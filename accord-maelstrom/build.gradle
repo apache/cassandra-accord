@@ -1,0 +1,49 @@
+plugins {
+    id 'java'
+}
+
+group 'accord'
+version '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+compileJava {
+    sourceCompatibility = JavaVersion.VERSION_11
+}
+
+dependencies {
+    compile project(':accord-core')
+    implementation 'com.google.code.gson:gson:2.8.7'
+    implementation 'com.google.guava:guava:30.1.1-jre'
+    implementation 'ch.qos.logback:logback-classic:1.2.3'
+    testCompile project(path: ':accord-core', configuration: 'testClasses')
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.7.0'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.7.0'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+jar {
+    manifest {
+        attributes(
+                'Main-Class': 'accord.maelstrom.Main',
+        )
+    }
+}
+
+task fatJar(type: Jar) {
+    manifest.from jar.manifest
+    classifier = 'all'
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    } {
+        exclude "META-INF/*.SF"
+        exclude "META-INF/*.DSA"
+        exclude "META-INF/*.RSA"
+    }
+    with jar
+}
