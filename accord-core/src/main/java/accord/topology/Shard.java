@@ -3,6 +3,7 @@ package accord.topology;
 import java.util.List;
 import java.util.Set;
 
+import accord.api.KeyRange;
 import accord.local.Node.Id;
 import accord.api.Key;
 import com.google.common.annotations.VisibleForTesting;
@@ -10,17 +11,16 @@ import com.google.common.base.Preconditions;
 
 public class Shard
 {
-    public final Key start, end;
+    public final KeyRange range;
     public final List<Id> nodes;
     public final Set<Id> fastPathElectorate;
     public final int recoveryFastPathSize;
     public final int fastPathQuorumSize;
     public final int slowPathQuorumSize;
 
-    public Shard(Key start, Key end, List<Id> nodes, Set<Id> fastPathElectorate)
+    public Shard(KeyRange range, List<Id> nodes, Set<Id> fastPathElectorate)
     {
-        this.start = start;
-        this.end = end;
+        this.range = range;
         this.nodes = nodes;
         int f = maxToleratedFailures(nodes.size());
         this.fastPathElectorate = fastPathElectorate;
@@ -40,18 +40,17 @@ public class Shard
     static int fastPathQuorumSize(int replicas, int electorate, int f)
     {
         Preconditions.checkArgument(electorate >= replicas - f);
-//        return (fastPathElectorateSize + f + 1 + 1) / 2;
         return (f + electorate)/2 + 1;
     }
 
     public boolean contains(Key key)
     {
-        return key.compareTo(start) >= 0 && key.compareTo(end) < 0;
+        return range.containsKey(key);
     }
 
     @Override
     public String toString()
     {
-        return "Shard[" + start + ',' + end + ']';
+        return "Shard[" + range.start() + ',' + range.end() + ']';
     }
 }

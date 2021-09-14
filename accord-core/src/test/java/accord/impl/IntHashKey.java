@@ -5,11 +5,19 @@ import java.util.List;
 import java.util.zip.CRC32C;
 
 import accord.api.Key;
-import accord.utils.KeyRange;
+import accord.api.KeyRange;
 import accord.txn.Keys;
 
 public class IntHashKey implements Key<IntHashKey>
 {
+    private static class Range extends KeyRange.EndInclusive<IntHashKey>
+    {
+        public Range(IntHashKey start, IntHashKey end)
+        {
+            super(start, end);
+        }
+    }
+
     public final int key;
     public final int hash;
 
@@ -47,11 +55,6 @@ public class IntHashKey implements Key<IntHashKey>
         return new Keys(keys);
     }
 
-    public static KeyRange<IntHashKey> range(int start, int end)
-    {
-        return KeyRange.of(key(start), key(end));
-    }
-
     public static KeyRange<IntHashKey>[] ranges(int count)
     {
         List<KeyRange<IntHashKey>> result = new ArrayList<>();
@@ -61,10 +64,10 @@ public class IntHashKey implements Key<IntHashKey>
         for (int i = 1 ; i < count ; ++i)
         {
             IntHashKey next = new IntHashKey(Integer.MIN_VALUE, (int)Math.min(Integer.MAX_VALUE, start + i * delta));
-            result.add(KeyRange.of(prev, next));
+            result.add(new Range(prev, next));
             prev = next;
         }
-        result.add(KeyRange.of(prev, new IntHashKey(Integer.MIN_VALUE, Integer.MAX_VALUE)));
+        result.add(new Range(prev, new IntHashKey(Integer.MIN_VALUE, Integer.MAX_VALUE)));
         return result.toArray(KeyRange[]::new);
     }
 

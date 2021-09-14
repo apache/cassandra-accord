@@ -4,7 +4,7 @@ package accord.impl;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Key;
-import accord.utils.KeyRange;
+import accord.api.KeyRange;
 import accord.topology.Shard;
 import accord.topology.Shards;
 import accord.utils.WrapAroundList;
@@ -42,7 +42,7 @@ public class TopologyFactory<K extends Key<K>>
 
         final List<Shard> shards = new ArrayList<>();
         for (int i = 0 ; i < ranges.length ; ++i)
-            shards.add(new Shard(ranges[i].start, ranges[i].end, electorates.get(i % electorates.size()), fastPathElectorates.get(i % fastPathElectorates.size())));
+            shards.add(new Shard(ranges[i], electorates.get(i % electorates.size()), fastPathElectorates.get(i % fastPathElectorates.size())));
         return new Shards(shards.toArray(Shard[]::new));
     }
 

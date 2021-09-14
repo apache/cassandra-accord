@@ -3,10 +3,9 @@ package accord.impl.mock;
 import accord.NetworkFilter;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.messages.*;
+import accord.messages.Timeout;
 import accord.utils.ThreadPoolScheduler;
 import accord.txn.TxnId;
-import accord.utils.KeyRange;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
@@ -85,7 +84,7 @@ public class MockCluster implements Network
             Id nextId = nextNodeId();
             ids.add(nextId);
         }
-        TopologyFactory<IntKey> topologyFactory = new TopologyFactory<>(config.replication, KeyRange.of(IntKey.key(0), IntKey.key(config.maxKey)));
+        TopologyFactory<IntKey> topologyFactory = new TopologyFactory<>(config.replication, IntKey.range(0, config.maxKey));
         Shards topology = topologyFactory.toShards(ids);
         for (int i=0; i<config.initialNodes; i++)
         {

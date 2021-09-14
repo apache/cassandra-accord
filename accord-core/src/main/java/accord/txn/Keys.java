@@ -1,9 +1,6 @@
 package accord.txn;
 
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Iterator;
-import java.util.SortedSet;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -43,17 +40,6 @@ public class Keys implements Iterable<Key>
         return keys[indexOf];
     }
 
-    public Stream<Key> subSet(Key start, boolean isInclusiveStart, Key end, boolean isInclusiveEnd)
-    {
-        int i = Arrays.binarySearch(keys, start);
-        if (i < 0) i = -1 -i;
-        else if (!isInclusiveStart) ++i;
-        int j = Arrays.binarySearch(keys, end);
-        if (j < 0) j = -1 -j;
-        else if (isInclusiveEnd) ++j;
-        return Arrays.stream(keys, i, j);
-    }
-
     public Keys select(int[] indexes)
     {
         Key[] selection = new Key[indexes.length];
@@ -62,9 +48,19 @@ public class Keys implements Iterable<Key>
         return new Keys(selection);
     }
 
+    public boolean isEmpty()
+    {
+        return keys.length == 0;
+    }
+
     public int size()
     {
         return keys.length;
+    }
+
+    public int search(int lowerBound, int upperBound, Object key, Comparator<Object> comparator)
+    {
+        return Arrays.binarySearch(keys, lowerBound, upperBound, key, comparator);
     }
 
     public int ceilIndex(int lowerBound, int upperBound, Key key)
@@ -77,44 +73,6 @@ public class Keys implements Iterable<Key>
     public int ceilIndex(Key key)
     {
         return ceilIndex(0, keys.length, key);
-    }
-
-    public int higherIndex(int lowerBound, int upperBound, Key key)
-    {
-        int i = Arrays.binarySearch(keys, lowerBound, upperBound, key);
-        if (i < 0) i = -1 - i;
-        else ++i;
-        return i;
-    }
-
-    public int higherIndex(Key key)
-    {
-        return higherIndex(0, keys.length, key);
-    }
-
-    public int floorIndex(int lowerBound, int upperBound, Key key)
-    {
-        int i = Arrays.binarySearch(keys, lowerBound, upperBound, key);
-        if (i < 0) i = -2 - i;
-        return i;
-    }
-
-    public int floorIndex(Key key)
-    {
-        return floorIndex(0, keys.length, key);
-    }
-
-    public int lowerIndex(int lowerBound, int upperBound, Key key)
-    {
-        int i = Arrays.binarySearch(keys, lowerBound, upperBound, key);
-        if (i < 0) i = -2 - i;
-        else --i;
-        return i;
-    }
-
-    public int lowerIndex(Key key)
-    {
-        return lowerIndex(0, keys.length, key);
     }
 
     public Stream<Key> stream()

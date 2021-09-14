@@ -7,5 +7,5 @@ package accord.api;
  */
 public interface Read
 {
-    Data read(Key start, Key end, Store store);
+    Data read(KeyRange range, Store store);
 }

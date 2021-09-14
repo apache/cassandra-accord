@@ -3,12 +3,21 @@ package accord.maelstrom;
 import java.io.IOException;
 
 import accord.api.Key;
+import accord.api.KeyRange;
 import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
 public class MaelstromKey extends Datum<MaelstromKey> implements Key<MaelstromKey>
 {
+    public static class Range extends KeyRange.EndInclusive<MaelstromKey>
+    {
+        public Range(MaelstromKey start, MaelstromKey end)
+        {
+            super(start, end);
+        }
+    }
+
     public MaelstromKey(Kind kind, Object value)
     {
         super(kind, value);

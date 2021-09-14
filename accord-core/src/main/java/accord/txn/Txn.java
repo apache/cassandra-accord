@@ -3,13 +3,7 @@ package accord.txn;
 import java.util.Comparator;
 import java.util.stream.Stream;
 
-import accord.api.Data;
-import accord.api.Query;
-import accord.api.Read;
-import accord.api.Result;
-import accord.api.Update;
-import accord.api.Key;
-import accord.api.Store;
+import accord.api.*;
 import accord.local.Command;
 import accord.local.CommandsForKey;
 import accord.local.Instance;
@@ -80,15 +74,15 @@ public class Txn
         return "read:" + read.toString() + (update != null ? ", update:" + update : "");
     }
 
-    public Data read(Key start, Key end, Store store)
+    public Data read(KeyRange range, Store store)
     {
-        return read.read(start, end, store);
+        return read.read(range, store);
     }
 
     public Data read(Command command)
     {
         Instance instance = command.instance;
-        return read(instance.shard.start, instance.shard.end, instance.store());
+        return read(instance.shard.range, instance.store());
     }
 
     // TODO: move these somewhere else?

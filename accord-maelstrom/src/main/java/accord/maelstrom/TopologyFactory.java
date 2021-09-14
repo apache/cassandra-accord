@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import accord.api.KeyRange;
 import accord.local.Node.Id;
 import accord.maelstrom.Datum.Kind;
 import accord.topology.Shard;
@@ -18,22 +19,24 @@ public class TopologyFactory
     final int shards;
     final int rf;
     final Kind[] kinds;
-    final MaelstromKey[][] starts, ends;
+    final KeyRange<MaelstromKey>[][] ranges;
 
     public TopologyFactory(int shards, int rf)
     {
         this.shards = shards;
         this.rf = rf;
         this.kinds = Datum.COMPARE_BY_HASH ? new Kind[] { Kind.HASH } : new Kind[] { Kind.STRING, Kind.LONG, Kind.DOUBLE };
-        this.starts = new MaelstromKey[kinds.length][shards];
-        this.ends = new MaelstromKey[kinds.length][shards];
+        this.ranges = new MaelstromKey.Range[kinds.length][shards];
         for (int i = 0 ; i < kinds.length ; ++i)
         {
             Kind kind = kinds[i];
-            starts[i] = kind.split(shards);
-            ends[i] = new MaelstromKey[shards];
-            System.arraycopy(starts[i], 1, ends[i], 0, shards - 1);
-            ends[i][shards - 1] = new MaelstromKey(kind, null);
+            MaelstromKey[] starts = kind.split(shards);
+            MaelstromKey[] ends = new MaelstromKey[shards];
+            System.arraycopy(starts, 1, ends, 0, shards - 1);
+            ends[shards - 1] = new MaelstromKey(kind, null);
+            this.ranges[i] = new MaelstromKey.Range[shards];
+            for (int j=0; j<shards; j++)
+                ranges[i][j] = new MaelstromKey.Range(starts[j], ends[j]);
         }
     }
 
@@ -59,7 +62,7 @@ public class TopologyFactory
         for (int j = 0 ; j < kinds.length ; ++j)
         {
             for (int i = 0 ; i < this.shards ; ++i)
-                shards.add(new Shard(starts[j][i], ends[j][i], electorates.get(i % electorates.size()), fastPathElectorates.get(i % fastPathElectorates.size())));
+                shards.add(new Shard(ranges[j][i], electorates.get(i % electorates.size()), fastPathElectorates.get(i % fastPathElectorates.size())));
         }
         return new Shards(shards.toArray(Shard[]::new));
     }

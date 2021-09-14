@@ -19,7 +19,7 @@ public class Writes
     public void apply(Instance instance)
     {
         if (write != null)
-            write.apply(instance.shard.start, instance.shard.end, executeAt, instance.store());
+            write.apply(instance.shard.range, executeAt, instance.store());
     }
 
     @Override

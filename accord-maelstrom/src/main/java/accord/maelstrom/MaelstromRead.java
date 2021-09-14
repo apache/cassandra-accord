@@ -1,10 +1,9 @@
 package accord.maelstrom;
 
-import accord.api.Data;
-import accord.api.Key;
-import accord.api.Store;
-import accord.api.Read;
+import accord.api.*;
 import accord.txn.Keys;
+
+import static java.lang.Math.max;
 
 public class MaelstromRead implements Read
 {
@@ -16,11 +15,14 @@ public class MaelstromRead implements Read
     }
 
     @Override
-    public Data read(Key start, Key end, Store store)
+    public Data read(KeyRange range, Store store)
     {
         MaelstromStore s = (MaelstromStore)store;
         MaelstromData result = new MaelstromData();
-        for (int i = keys.ceilIndex(start), limit = keys.ceilIndex(end) ; i < limit ; ++i)
+        int lowIdx = range.lowKeyIndex(keys);
+        if (lowIdx < 0)
+            return result;
+        for (int i = lowIdx, limit = range.higherKeyIndex(keys) ; i < limit ; ++i)
             result.put(keys.get(i), s.get(keys.get(i)));
         return result;
     }

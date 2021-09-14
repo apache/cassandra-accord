@@ -9,5 +9,5 @@ import accord.txn.Timestamp;
  */
 public interface Write
 {
-    void apply(Key start, Key end, Timestamp executeAt, Store store);
+    void apply(KeyRange range, Timestamp executeAt, Store store);
 }
