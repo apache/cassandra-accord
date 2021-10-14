@@ -113,7 +113,7 @@ public class Command implements Listener, Consumer<Listener>
         // unlike in the Accord paper, we partition shards within a node, so that to ensure a total order we must either:
         //  - use a global logical clock to issue new timestamps; or
         //  - assign each shard _and_ process a unique id, and use both as components of the timestamp
-        Timestamp witnessed = txnId.compareTo(max) > 0 ? txnId : commandStore.uniqueNow(max);
+        Timestamp witnessed = txnId.compareTo(max) > 0 && txnId.epoch >= commandStore.epoch() ? txnId : commandStore.uniqueNow(max);
 
         this.txn = txn;
         this.executeAt = witnessed;

@@ -1,33 +1,28 @@
 package accord.local;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
-import accord.api.Agent;
-import accord.api.Key;
-import accord.api.MessageSink;
-import accord.api.Result;
-import accord.api.Scheduler;
-import accord.api.Store;
+import accord.api.*;
 import accord.coordinate.Coordinate;
-import accord.messages.Callback;
-import accord.messages.Request;
-import accord.messages.Reply;
+import accord.messages.*;
 import accord.topology.Shard;
-import accord.topology.Shards;
 import accord.topology.Topology;
+import accord.topology.TopologyManager;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
 import accord.txn.Txn;
 import accord.txn.TxnId;
 
-public class Node
+public class Node implements ConfigurationService.Listener
 {
     public static class Id implements Comparable<Id>
     {
@@ -77,9 +72,9 @@ public class Node
 
     private final CommandStores commandStores;
     private final Id id;
-    private final Topology cluster;
     private final MessageSink messageSink;
-    private final Random random;
+    private final ConfigurationService configService;
+    private final TopologyManager topology;
 
     private final LongSupplier nowSupplier;
     private final AtomicReference<Timestamp> now;
@@ -91,19 +86,69 @@ public class Node
     private final Map<TxnId, CompletionStage<Result>> coordinating = new ConcurrentHashMap<>();
     private final Set<TxnId> pendingRecovery = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
-    public Node(Id id, Topology cluster, MessageSink messageSink, Random random, LongSupplier nowSupplier,
+    public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier,
                 Supplier<Store> dataSupplier, Agent agent, Scheduler scheduler, CommandStore.Factory commandStoreFactory)
     {
         this.id = id;
-        this.cluster = cluster;
-        this.random = random;
         this.agent = agent;
-        this.now = new AtomicReference<>(new Timestamp(nowSupplier.getAsLong(), 0, id));
         this.messageSink = messageSink;
+        this.configService = configService;
+        this.topology = new TopologyManager(id, configService::reportEpoch);
+        Topology topology = configService.currentTopology();
+        this.now = new AtomicReference<>(new Timestamp(topology.epoch(), nowSupplier.getAsLong(), 0, id));
         this.nowSupplier = nowSupplier;
         this.scheduler = scheduler;
-        this.commandStores = new CommandStores(numCommandShards(), id, this::uniqueNow, agent, dataSupplier.get(), commandStoreFactory);
-        this.commandStores.updateTopology(cluster.forNode(id));
+        this.commandStores = new CommandStores(numCommandShards(),
+                                               id,
+                                               this::uniqueNow,
+                                               agent,
+                                               dataSupplier.get(),
+                                               commandStoreFactory);
+
+        configService.registerListener(this);
+        onTopologyUpdate(topology, false);
+    }
+
+    public ConfigurationService configService()
+    {
+        return configService;
+    }
+
+    public MessageSink messageSink()
+    {
+        return messageSink;
+    }
+
+    public long epoch()
+    {
+        return topology().epoch();
+    }
+
+    private synchronized void onTopologyUpdate(Topology topology, boolean acknowledge)
+    {
+        if (topology.epoch() <= this.topology.epoch())
+            return;
+        commandStores.updateTopology(topology);
+        this.topology.onTopologyUpdate(topology);
+        if (acknowledge)
+            configService.acknowledgeEpoch(topology.epoch());
+    }
+
+    @Override
+    public synchronized void onTopologyUpdate(Topology topology)
+    {
+        onTopologyUpdate(topology, true);
+    }
+
+    @Override
+    public void onEpochSyncComplete(Id node, long epoch)
+    {
+        topology.onEpochSyncComplete(node, epoch);
+    }
+
+    public TopologyManager topology()
+    {
+        return topology;
     }
 
     public void shutdown()
@@ -116,22 +161,23 @@ public class Node
         return now.updateAndGet(cur -> {
             // TODO: this diverges from proof; either show isomorphism or make consistent
             long now = nowSupplier.getAsLong();
-            if (now > cur.real) return new Timestamp(now, 0, id);
-            else return new Timestamp(cur.real, cur.logical + 1, id);
+            long epoch = Math.max(cur.epoch, topology.epoch());
+            return (now > cur.real)
+                 ? new Timestamp(epoch, now, 0, id)
+                 : new Timestamp(epoch, cur.real, cur.logical + 1, id);
         });
     }
 
     public Timestamp uniqueNow(Timestamp atLeast)
     {
         if (now.get().compareTo(atLeast) < 0)
-            now.accumulateAndGet(atLeast, (a, b) -> a.compareTo(b) < 0 ? new Timestamp(b.real, b.logical + 1, id) : a);
-
-        return now.updateAndGet(cur -> {
-            // TODO: this diverges from proof; either show isomorphism or make consistent
-            long now = nowSupplier.getAsLong();
-            if (now > cur.real) return new Timestamp(now, 0, id);
-            else return new Timestamp(cur.real, cur.logical + 1, id);
-        });
+            now.accumulateAndGet(atLeast, (current, proposed) -> {
+                long minEpoch = topology.epoch();
+                current = current.withMinEpoch(minEpoch);
+                proposed = proposed.withMinEpoch(minEpoch);
+                return proposed.compareTo(current) <= 0 ? current.logicalNext(id) : proposed;
+            });
+        return uniqueNow();
     }
 
     public long now()
@@ -139,14 +185,24 @@ public class Node
         return nowSupplier.getAsLong();
     }
 
-    public Topology cluster()
-    {
-        return cluster;
-    }
-
     public Stream<CommandStore> local(Keys keys)
     {
         return commandStores.forKeys(keys);
+    }
+
+    public Stream<CommandStore> local(Txn txn)
+    {
+        return commandStores.forKeys(txn.keys());
+    }
+
+    public Stream<CommandStore> local(TxnRequest.Scope scope)
+    {
+        return commandStores.forScope(scope);
+    }
+
+    public Stream<CommandStore> local()
+    {
+        return commandStores.stream();
     }
 
     public Optional<CommandStore> local(Key key)
@@ -157,10 +213,10 @@ public class Node
     }
 
     // send to every node besides ourselves
-    public void send(Shards shards, Request send)
+    public void send(Topology topology, Request send)
     {
         Set<Id> contacted = new HashSet<>();
-        shards.forEach(shard -> send(shard, send, contacted));
+        topology.forEach(shard -> send(shard, send, contacted));
     }
 
     public void send(Shard shard, Request send)
@@ -176,37 +232,26 @@ public class Node
         });
     }
 
-    // send to every node besides ourselves
-    public <T> void send(Shards shards, Request send, Callback<T> callback)
-    {
-        // TODO efficiency
-        Set<Id> contacted = new HashSet<>();
-        shards.forEach(shard -> send(shard, send, callback, contacted));
-    }
-
-    public <T> void send(Shard shard, Request send, Callback<T> callback)
-    {
-        shard.nodes.forEach(node -> send(node, send, callback));
-    }
-
-    private <T> void send(Shard shard, Request send, Callback<T> callback, Set<Id> alreadyContacted)
-    {
-        shard.nodes.forEach(node -> {
-            if (alreadyContacted.add(node))
-                send(node, send, callback);
-        });
-    }
-
     public <T> void send(Collection<Id> to, Request send)
     {
         for (Id dst: to)
             send(dst, send);
     }
 
+    public <T> void send(Collection<Id> to, Function<Id, Request> requestFactory)
+    {
+        to.forEach(dst -> send(dst, requestFactory.apply(dst)));
+    }
+
     public <T> void send(Collection<Id> to, Request send, Callback<T> callback)
     {
         for (Id dst: to)
             send(dst, send, callback);
+    }
+
+    public <T> void send(Collection<Id> to, Function<Id, Request> requestFactory, Callback<T> callback)
+    {
+        to.forEach(dst -> send(dst, requestFactory.apply(dst), callback));
     }
 
     // send to a specific node
@@ -226,11 +271,22 @@ public class Node
         messageSink.reply(replyingToNode, replyingToMessage, send);
     }
 
-    public CompletionStage<Result> coordinate(Txn txn)
+    public TxnId nextTxnId()
     {
-        TxnId txnId = new TxnId(uniqueNow());
+        return new TxnId(uniqueNow());
+    }
+
+    public CompletionStage<Result> coordinate(TxnId txnId, Txn txn)
+    {
+        // TODO: The combination of updating the epoch of the next timestamp with epochs we don’t have topologies for,
+        //  and requiring preaccept to talk to its topology epoch means that learning of a new epoch via timestamp
+        //  (ie not via config service) will halt any new txns from a node until it receives this topology
+        if (txnId.epoch > configService.currentEpoch())
+            return configService.fetchTopologyForEpochStage(txnId.epoch).thenCompose(v -> coordinate(txnId, txn));
+
         CompletionStage<Result> result = Coordinate.execute(this, txnId, txn);
         coordinating.put(txnId, result);
+        // TODO (now): error handling
         result.handle((success, fail) ->
                       {
                           coordinating.remove(txnId);
@@ -243,15 +299,33 @@ public class Node
         return result;
     }
 
-    // TODO: encapsulate in Coordinate, so we can request that e.g. commits be re-sent?
-    public CompletionStage<Result> recover(TxnId txnId, Txn txn)
+    public CompletionStage<Result> coordinate(Txn txn)
     {
+        return coordinate(nextTxnId(), txn);
+    }
+
+    // TODO: encapsulate in Coordinate, so we can request that e.g. commits be re-sent?
+    public void recover(TxnId txnId, Txn txn)
+    {
+        if (txnId.epoch > configService.currentEpoch())
+        {
+            configService.fetchTopologyForEpoch(txnId.epoch, () -> recover(txnId, txn));
+            return;
+        }
+
         CompletionStage<Result> result = coordinating.get(txnId);
         if (result != null)
-            return result;
+            return;
+
+        if (txnId.epoch > topology().epoch())
+        {
+            configService().fetchTopologyForEpoch(txnId.epoch, () -> recover(txnId, txn));
+            return;
+        }
 
         result = Coordinate.recover(this, txnId, txn);
         coordinating.putIfAbsent(txnId, result);
+        // TODO (now): error handling
         result.handle((success, fail) -> {
             coordinating.remove(txnId);
             agent.onRecover(this, success, fail);
@@ -261,22 +335,22 @@ public class Node
                 scheduler.once(() -> { pendingRecovery.remove(txnId); recover(txnId, txn); } , 30L, TimeUnit.SECONDS);
             return null;
         });
-        return result;
     }
 
     public void receive(Request request, Id from, long messageId)
     {
+        long unknownEpoch = topology().maxUnknownEpoch(request);
+        if (unknownEpoch > 0)
+        {
+            configService.fetchTopologyForEpoch(unknownEpoch, () -> receive(request, from, messageId));
+            return;
+        }
         scheduler.now(() -> request.process(this, from, messageId));
     }
 
     public Scheduler scheduler()
     {
         return scheduler;
-    }
-
-    public Random random()
-    {
-        return random;
     }
 
     public Agent agent()

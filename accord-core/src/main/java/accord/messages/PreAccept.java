@@ -7,32 +7,40 @@ import java.util.TreeMap;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.topology.Topologies;
 import accord.txn.Timestamp;
 import accord.local.Command;
 import accord.txn.Dependencies;
 import accord.txn.Txn;
 import accord.txn.TxnId;
 
-public class PreAccept implements Request
+public class PreAccept extends TxnRequest
 {
     public final TxnId txnId;
     public final Txn txn;
 
-    public PreAccept(TxnId txnId, Txn txn)
+    public PreAccept(Scope scope, TxnId txnId, Txn txn)
     {
+        super(scope);
         this.txnId = txnId;
         this.txn = txn;
     }
 
+    public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn)
+    {
+        this(Scope.forTopologies(to, topologies, txn), txnId, txn);
+    }
+
     public void process(Node node, Id from, long messageId)
     {
-        node.reply(from, messageId, txn.local(node).map(instance -> {
+        node.reply(from, messageId, node.local(scope()).map(instance -> {
+            // note: this diverges from the paper, in that instead of waiting for JoinShard,
+            //       we PreAccept to both old and new topologies and require quorums in both.
+            //       This necessitates sending to ALL replicas of old topology, not only electorate (as fast path may be unreachable).
             Command command = instance.command(txnId);
             if (!command.witness(txn))
                 return PreAcceptNack.INSTANCE;
-            // TODO: only lookup keys relevant to this instance
-            // TODO: why don't we calculate deps from the executeAt timestamp??
-            return new PreAcceptOk(command.executeAt(), calculateDeps(instance, txnId, txn, txnId));
+            return new PreAcceptOk(txnId, command.executeAt(), calculateDeps(instance, txnId, txn, txnId));
         }).reduce((r1, r2) -> {
             if (!r1.isOK()) return r1;
             if (!r2.isOK()) return r2;
@@ -52,11 +60,13 @@ public class PreAccept implements Request
 
     public static class PreAcceptOk implements PreAcceptReply
     {
+        public final TxnId txnId;
         public final Timestamp witnessedAt;
         public final Dependencies deps;
 
-        public PreAcceptOk(Timestamp witnessedAt, Dependencies deps)
+        public PreAcceptOk(TxnId txnId, Timestamp witnessedAt, Dependencies deps)
         {
+            this.txnId = txnId;
             this.witnessedAt = witnessedAt;
             this.deps = deps;
         }
@@ -86,7 +96,8 @@ public class PreAccept implements Request
         public String toString()
         {
             return "PreAcceptOk{" +
-                    "witnessedAt=" + witnessedAt +
+                    "txnId=" + txnId +
+                    ", witnessedAt=" + witnessedAt +
                     ", deps=" + deps +
                     '}';
         }

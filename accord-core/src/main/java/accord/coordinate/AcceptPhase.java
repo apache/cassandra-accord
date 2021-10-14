@@ -5,11 +5,11 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import accord.coordinate.tracking.QuorumTracker;
+import accord.topology.Topologies;
 import accord.txn.Ballot;
 import accord.messages.Callback;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.topology.Shards;
 import accord.txn.Timestamp;
 import accord.txn.Dependencies;
 import accord.txn.Txn;
@@ -24,27 +24,25 @@ class AcceptPhase extends CompletableFuture<Agreed>
     final Ballot ballot;
     final TxnId txnId;
     final Txn txn;
-    final Shards shards; // TODO: remove, hide in participants
 
     private List<AcceptOk> acceptOks;
     private Timestamp proposed;
     private QuorumTracker acceptTracker;
 
-    AcceptPhase(Node node, Ballot ballot, TxnId txnId, Txn txn, Shards shards)
+    AcceptPhase(Node node, Ballot ballot, TxnId txnId, Txn txn)
     {
         this.node = node;
         this.ballot = ballot;
         this.txnId = txnId;
         this.txn = txn;
-        this.shards = shards;
     }
 
-    protected void startAccept(Timestamp executeAt, Dependencies deps)
+    protected void startAccept(Timestamp executeAt, Dependencies deps, Topologies topologies)
     {
         this.proposed = executeAt;
         this.acceptOks = new ArrayList<>();
-        this.acceptTracker = new QuorumTracker(shards);
-        node.send(acceptTracker.nodes(), new Accept(ballot, txnId, txn, executeAt, deps), new Callback<AcceptReply>()
+        this.acceptTracker = new QuorumTracker(topologies);
+        node.send(acceptTracker.nodes(), to -> new Accept(to, topologies, ballot, txnId, txn, executeAt, deps), new Callback<AcceptReply>()
         {
             @Override
             public void onSuccess(Id from, AcceptReply response)
@@ -86,11 +84,11 @@ class AcceptPhase extends CompletableFuture<Agreed>
         Dependencies deps = new Dependencies();
         for (AcceptOk acceptOk : acceptOks)
             deps.addAll(acceptOk.deps);
-        agreed(proposed, deps);
+        agreed(proposed, deps, acceptTracker.topologies());
     }
 
-    protected void agreed(Timestamp executeAt, Dependencies deps)
+    protected void agreed(Timestamp executeAt, Dependencies deps, Topologies topologies)
     {
-        complete(new Agreed(txnId, txn, executeAt, deps, shards, null, null));
+        complete(new Agreed(txnId, txn, executeAt, deps, topologies, null, null));
     }
 }

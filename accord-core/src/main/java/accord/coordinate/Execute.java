@@ -1,6 +1,5 @@
 package accord.coordinate;
 
-import java.util.Collection;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -10,20 +9,15 @@ import accord.coordinate.tracking.ReadTracker;
 import accord.api.Result;
 import accord.messages.Callback;
 import accord.local.Node;
-import accord.txn.Dependencies;
+import accord.topology.Topologies;
+import accord.txn.*;
 import accord.messages.Apply;
 import accord.messages.ReadData.ReadReply;
 import accord.messages.ReadData.ReadWaiting;
-import accord.topology.Shards;
 import accord.local.Node.Id;
-import accord.txn.Timestamp;
-import accord.txn.Txn;
-import accord.txn.TxnId;
-import accord.txn.Keys;
 import accord.messages.Commit;
 import accord.messages.ReadData;
 import accord.messages.ReadData.ReadOk;
-import com.google.common.base.Preconditions;
 
 class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
 {
@@ -31,12 +25,11 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
     final TxnId txnId;
     final Txn txn;
     final Timestamp executeAt;
-    final Shards shards;
+    final Topologies topologies;
     final Keys keys;
     final Dependencies deps;
-    final ReadTracker tracker;
+    final ReadTracker readTracker;
     private Data data;
-    final int replicaIndex;
 
     private Execute(Node node, Agreed agreed)
     {
@@ -46,24 +39,23 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         this.keys = txn.keys();
         this.deps = agreed.deps;
         this.executeAt = agreed.executeAt;
-        this.shards = agreed.shards;
-        this.tracker = new ReadTracker(shards);
-        this.replicaIndex = node.random().nextInt(shards.get(0).nodes.size());
+        this.topologies = node.topology().forTxn(agreed.txn).removeEpochsBefore(agreed.executeAt.epoch);
+        this.readTracker = new ReadTracker(topologies.removeEpochsBefore(topologies.currentEpoch()));
 
         // TODO: perhaps compose these different behaviours differently?
         if (agreed.applied != null)
         {
-            Apply send = new Apply(txnId, txn, executeAt, agreed.deps, agreed.applied, agreed.result);
-            node.send(shards, send);
+            node.send(topologies.nodes(),
+                      to -> new Apply(to, topologies, txnId, txn, executeAt, agreed.deps, agreed.applied, agreed.result));
             complete(agreed.result);
         }
         else
         {
-            Set<Id> readSet = tracker.computeMinimalReadSetAndMarkInflight();
-            for (Node.Id to : tracker.nodes())
+            Set<Id> readSet = readTracker.computeMinimalReadSetAndMarkInflight();
+            for (Node.Id to : readTracker.nodes())
             {
                 boolean read = readSet.contains(to);
-                Commit send = new Commit(txnId, txn, executeAt, agreed.deps, read);
+                Commit send = new Commit(to, topologies, txnId, txn, executeAt, agreed.deps, read);
                 if (read)
                 {
                     node.send(to, send, this);
@@ -87,7 +79,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         {
             ReadWaiting waiting = (ReadWaiting) reply;
             // TODO first see if we can collect newer information (from ourselves or others), and if so send it
-            // otherwise, try to complete the transaction
+            //  otherwise, try to complete the transaction
             node.recover(waiting.txnId, waiting.txn);
             return;
         }
@@ -101,12 +93,13 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         data = data == null ? ((ReadOk) reply).data
                             : data.merge(((ReadOk) reply).data);
 
-        tracker.recordReadSuccess(from);
+        readTracker.recordReadSuccess(from);
 
-        if (tracker.hasCompletedRead())
+        if (readTracker.hasCompletedRead())
         {
             Result result = txn.result(data);
-            node.send(shards, new Apply(txnId, txn, executeAt, deps, txn.execute(executeAt, data), result));
+            Writes writes = txn.execute(executeAt, data);
+            node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, executeAt, deps, writes, result));
             complete(result);
         }
     }
@@ -119,15 +112,16 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         if (!(throwable instanceof Timeout))
             throwable.printStackTrace();
 
-        tracker.recordReadFailure(from);
-        Set<Id> readFrom = tracker.computeMinimalReadSetAndMarkInflight();
-        if (readFrom == null)
+        readTracker.recordReadFailure(from);
+        Set<Id> readFrom = readTracker.computeMinimalReadSetAndMarkInflight();
+        if (readFrom != null)
         {
-            Preconditions.checkState(tracker.hasFailed());
+            node.send(readFrom, to -> new ReadData(to, topologies, txnId, txn, executeAt), this);
+        }
+        else if (readTracker.hasFailed())
+        {
             completeExceptionally(throwable);
         }
-        else
-            node.send(readFrom, new ReadData(txnId, txn), this);
     }
 
     static CompletionStage<Result> execute(Node instance, Agreed agreed)

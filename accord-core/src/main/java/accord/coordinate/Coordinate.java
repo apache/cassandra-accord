@@ -8,6 +8,7 @@ import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
+import accord.api.ConfigurationService;
 import accord.local.Node;
 import accord.api.Result;
 import accord.txn.Txn;
@@ -16,14 +17,23 @@ import accord.txn.Ballot;
 
 public class Coordinate
 {
+    private static CompletionStage<Result> fetchEpochOrExecute(Node node, Agreed agreed, DebugCompletionStage<Result> result)
+    {
+        long executeEpoch = agreed.executeAt.epoch;
+        ConfigurationService configService = node.configService();
+        if (executeEpoch > configService.currentEpoch())
+            return configService.fetchTopologyForEpochStage(executeEpoch)
+                                .thenCompose(v -> fetchEpochOrExecute(node, agreed, result));
+
+        CompletionStage<Result> execute = Execute.execute(node, agreed);
+        result.debug2 = execute;
+        return execute;
+    }
+
     private static CompletionStage<Result> andThenExecute(Node node, CompletionStage<Agreed> agree)
     {
         DebugCompletionStage<Result> result = new DebugCompletionStage<>(agree);
-        result.wrapped = agree.thenCompose(agreed -> {
-            CompletionStage<Result> execute = Execute.execute(node, agreed);
-            result.debug2 = execute;
-            return execute;
-        });
+        result.wrapped = agree.thenCompose(agreed -> fetchEpochOrExecute(node, agreed, result));
         return result;
     }
 

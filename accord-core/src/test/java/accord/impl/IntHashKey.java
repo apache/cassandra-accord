@@ -2,6 +2,7 @@ package accord.impl;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.zip.CRC32C;
 
 import accord.api.Key;
@@ -75,6 +76,11 @@ public class IntHashKey implements Key<IntHashKey>
         return new IntHashKey(k);
     }
 
+    public static IntHashKey forHash(int hash)
+    {
+        return new IntHashKey(Integer.MIN_VALUE, hash);
+    }
+
     public static Keys keys(int k0, int... kn)
     {
         Key[] keys = new Key[kn.length + 1];
@@ -101,11 +107,31 @@ public class IntHashKey implements Key<IntHashKey>
         return result.toArray(KeyRange[]::new);
     }
 
+    public static KeyRange<IntHashKey> range(IntHashKey start, IntHashKey end)
+    {
+        return new Range(start, end);
+    }
+
     @Override
     public String toString()
     {
         if (key == Integer.MIN_VALUE && hash(key) != hash) return "#" + hash;
         return Integer.toString(key);
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        IntHashKey that = (IntHashKey) o;
+        return key == that.key && hash == that.hash;
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hash(key, hash);
     }
 
     private static int hash(int key)

@@ -5,6 +5,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import accord.api.Key;
+import accord.api.KeyRange;
+import accord.topology.KeyRanges;
 
 @SuppressWarnings("rawtypes")
 public class Keys implements Iterable<Key>
@@ -28,6 +30,21 @@ public class Keys implements Iterable<Key>
     {
         this.keys = keys;
         Arrays.sort(keys);
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Keys keys1 = (Keys) o;
+        return Arrays.equals(keys, keys1.keys);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Arrays.hashCode(keys);
     }
 
     public int indexOf(Key key)
@@ -115,4 +132,52 @@ public class Keys implements Iterable<Key>
 
         return new Keys(keys);
     }
+
+    public Keys intersection(KeyRanges ranges)
+    {
+        Key[] result = null;
+        int resultSize = 0;
+
+        int keyLB = 0;
+        int keyHB = size();
+        int rangeLB = 0;
+        int rangeHB = ranges.rangeIndexForKey(keys[keyHB-1]);
+        rangeHB = rangeHB < 0 ? -1 - rangeHB : rangeHB + 1;
+
+        for (;rangeLB<rangeHB && keyLB<keyHB;)
+        {
+            Key key = keys[keyLB];
+            rangeLB = ranges.rangeIndexForKey(rangeLB, ranges.size(), key);
+
+            if (rangeLB < 0)
+            {
+                rangeLB = -1 -rangeLB;
+                if (rangeLB >= rangeHB)
+                    break;
+                keyLB = ranges.get(rangeLB).lowKeyIndex(this, keyLB, keyHB);
+            }
+            else
+            {
+                if (result == null)
+                    result = new Key[keyHB - keyLB];
+                KeyRange<?> range = ranges.get(rangeLB);
+                int highKey = range.higherKeyIndex(this, keyLB, keyHB);
+                int size = highKey - keyLB;
+                System.arraycopy(keys, keyLB, result, resultSize, size);
+                keyLB = highKey;
+                resultSize += size;
+                rangeLB++;
+            }
+
+            if (keyLB < 0)
+                keyLB = -1 - keyLB;
+        }
+
+        if (result != null && resultSize < result.length)
+            result = Arrays.copyOf(result, resultSize);
+
+        return result != null ? new Keys(result) : EMPTY;
+    }
+
+
 }

@@ -3,16 +3,16 @@ package accord.local;
 import java.util.Iterator;
 import java.util.NavigableMap;
 import java.util.TreeMap;
+import java.util.function.Consumer;
 
 import accord.txn.Timestamp;
-import accord.txn.TxnId;
 import com.google.common.collect.Iterators;
 
 public class CommandsForKey implements Listener, Iterable<Command>
 {
     // TODO: efficiency
     public final NavigableMap<Timestamp, Command> uncommitted = new TreeMap<>();
-    public final NavigableMap<TxnId, Command> committedById = new TreeMap<>();
+    public final NavigableMap<Timestamp, Command> committedById = new TreeMap<>();
     public final NavigableMap<Timestamp, Command> committedByExecuteAt = new TreeMap<>();
 
     private Timestamp max = Timestamp.NONE;
@@ -44,6 +44,15 @@ public class CommandsForKey implements Listener, Iterable<Command>
         max = Timestamp.max(max, command.executeAt());
         uncommitted.put(command.txnId(), command);
         command.addListener(this);
+    }
+
+    public void forWitnessed(Timestamp minTs, Timestamp maxTs, Consumer<Command> consumer)
+    {
+        uncommitted.subMap(minTs, true, maxTs, true).values().stream()
+                .filter(cmd -> cmd.hasBeen(Status.PreAccepted)).forEach(consumer);
+        committedById.subMap(minTs, true, maxTs, true).values().forEach(consumer);
+        committedByExecuteAt.subMap(minTs, true, maxTs, true).values().stream()
+                .filter(cmd -> cmd.txnId().compareTo(minTs) < 0 || cmd.txnId().compareTo(maxTs) > 0).forEach(consumer);
     }
 
     @Override

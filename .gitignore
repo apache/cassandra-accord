@@ -1,4 +1,5 @@
 .idea/
 .gradle/
+build/
 accord-core/build/
 accord-maelstrom/build/

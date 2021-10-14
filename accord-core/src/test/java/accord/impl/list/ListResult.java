@@ -14,7 +14,7 @@ public class ListResult implements Result, Reply
     public final Id client;
     public final long requestId;
     public final Keys keys;
-    public final int[][] read;
+    public final int[][] read; // equal in size to keys.size()
     public final ListUpdate update;
 
     public ListResult(Id client, long requestId, Keys keys, int[][] read, ListUpdate update)

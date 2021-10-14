@@ -11,8 +11,8 @@ public class Ballot extends Timestamp
         super(from);
     }
 
-    public Ballot(long real, int logical, Id node)
+    public Ballot(long epoch, long real, int logical, Id node)
     {
-        super(real, logical, node);
+        super(epoch, real, logical, node);
     }
 }

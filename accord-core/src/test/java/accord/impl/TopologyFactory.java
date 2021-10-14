@@ -5,7 +5,7 @@ import accord.local.Node;
 import accord.api.Key;
 import accord.api.KeyRange;
 import accord.topology.KeyRanges;
-import accord.topology.Shards;
+import accord.topology.Topology;
 
 import java.util.*;
 
@@ -21,18 +21,18 @@ public class TopologyFactory<K extends Key<K>>
         this.ranges = ranges;
     }
 
-    public Shards toShards(Node.Id[] cluster)
+    public Topology toTopology(Node.Id[] cluster)
     {
         return TopologyUtils.initialTopology(cluster, new KeyRanges(ranges), rf);
     }
 
-    public Shards toShards(List<Node.Id> cluster)
+    public Topology toTopology(List<Node.Id> cluster)
     {
-        return toShards(cluster.toArray(Node.Id[]::new));
+        return toTopology(cluster.toArray(Node.Id[]::new));
     }
 
-    public static <K extends Key<K>> Shards toShards(List<Node.Id> cluster, int rf, KeyRange<K>... ranges)
+    public static <K extends Key<K>> Topology toTopology(List<Node.Id> cluster, int rf, KeyRange<K>... ranges)
     {
-        return new TopologyFactory<>(rf, ranges).toShards(cluster);
+        return new TopologyFactory<>(rf, ranges).toTopology(cluster);
     }
 }

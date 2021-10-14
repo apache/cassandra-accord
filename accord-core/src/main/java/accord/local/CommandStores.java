@@ -3,20 +3,18 @@ package accord.local;
 import accord.api.Agent;
 import accord.api.KeyRange;
 import accord.api.Store;
+import accord.local.CommandStore.Mapping;
+import accord.messages.TxnRequest;
 import accord.topology.KeyRanges;
-import accord.topology.Shards;
 import accord.topology.Topology;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
 import com.google.common.base.Preconditions;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Spliterator;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.function.Consumer;
-import java.util.function.Function;
+import java.util.function.*;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -25,31 +23,74 @@ import java.util.stream.StreamSupport;
  */
 public class CommandStores
 {
-    private Topology localTopology = Shards.EMPTY;
-    private final CommandStore[] commandStores;
-
-    public CommandStores(int num, Node.Id nodeId, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store, CommandStore.Factory shardFactory)
+    static class Mappings
     {
-        this.commandStores = new CommandStore[num];
-        for (int i=0; i<num; i++)
-            commandStores[i] = shardFactory.create(i, nodeId, uniqueNow, agent, store);
+        static final Mappings EMPTY = new Mappings(Topology.EMPTY, Topology.EMPTY, new CommandStore[0], new Mapping[0]);
+        final Topology cluster;
+        final CommandStore[] stores;
+        final Topology local;
+        final Mapping[] mappings;
+
+        public Mappings(Topology cluster, Topology local, CommandStore[] stores, Mapping[] mappings)
+        {
+            Preconditions.checkArgument(stores.length == mappings.length);
+            this.cluster = cluster;
+            this.local = local;
+            this.stores = stores;
+            this.mappings = mappings;
+        }
+
+        int size()
+        {
+            return stores.length;
+        }
+
+        Mappings withNewTopology(Topology cluster, Topology local)
+        {
+            return new Mappings(cluster, local, stores, Mapping.withNewLocalTopology(mappings, local));
+        }
+    }
+
+    private final Node.Id node;
+    private final BiFunction<Integer, Mapping, CommandStore> shardFactory;
+    private final int numShards;
+    private volatile Mappings mappings = Mappings.EMPTY;
+
+    public CommandStores(int num, Node.Id node, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store, CommandStore.Factory shardFactory)
+    {
+        this.node = node;
+        this.numShards = num;
+        this.shardFactory = (idx, mapping) -> shardFactory.create(idx, node, uniqueNow, agent, store, mapping, this::getRangeMapping);
+    }
+
+    private Mapping getRangeMapping(int idx)
+    {
+        return mappings.mappings[idx];
     }
 
     public synchronized void shutdown()
     {
-        for (CommandStore commandStore : commandStores)
+        for (CommandStore commandStore : mappings.stores)
             commandStore.shutdown();
     }
 
     public Stream<CommandStore> stream()
     {
-        return StreamSupport.stream(new ShardSpliterator(), false);
+        return StreamSupport.stream(new ShardSpliterator(mappings.stores), false);
     }
 
     public Stream<CommandStore> forKeys(Keys keys)
     {
-        // TODO: filter shards before sending to their thread?
-        return stream().filter(commandShard -> commandShard.intersects(keys));
+        Mappings stores = mappings;
+        IntPredicate predicate = i -> stores.mappings[i].ranges.intersects(keys);
+        return StreamSupport.stream(new ShardSpliterator(stores.stores, predicate), false);
+    }
+
+    public Stream<CommandStore> forScope(TxnRequest.Scope scope)
+    {
+        Mappings stores = mappings;
+        IntPredicate predicate = i ->  scope.intersects(stores.mappings[i].ranges);
+        return StreamSupport.stream(new ShardSpliterator(stores.stores, predicate), false);
     }
 
     static List<KeyRanges> shardRanges(KeyRanges ranges, int shards)
@@ -75,28 +116,71 @@ public class CommandStores
         return result;
     }
 
-    public synchronized void updateTopology(Topology newTopology)
+    public synchronized void updateTopology(Topology cluster)
     {
-        KeyRanges removed = localTopology.ranges().difference(newTopology.ranges());
-        KeyRanges added = newTopology.ranges().difference(localTopology.ranges());
-        List<KeyRanges> sharded = shardRanges(added, commandStores.length);
-        stream().forEach(commands -> commands.updateTopology(newTopology, sharded.get(commands.index()), removed));
-        localTopology = newTopology;
+        Preconditions.checkArgument(!cluster.isSubset(), "Use full topology for CommandStores.updateTopology");
+
+        Mappings current = mappings;
+        if (cluster.epoch() <= current.cluster.epoch())
+            return;
+
+        Topology local = cluster.forNode(node);
+        KeyRanges currentRanges = Arrays.stream(current.mappings).map(mapping -> mapping.ranges).reduce(KeyRanges.EMPTY, (l, r) -> l.union(r)).mergeTouching();
+        KeyRanges added = local.ranges().difference(currentRanges);
+
+        if (added.isEmpty())
+        {
+            mappings = mappings.withNewTopology(cluster, local);
+            return;
+        }
+
+
+        List<KeyRanges> sharded = shardRanges(added, numShards);
+        Mapping[] newMappings = new Mapping[current.size() + sharded.size()];
+        CommandStore[] newStores = new CommandStore[current.size() + sharded.size()];
+        Mapping.withNewLocalTopology(current.mappings, local, newMappings);
+        System.arraycopy(current.stores, 0, newStores, 0, current.size());
+
+        for (int i=0; i<sharded.size(); i++)
+        {
+            int idx = current.size() + i;
+            Mapping mapping = new Mapping(sharded.get(i), local);
+            newMappings[idx] = mapping;
+            newStores[idx] = shardFactory.apply(idx, mapping);
+        }
+
+        mappings = new Mappings(cluster, local, newStores, newMappings);
     }
 
-    private class ShardSpliterator implements Spliterator<CommandStore>
+    private static class ShardSpliterator implements Spliterator<CommandStore>
     {
         int i = 0;
+        final CommandStore[] commandStores;
+        final IntPredicate predicate;
+
+        public ShardSpliterator(CommandStore[] commandStores, IntPredicate predicate)
+        {
+            this.commandStores = commandStores;
+            this.predicate = predicate;
+        }
+
+        public ShardSpliterator(CommandStore[] commandStores)
+        {
+            this (commandStores, i -> true);
+        }
 
         @Override
         public boolean tryAdvance(Consumer<? super CommandStore> action)
         {
-            if (i < commandStores.length)
+            while (i < commandStores.length)
             {
-                CommandStore shard = commandStores[i++];
+                int idx = i++;
+                if (!predicate.test(idx))
+                    continue;
                 try
                 {
-                    shard.process(action).toCompletableFuture().get();
+                    commandStores[idx].process(action).toCompletableFuture().get();
+                    break;
                 }
                 catch (InterruptedException | ExecutionException e)
                 {
@@ -113,14 +197,17 @@ public class CommandStores
             if (i >= commandStores.length)
                 return;
 
-            CompletableFuture<Void>[] futures = new CompletableFuture[commandStores.length - i];
+            List<CompletableFuture<Void>> futures = new ArrayList<>(commandStores.length - i);
             for (; i< commandStores.length; i++)
-                futures[i] = commandStores[i].process(action).toCompletableFuture();
+            {
+                if (predicate.test(i))
+                    futures.add(commandStores[i].process(action).toCompletableFuture());
+            }
 
             try
             {
-                for (CompletableFuture<Void> future : futures)
-                    future.get();
+                for (int i=0, mi=futures.size(); i<mi; i++)
+                    futures.get(i).get();
             }
             catch (InterruptedException e)
             {
