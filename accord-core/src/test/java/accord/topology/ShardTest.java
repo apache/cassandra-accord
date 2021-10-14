@@ -1,7 +1,15 @@
 package accord.topology;
 
+import accord.local.Node;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+import static accord.Utils.ids;
+import static accord.impl.IntKey.range;
 
 public class ShardTest
 {
@@ -44,19 +52,35 @@ public class ShardTest
         Assertions.assertEquals(expected, actual);
     }
 
-    void assertInvalidFastPathElectorateSize(int replicas, int fpElectorate)
+    void assertIllegalArgument(Runnable runnable, String msg)
     {
-        int f = Shard.maxToleratedFailures(replicas);
         try
         {
-            Shard.fastPathQuorumSize(replicas, fpElectorate, f);
-            Assertions.fail(String.format("Expected exception for fp electorate size %s for replica set size %s (f %s)",
-                                          fpElectorate, replicas, f));
+            runnable.run();
+            Assertions.fail(msg);
         }
         catch (IllegalArgumentException e)
         {
             // noop
         }
+    }
+
+    void assertInvalidFastPathElectorateSize(int replicas, int fpElectorate)
+    {
+        int f = Shard.maxToleratedFailures(replicas);
+        assertIllegalArgument(() -> Shard.fastPathQuorumSize(replicas, fpElectorate, f),
+                              String.format("Expected exception for fp electorate size %s for replica set size %s (f %s)",
+                                            fpElectorate, replicas, f));
+    }
+
+    @Test
+    void slowPathQuorumSizeTest()
+    {
+        Assertions.assertEquals(1, Shard.slowPathQuorumSize(1));
+        Assertions.assertEquals(2, Shard.slowPathQuorumSize(2));
+        Assertions.assertEquals(2, Shard.slowPathQuorumSize(3));
+        Assertions.assertEquals(3, Shard.slowPathQuorumSize(4));
+        Assertions.assertEquals(3, Shard.slowPathQuorumSize(5));
     }
 
     @Test
@@ -104,5 +128,17 @@ public class ShardTest
         assertFastPathQuorumSize(6, 9, 6);
         assertFastPathQuorumSize(5, 9, 5);
         assertInvalidFastPathElectorateSize(9, 4);
+    }
+
+    @Test
+    void pendingNodeValidation()
+    {
+        List<Node.Id> nodes = ids(0, 3);
+        Set<Node.Id> fpNodes = new HashSet<>(ids(0, 2));
+        // pending nodes are part of electorate
+        new Shard(range(0, 100), nodes, fpNodes, new HashSet<>(ids(3, 3)));
+        // pending nodes are not part of electorate
+        assertIllegalArgument(() -> new Shard(range(0, 100), nodes, fpNodes, new HashSet<>(ids(4, 4))),
+                              "Expected exception for non-electorate pending nodes");
     }
 }

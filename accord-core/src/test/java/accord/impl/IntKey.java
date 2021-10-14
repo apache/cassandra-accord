@@ -81,6 +81,15 @@ public class IntKey implements Key<IntKey>
         return new Keys(keys);
     }
 
+    public static Keys keys(int[] keyArray)
+    {
+        Key[] keys = new Key[keyArray.length];
+        for (int i=0; i<keyArray.length; i++)
+            keys[i] = new IntKey(keyArray[i]);
+
+        return new Keys(keys);
+    }
+
     public static KeyRange<IntKey> range(IntKey start, IntKey end)
     {
         return new Range(start, end);

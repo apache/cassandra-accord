@@ -87,11 +87,72 @@ public class KeyRanges implements Iterable<KeyRange>
         return new KeyRanges(selection);
     }
 
+    public KeyRanges intersection(Keys keys)
+    {
+        List<KeyRange<?>> result = null;
+
+        int keyLB = 0;
+        int keyHB = keys.size();
+        int rangeLB = 0;
+        int rangeHB = rangeIndexForKey(keys.get(keyHB-1));
+        rangeHB = rangeHB < 0 ? -1 - rangeHB : rangeHB + 1;
+
+        for (;rangeLB<rangeHB && keyLB<keyHB;)
+        {
+            Key key = keys.get(keyLB);
+            rangeLB = rangeIndexForKey(rangeLB, size(), key);
+
+            if (rangeLB < 0)
+            {
+                rangeLB = -1 -rangeLB;
+                if (rangeLB >= rangeHB)
+                    break;
+                keyLB = ranges[rangeLB].lowKeyIndex(keys, keyLB, keyHB);
+            }
+            else
+            {
+                if (result == null)
+                    result = new ArrayList<>(Math.min(rangeHB - rangeLB, keyHB - keyLB));
+                KeyRange<?> range = ranges[rangeLB];
+                result.add(range);
+                keyLB = range.higherKeyIndex(keys, keyLB, keyHB);
+                rangeLB++;
+            }
+
+            if (keyLB < 0)
+                keyLB = -1 - keyLB;
+        }
+
+        return result != null ? new KeyRanges(result.toArray(KeyRange[]::new)) : EMPTY;
+    }
+
     public boolean intersects(Keys keys)
     {
         for (int i=0; i<ranges.length; i++)
             if (ranges[i].intersects(keys))
                 return true;
+        return false;
+    }
+
+    public boolean intersects(KeyRange range)
+    {
+        for (int i=0; i<ranges.length; i++)
+            if (ranges[i].compareIntersecting(range) == 0)
+                return true;
+        return false;
+    }
+
+    public boolean intersects(KeyRanges ranges)
+    {
+        // TODO: efficiency
+        for (KeyRange thisRange : this.ranges)
+        {
+            for (KeyRange thatRange : ranges)
+            {
+                if (thisRange.intersects(thatRange))
+                    return true;
+            }
+        }
         return false;
     }
 
@@ -164,6 +225,80 @@ public class KeyRanges implements Iterable<KeyRange>
         return union(new KeyRanges(new KeyRange[]{range}));
     }
 
+    private static KeyRange tryMerge(KeyRange range1, KeyRange range2)
+    {
+        if (range1 == null || range2 == null)
+            return null;
+        return range1.tryMerge(range2);
+    }
+
+    public KeyRanges merge(KeyRanges that)
+    {
+        List<KeyRange> result = new ArrayList<>(this.size() + that.size());
+        int thisIdx = 0, thisSize = this.size();
+        int thatIdx = 0, thatSize = that.size();
+
+        KeyRange merging = null;
+        while (thisIdx < thisSize || thatIdx < thatSize)
+        {
+            KeyRange merged;
+            KeyRange thisRange = thisIdx < thisSize ? this.get(thisIdx) : null;
+            KeyRange thatRange = thatIdx < thatSize ? that.get(thatIdx) : null;
+            if ((merged = tryMerge(merging, thisRange)) != null)
+            {
+                merging = merged;
+                thisIdx++;
+            }
+            else if ((merged = tryMerge(merging, thatRange)) != null)
+            {
+                merging = merged;
+                thatIdx++;
+            }
+            else if (merging != null)
+            {
+                result.add(merging);
+                merging = null;
+            }
+            else if (thisRange == null)
+            {
+                result.add(thatRange);
+                thatIdx++;
+            }
+            else if (thatRange == null)
+            {
+                result.add(thisRange);
+                thisIdx++;
+            }
+            else
+            {
+                int cmp = thisRange.compareIntersecting(thatRange);
+                if (cmp > 0)
+                {
+                    result.add(thatRange);
+                    thatIdx++;
+                }
+                else if (cmp < 0)
+                {
+                    result.add(thisRange);
+                    thisIdx++;
+                }
+                else
+                {
+                    merging = thisRange.tryMerge(thatRange);
+                    thisIdx++;
+                    thatIdx++;
+                    Preconditions.checkState(merging != null);
+                }
+            }
+        }
+
+        if (merging != null)
+            result.add(merging);
+
+
+        return new KeyRanges(result.toArray(KeyRange[]::new));
+    }
+
     public KeyRanges mergeTouching()
     {
         if (ranges.length == 0)
@@ -185,6 +320,11 @@ public class KeyRanges implements Iterable<KeyRange>
         }
         result.add(current);
         return new KeyRanges(result.toArray(KeyRange[]::new));
+    }
+
+    public static KeyRanges singleton(KeyRange range)
+    {
+        return new KeyRanges(new KeyRange[]{range});
     }
 
 }

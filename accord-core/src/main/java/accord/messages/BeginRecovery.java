@@ -1,6 +1,8 @@
 package accord.messages;
 
+import accord.api.ConfigurationService;
 import accord.api.Result;
+import accord.topology.Topologies;
 import accord.txn.Writes;
 import accord.txn.Ballot;
 import accord.local.Node;
@@ -11,6 +13,7 @@ import accord.txn.Dependencies;
 import accord.local.Status;
 import accord.txn.Txn;
 import accord.txn.TxnId;
+import com.google.common.base.Preconditions;
 
 import static accord.local.Status.Accepted;
 import static accord.local.Status.Applied;
@@ -19,22 +22,28 @@ import static accord.local.Status.NotWitnessed;
 import static accord.local.Status.PreAccepted;
 import static accord.messages.PreAccept.calculateDeps;
 
-public class BeginRecovery implements Request
+public class BeginRecovery extends TxnRequest
 {
     final TxnId txnId;
     final Txn txn;
     final Ballot ballot;
 
-    public BeginRecovery(TxnId txnId, Txn txn, Ballot ballot)
+    public BeginRecovery(Scope scope, TxnId txnId, Txn txn, Ballot ballot)
     {
+        super(scope);
         this.txnId = txnId;
         this.txn = txn;
         this.ballot = ballot;
     }
 
+    public BeginRecovery(Id to, Topologies topologies, TxnId txnId, Txn txn, Ballot ballot)
+    {
+        this(Scope.forTopologies(to, topologies, txn), txnId, txn, ballot);
+    }
+
     public void process(Node node, Id replyToNode, long replyToMessage)
     {
-        RecoverReply reply = txn.local(node).map(instance -> {
+        RecoverReply reply = node.local(scope()).map(instance -> {
             Command command = instance.command(txnId);
 
             if (!command.recover(txn, ballot))
@@ -53,6 +62,8 @@ public class BeginRecovery implements Request
             }
             else
             {
+                // if accepted or committed txns with a later txnid exist and they do not contain
+                // our txnid as a dependency, it could not have been witnessed by a quorum
                 rejectsFastPath = txn.uncommittedStartedAfter(instance, txnId)
                                              .filter(c -> c.hasBeen(Accepted))
                                              .anyMatch(c -> !c.savedDeps().contains(txnId));
@@ -60,16 +71,19 @@ public class BeginRecovery implements Request
                     rejectsFastPath = txn.committedExecutesAfter(instance, txnId)
                                          .anyMatch(c -> !c.savedDeps().contains(txnId));
 
+                // committed txns with an earlier txnid and have our txnid as a dependency
                 earlierCommittedWitness = txn.committedStartedBefore(instance, txnId)
                                              .filter(c -> c.savedDeps().contains(txnId))
                                              .collect(Dependencies::new, Dependencies::add, Dependencies::addAll);
 
+                // accepted txns with an earlier txnid that don't have our txnid as a dependency
                 earlierAcceptedNoWitness = txn.uncommittedStartedBefore(instance, txnId)
-                                              .filter(c -> c.is(Accepted) && !c.savedDeps().contains(txnId))
-                                              .filter(c -> c.savedDeps().contains(txnId))
+                                              .filter(c -> c.is(Accepted)
+                                                        && !c.savedDeps().contains(txnId)
+                                                        && c.executeAt().compareTo(txnId) > 0)
                                               .collect(Dependencies::new, Dependencies::add, Dependencies::addAll);
             }
-            return new RecoverOk(command.status(), command.accepted(), command.executeAt(), deps, earlierCommittedWitness, earlierAcceptedNoWitness, rejectsFastPath, command.writes(), command.result());
+            return new RecoverOk(txnId, command.status(), command.accepted(), command.executeAt(), deps, earlierCommittedWitness, earlierAcceptedNoWitness, rejectsFastPath, command.writes(), command.result());
         }).reduce((r1, r2) -> {
             if (!r1.isOK()) return r1;
             if (!r2.isOK()) return r2;
@@ -118,14 +132,14 @@ public class BeginRecovery implements Request
             ok1.earlierAcceptedNoWitness.addAll(ok2.earlierAcceptedNoWitness);
             ok1.earlierAcceptedNoWitness.removeAll(ok1.earlierCommittedWitness);
             return new RecoverOk(
-            ok1.status,
-            Ballot.max(ok1.accepted, ok2.accepted),
-            Timestamp.max(ok1.executeAt, ok2.executeAt),
-            deps,
-            ok1.earlierCommittedWitness,
-            ok1.earlierAcceptedNoWitness,
-                ok1.rejectsFastPath | ok2.rejectsFastPath,
-            ok1.writes, ok1.result);
+                    txnId, ok1.status,
+                    Ballot.max(ok1.accepted, ok2.accepted),
+                    Timestamp.max(ok1.executeAt, ok2.executeAt),
+                    deps,
+                    ok1.earlierCommittedWitness,
+                    ok1.earlierAcceptedNoWitness,
+                    ok1.rejectsFastPath | ok2.rejectsFastPath,
+                    ok1.writes, ok1.result);
         }).orElseThrow();
 
         node.reply(replyToNode, replyToMessage, reply);
@@ -133,8 +147,21 @@ public class BeginRecovery implements Request
         {
             // disseminate directly
             RecoverOk ok = (RecoverOk) reply;
-            node.send(node.cluster().forKeys(txn.keys), new Apply(txnId, txn, ok.executeAt, ok.deps, ok.writes, ok.result));
+            ConfigurationService configService = node.configService();
+            if (ok.executeAt.epoch > configService.currentEpoch())
+            {
+                configService.fetchTopologyForEpoch(ok.executeAt.epoch, () -> disseminateApply(node, ok));
+                return;
+            }
+            disseminateApply(node, ok);
         }
+    }
+
+    private void disseminateApply(Node node, RecoverOk ok)
+    {
+        Preconditions.checkArgument(ok.status == Applied);
+        Topologies topologies = node.topology().forKeys(txn.keys, ok.executeAt.epoch);
+        node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, ok.executeAt, ok.deps, ok.writes, ok.result));
     }
 
     public interface RecoverReply extends Reply
@@ -144,6 +171,7 @@ public class BeginRecovery implements Request
 
     public static class RecoverOk implements RecoverReply
     {
+        public final TxnId txnId; // TODO for debugging?
         public final Status status;
         public final Ballot accepted;
         public final Timestamp executeAt;
@@ -154,8 +182,9 @@ public class BeginRecovery implements Request
         public final Writes writes;
         public final Result result;
 
-        RecoverOk(Status status, Ballot accepted, Timestamp executeAt, Dependencies deps, Dependencies earlierCommittedWitness, Dependencies earlierAcceptedNoWitness, boolean rejectsFastPath, Writes writes, Result result)
+        RecoverOk(TxnId txnId, Status status, Ballot accepted, Timestamp executeAt, Dependencies deps, Dependencies earlierCommittedWitness, Dependencies earlierAcceptedNoWitness, boolean rejectsFastPath, Writes writes, Result result)
         {
+            this.txnId = txnId;
             this.accepted = accepted;
             this.executeAt = executeAt;
             this.status = status;
@@ -177,7 +206,8 @@ public class BeginRecovery implements Request
         public String toString()
         {
             return "RecoverOk{" +
-                   "status:" + status +
+                   "txnId:" + txnId +
+                   ", status:" + status +
                    ", accepted:" + accepted +
                    ", executeAt:" + executeAt +
                    ", deps:" + deps +

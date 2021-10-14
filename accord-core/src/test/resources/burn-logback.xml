@@ -1,0 +1,24 @@
+<configuration debug="false" scan="true">
+    <timestamp key="bySecond" datePattern="yyyy-MM-dd-HH:mm:ss"/>
+    <property name="startTime" value="${bySecond}"/>
+    <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+        <file>./build/burn-test/logs/burn-${startTime}.log</file>
+        <encoder>
+            <pattern>%-5level ${bySecond} %F:%L - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%-5level ${bySecond} %F:%L - %msg%n</pattern>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>INFO</level>
+        </filter>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="FILE"/>
+        <appender-ref ref="STDOUT"/>
+    </root>
+</configuration>

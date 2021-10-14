@@ -27,8 +27,8 @@ public class TopologyTest
         Assertions.assertTrue(shard.range.containsKey(expectedKey));
         Assertions.assertEquals(expectedRange, shard.range);
 
-        Shards shards = topology.forKeys(Keys.of(expectedKey));
-        shard = Iterables.getOnlyElement(shards);
+        Topology subTopology = topology.forKeys(Keys.of(expectedKey));
+        shard = Iterables.getOnlyElement(subTopology);
         Assertions.assertTrue(shard.range.containsKey(expectedKey));
         Assertions.assertEquals(expectedRange, shard.range);
     }
@@ -36,7 +36,7 @@ public class TopologyTest
     private static Topology topology(List<Node.Id> ids, int rf, KeyRange... ranges)
     {
         TopologyFactory<IntKey> topologyFactory = new TopologyFactory<>(rf, ranges);
-        return topologyFactory.toShards(ids);
+        return topologyFactory.toTopology(ids);
     }
 
     private static Topology topology(int numNodes, int rf, KeyRange... ranges)

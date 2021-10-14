@@ -1,7 +1,5 @@
 package accord.impl.basic;
 
-import java.io.OutputStream;
-import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -17,6 +15,8 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import accord.api.MessageSink;
+import accord.burn.BurnTestConfigurationService;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -27,25 +27,28 @@ import accord.impl.list.ListStore;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
-import accord.topology.Shards;
+import accord.topology.TopologyRandomizer;
+import accord.topology.Topology;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class Cluster implements Scheduler
 {
+    private static final Logger logger = LoggerFactory.getLogger(Cluster.class);
+
     final Function<Id, Node> lookup;
     final PendingQueue pending;
     final Consumer<Packet> responseSink;
     final Map<Id, NodeSink> sinks = new HashMap<>();
-    final PrintWriter err;
     int clock;
     int recurring;
     Set<Id> partitionSet;
 
-    public Cluster(Supplier<PendingQueue> queueSupplier, Function<Id, Node> lookup, Consumer<Packet> responseSink, OutputStream stderr)
+    public Cluster(Supplier<PendingQueue> queueSupplier, Function<Id, Node> lookup, Consumer<Packet> responseSink)
     {
         this.pending = queueSupplier.get();
         this.lookup = lookup;
         this.responseSink = responseSink;
-        this.err = new PrintWriter(stderr);
         this.partitionSet = new HashSet<>();
     }
 
@@ -58,8 +61,8 @@ public class Cluster implements Scheduler
 
     private void add(Packet packet)
     {
-        err.println(clock++ + " SEND " + packet);
-        err.flush();
+        boolean isReply = packet.message instanceof Reply;
+        logger.trace("{} {} {}", clock++, isReply ? "RPLY" : "SEND", packet);
         if (lookup.apply(packet.dst) == null) responseSink.accept(packet);
         else pending.add(packet);
     }
@@ -89,25 +92,23 @@ public class Cluster implements Scheduler
             Node on = lookup.apply(deliver.dst);
             // Drop the message if it goes across the partition
             boolean drop = ((Packet) next).src.id >= 0 &&
-                           !(partitionSet.contains(deliver.src) && partitionSet.contains(deliver.dst)
-                             || !partitionSet.contains(deliver.src) && !partitionSet.contains(deliver.dst));
+                    !(partitionSet.contains(deliver.src) && partitionSet.contains(deliver.dst)
+                            || !partitionSet.contains(deliver.src) && !partitionSet.contains(deliver.dst));
             if (drop)
             {
-                err.println(clock++ + " DROP " + deliver);
-                err.flush();
+                logger.trace("{} DROP[{}] {}", clock++, on.epoch(), deliver);
                 return true;
             }
-            err.println(clock++ + " RECV " + deliver);
-            err.flush();
+            logger.trace("{} RECV[{}] {}", clock++, on.epoch(), deliver);
             if (deliver.message instanceof Reply)
             {
                 Reply reply = (Reply) deliver.message;
                 Callback callback = reply.isFinal() ? sinks.get(deliver.dst).callbacks.remove(deliver.replyId)
-                                                    : sinks.get(deliver.dst).callbacks.get(deliver.replyId);
+                        : sinks.get(deliver.dst).callbacks.get(deliver.replyId);
                 if (callback != null)
                     on.scheduler().now(() -> callback.onSuccess(deliver.src, reply));
             }
-            else on.receive((Request)deliver.message, deliver.src, deliver.requestId);
+            else on.receive((Request) deliver.message, deliver.src, deliver.requestId);
         }
         else
         {
@@ -139,16 +140,21 @@ public class Cluster implements Scheduler
         run.run();
     }
 
-    public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, Supplier<Random> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, OutputStream stderr)
+    public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, Supplier<Random> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in)
     {
-        Shards shards = topologyFactory.toShards(nodes);
+        Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> lookup = new HashMap<>();
+        TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, lookup::get);
         try
         {
-            Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink, stderr);
+            Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink);
             for (Id node : nodes)
-                lookup.put(node, new Node(node, shards, sinks.create(node, randomSupplier.get()), randomSupplier.get(),
+            {
+                MessageSink messageSink = sinks.create(node, randomSupplier.get());
+                BurnTestConfigurationService configService = new BurnTestConfigurationService(node, messageSink, randomSupplier, topology, lookup::get);
+                lookup.put(node, new Node(node, messageSink, configService,
                                           nowSupplier.get(), ListStore::new, ListAgent.INSTANCE, sinks, CommandStore.Factory.SYNCHRONIZED));
+            }
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));
             sinks.recurring(() ->
@@ -157,6 +163,7 @@ public class Cluster implements Scheduler
                                 int partitionSize = randomSupplier.get().nextInt((topologyFactory.rf+1)/2);
                                 sinks.partitionSet = new HashSet<>(nodesList.subList(0, partitionSize));
                             }, 5L, TimeUnit.SECONDS);
+            sinks.recurring(configRandomizer::maybeUpdateTopology, 1L, TimeUnit.SECONDS);
 
             Packet next;
             while ((next = in.get()) != null)

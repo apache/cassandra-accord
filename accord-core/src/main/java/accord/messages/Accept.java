@@ -1,7 +1,6 @@
 package accord.messages;
 
-import accord.messages.Reply;
-import accord.messages.Request;
+import accord.topology.Topologies;
 import accord.txn.Ballot;
 import accord.local.Node;
 import accord.txn.Timestamp;
@@ -12,7 +11,7 @@ import accord.txn.TxnId;
 
 import static accord.messages.PreAccept.calculateDeps;
 
-public class Accept implements Request
+public class Accept extends TxnRequest
 {
     public final Ballot ballot;
     public final TxnId txnId;
@@ -20,8 +19,9 @@ public class Accept implements Request
     public final Timestamp executeAt;
     public final Dependencies deps;
 
-    public Accept(Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps)
+    public Accept(Scope scope, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps)
     {
+        super(scope);
         this.ballot = ballot;
         this.txnId = txnId;
         this.txn = txn;
@@ -29,13 +29,18 @@ public class Accept implements Request
         this.deps = deps;
     }
 
+    public Accept(Node.Id dst, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps)
+    {
+        this(Scope.forTopologies(dst, topologies, txn), ballot, txnId, txn, executeAt, deps);
+    }
+
     public void process(Node on, Node.Id replyToNode, long replyToMessage)
     {
-        on.reply(replyToNode, replyToMessage, txn.local(on).map(instance -> {
+        on.reply(replyToNode, replyToMessage, on.local(scope()).map(instance -> {
             Command command = instance.command(txnId);
             if (!command.accept(ballot, txn, executeAt, deps))
-                return new AcceptNack(command.promised());
-            return new AcceptOk(calculateDeps(instance, txnId, txn, executeAt));
+                return new AcceptNack(txnId, command.promised());
+            return new AcceptOk(txnId, calculateDeps(instance, txnId, txn, executeAt));
         }).reduce((r1, r2) -> {
             if (!r1.isOK()) return r1;
             if (!r2.isOK()) return r2;
@@ -55,10 +60,12 @@ public class Accept implements Request
 
     public static class AcceptOk implements AcceptReply
     {
+        public final TxnId txnId;
         public final Dependencies deps;
 
-        public AcceptOk(Dependencies deps)
+        public AcceptOk(TxnId txnId, Dependencies deps)
         {
+            this.txnId = txnId;
             this.deps = deps;
         }
 
@@ -71,16 +78,21 @@ public class Accept implements Request
         @Override
         public String toString()
         {
-            return "AcceptOk{" + deps + '}';
+            return "AcceptOk{" +
+                    "txnId=" + txnId +
+                    ", deps=" + deps +
+                    '}';
         }
     }
 
     public static class AcceptNack implements AcceptReply
     {
+        public final TxnId txnId;
         public final Timestamp reject;
 
-        public AcceptNack(Timestamp reject)
+        public AcceptNack(TxnId txnId, Timestamp reject)
         {
+            this.txnId = txnId;
             this.reject = reject;
         }
 
@@ -93,7 +105,10 @@ public class Accept implements Request
         @Override
         public String toString()
         {
-            return "AcceptNack{" + reject + '}';
+            return "AcceptNack{" +
+                    "txnId=" + txnId +
+                    ", reject=" + reject +
+                    '}';
         }
     }
 

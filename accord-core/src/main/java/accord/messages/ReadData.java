@@ -1,5 +1,6 @@
 package accord.messages;
 
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -8,13 +9,15 @@ import java.util.stream.Collectors;
 import accord.local.*;
 import accord.local.Node.Id;
 import accord.api.Data;
+import accord.topology.KeyRanges;
+import accord.topology.Topologies;
 import accord.txn.Txn;
 import accord.txn.TxnId;
 import accord.txn.Timestamp;
 import accord.api.Scheduler.Scheduled;
 import accord.utils.DeterministicIdentitySet;
 
-public class ReadData implements Request
+public class ReadData extends TxnRequest
 {
     static class LocalRead implements Listener
     {
@@ -56,7 +59,7 @@ public class ReadData implements Request
                 if (blockedBy == null) return;
                 blockedBy.addListener(this);
                 assert blockedBy.status().compareTo(Status.NotWitnessed) > 0;
-                node.reply(replyToNode, replyToMessage, new ReadWaiting(blockedBy.txnId(), blockedBy.txn(), blockedBy.executeAt(), blockedBy.status()));
+                node.reply(replyToNode, replyToMessage, new ReadWaiting(txnId, blockedBy.txnId(), blockedBy.txn(), blockedBy.executeAt(), blockedBy.status()));
             }
         }
 
@@ -102,16 +105,23 @@ public class ReadData implements Request
             {
                 isObsolete = true;
                 waitingOnReporter.cancel();
+                Set<Node.Id> nodes = new HashSet<>();
+                Topologies topologies = node.topology().forKeys(command.txn().keys());
+                KeyRanges ranges = command.commandStore.ranges();
+                topologies.forEachShard(shard -> {
+                    if (ranges.intersects(shard.range))
+                        nodes.addAll(shard.nodes);
+                });
                 // FIXME: this may result in redundant messages being sent when a shard is split across several command shards
-                node.send(command.commandStore.nodesFor(command), new Apply(command.txnId(), command.txn(), command.executeAt(), command.savedDeps(), command.writes(), command.result()));
+                node.send(nodes, to -> new Apply(to, topologies, command.txnId(), command.txn(), command.executeAt(), command.savedDeps(), command.writes(), command.result()));
                 node.reply(replyToNode, replyToMessage, new ReadNack());
             }
         }
 
-        synchronized void setup(TxnId txnId, Txn txn)
+        synchronized void setup(TxnId txnId, Txn txn, Scope scope)
         {
             // TODO: simple hash set supporting concurrent modification, or else avoid concurrent modification
-            waitingOn = txn.local(node).collect(Collectors.toCollection(() -> new DeterministicIdentitySet<>()));
+            waitingOn = node.local(scope).collect(Collectors.toCollection(() -> new DeterministicIdentitySet<>()));
             // FIXME: fix/check thread safety
             CommandStore.onEach(waitingOn, instance -> {
                 Command command = instance.command(txnId);
@@ -141,16 +151,24 @@ public class ReadData implements Request
 
     final TxnId txnId;
     final Txn txn;
+    final Timestamp executeAt;
 
-    public ReadData(TxnId txnId, Txn txn)
+    public ReadData(Scope scope, TxnId txnId, Txn txn, Timestamp executeAt)
     {
+        super(scope);
         this.txnId = txnId;
         this.txn = txn;
+        this.executeAt = executeAt;
+    }
+
+    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Txn txn, Timestamp executeAt)
+    {
+        this(Scope.forTopologies(to, topologies, txn), txnId, txn, executeAt);
     }
 
     public void process(Node node, Node.Id from, long messageId)
     {
-        new LocalRead(txnId, node, from, messageId).setup(txnId, txn);
+        new LocalRead(txnId, node, from, messageId).setup(txnId, txn, scope());
     }
 
     public static class ReadReply implements Reply
@@ -187,13 +205,15 @@ public class ReadData implements Request
 
     public static class ReadWaiting extends ReadReply
     {
+        public final TxnId forTxn;
         public final TxnId txnId;
         public final Txn txn;
         public final Timestamp executeAt;
         public final Status status;
 
-        public ReadWaiting(TxnId txnId, Txn txn, Timestamp executeAt, Status status)
+        public ReadWaiting(TxnId forTxn, TxnId txnId, Txn txn, Timestamp executeAt, Status status)
         {
+            this.forTxn = forTxn;
             this.txnId = txnId;
             this.txn = txn;
             this.executeAt = executeAt;
@@ -210,7 +230,8 @@ public class ReadData implements Request
         public String toString()
         {
             return "ReadWaiting{" +
-                   "txnId:" + txnId +
+                   "forTxn:" + forTxn +
+                   ", txnId:" + txnId +
                    ", txn:" + txn +
                    ", executeAt:" + executeAt +
                    ", status:" + status +

@@ -16,6 +16,7 @@ public class ListRequest implements Request
 
     public void process(Node node, Id client, long messageId)
     {
+        // TODO (now): error handling
         node.coordinate(txn).handle((success, fail) -> {
             if (success != null)
                 node.reply(client, messageId, (ListResult) success);

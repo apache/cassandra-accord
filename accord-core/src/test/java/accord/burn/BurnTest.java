@@ -5,6 +5,7 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.List;
@@ -23,6 +24,7 @@ import java.util.function.Consumer;
 
 import accord.impl.IntHashKey;
 import accord.impl.basic.Cluster;
+import accord.impl.basic.PropagatingPendingQueue;
 import accord.impl.basic.RandomDelayQueue.Factory;
 import accord.impl.IntKey;
 import accord.impl.TopologyFactory;
@@ -40,9 +42,15 @@ import accord.local.Node.Id;
 import accord.api.Key;
 import accord.txn.Txn;
 import accord.txn.Keys;
+import accord.verify.StrictSerializabilityVerifier;
+import ch.qos.logback.classic.Level;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class BurnTest
 {
+    private static final Logger logger = LoggerFactory.getLogger(BurnTest.class);
+
     static List<Packet> generate(Random random, List<Id> clients, List<Id> nodes, int keyCount, int operations)
     {
         List<Key> keys = new ArrayList<>();
@@ -104,44 +112,44 @@ public class BurnTest
 
     static void burn(long seed, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency) throws IOException
     {
-        burn(seed, topologyFactory, clients, nodes, keyCount, operations, concurrency, System.out, System.err);
-    }
-
-    static void burn(long seed, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency, PrintStream out, PrintStream err) throws IOException
-    {
         Random random = new Random();
         System.out.println(seed);
         random.setSeed(seed);
-        burn(random, topologyFactory, clients, nodes, keyCount, operations, concurrency, out, err);
-    }
-
-    static void burn(Random random, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency)
-    {
-        burn(random, topologyFactory, clients, nodes, keyCount, operations, concurrency, System.out, System.err);
+        burn(random, topologyFactory, clients, nodes, keyCount, operations, concurrency);
     }
 
     static void reconcile(long seed, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency) throws IOException, ExecutionException, InterruptedException, TimeoutException
     {
-        ReconcilingOutputStreams streams = new ReconcilingOutputStreams(System.out, System.err, 2);
+        ReconcilingLogger logReconciler = new ReconcilingLogger(logger);
+
         Random random1 = new Random(), random2 = new Random();
         random1.setSeed(seed);
         random2.setSeed(seed);
-        PrintStream out1 = new PrintStream(streams.get(0));
-        PrintStream out2 = new PrintStream(streams.get(1));
         ExecutorService exec = Executors.newFixedThreadPool(2);
-        Future<?> f1 = exec.submit(() -> burn(random1, topologyFactory, clients, nodes, keyCount, operations, concurrency, out1, out1));
-        Future<?> f2 = exec.submit(() -> burn(random2, topologyFactory, clients, nodes, keyCount, operations, concurrency, out2, out2));
+        Future<?> f1;
+        try (ReconcilingLogger.Session session = logReconciler.nextSession())
+        {
+            f1 = exec.submit(() -> burn(random1, topologyFactory, clients, nodes, keyCount, operations, concurrency));
+        }
+
+        Future<?> f2;
+        try (ReconcilingLogger.Session session = logReconciler.nextSession())
+        {
+            f2 = exec.submit(() -> burn(random2, topologyFactory, clients, nodes, keyCount, operations, concurrency));
+        }
         exec.shutdown();
         f1.get();
         f2.get();
+
+        assert logReconciler.reconcile();
     }
 
-    static void burn(Random random, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency, PrintStream stdout, PrintStream stderr)
+    static void burn(Random random, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency)
     {
-        PendingQueue queue = new Factory(random).get();
+        List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
+        PendingQueue queue = new PropagatingPendingQueue(failures, new Factory(random).get());
 
-        SerializabilityVerifier serializable = new SerializabilityVerifier(keyCount);
-        Map<Integer, LinearizabilityVerifier> linearizableMap = new HashMap<>();
+        StrictSerializabilityVerifier strictSerializable = new StrictSerializabilityVerifier(keyCount);
 
         Packet[] requests = generate(random, clients, nodes, keyCount, operations).toArray(Packet[]::new);
         int[] starts = new int[requests.length];
@@ -169,53 +177,50 @@ public class BurnTest
                 queue.add(requests[i]);
             }
 
-            stdout.println(reply);
-            serializable.begin();
-
-            ListUpdate update = (ListUpdate) ((ListRequest) requests[(int)packet.replyId].message).txn.update;
-            int start = starts[(int)packet.replyId];
-            int end = clock.incrementAndGet();
-            replies[(int)packet.replyId] = packet;
-
-            for (int i = 0 ; i < reply.read.length ; ++i)
+            try
             {
-                Key key = reply.keys.get(i);
-                int k = key(key);
 
-                int[] read = reply.read[i];
-                int write = reply.update.getOrDefault(key, -1);
+                int start = starts[(int)packet.replyId];
+                int end = clock.incrementAndGet();
 
-                if (read != null)
+                logger.debug("{} at [{}, {}]", reply, start, end);
+
+                replies[(int)packet.replyId] = packet;
+                strictSerializable.begin();
+
+                for (int i = 0 ; i < reply.read.length ; ++i)
                 {
-                    // TODO: standardise read to include/exclude write
-                    serializable.witnessRead(k, read);
+                    Key key = reply.keys.get(i);
+                    int k = key(key);
+
+                    int[] read = reply.read[i];
+                    int write = reply.update.getOrDefault(key, -1);
+
+                    if (read != null)
+                        strictSerializable.witnessRead(k, read);
                     if (write >= 0)
-                        read = append(read, write);
-                    linearizableMap.computeIfAbsent(k, LinearizabilityVerifier::new)
-                              .witnessRead(new Observation(read, start, end));
+                        strictSerializable.witnessWrite(k, write);
                 }
-                if (write >= 0)
-                {
-                    serializable.witnessWrite(k, write);
-                    linearizableMap.computeIfAbsent(k, LinearizabilityVerifier::new)
-                                   .witnessWrite(write, start, end, true);
-                }
-            }
 
-            serializable.apply();
+                strictSerializable.apply(start, end);
+            }
+            catch (Throwable t)
+            {
+                failures.add(t);
+            }
         };
 
         Cluster.run(nodes.toArray(Id[]::new), () -> queue,
                     responseSink, () -> new Random(random.nextLong()), () -> new AtomicLong()::incrementAndGet,
-                    topologyFactory, () -> null, stderr);
+                    topologyFactory, () -> null);
 
-        stdout.printf("Received %d acks to %d operations\n", clock.get() - operations, operations);
+        logger.info("Received {} acks to {} operations\n", clock.get() - operations, operations);
         if (clock.get() != operations * 2)
         {
             for (int i = 0 ; i < requests.length ; ++i)
             {
-                stdout.println(requests[i]);
-                stdout.println("\t\t" + replies[i]);
+                logger.debug("{}", requests[i]);
+                logger.debug("\t\t" + replies[i]);
             }
             throw new AssertionError("Incomplete set of responses");
         }
@@ -223,32 +228,29 @@ public class BurnTest
 
     public static void main(String[] args) throws Exception
     {
-        PrintStream devnull = new PrintStream(new OutputStream()
+        Long overrideSeed = null;
+        do
         {
-            @Override
-            public void write(int b) throws IOException
-            {
-            }
-        });
-
-        while (true)
-        {
-            long seed = ThreadLocalRandom.current().nextLong();
-            System.out.println("Seed " + seed);
+            long seed = overrideSeed != null ? overrideSeed : ThreadLocalRandom.current().nextLong();
+            logger.info("Seed: {}", seed);
             Random random = new Random(seed);
-            List<Id> clients =  generateIds(true, 1 + random.nextInt(4));
-            List<Id> nodes =  generateIds(false, 5 + random.nextInt(5));
-            burn(random, new TopologyFactory<>(nodes.size() == 5 ? 3 : (2 + random.nextInt(3)), IntHashKey.ranges(4 + random.nextInt(12))),
-                 clients,
-                 nodes,
-                 5 + random.nextInt(15),
-                 100,
-                 10 + random.nextInt(30),
-//                 System.out,
-//                 System.err
-                 devnull, devnull
-            );
-        }
+            try
+            {
+                List<Id> clients =  generateIds(true, 1 + random.nextInt(4));
+                List<Id> nodes =  generateIds(false, 5 + random.nextInt(5));
+                burn(random, new TopologyFactory<>(nodes.size() == 5 ? 3 : (2 + random.nextInt(3)), IntHashKey.ranges(4 + random.nextInt(12))),
+                     clients,
+                     nodes,
+                     5 + random.nextInt(15),
+                     200,
+                     10 + random.nextInt(30));
+            }
+            catch (Throwable t)
+            {
+                logger.error("Exception running burn test:", t);
+                throw t;
+            }
+        } while (overrideSeed == null);
     }
 
     private static List<Id> generateIds(boolean clients, int count)
@@ -261,7 +263,7 @@ public class BurnTest
 
     private static int key(Key key)
     {
-        return ((IntKey) key).key;
+        return ((IntHashKey) key).key;
     }
 
     private static int[] append(int[] to, int append)
