@@ -5,8 +5,6 @@ import accord.api.Key;
 import accord.api.KeyRange;
 import accord.api.Store;
 import accord.topology.KeyRanges;
-import accord.topology.Shard;
-import accord.topology.Shards;
 import accord.topology.Topology;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
@@ -37,51 +35,6 @@ public abstract class CommandStore
     private final Function<Timestamp, Timestamp> uniqueNow;
     private final Agent agent;
     private final Store store;
-
-    /**
-     * maps ranges handled by this command store to their current shards by index
-     */
-    static class RangeMapping
-    {
-        private static final RangeMapping EMPTY = new RangeMapping(KeyRanges.EMPTY, new Shard[0], Shards.EMPTY);
-        final KeyRanges ranges;
-        final Shard[] shards;
-        final Topology topology;
-
-        public RangeMapping(KeyRanges ranges, Shard[] shards, Topology topology)
-        {
-            Preconditions.checkArgument(ranges.size() == shards.length);
-            this.ranges = ranges;
-            this.shards = shards;
-            this.topology = topology;
-        }
-
-        private static class Builder
-        {
-            private final Topology localTopology;
-            private final List<KeyRange> ranges;
-            private final List<Shard> shards;
-
-            public Builder(int minSize, Topology localTopology)
-            {
-                this.localTopology = localTopology;
-                this.ranges = new ArrayList<>(minSize);
-                this.shards = new ArrayList<>(minSize);
-            }
-
-            public void addMapping(KeyRange range, Shard shard)
-            {
-                Preconditions.checkArgument(shard.range.fullyContains(range));
-                ranges.add(range);
-                shards.add(shard);
-            }
-
-            public RangeMapping build()
-            {
-                return new RangeMapping(new KeyRanges(ranges), shards.toArray(Shard[]::new), localTopology);
-            }
-        }
-    }
 
     public CommandStore(int index, Node.Id nodeId, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store)
     {
@@ -175,49 +128,10 @@ public abstract class CommandStore
         return result;
     }
 
-    static RangeMapping mapRanges(KeyRanges mergedRanges, Topology localTopology)
-    {
-        RangeMapping.Builder builder = new RangeMapping.Builder(mergedRanges.size(), localTopology);
-        int shardIdx = 0;
-        for (int rangeIdx=0; rangeIdx<mergedRanges.size(); rangeIdx++)
-        {
-            KeyRange mergedRange = mergedRanges.get(rangeIdx);
-            while (shardIdx < localTopology.size())
-            {
-                Shard shard = localTopology.get(shardIdx);
-
-                int cmp = shard.range.compareIntersecting(mergedRange);
-                if (cmp > 0)
-                    throw new IllegalStateException("mapped shards should always be intersecting or greater than the current shard");
-
-                if (cmp < 0)
-                {
-                    shardIdx++;
-                    continue;
-                }
-
-                if (shard.range.fullyContains(mergedRange))
-                {
-                    builder.addMapping(mergedRange, shard);
-                    break;
-                }
-                else
-                {
-                    KeyRange intersection = mergedRange.intersection(shard.range);
-                    Preconditions.checkState(intersection.start().equals(mergedRange.start()));
-                    builder.addMapping(intersection, shard);
-                    mergedRange = mergedRange.subRange(intersection.end(), mergedRange.end());
-                    shardIdx++;
-                }
-            }
-        }
-        return builder.build();
-    }
-
     void updateTopology(Topology topology, KeyRanges added, KeyRanges removed)
     {
         KeyRanges newRanges = rangeMap.ranges.difference(removed).union(added).mergeTouching();
-        rangeMap = mapRanges(newRanges, topology);
+        rangeMap = RangeMapping.mapRanges(newRanges, topology);
 
         for (KeyRange range : removed)
         {

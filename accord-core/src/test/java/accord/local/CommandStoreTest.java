@@ -53,7 +53,7 @@ public class CommandStoreTest
         return shards;
     }
 
-    private static void assertMapping(KeyRanges ranges, Shard[] shards, CommandStore.RangeMapping mapping)
+    private static void assertMapping(KeyRanges ranges, Shard[] shards, RangeMapping mapping)
     {
         Assertions.assertEquals(ranges, mapping.ranges);
         Assertions.assertArrayEquals(shards, mapping.shards);
