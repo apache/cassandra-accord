@@ -96,13 +96,11 @@ class RangeMapping
 
     static class Multi
     {
-        final long epoch;
         final Topology topology;
         final RangeMapping[] mappings;
 
-        public Multi(long epoch, Topology topology, RangeMapping[] mappings)
+        public Multi(Topology topology, RangeMapping[] mappings)
         {
-            this.epoch = epoch;
             this.topology = topology;
             this.mappings = mappings;
         }
@@ -113,7 +111,7 @@ class RangeMapping
             for (int i=0; i<size; i++)
                 mappings[i] = RangeMapping.EMPTY;
 
-            return new Multi(0, RangeMapping.EMPTY.topology, mappings);
+            return new Multi(RangeMapping.EMPTY.topology, mappings);
         }
     }
 }

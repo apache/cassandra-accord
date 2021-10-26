@@ -77,6 +77,11 @@ public class Topology extends AbstractCollection<Shard>
         this.supersetRangeIndexes = supersetIndexes;
     }
 
+    public long epoch()
+    {
+        return epoch;
+    }
+
     public Shards forNode(Id node)
     {
         NodeInfo info = nodeLookup.get(node);

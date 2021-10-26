@@ -81,13 +81,13 @@ public class CommandStores
         return result;
     }
 
-    public synchronized void updateTopology(long newEpoch, Topology newTopology)
+    public synchronized void updateTopology(Topology newTopology)
     {
         // FIXME: if we miss a topology update, we may end up with stale command data for ranges that were owned by
         //  someone else during the period we were not receiving topology updates. Something like a ballot low bound
         //  may make this a non-issue, and would be preferable to having to chase down all historical topology changes.
         //  OTOH, we'll probably need a complete history of topology changes to do recovery properly
-        if (newEpoch <= rangeMappings.epoch)
+        if (newTopology.epoch() <= rangeMappings.topology.epoch())
             return;
 
         KeyRanges removed = rangeMappings.topology.ranges().difference(newTopology.ranges());
@@ -103,7 +103,7 @@ public class CommandStores
         }
 
         RangeMapping.Multi previous = rangeMappings;
-        rangeMappings = new RangeMapping.Multi(newEpoch, newTopology, newMappings);
+        rangeMappings = new RangeMapping.Multi(newTopology, newMappings);
         stream().forEach(commands -> commands.onTopologyChange(previous.mappings[commands.index()],
                                                                rangeMappings.mappings[commands.index()]));
     }
