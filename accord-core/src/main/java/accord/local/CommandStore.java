@@ -16,6 +16,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.IntFunction;
 
 /**
  * Single threaded internal shard of accord transaction metadata
@@ -24,7 +25,12 @@ public abstract class CommandStore
 {
     public interface Factory
     {
-        CommandStore create(int index, Node.Id nodeId, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store);
+        CommandStore create(int index,
+                            Node.Id nodeId,
+                            Function<Timestamp, Timestamp> uniqueNow,
+                            Agent agent,
+                            Store store,
+                            IntFunction<RangeMapping> mappingSupplier);
         Factory SYNCHRONIZED = Synchronized::new;
         Factory SINGLE_THREAD = SingleThread::new;
         Factory SINGLE_THREAD_DEBUG = SingleThreadDebug::new;
@@ -35,21 +41,27 @@ public abstract class CommandStore
     private final Function<Timestamp, Timestamp> uniqueNow;
     private final Agent agent;
     private final Store store;
+    private final IntFunction<RangeMapping> mappingSupplier;
+    private RangeMapping rangeMap;
 
-    public CommandStore(int index, Node.Id nodeId, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store)
+    private final NavigableMap<TxnId, Command> commands = new TreeMap<>();
+    private final NavigableMap<Key, CommandsForKey> commandsForKey = new TreeMap<>();
+
+    public CommandStore(int index,
+                        Node.Id nodeId,
+                        Function<Timestamp, Timestamp> uniqueNow,
+                        Agent agent,
+                        Store store,
+                        IntFunction<RangeMapping> mappingSupplier)
     {
         this.index = index;
         this.nodeId = nodeId;
         this.uniqueNow = uniqueNow;
         this.agent = agent;
         this.store = store;
+        this.mappingSupplier = mappingSupplier;
+        rangeMap = mappingSupplier.apply(index);
     }
-
-    private volatile RangeMapping rangeMap = RangeMapping.EMPTY;
-
-
-    private final NavigableMap<TxnId, Command> commands = new TreeMap<>();
-    private final NavigableMap<Key, CommandsForKey> commandsForKey = new TreeMap<>();
 
     public Command command(TxnId txnId)
     {
@@ -152,6 +164,32 @@ public abstract class CommandStore
         }
     }
 
+    void onTopologyChange(RangeMapping prevMapping, RangeMapping currentMapping)
+    {
+        Preconditions.checkState(rangeMap != prevMapping);
+        // processInternal should pick up any topology changes before executing this task
+        Preconditions.checkState(rangeMap == currentMapping);
+        KeyRanges removed = prevMapping.ranges.difference(rangeMap.ranges);
+
+        for (KeyRange range : removed)
+        {
+            NavigableMap<Key, CommandsForKey> subMap = commandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive());
+            Iterator<Key> keyIterator = subMap.keySet().iterator();
+            while (keyIterator.hasNext())
+            {
+                Key key = keyIterator.next();
+                CommandsForKey forKey = commandsForKey.get(key);
+                if (forKey != null)
+                {
+                    for (Command command : forKey)
+                        if (command.txn() != null && !rangeMap.ranges.intersects(command.txn().keys))
+                            commands.remove(command.txnId());
+                }
+                keyIterator.remove();
+            }
+        }
+    }
+
     public int index()
     {
         return index;
@@ -168,10 +206,16 @@ public abstract class CommandStore
             store.process(consumer);
     }
 
+    private void refreshRangeMap()
+    {
+        rangeMap = mappingSupplier.apply(index);
+    }
+
     <R> void processInternal(Function<? super CommandStore, R> function, CompletableFuture<R> future)
     {
         try
         {
+            refreshRangeMap();
             future.complete(function.apply(this));
         }
         catch (Throwable e)
@@ -184,6 +228,7 @@ public abstract class CommandStore
     {
         try
         {
+            refreshRangeMap();
             consumer.accept(this);
             future.complete(null);
         }
@@ -201,9 +246,14 @@ public abstract class CommandStore
 
     public static class Synchronized extends CommandStore
     {
-        public Synchronized(int index, Node.Id nodeId, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store)
+        public Synchronized(int index,
+                            Node.Id nodeId,
+                            Function<Timestamp, Timestamp> uniqueNow,
+                            Agent agent,
+                            Store store,
+                            IntFunction<RangeMapping> mappingSupplier)
         {
-            super(index, nodeId, uniqueNow, agent, store);
+            super(index, nodeId, uniqueNow, agent, store, mappingSupplier);
         }
 
         @Override
@@ -262,9 +312,14 @@ public abstract class CommandStore
             }
         }
 
-        public SingleThread(int index, Node.Id nodeId, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store)
+        public SingleThread(int index,
+                            Node.Id nodeId,
+                            Function<Timestamp, Timestamp> uniqueNow,
+                            Agent agent,
+                            Store store,
+                            IntFunction<RangeMapping> mappingSupplier)
         {
-            super(index, nodeId, uniqueNow, agent, store);
+            super(index, nodeId, uniqueNow, agent, store, mappingSupplier);
             executor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
                 thread.setName(CommandStore.class.getSimpleName() + '[' + nodeId + ':' + index + ']');
@@ -299,9 +354,14 @@ public abstract class CommandStore
     {
         private final AtomicReference<Thread> expectedThread = new AtomicReference<>();
 
-        public SingleThreadDebug(int index, Node.Id nodeId, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store)
+        public SingleThreadDebug(int index,
+                                 Node.Id nodeId,
+                                 Function<Timestamp, Timestamp> uniqueNow,
+                                 Agent agent,
+                                 Store store,
+                                 IntFunction<RangeMapping> mappingSupplier)
         {
-            super(index, nodeId, uniqueNow, agent, store);
+            super(index, nodeId, uniqueNow, agent, store, mappingSupplier);
         }
 
         private void assertThread()

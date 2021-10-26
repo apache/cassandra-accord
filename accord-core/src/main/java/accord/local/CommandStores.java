@@ -25,14 +25,20 @@ import java.util.stream.StreamSupport;
  */
 public class CommandStores
 {
-    private Topology localTopology = Shards.EMPTY;
     private final CommandStore[] commandStores;
+    private volatile RangeMapping.Multi rangeMappings;
 
     public CommandStores(int num, Node.Id nodeId, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store, CommandStore.Factory shardFactory)
     {
         this.commandStores = new CommandStore[num];
+        this.rangeMappings = RangeMapping.Multi.empty(num);
         for (int i=0; i<num; i++)
-            commandStores[i] = shardFactory.create(i, nodeId, uniqueNow, agent, store);
+            commandStores[i] = shardFactory.create(i, nodeId, uniqueNow, agent, store, this::getRangeMapping);
+    }
+
+    private RangeMapping getRangeMapping(int idx)
+    {
+        return rangeMappings.mappings[idx];
     }
 
     public synchronized void shutdown()
@@ -75,13 +81,31 @@ public class CommandStores
         return result;
     }
 
-    public synchronized void updateTopology(Topology newTopology)
+    public synchronized void updateTopology(long newEpoch, Topology newTopology)
     {
-        KeyRanges removed = localTopology.ranges().difference(newTopology.ranges());
-        KeyRanges added = newTopology.ranges().difference(localTopology.ranges());
+        // FIXME: if we miss a topology update, we may end up with stale command data for ranges that were owned by
+        //  someone else during the period we were not receiving topology updates. Something like a ballot low bound
+        //  may make this a non-issue, and would be preferable to having to chase down all historical topology changes.
+        //  OTOH, we'll probably need a complete history of topology changes to do recovery properly
+        if (newEpoch <= rangeMappings.epoch)
+            return;
+
+        KeyRanges removed = rangeMappings.topology.ranges().difference(newTopology.ranges());
+        KeyRanges added = newTopology.ranges().difference(rangeMappings.topology.ranges());
         List<KeyRanges> sharded = shardRanges(added, commandStores.length);
-        stream().forEach(commands -> commands.updateTopology(newTopology, sharded.get(commands.index()), removed));
-        localTopology = newTopology;
+
+        RangeMapping[] newMappings = new RangeMapping[rangeMappings.mappings.length];
+
+        for (int i=0; i<rangeMappings.mappings.length; i++)
+        {
+            KeyRanges newRanges = rangeMappings.mappings[i].ranges.difference(removed).union(sharded.get(i)).mergeTouching();
+            newMappings[i] = RangeMapping.mapRanges(newRanges, newTopology);
+        }
+
+        RangeMapping.Multi previous = rangeMappings;
+        rangeMappings = new RangeMapping.Multi(newEpoch, newTopology, newMappings);
+        stream().forEach(commands -> commands.onTopologyChange(previous.mappings[commands.index()],
+                                                               rangeMappings.mappings[commands.index()]));
     }
 
     private class ShardSpliterator implements Spliterator<CommandStore>

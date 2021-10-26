@@ -9,6 +9,7 @@ import com.google.common.base.Preconditions;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.IntFunction;
 
 /**
  * maps ranges handled by this command store to their current shards by index
@@ -91,5 +92,28 @@ class RangeMapping
             }
         }
         return builder.build();
+    }
+
+    static class Multi
+    {
+        final long epoch;
+        final Topology topology;
+        final RangeMapping[] mappings;
+
+        public Multi(long epoch, Topology topology, RangeMapping[] mappings)
+        {
+            this.epoch = epoch;
+            this.topology = topology;
+            this.mappings = mappings;
+        }
+
+        static Multi empty(int size)
+        {
+            RangeMapping[] mappings = new RangeMapping[size];
+            for (int i=0; i<size; i++)
+                mappings[i] = RangeMapping.EMPTY;
+
+            return new Multi(0, RangeMapping.EMPTY.topology, mappings);
+        }
     }
 }

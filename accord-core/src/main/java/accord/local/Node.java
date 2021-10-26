@@ -103,7 +103,8 @@ public class Node
         this.nowSupplier = nowSupplier;
         this.scheduler = scheduler;
         this.commandStores = new CommandStores(numCommandShards(), id, this::uniqueNow, agent, dataSupplier.get(), commandStoreFactory);
-        this.commandStores.updateTopology(cluster.forNode(id));
+        // FIXME: move epoch into Topology and merge Topology and Shards
+        this.commandStores.updateTopology(1, cluster.forNode(id));
     }
 
     public void shutdown()
