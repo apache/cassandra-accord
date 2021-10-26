@@ -140,30 +140,6 @@ public abstract class CommandStore
         return result;
     }
 
-    void updateTopology(Topology topology, KeyRanges added, KeyRanges removed)
-    {
-        KeyRanges newRanges = rangeMap.ranges.difference(removed).union(added).mergeTouching();
-        rangeMap = RangeMapping.mapRanges(newRanges, topology);
-
-        for (KeyRange range : removed)
-        {
-            NavigableMap<Key, CommandsForKey> subMap = commandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive());
-            Iterator<Key> keyIterator = subMap.keySet().iterator();
-            while (keyIterator.hasNext())
-            {
-                Key key = keyIterator.next();
-                CommandsForKey forKey = commandsForKey.get(key);
-                if (forKey != null)
-                {
-                    for (Command command : forKey)
-                        if (command.txn() != null && !rangeMap.ranges.intersects(command.txn().keys))
-                            commands.remove(command.txnId());
-                }
-                keyIterator.remove();
-            }
-        }
-    }
-
     void onTopologyChange(RangeMapping prevMapping, RangeMapping currentMapping)
     {
         Preconditions.checkState(rangeMap != prevMapping);
