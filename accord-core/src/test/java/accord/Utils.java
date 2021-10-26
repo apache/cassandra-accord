@@ -45,9 +45,14 @@ public class Utils
         return new KeyRanges(ranges);
     }
 
+    public static Shards shards(long epoch, Shard... shards)
+    {
+        return new Shards(epoch, shards);
+    }
+
     public static Shards shards(Shard... shards)
     {
-        return new Shards(shards);
+        return shards(1, shards);
     }
 
     public static Txn writeTxn(Keys keys)

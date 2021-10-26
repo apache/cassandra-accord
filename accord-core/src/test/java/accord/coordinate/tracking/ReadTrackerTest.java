@@ -86,7 +86,7 @@ public class ReadTrackerTest
     @Test
     void multiShardSuccess()
     {
-        Shards subShards = new Shards(new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
+        Shards subShards = new Shards(1, new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
         ReadTracker responses = new ReadTracker(subShards);
         /*
         (000, 100](100, 200](200, 300]
@@ -101,7 +101,7 @@ public class ReadTrackerTest
     @Test
     void multiShardRetryAndReadSet()
     {
-        Shards subShards = new Shards(new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
+        Shards subShards = new Shards(1, new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
         ReadTracker responses = new ReadTracker(subShards);
         /*
         (000, 100](100, 200](200, 300]

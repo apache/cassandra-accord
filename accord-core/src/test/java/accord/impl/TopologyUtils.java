@@ -47,7 +47,7 @@ public class TopologyUtils
         final List<Shard> shards = new ArrayList<>();
         for (int i = 0 ; i < ranges.size() ; ++i)
             shards.add(new Shard(ranges.get(i), electorates.get(i % electorates.size()), fastPathElectorates.get(i % fastPathElectorates.size())));
-        return new Shards(shards.toArray(Shard[]::new));
+        return new Shards(1, shards.toArray(Shard[]::new));
     }
 
     public static <K extends Key<K>> Shards initialTopology(List<Node.Id> cluster, KeyRanges ranges, int rf)

@@ -105,7 +105,7 @@ public class PreacceptTrackerTest
     @Test
     void multiShard()
     {
-        Shards subShards = new Shards(new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
+        Shards subShards = new Shards(1, new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
         FastPathTracker<Agree.ShardTracker> responses = new FastPathTracker<>(subShards, Agree.ShardTracker[]::new, Agree.ShardTracker::new);
         /*
         (000, 100](100, 200](200, 300]

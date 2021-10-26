@@ -20,6 +20,7 @@ import accord.utils.IndexedPredicate;
 
 public class Topology extends AbstractCollection<Shard>
 {
+    final long epoch;
     final Shard[] shards;
     final KeyRanges ranges;
     final Map<Id, Shards.NodeInfo> nodeLookup;
@@ -44,8 +45,9 @@ public class Topology extends AbstractCollection<Shard>
         }
     }
 
-    public Topology(Shard... shards)
+    public Topology(long epoch, Shard... shards)
     {
+        this.epoch = epoch;
         this.ranges = new KeyRanges(Arrays.stream(shards).map(shard -> shard.range).toArray(KeyRange[]::new));
         this.shards = shards;
         this.subsetOfRanges = ranges;
@@ -65,8 +67,9 @@ public class Topology extends AbstractCollection<Shard>
         }
     }
 
-    public Topology(Shard[] shards, KeyRanges ranges, Map<Id, Shards.NodeInfo> nodeLookup, KeyRanges subsetOfRanges, int[] supersetIndexes)
+    public Topology(long epoch, Shard[] shards, KeyRanges ranges, Map<Id, Shards.NodeInfo> nodeLookup, KeyRanges subsetOfRanges, int[] supersetIndexes)
     {
+        this.epoch = epoch;
         this.shards = shards;
         this.ranges = ranges;
         this.nodeLookup = nodeLookup;
@@ -79,7 +82,7 @@ public class Topology extends AbstractCollection<Shard>
         NodeInfo info = nodeLookup.get(node);
         if (info == null)
             return Shards.EMPTY;
-        return Shards.select(shards, info.supersetIndexes);
+        return Shards.select(epoch, shards, info.supersetIndexes);
     }
 
     public Shard forKey(Key key)
@@ -118,7 +121,7 @@ public class Topology extends AbstractCollection<Shard>
             if (intersects(newSubset, e.getValue().supersetIndexes))
                 nodeLookup.put(e.getKey(), e.getValue());
         }
-        return new Shards(shards, ranges, nodeLookup, rangeSubset, newSubset);
+        return new Shards(epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
     }
 
     /**

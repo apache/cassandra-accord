@@ -7,26 +7,27 @@ import accord.api.KeyRange;
 import accord.local.Node.Id;
 import accord.txn.Keys;
 
+// TODO: merge with Topology
 public class Shards extends Topology
 {
-    public static final Shards EMPTY = new Shards(new Shard[0], KeyRanges.EMPTY, Collections.emptyMap(), KeyRanges.EMPTY.EMPTY, new int[0]);
+    public static final Shards EMPTY = new Shards(0, new Shard[0], KeyRanges.EMPTY, Collections.emptyMap(), KeyRanges.EMPTY.EMPTY, new int[0]);
 
-    public Shards(Shard... shards)
+    public Shards(long epoch, Shard... shards)
     {
-        super(shards);
+        super(epoch, shards);
     }
 
-    public Shards(Shard[] shards, KeyRanges ranges, Map<Id, NodeInfo> nodeLookup, KeyRanges subsetOfRanges, int[] supersetIndexes)
+    public Shards(long epoch, Shard[] shards, KeyRanges ranges, Map<Id, NodeInfo> nodeLookup, KeyRanges subsetOfRanges, int[] supersetIndexes)
     {
-        super(shards, ranges, nodeLookup, subsetOfRanges, supersetIndexes);
+        super(epoch, shards, ranges, nodeLookup, subsetOfRanges, supersetIndexes);
     }
 
-    public static Shards select(Shard[] shards, int[] indexes)
+    public static Shards select(long epoch, Shard[] shards, int[] indexes)
     {
         Shard[] subset = new Shard[indexes.length];
         for (int i=0; i<indexes.length; i++)
             subset[i] = shards[indexes[i]];
 
-        return new Shards(subset);
+        return new Shards(epoch, subset);
     }
 }
