@@ -6,6 +6,7 @@ import java.util.zip.CRC32C;
 
 import accord.api.Key;
 import accord.api.KeyRange;
+import accord.topology.KeyRanges;
 import accord.txn.Keys;
 
 public class IntHashKey implements Key<IntHashKey>
@@ -15,6 +16,35 @@ public class IntHashKey implements Key<IntHashKey>
         public Range(IntHashKey start, IntHashKey end)
         {
             super(start, end);
+        }
+
+        @Override
+        public KeyRange<IntHashKey> subRange(IntHashKey start, IntHashKey end)
+        {
+            return new Range(start, end);
+        }
+
+        @Override
+        public KeyRanges split(int count)
+        {
+            int startHash = start().hash;
+            int endHash = end().hash;
+            int currentSize = endHash - startHash;
+            if (currentSize < count)
+                return new KeyRanges(new KeyRange[]{this});
+            int interval =  currentSize / count;
+
+            int last = 0;
+            KeyRange[] ranges = new KeyRange[count];
+            for (int i=0; i<count; i++)
+            {
+                int subStart = i > 0 ? last : startHash;
+                int subEnd = i < count - 1 ? subStart + interval : endHash;
+                ranges[i] = new Range(new IntHashKey(Integer.MIN_VALUE, subStart),
+                                      new IntHashKey(Integer.MIN_VALUE, subEnd));
+                last = subEnd;
+            }
+            return new KeyRanges(ranges);
         }
     }
 

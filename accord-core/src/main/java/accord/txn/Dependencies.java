@@ -7,7 +7,7 @@ import java.util.Objects;
 import java.util.TreeMap;
 
 import accord.local.Command;
-import accord.topology.Shard;
+import accord.local.CommandStore;
 import com.google.common.annotations.VisibleForTesting;
 
 // TODO: do not send Txn
@@ -64,13 +64,12 @@ public class Dependencies implements Iterable<Entry<TxnId, Txn>>
         return deps.get(txnId);
     }
 
-    public Iterable<TxnId> on(Shard shard)
+    public Iterable<TxnId> on(CommandStore commandStore)
     {
-        // TODO: efficiency
         return deps.entrySet()
-                   .stream()
-                   .filter(e -> e.getValue().keys().stream().anyMatch(shard::contains))
-                   .map(Entry::getKey)::iterator;
+                .stream()
+                .filter(e -> commandStore.intersects(e.getValue().keys()))
+                .map(Entry::getKey)::iterator;
     }
 
     @Override

@@ -1,5 +1,6 @@
 package accord.api;
 
+import accord.topology.KeyRanges;
 import accord.txn.Keys;
 import com.google.common.base.Preconditions;
 
@@ -39,6 +40,12 @@ public abstract class KeyRange<K extends Key<K>>
         {
             return true;
         }
+
+        @Override
+        public KeyRange<K> tryMerge(KeyRange<K> that)
+        {
+            return KeyRange.tryMergeExclusiveInclusive(this, that);
+        }
     }
 
     public static abstract class StartInclusive<K extends Key<K>> extends KeyRange<K>
@@ -69,6 +76,34 @@ public abstract class KeyRange<K extends Key<K>>
         {
             return false;
         }
+
+        @Override
+        public KeyRange<K> tryMerge(KeyRange<K> that)
+        {
+            return KeyRange.tryMergeExclusiveInclusive(this, that);
+        }
+    }
+
+    private static <K extends Key<K>> KeyRange<K> tryMergeExclusiveInclusive(KeyRange<K> left, KeyRange<K> right)
+    {
+        if (left.getClass() != right.getClass())
+            return null;
+
+        Preconditions.checkArgument(left instanceof EndInclusive || left instanceof StartInclusive);
+
+        int cmp = left.compareIntersecting(right);
+
+        if (cmp == 0)
+            return left.subRange(left.start.compareTo(right.start) < 0 ? left.start : right.start,
+                                 left.end.compareTo(right.end) > 0 ? left.end : right.end);
+
+        if (cmp > 0 && right.end.equals(left.start))
+            return left.subRange(right.start, left.end);
+
+        if (cmp < 0 && left.end.equals(right.start))
+            return left.subRange(left.start, right.end);
+
+        return null;
     }
 
     private final K start;
@@ -94,6 +129,20 @@ public abstract class KeyRange<K extends Key<K>>
     public abstract boolean startInclusive();
 
     public abstract boolean endInclusive();
+
+    /**
+     * Return a new range covering this and the given range if the ranges are intersecting or touching. That is,
+     * no keys can exist between the touching ends of the range.
+     */
+    public abstract KeyRange<K> tryMerge(KeyRange<K> that);
+
+    public abstract KeyRange<K> subRange(K start, K end);
+
+    /**
+     * Split this range into roughly equally sized subranges
+     * @param count the number of subranges to create
+     */
+    public abstract KeyRanges split(int count);
 
     @Override
     public boolean equals(Object o)
@@ -127,6 +176,44 @@ public abstract class KeyRange<K extends Key<K>>
         return compareKey(key) == 0;
     }
 
+
+    /**
+     * Returns a negative integer, zero, or a positive integer if both points of the provided range are less than, the
+     * range intersects this range, or both points are greater than this range
+     */
+    public int compareIntersecting(KeyRange<K> that)
+    {
+        if (this.start.compareTo(that.end) >= 0)
+            return 1;
+        if (this.end.compareTo(that.start) <= 0)
+            return -1;
+        return 0;
+    }
+
+    public boolean fullyContains(KeyRange<K> that)
+    {
+        return that.start.compareTo(this.start) >= 0 && that.end.compareTo(this.end) <= 0;
+    }
+
+    public boolean intersects(Keys keys)
+    {
+        return lowKeyIndex(keys) >= 0;
+    }
+
+    /**
+     * Returns a range covering the overlapping parts of this and the provided range, returns
+     * null if the ranges do not overlap
+     */
+    public KeyRange<K> intersection(KeyRange<K> that)
+    {
+        if (this.compareIntersecting(that) != 0)
+            return null;
+
+        K start = this.start.compareTo(that.start) > 0 ? this.start : that.start;
+        K end = this.end.compareTo(that.end) < 0 ? this.end : that.end;
+        return subRange(start, end);
+    }
+
     /**
      * returns the index of the first key larger than what's covered by this range
      */
@@ -144,20 +231,25 @@ public abstract class KeyRange<K extends Key<K>>
     }
 
     /**
-     * returns the index of the lowest key contained in this range
+     * returns the index of the lowest key contained in this range. If the keys object contains no intersecting
+     * keys, <code>(-(<i>insertion point</i>) - 1)</code> is returned. Where <i>insertion point</i> is where an
+     * intersecting key would be inserted into the keys array
      * @param keys
      */
-    public int lowKeyIndex(Keys keys)
+    public int lowKeyIndex(Keys keys, int lowerBound, int upperBound)
     {
         if (keys.isEmpty()) return -1;
 
-        int i = keys.search(0, keys.size(), this,
+        int i = keys.search(lowerBound, upperBound, this,
                             (k, r) -> ((KeyRange) r).compareKey((Key) k) < 0 ? -1 : 1);
 
-        if (i < 0) i = -1 - i;
+        int minIdx = -1 - i;
 
-        if (i == 0 && !containsKey((K) keys.get(0))) i = -1;
+        return (minIdx < keys.size() && containsKey((K) keys.get(minIdx))) ? minIdx : i;
+    }
 
-        return i;
+    public int lowKeyIndex(Keys keys)
+    {
+        return lowKeyIndex(keys, 0, keys.size());
     }
 }

@@ -22,7 +22,7 @@ import static accord.local.Status.ReadyToExecute;
 
 public class Command implements Listener, Consumer<Listener>
 {
-    public final Instance instance;
+    public final CommandStore commandStore;
     private final TxnId txnId;
     private Txn txn;
     private Ballot promised = Ballot.ZERO, accepted = Ballot.ZERO;
@@ -38,9 +38,9 @@ public class Command implements Listener, Consumer<Listener>
 
     private final Listeners listeners = new Listeners();
 
-    public Command(Instance instance, TxnId id)
+    public Command(CommandStore commandStore, TxnId id)
     {
-        this.instance = instance;
+        this.commandStore = commandStore;
         this.txnId = id;
     }
 
@@ -109,17 +109,17 @@ public class Command implements Listener, Consumer<Listener>
         if (hasBeen(PreAccepted))
             return true;
 
-        Timestamp max = txn.maxConflict(instance);
+        Timestamp max = txn.maxConflict(commandStore);
         // unlike in the Accord paper, we partition shards within a node, so that to ensure a total order we must either:
         //  - use a global logical clock to issue new timestamps; or
         //  - assign each shard _and_ process a unique id, and use both as components of the timestamp
-        Timestamp witnessed = txnId.compareTo(max) > 0 ? txnId : instance.node().uniqueNow(max);
+        Timestamp witnessed = txnId.compareTo(max) > 0 ? txnId : commandStore.uniqueNow(max);
 
         this.txn = txn;
         this.executeAt = witnessed;
         this.status = PreAccepted;
 
-        txn.register(instance, this);
+        txn.register(commandStore, this);
         listeners.forEach(this);
         return true;
     }
@@ -149,7 +149,7 @@ public class Command implements Listener, Consumer<Listener>
             if (executeAt.equals(this.executeAt))
                 return false;
 
-            instance.node().agent().onInconsistentTimestamp(this, this.executeAt, executeAt);
+            commandStore.agent().onInconsistentTimestamp(this, this.executeAt, executeAt);
         }
 
         witness(txn);
@@ -159,9 +159,9 @@ public class Command implements Listener, Consumer<Listener>
         this.waitingOnCommit = new TreeMap<>();
         this.waitingOnApply = new TreeMap<>();
 
-        for (TxnId id : savedDeps().on(instance.shard))
+        for (TxnId id : savedDeps().on(commandStore))
         {
-            Command command = instance.command(id);
+            Command command = commandStore.command(id);
             switch (command.status)
             {
                 default:
@@ -204,7 +204,7 @@ public class Command implements Listener, Consumer<Listener>
         else if (!hasBeen(Committed))
             commit(txn, deps, executeAt);
         else if (!executeAt.equals(this.executeAt))
-            instance.node().agent().onInconsistentTimestamp(this, this.executeAt, executeAt);
+            commandStore.agent().onInconsistentTimestamp(this, this.executeAt, executeAt);
 
         this.executeAt = executeAt;
         this.writes = writes;
@@ -281,7 +281,7 @@ public class Command implements Listener, Consumer<Listener>
                 listeners.forEach(this);
                 break;
             case Executed:
-                writes.apply(instance);
+                writes.apply(commandStore);
                 status = Applied;
                 listeners.forEach(this);
         }

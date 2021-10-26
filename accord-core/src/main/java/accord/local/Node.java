@@ -70,10 +70,14 @@ public class Node
         }
     }
 
+    public static int numCommandShards()
+    {
+        return 8; // TODO: make configurable
+    }
+
+    private final CommandStores commandStores;
     private final Id id;
     private final Topology cluster;
-    private final Shards local;
-    private final Instance[] instances;
     private final MessageSink messageSink;
     private final Random random;
 
@@ -87,20 +91,24 @@ public class Node
     private final Map<TxnId, CompletionStage<Result>> coordinating = new ConcurrentHashMap<>();
     private final Set<TxnId> pendingRecovery = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
-    public Node(Id id, Topology cluster, Shards local, MessageSink messageSink, Random random, LongSupplier nowSupplier, Supplier<Store> dataSupplier, Agent agent, Scheduler scheduler)
+    public Node(Id id, Topology cluster, MessageSink messageSink, Random random, LongSupplier nowSupplier,
+                Supplier<Store> dataSupplier, Agent agent, Scheduler scheduler, CommandStore.Factory commandStoreFactory)
     {
         this.id = id;
         this.cluster = cluster;
         this.random = random;
         this.agent = agent;
         this.now = new AtomicReference<>(new Timestamp(nowSupplier.getAsLong(), 0, id));
-        this.local = local;
         this.messageSink = messageSink;
-        this.instances = new Instance[local.size()];
         this.nowSupplier = nowSupplier;
         this.scheduler = scheduler;
-        for (int i = 0 ; i < instances.length ; ++i)
-            instances[i] = new Instance(local.get(i), this, dataSupplier.get());
+        this.commandStores = new CommandStores(numCommandShards(), id, this::uniqueNow, agent, dataSupplier.get(), commandStoreFactory);
+        this.commandStores.updateTopology(cluster.forNode(id));
+    }
+
+    public void shutdown()
+    {
+        commandStores.shutdown();
     }
 
     public Timestamp uniqueNow()
@@ -136,13 +144,12 @@ public class Node
         return cluster;
     }
 
-    public Stream<Instance> local(Keys keys)
+    public Stream<CommandStore> local(Keys keys)
     {
-        // TODO: efficiency
-        return Stream.of(local.select(keys, instances, Instance[]::new));
+        return commandStores.forKeys(keys);
     }
 
-    public Optional<Instance> local(Key key)
+    public Optional<CommandStore> local(Key key)
     {
         return local(Keys.of(key)).reduce((i1, i2) -> {
             throw new IllegalStateException("more than one instance encountered for key");
@@ -188,6 +195,18 @@ public class Node
             if (alreadyContacted.add(node))
                 send(node, send, callback);
         });
+    }
+
+    public <T> void send(Collection<Id> to, Request send)
+    {
+        for (Id dst: to)
+            send(dst, send);
+    }
+
+    public <T> void send(Collection<Id> to, Request send, Callback<T> callback)
+    {
+        for (Id dst: to)
+            send(dst, send, callback);
     }
 
     // send to a specific node

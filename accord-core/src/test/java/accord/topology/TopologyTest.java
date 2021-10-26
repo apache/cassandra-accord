@@ -18,7 +18,6 @@ import static accord.impl.IntKey.range;
 
 public class TopologyTest
 {
-
     private static void assertRangeForKey(Topology topology, int key, int start, int end)
     {
         Key expectedKey = key(key);
@@ -55,23 +54,33 @@ public class TopologyTest
         return IntKey.range(start, end);
     }
 
+    private static void assertNoRangeForKey(Topology topology, int key)
+    {
+        try
+        {
+            topology.forKey(key(key));
+            Assertions.fail("Expected exception");
+        }
+        catch (IllegalArgumentException e)
+        {
+            // noop
+        }
+    }
+
     @Test
     void forKeyTest()
     {
-        Topology topology = topology(r(0, 100), r(100, 200), r(200, 300));
+        Topology topology = topology(r(0, 100), r(100, 200), r(300, 400));
+        assertNoRangeForKey(topology, -50);
         assertRangeForKey(topology, 50, 0, 100);
         assertRangeForKey(topology, 100, 0, 100);
+        assertNoRangeForKey(topology, 250);
+        assertRangeForKey(topology, 350, 300, 400);
     }
 
     @Test
     void forRangesTest()
     {
 
-    }
-
-    @Test
-    void sequentialRanges()
-    {
-        // TODO: confirm non-sequential ranges are handled properly
     }
 }

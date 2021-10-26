@@ -1,6 +1,5 @@
 package accord.messages;
 
-import accord.local.Instance;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.MessageSink;
@@ -42,7 +41,8 @@ public class PreAcceptTest
         Random random = new Random();
         MockStore store = new MockStore();
         Scheduler scheduler = new ThreadPoolScheduler();
-        return new Node(nodeId, TOPOLOGY, TOPOLOGY.forNode(nodeId), messageSink, random, clock, () -> store, new TestAgent(), scheduler);
+        return new Node(nodeId, TOPOLOGY, messageSink, random, clock, () -> store,
+                        new TestAgent(), scheduler, CommandStore.Factory.SINGLE_THREAD);
     }
 
     @Test
@@ -52,23 +52,30 @@ public class PreAcceptTest
         Clock clock = new Clock(100);
         Node node = createNode(ID1, messageSink, clock);
 
-        IntKey key = IntKey.key(10);
-        Instance instance = node.local(key).orElseThrow();
-        Assertions.assertFalse(instance.hasCommandsForKey(key));
+        try
+        {
+            IntKey key = IntKey.key(10);
+            CommandStore commandStore = node.local(key).orElseThrow();
+            Assertions.assertFalse(commandStore.hasCommandsForKey(key));
 
-        TxnId txnId = clock.idForNode(ID2);
-        Txn txn = writeTxn(Keys.of(key));
-        PreAccept preAccept = new PreAccept(txnId, txn);
-        clock.increment(10);
-        preAccept.process(node, ID2, 0);
+            TxnId txnId = clock.idForNode(ID2);
+            Txn txn = writeTxn(Keys.of(key));
+            PreAccept preAccept = new PreAccept(txnId, txn);
+            clock.increment(10);
+            preAccept.process(node, ID2, 0);
 
-        Command command = instance.commandsForKey(key).uncommitted.get(txnId);
-        Assertions.assertEquals(Status.PreAccepted, command.status());
+            Command command = commandStore.commandsForKey(key).uncommitted.get(txnId);
+            Assertions.assertEquals(Status.PreAccepted, command.status());
 
-        messageSink.assertHistorySizes(0, 1);
-        Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-        Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, new Dependencies()),
-                                messageSink.responses.get(0).payload);
+            messageSink.assertHistorySizes(0, 1);
+            Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, new Dependencies()),
+                                    messageSink.responses.get(0).payload);
+        }
+        finally
+        {
+            node.shutdown();
+        }
     }
 
     @Test
@@ -77,15 +84,21 @@ public class PreAcceptTest
         RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
         Clock clock = new Clock(100);
         Node node = createNode(ID1, messageSink, clock);
+        try
+        {
+            IntKey key = IntKey.key(10);
+            CommandStore commandStore = node.local(key).orElseThrow();
+            Assertions.assertFalse(commandStore.hasCommandsForKey(key));
 
-        IntKey key = IntKey.key(10);
-        Instance instance = node.local(key).orElseThrow();
-        Assertions.assertFalse(instance.hasCommandsForKey(key));
-
-        TxnId txnId = clock.idForNode(ID2);
-        Txn txn = writeTxn(Keys.of(key));
-        PreAccept preAccept = new PreAccept(txnId, txn);
-        preAccept.process(node, ID2, 0);
+            TxnId txnId = clock.idForNode(ID2);
+            Txn txn = writeTxn(Keys.of(key));
+            PreAccept preAccept = new PreAccept(txnId, txn);
+            preAccept.process(node, ID2, 0);
+        }
+        finally
+        {
+            node.shutdown();
+        }
     }
 
     @Test
@@ -99,22 +112,29 @@ public class PreAcceptTest
         RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
         Clock clock = new Clock(100);
         Node node = createNode(ID1, messageSink, clock);
+        try
+        {
 
-        IntKey key1 = IntKey.key(10);
-        PreAccept preAccept1 = new PreAccept(clock.idForNode(ID2), writeTxn(Keys.of(key1)));
-        preAccept1.process(node, ID2, 0);
+            IntKey key1 = IntKey.key(10);
+            PreAccept preAccept1 = new PreAccept(clock.idForNode(ID2), writeTxn(Keys.of(key1)));
+            preAccept1.process(node, ID2, 0);
 
-        messageSink.clearHistory();
-        IntKey key2 = IntKey.key(11);
-        TxnId txnId2 = new TxnId(50, 0, ID3);
-        PreAccept preAccept2 = new PreAccept(txnId2, writeTxn(Keys.of(key1, key2)));
-        clock.increment(10);
-        preAccept2.process(node, ID3, 0);
+            messageSink.clearHistory();
+            IntKey key2 = IntKey.key(11);
+            TxnId txnId2 = new TxnId(50, 0, ID3);
+            PreAccept preAccept2 = new PreAccept(txnId2, writeTxn(Keys.of(key1, key2)));
+            clock.increment(10);
+            preAccept2.process(node, ID3, 0);
 
-        messageSink.assertHistorySizes(0, 1);
-        Assertions.assertEquals(ID3, messageSink.responses.get(0).to);
-        Dependencies expectedDeps = new Dependencies();
-        Assertions.assertEquals(new PreAccept.PreAcceptOk(new TxnId(110, 0, ID1), expectedDeps),
-                                messageSink.responses.get(0).payload);
+            messageSink.assertHistorySizes(0, 1);
+            Assertions.assertEquals(ID3, messageSink.responses.get(0).to);
+            Dependencies expectedDeps = new Dependencies();
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(new TxnId(110, 0, ID1), expectedDeps),
+                                    messageSink.responses.get(0).payload);
+        }
+        finally
+        {
+            node.shutdown();
+        }
     }
 }

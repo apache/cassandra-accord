@@ -1,7 +1,11 @@
 package accord;
 
+import accord.api.KeyRange;
 import accord.local.Node;
 import accord.impl.mock.MockStore;
+import accord.topology.KeyRanges;
+import accord.topology.Shard;
+import accord.topology.Shards;
 import accord.txn.Txn;
 import accord.txn.Keys;
 import com.google.common.base.Preconditions;
@@ -34,6 +38,16 @@ public class Utils
             rlist.add(id(i));
 
         return rlist;
+    }
+
+    public static KeyRanges ranges(KeyRange... ranges)
+    {
+        return new KeyRanges(ranges);
+    }
+
+    public static Shards shards(Shard... shards)
+    {
+        return new Shards(shards);
     }
 
     public static Txn writeTxn(Keys keys)

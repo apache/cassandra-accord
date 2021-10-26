@@ -1,7 +1,5 @@
 package accord.messages;
 
-import accord.messages.Reply;
-import accord.messages.Request;
 import accord.api.Result;
 import accord.txn.Writes;
 import accord.txn.Ballot;

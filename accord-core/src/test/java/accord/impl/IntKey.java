@@ -3,9 +3,11 @@ package accord.impl;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.BiFunction;
 
 import accord.api.Key;
 import accord.api.KeyRange;
+import accord.topology.KeyRanges;
 import accord.txn.Keys;
 
 public class IntKey implements Key<IntKey>
@@ -16,6 +18,39 @@ public class IntKey implements Key<IntKey>
         {
             super(start, end);
         }
+
+        @Override
+        public KeyRange<IntKey> subRange(IntKey start, IntKey end)
+        {
+            return new Range(start, end);
+        }
+
+        @Override
+        public KeyRanges split(int count)
+        {
+            return splitRange(this, count, Range::new);
+        }
+    }
+
+    public static KeyRanges splitRange(KeyRange<IntKey> range, int count, BiFunction<IntKey, IntKey, KeyRange<IntKey>> ctor)
+    {
+        int start = range.start().key;
+        int end = range.end().key;
+        int currentSize = end - start;
+        if (currentSize < count)
+            return new KeyRanges(new KeyRange[]{range});
+        int interval =  currentSize / count;
+
+        int nextStart = start;
+        KeyRange[] ranges = new KeyRange[count];
+        for (int i=0; i<count; i++)
+        {
+            int subStart = nextStart;
+            int subEnd = i < count - 1 ? subStart + interval : end;
+            ranges[i] = ctor.apply(key(subStart), key(subEnd));
+            nextStart = subEnd;
+        }
+        return new KeyRanges(ranges);
     }
 
     public final int key;

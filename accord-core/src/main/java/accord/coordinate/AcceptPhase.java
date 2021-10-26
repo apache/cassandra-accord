@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-import accord.messages.Preempted;
+import accord.coordinate.tracking.QuorumTracker;
 import accord.txn.Ballot;
 import accord.messages.Callback;
 import accord.local.Node;
@@ -24,13 +24,11 @@ class AcceptPhase extends CompletableFuture<Agreed>
     final Ballot ballot;
     final TxnId txnId;
     final Txn txn;
-    final Shards shards;
+    final Shards shards; // TODO: remove, hide in participants
 
     private List<AcceptOk> acceptOks;
     private Timestamp proposed;
-    private int[] accepts;
-    private int[] failures;
-    private int acceptQuorums;
+    private QuorumTracker acceptTracker;
 
     AcceptPhase(Node node, Ballot ballot, TxnId txnId, Txn txn, Shards shards)
     {
@@ -45,9 +43,8 @@ class AcceptPhase extends CompletableFuture<Agreed>
     {
         this.proposed = executeAt;
         this.acceptOks = new ArrayList<>();
-        this.accepts = new int[shards.size()];
-        this.failures = new int[shards.size()];
-        node.send(shards, new Accept(ballot, txnId, txn, executeAt, deps), new Callback<AcceptReply>()
+        this.acceptTracker = new QuorumTracker(shards);
+        node.send(acceptTracker.nodes(), new Accept(ballot, txnId, txn, executeAt, deps), new Callback<AcceptReply>()
         {
             @Override
             public void onSuccess(Id from, AcceptReply response)
@@ -58,10 +55,9 @@ class AcceptPhase extends CompletableFuture<Agreed>
             @Override
             public void onFailure(Id from, Throwable throwable)
             {
-                shards.forEachOn(from, (i, shard) -> {
-                    if (++failures[i] >= shard.slowPathQuorumSize)
-                        completeExceptionally(new accord.messages.Timeout());
-                });
+                acceptTracker.recordFailure(from);
+                if (acceptTracker.hasFailed())
+                    completeExceptionally(new Timeout());
             }
         });
     }
@@ -79,12 +75,9 @@ class AcceptPhase extends CompletableFuture<Agreed>
 
         AcceptOk ok = (AcceptOk) reply;
         acceptOks.add(ok);
-        shards.forEachOn(from, txn.keys(), (i, shard) -> {
-            if (++accepts[i] == shard.slowPathQuorumSize)
-                ++acceptQuorums;
-        });
+        acceptTracker.recordSuccess(from);
 
-        if (acceptQuorums == shards.size())
+        if (acceptTracker.hasReachedQuorum())
             onAccepted();
     }
 

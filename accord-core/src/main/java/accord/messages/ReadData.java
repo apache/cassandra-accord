@@ -5,15 +5,9 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import accord.local.Instance;
-import accord.local.Node;
+import accord.local.*;
 import accord.local.Node.Id;
 import accord.api.Data;
-import accord.messages.Reply;
-import accord.messages.Request;
-import accord.local.Command;
-import accord.local.Listener;
-import accord.local.Status;
 import accord.txn.Txn;
 import accord.txn.TxnId;
 import accord.txn.Timestamp;
@@ -31,7 +25,7 @@ public class ReadData implements Request
 
         Data data;
         boolean isObsolete; // TODO: respond with the Executed result we have stored?
-        Set<Instance> waitingOn;
+        Set<CommandStore> waitingOn;
         Scheduled waitingOnReporter;
 
         LocalRead(TxnId txnId, Node node, Id replyToNode, long replyToMessage)
@@ -56,7 +50,7 @@ public class ReadData implements Request
             @Override
             public void run()
             {
-                Iterator<Instance> i = waitingOn.iterator();
+                Iterator<CommandStore> i = waitingOn.iterator();
                 Command blockedBy = null;
                 while (i.hasNext() && null == (blockedBy = i.next().command(txnId).blockedBy()));
                 if (blockedBy == null) return;
@@ -94,7 +88,7 @@ public class ReadData implements Request
             Data next = command.txn().read(command);
             data = data == null ? next : data.merge(next);
 
-            waitingOn.remove(command.instance);
+            waitingOn.remove(command.commandStore);
             if (waitingOn.isEmpty())
             {
                 waitingOnReporter.cancel();
@@ -108,7 +102,8 @@ public class ReadData implements Request
             {
                 isObsolete = true;
                 waitingOnReporter.cancel();
-                node.send(command.instance.shard, new Apply(command.txnId(), command.txn(), command.executeAt(), command.savedDeps(), command.writes(), command.result()));
+                // FIXME: this may result in redundant messages being sent when a shard is split across several command shards
+                node.send(command.commandStore.nodesFor(command), new Apply(command.txnId(), command.txn(), command.executeAt(), command.savedDeps(), command.writes(), command.result()));
                 node.reply(replyToNode, replyToMessage, new ReadNack());
             }
         }
@@ -117,7 +112,8 @@ public class ReadData implements Request
         {
             // TODO: simple hash set supporting concurrent modification, or else avoid concurrent modification
             waitingOn = txn.local(node).collect(Collectors.toCollection(() -> new DeterministicIdentitySet<>()));
-            waitingOn.forEach(instance -> {
+            // FIXME: fix/check thread safety
+            CommandStore.onEach(waitingOn, instance -> {
                 Command command = instance.command(txnId);
                 command.witness(txn);
                 switch (command.status())

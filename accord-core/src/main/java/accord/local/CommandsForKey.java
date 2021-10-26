@@ -1,12 +1,14 @@
 package accord.local;
 
+import java.util.Iterator;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
 import accord.txn.Timestamp;
 import accord.txn.TxnId;
+import com.google.common.collect.Iterators;
 
-public class CommandsForKey implements Listener
+public class CommandsForKey implements Listener, Iterable<Command>
 {
     // TODO: efficiency
     public final NavigableMap<Timestamp, Command> uncommitted = new TreeMap<>();
@@ -42,5 +44,11 @@ public class CommandsForKey implements Listener
         max = Timestamp.max(max, command.executeAt());
         uncommitted.put(command.txnId(), command);
         command.addListener(this);
+    }
+
+    @Override
+    public Iterator<Command> iterator()
+    {
+        return Iterators.concat(uncommitted.values().iterator(), committedByExecuteAt.values().iterator());
     }
 }

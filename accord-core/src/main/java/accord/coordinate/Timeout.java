@@ -1,4 +1,4 @@
-package accord.messages;
+package accord.coordinate;
 
 /**
  * Thrown when a transaction exceeds its specified timeout for obtaining a result for a client

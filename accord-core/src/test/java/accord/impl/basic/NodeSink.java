@@ -6,10 +6,10 @@ import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
+import accord.coordinate.Timeout;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.MessageSink;
-import accord.messages.Timeout;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;

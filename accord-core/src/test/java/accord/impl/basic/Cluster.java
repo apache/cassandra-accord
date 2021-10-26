@@ -17,6 +17,7 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Scheduler;
@@ -30,7 +31,6 @@ import accord.topology.Shards;
 
 public class Cluster implements Scheduler
 {
-
     final Function<Id, Node> lookup;
     final PendingQueue pending;
     final Consumer<Packet> responseSink;
@@ -143,23 +143,30 @@ public class Cluster implements Scheduler
     {
         Shards shards = topologyFactory.toShards(nodes);
         Map<Id, Node> lookup = new HashMap<>();
-        Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink, stderr);
-        for (Id node : nodes)
-            lookup.put(node, new Node(node, shards, shards.forNode(node), sinks.create(node, randomSupplier.get()),
-                                      randomSupplier.get(), nowSupplier.get(), ListStore::new, ListAgent.INSTANCE, sinks));
-
-        List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));
-        sinks.recurring(() ->
+        try
         {
-            Collections.shuffle(nodesList, randomSupplier.get());
-            int partitionSize = randomSupplier.get().nextInt((topologyFactory.rf+1)/2);
-            sinks.partitionSet = new HashSet<>(nodesList.subList(0, partitionSize));
-        }, 5L, TimeUnit.SECONDS);
+            Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink, stderr);
+            for (Id node : nodes)
+                lookup.put(node, new Node(node, shards, sinks.create(node, randomSupplier.get()), randomSupplier.get(),
+                                          nowSupplier.get(), ListStore::new, ListAgent.INSTANCE, sinks, CommandStore.Factory.SYNCHRONIZED));
 
-        Packet next;
-        while ((next = in.get()) != null)
-            sinks.add(next);
+            List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));
+            sinks.recurring(() ->
+                            {
+                                Collections.shuffle(nodesList, randomSupplier.get());
+                                int partitionSize = randomSupplier.get().nextInt((topologyFactory.rf+1)/2);
+                                sinks.partitionSet = new HashSet<>(nodesList.subList(0, partitionSize));
+                            }, 5L, TimeUnit.SECONDS);
 
-        while (sinks.processPending());
+            Packet next;
+            while ((next = in.get()) != null)
+                sinks.add(next);
+
+            while (sinks.processPending());
+        }
+        finally
+        {
+            lookup.values().forEach(Node::shutdown);
+        }
     }
 }

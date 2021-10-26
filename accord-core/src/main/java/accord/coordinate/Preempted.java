@@ -1,4 +1,4 @@
-package accord.messages;
+package accord.coordinate;
 
 /**
  * Thrown when a coordinator is preempted by another recovery

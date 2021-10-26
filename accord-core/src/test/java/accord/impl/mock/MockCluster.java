@@ -1,19 +1,20 @@
 package accord.impl.mock;
 
 import accord.NetworkFilter;
+import accord.coordinate.Timeout;
+import accord.impl.TopologyUtils;
+import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.messages.Timeout;
+import accord.topology.KeyRanges;
 import accord.utils.ThreadPoolScheduler;
 import accord.txn.TxnId;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
-import accord.impl.IntKey;
 import accord.impl.TestAgent;
 import accord.topology.Shards;
 import accord.topology.Topology;
-import accord.impl.TopologyFactory;
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,7 +26,7 @@ import java.util.function.LongSupplier;
 
 import static accord.Utils.id;
 
-public class MockCluster implements Network
+public class MockCluster implements Network, AutoCloseable
 {
     private static final Logger logger = LoggerFactory.getLogger(MockCluster.class);
 
@@ -46,6 +47,12 @@ public class MockCluster implements Network
         init();
     }
 
+    @Override
+    public void close()
+    {
+        nodes.values().forEach(Node::shutdown);
+    }
+
     private synchronized Id nextNodeId()
     {
         return id(nextNodeId++);
@@ -61,35 +68,34 @@ public class MockCluster implements Network
         return System.currentTimeMillis();
     }
 
-    private Node createNode(Id id, Shards local, Topology topology)
+    private Node createNode(Id id, Topology topology)
     {
         MockStore store = new MockStore();
         return new Node(id,
-                topology,
-                local,
-                new SimpleMessageSink(id, this),
-                new Random(random.nextLong()),
-                this::now,
-                () -> store,
-                new TestAgent(),
-                new ThreadPoolScheduler());
+                        topology,
+                        new SimpleMessageSink(id, this),
+                        new Random(random.nextLong()),
+                        this::now,
+                        () -> store,
+                        new TestAgent(),
+                        new ThreadPoolScheduler(),
+                        CommandStore.Factory.SINGLE_THREAD);
     }
 
     private void init()
     {
-        Preconditions.checkArgument(config.initialNodes == config.replication, "TODO");
         List<Id> ids = new ArrayList<>(config.initialNodes);
         for (int i=0; i<config.initialNodes; i++)
         {
             Id nextId = nextNodeId();
             ids.add(nextId);
         }
-        TopologyFactory<IntKey> topologyFactory = new TopologyFactory<>(config.replication, IntKey.range(0, config.maxKey));
-        Shards topology = topologyFactory.toShards(ids);
+        KeyRanges ranges = TopologyUtils.initialRanges(config.initialNodes, config.maxKey);
+        Shards topology = TopologyUtils.initialTopology(ids, ranges, config.replication);
         for (int i=0; i<config.initialNodes; i++)
         {
             Id id = ids.get(i);
-            Node node = createNode(id, topology.forNode(id), topology);
+            Node node = createNode(id, topology);
             nodes.put(id, node);
         }
     }

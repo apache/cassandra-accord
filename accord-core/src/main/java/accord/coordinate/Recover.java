@@ -4,7 +4,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import accord.messages.Preempted;
+import accord.coordinate.tracking.FastPathTracker;
+import accord.coordinate.tracking.QuorumTracker;
+import accord.topology.Shard;
 import accord.txn.Ballot;
 import accord.messages.Callback;
 import accord.local.Node;
@@ -27,14 +29,11 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
 {
     class RetryAfterCommits implements Callback<WaitOnCommitOk>
     {
-        final int[] failures;
-        final int[] commits;
-        int commitQuorums;
+        final QuorumTracker retryTracker;
 
         RetryAfterCommits(Dependencies waitOn)
         {
-            commits = new int[waitOn.size()];
-            failures = new int[waitOn.size()];
+            retryTracker = new QuorumTracker(shards);
             for (Map.Entry<TxnId, Txn> e : waitOn)
                 node.send(shards, new WaitOnCommit(e.getKey(), e.getValue().keys()), this);
         }
@@ -44,15 +43,12 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
         {
             synchronized (Recover.this)
             {
-                if (isDone() || commitQuorums == commits.length)
+                if (isDone() || retryTracker.hasReachedQuorum())
                     return;
 
-                shards.forEachOn(from, (i, shard) -> {
-                    if (++commits[i] == shard.slowPathQuorumSize)
-                        ++commitQuorums;
-                });
+                retryTracker.recordSuccess(from);
 
-                if (commitQuorums == commits.length)
+                if (retryTracker.hasReachedQuorum())
                 {
                     new Recover(node, ballot, txnId, txn, shards).handle((success, failure) -> {
                         if (success != null) complete(success);
@@ -71,20 +67,42 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
                 if (isDone())
                     return;
 
-                shards.forEachOn(from, (i, shard) -> {
-                    if (++failures[i] >= shard.slowPathQuorumSize)
-                        completeExceptionally(new accord.messages.Timeout());
-                });
+                retryTracker.recordFailure(from);
+                if (retryTracker.hasFailed())
+                    completeExceptionally(new Timeout());
             }
         }
     }
 
+    // TODO: not sure it makes sense to extend FastPathTracker, as intent here is a bit different
+    static class ShardTracker extends FastPathTracker.FastPathShardTracker
+    {
+        int responsesFromElectorate;
+        public ShardTracker(Shard shard)
+        {
+            super(shard);
+        }
+
+        @Override
+        public boolean includeInFastPath(Node.Id node, boolean withFastPathTimestamp)
+        {
+            if (!shard.fastPathElectorate.contains(node))
+                return false;
+
+            ++responsesFromElectorate;
+            return withFastPathTimestamp;
+        }
+
+        @Override
+        public boolean hasMetFastPathCriteria()
+        {
+            int fastPathRejections = responsesFromElectorate - fastPathAccepts;
+            return fastPathRejections <= shard.fastPathElectorate.size() - shard.fastPathQuorumSize;
+        }
+    }
+
     final List<RecoverOk> recoverOks = new ArrayList<>();
-    int[] failure;
-    int[] recovery;
-    int[] recoveryWithFastPath;
-    int recoveryWithFastPathQuorums = 0;
-    int recoveryQuorums = 0;
+    final FastPathTracker<ShardTracker> tracker;
 
     public Recover(Node node, Ballot ballot, TxnId txnId, Txn txn)
     {
@@ -94,16 +112,14 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
     private Recover(Node node, Ballot ballot, TxnId txnId, Txn txn, Shards shards)
     {
         super(node, ballot, txnId, txn, shards);
-        this.failure = new int[this.shards.size()];
-        this.recovery = new int[this.shards.size()];
-        this.recoveryWithFastPath = new int[this.shards.size()];
-        node.send(this.shards, new BeginRecovery(txnId, txn, ballot), this);
+        tracker = new FastPathTracker<>(shards, ShardTracker[]::new, ShardTracker::new);
+        node.send(tracker.nodes(), new BeginRecovery(txnId, txn, ballot), this);
     }
 
     @Override
     public synchronized void onSuccess(Id from, RecoverReply response)
     {
-        if (isDone() || recoveryQuorums == shards.size())
+        if (isDone() || tracker.hasReachedQuorum())
             return;
 
         if (!response.isOK())
@@ -115,15 +131,9 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
         RecoverOk ok = (RecoverOk) response;
         recoverOks.add(ok);
         boolean fastPath = ok.executeAt.compareTo(txnId) == 0;
-        shards.forEachOn(from, (i, shard) -> {
-            if (fastPath && ++recoveryWithFastPath[i] == shard.recoveryFastPathSize)
-                ++recoveryWithFastPathQuorums;
+        tracker.recordSuccess(from, fastPath);
 
-            if (++recovery[i] == shard.slowPathQuorumSize)
-                ++recoveryQuorums;
-        });
-
-        if (recoveryQuorums == shards.size())
+        if (tracker.hasReachedQuorum())
             recover();
     }
 
@@ -173,7 +183,7 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
         }
 
         Timestamp executeAt;
-        if (rejectsFastPath || recoveryWithFastPathQuorums < shards.size())
+        if (rejectsFastPath || !tracker.hasMetFastPathCriteria())
         {
             executeAt = maxExecuteAt;
         }
@@ -197,9 +207,8 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
         if (isDone())
             return;
 
-        shards.forEachOn(from, (i, shard) -> {
-            if (++failure[i] >= shard.slowPathQuorumSize)
-                completeExceptionally(new accord.messages.Timeout());
-        });
+        tracker.recordFailure(from);
+        if (tracker.hasFailed())
+            completeExceptionally(new Timeout());
     }
 }
