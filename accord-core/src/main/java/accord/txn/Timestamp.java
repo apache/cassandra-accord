@@ -20,17 +20,17 @@ public class Timestamp implements Comparable<Timestamp>
         this.node = node;
     }
 
-    public Timestamp(long real, int logical, Id node)
-    {
-        this(0, real, logical, node);
-    }
-
     public Timestamp(Timestamp copy)
     {
         this.epoch = copy.epoch;
         this.real = copy.real;
         this.logical = copy.logical;
         this.node = copy.node;
+    }
+
+    public Timestamp withMinEpoch(long minEpoch)
+    {
+        return minEpoch <= epoch ? this : new Timestamp(minEpoch, real, logical, node);
     }
 
     @Override

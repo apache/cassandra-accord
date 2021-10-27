@@ -58,7 +58,7 @@ public class PreAcceptTest
             CommandStore commandStore = node.local(key).orElseThrow();
             Assertions.assertFalse(commandStore.hasCommandsForKey(key));
 
-            TxnId txnId = clock.idForNode(ID2);
+            TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
             PreAccept preAccept = new PreAccept(txnId, txn);
             clock.increment(10);
@@ -90,7 +90,7 @@ public class PreAcceptTest
             CommandStore commandStore = node.local(key).orElseThrow();
             Assertions.assertFalse(commandStore.hasCommandsForKey(key));
 
-            TxnId txnId = clock.idForNode(ID2);
+            TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
             PreAccept preAccept = new PreAccept(txnId, txn);
             preAccept.process(node, ID2, 0);
@@ -116,12 +116,12 @@ public class PreAcceptTest
         {
 
             IntKey key1 = IntKey.key(10);
-            PreAccept preAccept1 = new PreAccept(clock.idForNode(ID2), writeTxn(Keys.of(key1)));
+            PreAccept preAccept1 = new PreAccept(clock.idForNode(1, ID2), writeTxn(Keys.of(key1)));
             preAccept1.process(node, ID2, 0);
 
             messageSink.clearHistory();
             IntKey key2 = IntKey.key(11);
-            TxnId txnId2 = new TxnId(50, 0, ID3);
+            TxnId txnId2 = new TxnId(1, 50, 0, ID3);
             PreAccept preAccept2 = new PreAccept(txnId2, writeTxn(Keys.of(key1, key2)));
             clock.increment(10);
             preAccept2.process(node, ID3, 0);
@@ -129,7 +129,7 @@ public class PreAcceptTest
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID3, messageSink.responses.get(0).to);
             Dependencies expectedDeps = new Dependencies();
-            Assertions.assertEquals(new PreAccept.PreAcceptOk(new TxnId(110, 0, ID1), expectedDeps),
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(new TxnId(1, 110, 0, ID1), expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
         finally

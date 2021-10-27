@@ -266,9 +266,9 @@ public class MockCluster implements Network, AutoCloseable
             return now();
         }
 
-        public TxnId idForNode(Id id)
+        public TxnId idForNode(long epoch, Id id)
         {
-            return new TxnId(now.get(), 0, id);
+            return new TxnId(epoch, now.get(), 0, id);
         }
     }
 }

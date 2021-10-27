@@ -9,8 +9,8 @@ public class TxnId extends Timestamp
         super(timestamp);
     }
 
-    public TxnId(long real, int logical, Id node)
+    public TxnId(long epoch, long real, int logical, Id node)
     {
-        super(real, logical, node);
+        super(epoch, real, logical, node);
     }
 }

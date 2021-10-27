@@ -96,7 +96,7 @@ public class Node
         this.id = id;
         this.random = random;
         this.agent = agent;
-        this.now = new AtomicReference<>(new Timestamp(nowSupplier.getAsLong(), 0, id));
+        this.now = new AtomicReference<>(new Timestamp(cluster.epoch(), nowSupplier.getAsLong(), 0, id));
         this.messageSink = messageSink;
         this.nowSupplier = nowSupplier;
         this.scheduler = scheduler;
@@ -114,22 +114,23 @@ public class Node
         return now.updateAndGet(cur -> {
             // TODO: this diverges from proof; either show isomorphism or make consistent
             long now = nowSupplier.getAsLong();
-            if (now > cur.real) return new Timestamp(now, 0, id);
-            else return new Timestamp(cur.real, cur.logical + 1, id);
+            long epoch = Math.max(cur.epoch, commandStores.epoch());
+            return (now > cur.real)
+                 ? new Timestamp(epoch, now, 0, id)
+                 : new Timestamp(epoch, cur.real, cur.logical + 1, id);
         });
     }
 
     public Timestamp uniqueNow(Timestamp atLeast)
     {
         if (now.get().compareTo(atLeast) < 0)
-            now.accumulateAndGet(atLeast, (a, b) -> a.compareTo(b) < 0 ? new Timestamp(b.real, b.logical + 1, id) : a);
-
-        return now.updateAndGet(cur -> {
-            // TODO: this diverges from proof; either show isomorphism or make consistent
-            long now = nowSupplier.getAsLong();
-            if (now > cur.real) return new Timestamp(now, 0, id);
-            else return new Timestamp(cur.real, cur.logical + 1, id);
-        });
+            now.accumulateAndGet(atLeast, (current, proposed) -> {
+                Timestamp timestamp = proposed.compareTo(current) <= 0
+                        ? new Timestamp(current.epoch, current.real, current.logical + 1, id)
+                        : proposed;
+                return timestamp.withMinEpoch(commandStores.epoch());
+            });
+        return uniqueNow();
     }
 
     public long now()
