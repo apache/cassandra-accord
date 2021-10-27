@@ -137,4 +137,33 @@ public class PreAcceptTest
             node.shutdown();
         }
     }
+
+    /**
+     * Test that a preaccept with a larger timestampe than previously seen is accepted
+     * with the proposed timestamp
+     */
+    @Test
+    void singleKeyNewerTimestamp()
+    {
+        RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
+        Clock clock = new Clock(100);
+        Node node = createNode(ID1, messageSink, clock);
+        IntKey key = IntKey.key(10);
+        try
+        {
+            TxnId txnId = new TxnId(1, 110, 0, ID2);
+            PreAccept preAccept = new PreAccept(txnId, writeTxn(Keys.of(key)));
+            preAccept.process(node, ID2, 0);
+
+            messageSink.assertHistorySizes(0, 1);
+            Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
+            Dependencies expectedDeps = new Dependencies();
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, expectedDeps),
+                                    messageSink.responses.get(0).payload);
+        }
+        finally
+        {
+            node.shutdown();
+        }
+    }
 }

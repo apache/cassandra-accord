@@ -32,6 +32,7 @@ public class MockCluster implements Network, AutoCloseable
 
     private final Random random;
     private final Config config;
+    private final LongSupplier nowSupplier;
     private final Map<Id, Node> nodes = new ConcurrentHashMap<>();
     private int nextNodeId = 1;
     public NetworkFilter networkFilter = new NetworkFilter();
@@ -43,6 +44,7 @@ public class MockCluster implements Network, AutoCloseable
     {
         this.config = new Config(builder);
         this.random = new Random(config.seed);
+        this.nowSupplier = builder.nowSupplier;
 
         init();
     }
@@ -63,11 +65,6 @@ public class MockCluster implements Network, AutoCloseable
         return nextMessageId++;
     }
 
-    private long now()
-    {
-        return System.currentTimeMillis();
-    }
-
     private Node createNode(Id id, Topology topology)
     {
         MockStore store = new MockStore();
@@ -75,7 +72,7 @@ public class MockCluster implements Network, AutoCloseable
                         topology,
                         new SimpleMessageSink(id, this),
                         new Random(random.nextLong()),
-                        this::now,
+                        nowSupplier,
                         () -> store,
                         new TestAgent(),
                         new ThreadPoolScheduler(),
@@ -202,6 +199,7 @@ public class MockCluster implements Network, AutoCloseable
         private int initialNodes = 3;
         private int replication = 3;
         private int maxKey = 10000;
+        private LongSupplier nowSupplier = System::currentTimeMillis;
 
         public Builder seed(long seed)
         {
@@ -224,6 +222,12 @@ public class MockCluster implements Network, AutoCloseable
         public Builder maxKey(int max)
         {
             this.maxKey = max;
+            return this;
+        }
+
+        public Builder nowSupplier(LongSupplier supplier)
+        {
+            nowSupplier = supplier;
             return this;
         }
 
@@ -253,6 +257,11 @@ public class MockCluster implements Network, AutoCloseable
         public long increment(long by)
         {
             return now.addAndGet(by);
+        }
+
+        public long increment()
+        {
+            return increment(1);
         }
 
         public long now()
