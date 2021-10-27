@@ -22,6 +22,12 @@ public class Shards extends Topology
         super(epoch, shards, ranges, nodeLookup, subsetOfRanges, supersetIndexes);
     }
 
+    @Override
+    public Topology withEpoch(long epoch)
+    {
+        return new Shards(epoch, shards, ranges, nodeLookup, subsetOfRanges, supersetRangeIndexes);
+    }
+
     public static Shards select(long epoch, Shard[] shards, int[] indexes)
     {
         Shard[] subset = new Shard[indexes.length];

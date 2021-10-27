@@ -90,18 +90,18 @@ public class Node
     private final Map<TxnId, CompletionStage<Result>> coordinating = new ConcurrentHashMap<>();
     private final Set<TxnId> pendingRecovery = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
-    public Node(Id id, Topology cluster, MessageSink messageSink, Random random, LongSupplier nowSupplier,
+    public Node(Id id, Topology clusterTopology, MessageSink messageSink, Random random, LongSupplier nowSupplier,
                 Supplier<Store> dataSupplier, Agent agent, Scheduler scheduler, CommandStore.Factory commandStoreFactory)
     {
         this.id = id;
         this.random = random;
         this.agent = agent;
-        this.now = new AtomicReference<>(new Timestamp(cluster.epoch(), nowSupplier.getAsLong(), 0, id));
+        this.now = new AtomicReference<>(new Timestamp(clusterTopology.epoch(), nowSupplier.getAsLong(), 0, id));
         this.messageSink = messageSink;
         this.nowSupplier = nowSupplier;
         this.scheduler = scheduler;
         this.commandStores = new CommandStores(numCommandShards(), id, this::uniqueNow, agent, dataSupplier.get(), commandStoreFactory);
-        this.commandStores.updateTopology(cluster.forNode(id));
+        this.commandStores.updateTopology(clusterTopology);
     }
 
     public void shutdown()
@@ -138,9 +138,14 @@ public class Node
         return nowSupplier.getAsLong();
     }
 
-    public Topology cluster()
+    public void updateTopology(Topology clusterTopology)
     {
-        return commandStores.topology();
+        commandStores.updateTopology(clusterTopology);
+    }
+
+    public Topology clusterTopology()
+    {
+        return commandStores.clusterTopology();
     }
 
     public Stream<CommandStore> local(Keys keys)

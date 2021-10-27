@@ -106,7 +106,7 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
 
     public Recover(Node node, Ballot ballot, TxnId txnId, Txn txn)
     {
-        this(node, ballot, txnId, txn, node.cluster().forKeys(txn.keys()));
+        this(node, ballot, txnId, txn, node.clusterTopology().forKeys(txn.keys()));
     }
 
     private Recover(Node node, Ballot ballot, TxnId txnId, Txn txn, Shards shards)

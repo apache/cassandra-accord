@@ -4,7 +4,6 @@ import accord.api.Agent;
 import accord.api.KeyRange;
 import accord.api.Store;
 import accord.topology.KeyRanges;
-import accord.topology.Shards;
 import accord.topology.Topology;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
@@ -25,20 +24,22 @@ import java.util.stream.StreamSupport;
  */
 public class CommandStores
 {
+    private final Node.Id node;
     private final CommandStore[] commandStores;
     private volatile RangeMapping.Multi rangeMappings;
 
-    public CommandStores(int num, Node.Id nodeId, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store, CommandStore.Factory shardFactory)
+    public CommandStores(int num, Node.Id node, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store, CommandStore.Factory shardFactory)
     {
+        this.node = node;
         this.commandStores = new CommandStore[num];
         this.rangeMappings = RangeMapping.Multi.empty(num);
         for (int i=0; i<num; i++)
-            commandStores[i] = shardFactory.create(i, nodeId, uniqueNow, agent, store, this::getRangeMapping);
+            commandStores[i] = shardFactory.create(i, node, uniqueNow, agent, store, this::getRangeMapping);
     }
 
-    public Topology topology()
+    public Topology clusterTopology()
     {
-        return rangeMappings.topology;
+        return rangeMappings.cluster;
     }
 
     private RangeMapping getRangeMapping(int idx)
@@ -48,7 +49,7 @@ public class CommandStores
 
     public long epoch()
     {
-        return rangeMappings.topology.epoch();
+        return rangeMappings.cluster.epoch();
     }
 
     public synchronized void shutdown()
@@ -91,17 +92,20 @@ public class CommandStores
         return result;
     }
 
-    public synchronized void updateTopology(Topology newTopology)
+    public synchronized void updateTopology(Topology cluster)
     {
+        Preconditions.checkArgument(!cluster.isSubset(), "Use full topology for CommandStores.updateTopology");
+
         // FIXME: if we miss a topology update, we may end up with stale command data for ranges that were owned by
         //  someone else during the period we were not receiving topology updates. Something like a ballot low bound
         //  may make this a non-issue, and would be preferable to having to chase down all historical topology changes.
         //  OTOH, we'll probably need a complete history of topology changes to do recovery properly
-        if (newTopology.epoch() <= rangeMappings.topology.epoch())
+        if (cluster.epoch() <= rangeMappings.cluster.epoch())
             return;
 
-        KeyRanges removed = rangeMappings.topology.ranges().difference(newTopology.ranges());
-        KeyRanges added = newTopology.ranges().difference(rangeMappings.topology.ranges());
+        Topology local = cluster.forNode(node);
+        KeyRanges removed = rangeMappings.local.ranges().difference(local.ranges());
+        KeyRanges added = local.ranges().difference(rangeMappings.local.ranges());
         List<KeyRanges> sharded = shardRanges(added, commandStores.length);
 
         RangeMapping[] newMappings = new RangeMapping[rangeMappings.mappings.length];
@@ -109,11 +113,11 @@ public class CommandStores
         for (int i=0; i<rangeMappings.mappings.length; i++)
         {
             KeyRanges newRanges = rangeMappings.mappings[i].ranges.difference(removed).union(sharded.get(i)).mergeTouching();
-            newMappings[i] = RangeMapping.mapRanges(newRanges, newTopology);
+            newMappings[i] = RangeMapping.mapRanges(newRanges, local);
         }
 
         RangeMapping.Multi previous = rangeMappings;
-        rangeMappings = new RangeMapping.Multi(newTopology, newMappings);
+        rangeMappings = new RangeMapping.Multi(cluster, local, newMappings);
         stream().forEach(commands -> commands.onTopologyChange(previous.mappings[commands.index()],
                                                                rangeMappings.mappings[commands.index()]));
     }

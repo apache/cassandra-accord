@@ -9,7 +9,6 @@ import com.google.common.base.Preconditions;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.IntFunction;
 
 /**
  * maps ranges handled by this command store to their current shards by index
@@ -96,12 +95,14 @@ class RangeMapping
 
     static class Multi
     {
-        final Topology topology;
+        final Topology cluster;
+        final Topology local;
         final RangeMapping[] mappings;
 
-        public Multi(Topology topology, RangeMapping[] mappings)
+        public Multi(Topology cluster, Topology local, RangeMapping[] mappings)
         {
-            this.topology = topology;
+            this.cluster = cluster;
+            this.local = local;
             this.mappings = mappings;
         }
 
@@ -111,7 +112,7 @@ class RangeMapping
             for (int i=0; i<size; i++)
                 mappings[i] = RangeMapping.EMPTY;
 
-            return new Multi(RangeMapping.EMPTY.topology, mappings);
+            return new Multi(RangeMapping.EMPTY.topology, RangeMapping.EMPTY.topology, mappings);
         }
     }
 }
