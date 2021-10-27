@@ -36,6 +36,11 @@ public class CommandStores
             commandStores[i] = shardFactory.create(i, nodeId, uniqueNow, agent, store, this::getRangeMapping);
     }
 
+    public Topology topology()
+    {
+        return rangeMappings.topology;
+    }
+
     private RangeMapping getRangeMapping(int idx)
     {
         return rangeMappings.mappings[idx];

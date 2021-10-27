@@ -107,22 +107,24 @@ public class Json
 
     private interface TimestampFactory<T>
     {
-        T create(long real, int logical, Id node);
+        T create(long epoch, long real, int logical, Id node);
     }
 
     private static <T> T readTimestamp(JsonReader in, TimestampFactory<T> factory) throws IOException
     {
         in.beginArray();
+        long epoch = in.nextLong();
         long real = in.nextLong();
         int logical = in.nextInt();
         Id node = ID_ADAPTER.read(in);
         in.endArray();
-        return factory.create(real, logical, node);
+        return factory.create(epoch, real, logical, node);
     }
 
     private static void writeTimestamp(JsonWriter out, Timestamp timestamp) throws IOException
     {
         out.beginArray();
+        out.value(timestamp.epoch);
         out.value(timestamp.real);
         out.value(timestamp.logical);
         ID_ADAPTER.write(out, timestamp.node);

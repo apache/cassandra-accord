@@ -77,7 +77,6 @@ public class Node
 
     private final CommandStores commandStores;
     private final Id id;
-    private final Topology cluster;
     private final MessageSink messageSink;
     private final Random random;
 
@@ -95,7 +94,6 @@ public class Node
                 Supplier<Store> dataSupplier, Agent agent, Scheduler scheduler, CommandStore.Factory commandStoreFactory)
     {
         this.id = id;
-        this.cluster = cluster;
         this.random = random;
         this.agent = agent;
         this.now = new AtomicReference<>(new Timestamp(nowSupplier.getAsLong(), 0, id));
@@ -141,7 +139,7 @@ public class Node
 
     public Topology cluster()
     {
-        return cluster;
+        return commandStores.topology();
     }
 
     public Stream<CommandStore> local(Keys keys)
