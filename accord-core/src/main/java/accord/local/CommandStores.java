@@ -16,6 +16,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.IntPredicate;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -65,8 +66,8 @@ public class CommandStores
 
     public Stream<CommandStore> forKeys(Keys keys)
     {
-        // TODO: filter shards before sending to their thread?
-        return stream().filter(commandShard -> commandShard.intersects(keys));
+        IntPredicate predicate = i -> rangeMappings.mappings[i].ranges.intersects(keys);
+        return StreamSupport.stream(new ShardSpliterator(predicate), false);
     }
 
     static List<KeyRanges> shardRanges(KeyRanges ranges, int shards)
@@ -125,16 +126,30 @@ public class CommandStores
     private class ShardSpliterator implements Spliterator<CommandStore>
     {
         int i = 0;
+        final IntPredicate predicate;
+
+        public ShardSpliterator(IntPredicate predicate)
+        {
+            this.predicate = predicate;
+        }
+
+        public ShardSpliterator()
+        {
+            this (i -> true);
+        }
 
         @Override
         public boolean tryAdvance(Consumer<? super CommandStore> action)
         {
-            if (i < commandStores.length)
+            while (i < commandStores.length)
             {
-                CommandStore shard = commandStores[i++];
+                int idx = i++;
+                if (!predicate.test(idx))
+                    continue;
                 try
                 {
-                    shard.process(action).toCompletableFuture().get();
+                    commandStores[idx].process(action).toCompletableFuture().get();
+                    break;
                 }
                 catch (InterruptedException | ExecutionException e)
                 {
@@ -151,14 +166,17 @@ public class CommandStores
             if (i >= commandStores.length)
                 return;
 
-            CompletableFuture<Void>[] futures = new CompletableFuture[commandStores.length - i];
+            List<CompletableFuture<Void>> futures = new ArrayList<>(commandStores.length - i);
             for (; i< commandStores.length; i++)
-                futures[i] = commandStores[i].process(action).toCompletableFuture();
+            {
+                if (predicate.test(i))
+                    futures.add(commandStores[i].process(action).toCompletableFuture());
+            }
 
             try
             {
-                for (CompletableFuture<Void> future : futures)
-                    future.get();
+                for (int i=0, mi=futures.size(); i<mi; i++)
+                    futures.get(i).get();
             }
             catch (InterruptedException e)
             {
