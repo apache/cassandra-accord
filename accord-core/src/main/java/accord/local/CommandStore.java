@@ -5,7 +5,6 @@ import accord.api.Key;
 import accord.api.KeyRange;
 import accord.api.Store;
 import accord.topology.KeyRanges;
-import accord.topology.Topology;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
 import accord.txn.TxnId;
@@ -101,6 +100,11 @@ public abstract class CommandStore
     public Node.Id nodeId()
     {
         return nodeId;
+    }
+
+    public long epoch()
+    {
+        return rangeMap.topology.epoch();
     }
 
     public KeyRanges ranges()

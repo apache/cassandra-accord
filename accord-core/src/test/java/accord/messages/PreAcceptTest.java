@@ -166,4 +166,38 @@ public class PreAcceptTest
             node.shutdown();
         }
     }
+
+    @Test
+    void supersedingEpochPrecludesFastPath()
+    {
+        RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
+        Clock clock = new Clock(100);
+        Node node = createNode(ID1, messageSink, clock);
+
+        try
+        {
+            IntKey key = IntKey.key(10);
+            CommandStore commandStore = node.local(key).orElseThrow();
+            node.updateTopology(node.clusterTopology().withEpoch(2));
+
+            TxnId txnId = clock.idForNode(1, ID2);
+            Txn txn = writeTxn(Keys.of(key));
+            PreAccept preAccept = new PreAccept(txnId, txn);
+
+            clock.increment(10);
+            preAccept.process(node, ID2, 0);
+
+            Command command = commandStore.commandsForKey(key).uncommitted.get(txnId);
+            Assertions.assertEquals(Status.PreAccepted, command.status());
+
+            messageSink.assertHistorySizes(0, 1);
+            Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(new TxnId(2, 110, 0, ID1), new Dependencies()),
+                                    messageSink.responses.get(0).payload);
+        }
+        finally
+        {
+            node.shutdown();
+        }
+    }
 }
