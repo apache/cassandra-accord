@@ -46,7 +46,7 @@ public class MockCluster implements Network, AutoCloseable
         this.random = new Random(config.seed);
         this.nowSupplier = builder.nowSupplier;
 
-        init();
+        init(builder.topology);
     }
 
     @Override
@@ -79,7 +79,7 @@ public class MockCluster implements Network, AutoCloseable
                         CommandStore.Factory.SINGLE_THREAD);
     }
 
-    private void init()
+    private void init(Topology topology)
     {
         List<Id> ids = new ArrayList<>(config.initialNodes);
         for (int i=0; i<config.initialNodes; i++)
@@ -87,8 +87,11 @@ public class MockCluster implements Network, AutoCloseable
             Id nextId = nextNodeId();
             ids.add(nextId);
         }
-        KeyRanges ranges = TopologyUtils.initialRanges(config.initialNodes, config.maxKey);
-        Shards topology = TopologyUtils.initialTopology(ids, ranges, config.replication);
+        if (topology == null)
+        {
+            KeyRanges ranges = TopologyUtils.initialRanges(config.initialNodes, config.maxKey);
+            topology = TopologyUtils.initialTopology(ids, ranges, config.replication);
+        }
         for (int i=0; i<config.initialNodes; i++)
         {
             Id id = ids.get(i);
@@ -199,6 +202,7 @@ public class MockCluster implements Network, AutoCloseable
         private int initialNodes = 3;
         private int replication = 3;
         private int maxKey = 10000;
+        private Topology topology = null;
         private LongSupplier nowSupplier = System::currentTimeMillis;
 
         public Builder seed(long seed)
@@ -228,6 +232,12 @@ public class MockCluster implements Network, AutoCloseable
         public Builder nowSupplier(LongSupplier supplier)
         {
             nowSupplier = supplier;
+            return this;
+        }
+
+        public Builder topology(Topology topology)
+        {
+            this.topology = topology;
             return this;
         }
 

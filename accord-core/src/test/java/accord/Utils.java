@@ -6,12 +6,15 @@ import accord.impl.mock.MockStore;
 import accord.topology.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Shards;
+import accord.topology.Topology;
 import accord.txn.Txn;
 import accord.txn.Keys;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Sets;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public class Utils
 {
@@ -40,6 +43,22 @@ public class Utils
         return rlist;
     }
 
+    public static List<Node.Id> idList(int... ids)
+    {
+        List<Node.Id> list = new ArrayList<>(ids.length);
+        for (int i : ids)
+            list.add(new Node.Id(i));
+        return list;
+    }
+
+    public static Set<Node.Id> idSet(int... ids)
+    {
+        Set<Node.Id> set = Sets.newHashSetWithExpectedSize(ids.length);
+        for (int i : ids)
+            set.add(new Node.Id(i));
+        return set;
+    }
+
     public static KeyRanges ranges(KeyRange... ranges)
     {
         return new KeyRanges(ranges);
@@ -63,5 +82,15 @@ public class Utils
     public static Txn readTxn(Keys keys)
     {
         return new Txn(keys, MockStore.READ, MockStore.QUERY);
+    }
+
+    public static Shard shard(KeyRange range, List<Node.Id> nodes, Set<Node.Id> fastPath)
+    {
+        return new Shard(range, nodes, fastPath);
+    }
+
+    public static Topology topology(long epoch, Shard... shards)
+    {
+        return new Shards(epoch, shards);
     }
 }
