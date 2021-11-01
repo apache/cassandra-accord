@@ -27,7 +27,7 @@ import accord.impl.list.ListStore;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
-import accord.topology.Shards;
+import accord.topology.Topology;
 
 public class Cluster implements Scheduler
 {
@@ -141,13 +141,13 @@ public class Cluster implements Scheduler
 
     public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, Supplier<Random> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, OutputStream stderr)
     {
-        Shards shards = topologyFactory.toShards(nodes);
+        Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> lookup = new HashMap<>();
         try
         {
             Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink, stderr);
             for (Id node : nodes)
-                lookup.put(node, new Node(node, shards, sinks.create(node, randomSupplier.get()), randomSupplier.get(),
+                lookup.put(node, new Node(node, topology, sinks.create(node, randomSupplier.get()), randomSupplier.get(),
                                           nowSupplier.get(), ListStore::new, ListAgent.INSTANCE, sinks, CommandStore.Factory.SYNCHRONIZED));
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));

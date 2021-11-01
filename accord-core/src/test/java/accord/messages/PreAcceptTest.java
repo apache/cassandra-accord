@@ -5,6 +5,7 @@ import accord.local.Node.Id;
 import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.impl.mock.MockCluster.Clock;
+import accord.topology.Topology;
 import accord.txn.Dependencies;
 import accord.txn.Txn;
 import accord.txn.TxnId;
@@ -16,7 +17,6 @@ import accord.impl.mock.Network;
 import accord.impl.mock.RecordingMessageSink;
 import accord.impl.TestAgent;
 import accord.impl.mock.MockStore;
-import accord.topology.Shards;
 import accord.impl.TopologyFactory;
 
 import org.junit.jupiter.api.Assertions;
@@ -34,7 +34,7 @@ public class PreAcceptTest
     private static final Id ID2 = id(2);
     private static final Id ID3 = id(3);
     private static final List<Id> IDS = List.of(ID1, ID2, ID3);
-    private static final Shards TOPOLOGY = TopologyFactory.toShards(IDS, 3, IntKey.range(0, 100));
+    private static final Topology TOPOLOGY = TopologyFactory.toTopology(IDS, 3, IntKey.range(0, 100));
 
     private static Node createNode(Id nodeId, MessageSink messageSink, Clock clock)
     {

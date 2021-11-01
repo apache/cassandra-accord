@@ -3,7 +3,6 @@ package accord.local;
 import accord.api.KeyRange;
 import accord.topology.KeyRanges;
 import accord.topology.Shard;
-import accord.topology.Shards;
 import accord.topology.Topology;
 import com.google.common.base.Preconditions;
 
@@ -15,7 +14,7 @@ import java.util.List;
  */
 class RangeMapping
 {
-    static final RangeMapping EMPTY = new RangeMapping(KeyRanges.EMPTY, new Shard[0], Shards.EMPTY);
+    static final RangeMapping EMPTY = new RangeMapping(KeyRanges.EMPTY, new Shard[0], Topology.EMPTY);
     final KeyRanges ranges;
     final Shard[] shards;
     final Topology topology;

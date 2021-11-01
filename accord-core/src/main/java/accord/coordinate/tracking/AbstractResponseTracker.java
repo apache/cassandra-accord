@@ -2,7 +2,7 @@ package accord.coordinate.tracking;
 
 import accord.local.Node;
 import accord.topology.Shard;
-import accord.topology.Shards;
+import accord.topology.Topology;
 import com.google.common.annotations.VisibleForTesting;
 
 import java.util.*;
@@ -14,7 +14,7 @@ import java.util.function.Predicate;
 
 abstract class AbstractResponseTracker<T extends AbstractResponseTracker.ShardTracker>
 {
-    private final Shards shards;
+    private final Topology topology;
     private final T[] trackers;
 
     static class ShardTracker
@@ -27,21 +27,21 @@ abstract class AbstractResponseTracker<T extends AbstractResponseTracker.ShardTr
         }
     }
 
-    public AbstractResponseTracker(Shards shards, IntFunction<T[]> arrayFactory, Function<Shard, T> trackerFactory)
+    public AbstractResponseTracker(Topology topology, IntFunction<T[]> arrayFactory, Function<Shard, T> trackerFactory)
     {
-        this.shards = shards;
-        this.trackers = arrayFactory.apply(shards.size());
-        shards.forEach((i, shard) -> trackers[i] = trackerFactory.apply(shard));
+        this.topology = topology;
+        this.trackers = arrayFactory.apply(topology.size());
+        topology.forEach((i, shard) -> trackers[i] = trackerFactory.apply(shard));
     }
 
     void forEachTrackerForNode(Node.Id node, BiConsumer<T, Node.Id> consumer)
     {
-        shards.forEachOn(node, (i, shard) -> consumer.accept(trackers[i], node));
+        topology.forEachOn(node, (i, shard) -> consumer.accept(trackers[i], node));
     }
 
     int matchingTrackersForNode(Node.Id node, Predicate<T> consumer)
     {
-        return shards.matchesOn(node, (i, shard) -> consumer.test(trackers[i]));
+        return topology.matchesOn(node, (i, shard) -> consumer.test(trackers[i]));
     }
 
     boolean all(Predicate<T> predicate)
@@ -69,7 +69,7 @@ abstract class AbstractResponseTracker<T extends AbstractResponseTracker.ShardTr
 
     public Set<Node.Id> nodes()
     {
-        return shards.nodes();
+        return topology.nodes();
     }
 
     @VisibleForTesting

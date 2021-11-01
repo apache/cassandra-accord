@@ -5,20 +5,20 @@ import accord.impl.TopologyUtils;
 import accord.local.Node;
 import accord.topology.KeyRanges;
 import accord.topology.Shard;
-import accord.topology.Shards;
+import accord.topology.Topology;
 import com.google.common.collect.Sets;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 
-import static accord.Utils.shards;
+import static accord.Utils.topology;
 
 public class ReadTrackerTest
 {
     private static final Node.Id[] ids = Utils.ids(5).toArray(Node.Id[]::new);
     private static final KeyRanges ranges = TopologyUtils.initialRanges(5, 500);
-    private static final Shards topology = TopologyUtils.initialTopology(ids, ranges, 3);
+    private static final Topology topology = TopologyUtils.initialTopology(ids, ranges, 3);
         /*
         (000, 100](100, 200](200, 300](300, 400](400, 500]
         [1, 2, 3] [2, 3, 4] [3, 4, 5] [4, 5, 1] [5, 1, 2]
@@ -35,8 +35,8 @@ public class ReadTrackerTest
     @Test
     void singleShard()
     {
-        Shards subShards = shards(topology.get(0));
-        ReadTracker tracker = new ReadTracker(subShards);
+        Topology subTopology = topology(topology.get(0));
+        ReadTracker tracker = new ReadTracker(subTopology);
 
         tracker.recordInflightRead(ids[0]);
         assertResponseState(tracker, false, false);
@@ -48,8 +48,8 @@ public class ReadTrackerTest
     @Test
     void singleShardRetry()
     {
-        Shards subShards = shards(topology.get(0));
-        ReadTracker tracker = new ReadTracker(subShards);
+        Topology subTopology = topology(topology.get(0));
+        ReadTracker tracker = new ReadTracker(subTopology);
 
         tracker.recordInflightRead(ids[0]);
         assertResponseState(tracker, false, false);
@@ -67,8 +67,8 @@ public class ReadTrackerTest
     @Test
     void singleShardFailure()
     {
-        Shards subShards = shards(topology.get(0));
-        ReadTracker tracker = new ReadTracker(subShards);
+        Topology subTopology = topology(topology.get(0));
+        ReadTracker tracker = new ReadTracker(subTopology);
 
         tracker.recordInflightRead(ids[0]);
         tracker.recordReadFailure(ids[0]);
@@ -86,8 +86,8 @@ public class ReadTrackerTest
     @Test
     void multiShardSuccess()
     {
-        Shards subShards = new Shards(1, new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
-        ReadTracker responses = new ReadTracker(subShards);
+        Topology subTopology = new Topology(1, new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
+        ReadTracker responses = new ReadTracker(subTopology);
         /*
         (000, 100](100, 200](200, 300]
         [1, 2, 3] [2, 3, 4] [3, 4, 5]
@@ -101,8 +101,8 @@ public class ReadTrackerTest
     @Test
     void multiShardRetryAndReadSet()
     {
-        Shards subShards = new Shards(1, new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
-        ReadTracker responses = new ReadTracker(subShards);
+        Topology subTopology = new Topology(1, new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
+        ReadTracker responses = new ReadTracker(subTopology);
         /*
         (000, 100](100, 200](200, 300]
         [1, 2, 3] [2, 3, 4] [3, 4, 5]

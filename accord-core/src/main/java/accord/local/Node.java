@@ -20,7 +20,6 @@ import accord.messages.Callback;
 import accord.messages.Request;
 import accord.messages.Reply;
 import accord.topology.Shard;
-import accord.topology.Shards;
 import accord.topology.Topology;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
@@ -161,10 +160,10 @@ public class Node
     }
 
     // send to every node besides ourselves
-    public void send(Shards shards, Request send)
+    public void send(Topology topology, Request send)
     {
         Set<Id> contacted = new HashSet<>();
-        shards.forEach(shard -> send(shard, send, contacted));
+        topology.forEach(shard -> send(shard, send, contacted));
     }
 
     public void send(Shard shard, Request send)
@@ -181,11 +180,11 @@ public class Node
     }
 
     // send to every node besides ourselves
-    public <T> void send(Shards shards, Request send, Callback<T> callback)
+    public <T> void send(Topology topology, Request send, Callback<T> callback)
     {
         // TODO efficiency
         Set<Id> contacted = new HashSet<>();
-        shards.forEach(shard -> send(shard, send, callback, contacted));
+        topology.forEach(shard -> send(shard, send, callback, contacted));
     }
 
     public <T> void send(Shard shard, Request send, Callback<T> callback)

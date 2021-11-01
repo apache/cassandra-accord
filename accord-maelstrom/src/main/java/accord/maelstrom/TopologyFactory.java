@@ -10,7 +10,7 @@ import accord.api.KeyRange;
 import accord.local.Node.Id;
 import accord.maelstrom.Datum.Kind;
 import accord.topology.Shard;
-import accord.topology.Shards;
+import accord.topology.Topology;
 import accord.utils.WrapAroundList;
 import accord.utils.WrapAroundSet;
 
@@ -41,7 +41,7 @@ public class TopologyFactory
     }
 
 
-    public Shards toShards(Id[] cluster)
+    public Topology toTopology(Id[] cluster)
     {
         final Map<Id, Integer> lookup = new HashMap<>();
         for (int i = 0 ; i < cluster.length ; ++i)
@@ -64,6 +64,6 @@ public class TopologyFactory
             for (int i = 0 ; i < this.shards ; ++i)
                 shards.add(new Shard(ranges[j][i], electorates.get(i % electorates.size()), fastPathElectorates.get(i % fastPathElectorates.size())));
         }
-        return new Shards(1, shards.toArray(Shard[]::new));
+        return new Topology(1, shards.toArray(Shard[]::new));
     }
 }

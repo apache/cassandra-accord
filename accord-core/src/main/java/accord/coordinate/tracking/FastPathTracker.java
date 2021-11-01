@@ -5,7 +5,7 @@ import java.util.function.IntFunction;
 
 import accord.local.Node;
 import accord.topology.Shard;
-import accord.topology.Shards;
+import accord.topology.Topology;
 
 public class FastPathTracker<T extends FastPathTracker.FastPathShardTracker> extends AbstractQuorumTracker<T>
 {
@@ -29,9 +29,9 @@ public class FastPathTracker<T extends FastPathTracker.FastPathShardTracker> ext
         public abstract boolean hasMetFastPathCriteria();
     }
 
-    public FastPathTracker(Shards shards, IntFunction<T[]> arrayFactory, Function<Shard, T> trackerFactory)
+    public FastPathTracker(Topology topology, IntFunction<T[]> arrayFactory, Function<Shard, T> trackerFactory)
     {
-        super(shards, arrayFactory, trackerFactory);
+        super(topology, arrayFactory, trackerFactory);
     }
 
     public void recordSuccess(Node.Id node, boolean withFastPathTimestamp)

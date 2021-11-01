@@ -5,7 +5,7 @@ import accord.impl.TestAgent;
 import accord.impl.TopologyFactory;
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockStore;
-import accord.topology.Shards;
+import accord.topology.Topology;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
 import accord.txn.Txn;
@@ -27,7 +27,7 @@ public class CommandTest
     private static final Node.Id ID2 = id(2);
     private static final Node.Id ID3 = id(3);
     private static final List<Node.Id> IDS = List.of(ID1, ID2, ID3);
-    private static final Shards TOPOLOGY = TopologyFactory.toShards(IDS, 3, IntKey.range(0, 100));
+    private static final Topology TOPOLOGY = TopologyFactory.toTopology(IDS, 3, IntKey.range(0, 100));
     private static final IntKey KEY = IntKey.key(10);
 
     private static class CommandStoreSupport

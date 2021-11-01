@@ -21,8 +21,8 @@ import accord.api.MessageSink;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
-import accord.topology.Shards;
 import accord.api.Scheduler;
+import accord.topology.Topology;
 
 // TODO: merge with accord.impl.basic.Cluster
 public class Cluster implements Scheduler
@@ -253,13 +253,13 @@ public class Cluster implements Scheduler
 
     public static void run(Id[] nodes, QueueSupplier queueSupplier, Consumer<Packet> responseSink, Supplier<Random> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, OutputStream stderr)
     {
-        Shards shards = topologyFactory.toShards(nodes);
+        Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> lookup = new HashMap<>();
         try
         {
             Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink, stderr);
             for (Id node : nodes)
-                lookup.put(node, new Node(node, shards, sinks.create(node, randomSupplier.get()), randomSupplier.get(),
+                lookup.put(node, new Node(node, topology, sinks.create(node, randomSupplier.get()), randomSupplier.get(),
                                           nowSupplier.get(), MaelstromStore::new, MaelstromAgent.INSTANCE, sinks, CommandStore.Factory.SINGLE_THREAD));
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));

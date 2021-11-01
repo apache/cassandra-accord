@@ -1,6 +1,5 @@
 package accord.coordinate;
 
-import java.util.Collection;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -10,11 +9,11 @@ import accord.coordinate.tracking.ReadTracker;
 import accord.api.Result;
 import accord.messages.Callback;
 import accord.local.Node;
+import accord.topology.Topology;
 import accord.txn.Dependencies;
 import accord.messages.Apply;
 import accord.messages.ReadData.ReadReply;
 import accord.messages.ReadData.ReadWaiting;
-import accord.topology.Shards;
 import accord.local.Node.Id;
 import accord.txn.Timestamp;
 import accord.txn.Txn;
@@ -31,7 +30,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
     final TxnId txnId;
     final Txn txn;
     final Timestamp executeAt;
-    final Shards shards;
+    final Topology topology;
     final Keys keys;
     final Dependencies deps;
     final ReadTracker tracker;
@@ -46,15 +45,15 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         this.keys = txn.keys();
         this.deps = agreed.deps;
         this.executeAt = agreed.executeAt;
-        this.shards = agreed.shards;
-        this.tracker = new ReadTracker(shards);
-        this.replicaIndex = node.random().nextInt(shards.get(0).nodes.size());
+        this.topology = agreed.topology;
+        this.tracker = new ReadTracker(topology);
+        this.replicaIndex = node.random().nextInt(topology.get(0).nodes.size());
 
         // TODO: perhaps compose these different behaviours differently?
         if (agreed.applied != null)
         {
             Apply send = new Apply(txnId, txn, executeAt, agreed.deps, agreed.applied, agreed.result);
-            node.send(shards, send);
+            node.send(topology, send);
             complete(agreed.result);
         }
         else
@@ -106,7 +105,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         if (tracker.hasCompletedRead())
         {
             Result result = txn.result(data);
-            node.send(shards, new Apply(txnId, txn, executeAt, deps, txn.execute(executeAt, data), result));
+            node.send(topology, new Apply(txnId, txn, executeAt, deps, txn.execute(executeAt, data), result));
             complete(result);
         }
     }

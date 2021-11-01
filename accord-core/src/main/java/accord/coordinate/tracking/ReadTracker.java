@@ -2,8 +2,8 @@ package accord.coordinate.tracking;
 
 import accord.local.Node.Id;
 import accord.topology.Shard;
-import accord.topology.Shards;
 
+import accord.topology.Topology;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
@@ -59,10 +59,10 @@ public class ReadTracker extends AbstractResponseTracker<ReadTracker.ReadShardTr
 
     private final List<Id> candidates;
 
-    public ReadTracker(Shards shards)
+    public ReadTracker(Topology topology)
     {
-        super(shards, ReadShardTracker[]::new, ReadShardTracker::new);
-        candidates = new ArrayList<>(shards.nodes());
+        super(topology, ReadShardTracker[]::new, ReadShardTracker::new);
+        candidates = new ArrayList<>(topology.nodes());
     }
 
     @VisibleForTesting

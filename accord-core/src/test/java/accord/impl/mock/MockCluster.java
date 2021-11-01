@@ -13,7 +13,6 @@ import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.impl.TestAgent;
-import accord.topology.Shards;
 import accord.topology.Topology;
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;

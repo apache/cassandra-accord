@@ -5,7 +5,7 @@ import accord.api.KeyRange;
 import accord.local.Node;
 import accord.topology.KeyRanges;
 import accord.topology.Shard;
-import accord.topology.Shards;
+import accord.topology.Topology;
 import accord.utils.WrapAroundList;
 import accord.utils.WrapAroundSet;
 
@@ -27,7 +27,7 @@ public class TopologyUtils
         return new KeyRanges(ranges);
     }
 
-    public static <K extends Key<K>> Shards initialTopology(Node.Id[] cluster, KeyRanges ranges, int rf)
+    public static <K extends Key<K>> Topology initialTopology(Node.Id[] cluster, KeyRanges ranges, int rf)
     {
         final Map<Node.Id, Integer> lookup = new HashMap<>();
         for (int i = 0 ; i < cluster.length ; ++i)
@@ -47,10 +47,10 @@ public class TopologyUtils
         final List<Shard> shards = new ArrayList<>();
         for (int i = 0 ; i < ranges.size() ; ++i)
             shards.add(new Shard(ranges.get(i), electorates.get(i % electorates.size()), fastPathElectorates.get(i % fastPathElectorates.size())));
-        return new Shards(1, shards.toArray(Shard[]::new));
+        return new Topology(1, shards.toArray(Shard[]::new));
     }
 
-    public static <K extends Key<K>> Shards initialTopology(List<Node.Id> cluster, KeyRanges ranges, int rf)
+    public static <K extends Key<K>> Topology initialTopology(List<Node.Id> cluster, KeyRanges ranges, int rf)
     {
         return initialTopology(cluster.toArray(Node.Id[]::new), ranges, rf);
     }

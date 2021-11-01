@@ -7,7 +7,7 @@ import java.util.function.IntFunction;
 
 import accord.local.Node;
 import accord.topology.Shard;
-import accord.topology.Shards;
+import accord.topology.Topology;
 
 public class AbstractQuorumTracker<T extends AbstractQuorumTracker.QuorumShardTracker> extends AbstractResponseTracker<T>
 {
@@ -54,9 +54,9 @@ public class AbstractQuorumTracker<T extends AbstractQuorumTracker.QuorumShardTr
         }
     }
 
-    public AbstractQuorumTracker(Shards shards, IntFunction<T[]> arrayFactory, Function<Shard, T> trackerFactory)
+    public AbstractQuorumTracker(Topology topology, IntFunction<T[]> arrayFactory, Function<Shard, T> trackerFactory)
     {
-        super(shards, arrayFactory, trackerFactory);
+        super(topology, arrayFactory, trackerFactory);
     }
 
     // TODO: refactor to return true if this call caused the state change to failed

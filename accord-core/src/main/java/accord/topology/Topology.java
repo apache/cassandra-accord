@@ -1,13 +1,6 @@
 package accord.topology;
 
-import java.util.AbstractCollection;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.function.IntFunction;
 import java.util.stream.IntStream;
 
@@ -20,10 +13,11 @@ import accord.utils.IndexedPredicate;
 
 public class Topology extends AbstractCollection<Shard>
 {
+    public static final Topology EMPTY = new Topology(0, new Shard[0], KeyRanges.EMPTY, Collections.emptyMap(), KeyRanges.EMPTY.EMPTY, new int[0]);
     final long epoch;
     final Shard[] shards;
     final KeyRanges ranges;
-    final Map<Id, Shards.NodeInfo> nodeLookup;
+    final Map<Id, NodeInfo> nodeLookup;
     final KeyRanges subsetOfRanges;
     final int[] supersetRangeIndexes;
 
@@ -63,11 +57,11 @@ public class Topology extends AbstractCollection<Shard>
         {
             int[] supersetIndexes = e.getValue().stream().mapToInt(i -> i).toArray();
             KeyRanges ranges = this.ranges.select(supersetIndexes);
-            nodeLookup.put(e.getKey(), new Shards.NodeInfo(ranges, supersetIndexes));
+            nodeLookup.put(e.getKey(), new NodeInfo(ranges, supersetIndexes));
         }
     }
 
-    public Topology(long epoch, Shard[] shards, KeyRanges ranges, Map<Id, Shards.NodeInfo> nodeLookup, KeyRanges subsetOfRanges, int[] supersetIndexes)
+    public Topology(long epoch, Shard[] shards, KeyRanges ranges, Map<Id, NodeInfo> nodeLookup, KeyRanges subsetOfRanges, int[] supersetIndexes)
     {
         this.epoch = epoch;
         this.shards = shards;
@@ -75,6 +69,15 @@ public class Topology extends AbstractCollection<Shard>
         this.nodeLookup = nodeLookup;
         this.subsetOfRanges = subsetOfRanges;
         this.supersetRangeIndexes = supersetIndexes;
+    }
+
+    public static Topology select(long epoch, Shard[] shards, int[] indexes)
+    {
+        Shard[] subset = new Shard[indexes.length];
+        for (int i=0; i<indexes.length; i++)
+            subset[i] = shards[indexes[i]];
+
+        return new Topology(epoch, subset);
     }
 
     public boolean isSubset()
@@ -92,12 +95,12 @@ public class Topology extends AbstractCollection<Shard>
         return epoch;
     }
 
-    public Shards forNode(Id node)
+    public Topology forNode(Id node)
     {
         NodeInfo info = nodeLookup.get(node);
         if (info == null)
-            return Shards.EMPTY;
-        return Shards.select(epoch, shards, info.supersetIndexes);
+            return Topology.EMPTY;
+        return select(epoch, shards, info.supersetIndexes);
     }
 
     public Shard forKey(Key key)
@@ -108,7 +111,7 @@ public class Topology extends AbstractCollection<Shard>
         return shards[i];
     }
 
-    public Shards forKeys(Keys select)
+    public Topology forKeys(Keys select)
     {
         int subsetIndex = 0;
         int count = 0;
@@ -136,16 +139,16 @@ public class Topology extends AbstractCollection<Shard>
             if (intersects(newSubset, e.getValue().supersetIndexes))
                 nodeLookup.put(e.getKey(), e.getValue());
         }
-        return new Shards(epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
+        return new Topology(epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
     }
 
     /**
      * @param on the node to limit our selection to
-     * @param select may be a superSet of the keys owned by {@code on} but not of this {@code Shards}
+     * @param select may be a superSet of the keys owned by {@code on} but not of this {@code Topology}
      */
     public void forEachOn(Id on, Keys select, IndexedConsumer<Shard> consumer)
     {
-        Shards.NodeInfo info = nodeLookup.get(on);
+        NodeInfo info = nodeLookup.get(on);
         for (int i = 0, j = 0, k = 0 ; i < select.size() && j < supersetRangeIndexes.length && k < info.supersetIndexes.length ;)
         {
             Key key = select.get(i);
@@ -166,7 +169,7 @@ public class Topology extends AbstractCollection<Shard>
     public void forEachOn(Id on, IndexedConsumer<Shard> consumer)
     {
         // TODO: this can be done by divide-and-conquer splitting of the lists and recursion, which should be more efficient
-        Shards.NodeInfo info = nodeLookup.get(on);
+        NodeInfo info = nodeLookup.get(on);
         if (info == null)
             return;
         int[] a = supersetRangeIndexes, b = info.supersetIndexes;
@@ -195,7 +198,7 @@ public class Topology extends AbstractCollection<Shard>
     {
         // TODO: this can be done by divide-and-conquer splitting of the lists and recursion, which should be more efficient
         int count = 0;
-        Shards.NodeInfo info = nodeLookup.get(on);
+        NodeInfo info = nodeLookup.get(on);
         int[] a = supersetRangeIndexes, b = info.supersetIndexes;
         int ai = 0, bi = 0;
         while (ai < a.length && bi < b.length)

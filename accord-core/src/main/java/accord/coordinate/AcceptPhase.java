@@ -5,11 +5,11 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import accord.coordinate.tracking.QuorumTracker;
+import accord.topology.Topology;
 import accord.txn.Ballot;
 import accord.messages.Callback;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.topology.Shards;
 import accord.txn.Timestamp;
 import accord.txn.Dependencies;
 import accord.txn.Txn;
@@ -24,26 +24,26 @@ class AcceptPhase extends CompletableFuture<Agreed>
     final Ballot ballot;
     final TxnId txnId;
     final Txn txn;
-    final Shards shards; // TODO: remove, hide in participants
+    final Topology topology; // TODO: remove, hide in participants
 
     private List<AcceptOk> acceptOks;
     private Timestamp proposed;
     private QuorumTracker acceptTracker;
 
-    AcceptPhase(Node node, Ballot ballot, TxnId txnId, Txn txn, Shards shards)
+    AcceptPhase(Node node, Ballot ballot, TxnId txnId, Txn txn, Topology topology)
     {
         this.node = node;
         this.ballot = ballot;
         this.txnId = txnId;
         this.txn = txn;
-        this.shards = shards;
+        this.topology = topology;
     }
 
     protected void startAccept(Timestamp executeAt, Dependencies deps)
     {
         this.proposed = executeAt;
         this.acceptOks = new ArrayList<>();
-        this.acceptTracker = new QuorumTracker(shards);
+        this.acceptTracker = new QuorumTracker(topology);
         node.send(acceptTracker.nodes(), new Accept(ballot, txnId, txn, executeAt, deps), new Callback<AcceptReply>()
         {
             @Override
@@ -91,6 +91,6 @@ class AcceptPhase extends CompletableFuture<Agreed>
 
     protected void agreed(Timestamp executeAt, Dependencies deps)
     {
-        complete(new Agreed(txnId, txn, executeAt, deps, shards, null, null));
+        complete(new Agreed(txnId, txn, executeAt, deps, topology, null, null));
     }
 }

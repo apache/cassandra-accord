@@ -18,13 +18,13 @@ import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Scheduler;
+import accord.topology.Topology;
 import accord.utils.ThreadPoolScheduler;
 import accord.maelstrom.Packet.Type;
 import accord.api.MessageSink;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
-import accord.topology.Shards;
 
 public class Main
 {
@@ -128,7 +128,7 @@ public class Main
         err.flush();
         ThreadPoolScheduler scheduler = new ThreadPoolScheduler();
         Node on;
-        Shards shards;
+        Topology topology;
         StdoutSink sink;
         {
             String line = in.get();
@@ -136,9 +136,9 @@ public class Main
             err.flush();
             Packet packet = Json.GSON.fromJson(line, Packet.class);
             MaelstromInit init = (MaelstromInit) packet.body;
-            shards = topologyFactory.toShards(init.cluster);
+            topology = topologyFactory.toTopology(init.cluster);
             sink = new StdoutSink(System::currentTimeMillis, scheduler, start, init.self, out, err);
-            on = new Node(init.self, shards, sink, new Random(), System::currentTimeMillis, MaelstromStore::new, MaelstromAgent.INSTANCE, scheduler, CommandStore.Factory.SINGLE_THREAD);
+            on = new Node(init.self, topology, sink, new Random(), System::currentTimeMillis, MaelstromStore::new, MaelstromAgent.INSTANCE, scheduler, CommandStore.Factory.SINGLE_THREAD);
             err.println("Initialized node " + init.self);
             err.flush();
             sink.send(packet.src, new Body(Type.init_ok, Body.SENTINEL_MSG_ID, init.msg_id));

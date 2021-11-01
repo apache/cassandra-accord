@@ -5,7 +5,6 @@ import accord.local.Node;
 import accord.impl.mock.MockStore;
 import accord.topology.KeyRanges;
 import accord.topology.Shard;
-import accord.topology.Shards;
 import accord.topology.Topology;
 import accord.txn.Txn;
 import accord.txn.Keys;
@@ -64,16 +63,6 @@ public class Utils
         return new KeyRanges(ranges);
     }
 
-    public static Shards shards(long epoch, Shard... shards)
-    {
-        return new Shards(epoch, shards);
-    }
-
-    public static Shards shards(Shard... shards)
-    {
-        return shards(1, shards);
-    }
-
     public static Txn writeTxn(Keys keys)
     {
         return new Txn(keys, MockStore.READ, MockStore.QUERY, MockStore.UPDATE);
@@ -91,6 +80,11 @@ public class Utils
 
     public static Topology topology(long epoch, Shard... shards)
     {
-        return new Shards(epoch, shards);
+        return new Topology(epoch, shards);
+    }
+
+    public static Topology topology(Shard... shards)
+    {
+        return topology(1, shards);
     }
 }

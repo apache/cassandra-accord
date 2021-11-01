@@ -61,7 +61,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
     {
         super(node, Ballot.ZERO, txnId, txn, node.clusterTopology().forKeys(txn.keys()));
         this.keys = txn.keys();
-        tracker = new FastPathTracker<>(shards, ShardTracker[]::new, ShardTracker::new);
+        tracker = new FastPathTracker<>(topology, ShardTracker[]::new, ShardTracker::new);
 
         node.send(tracker.nodes(), new PreAccept(txnId, txn), this);
     }
