@@ -229,9 +229,13 @@ public class Node
         messageSink.reply(replyingToNode, replyingToMessage, send);
     }
 
-    public CompletionStage<Result> coordinate(Txn txn)
+    public TxnId nextTxnId()
     {
-        TxnId txnId = new TxnId(uniqueNow());
+        return new TxnId(uniqueNow());
+    }
+
+    public CompletionStage<Result> coordinate(TxnId txnId, Txn txn)
+    {
         CompletionStage<Result> result = Coordinate.execute(this, txnId, txn);
         coordinating.put(txnId, result);
         result.handle((success, fail) ->
@@ -244,6 +248,11 @@ public class Node
                           return null;
                       });
         return result;
+    }
+
+    public CompletionStage<Result> coordinate(Txn txn)
+    {
+        return coordinate(nextTxnId(), txn);
     }
 
     // TODO: encapsulate in Coordinate, so we can request that e.g. commits be re-sent?

@@ -151,6 +151,8 @@ public abstract class CommandStore
         Preconditions.checkState(rangeMap == currentMapping);
         KeyRanges removed = prevMapping.ranges.difference(rangeMap.ranges);
 
+        // FIXME: we can't purge state for ranges we no longer replicate until we know the new epoch has taken effect
+        //  at a quorum of the old electorate
         for (KeyRange range : removed)
         {
             NavigableMap<Key, CommandsForKey> subMap = commandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive());

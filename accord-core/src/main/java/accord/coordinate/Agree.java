@@ -105,6 +105,11 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
         boolean fastPath = ok.witnessedAt.compareTo(txnId) == 0;
         tracker.recordSuccess(from, fastPath);
 
+        if (!fastPath && ok.witnessedAt.epoch > txnId.epoch)
+        {
+            throw new UnsupportedOperationException("FIXME");
+        }
+
         if (tracker.hasMetFastPathCriteria() || shouldSlowPathAccept())
             onPreAccepted();
     }
