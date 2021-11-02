@@ -259,8 +259,11 @@ public class Cluster implements Scheduler
         {
             Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink, stderr);
             for (Id node : nodes)
-                lookup.put(node, new Node(node, topology, sinks.create(node, randomSupplier.get()), randomSupplier.get(),
+            {
+                MessageSink messageSink = sinks.create(node, randomSupplier.get());
+                lookup.put(node, new Node(node, messageSink, new SimpleConfigService(topology), randomSupplier.get(),
                                           nowSupplier.get(), MaelstromStore::new, MaelstromAgent.INSTANCE, sinks, CommandStore.Factory.SINGLE_THREAD));
+            }
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));
             sinks.recurring(() ->

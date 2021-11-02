@@ -17,6 +17,8 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import accord.api.MessageSink;
+import accord.impl.mock.MockConfigurationService;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -147,8 +149,12 @@ public class Cluster implements Scheduler
         {
             Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink, stderr);
             for (Id node : nodes)
-                lookup.put(node, new Node(node, topology, sinks.create(node, randomSupplier.get()), randomSupplier.get(),
+            {
+                MessageSink messageSink = sinks.create(node, randomSupplier.get());
+                MockConfigurationService configurationService = new MockConfigurationService(messageSink, topology);
+                lookup.put(node, new Node(node, messageSink, configurationService, randomSupplier.get(),
                                           nowSupplier.get(), ListStore::new, ListAgent.INSTANCE, sinks, CommandStore.Factory.SYNCHRONIZED));
+            }
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));
             sinks.recurring(() ->

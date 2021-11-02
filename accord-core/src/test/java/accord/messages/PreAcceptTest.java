@@ -1,5 +1,6 @@
 package accord.messages;
 
+import accord.impl.mock.MockConfigurationService;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.MessageSink;
@@ -41,8 +42,15 @@ public class PreAcceptTest
         Random random = new Random();
         MockStore store = new MockStore();
         Scheduler scheduler = new ThreadPoolScheduler();
-        return new Node(nodeId, TOPOLOGY, messageSink, random, clock, () -> store,
-                        new TestAgent(), scheduler, CommandStore.Factory.SINGLE_THREAD);
+        return new Node(nodeId,
+                        messageSink,
+                        new MockConfigurationService(messageSink, TOPOLOGY),
+                        random,
+                        clock,
+                        () -> store,
+                        new TestAgent(),
+                        scheduler,
+                        CommandStore.Factory.SINGLE_THREAD);
     }
 
     @Test

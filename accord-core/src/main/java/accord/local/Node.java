@@ -9,12 +9,7 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
-import accord.api.Agent;
-import accord.api.Key;
-import accord.api.MessageSink;
-import accord.api.Result;
-import accord.api.Scheduler;
-import accord.api.Store;
+import accord.api.*;
 import accord.coordinate.Coordinate;
 import accord.messages.Callback;
 import accord.messages.Request;
@@ -77,6 +72,7 @@ public class Node
     private final CommandStores commandStores;
     private final Id id;
     private final MessageSink messageSink;
+    private final ConfigurationService configurationService;
     private final Random random;
 
     private final LongSupplier nowSupplier;
@@ -89,18 +85,44 @@ public class Node
     private final Map<TxnId, CompletionStage<Result>> coordinating = new ConcurrentHashMap<>();
     private final Set<TxnId> pendingRecovery = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
-    public Node(Id id, Topology clusterTopology, MessageSink messageSink, Random random, LongSupplier nowSupplier,
+    public Node(Id id, MessageSink messageSink, ConfigurationService configurationService, Random random, LongSupplier nowSupplier,
                 Supplier<Store> dataSupplier, Agent agent, Scheduler scheduler, CommandStore.Factory commandStoreFactory)
     {
         this.id = id;
         this.random = random;
         this.agent = agent;
-        this.now = new AtomicReference<>(new Timestamp(clusterTopology.epoch(), nowSupplier.getAsLong(), 0, id));
         this.messageSink = messageSink;
+        this.configurationService = configurationService;
+        Topology topology = configurationService.currentTopology();
+        this.now = new AtomicReference<>(new Timestamp(topology.epoch(), nowSupplier.getAsLong(), 0, id));
         this.nowSupplier = nowSupplier;
         this.scheduler = scheduler;
-        this.commandStores = new CommandStores(numCommandShards(), id, this::uniqueNow, agent, dataSupplier.get(), commandStoreFactory);
-        this.commandStores.updateTopology(clusterTopology);
+        this.commandStores = new CommandStores(numCommandShards(),
+                                               id,
+                                               configurationService,
+                                               this::uniqueNow,
+                                               agent,
+                                               dataSupplier.get(),
+                                               commandStoreFactory);
+        this.commandStores.updateTopology(topology);
+        configurationService.registerListener(new ConfigurationService.Listener() {
+            @Override
+            public void onTopologyUpdate(Topology topology)
+            {
+                commandStores.updateTopology(topology);
+            }
+
+            @Override
+            public void onEpochLowBoundChange(long epoch)
+            {
+                throw new UnsupportedOperationException("GC command store data");
+            }
+        });
+    }
+
+    public ConfigurationService configurationService()
+    {
+        return configurationService;
     }
 
     public void shutdown()

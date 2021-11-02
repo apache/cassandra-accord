@@ -67,9 +67,11 @@ public class MockCluster implements Network, AutoCloseable
     private Node createNode(Id id, Topology topology)
     {
         MockStore store = new MockStore();
+        SimpleMessageSink messageSink = new SimpleMessageSink(id, this);
+        MockConfigurationService configurationService = new MockConfigurationService(messageSink, topology);
         return new Node(id,
-                        topology,
-                        new SimpleMessageSink(id, this),
+                        messageSink,
+                        configurationService,
                         new Random(random.nextLong()),
                         nowSupplier,
                         () -> store,

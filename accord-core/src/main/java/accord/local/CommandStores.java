@@ -1,6 +1,7 @@
 package accord.local;
 
 import accord.api.Agent;
+import accord.api.ConfigurationService;
 import accord.api.KeyRange;
 import accord.api.Store;
 import accord.topology.KeyRanges;
@@ -9,9 +10,7 @@ import accord.txn.Keys;
 import accord.txn.Timestamp;
 import com.google.common.base.Preconditions;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Spliterator;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
@@ -28,10 +27,12 @@ public class CommandStores
     private final Node.Id node;
     private final CommandStore[] commandStores;
     private volatile RangeMapping.Multi rangeMappings;
+    private final ConfigurationService configurationService;
 
-    public CommandStores(int num, Node.Id node, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store, CommandStore.Factory shardFactory)
+    public CommandStores(int num, Node.Id node, ConfigurationService configurationService, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store, CommandStore.Factory shardFactory)
     {
         this.node = node;
+        this.configurationService = configurationService;
         this.commandStores = new CommandStore[num];
         this.rangeMappings = RangeMapping.Multi.empty(num);
         for (int i=0; i<num; i++)
