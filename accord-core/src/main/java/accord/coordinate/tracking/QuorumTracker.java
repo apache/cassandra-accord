@@ -1,9 +1,10 @@
 package accord.coordinate.tracking;
 
+import accord.coordinate.tracking.AbstractQuorumTracker.QuorumShardTracker;
 import accord.local.Node;
 import accord.topology.Topology;
 
-public class QuorumTracker extends AbstractQuorumTracker<QuorumTracker.QuorumShardTracker>
+public class QuorumTracker extends AbstractQuorumTracker<QuorumShardTracker>
 {
     public QuorumTracker(Topology shards)
     {

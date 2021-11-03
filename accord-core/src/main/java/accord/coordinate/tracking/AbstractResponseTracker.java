@@ -12,12 +12,12 @@ import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.function.Predicate;
 
-abstract class AbstractResponseTracker<T extends AbstractResponseTracker.ShardTracker>
+public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.ShardTracker>
 {
     private final Topology topology;
     private final T[] trackers;
 
-    static class ShardTracker
+    public static class ShardTracker
     {
         public final Shard shard;
 
@@ -34,17 +34,17 @@ abstract class AbstractResponseTracker<T extends AbstractResponseTracker.ShardTr
         topology.forEach((i, shard) -> trackers[i] = trackerFactory.apply(shard));
     }
 
-    void forEachTrackerForNode(Node.Id node, BiConsumer<T, Node.Id> consumer)
+    protected void forEachTrackerForNode(Node.Id node, BiConsumer<T, Node.Id> consumer)
     {
         topology.forEachOn(node, (i, shard) -> consumer.accept(trackers[i], node));
     }
 
-    int matchingTrackersForNode(Node.Id node, Predicate<T> consumer)
+    protected int matchingTrackersForNode(Node.Id node, Predicate<T> consumer)
     {
         return topology.matchesOn(node, (i, shard) -> consumer.test(trackers[i]));
     }
 
-    boolean all(Predicate<T> predicate)
+    protected boolean all(Predicate<T> predicate)
     {
         for (T tracker : trackers)
             if (!predicate.test(tracker))
@@ -52,7 +52,7 @@ abstract class AbstractResponseTracker<T extends AbstractResponseTracker.ShardTr
         return true;
     }
 
-    boolean any(Predicate<T> predicate)
+    protected boolean any(Predicate<T> predicate)
     {
         for (T tracker : trackers)
             if (predicate.test(tracker))
@@ -60,7 +60,7 @@ abstract class AbstractResponseTracker<T extends AbstractResponseTracker.ShardTr
         return false;
     }
 
-    <V> V accumulate(BiFunction<T, V, V> function, V start)
+    protected <V> V accumulate(BiFunction<T, V, V> function, V start)
     {
         for (T tracker : trackers)
             start = function.apply(tracker, start);
