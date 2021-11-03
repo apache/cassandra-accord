@@ -107,7 +107,7 @@ public class Node
                                                this::uniqueNow,
                                                agent,
                                                dataSupplier.get(),
-                                               commandStoreFactory);
+                                               commandStoreFactory, topologyTracker);
         this.commandStores.updateTopology(topology);
         configurationService.registerListener(new ConfigurationService.Listener() {
             @Override
@@ -128,6 +128,11 @@ public class Node
     public ConfigurationService configurationService()
     {
         return configurationService;
+    }
+
+    public TopologyTracker topologyTracker()
+    {
+        return topologyTracker;
     }
 
     public void shutdown()

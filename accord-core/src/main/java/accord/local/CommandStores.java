@@ -6,6 +6,7 @@ import accord.api.KeyRange;
 import accord.api.Store;
 import accord.topology.KeyRanges;
 import accord.topology.Topology;
+import accord.topology.TopologyTracker;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
 import com.google.common.base.Preconditions;
@@ -28,15 +29,17 @@ public class CommandStores
     private final CommandStore[] commandStores;
     private volatile RangeMapping.Multi rangeMappings;
     private final ConfigurationService configurationService;
+    private final TopologyTracker topologyTracker;
 
-    public CommandStores(int num, Node.Id node, ConfigurationService configurationService, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store, CommandStore.Factory shardFactory)
+    public CommandStores(int num, Node.Id node, ConfigurationService configurationService, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store, CommandStore.Factory shardFactory, TopologyTracker topologyTracker)
     {
         this.node = node;
         this.configurationService = configurationService;
         this.commandStores = new CommandStore[num];
         this.rangeMappings = RangeMapping.Multi.empty(num);
+        this.topologyTracker = topologyTracker;
         for (int i=0; i<num; i++)
-            commandStores[i] = shardFactory.create(i, node, uniqueNow, agent, store, this::getRangeMapping);
+            commandStores[i] = shardFactory.create(i, node, uniqueNow, agent, store, topologyTracker, this::getRangeMapping);
     }
 
     public Topology clusterTopology()
@@ -116,7 +119,7 @@ public class CommandStores
         for (int i=0; i<rangeMappings.mappings.length; i++)
         {
             KeyRanges newRanges = rangeMappings.mappings[i].ranges.difference(removed).union(sharded.get(i)).mergeTouching();
-            newMappings[i] = RangeMapping.mapRanges(newRanges, local);
+            newMappings[i] = new RangeMapping(newRanges, local);
         }
 
         RangeMapping.Multi previous = rangeMappings;

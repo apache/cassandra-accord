@@ -1,8 +1,10 @@
 package accord.topology;
 
 import accord.api.ConfigurationService;
+import accord.api.KeyRange;
 import accord.coordinate.tracking.AbstractResponseTracker;
 import accord.local.Node;
+import accord.txn.Keys;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
@@ -169,7 +171,6 @@ public class TopologyTracker implements ConfigurationService.Listener
         }
     }
 
-    private Topology current = Topology.EMPTY;
     private volatile Epochs epochs = Epochs.EMPTY;
 
     @Override
@@ -186,12 +187,51 @@ public class TopologyTracker implements ConfigurationService.Listener
 
     Topology current()
     {
-        return current;
+        return epochs.current();
+    }
+
+    public long epoch()
+    {
+        return current().epoch;
     }
 
     @VisibleForTesting
     EpochState getEpochState(long epoch)
     {
         return epochs.get(epoch);
+    }
+
+    /**
+     * Return the nodes from all active epochs needed to service the intersection of the given
+     * ranges and keys
+     */
+    public Set<Node.Id> nodesFor(KeyRanges ranges, Keys keys)
+    {
+        Epochs current = epochs;
+        long maxEpoch = current.current().epoch;
+        Set<Node.Id> result = new HashSet<>();
+
+        for (long epoch=maxEpoch; epoch>=current.minEpoch; epoch--)
+        {
+            EpochState epochState = current.get(epoch);
+
+            // TODO: efficiency
+            Topology forKeys = epochState.topology.forKeys(keys);
+            for (Shard shard : forKeys)
+            {
+                for (KeyRange range : ranges)
+                {
+                    if (range.compareIntersecting(shard.range) == 0)
+                    {
+                        result.addAll(shard.nodes);
+                        break;
+                    }
+                }
+            }
+
+            if (epochState.acknowledged)
+                break;
+        }
+        return result;
     }
 }

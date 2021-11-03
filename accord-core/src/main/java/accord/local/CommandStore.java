@@ -5,6 +5,7 @@ import accord.api.Key;
 import accord.api.KeyRange;
 import accord.api.Store;
 import accord.topology.KeyRanges;
+import accord.topology.TopologyTracker;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
 import accord.txn.TxnId;
@@ -29,6 +30,7 @@ public abstract class CommandStore
                             Function<Timestamp, Timestamp> uniqueNow,
                             Agent agent,
                             Store store,
+                            TopologyTracker topologyTracker,
                             IntFunction<RangeMapping> mappingSupplier);
         Factory SYNCHRONIZED = Synchronized::new;
         Factory SINGLE_THREAD = SingleThread::new;
@@ -40,6 +42,7 @@ public abstract class CommandStore
     private final Function<Timestamp, Timestamp> uniqueNow;
     private final Agent agent;
     private final Store store;
+    private final TopologyTracker topologyTracker;
     private final IntFunction<RangeMapping> mappingSupplier;
     private RangeMapping rangeMap;
 
@@ -51,6 +54,7 @@ public abstract class CommandStore
                         Function<Timestamp, Timestamp> uniqueNow,
                         Agent agent,
                         Store store,
+                        TopologyTracker topologyTracker,
                         IntFunction<RangeMapping> mappingSupplier)
     {
         this.index = index;
@@ -58,6 +62,7 @@ public abstract class CommandStore
         this.uniqueNow = uniqueNow;
         this.agent = agent;
         this.store = store;
+        this.topologyTracker = topologyTracker;
         this.mappingSupplier = mappingSupplier;
         rangeMap = mappingSupplier.apply(index);
     }
@@ -111,37 +116,6 @@ public abstract class CommandStore
     {
         // TODO: check thread safety of callers
         return rangeMap.ranges;
-    }
-
-    public Set<Node.Id> nodesFor(Command command)
-    {
-        RangeMapping mapping = rangeMap;
-        Keys keys = command.txn().keys;
-
-        Set<Node.Id> result = new HashSet<>();
-        int lowerBound = 0;
-        for (int i=0; i<mapping.ranges.size(); i++)
-        {
-            KeyRange range = mapping.ranges.get(i);
-            int lowKeyIdx = range.lowKeyIndex(keys, lowerBound, keys.size());
-
-            if (lowKeyIdx < -keys.size())
-                break;
-
-            if (lowKeyIdx < 0)
-            {
-                // all remaining keys are greater than this range, so go to the next one
-                lowerBound = -1 - lowKeyIdx;
-                continue;
-            }
-
-            // otherwise this range intersects with the txn, so add it's shard's endpoings
-            // TODO: filter pending nodes for reads
-            result.addAll(mapping.shards[i].nodes);
-            lowerBound = lowKeyIdx;
-        }
-
-        return result;
     }
 
     void onTopologyChange(RangeMapping prevMapping, RangeMapping currentMapping)
@@ -233,9 +207,10 @@ public abstract class CommandStore
                             Function<Timestamp, Timestamp> uniqueNow,
                             Agent agent,
                             Store store,
+                            TopologyTracker topologyTracker,
                             IntFunction<RangeMapping> mappingSupplier)
         {
-            super(index, nodeId, uniqueNow, agent, store, mappingSupplier);
+            super(index, nodeId, uniqueNow, agent, store, topologyTracker, mappingSupplier);
         }
 
         @Override
@@ -299,9 +274,10 @@ public abstract class CommandStore
                             Function<Timestamp, Timestamp> uniqueNow,
                             Agent agent,
                             Store store,
+                            TopologyTracker topologyTracker,
                             IntFunction<RangeMapping> mappingSupplier)
         {
-            super(index, nodeId, uniqueNow, agent, store, mappingSupplier);
+            super(index, nodeId, uniqueNow, agent, store, topologyTracker, mappingSupplier);
             executor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
                 thread.setName(CommandStore.class.getSimpleName() + '[' + nodeId + ':' + index + ']');
@@ -341,9 +317,10 @@ public abstract class CommandStore
                                  Function<Timestamp, Timestamp> uniqueNow,
                                  Agent agent,
                                  Store store,
+                                 TopologyTracker topologyTracker,
                                  IntFunction<RangeMapping> mappingSupplier)
         {
-            super(index, nodeId, uniqueNow, agent, store, mappingSupplier);
+            super(index, nodeId, uniqueNow, agent, store, topologyTracker, mappingSupplier);
         }
 
         private void assertThread()

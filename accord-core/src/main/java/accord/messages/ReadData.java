@@ -102,8 +102,9 @@ public class ReadData implements Request
             {
                 isObsolete = true;
                 waitingOnReporter.cancel();
+                Set<Node.Id> nodes = node.topologyTracker().nodesFor(command.commandStore.ranges(), command.txn().keys);
                 // FIXME: this may result in redundant messages being sent when a shard is split across several command shards
-                node.send(command.commandStore.nodesFor(command), new Apply(command.txnId(), command.txn(), command.executeAt(), command.savedDeps(), command.writes(), command.result()));
+                node.send(nodes, new Apply(command.txnId(), command.txn(), command.executeAt(), command.savedDeps(), command.writes(), command.result()));
                 node.reply(replyToNode, replyToMessage, new ReadNack());
             }
         }

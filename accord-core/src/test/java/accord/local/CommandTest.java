@@ -6,6 +6,7 @@ import accord.impl.TopologyFactory;
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockStore;
 import accord.topology.Topology;
+import accord.topology.TopologyTracker;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
 import accord.txn.Txn;
@@ -35,6 +36,7 @@ public class CommandTest
         final AtomicReference<RangeMapping> mapping = new AtomicReference<>(RangeMapping.EMPTY);
         final MockStore data = new MockStore();
         final AtomicReference<Timestamp> nextTimestamp = new AtomicReference<>(Timestamp.NONE);
+        final TopologyTracker topologyTracker = new TopologyTracker();
         final Function<Timestamp, Timestamp> uniqueNow = atleast -> {
             Timestamp next = nextTimestamp.get();
             Assertions.assertTrue(next.compareTo(atleast) >= 0);
@@ -45,7 +47,7 @@ public class CommandTest
     private static void setMappingEpoch(AtomicReference<RangeMapping> mapping, long epoch)
     {
         RangeMapping current = mapping.get();
-        RangeMapping next = new RangeMapping(current.ranges, current.shards, current.topology.withEpoch(epoch));
+        RangeMapping next = new RangeMapping(current.ranges, current.topology.withEpoch(epoch));
         mapping.set(next);
     }
 
@@ -56,6 +58,7 @@ public class CommandTest
                                              storeSupport.uniqueNow,
                                              new TestAgent(),
                                              storeSupport.data,
+                                             storeSupport.topologyTracker,
                                              i -> storeSupport.mapping.get());
     }
 
