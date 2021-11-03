@@ -21,6 +21,7 @@ import java.util.*;
  * Assumes a topology service that won't report epoch n without having n-1 etc also available
  *
  * TODO: support creating after epoch 0
+ * TODO: rename
  */
 public class TopologyTracker implements ConfigurationService.Listener
 {
@@ -122,6 +123,12 @@ public class TopologyTracker implements ConfigurationService.Listener
         {
             return acknowledged;
         }
+
+        boolean acknowledgedFor(Keys keys)
+        {
+            // TODO: check individual shards
+            return acknowledged;
+        }
     }
 
     private static class Epochs
@@ -201,6 +208,32 @@ public class TopologyTracker implements ConfigurationService.Listener
         return epochs.get(epoch);
     }
 
+    public List<Topology> forKeys(Keys keys)
+    {
+        Epochs current = epochs;
+        long maxEpoch = current.current().epoch;
+
+        EpochState epochState = current.get(maxEpoch);
+        Topology topology = epochState.topology.forKeys(keys);
+        if (epochState.acknowledgedFor(keys))
+        {
+            return Collections.singletonList(topology);
+        }
+        else
+        {
+            List<Topology> topologies = new ArrayList<>(2);
+            topologies.add(topology);
+            for (long epoch=maxEpoch-1; epoch>=current.minEpoch; epoch--)
+            {
+                epochState = current.get(epoch);
+                topologies.add(epochState.topology.forKeys(keys));
+                if (epochState.acknowledgedFor(keys))
+                    break;
+            }
+            return topologies;
+        }
+    }
+
     /**
      * Return the nodes from all active epochs needed to service the intersection of the given
      * ranges and keys
@@ -229,7 +262,7 @@ public class TopologyTracker implements ConfigurationService.Listener
                 }
             }
 
-            if (epochState.acknowledged)
+            if (epochState.acknowledgedFor(keys))
                 break;
         }
         return result;

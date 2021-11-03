@@ -71,6 +71,30 @@ public class Topology extends AbstractCollection<Shard>
         this.supersetRangeIndexes = supersetIndexes;
     }
 
+    @Override
+    public String toString()
+    {
+        return "Topology{" + "epoch=" + epoch + ", " + super.toString() + '}';
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Topology topology = (Topology) o;
+        return epoch == topology.epoch && Arrays.equals(shards, topology.shards) && ranges.equals(topology.ranges) && nodeLookup.equals(topology.nodeLookup) && subsetOfRanges.equals(topology.subsetOfRanges) && Arrays.equals(supersetRangeIndexes, topology.supersetRangeIndexes);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        int result = Objects.hash(epoch, ranges, nodeLookup, subsetOfRanges);
+        result = 31 * result + Arrays.hashCode(shards);
+        result = 31 * result + Arrays.hashCode(supersetRangeIndexes);
+        return result;
+    }
+
     public static Topology select(long epoch, Shard[] shards, int[] indexes)
     {
         Shard[] subset = new Shard[indexes.length];
