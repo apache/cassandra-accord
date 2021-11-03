@@ -37,36 +37,36 @@ public class TopologyChangeTest
 
     }
 
-    @Test
-    void disjointElectorate() throws Throwable
-    {
-        Keys keys = keys(150);
-        KeyRange range = range(100, 200);
-        Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
-        Topology topology2 = topology(2, shard(range, idList(4, 5, 6), idSet(4, 5)));
-        try (MockCluster cluster = MockCluster.builder().nodes(6).topology(topology1).build())
-        {
-            Node node1 = cluster.get(1);
-            TxnId txnId1 = node1.nextTxnId();
-            Txn txn1 = writeTxn(keys);
-            node1.coordinate(txnId1, txn1).toCompletableFuture().get();
-            node1.local(keys).forEach(commands -> {
-                Command command = commands.command(txnId1);
-                Assertions.assertTrue(command.savedDeps().isEmpty());
-            });
-
-            cluster.get(4).updateTopology(topology2);
-            cluster.get(5).updateTopology(topology2);
-            cluster.get(6).updateTopology(topology2);
-            Node node4 = cluster.get(4);
-
-            TxnId txnId2 = node1.nextTxnId();
-            Txn txn2 = writeTxn(keys);
-            node4.coordinate(txnId2, txn2).toCompletableFuture().get();
-            node4.local(keys).forEach(commands -> {
-                Command command = commands.command(txnId2);
-                Assertions.assertTrue(command.savedDeps().contains(txnId1));
-            });
-        }
-    }
+//    @Test
+//    void disjointElectorate() throws Throwable
+//    {
+//        Keys keys = keys(150);
+//        KeyRange range = range(100, 200);
+//        Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
+//        Topology topology2 = topology(2, shard(range, idList(4, 5, 6), idSet(4, 5)));
+//        try (MockCluster cluster = MockCluster.builder().nodes(6).topology(topology1).build())
+//        {
+//            Node node1 = cluster.get(1);
+//            TxnId txnId1 = node1.nextTxnId();
+//            Txn txn1 = writeTxn(keys);
+//            node1.coordinate(txnId1, txn1).toCompletableFuture().get();
+//            node1.local(keys).forEach(commands -> {
+//                Command command = commands.command(txnId1);
+//                Assertions.assertTrue(command.savedDeps().isEmpty());
+//            });
+//
+//            cluster.get(4).updateTopology(topology2);
+//            cluster.get(5).updateTopology(topology2);
+//            cluster.get(6).updateTopology(topology2);
+//            Node node4 = cluster.get(4);
+//
+//            TxnId txnId2 = node1.nextTxnId();
+//            Txn txn2 = writeTxn(keys);
+//            node4.coordinate(txnId2, txn2).toCompletableFuture().get();
+//            node4.local(keys).forEach(commands -> {
+//                Command command = commands.command(txnId2);
+//                Assertions.assertTrue(command.savedDeps().contains(txnId1));
+//            });
+//        }
+//    }
 }

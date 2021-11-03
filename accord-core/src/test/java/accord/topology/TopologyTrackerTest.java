@@ -39,9 +39,9 @@ public class TopologyTrackerTest
         // TODO: test fast path enabling
     }
 
-    private static List<Topology> topologies(Topology... topologies)
+    private static Topologies topologies(Topology... topologies)
     {
-        return Lists.newArrayList(topologies);
+        return new Topologies.Multi(topologies);
     }
 
     @Test

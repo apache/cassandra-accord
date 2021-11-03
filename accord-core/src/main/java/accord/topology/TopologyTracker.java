@@ -208,7 +208,7 @@ public class TopologyTracker implements ConfigurationService.Listener
         return epochs.get(epoch);
     }
 
-    public List<Topology> forKeys(Keys keys)
+    public Topologies forKeys(Keys keys)
     {
         Epochs current = epochs;
         long maxEpoch = current.current().epoch;
@@ -217,11 +217,11 @@ public class TopologyTracker implements ConfigurationService.Listener
         Topology topology = epochState.topology.forKeys(keys);
         if (epochState.acknowledgedFor(keys))
         {
-            return Collections.singletonList(topology);
+            return new Topologies.Singleton(topology);
         }
         else
         {
-            List<Topology> topologies = new ArrayList<>(2);
+            Topologies.Multi topologies = new Topologies.Multi(2);
             topologies.add(topology);
             for (long epoch=maxEpoch-1; epoch>=current.minEpoch; epoch--)
             {
@@ -240,18 +240,14 @@ public class TopologyTracker implements ConfigurationService.Listener
      */
     public Set<Node.Id> nodesFor(KeyRanges ranges, Keys keys)
     {
-        Epochs current = epochs;
-        long maxEpoch = current.current().epoch;
+        Topologies topologies = forKeys(keys);
         Set<Node.Id> result = new HashSet<>();
-
-        for (long epoch=maxEpoch; epoch>=current.minEpoch; epoch--)
+        for (int i=0,mi=topologies.size(); i<mi; i++)
         {
-            EpochState epochState = current.get(epoch);
-
-            // TODO: efficiency
-            Topology forKeys = epochState.topology.forKeys(keys);
-            for (Shard shard : forKeys)
+            Topology topology = topologies.get(i);
+            for (Shard shard : topology)
             {
+                // TODO: efficiency
                 for (KeyRange range : ranges)
                 {
                     if (range.compareIntersecting(shard.range) == 0)
@@ -261,9 +257,6 @@ public class TopologyTracker implements ConfigurationService.Listener
                     }
                 }
             }
-
-            if (epochState.acknowledgedFor(keys))
-                break;
         }
         return result;
     }
