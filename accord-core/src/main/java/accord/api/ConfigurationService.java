@@ -1,5 +1,6 @@
 package accord.api;
 
+import accord.local.Node;
 import accord.topology.Topology;
 
 /**
@@ -10,8 +11,16 @@ public interface ConfigurationService
 {
     interface Listener
     {
+        /**
+         * Informs listeners of new topology. This is guaranteed to be called sequentially for each epoch after
+         * the initial topology returned by `currentTopology` on startup.
+         */
         void onTopologyUpdate(Topology topology);
-        void onEpochLowBoundChange(long epoch);
+
+        /**
+         * Called when the given node the configuration service learns that a node has acknowledged a config epoch
+         */
+        void onEpochAcknowledgement(Node.Id node, long epoch);
     }
 
     void registerListener(Listener listener);
@@ -23,6 +32,9 @@ public interface ConfigurationService
     long getEpochLowBound();
 
 
+    /**
+     * Returns the current topology. Also called on startup for the "starting point" topology.
+     */
     Topology currentTopology();
 
     Topology getTopologyForEpoch(long epoch);
