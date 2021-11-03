@@ -108,6 +108,7 @@ public class CommandStores
         Topology local = cluster.forNode(node);
         KeyRanges removed = rangeMappings.local.ranges().difference(local.ranges());
         KeyRanges added = local.ranges().difference(rangeMappings.local.ranges());
+        // FIXME: fetch transaction history for added ranges
         List<KeyRanges> sharded = shardRanges(added, commandStores.length);
 
         RangeMapping[] newMappings = new RangeMapping[rangeMappings.mappings.length];

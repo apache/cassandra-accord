@@ -17,6 +17,8 @@ import java.util.*;
  * * clean up obsolete data
  *
  * Assumes a topology service that won't report epoch n without having n-1 etc also available
+ *
+ * TODO: support creating after epoch 0
  */
 public class TopologyTracker implements ConfigurationService.Listener
 {
@@ -167,14 +169,8 @@ public class TopologyTracker implements ConfigurationService.Listener
         }
     }
 
-    private final Node.Id thisNode;
     private Topology current = Topology.EMPTY;
     private volatile Epochs epochs = Epochs.EMPTY;
-
-    public TopologyTracker(Node.Id thisNode)
-    {
-        this.thisNode = thisNode;
-    }
 
     @Override
     public synchronized void onTopologyUpdate(Topology topology)

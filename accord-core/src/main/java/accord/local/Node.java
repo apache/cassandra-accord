@@ -16,6 +16,7 @@ import accord.messages.Request;
 import accord.messages.Reply;
 import accord.topology.Shard;
 import accord.topology.Topology;
+import accord.topology.TopologyTracker;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
 import accord.txn.Txn;
@@ -73,6 +74,7 @@ public class Node
     private final Id id;
     private final MessageSink messageSink;
     private final ConfigurationService configurationService;
+    private final TopologyTracker topologyTracker;
     private final Random random;
 
     private final LongSupplier nowSupplier;
@@ -93,7 +95,9 @@ public class Node
         this.agent = agent;
         this.messageSink = messageSink;
         this.configurationService = configurationService;
+        this.topologyTracker = new TopologyTracker();
         Topology topology = configurationService.currentTopology();
+        topologyTracker.onTopologyUpdate(topology);
         this.now = new AtomicReference<>(new Timestamp(topology.epoch(), nowSupplier.getAsLong(), 0, id));
         this.nowSupplier = nowSupplier;
         this.scheduler = scheduler;
@@ -110,12 +114,13 @@ public class Node
             public void onTopologyUpdate(Topology topology)
             {
                 commandStores.updateTopology(topology);
+                topologyTracker.onTopologyUpdate(topology);
             }
 
             @Override
-            public void onEpochLowBoundChange(long epoch)
+            public void onEpochAcknowledgement(Id node, long epoch)
             {
-                throw new UnsupportedOperationException("GC command store data");
+                topologyTracker.onEpochAcknowledgement(node, epoch);
             }
         });
     }
