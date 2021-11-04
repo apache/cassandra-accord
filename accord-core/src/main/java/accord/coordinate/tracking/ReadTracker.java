@@ -3,7 +3,7 @@ package accord.coordinate.tracking;
 import accord.local.Node.Id;
 import accord.topology.Shard;
 
-import accord.topology.Topology;
+import accord.topology.Topologies;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
@@ -59,10 +59,12 @@ public class ReadTracker extends AbstractResponseTracker<ReadTracker.ReadShardTr
 
     private final List<Id> candidates;
 
-    public ReadTracker(Topology topology)
+    public ReadTracker(Topologies topologies)
     {
-        super(topology, ReadShardTracker[]::new, ReadShardTracker::new);
-        candidates = new ArrayList<>(topology.nodes());
+        super(topologies, ReadShardTracker[]::new, ReadShardTracker::new);
+        // TODO: do we want all nodes from all epochs for reads??
+        // TODO: may also need to -not- read from newer epochs if new nodes don't have data
+        candidates = new ArrayList<>(topologies.nodes());
     }
 
     @VisibleForTesting

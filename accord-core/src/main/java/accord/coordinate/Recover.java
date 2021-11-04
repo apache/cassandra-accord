@@ -7,7 +7,7 @@ import java.util.Map;
 import accord.coordinate.tracking.FastPathTracker;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.topology.Shard;
-import accord.topology.Topology;
+import accord.topology.Topologies;
 import accord.txn.Ballot;
 import accord.messages.Callback;
 import accord.local.Node;
@@ -33,9 +33,9 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
 
         RetryAfterCommits(Dependencies waitOn)
         {
-            retryTracker = new QuorumTracker(topology);
+            retryTracker = new QuorumTracker(topologies);
             for (Map.Entry<TxnId, Txn> e : waitOn)
-                node.send(topology, new WaitOnCommit(e.getKey(), e.getValue().keys()), this);
+                node.send(topologies.nodes(), new WaitOnCommit(e.getKey(), e.getValue().keys()), this);
         }
 
         @Override
@@ -50,7 +50,7 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
 
                 if (retryTracker.hasReachedQuorum())
                 {
-                    new Recover(node, ballot, txnId, txn, topology).handle((success, failure) -> {
+                    new Recover(node, ballot, txnId, txn, topologies).handle((success, failure) -> {
                         if (success != null) complete(success);
                         else completeExceptionally(failure);
                         return null;
@@ -106,13 +106,13 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
 
     public Recover(Node node, Ballot ballot, TxnId txnId, Txn txn)
     {
-        this(node, ballot, txnId, txn, node.clusterTopology().forKeys(txn.keys()));
+        this(node, ballot, txnId, txn, node.topologyTracker().forKeys(txn.keys()));
     }
 
-    private Recover(Node node, Ballot ballot, TxnId txnId, Txn txn, Topology topology)
+    private Recover(Node node, Ballot ballot, TxnId txnId, Txn txn, Topologies topologies)
     {
-        super(node, ballot, txnId, txn, topology);
-        tracker = new FastPathTracker<>(topology, ShardTracker[]::new, ShardTracker::new);
+        super(node, ballot, txnId, txn, topologies);
+        tracker = new FastPathTracker<>(topologies, ShardTracker[]::new, ShardTracker::new);
         node.send(tracker.nodes(), new BeginRecovery(txnId, txn, ballot), this);
     }
 
@@ -162,7 +162,7 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
                 case ReadyToExecute:
                 case Executed:
                 case Applied:
-                    complete(new Agreed(txnId, txn, acceptOrCommit.executeAt, acceptOrCommit.deps, topology, acceptOrCommit.writes, acceptOrCommit.result));
+                    complete(new Agreed(txnId, txn, acceptOrCommit.executeAt, acceptOrCommit.deps, topologies, acceptOrCommit.writes, acceptOrCommit.result));
                     return;
             }
         }

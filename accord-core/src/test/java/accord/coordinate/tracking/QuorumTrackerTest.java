@@ -9,6 +9,7 @@ import accord.topology.Topology;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import static accord.Utils.topologies;
 import static accord.Utils.topology;
 
 public class QuorumTrackerTest
@@ -35,7 +36,7 @@ public class QuorumTrackerTest
     void singleShard()
     {
         Topology subTopology = topology(topology.get(0));
-        QuorumTracker responses = new QuorumTracker(subTopology);
+        QuorumTracker responses = new QuorumTracker(topologies(subTopology));
 
         responses.recordSuccess(ids[0]);
         assertResponseState(responses, false, false, true);
@@ -54,7 +55,7 @@ public class QuorumTrackerTest
     void unexpectedResponsesAreIgnored()
     {
         Topology subTopology = topology(topology.get(0));
-        QuorumTracker responses = new QuorumTracker(subTopology);
+        QuorumTracker responses = new QuorumTracker(topologies(subTopology));
 
         responses.recordSuccess(ids[0]);
         assertResponseState(responses, false, false, true);
@@ -71,7 +72,7 @@ public class QuorumTrackerTest
     void failure()
     {
         Topology subTopology = topology(topology.get(0));
-        QuorumTracker responses = new QuorumTracker(subTopology);
+        QuorumTracker responses = new QuorumTracker(topologies(subTopology));
 
         responses.recordSuccess(ids[0]);
         assertResponseState(responses, false, false, true);
@@ -87,7 +88,7 @@ public class QuorumTrackerTest
     void multiShard()
     {
         Topology subTopology = new Topology(1, new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
-        QuorumTracker responses = new QuorumTracker(subTopology);
+        QuorumTracker responses = new QuorumTracker(topologies(subTopology));
         /*
         (000, 100](100, 200](200, 300]
         [1, 2, 3] [2, 3, 4] [3, 4, 5]

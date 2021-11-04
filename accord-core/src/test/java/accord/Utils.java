@@ -5,6 +5,7 @@ import accord.local.Node;
 import accord.impl.mock.MockStore;
 import accord.topology.KeyRanges;
 import accord.topology.Shard;
+import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.txn.Txn;
 import accord.txn.Keys;
@@ -86,5 +87,10 @@ public class Utils
     public static Topology topology(Shard... shards)
     {
         return topology(1, shards);
+    }
+
+    public static Topologies topologies(Topology... topologies)
+    {
+        return new Topologies.Multi(topologies);
     }
 }

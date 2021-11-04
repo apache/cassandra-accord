@@ -1,6 +1,11 @@
 package accord.topology;
 
+import accord.local.Node;
+import accord.utils.IndexedConsumer;
+
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
 
 public interface Topologies
 {
@@ -13,6 +18,14 @@ public interface Topologies
 
     Topology get(int i);
     int size();
+
+    Set<Node.Id> nodes();
+
+    default void forEach(IndexedConsumer<Topology> consumer)
+    {
+        for (int i=0, mi=size(); i<mi; i++)
+            consumer.accept(i, get(i));
+    }
 
     private static boolean equals(Topologies t, Object o)
     {
@@ -87,6 +100,12 @@ public interface Topologies
         }
 
         @Override
+        public Set<Node.Id> nodes()
+        {
+            return topology.nodes();
+        }
+
+        @Override
         public boolean equals(Object obj)
         {
             return Topologies.equals(this, obj);
@@ -123,6 +142,15 @@ public interface Topologies
         public Topology current()
         {
             return get(size() - 1);
+        }
+
+        @Override
+        public Set<Node.Id> nodes()
+        {
+            Set<Node.Id> result = new HashSet<>();
+            for (int i=0,mi=size(); i<mi; i++)
+                result.addAll(get(i).nodes());
+            return result;
         }
 
         @Override

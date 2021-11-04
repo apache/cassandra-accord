@@ -9,7 +9,7 @@ import accord.coordinate.tracking.ReadTracker;
 import accord.api.Result;
 import accord.messages.Callback;
 import accord.local.Node;
-import accord.topology.Topology;
+import accord.topology.Topologies;
 import accord.txn.Dependencies;
 import accord.messages.Apply;
 import accord.messages.ReadData.ReadReply;
@@ -30,7 +30,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
     final TxnId txnId;
     final Txn txn;
     final Timestamp executeAt;
-    final Topology topology;
+    final Topologies topologies;
     final Keys keys;
     final Dependencies deps;
     final ReadTracker tracker;
@@ -45,15 +45,15 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         this.keys = txn.keys();
         this.deps = agreed.deps;
         this.executeAt = agreed.executeAt;
-        this.topology = agreed.topology;
-        this.tracker = new ReadTracker(topology);
-        this.replicaIndex = node.random().nextInt(topology.get(0).nodes.size());
+        this.topologies = agreed.topologies;
+        this.tracker = new ReadTracker(topologies);
+        this.replicaIndex = node.random().nextInt(topologies.get(0).get(0).nodes.size());
 
         // TODO: perhaps compose these different behaviours differently?
         if (agreed.applied != null)
         {
             Apply send = new Apply(txnId, txn, executeAt, agreed.deps, agreed.applied, agreed.result);
-            node.send(topology, send);
+            node.send(topologies.nodes(), send);
             complete(agreed.result);
         }
         else
@@ -105,7 +105,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         if (tracker.hasCompletedRead())
         {
             Result result = txn.result(data);
-            node.send(topology, new Apply(txnId, txn, executeAt, deps, txn.execute(executeAt, data), result));
+            node.send(topologies.nodes(), new Apply(txnId, txn, executeAt, deps, txn.execute(executeAt, data), result));
             complete(result);
         }
     }

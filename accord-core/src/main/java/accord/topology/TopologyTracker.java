@@ -72,9 +72,9 @@ public class TopologyTracker implements ConfigurationService.Listener
 
     private static class EpochAcknowledgementTracker extends AbstractResponseTracker<ShardEpochTracker>
     {
-        public EpochAcknowledgementTracker(Topology topology)
+        public EpochAcknowledgementTracker(Topologies topologies)
         {
-            super(topology, ShardEpochTracker[]::new, ShardEpochTracker::new);
+            super(topologies, ShardEpochTracker[]::new, ShardEpochTracker::new);
         }
 
         public void recordAcknowledgement(Node.Id node)
@@ -104,7 +104,8 @@ public class TopologyTracker implements ConfigurationService.Listener
         {
             this.topology = topology;
             this.previous = previous;
-            this.acknowledgements = new EpochAcknowledgementTracker(previous);
+            // FIXME: may need a separate tracker class
+            this.acknowledgements = new EpochAcknowledgementTracker(new Topologies.Singleton(previous));
             updateState();
         }
 

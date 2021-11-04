@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 
+import static accord.Utils.topologies;
 import static accord.Utils.topology;
 
 public class ReadTrackerTest
@@ -36,7 +37,7 @@ public class ReadTrackerTest
     void singleShard()
     {
         Topology subTopology = topology(topology.get(0));
-        ReadTracker tracker = new ReadTracker(subTopology);
+        ReadTracker tracker = new ReadTracker(topologies(subTopology));
 
         tracker.recordInflightRead(ids[0]);
         assertResponseState(tracker, false, false);
@@ -49,7 +50,7 @@ public class ReadTrackerTest
     void singleShardRetry()
     {
         Topology subTopology = topology(topology.get(0));
-        ReadTracker tracker = new ReadTracker(subTopology);
+        ReadTracker tracker = new ReadTracker(topologies(subTopology));
 
         tracker.recordInflightRead(ids[0]);
         assertResponseState(tracker, false, false);
@@ -68,7 +69,7 @@ public class ReadTrackerTest
     void singleShardFailure()
     {
         Topology subTopology = topology(topology.get(0));
-        ReadTracker tracker = new ReadTracker(subTopology);
+        ReadTracker tracker = new ReadTracker(topologies(subTopology));
 
         tracker.recordInflightRead(ids[0]);
         tracker.recordReadFailure(ids[0]);
@@ -87,7 +88,7 @@ public class ReadTrackerTest
     void multiShardSuccess()
     {
         Topology subTopology = new Topology(1, new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
-        ReadTracker responses = new ReadTracker(subTopology);
+        ReadTracker responses = new ReadTracker(topologies(subTopology));
         /*
         (000, 100](100, 200](200, 300]
         [1, 2, 3] [2, 3, 4] [3, 4, 5]
@@ -102,7 +103,7 @@ public class ReadTrackerTest
     void multiShardRetryAndReadSet()
     {
         Topology subTopology = new Topology(1, new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
-        ReadTracker responses = new ReadTracker(subTopology);
+        ReadTracker responses = new ReadTracker(topologies(subTopology));
         /*
         (000, 100](100, 200](200, 300]
         [1, 2, 3] [2, 3, 4] [3, 4, 5]

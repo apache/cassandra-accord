@@ -39,11 +39,6 @@ public class TopologyTrackerTest
         // TODO: test fast path enabling
     }
 
-    private static Topologies topologies(Topology... topologies)
-    {
-        return new Topologies.Multi(topologies);
-    }
-
     @Test
     void forKeys()
     {
