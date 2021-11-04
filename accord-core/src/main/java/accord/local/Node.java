@@ -145,7 +145,7 @@ public class Node
         return now.updateAndGet(cur -> {
             // TODO: this diverges from proof; either show isomorphism or make consistent
             long now = nowSupplier.getAsLong();
-            long epoch = Math.max(cur.epoch, commandStores.epoch());
+            long epoch = Math.max(cur.epoch, topologyTracker.epoch());
             return (now > cur.real)
                  ? new Timestamp(epoch, now, 0, id)
                  : new Timestamp(epoch, cur.real, cur.logical + 1, id);
@@ -159,7 +159,7 @@ public class Node
                 Timestamp timestamp = proposed.compareTo(current) <= 0
                         ? new Timestamp(current.epoch, current.real, current.logical + 1, id)
                         : proposed;
-                return timestamp.withMinEpoch(commandStores.epoch());
+                return timestamp.withMinEpoch(topologyTracker.epoch());
             });
         return uniqueNow();
     }

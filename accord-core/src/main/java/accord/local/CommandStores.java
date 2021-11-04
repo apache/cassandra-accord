@@ -52,11 +52,6 @@ public class CommandStores
         return rangeMappings.mappings[idx];
     }
 
-    public long epoch()
-    {
-        return rangeMappings.cluster.epoch();
-    }
-
     public synchronized void shutdown()
     {
         for (CommandStore commandStore : commandStores)
