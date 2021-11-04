@@ -22,7 +22,7 @@ import accord.txn.Timestamp;
 import accord.txn.Txn;
 import accord.txn.TxnId;
 
-public class Node
+public class Node implements ConfigurationService.Listener
 {
     public static class Id implements Comparable<Id>
     {
@@ -97,7 +97,6 @@ public class Node
         this.configurationService = configurationService;
         this.topologyTracker = new TopologyTracker();
         Topology topology = configurationService.currentTopology();
-        topologyTracker.onTopologyUpdate(topology);
         this.now = new AtomicReference<>(new Timestamp(topology.epoch(), nowSupplier.getAsLong(), 0, id));
         this.nowSupplier = nowSupplier;
         this.scheduler = scheduler;
@@ -108,26 +107,24 @@ public class Node
                                                agent,
                                                dataSupplier.get(),
                                                commandStoreFactory, topologyTracker);
-        this.commandStores.updateTopology(topology);
-        configurationService.registerListener(new ConfigurationService.Listener() {
-            @Override
-            public void onTopologyUpdate(Topology topology)
-            {
-                commandStores.updateTopology(topology);
-                topologyTracker.onTopologyUpdate(topology);
-            }
 
-            @Override
-            public void onEpochAcknowledgement(Id node, long epoch)
-            {
-                topologyTracker.onEpochAcknowledgement(node, epoch);
-            }
-        });
+        configurationService.registerListener(this);
+        onTopologyUpdate(topology);
     }
 
-    public ConfigurationService configurationService()
+    @Override
+    public synchronized void onTopologyUpdate(Topology topology)
     {
-        return configurationService;
+        if (topology.epoch() <= topologyTracker.epoch())
+            return;
+        commandStores.updateTopology(topology);
+        topologyTracker.onTopologyUpdate(topology);
+    }
+
+    @Override
+    public void onEpochAcknowledgement(Id node, long epoch)
+    {
+        topologyTracker.onEpochAcknowledgement(node, epoch);
     }
 
     public TopologyTracker topologyTracker()
@@ -169,16 +166,6 @@ public class Node
         return nowSupplier.getAsLong();
     }
 
-    public void updateTopology(Topology clusterTopology)
-    {
-        commandStores.updateTopology(clusterTopology);
-    }
-
-    public Topology clusterTopology()
-    {
-        return commandStores.clusterTopology();
-    }
-
     public Stream<CommandStore> local(Keys keys)
     {
         return commandStores.forKeys(keys);
@@ -208,27 +195,6 @@ public class Node
         shard.nodes.forEach(node -> {
             if (alreadyContacted.add(node))
                 send(node, send);
-        });
-    }
-
-    // send to every node besides ourselves
-    public <T> void send(Topology topology, Request send, Callback<T> callback)
-    {
-        // TODO efficiency
-        Set<Id> contacted = new HashSet<>();
-        topology.forEach(shard -> send(shard, send, callback, contacted));
-    }
-
-    public <T> void send(Shard shard, Request send, Callback<T> callback)
-    {
-        shard.nodes.forEach(node -> send(node, send, callback));
-    }
-
-    private <T> void send(Shard shard, Request send, Callback<T> callback, Set<Id> alreadyContacted)
-    {
-        shard.nodes.forEach(node -> {
-            if (alreadyContacted.add(node))
-                send(node, send, callback);
         });
     }
 

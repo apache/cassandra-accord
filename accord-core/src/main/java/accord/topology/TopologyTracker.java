@@ -193,7 +193,7 @@ public class TopologyTracker implements ConfigurationService.Listener
         epochs.acknowledge(node, epoch);
     }
 
-    Topology current()
+    public Topology current()
     {
         return epochs.current();
     }

@@ -186,7 +186,7 @@ public class PreAcceptTest
         {
             IntKey key = IntKey.key(10);
             CommandStore commandStore = node.local(key).orElseThrow();
-            node.updateTopology(node.clusterTopology().withEpoch(2));
+            node.onTopologyUpdate(node.topologyTracker().current().withEpoch(2));
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
