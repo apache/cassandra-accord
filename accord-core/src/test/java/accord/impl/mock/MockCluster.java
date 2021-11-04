@@ -173,6 +173,19 @@ public class MockCluster implements Network, AutoCloseable
         return get(id(i));
     }
 
+    public MockConfigurationService configService(Id id)
+    {
+        Node node = nodes.get(id);
+        if (node == null)
+            throw new NoSuchElementException("No node exists with id " + id);
+        return (MockConfigurationService) node.configurationService();
+    }
+
+    public MockConfigurationService configService(int i)
+    {
+        return configService(id(i));
+    }
+
     public List<Node> nodes(Iterable<Id> ids)
     {
         List<Node> rlist = new ArrayList<>();

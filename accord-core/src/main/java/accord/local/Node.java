@@ -112,6 +112,11 @@ public class Node implements ConfigurationService.Listener
         onTopologyUpdate(topology);
     }
 
+    public ConfigurationService configurationService()
+    {
+        return configurationService;
+    }
+
     @Override
     public synchronized void onTopologyUpdate(Topology topology)
     {

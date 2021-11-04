@@ -1,11 +1,14 @@
 package accord.coordinate;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletionStage;
 
 import accord.coordinate.tracking.FastPathTracker;
 import accord.topology.Shard;
+import accord.topology.Topologies;
 import accord.txn.Ballot;
 import accord.messages.Callback;
 import accord.local.Node;
@@ -18,6 +21,7 @@ import accord.messages.PreAccept.PreAcceptOk;
 import accord.txn.Txn;
 import accord.txn.TxnId;
 import accord.messages.PreAccept.PreAcceptReply;
+import com.google.common.collect.Sets;
 
 /**
  * Perform initial rounds of PreAccept and Accept until we have reached agreement about when we should execute.
@@ -45,11 +49,66 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
         }
     }
 
+    static class PreacceptTracker extends FastPathTracker<ShardTracker>
+    {
+        volatile long supersedingEpoch = -1;
+        private final boolean fastPathPermitted;
+        private final Set<Id> successes = new HashSet<>();
+        private final Set<Id> failures = new HashSet<>();
+
+        public PreacceptTracker(Topologies topologies, boolean fastPathPermitted)
+        {
+            super(topologies, Agree.ShardTracker[]::new, Agree.ShardTracker::new);
+            this.fastPathPermitted = fastPathPermitted;
+        }
+
+        @Override
+        public void recordFailure(Id node)
+        {
+            failures.add(node);
+            super.recordFailure(node);
+        }
+
+        @Override
+        public void recordSuccess(Id node, boolean withFastPathTimestamp)
+        {
+            successes.add(node);
+            super.recordSuccess(node, withFastPathTimestamp);
+        }
+
+        public synchronized boolean recordSupersedingEpoch(long epoch)
+        {
+            if (epoch <= supersedingEpoch)
+                return false;
+            supersedingEpoch = epoch;
+            return true;
+        }
+
+        public boolean hasSupersedingEpoch()
+        {
+            return supersedingEpoch > 0;
+        }
+
+        public PreacceptTracker withUpdatedTopologies(Topologies topologies)
+        {
+            PreacceptTracker tracker = new PreacceptTracker(topologies, false);
+            successes.forEach(id -> tracker.recordSuccess(id, false));
+            failures.forEach(tracker::recordFailure);
+            return tracker;
+        }
+
+        @Override
+        public boolean hasMetFastPathCriteria()
+        {
+            return fastPathPermitted && super.hasMetFastPathCriteria();
+        }
+    }
+
     final Keys keys;
 
     public enum PreacceptOutcome { COMMIT, ACCEPT }
 
-    private final FastPathTracker<ShardTracker> tracker;
+    private PreacceptTracker tracker;
 
     private PreacceptOutcome preacceptOutcome;
     private final List<PreAcceptOk> preAcceptOks = new ArrayList<>();
@@ -61,7 +120,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
     {
         super(node, Ballot.ZERO, txnId, txn, node.topologyTracker().forKeys(txn.keys()));
         this.keys = txn.keys();
-        tracker = new FastPathTracker<>(topologies, ShardTracker[]::new, ShardTracker::new);
+        tracker = new PreacceptTracker(topologies, true);
 
         node.send(tracker.nodes(), new PreAccept(txnId, txn), this);
     }
@@ -73,7 +132,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
     }
 
     @Override
-    public void onFailure(Id from, Throwable throwable)
+    public synchronized void onFailure(Id from, Throwable throwable)
     {
         if (isDone() || isPreAccepted())
             return;
@@ -83,6 +142,25 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
             completeExceptionally(new Timeout());
 
         // if no other responses are expected and the slow quorum has been satisfied, proceed
+        if (shouldSlowPathAccept())
+            onPreAccepted();
+    }
+
+    private synchronized void onEpochUpdate()
+    {
+        if (!tracker.hasSupersedingEpoch())
+            return;
+        Topologies newTopologies = node.topologyTracker().forKeys(txn.keys());
+        if (newTopologies.currentEpoch() < tracker.supersedingEpoch)
+            return;
+        Set<Id> previousNodes = tracker.nodes();
+        tracker = tracker.withUpdatedTopologies(newTopologies);
+
+        // send messages to new nodes
+        Set<Id> needMessages = Sets.difference(tracker.nodes(), previousNodes);
+        if (!needMessages.isEmpty())
+            node.send(needMessages, new PreAccept(txnId, txn), this);
+
         if (shouldSlowPathAccept())
             onPreAccepted();
     }
@@ -107,10 +185,11 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
 
         if (!fastPath && ok.witnessedAt.epoch > txnId.epoch)
         {
-            throw new UnsupportedOperationException("FIXME");
+            if (tracker.recordSupersedingEpoch(ok.witnessedAt.epoch))
+                node.configurationService().fetchTopologyForEpoch(ok.witnessedAt.epoch, this::onEpochUpdate);
         }
 
-        if (tracker.hasMetFastPathCriteria() || shouldSlowPathAccept())
+        if (!tracker.hasSupersedingEpoch() && (tracker.hasMetFastPathCriteria() || shouldSlowPathAccept()))
             onPreAccepted();
     }
 
@@ -148,7 +227,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
 
     private boolean shouldSlowPathAccept()
     {
-        return !tracker.hasInFlight() && tracker.hasReachedQuorum();
+        return (!tracker.fastPathPermitted || !tracker.hasInFlight()) && tracker.hasReachedQuorum();
     }
 
     private boolean isPreAccepted()

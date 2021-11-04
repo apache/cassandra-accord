@@ -86,7 +86,8 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         {
             ReadWaiting waiting = (ReadWaiting) reply;
             // TODO first see if we can collect newer information (from ourselves or others), and if so send it
-            // otherwise, try to complete the transaction
+            //  otherwise, try to complete the transaction
+            // TODO: try another node, which may not be waiting
             node.recover(waiting.txnId, waiting.txn);
             return;
         }
