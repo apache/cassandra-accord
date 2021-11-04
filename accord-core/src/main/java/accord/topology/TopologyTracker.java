@@ -134,34 +134,38 @@ public class TopologyTracker implements ConfigurationService.Listener
 
     private static class Epochs
     {
-        static final Epochs EMPTY = new Epochs(0, new EpochState[0]);
+        static final Epochs EMPTY = new Epochs(new EpochState[0]);
 
-        final long minEpoch;
-        final EpochState[] epochs;
+        private final long maxEpoch;
+        private final long minEpoch;
+        private final EpochState[] epochs;
 
-        private Epochs(long minEpoch, EpochState[] epochs)
+        private Epochs(EpochState[] epochs)
         {
-            this.minEpoch = minEpoch;
+            this.maxEpoch = epochs.length > 0 ? epochs[0].epoch() : 0;
+            for (int i=1; i<epochs.length; i++)
+                Preconditions.checkArgument(epochs[i].epoch() == epochs[i-1].epoch() - 1);
+            this.minEpoch = epochs.length > 0 ? epochs[epochs.length - 1].epoch() : 0;
             this.epochs = epochs;
         }
 
         public long nextEpoch()
         {
-            return minEpoch + Math.max(epochs.length, 1);
+            return current().epoch + 1;
         }
 
         public Topology current()
         {
-            return epochs.length > 0 ? epochs[epochs.length - 1].topology : Topology.EMPTY;
+            return epochs.length > 0 ? epochs[0].topology : Topology.EMPTY;
         }
 
         public Epochs add(Topology topology)
         {
             Preconditions.checkArgument(topology.epoch == nextEpoch());
             EpochState[] nextEpochs = new EpochState[epochs.length + 1];
-            System.arraycopy(epochs, 0, nextEpochs, 0, epochs.length);
-            nextEpochs[nextEpochs.length - 1] = new EpochState(topology, current());
-            return new Epochs(nextEpochs[0].epoch(), nextEpochs);
+            System.arraycopy(epochs, 0, nextEpochs, 1, epochs.length);
+            nextEpochs[0] = new EpochState(topology, current());
+            return new Epochs(nextEpochs);
         }
 
         public void acknowledge(Node.Id node, long epoch)
@@ -172,10 +176,10 @@ public class TopologyTracker implements ConfigurationService.Listener
 
         private EpochState get(long epoch)
         {
-            if (epoch < minEpoch || epoch > minEpoch + epochs.length)
+            if (epoch > maxEpoch || epoch < maxEpoch - epochs.length)
                 return null;
 
-            return epochs[(int) (epoch - minEpoch)];
+            return epochs[(int) (maxEpoch - epoch)];
         }
     }
 
@@ -212,7 +216,7 @@ public class TopologyTracker implements ConfigurationService.Listener
     public Topologies forKeys(Keys keys)
     {
         Epochs current = epochs;
-        long maxEpoch = current.current().epoch;
+        long maxEpoch = current.maxEpoch;
 
         EpochState epochState = current.get(maxEpoch);
         Topology topology = epochState.topology.forKeys(keys);
@@ -225,9 +229,9 @@ public class TopologyTracker implements ConfigurationService.Listener
             // TODO: use number of unacknowledged epochs for initial capacity
             Topologies.Multi topologies = new Topologies.Multi(2);
             topologies.add(topology);
-            for (long epoch=maxEpoch-1; epoch>=current.minEpoch; epoch--)
+            for (int i=1; i<current.epochs.length; i++)
             {
-                epochState = current.get(epoch);
+                epochState = current.epochs[i];
                 topologies.add(epochState.topology.forKeys(keys));
                 if (epochState.acknowledgedFor(keys))
                     break;
