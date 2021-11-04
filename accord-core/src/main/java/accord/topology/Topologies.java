@@ -2,10 +2,9 @@ package accord.topology;
 
 import accord.local.Node;
 import accord.utils.IndexedConsumer;
+import com.google.common.base.Preconditions;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
 
 public interface Topologies
 {
@@ -124,24 +123,44 @@ public interface Topologies
         }
     }
 
-    class Multi extends ArrayList<Topology> implements Topologies
+    class Multi implements Topologies
     {
+        private final List<Topology> topologies;
+
         public Multi(int initialCapacity)
         {
-            super(initialCapacity);
+            this.topologies = new ArrayList<>(initialCapacity);
         }
 
         public Multi(Topology... topologies)
         {
-            super(topologies.length);
+            this(topologies.length);
             for (Topology topology : topologies)
                 add(topology);
+        }
+
+        public void add(Topology topology)
+        {
+            Preconditions.checkArgument(topologies.isEmpty() || topology.epoch == topologies.get(topology.size() - 1).epoch - 1);
+            topologies.add(topology);
+        }
+
+        @Override
+        public Topology get(int i)
+        {
+            return topologies.get(i);
+        }
+
+        @Override
+        public int size()
+        {
+            return topologies.size();
         }
 
         @Override
         public Topology current()
         {
-            return get(size() - 1);
+            return get(0);
         }
 
         @Override

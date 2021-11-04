@@ -222,6 +222,7 @@ public class TopologyTracker implements ConfigurationService.Listener
         }
         else
         {
+            // TODO: use number of unacknowledged epochs for initial capacity
             Topologies.Multi topologies = new Topologies.Multi(2);
             topologies.add(topology);
             for (long epoch=maxEpoch-1; epoch>=current.minEpoch; epoch--)

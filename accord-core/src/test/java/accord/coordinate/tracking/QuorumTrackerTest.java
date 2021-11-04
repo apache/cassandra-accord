@@ -1,6 +1,7 @@
 package accord.coordinate.tracking;
 
 import accord.Utils;
+import accord.api.KeyRange;
 import accord.impl.TopologyUtils;
 import accord.local.Node;
 import accord.topology.KeyRanges;
@@ -9,8 +10,9 @@ import accord.topology.Topology;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import static accord.Utils.topologies;
-import static accord.Utils.topology;
+import static accord.Utils.*;
+import static accord.Utils.idSet;
+import static accord.impl.IntKey.range;
 
 public class QuorumTrackerTest
 {
@@ -104,5 +106,45 @@ public class QuorumTrackerTest
         assertResponseState(responses, false, false, true);
         responses.recordSuccess(ids[3]);
         assertResponseState(responses, true, false, true);
+    }
+
+    @Test
+    void multiTopology()
+    {
+        KeyRange range = range(100, 200);
+        Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
+        Topology topology2 = topology(2, shard(range, idList(4, 5, 6), idSet(4, 5)));
+
+        QuorumTracker responses = new QuorumTracker(topologies(topology2, topology1));
+
+        responses.recordSuccess(id(1));
+        assertResponseState(responses, false, false, true);
+        responses.recordSuccess(id(2));
+        assertResponseState(responses, false, false, true);
+
+        responses.recordSuccess(id(4));
+        assertResponseState(responses, false, false, true);
+        responses.recordSuccess(id(5));
+        assertResponseState(responses, true, false, true);
+    }
+
+    @Test
+    void multiTopologyFailure()
+    {
+        KeyRange range = range(100, 200);
+        Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
+        Topology topology2 = topology(2, shard(range, idList(4, 5, 6), idSet(4, 5)));
+
+        QuorumTracker responses = new QuorumTracker(topologies(topology2, topology1));
+
+        responses.recordSuccess(id(1));
+        assertResponseState(responses, false, false, true);
+        responses.recordSuccess(id(2));
+        assertResponseState(responses, false, false, true);
+
+        responses.recordFailure(id(4));
+        assertResponseState(responses, false, false, true);
+        responses.recordFailure(id(5));
+        assertResponseState(responses, false, true, true);
     }
 }
