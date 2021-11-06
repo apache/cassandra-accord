@@ -42,11 +42,6 @@ public class CommandStores
             commandStores[i] = shardFactory.create(i, node, uniqueNow, agent, store, topologyTracker, this::getRangeMapping);
     }
 
-    public Topology clusterTopology()
-    {
-        return rangeMappings.cluster;
-    }
-
     private RangeMapping getRangeMapping(int idx)
     {
         return rangeMappings.mappings[idx];
@@ -96,10 +91,6 @@ public class CommandStores
     {
         Preconditions.checkArgument(!cluster.isSubset(), "Use full topology for CommandStores.updateTopology");
 
-        // FIXME: if we miss a topology update, we may end up with stale command data for ranges that were owned by
-        //  someone else during the period we were not receiving topology updates. Something like a ballot low bound
-        //  may make this a non-issue, and would be preferable to having to chase down all historical topology changes.
-        //  OTOH, we'll probably need a complete history of topology changes to do recovery properly
         if (cluster.epoch() <= rangeMappings.cluster.epoch())
             return;
 

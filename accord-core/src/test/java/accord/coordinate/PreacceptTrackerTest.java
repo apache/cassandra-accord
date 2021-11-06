@@ -1,17 +1,20 @@
 package accord.coordinate;
 
 import accord.Utils;
+import accord.api.KeyRange;
 import accord.coordinate.tracking.FastPathTracker;
 import accord.impl.TopologyUtils;
 import accord.local.Node;
 import accord.topology.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topology;
+import accord.txn.Keys;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import static accord.Utils.topologies;
-import static accord.Utils.topology;
+import static accord.Utils.*;
+import static accord.impl.IntKey.keys;
+import static accord.impl.IntKey.range;
 
 public class PreacceptTrackerTest
 {
@@ -132,5 +135,15 @@ public class PreacceptTrackerTest
         responses.recordSuccess(ids[0], true);
         responses.recordSuccess(ids[4], true);
         assertResponseState(responses, true, true, false, false);
+    }
+
+    @Test
+    void multiTopology()
+    {
+        Keys keys = keys(150);
+        KeyRange range = range(100, 200);
+        Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
+        Topology topology2 = topology(2, shard(range, idList(4, 5, 6), idSet(4, 5)));
+
     }
 }

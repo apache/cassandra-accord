@@ -176,6 +176,11 @@ public class Node implements ConfigurationService.Listener
         return commandStores.forKeys(keys);
     }
 
+    public Stream<CommandStore> local()
+    {
+        return commandStores.stream();
+    }
+
     public Optional<CommandStore> local(Key key)
     {
         return local(Keys.of(key)).reduce((i1, i2) -> {

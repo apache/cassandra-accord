@@ -131,6 +131,7 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
         RecoverOk ok = (RecoverOk) response;
         recoverOks.add(ok);
         boolean fastPath = ok.executeAt.compareTo(txnId) == 0;
+        // TODO: handle epoch change
         tracker.recordSuccess(from, fastPath);
 
         if (tracker.hasReachedQuorum())

@@ -14,6 +14,7 @@ import com.google.common.base.Preconditions;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.IntFunction;
@@ -143,6 +144,15 @@ public abstract class CommandStore
                 }
                 keyIterator.remove();
             }
+        }
+    }
+
+    public void commandsForRanges(KeyRanges ranges, BiConsumer<Key, CommandsForKey> consumer)
+    {
+        for (KeyRange range : ranges)
+        {
+            NavigableMap<Key, CommandsForKey> subMap = commandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive());
+            subMap.entrySet().forEach(entry -> consumer.accept(entry.getKey(), entry.getValue()));
         }
     }
 
