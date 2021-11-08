@@ -3,6 +3,7 @@ package accord.impl.mock;
 import accord.api.ConfigurationService;
 import accord.api.MessageSink;
 import accord.topology.Topology;
+import com.google.common.collect.ImmutableSet;
 import org.junit.jupiter.api.Assertions;
 
 import java.util.*;
@@ -58,7 +59,9 @@ public class MockConfigurationService implements ConfigurationService
         if (epoch < epochs.size())
             onComplete.run();
 
-        waiting.computeIfAbsent(epoch, e -> new HashSet<>()).add(onComplete);
+        Set<Runnable> runnables = waiting.computeIfAbsent(epoch, e -> new HashSet<>());
+        if (onComplete != null)
+            runnables.add(onComplete);
     }
 
     public synchronized void reportTopology(Topology topology)
@@ -74,5 +77,10 @@ public class MockConfigurationService implements ConfigurationService
             return;
 
         runnables.forEach(Runnable::run);
+    }
+
+    public synchronized Set<Long> pendingEpochs()
+    {
+        return ImmutableSet.copyOf(waiting.keySet());
     }
 }

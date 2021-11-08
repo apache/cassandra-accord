@@ -23,7 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
-import static accord.Utils.id;
+import static accord.Utils.*;
 
 public class MockCluster implements Network, AutoCloseable
 {
@@ -187,12 +187,27 @@ public class MockCluster implements Network, AutoCloseable
         return configService(id(i));
     }
 
+    public Iterable<MockConfigurationService> configServices(int... ids)
+    {
+        assert ids.length > 0;
+        List<MockConfigurationService> result = new ArrayList<>(ids.length);
+        for (int id : ids)
+            result.add(configService(id));
+        return result;
+    }
+
     public List<Node> nodes(Iterable<Id> ids)
     {
         List<Node> rlist = new ArrayList<>();
         for (Id id : ids)
             rlist.add(get(id));
         return rlist;
+    }
+
+    public Iterable<Node> nodes(int... ids)
+    {
+        assert ids.length > 0;
+        return nodes(idList(ids));
     }
 
     public static class Config

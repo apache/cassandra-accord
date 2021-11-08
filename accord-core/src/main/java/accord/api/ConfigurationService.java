@@ -31,11 +31,15 @@ public interface ConfigurationService
      */
     long getEpochLowBound();
 
-
     /**
      * Returns the current topology. Also called on startup for the "starting point" topology.
      */
     Topology currentTopology();
+
+    default long currentEpoch()
+    {
+        return currentTopology().epoch();
+    }
 
     Topology getTopologyForEpoch(long epoch);
 
@@ -44,4 +48,9 @@ public interface ConfigurationService
      * service will fetch the given epoch, and any preceding epochs, and call onComplete when finished.
      */
     void fetchTopologyForEpoch(long epoch, Runnable onComplete);
+
+    default void fetchTopologyForEpoch(long epoch)
+    {
+        fetchTopologyForEpoch(epoch, null);
+    }
 }

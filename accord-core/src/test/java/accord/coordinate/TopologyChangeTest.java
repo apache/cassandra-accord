@@ -56,18 +56,27 @@ public class TopologyChangeTest
                 Assertions.assertTrue(command.savedDeps().isEmpty());
             });
 
-            cluster.configService(4).reportTopology(topology2);
-            cluster.configService(5).reportTopology(topology2);
-            cluster.configService(6).reportTopology(topology2);
+            cluster.configServices(4, 5, 6).forEach(config -> config.reportTopology(topology2));
 
             Node node4 = cluster.get(4);
             TxnId txnId2 = node4.nextTxnId();
             Txn txn2 = writeTxn(keys);
             node4.coordinate(txnId2, txn2).toCompletableFuture().get();
-            node4.local(keys).forEach(commands -> {
-                Command command = commands.command(txnId2);
-                Assertions.assertTrue(command.savedDeps().contains(txnId1));
+
+            // new nodes should have the previous epochs operation as a dependency
+            cluster.nodes(4, 5, 6).forEach(node -> {
+                node.local(keys).forEach(commands -> {
+                    Command command = commands.command(txnId2);
+                    Assertions.assertTrue(command.savedDeps().contains(txnId1));
+                });
             });
+
+            // old nodes should be aware of the new epoch
+            cluster.configServices(1, 2, 3).forEach(config -> {
+                Assertions.assertEquals(1, config.currentEpoch());
+                Assertions.assertTrue(config.pendingEpochs().contains(Long.valueOf(2)));
+            });
+
         }
     }
 }

@@ -117,6 +117,12 @@ public class Node implements ConfigurationService.Listener
         return configurationService;
     }
 
+    public void maybeReportEpoch(long epoch)
+    {
+        if (epoch > configurationService.currentEpoch())
+            configurationService.fetchTopologyForEpoch(epoch);
+    }
+
     @Override
     public synchronized void onTopologyUpdate(Topology topology)
     {
