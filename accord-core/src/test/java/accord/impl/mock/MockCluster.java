@@ -126,7 +126,7 @@ public class MockCluster implements Network, AutoCloseable
             callbacks.put(messageId, callback);
         }
 
-        logger.info("processing message from {} to {}: {}", from, to, request);
+        logger.info("processing message[{}] from {} to {}: {}", messageId, from, to, request);
         node.receive(request, from, messageId);
     }
 
@@ -140,7 +140,8 @@ public class MockCluster implements Network, AutoCloseable
             return;
         }
 
-        Callback callback = callbacks.remove(replyingToMessage);
+        Callback callback = reply.isFinal() ? callbacks.remove(replyingToMessage)
+                                            : callbacks.get(replyingToMessage);
 
         if (networkFilter.shouldDiscard(from, replyingToNode, reply))
         {
@@ -156,7 +157,7 @@ public class MockCluster implements Network, AutoCloseable
             return;
         }
 
-        logger.info("processing reply from {} to {}: {}", from, replyingToNode, reply);
+        logger.info("processing reply[{}] from {} to {}: {}", replyingToMessage, from, replyingToNode, reply);
         node.scheduler().now(() -> callback.onSuccess(from, reply));
     }
 
