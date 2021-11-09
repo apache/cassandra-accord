@@ -2,11 +2,8 @@ package accord.topology;
 
 import accord.api.KeyRange;
 import accord.txn.Keys;
-import com.google.common.collect.Lists;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-
-import java.util.List;
 
 import static accord.Utils.*;
 import static accord.impl.IntKey.keys;
@@ -25,18 +22,62 @@ public class TopologyTrackerTest
 
         Assertions.assertSame(Topology.EMPTY, service.current());
         service.onTopologyUpdate(topology1);
-        Assertions.assertTrue(service.getEpochState(1).acknowledged());
+        Assertions.assertTrue(service.getEpochStateUnsafe(1).acknowledged());
 
         service.onTopologyUpdate(topology2);
-        Assertions.assertFalse(service.getEpochState(2).acknowledged());
+        Assertions.assertFalse(service.getEpochStateUnsafe(2).acknowledged());
 
         service.onEpochAcknowledgement(id(1), 2);
-        Assertions.assertFalse(service.getEpochState(2).acknowledged());
+        Assertions.assertFalse(service.getEpochStateUnsafe(2).acknowledged());
 
         service.onEpochAcknowledgement(id(2), 2);
-        Assertions.assertTrue(service.getEpochState(2).acknowledged());
+        Assertions.assertTrue(service.getEpochStateUnsafe(2).acknowledged());
 
         // TODO: test fast path enabling
+    }
+
+    private static TopologyTracker tracker()
+    {
+        Topology topology1 = topology(1,
+                                      shard(range(100, 200), idList(1, 2, 3), idSet(1, 2)),
+                                      shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)));
+        Topology topology2 = topology(2,
+                                      shard(range(100, 200), idList(1, 2, 3), idSet(3, 4)),
+                                      shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)));
+
+        TopologyTracker service = new TopologyTracker();
+        service.onTopologyUpdate(topology1);
+        service.onTopologyUpdate(topology2);
+
+        return service;
+    }
+
+    @Test
+    void acknowledgedFor()
+    {
+        TopologyTracker service = tracker();
+
+        Assertions.assertFalse(service.getEpochStateUnsafe(2).acknowledged());
+        service.onEpochAcknowledgement(id(1), 2);
+        service.onEpochAcknowledgement(id(2), 2);
+        Assertions.assertFalse(service.getEpochStateUnsafe(2).acknowledged());
+        Assertions.assertTrue(service.getEpochStateUnsafe(2).acknowledgedFor(keys(150)));
+        Assertions.assertFalse(service.getEpochStateUnsafe(2).acknowledgedFor(keys(250)));
+    }
+
+    @Test
+    void syncCompleteFor()
+    {
+        TopologyTracker service = tracker();
+
+        Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
+        service.onEpochAcknowledgement(id(1), 2);
+        service.onEpochSyncComplete(id(1), 2);
+        service.onEpochAcknowledgement(id(2), 2);
+        service.onEpochSyncComplete(id(2), 2);
+        Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
+        Assertions.assertTrue(service.getEpochStateUnsafe(2).syncCompleteFor(keys(150)));
+        Assertions.assertFalse(service.getEpochStateUnsafe(2).syncCompleteFor(keys(250)));
     }
 
     @Test
@@ -50,10 +91,10 @@ public class TopologyTrackerTest
 
         Assertions.assertSame(Topology.EMPTY, service.current());
         service.onTopologyUpdate(topology1);
-        Assertions.assertTrue(service.getEpochState(1).acknowledged());
+        Assertions.assertTrue(service.getEpochStateUnsafe(1).acknowledged());
 
         service.onTopologyUpdate(topology2);
-        Assertions.assertFalse(service.getEpochState(2).acknowledged());
+        Assertions.assertFalse(service.getEpochStateUnsafe(2).acknowledged());
 
         Keys keys = keys(150);
         Assertions.assertEquals(topologies(topology2.forKeys(keys), topology1.forKeys(keys)),

@@ -1,6 +1,6 @@
 package accord.messages;
 
-import accord.impl.mock.MockConfigurationService;
+import accord.impl.mock.*;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.MessageSink;
@@ -14,10 +14,7 @@ import accord.utils.ThreadPoolScheduler;
 import accord.local.*;
 import accord.txn.Keys;
 import accord.impl.IntKey;
-import accord.impl.mock.Network;
-import accord.impl.mock.RecordingMessageSink;
 import accord.impl.TestAgent;
-import accord.impl.mock.MockStore;
 import accord.impl.TopologyFactory;
 
 import org.junit.jupiter.api.Assertions;
@@ -28,6 +25,7 @@ import java.util.Random;
 
 import static accord.Utils.id;
 import static accord.Utils.writeTxn;
+import static accord.impl.mock.MockCluster.configService;
 
 public class PreAcceptTest
 {
@@ -59,6 +57,7 @@ public class PreAcceptTest
         RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
         Clock clock = new Clock(100);
         Node node = createNode(ID1, messageSink, clock);
+        messageSink.clearHistory();
 
         try
         {
@@ -156,6 +155,7 @@ public class PreAcceptTest
         RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
         Clock clock = new Clock(100);
         Node node = createNode(ID1, messageSink, clock);
+        messageSink.clearHistory();
         IntKey key = IntKey.key(10);
         try
         {
@@ -186,7 +186,9 @@ public class PreAcceptTest
         {
             IntKey key = IntKey.key(10);
             CommandStore commandStore = node.local(key).orElseThrow();
-            node.onTopologyUpdate(node.topologyTracker().current().withEpoch(2));
+
+            configService(node).reportTopology(node.topologyTracker().current().withEpoch(2));
+            messageSink.clearHistory();
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));

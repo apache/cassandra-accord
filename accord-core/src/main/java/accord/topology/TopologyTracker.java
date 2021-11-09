@@ -110,6 +110,7 @@ public class TopologyTracker implements ConfigurationService.Listener
     {
         private final Topology topology;
         private final Topology previous;
+        // TODO: keep an unacknowledged topology
         private final EpochTracker tracker;
         private boolean acknowledged = false;
         private boolean syncComplete = false;
@@ -151,10 +152,20 @@ public class TopologyTracker implements ConfigurationService.Listener
             return acknowledged;
         }
 
+        /**
+         * determine if all shards intersecting with the given keys have acknowledged the new epoch
+         */
         boolean acknowledgedFor(Keys keys)
         {
-            // TODO: check individual shards
-            return acknowledged;
+            if (acknowledged)
+                return true;
+            Boolean result = previous.accumulateForKeys(keys, (i, shard, acc) -> {
+                if (acc == Boolean.FALSE)
+                    return acc;
+                ShardEpochTracker shardTracker = tracker.unsafeGet(i);
+                return Boolean.valueOf(shardTracker.quorumAcknowledged());
+            }, Boolean.TRUE);
+            return result == Boolean.TRUE;
         }
 
         boolean syncComplete()
@@ -162,10 +173,20 @@ public class TopologyTracker implements ConfigurationService.Listener
             return syncComplete;
         }
 
+        /**
+         * determine if sync has completed for all shards intersecting with the given keys
+         */
         boolean syncCompleteFor(Keys keys)
         {
-            // TODO: check individual shards
-            return syncComplete;
+            if (syncComplete)
+                return true;
+            Boolean result = previous.accumulateForKeys(keys, (i, shard, acc) -> {
+                if (acc == Boolean.FALSE)
+                    return acc;
+                ShardEpochTracker shardTracker = tracker.unsafeGet(i);
+                return Boolean.valueOf(shardTracker.quorumSyncComplete());
+            }, Boolean.TRUE);
+            return result == Boolean.TRUE;
         }
     }
 
@@ -257,7 +278,7 @@ public class TopologyTracker implements ConfigurationService.Listener
     }
 
     @VisibleForTesting
-    EpochState getEpochState(long epoch)
+    EpochState getEpochStateUnsafe(long epoch)
     {
         return epochs.get(epoch);
     }
@@ -275,12 +296,12 @@ public class TopologyTracker implements ConfigurationService.Listener
         }
         else
         {
-            // TODO: use number of unacknowledged epochs for initial capacity
             Topologies.Multi topologies = new Topologies.Multi(2);
             topologies.add(topology);
             for (int i=1; i<current.epochs.length; i++)
             {
                 epochState = current.epochs[i];
+                // TODO: only create a sub-topology including shards that are unacknowledged
                 topologies.add(epochState.topology.forKeys(keys));
                 if (epochState.acknowledgedFor(keys))
                     break;

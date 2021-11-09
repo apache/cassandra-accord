@@ -2,6 +2,8 @@ package accord.impl.mock;
 
 import accord.api.ConfigurationService;
 import accord.api.MessageSink;
+import accord.local.Node;
+import accord.messages.Request;
 import accord.topology.Topology;
 import com.google.common.collect.ImmutableSet;
 import org.junit.jupiter.api.Assertions;
@@ -62,6 +64,30 @@ public class MockConfigurationService implements ConfigurationService
         Set<Runnable> runnables = waiting.computeIfAbsent(epoch, e -> new HashSet<>());
         if (onComplete != null)
             runnables.add(onComplete);
+    }
+
+    public static class EpochAcknowledgeMessage implements Request
+    {
+        public final long epoch;
+
+        public EpochAcknowledgeMessage(long epoch)
+        {
+            this.epoch = epoch;
+        }
+
+        @Override
+        public void process(Node node, Node.Id from, long messageId)
+        {
+            node.onEpochAcknowledgement(from, epoch);
+        }
+    }
+
+    @Override
+    public void acknowledgeEpoch(long epoch)
+    {
+        EpochAcknowledgeMessage message = new EpochAcknowledgeMessage(epoch);
+        Topology topology = getTopologyForEpoch(epoch);
+        topology.nodes().forEach(to -> messageSink.send(to, message));
     }
 
     public synchronized void reportTopology(Topology topology)

@@ -9,6 +9,7 @@ import accord.local.Node.Id;
 import accord.api.Key;
 import accord.txn.Keys;
 import accord.utils.IndexedConsumer;
+import accord.utils.IndexedBiFunction;
 import accord.utils.IndexedPredicate;
 
 public class Topology extends AbstractCollection<Shard>
@@ -164,6 +165,24 @@ public class Topology extends AbstractCollection<Shard>
                 nodeLookup.put(e.getKey(), e.getValue());
         }
         return new Topology(epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
+    }
+
+    public <T> T accumulateForKeys(Keys select, IndexedBiFunction<Shard, T, T> function, T start)
+    {
+        int subsetIndex = 0;
+        for (int i = 0 ; i < select.size() ; )
+        {
+            // find the range containing the key at i
+            subsetIndex = subsetOfRanges.rangeIndexForKey(subsetIndex, subsetOfRanges.size(), select.get(i));
+            if (subsetIndex < 0 || subsetIndex >= subsetOfRanges.size())
+                throw new IllegalArgumentException("Range not found for " + select.get(i));
+            int supersetIndex = supersetRangeIndexes[subsetIndex];
+            Shard shard = shards[supersetIndex];
+            start = function.apply(subsetIndex, shard, start);
+            // find the first key outside this range
+            i = shard.range.higherKeyIndex(select, i, select.size());
+        }
+        return start;
     }
 
     /**
