@@ -130,12 +130,19 @@ public class Node implements ConfigurationService.Listener
             return;
         commandStores.updateTopology(topology);
         topologyTracker.onTopologyUpdate(topology);
+        configurationService.acknowledgeEpoch(topology.epoch());
     }
 
     @Override
     public void onEpochAcknowledgement(Id node, long epoch)
     {
         topologyTracker.onEpochAcknowledgement(node, epoch);
+    }
+
+    @Override
+    public void onEpochSyncComplete(Id node, long epoch)
+    {
+        topologyTracker.onEpochSyncComplete(node, epoch);
     }
 
     public TopologyTracker topologyTracker()

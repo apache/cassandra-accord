@@ -15,6 +15,8 @@ public interface Topologies
         return current().epoch;
     }
 
+    boolean fastPathPermitted();
+
     Topology get(int i);
     int size();
 
@@ -72,16 +74,24 @@ public interface Topologies
     class Singleton implements Topologies
     {
         private final Topology topology;
+        private final boolean fastPathPermitted;
 
-        public Singleton(Topology topology)
+        public Singleton(Topology topology, boolean fastPathPermitted)
         {
             this.topology = topology;
+            this.fastPathPermitted = fastPathPermitted;
         }
 
         @Override
         public Topology current()
         {
             return topology;
+        }
+
+        @Override
+        public boolean fastPathPermitted()
+        {
+            return fastPathPermitted;
         }
 
         @Override
@@ -139,10 +149,16 @@ public interface Topologies
                 add(topology);
         }
 
-        public void add(Topology topology)
+        @Override
+        public Topology current()
         {
-            Preconditions.checkArgument(topologies.isEmpty() || topology.epoch == topologies.get(topology.size() - 1).epoch - 1);
-            topologies.add(topology);
+            return get(0);
+        }
+
+        @Override
+        public boolean fastPathPermitted()
+        {
+            return false;
         }
 
         @Override
@@ -158,18 +174,18 @@ public interface Topologies
         }
 
         @Override
-        public Topology current()
-        {
-            return get(0);
-        }
-
-        @Override
         public Set<Node.Id> nodes()
         {
             Set<Node.Id> result = new HashSet<>();
             for (int i=0,mi=size(); i<mi; i++)
                 result.addAll(get(i).nodes());
             return result;
+        }
+
+        public void add(Topology topology)
+        {
+            Preconditions.checkArgument(topologies.isEmpty() || topology.epoch == topologies.get(topology.size() - 1).epoch - 1);
+            topologies.add(topology);
         }
 
         @Override

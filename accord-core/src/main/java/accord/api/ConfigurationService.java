@@ -21,6 +21,11 @@ public interface ConfigurationService
          * Called when the given node the configuration service learns that a node has acknowledged a config epoch
          */
         void onEpochAcknowledgement(Node.Id node, long epoch);
+
+        /**
+         * Called when accord data associated with a superseded epoch has been sync'd across current replicas
+         */
+        void onEpochSyncComplete(Node.Id node, long epoch);
     }
 
     void registerListener(Listener listener);
@@ -53,4 +58,10 @@ public interface ConfigurationService
     {
         fetchTopologyForEpoch(epoch, null);
     }
+
+    /**
+     * Called after this node learns of an epoch as part of the {@code Listener#onTopologyUpdate} call. Indicates
+     * the new epoch has been setup locally and the node is ready to process commands for it.
+     */
+    void acknowledgeEpoch(long epoch);
 }

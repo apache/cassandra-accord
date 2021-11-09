@@ -25,15 +25,6 @@ import java.util.*;
  */
 public class TopologyTracker implements ConfigurationService.Listener
 {
-    public enum EpochStatus
-    {
-        ANNOUNCED,
-        ACKNOWLEDGED,
-        REPAIRED,
-        READY,
-        SUPERSEDED
-    }
-
     static class ShardEpochTracker extends AbstractResponseTracker.ShardTracker
     {
         /*
@@ -42,6 +33,9 @@ public class TopologyTracker implements ConfigurationService.Listener
          */
         private int acknowledged = 0;
         private final Set<Node.Id> unacknowledged;
+
+        private int syncComplete = 0;
+        private final Set<Node.Id> pendingSync;
 
         /*
          * Until all intersecting nodes (ie those present in both epoch n and n+1) have repaired the operations of
@@ -53,6 +47,7 @@ public class TopologyTracker implements ConfigurationService.Listener
         {
             super(shard);
             this.unacknowledged = new HashSet<>(shard.nodes);
+            this.pendingSync = new HashSet<>(shard.nodes);
             this.needRepair = new HashSet<>(shard.nodes);
         }
 
@@ -68,11 +63,24 @@ public class TopologyTracker implements ConfigurationService.Listener
         {
             return acknowledged >= shard.slowPathQuorumSize;
         }
+
+        public boolean syncComplete(Node.Id id)
+        {
+            if (!pendingSync.remove(id))
+                return false;
+            syncComplete++;
+            return true;
+        }
+
+        public boolean quorumSyncComplete()
+        {
+            return syncComplete >= shard.slowPathQuorumSize;
+        }
     }
 
-    private static class EpochAcknowledgementTracker extends AbstractResponseTracker<ShardEpochTracker>
+    private static class EpochTracker extends AbstractResponseTracker<ShardEpochTracker>
     {
-        public EpochAcknowledgementTracker(Topologies topologies)
+        public EpochTracker(Topologies topologies)
         {
             super(topologies, ShardEpochTracker[]::new, ShardEpochTracker::new);
         }
@@ -86,18 +94,30 @@ public class TopologyTracker implements ConfigurationService.Listener
         {
             return all(ShardEpochTracker::quorumAcknowledged);
         }
+
+        public void recordSyncComplete(Node.Id node)
+        {
+            forEachTrackerForNode(node, ShardEpochTracker::syncComplete);
+        }
+
+        public boolean epochSynced()
+        {
+            return all(ShardEpochTracker::quorumSyncComplete);
+        }
     }
 
     static class EpochState
     {
         private final Topology topology;
         private final Topology previous;
-        private final EpochAcknowledgementTracker acknowledgements;
+        private final EpochTracker tracker;
         private boolean acknowledged = false;
+        private boolean syncComplete = false;
 
         private void updateState()
         {
-            acknowledged = acknowledgements.epochAcknowledged();
+            acknowledged = tracker.epochAcknowledged();
+            syncComplete = tracker.epochSynced();
         }
 
         EpochState(Topology topology, Topology previous)
@@ -105,13 +125,19 @@ public class TopologyTracker implements ConfigurationService.Listener
             this.topology = topology;
             this.previous = previous;
             // FIXME: may need a separate tracker class
-            this.acknowledgements = new EpochAcknowledgementTracker(new Topologies.Singleton(previous));
+            this.tracker = new EpochTracker(new Topologies.Singleton(previous, false));
             updateState();
         }
 
         public void recordAcknowledgement(Node.Id node)
         {
-            acknowledgements.recordAcknowledgement(node);
+            tracker.recordAcknowledgement(node);
+            updateState();
+        }
+
+        public void recordSyncComplete(Node.Id node)
+        {
+            tracker.recordSyncComplete(node);
             updateState();
         }
 
@@ -129,6 +155,17 @@ public class TopologyTracker implements ConfigurationService.Listener
         {
             // TODO: check individual shards
             return acknowledged;
+        }
+
+        boolean syncComplete()
+        {
+            return syncComplete;
+        }
+
+        boolean syncCompleteFor(Keys keys)
+        {
+            // TODO: check individual shards
+            return syncComplete;
         }
     }
 
@@ -174,6 +211,12 @@ public class TopologyTracker implements ConfigurationService.Listener
                 epochs[i].recordAcknowledgement(node);
         }
 
+        public void syncComplete(Node.Id node, long epoch)
+        {
+            for (int i=0; i<epochs.length && epochs[i].epoch() <= epoch; i++)
+                epochs[i].recordSyncComplete(node);
+        }
+
         private EpochState get(long epoch)
         {
             if (epoch > maxEpoch || epoch < maxEpoch - epochs.length)
@@ -195,6 +238,12 @@ public class TopologyTracker implements ConfigurationService.Listener
     public void onEpochAcknowledgement(Node.Id node, long epoch)
     {
         epochs.acknowledge(node, epoch);
+    }
+
+    @Override
+    public void onEpochSyncComplete(Node.Id node, long epoch)
+    {
+        epochs.syncComplete(node, epoch);
     }
 
     public Topology current()
@@ -222,7 +271,7 @@ public class TopologyTracker implements ConfigurationService.Listener
         Topology topology = epochState.topology.forKeys(keys);
         if (epochState.acknowledgedFor(keys))
         {
-            return new Topologies.Singleton(topology);
+            return new Topologies.Singleton(topology, epochState.syncCompleteFor(keys));
         }
         else
         {
