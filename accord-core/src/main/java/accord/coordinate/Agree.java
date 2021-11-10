@@ -76,6 +76,11 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
             super.recordSuccess(node, withFastPathTimestamp);
         }
 
+        public void recordSuccess(Id node)
+        {
+            recordSuccess(node, false);
+        }
+
         public synchronized boolean recordSupersedingEpoch(long epoch)
         {
             if (epoch <= supersedingEpoch)
@@ -92,7 +97,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
         public PreacceptTracker withUpdatedTopologies(Topologies topologies)
         {
             PreacceptTracker tracker = new PreacceptTracker(topologies, false);
-            successes.forEach(id -> tracker.recordSuccess(id, false));
+            successes.forEach(tracker::recordSuccess);
             failures.forEach(tracker::recordFailure);
             return tracker;
         }

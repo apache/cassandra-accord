@@ -33,29 +33,29 @@ public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.
     {
         this.topologies = topologies;
         this.trackerSets = (T[][]) new ShardTracker[topologies.size()][];
-        this.topologies.forEach((j, topology) -> {
+        this.topologies.forEach((i, topology) -> {
             T[] trackers = arrayFactory.apply(topology.size());
-            topology.forEach((i, shard) -> trackers[i] = trackerFactory.apply(shard));
-            this.trackerSets[j] = trackers;
+            topology.forEach((j, shard) -> trackers[j] = trackerFactory.apply(shard));
+            this.trackerSets[i] = trackers;
         });
     }
 
     protected void forEachTrackerForNode(Node.Id node, BiConsumer<T, Node.Id> consumer)
     {
-        this.topologies.forEach((j, topology) -> {
-            T[] trackers = trackerSets[j];
-            topology.forEachOn(node, (i, shard) -> consumer.accept(trackers[i], node));
+        this.topologies.forEach((i, topology) -> {
+            T[] trackers = trackerSets[i];
+            topology.forEachOn(node, (j, shard) -> consumer.accept(trackers[j], node));
         });
     }
 
     protected int matchingTrackersForNode(Node.Id node, Predicate<T> consumer)
     {
         int matches = 0;
-        for (int j=0, mj=topologies.size(); j<mj; j++)
+        for (int i=0, mi=topologies.size(); i<mi; i++)
         {
-            Topology topology = topologies.get(j);
-            T[] trackers = trackerSets[j];
-            matches += topology.matchesOn(node, (i, shard) -> consumer.test(trackers[i]));
+            Topology topology = topologies.get(i);
+            T[] trackers = trackerSets[i];
+            matches += topology.matchesOn(node, (j, shard) -> consumer.test(trackers[j]));
         }
         return matches;
     }
@@ -92,9 +92,9 @@ public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.
     }
 
     @VisibleForTesting
-    public T unsafeGet(int topologyIdx, int i)
+    public T unsafeGet(int topologyIdx, int shardIdx)
     {
-        return trackerSets[topologyIdx][i];
+        return trackerSets[topologyIdx][shardIdx];
     }
 
     public T unsafeGet(int i)
