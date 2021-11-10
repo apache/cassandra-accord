@@ -83,8 +83,16 @@ public class Topology extends AbstractCollection<Shard>
     {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        Topology topology = (Topology) o;
-        return epoch == topology.epoch && Arrays.equals(shards, topology.shards) && ranges.equals(topology.ranges) && nodeLookup.equals(topology.nodeLookup) && subsetOfRanges.equals(topology.subsetOfRanges) && Arrays.equals(supersetRangeIndexes, topology.supersetRangeIndexes);
+        Topology that = (Topology) o;
+        if (this.epoch != that.epoch || this.size() != that.size() || !this.subsetOfRanges.equals(that.subsetOfRanges))
+            return false;
+
+        for (int i=0, mi=this.size(); i<mi; i++)
+        {
+            if (!this.get(i).equals(that.get(i)))
+                return false;
+        }
+        return true;
     }
 
     @Override
@@ -136,7 +144,7 @@ public class Topology extends AbstractCollection<Shard>
         return shards[i];
     }
 
-    public Topology forKeys(Keys select)
+    public Topology forKeys(Keys select, IndexedPredicate<Shard> predicate)
     {
         int subsetIndex = 0;
         int count = 0;
@@ -148,8 +156,9 @@ public class Topology extends AbstractCollection<Shard>
             if (subsetIndex < 0 || subsetIndex >= subsetOfRanges.size())
                 throw new IllegalArgumentException("Range not found for " + select.get(i));
             int supersetIndex = supersetRangeIndexes[subsetIndex];
-            newSubset[count++] = supersetIndex;
             Shard shard = shards[supersetIndex];
+            if (predicate.test(subsetIndex, shard))
+                newSubset[count++] = supersetIndex;
             // find the first key outside this range
             i = shard.range.higherKeyIndex(select, i, select.size());
         }
@@ -165,6 +174,11 @@ public class Topology extends AbstractCollection<Shard>
                 nodeLookup.put(e.getKey(), e.getValue());
         }
         return new Topology(epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
+    }
+
+    public Topology forKeys(Keys select)
+    {
+        return forKeys(select, (i, shard) -> true);
     }
 
     public <T> T accumulateForKeys(Keys select, IndexedBiFunction<Shard, T, T> function, T start)

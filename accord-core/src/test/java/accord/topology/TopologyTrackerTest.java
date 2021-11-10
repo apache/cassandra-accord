@@ -113,7 +113,26 @@ public class TopologyTrackerTest
     @Test
     void forKeysPartiallyAcknowledged()
     {
+        Topology topology1 = topology(1,
+                                      shard(range(100, 200), idList(1, 2, 3), idSet(1, 2)),
+                                      shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)));
+        Topology topology2 = topology(2,
+                                      shard(range(100, 200), idList(1, 2, 3), idSet(1, 2)),
+                                      shard(range(200, 300), idList(4, 5, 6), idSet(5, 6)));
 
+        TopologyTracker service = new TopologyTracker();
+        service.onTopologyUpdate(topology1);
+        service.onTopologyUpdate(topology2);
+
+        // no acks, so all epoch 1 shards should be included
+        Assertions.assertEquals(topologies(topology2, topology1),
+                                service.forKeys(keys(150, 250)));
+
+        // first topology acked, so only the second shard should be included
+        service.onEpochAcknowledgement(id(1), 2);
+        service.onEpochAcknowledgement(id(2), 2);
+        Assertions.assertEquals(topologies(topology2, topology(1, shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)))),
+                                service.forKeys(keys(150, 250)));
     }
 
     /**

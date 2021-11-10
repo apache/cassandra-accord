@@ -2,6 +2,7 @@ package accord.topology;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 import accord.api.KeyRange;
@@ -73,5 +74,34 @@ public class Shard
     public String toString()
     {
         return "Shard[" + range.start() + ',' + range.end() + ']';
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Shard shard = (Shard) o;
+        return recoveryFastPathSize == shard.recoveryFastPathSize
+            && fastPathQuorumSize == shard.fastPathQuorumSize
+            && slowPathQuorumSize == shard.slowPathQuorumSize
+            && range.equals(shard.range)
+            && nodes.equals(shard.nodes)
+            && nodeSet.equals(shard.nodeSet)
+            && fastPathElectorate.equals(shard.fastPathElectorate)
+            && pending.equals(shard.pending);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hash(range,
+                            nodes,
+                            nodeSet,
+                            fastPathElectorate,
+                            pending,
+                            recoveryFastPathSize,
+                            fastPathQuorumSize,
+                            slowPathQuorumSize);
     }
 }

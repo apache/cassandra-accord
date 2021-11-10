@@ -184,7 +184,7 @@ public interface Topologies
 
         public void add(Topology topology)
         {
-            Preconditions.checkArgument(topologies.isEmpty() || topology.epoch == topologies.get(topology.size() - 1).epoch - 1);
+            Preconditions.checkArgument(topologies.isEmpty() || topology.epoch == topologies.get(topologies.size() - 1).epoch - 1);
             topologies.add(topology);
         }
 

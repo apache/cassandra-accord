@@ -123,6 +123,8 @@ public class TopologyTracker implements ConfigurationService.Listener
 
         EpochState(Topology topology, Topology previous)
         {
+            Preconditions.checkArgument(!topology.isSubset());
+            Preconditions.checkArgument(!previous.isSubset());
             this.topology = topology;
             this.previous = previous;
             // FIXME: may need a separate tracker class
@@ -166,6 +168,11 @@ public class TopologyTracker implements ConfigurationService.Listener
                 return Boolean.valueOf(shardTracker.quorumAcknowledged());
             }, Boolean.TRUE);
             return result == Boolean.TRUE;
+        }
+
+        boolean shardIsUnacknowledged(int idx, Shard shard)
+        {
+            return !tracker.unsafeGet(idx).quorumAcknowledged();
         }
 
         boolean syncComplete()
@@ -300,9 +307,11 @@ public class TopologyTracker implements ConfigurationService.Listener
             topologies.add(topology);
             for (int i=1; i<current.epochs.length; i++)
             {
+                // FIXME: again, this is confusing
+                EpochState nextState = current.epochs[i-1];
                 epochState = current.epochs[i];
                 // TODO: only create a sub-topology including shards that are unacknowledged
-                topologies.add(epochState.topology.forKeys(keys));
+                topologies.add(nextState.previous.forKeys(keys, nextState::shardIsUnacknowledged));
                 if (epochState.acknowledgedFor(keys))
                     break;
             }
