@@ -118,7 +118,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
 
     private Agree(Node node, TxnId txnId, Txn txn)
     {
-        super(node, Ballot.ZERO, txnId, txn, node.topologyTracker().forKeys(txn.keys()));
+        super(node, Ballot.ZERO, txnId, txn, node.topology().forKeys(txn.keys()));
         this.keys = txn.keys();
         tracker = new PreacceptTracker(topologies, topologies.fastPathPermitted());
 
@@ -150,7 +150,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
     {
         if (!tracker.hasSupersedingEpoch())
             return;
-        Topologies newTopologies = node.topologyTracker().forKeys(txn.keys());
+        Topologies newTopologies = node.topology().forKeys(txn.keys());
         if (newTopologies.currentEpoch() < tracker.supersedingEpoch)
             return;
         Set<Id> previousNodes = tracker.nodes();

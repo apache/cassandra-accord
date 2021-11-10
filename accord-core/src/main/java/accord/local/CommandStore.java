@@ -31,7 +31,6 @@ public abstract class CommandStore
                             Function<Timestamp, Timestamp> uniqueNow,
                             Agent agent,
                             Store store,
-                            TopologyTracker topologyTracker,
                             IntFunction<RangeMapping> mappingSupplier);
         Factory SYNCHRONIZED = Synchronized::new;
         Factory SINGLE_THREAD = SingleThread::new;
@@ -43,7 +42,6 @@ public abstract class CommandStore
     private final Function<Timestamp, Timestamp> uniqueNow;
     private final Agent agent;
     private final Store store;
-    private final TopologyTracker topologyTracker;
     private final IntFunction<RangeMapping> mappingSupplier;
     private RangeMapping rangeMap;
 
@@ -55,7 +53,6 @@ public abstract class CommandStore
                         Function<Timestamp, Timestamp> uniqueNow,
                         Agent agent,
                         Store store,
-                        TopologyTracker topologyTracker,
                         IntFunction<RangeMapping> mappingSupplier)
     {
         this.index = index;
@@ -63,7 +60,6 @@ public abstract class CommandStore
         this.uniqueNow = uniqueNow;
         this.agent = agent;
         this.store = store;
-        this.topologyTracker = topologyTracker;
         this.mappingSupplier = mappingSupplier;
         rangeMap = mappingSupplier.apply(index);
     }
@@ -218,10 +214,9 @@ public abstract class CommandStore
                             Function<Timestamp, Timestamp> uniqueNow,
                             Agent agent,
                             Store store,
-                            TopologyTracker topologyTracker,
                             IntFunction<RangeMapping> mappingSupplier)
         {
-            super(index, nodeId, uniqueNow, agent, store, topologyTracker, mappingSupplier);
+            super(index, nodeId, uniqueNow, agent, store, mappingSupplier);
         }
 
         @Override
@@ -285,10 +280,9 @@ public abstract class CommandStore
                             Function<Timestamp, Timestamp> uniqueNow,
                             Agent agent,
                             Store store,
-                            TopologyTracker topologyTracker,
                             IntFunction<RangeMapping> mappingSupplier)
         {
-            super(index, nodeId, uniqueNow, agent, store, topologyTracker, mappingSupplier);
+            super(index, nodeId, uniqueNow, agent, store, mappingSupplier);
             executor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
                 thread.setName(CommandStore.class.getSimpleName() + '[' + nodeId + ':' + index + ']');
@@ -328,10 +322,9 @@ public abstract class CommandStore
                                  Function<Timestamp, Timestamp> uniqueNow,
                                  Agent agent,
                                  Store store,
-                                 TopologyTracker topologyTracker,
                                  IntFunction<RangeMapping> mappingSupplier)
         {
-            super(index, nodeId, uniqueNow, agent, store, topologyTracker, mappingSupplier);
+            super(index, nodeId, uniqueNow, agent, store, mappingSupplier);
         }
 
         private void assertThread()

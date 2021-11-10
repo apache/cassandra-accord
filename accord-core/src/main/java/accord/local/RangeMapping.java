@@ -6,6 +6,7 @@ import accord.topology.Topology;
 /**
  * maps ranges handled by this command store to their current shards by index
  */
+// TODO: rename?
 class RangeMapping
 {
     static final RangeMapping EMPTY = new RangeMapping(KeyRanges.EMPTY, Topology.EMPTY);

@@ -187,7 +187,7 @@ public class PreAcceptTest
             IntKey key = IntKey.key(10);
             CommandStore commandStore = node.local(key).orElseThrow();
 
-            configService(node).reportTopology(node.topologyTracker().current().withEpoch(2));
+            configService(node).reportTopology(node.topology().current().withEpoch(2));
             messageSink.clearHistory();
 
             TxnId txnId = clock.idForNode(1, ID2);

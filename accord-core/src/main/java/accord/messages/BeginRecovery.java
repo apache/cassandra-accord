@@ -133,7 +133,7 @@ public class BeginRecovery implements Request
         {
             // disseminate directly
             RecoverOk ok = (RecoverOk) reply;
-            node.send(node.topologyTracker().forKeys(txn.keys).nodes(), new Apply(txnId, txn, ok.executeAt, ok.deps, ok.writes, ok.result));
+            node.send(node.topology().forKeys(txn.keys).nodes(), new Apply(txnId, txn, ok.executeAt, ok.deps, ok.writes, ok.result));
         }
     }
 

@@ -28,18 +28,14 @@ public class CommandStores
     private final Node.Id node;
     private final CommandStore[] commandStores;
     private volatile RangeMapping.Multi rangeMappings;
-    private final ConfigurationService configurationService;
-    private final TopologyTracker topologyTracker;
 
-    public CommandStores(int num, Node.Id node, ConfigurationService configurationService, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store, CommandStore.Factory shardFactory, TopologyTracker topologyTracker)
+    public CommandStores(int num, Node.Id node, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store, CommandStore.Factory shardFactory)
     {
         this.node = node;
-        this.configurationService = configurationService;
         this.commandStores = new CommandStore[num];
         this.rangeMappings = RangeMapping.Multi.empty(num);
-        this.topologyTracker = topologyTracker;
         for (int i=0; i<num; i++)
-            commandStores[i] = shardFactory.create(i, node, uniqueNow, agent, store, topologyTracker, this::getRangeMapping);
+            commandStores[i] = shardFactory.create(i, node, uniqueNow, agent, store, this::getRangeMapping);
     }
 
     private RangeMapping getRangeMapping(int idx)
@@ -97,7 +93,6 @@ public class CommandStores
         Topology local = cluster.forNode(node);
         KeyRanges removed = rangeMappings.local.ranges().difference(local.ranges());
         KeyRanges added = local.ranges().difference(rangeMappings.local.ranges());
-        // FIXME: fetch transaction history for added ranges
         List<KeyRanges> sharded = shardRanges(added, commandStores.length);
 
         RangeMapping[] newMappings = new RangeMapping[rangeMappings.mappings.length];

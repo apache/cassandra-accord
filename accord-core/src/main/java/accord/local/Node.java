@@ -73,8 +73,8 @@ public class Node implements ConfigurationService.Listener
     private final CommandStores commandStores;
     private final Id id;
     private final MessageSink messageSink;
-    private final ConfigurationService configurationService;
-    private final TopologyTracker topologyTracker;
+    private final ConfigurationService configService;
+    private final TopologyTracker topology;
     private final Random random;
 
     private final LongSupplier nowSupplier;
@@ -87,34 +87,33 @@ public class Node implements ConfigurationService.Listener
     private final Map<TxnId, CompletionStage<Result>> coordinating = new ConcurrentHashMap<>();
     private final Set<TxnId> pendingRecovery = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
-    public Node(Id id, MessageSink messageSink, ConfigurationService configurationService, Random random, LongSupplier nowSupplier,
+    public Node(Id id, MessageSink messageSink, ConfigurationService configService, Random random, LongSupplier nowSupplier,
                 Supplier<Store> dataSupplier, Agent agent, Scheduler scheduler, CommandStore.Factory commandStoreFactory)
     {
         this.id = id;
         this.random = random;
         this.agent = agent;
         this.messageSink = messageSink;
-        this.configurationService = configurationService;
-        this.topologyTracker = new TopologyTracker();
-        Topology topology = configurationService.currentTopology();
+        this.configService = configService;
+        this.topology = new TopologyTracker();
+        Topology topology = configService.currentTopology();
         this.now = new AtomicReference<>(new Timestamp(topology.epoch(), nowSupplier.getAsLong(), 0, id));
         this.nowSupplier = nowSupplier;
         this.scheduler = scheduler;
         this.commandStores = new CommandStores(numCommandShards(),
                                                id,
-                                               configurationService,
                                                this::uniqueNow,
                                                agent,
                                                dataSupplier.get(),
-                                               commandStoreFactory, topologyTracker);
+                                               commandStoreFactory);
 
-        configurationService.registerListener(this);
+        configService.registerListener(this);
         onTopologyUpdate(topology);
     }
 
     public ConfigurationService configService()
     {
-        return configurationService;
+        return configService;
     }
 
     public MessageSink messageSink()
@@ -124,35 +123,35 @@ public class Node implements ConfigurationService.Listener
 
     public void maybeReportEpoch(long epoch)
     {
-        if (epoch > configurationService.currentEpoch())
-            configurationService.fetchTopologyForEpoch(epoch);
+        if (epoch > configService.currentEpoch())
+            configService.fetchTopologyForEpoch(epoch);
     }
 
     @Override
     public synchronized void onTopologyUpdate(Topology topology)
     {
-        if (topology.epoch() <= topologyTracker.epoch())
+        if (topology.epoch() <= this.topology.epoch())
             return;
         commandStores.updateTopology(topology);
-        topologyTracker.onTopologyUpdate(topology);
-        configurationService.acknowledgeEpoch(topology.epoch());
+        this.topology.onTopologyUpdate(topology);
+        configService.acknowledgeEpoch(topology.epoch());
     }
 
     @Override
     public void onEpochAcknowledgement(Id node, long epoch)
     {
-        topologyTracker.onEpochAcknowledgement(node, epoch);
+        topology.onEpochAcknowledgement(node, epoch);
     }
 
     @Override
     public void onEpochSyncComplete(Id node, long epoch)
     {
-        topologyTracker.onEpochSyncComplete(node, epoch);
+        topology.onEpochSyncComplete(node, epoch);
     }
 
-    public TopologyTracker topologyTracker()
+    public TopologyTracker topology()
     {
-        return topologyTracker;
+        return topology;
     }
 
     public void shutdown()
@@ -165,7 +164,7 @@ public class Node implements ConfigurationService.Listener
         return now.updateAndGet(cur -> {
             // TODO: this diverges from proof; either show isomorphism or make consistent
             long now = nowSupplier.getAsLong();
-            long epoch = Math.max(cur.epoch, topologyTracker.epoch());
+            long epoch = Math.max(cur.epoch, topology.epoch());
             return (now > cur.real)
                  ? new Timestamp(epoch, now, 0, id)
                  : new Timestamp(epoch, cur.real, cur.logical + 1, id);
@@ -179,7 +178,7 @@ public class Node implements ConfigurationService.Listener
                 Timestamp timestamp = proposed.compareTo(current) <= 0
                         ? new Timestamp(current.epoch, current.real, current.logical + 1, id)
                         : proposed;
-                return timestamp.withMinEpoch(topologyTracker.epoch());
+                return timestamp.withMinEpoch(topology.epoch());
             });
         return uniqueNow();
     }

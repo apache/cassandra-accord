@@ -106,7 +106,7 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
 
     public Recover(Node node, Ballot ballot, TxnId txnId, Txn txn)
     {
-        this(node, ballot, txnId, txn, node.topologyTracker().forKeys(txn.keys()));
+        this(node, ballot, txnId, txn, node.topology().forKeys(txn.keys()));
     }
 
     private Recover(Node node, Ballot ballot, TxnId txnId, Txn txn, Topologies topologies)
@@ -131,7 +131,6 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
         RecoverOk ok = (RecoverOk) response;
         recoverOks.add(ok);
         boolean fastPath = ok.executeAt.compareTo(txnId) == 0;
-        // TODO: handle epoch change
         tracker.recordSuccess(from, fastPath);
 
         if (tracker.hasReachedQuorum())

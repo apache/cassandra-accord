@@ -31,12 +31,6 @@ public interface ConfigurationService
     void registerListener(Listener listener);
 
     /**
-     * Return the lowest epoch data exists for
-     * @return
-     */
-    long getEpochLowBound();
-
-    /**
      * Returns the current topology. Also called on startup for the "starting point" topology.
      */
     Topology currentTopology();

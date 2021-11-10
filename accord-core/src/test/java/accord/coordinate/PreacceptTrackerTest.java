@@ -136,14 +136,4 @@ public class PreacceptTrackerTest
         responses.recordSuccess(ids[4], true);
         assertResponseState(responses, true, true, false, false);
     }
-
-    @Test
-    void multiTopology()
-    {
-        Keys keys = keys(150);
-        KeyRange range = range(100, 200);
-        Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
-        Topology topology2 = topology(2, shard(range, idList(4, 5, 6), idSet(4, 5)));
-
-    }
 }

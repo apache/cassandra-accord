@@ -43,7 +43,7 @@ public class NodeTest
         Timestamp timestamp1 = node.uniqueNow();
         Assertions.assertEquals(ts(1, 101, 0, 1), timestamp1);
 
-        node.onTopologyUpdate(node.topologyTracker().current().withEpoch(2));
+        node.onTopologyUpdate(node.topology().current().withEpoch(2));
         Timestamp timestamp2 = node.uniqueNow();
         Assertions.assertEquals(ts(2, 101, 1, 1), timestamp2);
     }

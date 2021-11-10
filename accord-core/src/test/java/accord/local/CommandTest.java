@@ -36,7 +36,6 @@ public class CommandTest
         final AtomicReference<RangeMapping> mapping = new AtomicReference<>(RangeMapping.EMPTY);
         final MockStore data = new MockStore();
         final AtomicReference<Timestamp> nextTimestamp = new AtomicReference<>(Timestamp.NONE);
-        final TopologyTracker topologyTracker = new TopologyTracker();
         final Function<Timestamp, Timestamp> uniqueNow = atleast -> {
             Timestamp next = nextTimestamp.get();
             Assertions.assertTrue(next.compareTo(atleast) >= 0);
@@ -58,7 +57,6 @@ public class CommandTest
                                              storeSupport.uniqueNow,
                                              new TestAgent(),
                                              storeSupport.data,
-                                             storeSupport.topologyTracker,
                                              i -> storeSupport.mapping.get());
     }
 

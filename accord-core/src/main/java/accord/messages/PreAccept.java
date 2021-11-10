@@ -33,7 +33,6 @@ public class PreAccept implements Request
                 return PreAcceptNack.INSTANCE;
             // TODO: only lookup keys relevant to this instance
             // TODO: why don't we calculate deps from the executeAt timestamp??
-            // TODO: return new topology if epoch is stale?
             return new PreAcceptOk(command.executeAt(), calculateDeps(instance, txnId, txn, txnId));
         }).reduce((r1, r2) -> {
             if (!r1.isOK()) return r1;
