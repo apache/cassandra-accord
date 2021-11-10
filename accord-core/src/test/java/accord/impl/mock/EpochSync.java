@@ -1,11 +1,7 @@
 package accord.impl.mock;
 
-import accord.api.Key;
 import accord.coordinate.tracking.QuorumTracker;
-import accord.local.Command;
-import accord.local.CommandsForKey;
-import accord.local.Node;
-import accord.local.Status;
+import accord.local.*;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
@@ -16,11 +12,11 @@ import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Consumer;
 
 import static accord.impl.mock.MockCluster.configService;
 
@@ -31,16 +27,12 @@ public class EpochSync implements Runnable
     private final MockCluster cluster;
     private final long syncEpoch;
     private final long nextEpoch;
-    private final Timestamp minTimestamp;
-    private final Timestamp maxTimestamp;
 
     public EpochSync(MockCluster cluster, long syncEpoch)
     {
         this.cluster = cluster;
         this.syncEpoch = syncEpoch;
         this.nextEpoch = syncEpoch + 1;
-        minTimestamp = new Timestamp(syncEpoch, Long.MIN_VALUE, Integer.MIN_VALUE, Node.Id.NONE);
-        maxTimestamp = new Timestamp(syncEpoch, Long.MAX_VALUE, Integer.MAX_VALUE, Node.Id.MAX);
     }
 
     private static class SyncMessage implements Request
@@ -145,26 +137,12 @@ public class EpochSync implements Runnable
             nextTopology = node.configService().getTopologyForEpoch(nextEpoch);
         }
 
-        // TODO: clean this up
-        private void syncKeyCommands(Key key, CommandsForKey commands, Map<TxnId, SyncMessage> destMap)
-        {
-            Collection<Command> committed = commands.committedByExecuteAt.subMap(minTimestamp,
-                                                                                 true,
-                                                                                 maxTimestamp,
-                                                                                 true).values();
-            for (Command command : committed)
-                destMap.put(command.txnId(), new SyncMessage(command));
-        }
-
         @Override
         public void run()
         {
             Map<TxnId, SyncMessage> syncMessages = new ConcurrentHashMap<>();
-            // TODO: clean this up
-            node.local().forEach(commandStore -> commandStore.commandsForRanges(
-                    syncTopology.ranges(),
-                    (key, commands) -> syncKeyCommands(key, commands, syncMessages)
-            ));
+            Consumer<Command> commandConsumer = command -> syncMessages.put(command.txnId(), new SyncMessage(command));
+            node.local().forEach(commandStore -> commandStore.forCommittedInEpoch(syncTopology.ranges(), syncEpoch, commandConsumer));
 
             for (SyncMessage message : syncMessages.values())
                 CommandSync.sync(node, message, nextTopology);

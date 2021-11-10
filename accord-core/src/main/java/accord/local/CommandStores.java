@@ -103,10 +103,7 @@ public class CommandStores
             newMappings[i] = new RangeMapping(newRanges, local);
         }
 
-        RangeMapping.Multi previous = rangeMappings;
         rangeMappings = new RangeMapping.Multi(cluster, local, newMappings);
-        stream().forEach(commands -> commands.onTopologyChange(previous.mappings[commands.index()],
-                                                               rangeMappings.mappings[commands.index()]));
     }
 
     private class ShardSpliterator implements Spliterator<CommandStore>

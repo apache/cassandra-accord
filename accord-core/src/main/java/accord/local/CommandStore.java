@@ -115,15 +115,8 @@ public abstract class CommandStore
         return rangeMap.ranges;
     }
 
-    void onTopologyChange(RangeMapping prevMapping, RangeMapping currentMapping)
+    void purgeRanges(KeyRanges removed)
     {
-        Preconditions.checkState(rangeMap != prevMapping);
-        // processInternal should pick up any topology changes before executing this task
-        Preconditions.checkState(rangeMap == currentMapping);
-        KeyRanges removed = prevMapping.ranges.difference(rangeMap.ranges);
-
-        // FIXME: we can't purge state for ranges we no longer replicate until we know the new epoch has taken effect
-        //  at a quorum of the old electorate
         for (KeyRange range : removed)
         {
             NavigableMap<Key, CommandsForKey> subMap = commandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive());
@@ -143,13 +136,25 @@ public abstract class CommandStore
         }
     }
 
-    // TODO: clean this up
-    public void commandsForRanges(KeyRanges ranges, BiConsumer<Key, CommandsForKey> consumer)
+    public void forCommittedInEpoch(KeyRanges ranges, long epoch, Consumer<Command> consumer)
     {
+        Timestamp minTimestamp = new Timestamp(epoch, Long.MIN_VALUE, Integer.MIN_VALUE, Node.Id.NONE);
+        Timestamp maxTimestamp = new Timestamp(epoch, Long.MAX_VALUE, Integer.MAX_VALUE, Node.Id.MAX);
         for (KeyRange range : ranges)
         {
-            NavigableMap<Key, CommandsForKey> subMap = commandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive());
-            subMap.entrySet().forEach(entry -> consumer.accept(entry.getKey(), entry.getValue()));
+            Iterable<CommandsForKey> rangeCommands = commandsForKey.subMap(range.start(),
+                                                                           range.startInclusive(),
+                                                                           range.end(),
+                                                                           range.endInclusive()).values();
+            for (CommandsForKey commands : rangeCommands)
+            {
+
+                Collection<Command> committed = commands.committedByExecuteAt.subMap(minTimestamp,
+                                                                                     true,
+                                                                                     maxTimestamp,
+                                                                                     true).values();
+                committed.forEach(consumer);
+            }
         }
     }
 
