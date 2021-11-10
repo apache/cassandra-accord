@@ -112,9 +112,14 @@ public class Node implements ConfigurationService.Listener
         onTopologyUpdate(topology);
     }
 
-    public ConfigurationService configurationService()
+    public ConfigurationService configService()
     {
         return configurationService;
+    }
+
+    public MessageSink messageSink()
+    {
+        return messageSink;
     }
 
     public void maybeReportEpoch(long epoch)

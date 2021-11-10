@@ -109,4 +109,10 @@ public class MockConfigurationService implements ConfigurationService
     {
         return ImmutableSet.copyOf(waiting.keySet());
     }
+
+    public synchronized void reportSyncComplete(Node.Id node, long epoch)
+    {
+        for (Listener listener : listeners)
+            listener.onEpochSyncComplete(node, epoch);
+    }
 }

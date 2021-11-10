@@ -1,10 +1,13 @@
 package accord.coordinate;
 
 import accord.api.KeyRange;
+import accord.impl.mock.EpochSync;
 import accord.impl.mock.MockCluster;
-import accord.impl.mock.MockConfigurationService;
+import accord.impl.mock.RecordingMessageSink;
 import accord.local.Command;
 import accord.local.Node;
+import accord.local.Status;
+import accord.messages.Accept;
 import accord.topology.Topology;
 import accord.txn.Keys;
 import accord.txn.Txn;
@@ -12,30 +15,21 @@ import accord.txn.TxnId;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.Set;
+import java.util.stream.Collectors;
+
 import static accord.Utils.*;
 import static accord.impl.IntKey.keys;
 import static accord.impl.IntKey.range;
 
 public class TopologyChangeTest
 {
-    /**
-     * If a replica receives a preaccept request from a node on an earlier epoch, it's response should
-     * include the more recent topologies
-     */
-    @Test
-    void updateOnPreaccept()
+    private static TxnId coordinate(Node node, Keys keys) throws Throwable
     {
-
-    }
-
-    /**
-     * If a coordinator discovers a replica is on an earlier epoch during preaccept, it's accept message
-     * should include the more recent topologies
-     */
-    @Test
-    void updateOnAccept()
-    {
-
+        TxnId txnId = node.nextTxnId();
+        Txn txn = writeTxn(keys);
+        node.coordinate(txnId, txn).toCompletableFuture().get();
+        return txnId;
     }
 
     @Test
@@ -77,6 +71,66 @@ public class TopologyChangeTest
                 Assertions.assertTrue(config.pendingEpochs().contains(Long.valueOf(2)));
             });
 
+        }
+    }
+
+    @Test
+    void fastPathSkippedUntilSync() throws Throwable
+    {
+        Keys keys = keys(150);
+        KeyRange range = range(100, 200);
+        Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
+        Topology topology2 = topology(2, shard(range, idList(1, 2, 3), idSet(2, 3)));
+        try (MockCluster cluster = MockCluster.builder().nodes(3)
+                                                        .messageSink(RecordingMessageSink::new)
+                                                        .topology(topology1).build())
+        {
+            Node node1 = cluster.get(1);
+            RecordingMessageSink messageSink = (RecordingMessageSink) node1.messageSink();
+            messageSink.clearHistory();
+            TxnId txnId1 = coordinate(node1, keys);
+            node1.local(keys).forEach(commands -> {
+                Command command = commands.command(txnId1);
+                Assertions.assertTrue(command.savedDeps().isEmpty());
+            });
+
+            // check there was no accept phase
+            Assertions.assertFalse(messageSink.requests.stream().anyMatch(env -> env.payload instanceof Accept));
+
+
+            cluster.configServices(1, 2, 3).forEach(config -> config.reportTopology(topology2));
+            messageSink.clearHistory();
+
+            // post epoch change, there _should_ be accepts, but with the original timestamp
+            TxnId txnId2 = coordinate(node1, keys);
+            Set<Node.Id> accepts = messageSink.requests.stream()
+                    .filter(env -> env.payload instanceof Accept).map(env -> {
+                        Accept accept = (Accept) env.payload;
+                        Assertions.assertEquals(txnId2, accept.txnId);
+                        return env.to;
+            }).collect(Collectors.toSet());
+            Assertions.assertEquals(idSet(1, 2, 3), accepts);
+
+            node1.local(keys).forEach(commands -> {
+                Command command = commands.command(txnId2);
+                Assertions.assertTrue(command.hasBeen(Status.Committed));
+                Assertions.assertTrue(command.savedDeps().contains(txnId1));
+                Assertions.assertEquals(txnId2, command.executeAt());
+            });
+
+            EpochSync.sync(cluster, 1);
+
+            // post sync, fast path should be working again, and there should be no accept phase
+            messageSink.clearHistory();
+            TxnId txnId3 = coordinate(node1, keys);
+            Assertions.assertFalse(messageSink.requests.stream().anyMatch(env -> env.payload instanceof Accept));
+            node1.local(keys).forEach(commands -> {
+                Command command = commands.command(txnId3);
+                Assertions.assertTrue(command.hasBeen(Status.Committed));
+                Assertions.assertTrue(command.savedDeps().contains(txnId1));
+                Assertions.assertTrue(command.savedDeps().contains(txnId2));
+                Assertions.assertEquals(txnId3, command.executeAt());
+            });
         }
     }
 }

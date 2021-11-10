@@ -120,7 +120,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
     {
         super(node, Ballot.ZERO, txnId, txn, node.topologyTracker().forKeys(txn.keys()));
         this.keys = txn.keys();
-        tracker = new PreacceptTracker(topologies, true);
+        tracker = new PreacceptTracker(topologies, topologies.fastPathPermitted());
 
         node.send(tracker.nodes(), new PreAccept(txnId, txn), this);
     }
@@ -186,7 +186,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
         if (!fastPath && ok.witnessedAt.epoch > txnId.epoch)
         {
             if (tracker.recordSupersedingEpoch(ok.witnessedAt.epoch))
-                node.configurationService().fetchTopologyForEpoch(ok.witnessedAt.epoch, this::onEpochUpdate);
+                node.configService().fetchTopologyForEpoch(ok.witnessedAt.epoch, this::onEpochUpdate);
         }
 
         if (!tracker.hasSupersedingEpoch() && (tracker.hasMetFastPathCriteria() || shouldSlowPathAccept()))

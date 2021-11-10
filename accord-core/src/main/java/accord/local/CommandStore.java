@@ -147,6 +147,7 @@ public abstract class CommandStore
         }
     }
 
+    // TODO: clean this up
     public void commandsForRanges(KeyRanges ranges, BiConsumer<Key, CommandsForKey> consumer)
     {
         for (KeyRange range : ranges)

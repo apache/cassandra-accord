@@ -1,6 +1,7 @@
 package accord.impl.mock;
 
 import accord.NetworkFilter;
+import accord.api.MessageSink;
 import accord.coordinate.Timeout;
 import accord.impl.TopologyUtils;
 import accord.local.CommandStore;
@@ -21,6 +22,8 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
 import static accord.Utils.*;
@@ -33,6 +36,7 @@ public class MockCluster implements Network, AutoCloseable
     private final Config config;
     private final LongSupplier nowSupplier;
     private final Map<Id, Node> nodes = new ConcurrentHashMap<>();
+    private final BiFunction<Id, Network, MessageSink> messageSinkFactory;
     private int nextNodeId = 1;
     public NetworkFilter networkFilter = new NetworkFilter();
 
@@ -44,6 +48,7 @@ public class MockCluster implements Network, AutoCloseable
         this.config = new Config(builder);
         this.random = new Random(config.seed);
         this.nowSupplier = builder.nowSupplier;
+        this.messageSinkFactory = builder.messageSinkFactory;
 
         init(builder.topology);
     }
@@ -67,7 +72,7 @@ public class MockCluster implements Network, AutoCloseable
     private Node createNode(Id id, Topology topology)
     {
         MockStore store = new MockStore();
-        SimpleMessageSink messageSink = new SimpleMessageSink(id, this);
+        MessageSink messageSink = messageSinkFactory.apply(id, this);
         MockConfigurationService configurationService = new MockConfigurationService(messageSink, topology);
         return new Node(id,
                         messageSink,
@@ -176,7 +181,7 @@ public class MockCluster implements Network, AutoCloseable
 
     public static MockConfigurationService configService(Node node)
     {
-        return (MockConfigurationService) node.configurationService();
+        return (MockConfigurationService) node.configService();
     }
 
     public MockConfigurationService configService(Id id)
@@ -209,6 +214,11 @@ public class MockCluster implements Network, AutoCloseable
         return rlist;
     }
 
+    public void forEachNode(Consumer<Node> consumer)
+    {
+        nodes.values().forEach(consumer);
+    }
+
     public Iterable<Node> nodes(int... ids)
     {
         assert ids.length > 0;
@@ -239,6 +249,7 @@ public class MockCluster implements Network, AutoCloseable
         private int maxKey = 10000;
         private Topology topology = null;
         private LongSupplier nowSupplier = System::currentTimeMillis;
+        private BiFunction<Id, Network, MessageSink> messageSinkFactory = SimpleMessageSink::new;
 
         public Builder seed(long seed)
         {
@@ -273,6 +284,12 @@ public class MockCluster implements Network, AutoCloseable
         public Builder topology(Topology topology)
         {
             this.topology = topology;
+            return this;
+        }
+
+        public Builder messageSink(BiFunction<Id, Network, MessageSink> factory)
+        {
+            this.messageSinkFactory = factory;
             return this;
         }
 
