@@ -62,8 +62,6 @@ public class ReadTracker extends AbstractResponseTracker<ReadTracker.ReadShardTr
     public ReadTracker(Topologies topologies)
     {
         super(topologies, ReadShardTracker[]::new, ReadShardTracker::new);
-        // TODO: do we want all nodes from all epochs for reads??
-        // TODO: may also need to -not- read from newer epochs if new nodes don't have data
         candidates = new ArrayList<>(topologies.nodes());
     }
 
