@@ -16,7 +16,7 @@ import accord.messages.Request;
 import accord.messages.Reply;
 import accord.topology.Shard;
 import accord.topology.Topology;
-import accord.topology.TopologyTracker;
+import accord.topology.TopologyManager;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
 import accord.txn.Txn;
@@ -74,7 +74,7 @@ public class Node implements ConfigurationService.Listener
     private final Id id;
     private final MessageSink messageSink;
     private final ConfigurationService configService;
-    private final TopologyTracker topology;
+    private final TopologyManager topology;
     private final Random random;
 
     private final LongSupplier nowSupplier;
@@ -95,7 +95,7 @@ public class Node implements ConfigurationService.Listener
         this.agent = agent;
         this.messageSink = messageSink;
         this.configService = configService;
-        this.topology = new TopologyTracker();
+        this.topology = new TopologyManager();
         Topology topology = configService.currentTopology();
         this.now = new AtomicReference<>(new Timestamp(topology.epoch(), nowSupplier.getAsLong(), 0, id));
         this.nowSupplier = nowSupplier;
@@ -149,7 +149,7 @@ public class Node implements ConfigurationService.Listener
         topology.onEpochSyncComplete(node, epoch);
     }
 
-    public TopologyTracker topology()
+    public TopologyManager topology()
     {
         return topology;
     }

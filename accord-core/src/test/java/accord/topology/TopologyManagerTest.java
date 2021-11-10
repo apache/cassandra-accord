@@ -9,7 +9,7 @@ import static accord.Utils.*;
 import static accord.impl.IntKey.keys;
 import static accord.impl.IntKey.range;
 
-public class TopologyTrackerTest
+public class TopologyManagerTest
 {
     @Test
     void fastPathReconfiguration()
@@ -18,7 +18,7 @@ public class TopologyTrackerTest
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(1, 2, 3), idSet(2, 3)));
 
-        TopologyTracker service = new TopologyTracker();
+        TopologyManager service = new TopologyManager();
 
         Assertions.assertSame(Topology.EMPTY, service.current());
         service.onTopologyUpdate(topology1);
@@ -36,7 +36,7 @@ public class TopologyTrackerTest
         // TODO: test fast path enabling
     }
 
-    private static TopologyTracker tracker()
+    private static TopologyManager tracker()
     {
         Topology topology1 = topology(1,
                                       shard(range(100, 200), idList(1, 2, 3), idSet(1, 2)),
@@ -45,7 +45,7 @@ public class TopologyTrackerTest
                                       shard(range(100, 200), idList(1, 2, 3), idSet(3, 4)),
                                       shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)));
 
-        TopologyTracker service = new TopologyTracker();
+        TopologyManager service = new TopologyManager();
         service.onTopologyUpdate(topology1);
         service.onTopologyUpdate(topology2);
 
@@ -55,7 +55,7 @@ public class TopologyTrackerTest
     @Test
     void acknowledgedFor()
     {
-        TopologyTracker service = tracker();
+        TopologyManager service = tracker();
 
         Assertions.assertFalse(service.getEpochStateUnsafe(2).acknowledged());
         service.onEpochAcknowledgement(id(1), 2);
@@ -68,7 +68,7 @@ public class TopologyTrackerTest
     @Test
     void syncCompleteFor()
     {
-        TopologyTracker service = tracker();
+        TopologyManager service = tracker();
 
         Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
         service.onEpochAcknowledgement(id(1), 2);
@@ -87,7 +87,7 @@ public class TopologyTrackerTest
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(1, 2, 3), idSet(2, 3)));
 
-        TopologyTracker service = new TopologyTracker();
+        TopologyManager service = new TopologyManager();
 
         Assertions.assertSame(Topology.EMPTY, service.current());
         service.onTopologyUpdate(topology1);
@@ -120,7 +120,7 @@ public class TopologyTrackerTest
                                       shard(range(100, 200), idList(1, 2, 3), idSet(1, 2)),
                                       shard(range(200, 300), idList(4, 5, 6), idSet(5, 6)));
 
-        TopologyTracker service = new TopologyTracker();
+        TopologyManager service = new TopologyManager();
         service.onTopologyUpdate(topology1);
         service.onTopologyUpdate(topology2);
 
@@ -133,14 +133,5 @@ public class TopologyTrackerTest
         service.onEpochAcknowledgement(id(2), 2);
         Assertions.assertEquals(topologies(topology2, topology(1, shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)))),
                                 service.forKeys(keys(150, 250)));
-    }
-
-    /**
-     * nodes from
-     */
-    @Test
-    void nodesFor()
-    {
-
     }
 }

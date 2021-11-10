@@ -1,12 +1,10 @@
 package accord.local;
 
 import accord.api.Agent;
-import accord.api.ConfigurationService;
 import accord.api.KeyRange;
 import accord.api.Store;
 import accord.topology.KeyRanges;
 import accord.topology.Topology;
-import accord.topology.TopologyTracker;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
 import com.google.common.base.Preconditions;

@@ -6,7 +6,6 @@ import accord.impl.TopologyFactory;
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockStore;
 import accord.topology.Topology;
-import accord.topology.TopologyTracker;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
 import accord.txn.Txn;

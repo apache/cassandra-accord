@@ -19,11 +19,8 @@ import java.util.*;
  * * clean up obsolete data
  *
  * Assumes a topology service that won't report epoch n without having n-1 etc also available
- *
- * TODO: support creating after epoch 0
- * TODO: rename
  */
-public class TopologyTracker implements ConfigurationService.Listener
+public class TopologyManager implements ConfigurationService.Listener
 {
     static class ShardEpochTracker extends AbstractResponseTracker.ShardTracker
     {
@@ -37,18 +34,11 @@ public class TopologyTracker implements ConfigurationService.Listener
         private int syncComplete = 0;
         private final Set<Node.Id> pendingSync;
 
-        /*
-         * Until all intersecting nodes (ie those present in both epoch n and n+1) have repaired the operations of
-         * epoch n, other nodes may not remove accord metadata for the previous epoch
-         */
-        private final Set<Node.Id> needRepair;
-
         public ShardEpochTracker(Shard shard)
         {
             super(shard);
             this.unacknowledged = new HashSet<>(shard.nodes);
             this.pendingSync = new HashSet<>(shard.nodes);
-            this.needRepair = new HashSet<>(shard.nodes);
         }
 
         public boolean acknowledge(Node.Id id)
@@ -110,7 +100,6 @@ public class TopologyTracker implements ConfigurationService.Listener
     {
         private final Topology topology;
         private final Topology previous;
-        // TODO: keep an unacknowledged topology
         private final EpochTracker tracker;
         private boolean acknowledged = false;
         private boolean syncComplete = false;
@@ -127,7 +116,6 @@ public class TopologyTracker implements ConfigurationService.Listener
             Preconditions.checkArgument(!previous.isSubset());
             this.topology = topology;
             this.previous = previous;
-            // FIXME: may need a separate tracker class
             this.tracker = new EpochTracker(new Topologies.Singleton(previous, false));
             updateState();
         }
@@ -310,7 +298,6 @@ public class TopologyTracker implements ConfigurationService.Listener
                 // FIXME: again, this is confusing
                 EpochState nextState = current.epochs[i-1];
                 epochState = current.epochs[i];
-                // TODO: only create a sub-topology including shards that are unacknowledged
                 topologies.add(nextState.previous.forKeys(keys, nextState::shardIsUnacknowledged));
                 if (epochState.acknowledgedFor(keys))
                     break;
