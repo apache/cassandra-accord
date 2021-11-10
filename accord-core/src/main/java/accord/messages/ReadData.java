@@ -112,7 +112,7 @@ public class ReadData implements Request
         synchronized void setup(TxnId txnId, Txn txn)
         {
             // TODO: simple hash set supporting concurrent modification, or else avoid concurrent modification
-            waitingOn = txn.local(node).collect(Collectors.toCollection(() -> new DeterministicIdentitySet<>()));
+            waitingOn = node.local(txn).collect(Collectors.toCollection(() -> new DeterministicIdentitySet<>()));
             // FIXME: fix/check thread safety
             CommandStore.onEach(waitingOn, instance -> {
                 Command command = instance.command(txnId);

@@ -34,7 +34,7 @@ public class BeginRecovery implements Request
 
     public void process(Node node, Id replyToNode, long replyToMessage)
     {
-        RecoverReply reply = txn.local(node).map(instance -> {
+        RecoverReply reply = node.local(txn).map(instance -> {
             Command command = instance.command(txnId);
 
             if (!command.recover(txn, ballot))

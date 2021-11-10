@@ -193,6 +193,11 @@ public class Node implements ConfigurationService.Listener
         return commandStores.forKeys(keys);
     }
 
+    public Stream<CommandStore> local(Txn txn)
+    {
+        return commandStores.forKeys(txn.keys());
+    }
+
     public Stream<CommandStore> local()
     {
         return commandStores.stream();

@@ -25,7 +25,7 @@ public class Commit extends ReadData implements Request
 
     public void process(Node node, Id from, long messageId)
     {
-        txn.local(node).forEach(instance -> instance.command(txnId).commit(txn, deps, executeAt));
+        node.local(txn).forEach(instance -> instance.command(txnId).commit(txn, deps, executeAt));
         if (read) super.process(node, from, messageId);
     }
 

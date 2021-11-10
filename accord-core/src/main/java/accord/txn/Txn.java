@@ -83,12 +83,6 @@ public class Txn
         return read(commandStore.ranges(), commandStore.store());
     }
 
-    // TODO: move these somewhere else?
-    public Stream<CommandStore> local(Node node)
-    {
-        return node.local(keys());
-    }
-
     public Timestamp maxConflict(CommandStore commandStore)
     {
         return maxConflict(commandStore, keys());

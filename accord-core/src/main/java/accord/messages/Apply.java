@@ -32,7 +32,7 @@ public class Apply implements Request
 
     public void process(Node node, Id replyToNode, long replyToMessage)
     {
-        txn.local(node).forEach(instance -> instance.command(txnId).apply(txn, deps, executeAt, writes, result));
+        node.local(txn).forEach(instance -> instance.command(txnId).apply(txn, deps, executeAt, writes, result));
     }
 
     @Override

@@ -27,7 +27,7 @@ public class PreAccept implements Request
     public void process(Node node, Id from, long messageId)
     {
         node.maybeReportEpoch(txnId.epoch);
-        node.reply(from, messageId, txn.local(node).map(instance -> {
+        node.reply(from, messageId, node.local(txn).map(instance -> {
             Command command = instance.command(txnId);
             if (!command.witness(txn))
                 return PreAcceptNack.INSTANCE;
