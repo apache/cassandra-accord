@@ -71,6 +71,14 @@ public class TopologyChangeTest
                 Assertions.assertTrue(config.pendingEpochs().contains(Long.valueOf(2)));
             });
 
+            // ...and participated in consensus
+            cluster.nodes(1, 2, 3).forEach(node -> {
+                node.local(keys).forEach(commands -> {
+                    Command command = commands.command(txnId2);
+                    Assertions.assertTrue(command.hasBeen(Status.Committed));
+                });
+            });
+
         }
     }
 
