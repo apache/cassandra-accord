@@ -31,6 +31,7 @@ public class Accept implements Request
 
     public void process(Node on, Node.Id replyToNode, long replyToMessage)
     {
+        on.maybeReportEpoch(executeAt.epoch);
         on.reply(replyToNode, replyToMessage, on.local(txn).map(instance -> {
             Command command = instance.command(txnId);
             if (!command.accept(ballot, txn, executeAt, deps))
