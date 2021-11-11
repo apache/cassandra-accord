@@ -108,7 +108,7 @@ public class Node implements ConfigurationService.Listener
                                                commandStoreFactory);
 
         configService.registerListener(this);
-        onTopologyUpdate(topology);
+        onTopologyUpdate(topology, false);
     }
 
     public ConfigurationService configService()
@@ -127,14 +127,20 @@ public class Node implements ConfigurationService.Listener
             configService.fetchTopologyForEpoch(epoch);
     }
 
-    @Override
-    public synchronized void onTopologyUpdate(Topology topology)
+    private synchronized void onTopologyUpdate(Topology topology, boolean acknowledge)
     {
         if (topology.epoch() <= this.topology.epoch())
             return;
         commandStores.updateTopology(topology);
         this.topology.onTopologyUpdate(topology);
-        configService.acknowledgeEpoch(topology.epoch());
+        if (acknowledge)
+            configService.acknowledgeEpoch(topology.epoch());
+    }
+
+    @Override
+    public synchronized void onTopologyUpdate(Topology topology)
+    {
+        onTopologyUpdate(topology, true);
     }
 
     @Override
