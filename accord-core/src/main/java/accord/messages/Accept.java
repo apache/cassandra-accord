@@ -1,7 +1,5 @@
 package accord.messages;
 
-import accord.messages.Reply;
-import accord.messages.Request;
 import accord.txn.Ballot;
 import accord.local.Node;
 import accord.txn.Timestamp;
@@ -32,7 +30,7 @@ public class Accept implements Request
     public void process(Node on, Node.Id replyToNode, long replyToMessage)
     {
         on.maybeReportEpoch(executeAt.epoch);
-        on.reply(replyToNode, replyToMessage, on.local(txn).map(instance -> {
+        on.local(txn).map(instance -> {
             Command command = instance.command(txnId);
             if (!command.accept(ballot, txn, executeAt, deps))
                 return new AcceptNack(command.promised());
@@ -46,7 +44,7 @@ public class Accept implements Request
             if (ok2.deps.isEmpty()) return ok1;
             ok1.deps.addAll(ok2.deps);
             return ok1;
-        }).orElseThrow());
+        }).ifPresent(reply -> on.reply(replyToNode, replyToMessage, reply));
     }
 
     public interface AcceptReply extends Reply
