@@ -51,7 +51,10 @@ public class MockConfigurationService implements ConfigurationService
     public synchronized void fetchTopologyForEpoch(long epoch, Runnable onComplete)
     {
         if (epoch < epochs.size())
+        {
             onComplete.run();
+            return;
+        }
 
         Set<Runnable> runnables = waiting.computeIfAbsent(epoch, e -> new HashSet<>());
         if (onComplete != null)

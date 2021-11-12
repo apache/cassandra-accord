@@ -351,4 +351,9 @@ public class Topology extends AbstractCollection<Shard>
         }
         return false;
     }
+
+    public Shard[] shards()
+    {
+        return Arrays.copyOf(shards, shards.length);
+    }
 }

@@ -89,15 +89,15 @@ public class CommandStores
             return;
 
         Topology local = cluster.forNode(node);
-        KeyRanges removed = rangeMappings.local.ranges().difference(local.ranges());
-        KeyRanges added = local.ranges().difference(rangeMappings.local.ranges());
+        KeyRanges current = Arrays.stream(rangeMappings.mappings).map(mapping -> mapping.ranges).reduce(KeyRanges.EMPTY, (l, r) -> l.union(r)).mergeTouching();
+        KeyRanges added = local.ranges().difference(current);
         List<KeyRanges> sharded = shardRanges(added, commandStores.length);
 
         RangeMapping[] newMappings = new RangeMapping[rangeMappings.mappings.length];
 
         for (int i=0; i<rangeMappings.mappings.length; i++)
         {
-            KeyRanges newRanges = rangeMappings.mappings[i].ranges.difference(removed).union(sharded.get(i)).mergeTouching();
+            KeyRanges newRanges = rangeMappings.mappings[i].ranges.union(sharded.get(i)).mergeTouching();
             newMappings[i] = new RangeMapping(newRanges, local);
         }
 

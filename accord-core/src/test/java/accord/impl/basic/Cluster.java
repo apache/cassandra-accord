@@ -18,7 +18,7 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 import accord.api.MessageSink;
-import accord.impl.mock.MockConfigurationService;
+import accord.burn.RandomConfigurationService;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -29,6 +29,7 @@ import accord.impl.list.ListStore;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
+import accord.topology.RandomConfiguration;
 import accord.topology.Topology;
 
 public class Cluster implements Scheduler
@@ -91,8 +92,8 @@ public class Cluster implements Scheduler
             Node on = lookup.apply(deliver.dst);
             // Drop the message if it goes across the partition
             boolean drop = ((Packet) next).src.id >= 0 &&
-                           !(partitionSet.contains(deliver.src) && partitionSet.contains(deliver.dst)
-                             || !partitionSet.contains(deliver.src) && !partitionSet.contains(deliver.dst));
+                    !(partitionSet.contains(deliver.src) && partitionSet.contains(deliver.dst)
+                            || !partitionSet.contains(deliver.src) && !partitionSet.contains(deliver.dst));
             if (drop)
             {
                 err.println(clock++ + " DROP " + deliver);
@@ -105,11 +106,11 @@ public class Cluster implements Scheduler
             {
                 Reply reply = (Reply) deliver.message;
                 Callback callback = reply.isFinal() ? sinks.get(deliver.dst).callbacks.remove(deliver.replyId)
-                                                    : sinks.get(deliver.dst).callbacks.get(deliver.replyId);
+                        : sinks.get(deliver.dst).callbacks.get(deliver.replyId);
                 if (callback != null)
                     on.scheduler().now(() -> callback.onSuccess(deliver.src, reply));
             }
-            else on.receive((Request)deliver.message, deliver.src, deliver.requestId);
+            else on.receive((Request) deliver.message, deliver.src, deliver.requestId);
         }
         else
         {
@@ -145,14 +146,15 @@ public class Cluster implements Scheduler
     {
         Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> lookup = new HashMap<>();
+        RandomConfiguration configRandomizer = new RandomConfiguration(randomSupplier, topology, lookup::get);
         try
         {
             Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink, stderr);
             for (Id node : nodes)
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
-                MockConfigurationService configurationService = new MockConfigurationService(messageSink, topology);
-                lookup.put(node, new Node(node, messageSink, configurationService, randomSupplier.get(),
+                RandomConfigurationService configService = new RandomConfigurationService(messageSink, randomSupplier, topology);
+                lookup.put(node, new Node(node, messageSink, configService, randomSupplier.get(),
                                           nowSupplier.get(), ListStore::new, ListAgent.INSTANCE, sinks, CommandStore.Factory.SYNCHRONIZED));
             }
 
@@ -163,6 +165,7 @@ public class Cluster implements Scheduler
                                 int partitionSize = randomSupplier.get().nextInt((topologyFactory.rf+1)/2);
                                 sinks.partitionSet = new HashSet<>(nodesList.subList(0, partitionSize));
                             }, 5L, TimeUnit.SECONDS);
+            sinks.recurring(configRandomizer::maybeUpdateTopology, 1L, TimeUnit.SECONDS);
 
             Packet next;
             while ((next = in.get()) != null)

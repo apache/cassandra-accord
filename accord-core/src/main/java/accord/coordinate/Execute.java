@@ -120,13 +120,14 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
 
         tracker.recordReadFailure(from);
         Set<Id> readFrom = tracker.computeMinimalReadSetAndMarkInflight();
-        if (readFrom == null)
+        if (readFrom != null)
         {
-            Preconditions.checkState(tracker.hasFailed());
+            node.send(readFrom, new ReadData(txnId, txn), this);
+        }
+        else if (tracker.hasFailed())
+        {
             completeExceptionally(throwable);
         }
-        else
-            node.send(readFrom, new ReadData(txnId, txn), this);
     }
 
     static CompletionStage<Result> execute(Node instance, Agreed agreed)

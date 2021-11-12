@@ -33,6 +33,7 @@ public class Shard
         this.range = range;
         this.nodes = ImmutableList.copyOf(nodes);
         this.nodeSet = ImmutableSet.copyOf(nodes);
+        Preconditions.checkArgument(nodes.size() == nodeSet.size());
         int f = maxToleratedFailures(nodes.size());
         this.fastPathElectorate = ImmutableSet.copyOf(fastPathElectorate);
         this.pending = ImmutableSet.copyOf(pending);
@@ -68,6 +69,15 @@ public class Shard
     public boolean contains(Key key)
     {
         return range.containsKey(key);
+    }
+
+    public String toString(boolean extendedInfo)
+    {
+        String s = "Shard[" + range.start() + ',' + range.end() + ']';
+
+        if (extendedInfo)
+            s = s + ":(" + nodes + '/' + fastPathElectorate + ')';
+        return s;
     }
 
     @Override
