@@ -34,7 +34,7 @@ public class BeginRecovery implements Request
 
     public void process(Node node, Id replyToNode, long replyToMessage)
     {
-        node.local(txn).map(instance -> {
+        RecoverReply reply = node.local(txn).map(instance -> {
             Command command = instance.command(txnId);
 
             if (!command.recover(txn, ballot))
@@ -126,15 +126,15 @@ public class BeginRecovery implements Request
             ok1.earlierAcceptedNoWitness,
                 ok1.rejectsFastPath | ok2.rejectsFastPath,
             ok1.writes, ok1.result);
-        }).ifPresent(reply -> {
-            node.reply(replyToNode, replyToMessage, reply);
-            if (reply instanceof RecoverOk && ((RecoverOk) reply).status == Applied)
-            {
-                // disseminate directly
-                RecoverOk ok = (RecoverOk) reply;
-                node.send(node.topology().forKeys(txn.keys).nodes(), new Apply(txnId, txn, ok.executeAt, ok.deps, ok.writes, ok.result));
-            }
-        });
+        }).orElseThrow();
+
+        node.reply(replyToNode, replyToMessage, reply);
+        if (reply instanceof RecoverOk && ((RecoverOk) reply).status == Applied)
+        {
+            // disseminate directly
+            RecoverOk ok = (RecoverOk) reply;
+            node.send(node.topology().forKeys(txn.keys).nodes(), new Apply(txnId, txn, ok.executeAt, ok.deps, ok.writes, ok.result));
+        }
     }
 
     public interface RecoverReply extends Reply

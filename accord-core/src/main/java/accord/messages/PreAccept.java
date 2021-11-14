@@ -27,7 +27,7 @@ public class PreAccept implements Request
     public void process(Node node, Id from, long messageId)
     {
         node.maybeReportEpoch(txnId.epoch);
-        node.local(txn).map(instance -> {
+        node.reply(from, messageId, node.local(txn).map(instance -> {
             Command command = instance.command(txnId);
             if (!command.witness(txn))
                 return PreAcceptNack.INSTANCE;
@@ -43,7 +43,7 @@ public class PreAccept implements Request
             if (ok1 != okMax && !ok1.deps.isEmpty()) okMax.deps.addAll(ok1.deps);
             if (ok2 != okMax && !ok2.deps.isEmpty()) okMax.deps.addAll(ok2.deps);
             return okMax;
-        }).ifPresent(reply -> node.reply(from, messageId, reply));
+        }).orElseThrow());
     }
 
     public interface PreAcceptReply extends Reply
