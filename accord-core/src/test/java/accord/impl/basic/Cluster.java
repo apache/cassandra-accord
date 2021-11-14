@@ -153,7 +153,7 @@ public class Cluster implements Scheduler
             for (Id node : nodes)
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
-                RandomConfigurationService configService = new RandomConfigurationService(messageSink, randomSupplier, topology);
+                RandomConfigurationService configService = new RandomConfigurationService(node, messageSink, randomSupplier, topology);
                 lookup.put(node, new Node(node, messageSink, configService, randomSupplier.get(),
                                           nowSupplier.get(), ListStore::new, ListAgent.INSTANCE, sinks, CommandStore.Factory.SYNCHRONIZED));
             }

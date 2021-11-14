@@ -32,6 +32,12 @@ public class BeginRecovery implements Request
         this.ballot = ballot;
     }
 
+    @Override
+    public long epoch()
+    {
+        return ballot.epoch;
+    }
+
     public void process(Node node, Id replyToNode, long replyToMessage)
     {
         RecoverReply reply = node.local(txn).map(instance -> {

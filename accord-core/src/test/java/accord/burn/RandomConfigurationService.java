@@ -14,13 +14,15 @@ import java.util.function.Supplier;
 // TODO: merge with MockConfigurationService?
 public class RandomConfigurationService implements ConfigurationService
 {
+    private final Node.Id node;
     private final MessageSink messageSink;
     private final Supplier<Random> randomSupplier;
     private final List<Topology> epochs = new ArrayList<>();
     private final List<ConfigurationService.Listener> listeners = new ArrayList<>();
 
-    public RandomConfigurationService(MessageSink messageSink, Supplier<Random> randomSupplier, Topology topology)
+    public RandomConfigurationService(Node.Id node, MessageSink messageSink, Supplier<Random> randomSupplier, Topology topology)
     {
+        this.node = node;
         this.messageSink = messageSink;
         this.randomSupplier = randomSupplier;
         epochs.add(Topology.EMPTY);
@@ -62,6 +64,12 @@ public class RandomConfigurationService implements ConfigurationService
             if (topology == null)
                 on.configService().fetchTopologyForEpoch(epoch);
         }
+
+        @Override
+        public String toString()
+        {
+            return "FetchTopologyRequest{" + epoch + '}';
+        }
     }
 
     private static class FetchTopologyReply implements Reply
@@ -71,6 +79,13 @@ public class RandomConfigurationService implements ConfigurationService
         public FetchTopologyReply(Topology topology)
         {
             this.topology = topology;
+        }
+
+        @Override
+        public String toString()
+        {
+            String epoch = topology == null ? "null" : Long.toString(topology.epoch());
+            return "FetchTopologyReply{" + epoch + '}';
         }
     }
 
@@ -101,7 +116,10 @@ public class RandomConfigurationService implements ConfigurationService
         synchronized void sendNext()
         {
             if (candidates.isEmpty())
+            {
                 candidates.addAll(currentTopology().nodes());
+                candidates.remove(node);
+            }
             int idx = randomSupplier.get().nextInt(candidates.size());
             Node.Id node = candidates.remove(idx);
             messageSink.send(node, request, this);
@@ -152,6 +170,12 @@ public class RandomConfigurationService implements ConfigurationService
         public void process(Node node, Node.Id from, long messageId)
         {
             node.onEpochAcknowledgement(from, epoch);
+        }
+
+        @Override
+        public String toString()
+        {
+            return "EpochAcknowledgeMessage{" + epoch + '}';
         }
     }
 

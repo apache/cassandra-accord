@@ -163,6 +163,12 @@ public class RandomConfiguration
             RandomConfigurationService configService = (RandomConfigurationService) on.configService();
             configService.reportTopology(topology);
         }
+
+        @Override
+        public String toString()
+        {
+            return "AdvertiseTopology{" + topology.epoch() + '}';
+        }
     }
 
     public synchronized void maybeUpdateTopology()

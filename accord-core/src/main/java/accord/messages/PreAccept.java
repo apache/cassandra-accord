@@ -25,14 +25,14 @@ public class PreAccept implements Request
         this.txn = txn;
     }
 
+    @Override
+    public long epoch()
+    {
+        return txnId.epoch;
+    }
+
     public void process(Node node, Id from, long messageId)
     {
-        ConfigurationService configService = node.configService();
-        if (configService.currentEpoch() < txnId.epoch)
-        {
-            configService.fetchTopologyForEpoch(txnId.epoch, () -> process(node, from, messageId));
-            return;
-        }
         node.reply(from, messageId, node.local(txn).map(instance -> {
             Command command = instance.command(txnId);
             if (!command.witness(txn))

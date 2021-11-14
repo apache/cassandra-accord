@@ -314,6 +314,12 @@ public class Node implements ConfigurationService.Listener
 
     public void receive(Request request, Id from, long messageId)
     {
+        long msgEpoch = request.epoch();
+        if (configService.currentEpoch() < msgEpoch)
+        {
+            configService.fetchTopologyForEpoch(msgEpoch, () -> receive(request, from, messageId));
+            return;
+        }
         scheduler.now(() -> request.process(this, from, messageId));
     }
 

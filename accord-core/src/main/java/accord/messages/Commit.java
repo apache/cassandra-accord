@@ -24,14 +24,14 @@ public class Commit extends ReadData implements Request
         this.read = read;
     }
 
+    @Override
+    public long epoch()
+    {
+        return executeAt.epoch;
+    }
+
     public void process(Node node, Id from, long messageId)
     {
-        ConfigurationService configService = node.configService();
-        if (executeAt.epoch > configService.currentEpoch())
-        {
-            configService.fetchTopologyForEpoch(executeAt.epoch, () -> process(node, from, messageId));
-            return;
-        }
         node.local(txn).forEach(instance -> instance.command(txnId).commit(txn, deps, executeAt));
         if (read) super.process(node, from, messageId);
     }
@@ -39,8 +39,8 @@ public class Commit extends ReadData implements Request
     @Override
     public String toString()
     {
-        return "Commit{" +
-               "executeAt: " + executeAt +
+        return "Commit{txnId: " + txnId +
+               ", executeAt: " + executeAt +
                ", deps: " + deps +
                ", read: " + read +
                '}';

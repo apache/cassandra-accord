@@ -30,15 +30,14 @@ public class Accept implements Request
         this.deps = deps;
     }
 
+    @Override
+    public long epoch()
+    {
+        return executeAt.epoch;
+    }
+
     public void process(Node on, Node.Id replyToNode, long replyToMessage)
     {
-        ConfigurationService configService = on.configService();
-        if (executeAt.epoch > configService.currentEpoch())
-        {
-            // FIXME: could generalize this for any message
-            configService.fetchTopologyForEpoch(executeAt.epoch, () -> process(on, replyToNode, replyToMessage));
-            return;
-        }
         on.reply(replyToNode, replyToMessage, on.local(txn).map(instance -> {
             Command command = instance.command(txnId);
             if (!command.accept(ballot, txn, executeAt, deps))
