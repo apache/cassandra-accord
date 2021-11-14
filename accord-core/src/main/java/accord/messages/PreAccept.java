@@ -4,6 +4,7 @@ import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.TreeMap;
 
+import accord.api.ConfigurationService;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -26,7 +27,12 @@ public class PreAccept implements Request
 
     public void process(Node node, Id from, long messageId)
     {
-        node.maybeReportEpoch(txnId.epoch);
+        ConfigurationService configService = node.configService();
+        if (configService.currentEpoch() < txnId.epoch)
+        {
+            configService.fetchTopologyForEpoch(txnId.epoch, () -> process(node, from, messageId));
+            return;
+        }
         node.reply(from, messageId, node.local(txn).map(instance -> {
             Command command = instance.command(txnId);
             if (!command.witness(txn))

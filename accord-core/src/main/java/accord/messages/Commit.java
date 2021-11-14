@@ -1,5 +1,6 @@
 package accord.messages;
 
+import accord.api.ConfigurationService;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Request;
@@ -25,7 +26,12 @@ public class Commit extends ReadData implements Request
 
     public void process(Node node, Id from, long messageId)
     {
-        node.maybeReportEpoch(executeAt.epoch);
+        ConfigurationService configService = node.configService();
+        if (executeAt.epoch > configService.currentEpoch())
+        {
+            configService.fetchTopologyForEpoch(executeAt.epoch, () -> process(node, from, messageId));
+            return;
+        }
         node.local(txn).forEach(instance -> instance.command(txnId).commit(txn, deps, executeAt));
         if (read) super.process(node, from, messageId);
     }

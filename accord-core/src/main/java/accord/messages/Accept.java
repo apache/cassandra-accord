@@ -1,5 +1,6 @@
 package accord.messages;
 
+import accord.api.ConfigurationService;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.txn.Ballot;
@@ -31,7 +32,13 @@ public class Accept implements Request
 
     public void process(Node on, Node.Id replyToNode, long replyToMessage)
     {
-        on.maybeReportEpoch(executeAt.epoch);
+        ConfigurationService configService = on.configService();
+        if (executeAt.epoch > configService.currentEpoch())
+        {
+            // FIXME: could generalize this for any message
+            configService.fetchTopologyForEpoch(executeAt.epoch, () -> process(on, replyToNode, replyToMessage));
+            return;
+        }
         on.reply(replyToNode, replyToMessage, on.local(txn).map(instance -> {
             Command command = instance.command(txnId);
             if (!command.accept(ballot, txn, executeAt, deps))
