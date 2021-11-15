@@ -56,7 +56,7 @@ public class ReadData implements Request
                 if (blockedBy == null) return;
                 blockedBy.addListener(this);
                 assert blockedBy.status().compareTo(Status.NotWitnessed) > 0;
-                node.reply(replyToNode, replyToMessage, new ReadWaiting(blockedBy.txnId(), blockedBy.txn(), blockedBy.executeAt(), blockedBy.status()));
+                node.reply(replyToNode, replyToMessage, new ReadWaiting(txnId, blockedBy.txnId(), blockedBy.txn(), blockedBy.executeAt(), blockedBy.status()));
             }
         }
 
@@ -142,11 +142,19 @@ public class ReadData implements Request
 
     final TxnId txnId;
     final Txn txn;
+    final Timestamp executeAt;
 
-    public ReadData(TxnId txnId, Txn txn)
+    public ReadData(TxnId txnId, Txn txn, Timestamp executeAt)
     {
         this.txnId = txnId;
         this.txn = txn;
+        this.executeAt = executeAt;
+    }
+
+    @Override
+    public long epoch()
+    {
+        return executeAt.epoch;
     }
 
     public void process(Node node, Node.Id from, long messageId)
@@ -188,13 +196,15 @@ public class ReadData implements Request
 
     public static class ReadWaiting extends ReadReply
     {
+        public final TxnId forTxn;
         public final TxnId txnId;
         public final Txn txn;
         public final Timestamp executeAt;
         public final Status status;
 
-        public ReadWaiting(TxnId txnId, Txn txn, Timestamp executeAt, Status status)
+        public ReadWaiting(TxnId forTxn, TxnId txnId, Txn txn, Timestamp executeAt, Status status)
         {
+            this.forTxn = forTxn;
             this.txnId = txnId;
             this.txn = txn;
             this.executeAt = executeAt;

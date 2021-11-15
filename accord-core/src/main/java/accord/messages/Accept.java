@@ -1,8 +1,5 @@
 package accord.messages;
 
-import accord.api.ConfigurationService;
-import accord.messages.Reply;
-import accord.messages.Request;
 import accord.txn.Ballot;
 import accord.local.Node;
 import accord.txn.Timestamp;
@@ -41,8 +38,8 @@ public class Accept implements Request
         on.reply(replyToNode, replyToMessage, on.local(txn).map(instance -> {
             Command command = instance.command(txnId);
             if (!command.accept(ballot, txn, executeAt, deps))
-                return new AcceptNack(command.promised());
-            return new AcceptOk(calculateDeps(instance, txnId, txn, executeAt));
+                return new AcceptNack(txnId, command.promised());
+            return new AcceptOk(txnId, calculateDeps(instance, txnId, txn, executeAt));
         }).reduce((r1, r2) -> {
             if (!r1.isOK()) return r1;
             if (!r2.isOK()) return r2;
@@ -62,10 +59,12 @@ public class Accept implements Request
 
     public static class AcceptOk implements AcceptReply
     {
+        public final TxnId txnId;
         public final Dependencies deps;
 
-        public AcceptOk(Dependencies deps)
+        public AcceptOk(TxnId txnId, Dependencies deps)
         {
+            this.txnId = txnId;
             this.deps = deps;
         }
 
@@ -78,16 +77,21 @@ public class Accept implements Request
         @Override
         public String toString()
         {
-            return "AcceptOk{" + deps + '}';
+            return "AcceptOk{" +
+                    "txnId=" + txnId +
+                    ", deps=" + deps +
+                    '}';
         }
     }
 
     public static class AcceptNack implements AcceptReply
     {
+        public final TxnId txnId;
         public final Timestamp reject;
 
-        public AcceptNack(Timestamp reject)
+        public AcceptNack(TxnId txnId, Timestamp reject)
         {
+            this.txnId = txnId;
             this.reject = reject;
         }
 
@@ -100,7 +104,10 @@ public class Accept implements Request
         @Override
         public String toString()
         {
-            return "AcceptNack{" + reject + '}';
+            return "AcceptNack{" +
+                    "txnId=" + txnId +
+                    ", reject=" + reject +
+                    '}';
         }
     }
 

@@ -4,7 +4,6 @@ import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.TreeMap;
 
-import accord.api.ConfigurationService;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -39,7 +38,7 @@ public class PreAccept implements Request
                 return PreAcceptNack.INSTANCE;
             // TODO: only lookup keys relevant to this instance
             // TODO: why don't we calculate deps from the executeAt timestamp??
-            return new PreAcceptOk(command.executeAt(), calculateDeps(instance, txnId, txn, txnId));
+            return new PreAcceptOk(txnId, command.executeAt(), calculateDeps(instance, txnId, txn, txnId));
         }).reduce((r1, r2) -> {
             if (!r1.isOK()) return r1;
             if (!r2.isOK()) return r2;
@@ -59,11 +58,13 @@ public class PreAccept implements Request
 
     public static class PreAcceptOk implements PreAcceptReply
     {
+        public final TxnId txnId;
         public final Timestamp witnessedAt;
         public final Dependencies deps;
 
-        public PreAcceptOk(Timestamp witnessedAt, Dependencies deps)
+        public PreAcceptOk(TxnId txnId, Timestamp witnessedAt, Dependencies deps)
         {
+            this.txnId = txnId;
             this.witnessedAt = witnessedAt;
             this.deps = deps;
         }
@@ -93,7 +94,8 @@ public class PreAccept implements Request
         public String toString()
         {
             return "PreAcceptOk{" +
-                    "witnessedAt=" + witnessedAt +
+                    "txnId=" + txnId +
+                    ", witnessedAt=" + witnessedAt +
                     ", deps=" + deps +
                     '}';
         }

@@ -76,7 +76,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, new Dependencies()),
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, new Dependencies()),
                                     messageSink.responses.get(0).payload);
         }
         finally
@@ -136,7 +136,7 @@ public class PreAcceptTest
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID3, messageSink.responses.get(0).to);
             Dependencies expectedDeps = new Dependencies();
-            Assertions.assertEquals(new PreAccept.PreAcceptOk(new TxnId(1, 110, 0, ID1), expectedDeps),
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId2, new TxnId(1, 110, 0, ID1), expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
         finally
@@ -166,7 +166,7 @@ public class PreAcceptTest
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
             Dependencies expectedDeps = new Dependencies();
-            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, expectedDeps),
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
         finally
@@ -202,7 +202,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            Assertions.assertEquals(new PreAccept.PreAcceptOk(new TxnId(2, 110, 0, ID1), new Dependencies()),
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, new TxnId(2, 110, 0, ID1), new Dependencies()),
                                     messageSink.responses.get(0).payload);
         }
         finally
