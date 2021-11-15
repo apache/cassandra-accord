@@ -5,6 +5,7 @@ import accord.api.MessageSink;
 import accord.local.Node;
 import accord.messages.Request;
 import accord.topology.Topology;
+import accord.utils.EpochFunction;
 import com.google.common.collect.ImmutableSet;
 import org.junit.jupiter.api.Assertions;
 
@@ -16,16 +17,18 @@ public class MockConfigurationService implements ConfigurationService
     private final List<Topology> epochs = new ArrayList<>();
     private final List<Listener> listeners = new ArrayList<>();
     private final Map<Long, Set<Runnable>> waiting = new HashMap<>();
+    private final EpochFunction<MockConfigurationService> fetchTopologyHandler;
 
-    public MockConfigurationService(MessageSink messageSink)
+    public MockConfigurationService(MessageSink messageSink, EpochFunction<MockConfigurationService> fetchTopologyHandler)
     {
         this.messageSink = messageSink;
+        this.fetchTopologyHandler = fetchTopologyHandler;
         epochs.add(Topology.EMPTY);
     }
 
-    public MockConfigurationService(MessageSink messageSink, Topology initialTopology)
+    public MockConfigurationService(MessageSink messageSink, EpochFunction<MockConfigurationService> fetchTopologyHandler, Topology initialTopology)
     {
-        this(messageSink);
+        this(messageSink, fetchTopologyHandler);
         reportTopology(initialTopology);
     }
 
@@ -59,6 +62,8 @@ public class MockConfigurationService implements ConfigurationService
         Set<Runnable> runnables = waiting.computeIfAbsent(epoch, e -> new HashSet<>());
         if (onComplete != null)
             runnables.add(onComplete);
+
+        fetchTopologyHandler.apply(epoch, this);
     }
 
     public static class EpochAcknowledgeMessage implements Request

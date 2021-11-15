@@ -3,6 +3,7 @@ package accord.coordinate;
 import accord.api.KeyRange;
 import accord.impl.mock.EpochSync;
 import accord.impl.mock.MockCluster;
+import accord.impl.mock.MockConfigurationService;
 import accord.impl.mock.RecordingMessageSink;
 import accord.local.Command;
 import accord.local.Node;
@@ -12,6 +13,7 @@ import accord.topology.Topology;
 import accord.txn.Keys;
 import accord.txn.Txn;
 import accord.txn.TxnId;
+import accord.utils.EpochFunction;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -39,7 +41,15 @@ public class TopologyChangeTest
         KeyRange range = range(100, 200);
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(4, 5, 6), idSet(4, 5)));
-        try (MockCluster cluster = MockCluster.builder().nodes(6).topology(topology1).build())
+        EpochFunction<MockConfigurationService> fetchTopology = (epoch, service) -> {
+            Assertions.assertEquals(2, epoch);
+            service.reportTopology(topology2);
+        };
+        try (MockCluster cluster = MockCluster.builder()
+                                              .nodes(6)
+                                              .topology(topology1)
+                                              .setOnFetchTopology(fetchTopology)
+                                              .build())
         {
             Node node1 = cluster.get(1);
             TxnId txnId1 = node1.nextTxnId();
@@ -67,8 +77,7 @@ public class TopologyChangeTest
 
             // old nodes should be aware of the new epoch
             cluster.configServices(1, 2, 3).forEach(config -> {
-                Assertions.assertEquals(1, config.currentEpoch());
-                Assertions.assertTrue(config.pendingEpochs().contains(Long.valueOf(2)));
+                Assertions.assertEquals(2, config.currentEpoch());
             });
 
             // ...and participated in consensus
@@ -78,7 +87,6 @@ public class TopologyChangeTest
                     Assertions.assertTrue(command.hasBeen(Status.Committed));
                 });
             });
-
         }
     }
 

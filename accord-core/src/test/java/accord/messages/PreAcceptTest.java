@@ -10,6 +10,7 @@ import accord.topology.Topology;
 import accord.txn.Dependencies;
 import accord.txn.Txn;
 import accord.txn.TxnId;
+import accord.utils.EpochFunction;
 import accord.utils.ThreadPoolScheduler;
 import accord.local.*;
 import accord.txn.Keys;
@@ -42,7 +43,7 @@ public class PreAcceptTest
         Scheduler scheduler = new ThreadPoolScheduler();
         return new Node(nodeId,
                         messageSink,
-                        new MockConfigurationService(messageSink, TOPOLOGY),
+                        new MockConfigurationService(messageSink, EpochFunction.noop(), TOPOLOGY),
                         random,
                         clock,
                         () -> store,

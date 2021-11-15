@@ -8,6 +8,7 @@ import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.topology.KeyRanges;
+import accord.utils.EpochFunction;
 import accord.utils.ThreadPoolScheduler;
 import accord.txn.TxnId;
 import accord.messages.Callback;
@@ -42,6 +43,7 @@ public class MockCluster implements Network, AutoCloseable
 
     private long nextMessageId = 0;
     Map<Long, Callback> callbacks = new ConcurrentHashMap<>();
+    private final EpochFunction<MockConfigurationService> onFetchTopology;
 
     private MockCluster(Builder builder)
     {
@@ -49,6 +51,7 @@ public class MockCluster implements Network, AutoCloseable
         this.random = new Random(config.seed);
         this.nowSupplier = builder.nowSupplier;
         this.messageSinkFactory = builder.messageSinkFactory;
+        this.onFetchTopology = builder.onFetchTopology;
 
         init(builder.topology);
     }
@@ -73,7 +76,7 @@ public class MockCluster implements Network, AutoCloseable
     {
         MockStore store = new MockStore();
         MessageSink messageSink = messageSinkFactory.apply(id, this);
-        MockConfigurationService configurationService = new MockConfigurationService(messageSink, topology);
+        MockConfigurationService configurationService = new MockConfigurationService(messageSink, onFetchTopology, topology);
         return new Node(id,
                         messageSink,
                         configurationService,
@@ -250,6 +253,7 @@ public class MockCluster implements Network, AutoCloseable
         private Topology topology = null;
         private LongSupplier nowSupplier = System::currentTimeMillis;
         private BiFunction<Id, Network, MessageSink> messageSinkFactory = SimpleMessageSink::new;
+        private EpochFunction<MockConfigurationService> onFetchTopology = EpochFunction.noop();
 
         public Builder seed(long seed)
         {
@@ -290,6 +294,12 @@ public class MockCluster implements Network, AutoCloseable
         public Builder messageSink(BiFunction<Id, Network, MessageSink> factory)
         {
             this.messageSinkFactory = factory;
+            return this;
+        }
+
+        public Builder setOnFetchTopology(EpochFunction<MockConfigurationService> onFetchTopology)
+        {
+            this.onFetchTopology = onFetchTopology;
             return this;
         }
 
