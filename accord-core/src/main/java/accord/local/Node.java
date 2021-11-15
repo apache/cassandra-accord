@@ -314,10 +314,13 @@ public class Node implements ConfigurationService.Listener
 
     public void receive(Request request, Id from, long messageId)
     {
-        long msgEpoch = request.epoch();
-        if (configService.currentEpoch() < msgEpoch)
+
+        // TODO: this can be relaxed a bit. If the ranges replicated by this node with respect to a txn haven't changed,
+        //  we don't need to gate on learning the new epoch. However there's no way to know that without some info from
+        //  the sender, such as expected keys, etc.
+        if (configService.currentEpoch() < request.epoch())
         {
-            configService.fetchTopologyForEpoch(msgEpoch, () -> receive(request, from, messageId));
+            configService.fetchTopologyForEpoch(request.epoch(), () -> receive(request, from, messageId));
             return;
         }
         scheduler.now(() -> request.process(this, from, messageId));

@@ -15,6 +15,16 @@ public interface Topologies
         return current().epoch;
     }
 
+    default boolean hasUnacknowledged()
+    {
+        return size() > 1;
+    }
+
+    default long minUnacknowledgedEpoch()
+    {
+        return get(size() - 2).epoch();
+    }
+
     boolean fastPathPermitted();
 
     Topology get(int i);

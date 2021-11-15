@@ -4,10 +4,13 @@ import accord.local.Node.Id;
 import accord.topology.Shard;
 
 import accord.topology.Topologies;
+import accord.topology.TopologyManager;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 import java.util.*;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 public class ReadTracker extends AbstractResponseTracker<ReadTracker.ReadShardTracker>
 {
@@ -59,10 +62,18 @@ public class ReadTracker extends AbstractResponseTracker<ReadTracker.ReadShardTr
 
     private final List<Id> candidates;
 
-    public ReadTracker(Topologies topologies)
+    public ReadTracker(Topologies topologies, Predicate<Id> candidatePredicate)
     {
         super(topologies, ReadShardTracker[]::new, ReadShardTracker::new);
-        candidates = new ArrayList<>(topologies.nodes());
+        candidates = topologies.nodes().stream().filter(candidatePredicate).collect(Collectors.toList());
+    }
+
+    public static Predicate<Id> candidatePredicate(Topologies topologies, TopologyManager manager)
+    {
+        if (!topologies.hasUnacknowledged())
+            return id -> true;
+
+        return manager.epochAcknowledgedPredicate(topologies.minUnacknowledgedEpoch());
     }
 
     @VisibleForTesting

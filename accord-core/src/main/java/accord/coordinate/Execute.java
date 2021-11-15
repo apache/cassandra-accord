@@ -22,7 +22,6 @@ import accord.txn.Keys;
 import accord.messages.Commit;
 import accord.messages.ReadData;
 import accord.messages.ReadData.ReadOk;
-import com.google.common.base.Preconditions;
 
 class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
 {
@@ -46,7 +45,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         this.deps = agreed.deps;
         this.executeAt = agreed.executeAt;
         this.topologies = agreed.topologies;
-        this.tracker = new ReadTracker(topologies);
+        this.tracker = new ReadTracker(topologies, ReadTracker.candidatePredicate(topologies, node.topology()));
         this.replicaIndex = node.random().nextInt(topologies.get(0).get(0).nodes.size());
 
         // TODO: perhaps compose these different behaviours differently?
@@ -122,7 +121,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         Set<Id> readFrom = tracker.computeMinimalReadSetAndMarkInflight();
         if (readFrom != null)
         {
-            node.send(readFrom, new ReadData(txnId, txn), this);
+            node.send(readFrom, new ReadData(txnId, txn, executeAt), this);
         }
         else if (tracker.hasFailed())
         {
