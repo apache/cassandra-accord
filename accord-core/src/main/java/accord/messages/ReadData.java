@@ -1,5 +1,6 @@
 package accord.messages;
 
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -8,13 +9,15 @@ import java.util.stream.Collectors;
 import accord.local.*;
 import accord.local.Node.Id;
 import accord.api.Data;
+import accord.topology.KeyRanges;
+import accord.topology.Topologies;
 import accord.txn.Txn;
 import accord.txn.TxnId;
 import accord.txn.Timestamp;
 import accord.api.Scheduler.Scheduled;
 import accord.utils.DeterministicIdentitySet;
 
-public class ReadData implements Request
+public class ReadData extends TxnRequest
 {
     static class LocalRead implements Listener
     {
@@ -102,9 +105,15 @@ public class ReadData implements Request
             {
                 isObsolete = true;
                 waitingOnReporter.cancel();
-                Set<Node.Id> nodes = node.topology().nodesFor(command.commandStore.ranges(), command.txn().keys);
+                Set<Node.Id> nodes = new HashSet<>();
+                Topologies topologies = node.topology().forKeys(command.txn().keys());
+                KeyRanges ranges = command.commandStore.ranges();
+                topologies.forEachShard(shard -> {
+                    if (ranges.intersects(shard.range))
+                        nodes.addAll(shard.nodes);
+                });
                 // FIXME: this may result in redundant messages being sent when a shard is split across several command shards
-                node.send(nodes, new Apply(command.txnId(), command.txn(), command.executeAt(), command.savedDeps(), command.writes(), command.result()));
+                node.send(nodes, to -> new Apply(to, topologies, command.txnId(), command.txn(), command.executeAt(), command.savedDeps(), command.writes(), command.result()));
                 node.reply(replyToNode, replyToMessage, new ReadNack());
             }
         }
@@ -144,8 +153,9 @@ public class ReadData implements Request
     final Txn txn;
     final Timestamp executeAt;
 
-    public ReadData(TxnId txnId, Txn txn, Timestamp executeAt)
+    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Txn txn, Timestamp executeAt)
     {
+        super(to, topologies);
         this.txnId = txnId;
         this.txn = txn;
         this.executeAt = executeAt;
@@ -221,7 +231,8 @@ public class ReadData implements Request
         public String toString()
         {
             return "ReadWaiting{" +
-                   "txnId:" + txnId +
+                   "forTxn:" + forTxn +
+                   ", txnId:" + txnId +
                    ", txn:" + txn +
                    ", executeAt:" + executeAt +
                    ", status:" + status +

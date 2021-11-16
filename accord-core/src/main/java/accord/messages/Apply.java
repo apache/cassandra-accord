@@ -2,15 +2,15 @@ package accord.messages;
 
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.messages.Request;
 import accord.api.Result;
+import accord.topology.Topologies;
 import accord.txn.Dependencies;
 import accord.txn.Timestamp;
 import accord.txn.Writes;
 import accord.txn.Txn;
 import accord.txn.TxnId;
 
-public class Apply implements Request
+public class Apply extends TxnRequest
 {
     final TxnId txnId;
     final Txn txn;
@@ -20,8 +20,9 @@ public class Apply implements Request
     final Writes writes;
     final Result result;
 
-    public Apply(TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, Writes writes, Result result)
+    public Apply(Node.Id to, Topologies topologies, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, Writes writes, Result result)
     {
+        super(to, topologies);
         this.txnId = txnId;
         this.txn = txn;
         this.deps = deps;

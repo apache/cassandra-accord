@@ -2,20 +2,21 @@ package accord.messages;
 
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.topology.Topologies;
 import accord.txn.Timestamp;
 import accord.txn.Dependencies;
 import accord.txn.Txn;
 import accord.txn.TxnId;
 
 // TODO: CommitOk responses, so we can send again if no reply received? Or leave to recovery?
-public class Commit extends ReadData implements Request
+public class Commit extends ReadData
 {
     final Dependencies deps;
     final boolean read;
 
-    public Commit(TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, boolean read)
+    public Commit(Id to, Topologies topologies, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, boolean read)
     {
-        super(txnId, txn, executeAt);
+        super(to, topologies, txnId, txn, executeAt);
         this.deps = deps;
         this.read = read;
     }

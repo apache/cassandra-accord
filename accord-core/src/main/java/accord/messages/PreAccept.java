@@ -7,19 +7,30 @@ import java.util.TreeMap;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.topology.Topologies;
 import accord.txn.Timestamp;
 import accord.local.Command;
 import accord.txn.Dependencies;
 import accord.txn.Txn;
 import accord.txn.TxnId;
+import com.google.common.annotations.VisibleForTesting;
 
-public class PreAccept implements Request
+public class PreAccept extends TxnRequest
 {
     public final TxnId txnId;
     public final Txn txn;
 
-    public PreAccept(TxnId txnId, Txn txn)
+    public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn)
     {
+        super(to, topologies);
+        this.txnId = txnId;
+        this.txn = txn;
+    }
+
+    @VisibleForTesting
+    PreAccept(TxnId txnId, Txn txn)
+    {
+        super(null);
         this.txnId = txnId;
         this.txn = txn;
     }

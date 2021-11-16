@@ -5,10 +5,11 @@ import java.util.stream.Collectors;
 
 import accord.local.*;
 import accord.local.Node.Id;
+import accord.topology.Topologies;
 import accord.txn.TxnId;
 import accord.txn.Keys;
 
-public class WaitOnCommit implements Request
+public class WaitOnCommit extends TxnRequest
 {
     static class LocalWait implements Listener
     {
@@ -80,8 +81,9 @@ public class WaitOnCommit implements Request
     final TxnId txnId;
     final Keys keys;
 
-    public WaitOnCommit(TxnId txnId, Keys keys)
+    public WaitOnCommit(Id to, Topologies topologies, TxnId txnId, Keys keys)
     {
+        super(to, topologies);
         this.txnId = txnId;
         this.keys = keys;
     }

@@ -95,6 +95,14 @@ public class KeyRanges implements Iterable<KeyRange>
         return false;
     }
 
+    public boolean intersects(KeyRange range)
+    {
+        for (int i=0; i<ranges.length; i++)
+            if (ranges[i].compareIntersecting(range) == 0)
+                return true;
+        return false;
+    }
+
     /**
      * Subtracts the given set of key ranges from this
      * @param that

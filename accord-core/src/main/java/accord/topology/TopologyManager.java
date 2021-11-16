@@ -318,33 +318,6 @@ public class TopologyManager implements ConfigurationService.Listener
         }
     }
 
-    /**
-     * Return the nodes from all active epochs needed to service the intersection of the given
-     * ranges and keys
-     */
-    public Set<Node.Id> nodesFor(KeyRanges ranges, Keys keys)
-    {
-        Topologies topologies = forKeys(keys);
-        Set<Node.Id> result = new HashSet<>();
-        for (int i=0,mi=topologies.size(); i<mi; i++)
-        {
-            Topology topology = topologies.get(i);
-            for (Shard shard : topology)
-            {
-                // TODO: efficiency
-                for (KeyRange range : ranges)
-                {
-                    if (range.compareIntersecting(shard.range) == 0)
-                    {
-                        result.addAll(shard.nodes);
-                        break;
-                    }
-                }
-            }
-        }
-        return result;
-    }
-
     public boolean epochAcknowledgedBy(Node.Id node, long epoch)
     {
         EpochState epochState = epochs.get(epoch);

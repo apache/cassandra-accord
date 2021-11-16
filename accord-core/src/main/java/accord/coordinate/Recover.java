@@ -35,7 +35,7 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
         {
             retryTracker = new QuorumTracker(topologies);
             for (Map.Entry<TxnId, Txn> e : waitOn)
-                node.send(topologies.nodes(), new WaitOnCommit(e.getKey(), e.getValue().keys()), this);
+                node.send(topologies.nodes(), to -> new WaitOnCommit(to, topologies, e.getKey(), e.getValue().keys()), this);
         }
 
         @Override
@@ -113,7 +113,7 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
     {
         super(node, ballot, txnId, txn, topologies);
         tracker = new FastPathTracker<>(topologies, ShardTracker[]::new, ShardTracker::new);
-        node.send(tracker.nodes(), new BeginRecovery(txnId, txn, ballot), this);
+        node.send(tracker.nodes(), to -> new BeginRecovery(to, topologies, txnId, txn, ballot), this);
     }
 
     @Override

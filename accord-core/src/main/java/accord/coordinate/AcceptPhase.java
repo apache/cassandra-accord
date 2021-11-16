@@ -44,7 +44,7 @@ class AcceptPhase extends CompletableFuture<Agreed>
         this.proposed = executeAt;
         this.acceptOks = new ArrayList<>();
         this.acceptTracker = new QuorumTracker(topologies);
-        node.send(acceptTracker.nodes(), new Accept(ballot, txnId, txn, executeAt, deps), new Callback<AcceptReply>()
+        node.send(acceptTracker.nodes(), to -> new Accept(to, topologies, ballot, txnId, txn, executeAt, deps), new Callback<AcceptReply>()
         {
             @Override
             public void onSuccess(Id from, AcceptReply response)

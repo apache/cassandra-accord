@@ -5,6 +5,7 @@ import accord.utils.IndexedConsumer;
 import com.google.common.base.Preconditions;
 
 import java.util.*;
+import java.util.function.Consumer;
 
 public interface Topologies
 {
@@ -36,6 +37,18 @@ public interface Topologies
     {
         for (int i=0, mi=size(); i<mi; i++)
             consumer.accept(i, get(i));
+    }
+
+    default void forEachShard(Consumer<Shard> consumer)
+    {
+        for (int i=0, mi=size(); i<mi; i++)
+        {
+            Topology topology = get(i);
+            for (int j=0, mj=topology.size(); j<mj; j++)
+            {
+                consumer.accept(topology.get(j));
+            }
+        }
     }
 
     private static boolean equals(Topologies t, Object o)

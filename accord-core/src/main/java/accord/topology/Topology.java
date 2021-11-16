@@ -136,6 +136,12 @@ public class Topology extends AbstractCollection<Shard>
         return select(epoch, shards, info.supersetIndexes);
     }
 
+    public KeyRanges rangesForNode(Id node)
+    {
+        NodeInfo info = nodeLookup.get(node);
+        return info != null ? info.ranges : null;
+    }
+
     public Shard forKey(Key key)
     {
         int i = ranges.rangeIndexForKey(key);

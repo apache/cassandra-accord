@@ -51,8 +51,8 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         // TODO: perhaps compose these different behaviours differently?
         if (agreed.applied != null)
         {
-            Apply send = new Apply(txnId, txn, executeAt, agreed.deps, agreed.applied, agreed.result);
-            node.send(topologies.nodes(), send);
+            node.send(topologies.nodes(),
+                      to -> new Apply(to, topologies, txnId, txn, executeAt, agreed.deps, agreed.applied, agreed.result));
             complete(agreed.result);
         }
         else
@@ -61,7 +61,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
             for (Node.Id to : tracker.nodes())
             {
                 boolean read = readSet.contains(to);
-                Commit send = new Commit(txnId, txn, executeAt, agreed.deps, read);
+                Commit send = new Commit(to, topologies, txnId, txn, executeAt, agreed.deps, read);
                 if (read)
                 {
                     node.send(to, send, this);
@@ -104,7 +104,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         if (tracker.hasCompletedRead())
         {
             Result result = txn.result(data);
-            node.send(topologies.nodes(), new Apply(txnId, txn, executeAt, deps, txn.execute(executeAt, data), result));
+            node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, executeAt, deps, txn.execute(executeAt, data), result));
             complete(result);
         }
     }
@@ -121,7 +121,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         Set<Id> readFrom = tracker.computeMinimalReadSetAndMarkInflight();
         if (readFrom != null)
         {
-            node.send(readFrom, new ReadData(txnId, txn, executeAt), this);
+            node.send(readFrom, to -> new ReadData(to, topologies, txnId, txn, executeAt), this);
         }
         else if (tracker.hasFailed())
         {

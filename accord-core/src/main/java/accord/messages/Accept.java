@@ -1,5 +1,6 @@
 package accord.messages;
 
+import accord.topology.Topologies;
 import accord.txn.Ballot;
 import accord.local.Node;
 import accord.txn.Timestamp;
@@ -10,7 +11,7 @@ import accord.txn.TxnId;
 
 import static accord.messages.PreAccept.calculateDeps;
 
-public class Accept implements Request
+public class Accept extends TxnRequest
 {
     public final Ballot ballot;
     public final TxnId txnId;
@@ -18,8 +19,9 @@ public class Accept implements Request
     public final Timestamp executeAt;
     public final Dependencies deps;
 
-    public Accept(Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps)
+    public Accept(Node.Id dst, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps)
     {
+        super(dst, topologies);
         this.ballot = ballot;
         this.txnId = txnId;
         this.txn = txn;

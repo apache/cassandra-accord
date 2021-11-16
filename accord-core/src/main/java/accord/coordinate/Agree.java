@@ -127,7 +127,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
         this.keys = txn.keys();
         tracker = new PreacceptTracker(topologies, topologies.fastPathPermitted());
 
-        node.send(tracker.nodes(), new PreAccept(txnId, txn), this);
+        node.send(tracker.nodes(), to -> new PreAccept(to, topologies, txnId, txn), this);
     }
 
     @Override
@@ -164,7 +164,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
         // send messages to new nodes
         Set<Id> needMessages = Sets.difference(tracker.nodes(), previousNodes);
         if (!needMessages.isEmpty())
-            node.send(needMessages, new PreAccept(txnId, txn), this);
+            node.send(needMessages, to -> new PreAccept(to, newTopologies, txnId, txn), this);
 
         if (shouldSlowPathAccept())
             onPreAccepted();

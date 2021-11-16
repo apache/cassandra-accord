@@ -1,6 +1,7 @@
 package accord.messages;
 
 import accord.api.Result;
+import accord.topology.Topologies;
 import accord.txn.Writes;
 import accord.txn.Ballot;
 import accord.local.Node;
@@ -19,14 +20,15 @@ import static accord.local.Status.NotWitnessed;
 import static accord.local.Status.PreAccepted;
 import static accord.messages.PreAccept.calculateDeps;
 
-public class BeginRecovery implements Request
+public class BeginRecovery extends TxnRequest
 {
     final TxnId txnId;
     final Txn txn;
     final Ballot ballot;
 
-    public BeginRecovery(TxnId txnId, Txn txn, Ballot ballot)
+    public BeginRecovery(Id to, Topologies topologies, TxnId txnId, Txn txn, Ballot ballot)
     {
+        super(to, topologies);
         this.txnId = txnId;
         this.txn = txn;
         this.ballot = ballot;
@@ -139,7 +141,8 @@ public class BeginRecovery implements Request
         {
             // disseminate directly
             RecoverOk ok = (RecoverOk) reply;
-            node.send(node.topology().forKeys(txn.keys).nodes(), new Apply(txnId, txn, ok.executeAt, ok.deps, ok.writes, ok.result));
+            Topologies topologies = node.topology().forKeys(txn.keys);
+            node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, ok.executeAt, ok.deps, ok.writes, ok.result));
         }
     }
 

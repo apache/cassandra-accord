@@ -5,6 +5,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -242,10 +243,20 @@ public class Node implements ConfigurationService.Listener
             send(dst, send);
     }
 
+    public <T> void send(Collection<Id> to, Function<Id, Request> requestFactory)
+    {
+        to.forEach(dst -> send(dst, requestFactory.apply(dst)));
+    }
+
     public <T> void send(Collection<Id> to, Request send, Callback<T> callback)
     {
         for (Id dst: to)
             send(dst, send, callback);
+    }
+
+    public <T> void send(Collection<Id> to, Function<Id, Request> requestFactory, Callback<T> callback)
+    {
+        to.forEach(dst -> send(dst, requestFactory.apply(dst), callback));
     }
 
     // send to a specific node
