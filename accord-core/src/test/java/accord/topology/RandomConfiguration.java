@@ -64,6 +64,11 @@ public class RandomConfiguration
         KeyRange<IntHashKey> rightRange = right.range;
         IntHashKey minBound = (IntHashKey) leftRange.split(2).get(0).end();
         IntHashKey maxBound = (IntHashKey) rightRange.split(2).get(0).start();
+
+        if (minBound.hash == maxBound.hash)
+            // no adjustment is possible
+            return shards;
+
         IntHashKey newBound = IntHashKey.forHash(minBound.hash + random.nextInt(maxBound.hash - minBound.hash));
 
         shards[idx] = new Shard(IntHashKey.range(leftRange.start(), newBound), left.nodes, left.fastPathElectorate, left.pending);
@@ -81,12 +86,16 @@ public class RandomConfiguration
         int idxLeft = random.nextInt(shards.length);
         Shard shardLeft = shards[idxLeft];
 
+        // bail out if all shards have the same membership
+        if (Arrays.stream(shards).allMatch(shard -> shard.nodeSet.equals(shardLeft.nodeSet)))
+            return shards;
+
         int idxRight;
         Shard shardRight;
         do {
             idxRight = random.nextInt(shards.length);
             shardRight = shards[idxRight];
-        } while (idxRight == idxLeft && shardLeft.nodeSet.equals(shardRight.nodeSet));
+        } while (idxRight == idxLeft || shardLeft.nodeSet.equals(shardRight.nodeSet));
 
         List<Node.Id> nodesLeft;
         Node.Id toRight;
@@ -173,7 +182,7 @@ public class RandomConfiguration
 
     public synchronized void maybeUpdateTopology()
     {
-        if (randomSupplier.get().nextInt(25) != 0)
+        if (randomSupplier.get().nextInt(50) != 0)
             return;
 
         Random random = randomSupplier.get();

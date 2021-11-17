@@ -17,7 +17,7 @@ public abstract class TxnRequest implements Request
         scope = TxnRequestScope.forTopologies(to, topologies);
     }
 
-    TxnRequestScope scope()
+    public TxnRequestScope scope()
     {
         return scope;
     }

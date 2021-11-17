@@ -31,12 +31,6 @@ public class Apply extends TxnRequest
         this.result = result;
     }
 
-    @Override
-    public long epoch()
-    {
-        return executeAt.epoch;
-    }
-
     public void process(Node node, Id replyToNode, long replyToMessage)
     {
         node.local(txn).forEach(instance -> instance.command(txnId).apply(txn, deps, executeAt, writes, result));

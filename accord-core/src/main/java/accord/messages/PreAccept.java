@@ -35,12 +35,6 @@ public class PreAccept extends TxnRequest
         this.txn = txn;
     }
 
-    @Override
-    public long epoch()
-    {
-        return txnId.epoch;
-    }
-
     public void process(Node node, Id from, long messageId)
     {
         node.reply(from, messageId, node.local(txn).map(instance -> {

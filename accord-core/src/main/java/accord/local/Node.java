@@ -96,7 +96,7 @@ public class Node implements ConfigurationService.Listener
         this.agent = agent;
         this.messageSink = messageSink;
         this.configService = configService;
-        this.topology = new TopologyManager();
+        this.topology = new TopologyManager(id, configService::fetchTopologyForEpoch);
         Topology topology = configService.currentTopology();
         this.now = new AtomicReference<>(new Timestamp(topology.epoch(), nowSupplier.getAsLong(), 0, id));
         this.nowSupplier = nowSupplier;
@@ -329,9 +329,10 @@ public class Node implements ConfigurationService.Listener
         // TODO: this can be relaxed a bit. If the ranges replicated by this node with respect to a txn haven't changed,
         //  we don't need to gate on learning the new epoch. However there's no way to know that without some info from
         //  the sender, such as expected keys, etc.
-        if (configService.currentEpoch() < request.epoch())
+        long waitingOnEpoch = topology().canProcess(request);
+        if (waitingOnEpoch > 0)
         {
-            configService.fetchTopologyForEpoch(request.epoch(), () -> receive(request, from, messageId));
+            configService.fetchTopologyForEpoch(waitingOnEpoch, () -> receive(request, from, messageId));
             return;
         }
         scheduler.now(() -> request.process(this, from, messageId));

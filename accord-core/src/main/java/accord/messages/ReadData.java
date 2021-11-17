@@ -161,12 +161,6 @@ public class ReadData extends TxnRequest
         this.executeAt = executeAt;
     }
 
-    @Override
-    public long epoch()
-    {
-        return executeAt.epoch;
-    }
-
     public void process(Node node, Node.Id from, long messageId)
     {
         new LocalRead(txnId, node, from, messageId).setup(txnId, txn);

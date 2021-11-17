@@ -29,12 +29,6 @@ public class Accept extends TxnRequest
         this.deps = deps;
     }
 
-    @Override
-    public long epoch()
-    {
-        return executeAt.epoch;
-    }
-
     public void process(Node on, Node.Id replyToNode, long replyToMessage)
     {
         on.reply(replyToNode, replyToMessage, on.local(txn).map(instance -> {

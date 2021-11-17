@@ -1,15 +1,18 @@
 package accord.topology;
 
 import accord.api.ConfigurationService;
-import accord.api.KeyRange;
 import accord.coordinate.tracking.AbstractResponseTracker;
 import accord.local.Node;
+import accord.messages.Request;
+import accord.messages.TxnRequest;
+import accord.messages.TxnRequestScope;
 import accord.txn.Keys;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 
 import java.util.*;
+import java.util.function.LongConsumer;
 
 /**
  * Manages topology state changes and update bookkeeping
@@ -97,9 +100,10 @@ public class TopologyManager implements ConfigurationService.Listener
         }
     }
 
-    static class EpochState
+    class EpochState
     {
         private final Topology topology;
+        private final Topology local;
         private final Topology previous;
         private final EpochTracker tracker;
         private boolean acknowledged = false;
@@ -116,6 +120,7 @@ public class TopologyManager implements ConfigurationService.Listener
             Preconditions.checkArgument(!topology.isSubset());
             Preconditions.checkArgument(!previous.isSubset());
             this.topology = topology;
+            this.local = topology.forNode(node);
             this.previous = previous;
             this.tracker = new EpochTracker(new Topologies.Singleton(previous, false));
             updateState();
@@ -197,9 +202,8 @@ public class TopologyManager implements ConfigurationService.Listener
         }
     }
 
-    private static class Epochs
+    private class Epochs
     {
-        static final Epochs EMPTY = new Epochs(new EpochState[0]);
 
         private final long maxEpoch;
         private final long minEpoch;
@@ -252,9 +256,54 @@ public class TopologyManager implements ConfigurationService.Listener
 
             return epochs[(int) (maxEpoch - epoch)];
         }
+
+        long canProcess(TxnRequestScope scope)
+        {
+            EpochState lastState = null;
+            long missingEpoch = 0;
+            for (int i=0, mi=scope.size(); i<mi; i++)
+            {
+                TxnRequestScope.EpochRanges requestRanges = scope.get(i);
+                EpochState epochState = get(requestRanges.epoch);
+
+                if (epochState != null)
+                {
+                    lastState = epochState;
+                }
+                else if (lastState != null && requestRanges.ranges.difference(lastState.local.ranges()).isEmpty())
+                {
+                    // we don't have the most recent epoch, but still replicate the requested ranges
+                    missingEpoch = requestRanges.epoch;
+                    continue;
+                }
+                else
+                {
+                    // we don't have the most recent epoch, and we don't replicate the requested ranges
+                    return scope.epoch();
+                }
+
+                // validate requested ranges
+                KeyRanges localRanges = epochState.local.ranges();
+                if (!requestRanges.ranges.difference(localRanges).isEmpty())
+                    throw new RuntimeException("Received request for ranges not replicated by this node");
+            }
+            if (missingEpoch > 0)
+                missingEpochNotify.accept(missingEpoch);
+
+            return 0;
+        }
     }
 
-    private volatile Epochs epochs = Epochs.EMPTY;
+    private final Node.Id node;
+    private final LongConsumer missingEpochNotify;
+    private volatile Epochs epochs;
+
+    public TopologyManager(Node.Id node, LongConsumer missingEpochNotify)
+    {
+        this.node = node;
+        this.missingEpochNotify = missingEpochNotify;
+        this.epochs = new Epochs(new EpochState[0]);
+    }
 
     @Override
     public synchronized void onTopologyUpdate(Topology topology)
@@ -327,5 +376,13 @@ public class TopologyManager implements ConfigurationService.Listener
     public Predicate<Node.Id> epochAcknowledgedPredicate(long epoch)
     {
         return id -> epochAcknowledgedBy(id, epoch);
+    }
+
+    public long canProcess(Request request)
+    {
+        if (!(request instanceof TxnRequest))
+            return 0;
+
+        return epochs.canProcess(((TxnRequest) request).scope());
     }
 }
