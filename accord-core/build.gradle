@@ -40,3 +40,9 @@ dependencies {
 test {
     useJUnitPlatform()
 }
+
+task burn(type: JavaExec) {
+    classpath sourceSets.main.runtimeClasspath, sourceSets.test.output
+    main = 'accord.burn.BurnTest'
+    jvmArgs '-Dlogback.configurationFile=burn-logback.xml'
+}

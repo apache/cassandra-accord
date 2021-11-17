@@ -40,9 +40,14 @@ import accord.local.Node.Id;
 import accord.api.Key;
 import accord.txn.Txn;
 import accord.txn.Keys;
+import ch.qos.logback.classic.Level;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class BurnTest
 {
+    private static final Logger logger = LoggerFactory.getLogger(BurnTest.class);
+
     static List<Packet> generate(Random random, List<Id> clients, List<Id> nodes, int keyCount, int operations)
     {
         List<Key> keys = new ArrayList<>();
@@ -104,39 +109,26 @@ public class BurnTest
 
     static void burn(long seed, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency) throws IOException
     {
-        burn(seed, topologyFactory, clients, nodes, keyCount, operations, concurrency, System.out, System.err);
-    }
-
-    static void burn(long seed, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency, PrintStream out, PrintStream err) throws IOException
-    {
         Random random = new Random();
         System.out.println(seed);
         random.setSeed(seed);
-        burn(random, topologyFactory, clients, nodes, keyCount, operations, concurrency, out, err);
-    }
-
-    static void burn(Random random, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency)
-    {
-        burn(random, topologyFactory, clients, nodes, keyCount, operations, concurrency, System.out, System.err);
+        burn(random, topologyFactory, clients, nodes, keyCount, operations, concurrency);
     }
 
     static void reconcile(long seed, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency) throws IOException, ExecutionException, InterruptedException, TimeoutException
     {
-        ReconcilingOutputStreams streams = new ReconcilingOutputStreams(System.out, System.err, 2);
         Random random1 = new Random(), random2 = new Random();
         random1.setSeed(seed);
         random2.setSeed(seed);
-        PrintStream out1 = new PrintStream(streams.get(0));
-        PrintStream out2 = new PrintStream(streams.get(1));
         ExecutorService exec = Executors.newFixedThreadPool(2);
-        Future<?> f1 = exec.submit(() -> burn(random1, topologyFactory, clients, nodes, keyCount, operations, concurrency, out1, out1));
-        Future<?> f2 = exec.submit(() -> burn(random2, topologyFactory, clients, nodes, keyCount, operations, concurrency, out2, out2));
+        Future<?> f1 = exec.submit(() -> burn(random1, topologyFactory, clients, nodes, keyCount, operations, concurrency));
+        Future<?> f2 = exec.submit(() -> burn(random2, topologyFactory, clients, nodes, keyCount, operations, concurrency));
         exec.shutdown();
         f1.get();
         f2.get();
     }
 
-    static void burn(Random random, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency, PrintStream stdout, PrintStream stderr)
+    static void burn(Random random, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency)
     {
         PendingQueue queue = new Factory(random).get();
 
@@ -169,7 +161,7 @@ public class BurnTest
                 queue.add(requests[i]);
             }
 
-            stdout.println(reply);
+            logger.info("{}", reply);
             serializable.begin();
 
             ListUpdate update = (ListUpdate) ((ListRequest) requests[(int)packet.replyId].message).txn.update;
@@ -207,15 +199,15 @@ public class BurnTest
 
         Cluster.run(nodes.toArray(Id[]::new), () -> queue,
                     responseSink, () -> new Random(random.nextLong()), () -> new AtomicLong()::incrementAndGet,
-                    topologyFactory, () -> null, stderr);
+                    topologyFactory, () -> null);
 
-        stdout.printf("Received %d acks to %d operations\n", clock.get() - operations, operations);
+        logger.info("Received {} acks to {} operations\n", clock.get() - operations, operations);
         if (clock.get() != operations * 2)
         {
             for (int i = 0 ; i < requests.length ; ++i)
             {
-                stdout.println(requests[i]);
-                stdout.println("\t\t" + replies[i]);
+                logger.info("{}", requests[i]);
+                logger.info("\t\t" + replies[i]);
             }
             throw new AssertionError("Incomplete set of responses");
         }
@@ -234,20 +226,25 @@ public class BurnTest
         while (true)
         {
             long seed = ThreadLocalRandom.current().nextLong();
-            System.out.println("Seed " + seed);
+            logger.info("Seed: {}", seed);
             Random random = new Random(seed);
-            List<Id> clients =  generateIds(true, 1 + random.nextInt(4));
-            List<Id> nodes =  generateIds(false, 5 + random.nextInt(5));
-            burn(random, new TopologyFactory<>(nodes.size() == 5 ? 3 : (2 + random.nextInt(3)), IntHashKey.ranges(4 + random.nextInt(12))),
-                 clients,
-                 nodes,
-                 5 + random.nextInt(15),
-                 100,
-                 10 + random.nextInt(30),
-//                 System.out,
-//                 System.err
-                 devnull, devnull
-            );
+            try
+            {
+                ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME)).setLevel(Level.DEBUG);
+                List<Id> clients =  generateIds(true, 1 + random.nextInt(4));
+                List<Id> nodes =  generateIds(false, 5 + random.nextInt(5));
+                burn(random, new TopologyFactory<>(nodes.size() == 5 ? 3 : (2 + random.nextInt(3)), IntHashKey.ranges(4 + random.nextInt(12))),
+                     clients,
+                     nodes,
+                     5 + random.nextInt(15),
+                     100,
+                     10 + random.nextInt(30));
+            }
+            catch (Throwable t)
+            {
+                logger.error("Exception running burn test:", t);
+                throw t;
+            }
         }
     }
 

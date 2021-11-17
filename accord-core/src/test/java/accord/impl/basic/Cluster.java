@@ -31,24 +31,26 @@ import accord.messages.Reply;
 import accord.messages.Request;
 import accord.topology.RandomConfiguration;
 import accord.topology.Topology;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class Cluster implements Scheduler
 {
+    private static final Logger logger = LoggerFactory.getLogger(Cluster.class);
+
     final Function<Id, Node> lookup;
     final PendingQueue pending;
     final Consumer<Packet> responseSink;
     final Map<Id, NodeSink> sinks = new HashMap<>();
-    final PrintWriter err;
     int clock;
     int recurring;
     Set<Id> partitionSet;
 
-    public Cluster(Supplier<PendingQueue> queueSupplier, Function<Id, Node> lookup, Consumer<Packet> responseSink, OutputStream stderr)
+    public Cluster(Supplier<PendingQueue> queueSupplier, Function<Id, Node> lookup, Consumer<Packet> responseSink)
     {
         this.pending = queueSupplier.get();
         this.lookup = lookup;
         this.responseSink = responseSink;
-        this.err = new PrintWriter(stderr);
         this.partitionSet = new HashSet<>();
     }
 
@@ -61,8 +63,7 @@ public class Cluster implements Scheduler
 
     private void add(Packet packet)
     {
-        err.println(clock++ + " SEND " + packet);
-        err.flush();
+        logger.debug("{} SEND {}", clock++, packet);
         if (lookup.apply(packet.dst) == null) responseSink.accept(packet);
         else pending.add(packet);
     }
@@ -96,12 +97,10 @@ public class Cluster implements Scheduler
                             || !partitionSet.contains(deliver.src) && !partitionSet.contains(deliver.dst));
             if (drop)
             {
-                err.println(clock++ + " DROP " + deliver);
-                err.flush();
+                logger.debug("{} DROP {}", clock++, deliver);
                 return true;
             }
-            err.println(clock++ + " RECV " + deliver);
-            err.flush();
+            logger.debug("{} RECV {}", clock++, deliver);
             if (deliver.message instanceof Reply)
             {
                 Reply reply = (Reply) deliver.message;
@@ -142,14 +141,14 @@ public class Cluster implements Scheduler
         run.run();
     }
 
-    public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, Supplier<Random> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, OutputStream stderr)
+    public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, Supplier<Random> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in)
     {
         Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> lookup = new HashMap<>();
         RandomConfiguration configRandomizer = new RandomConfiguration(randomSupplier, topology, lookup::get);
         try
         {
-            Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink, stderr);
+            Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink);
             for (Id node : nodes)
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
