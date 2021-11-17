@@ -61,8 +61,6 @@ public class RandomConfigurationService implements ConfigurationService
         {
             Topology topology = on.configService().getTopologyForEpoch(epoch);
             on.reply(from, messageId, new FetchTopologyReply(topology));
-            if (topology == null)
-                on.configService().fetchTopologyForEpoch(epoch);
         }
 
         @Override
@@ -148,7 +146,7 @@ public class RandomConfigurationService implements ConfigurationService
     {
         if (epoch < epochs.size())
         {
-            onComplete.run();
+            if (onComplete != null ) onComplete.run();
             return;
         }
 

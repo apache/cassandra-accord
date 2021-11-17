@@ -23,9 +23,9 @@ public class TxnRequestScopeTest
         return epochRanges(epoch, ranges(ranges));
     }
 
-    private static TxnRequestScope scope(TxnRequestScope.EpochRanges... ranges)
+    private static TxnRequestScope scope(long epoch, TxnRequestScope.EpochRanges... ranges)
     {
-        return new TxnRequestScope(ranges);
+        return new TxnRequestScope(epoch, ranges);
     }
 
     @Test
@@ -39,9 +39,9 @@ public class TxnRequestScopeTest
         topologies.add(topology2);
         topologies.add(topology1);
 
-        Assertions.assertEquals(scope(epochRanges(1, range)),
+        Assertions.assertEquals(scope(2, epochRanges(1, range)),
                                 TxnRequestScope.forTopologies(id(1), topologies));
-        Assertions.assertEquals(scope(epochRanges(2, range)),
+        Assertions.assertEquals(scope(2, epochRanges(2, range)),
                                 TxnRequestScope.forTopologies(id(4), topologies));
     }
 
@@ -61,9 +61,9 @@ public class TxnRequestScopeTest
         Topologies.Multi topologies = new Topologies.Multi();
         topologies.add(topology2);
         topologies.add(topology1);
-        Assertions.assertEquals(scope(epochRanges(1, range1), epochRanges(2, range2)),
+        Assertions.assertEquals(scope(2, epochRanges(1, range1), epochRanges(2, range2)),
                                 TxnRequestScope.forTopologies(id(1), topologies));
-        Assertions.assertEquals(scope(epochRanges(1, range2), epochRanges(2, range1)),
+        Assertions.assertEquals(scope(2, epochRanges(1, range2), epochRanges(2, range1)),
                                 TxnRequestScope.forTopologies(id(4), topologies));
     }
 }

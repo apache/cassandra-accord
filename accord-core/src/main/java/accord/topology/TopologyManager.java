@@ -248,7 +248,6 @@ public class TopologyManager implements ConfigurationService.Listener
         long canProcess(TxnRequestScope scope)
         {
             EpochState lastState = null;
-            long missingEpoch = 0;
             for (int i=0, mi=scope.size(); i<mi; i++)
             {
                 TxnRequestScope.EpochRanges requestRanges = scope.get(i);
@@ -261,13 +260,12 @@ public class TopologyManager implements ConfigurationService.Listener
                 else if (lastState != null && requestRanges.ranges.difference(lastState.local.ranges()).isEmpty())
                 {
                     // we don't have the most recent epoch, but still replicate the requested ranges
-                    missingEpoch = requestRanges.epoch;
                     continue;
                 }
                 else
                 {
                     // we don't have the most recent epoch, and we don't replicate the requested ranges
-                    return scope.epoch();
+                    return scope.maxEpoch();
                 }
 
                 // validate requested ranges
@@ -275,8 +273,8 @@ public class TopologyManager implements ConfigurationService.Listener
                 if (!requestRanges.ranges.difference(localRanges).isEmpty())
                     throw new RuntimeException("Received request for ranges not replicated by this node");
             }
-            if (missingEpoch > 0)
-                missingEpochNotify.accept(missingEpoch);
+            if (scope.maxEpoch() > 0)
+                missingEpochNotify.accept(scope.maxEpoch());
 
             return 0;
         }

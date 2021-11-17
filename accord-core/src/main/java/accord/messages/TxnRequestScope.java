@@ -63,10 +63,12 @@ public class TxnRequestScope
         }
     }
 
+    private final long maxEpoch;
     private final EpochRanges[] ranges;
 
-    public TxnRequestScope(EpochRanges[] ranges)
+    public TxnRequestScope(long maxEpoch, EpochRanges[] ranges)
     {
+        this.maxEpoch = maxEpoch;
         this.ranges = ranges;
     }
 
@@ -87,7 +89,8 @@ public class TxnRequestScope
         List<EpochRanges> ranges = new ArrayList<>(topologies.size());
         for (int i=topologies.size() - 1; i>=0; i--)
         {
-            EpochRanges epochRanges = EpochRanges.forTopology(topologies.get(i), node, currentRanges);
+            Topology topology = topologies.get(i);
+            EpochRanges epochRanges = EpochRanges.forTopology(topology, node, currentRanges);
             if (epochRanges != null)
             {
                 ranges.add(epochRanges);
@@ -98,12 +101,12 @@ public class TxnRequestScope
             }
         }
 
-        return new TxnRequestScope(ranges.toArray(EpochRanges[]::new));
+        return new TxnRequestScope(topologies.currentEpoch(), ranges.toArray(EpochRanges[]::new));
     }
 
-    public long epoch()
+    public long maxEpoch()
     {
-        return ranges[ranges.length - 1].epoch;
+        return maxEpoch;
     }
 
     @Override

@@ -55,7 +55,7 @@ public class MockConfigurationService implements ConfigurationService
     {
         if (epoch < epochs.size())
         {
-            onComplete.run();
+            if (onComplete != null) onComplete.run();
             return;
         }
 
