@@ -45,7 +45,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         this.deps = agreed.deps;
         this.executeAt = agreed.executeAt;
         this.topologies = agreed.topologies;
-        this.tracker = new ReadTracker(topologies, ReadTracker.candidatePredicate(topologies, node.topology()));
+        this.tracker = new ReadTracker(topologies);
         this.replicaIndex = node.random().nextInt(topologies.get(0).get(0).nodes.size());
 
         // TODO: perhaps compose these different behaviours differently?

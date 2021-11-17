@@ -9,7 +9,6 @@ import accord.messages.TxnRequestScope;
 import accord.txn.Keys;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicate;
 
 import java.util.*;
 import java.util.function.LongConsumer;
@@ -162,17 +161,6 @@ public class TopologyManager implements ConfigurationService.Listener
                 return Boolean.valueOf(shardTracker.quorumAcknowledged());
             }, Boolean.TRUE);
             return result == Boolean.TRUE;
-        }
-
-        /**
-         * determine if the given nodes has acknowledged the new epoch
-         */
-        boolean acknowledgedBy(Node.Id node)
-        {
-            return previous.matchesOn(node, (i, shard) -> {
-                ShardEpochTracker shardTracker = tracker.unsafeGet(i);
-                return shardTracker.unacknowledged.contains(node);
-            }) == 0;
         }
 
         boolean shardIsUnacknowledged(int idx, Shard shard)
@@ -365,17 +353,6 @@ public class TopologyManager implements ConfigurationService.Listener
             }
             return topologies;
         }
-    }
-
-    public boolean epochAcknowledgedBy(Node.Id node, long epoch)
-    {
-        EpochState epochState = epochs.get(epoch);
-        return epochState.acknowledgedBy(node);
-    }
-
-    public Predicate<Node.Id> epochAcknowledgedPredicate(long epoch)
-    {
-        return id -> epochAcknowledgedBy(id, epoch);
     }
 
     public long canProcess(Request request)
