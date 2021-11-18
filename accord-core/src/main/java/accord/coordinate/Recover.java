@@ -103,16 +103,18 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
 
     final List<RecoverOk> recoverOks = new ArrayList<>();
     final FastPathTracker<ShardTracker> tracker;
+    final Topologies topologies;
 
     public Recover(Node node, Ballot ballot, TxnId txnId, Txn txn)
     {
-        this(node, ballot, txnId, txn, node.topology().forKeys(txn.keys()));
+        this(node, ballot, txnId, txn, node.topology().forTxn(txn));
     }
 
     private Recover(Node node, Ballot ballot, TxnId txnId, Txn txn, Topologies topologies)
     {
-        super(node, ballot, txnId, txn, topologies);
-        tracker = new FastPathTracker<>(topologies, ShardTracker[]::new, ShardTracker::new);
+        super(node, ballot, txnId, txn);
+        this.topologies = topologies;
+        this.tracker = new FastPathTracker<>(topologies, ShardTracker[]::new, ShardTracker::new);
         node.send(tracker.nodes(), to -> new BeginRecovery(to, topologies, txnId, txn, ballot), this);
     }
 
@@ -156,7 +158,7 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
             switch (acceptOrCommit.status)
             {
                 case Accepted:
-                    startAccept(acceptOrCommit.executeAt, acceptOrCommit.deps);
+                    startAccept(acceptOrCommit.executeAt, acceptOrCommit.deps, topologies);
                     return;
                 case Committed:
                 case ReadyToExecute:
@@ -198,7 +200,7 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
             executeAt = txnId;
         }
 
-        startAccept(executeAt, deps);
+        startAccept(executeAt, deps, topologies);
     }
 
     @Override

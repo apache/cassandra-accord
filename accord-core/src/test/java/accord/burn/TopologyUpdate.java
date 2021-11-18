@@ -94,6 +94,14 @@ public class TopologyUpdate
         return map(cluster, node -> MessageTask.apply(lookup.apply(node), cluster, desc, process));
     }
 
+    private static Collection<Node.Id> allNodesFor(Txn txn, Topology... topologies)
+    {
+        Set<Node.Id> result = new HashSet<>();
+        for (Topology topology : topologies)
+            result.addAll(topology.forKeys(txn.keys()).nodes());
+        return result;
+    }
+
     public static CompletionStage<Void> sync(Node node, long syncEpoch)
     {
         long nextEpoch = syncEpoch + 1;
@@ -105,7 +113,7 @@ public class TopologyUpdate
         node.local().forEach(commandStore -> commandStore.forCommittedInEpoch(syncTopology.ranges(), syncEpoch, commandConsumer));
 
         Iterator<MessageTask> iter = syncMessages.values().stream().map(cmd -> MessageTask.of(node,
-                                                                                              nextTopology.forKeys(cmd.txn.keys).nodes(),
+                                                                                              allNodesFor(cmd.txn, syncTopology, nextTopology),
                                                                                               "Sync:" + syncEpoch,
                                                                                               cmd::process)).iterator();
 

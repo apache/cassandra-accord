@@ -62,6 +62,11 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
             this.fastPathPermitted = fastPathPermitted;
         }
 
+        public PreacceptTracker(Topologies topologies)
+        {
+            this(topologies, topologies.fastPathPermitted());
+        }
+
         @Override
         public void recordFailure(Id node)
         {
@@ -123,11 +128,10 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
 
     private Agree(Node node, TxnId txnId, Txn txn)
     {
-        super(node, Ballot.ZERO, txnId, txn, node.topology().forKeys(txn.keys()));
+        super(node, Ballot.ZERO, txnId, txn);
         this.keys = txn.keys();
-        tracker = new PreacceptTracker(topologies, topologies.fastPathPermitted());
-
-        node.send(tracker.nodes(), to -> new PreAccept(to, topologies, txnId, txn), this);
+        tracker = new PreacceptTracker(node.topology().forKeys(txn.keys()));
+        node.send(tracker.nodes(), to -> new PreAccept(to, tracker.topologies(), txnId, txn), this);
     }
 
     @Override
@@ -209,7 +213,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
                 if (preAcceptOk.witnessedAt.equals(txnId))
                     deps.addAll(preAcceptOk.deps);
             }
-            agreed(txnId, deps);
+            agreed(txnId, deps, tracker.topologies());
         }
         else
         {
@@ -226,7 +230,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
             //       but by sending accept we rule out hybrid fast-path
             permitHybridFastPath = executeAt.compareTo(txnId) == 0;
 
-            startAccept(executeAt, deps);
+            startAccept(executeAt, deps, tracker.topologies());
         }
     }
 

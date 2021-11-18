@@ -24,22 +24,20 @@ class AcceptPhase extends CompletableFuture<Agreed>
     final Ballot ballot;
     final TxnId txnId;
     final Txn txn;
-    final Topologies topologies; // TODO: remove, hide in participants
 
     private List<AcceptOk> acceptOks;
     private Timestamp proposed;
     private QuorumTracker acceptTracker;
 
-    AcceptPhase(Node node, Ballot ballot, TxnId txnId, Txn txn, Topologies topologies)
+    AcceptPhase(Node node, Ballot ballot, TxnId txnId, Txn txn)
     {
         this.node = node;
         this.ballot = ballot;
         this.txnId = txnId;
         this.txn = txn;
-        this.topologies = topologies;
     }
 
-    protected void startAccept(Timestamp executeAt, Dependencies deps)
+    protected void startAccept(Timestamp executeAt, Dependencies deps, Topologies topologies)
     {
         this.proposed = executeAt;
         this.acceptOks = new ArrayList<>();
@@ -86,10 +84,10 @@ class AcceptPhase extends CompletableFuture<Agreed>
         Dependencies deps = new Dependencies();
         for (AcceptOk acceptOk : acceptOks)
             deps.addAll(acceptOk.deps);
-        agreed(proposed, deps);
+        agreed(proposed, deps, acceptTracker.topologies());
     }
 
-    protected void agreed(Timestamp executeAt, Dependencies deps)
+    protected void agreed(Timestamp executeAt, Dependencies deps, Topologies topologies)
     {
         complete(new Agreed(txnId, txn, executeAt, deps, topologies, null, null));
     }

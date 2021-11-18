@@ -40,6 +40,11 @@ public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.
         });
     }
 
+    public Topologies topologies()
+    {
+        return topologies;
+    }
+
     protected void forEachTrackerForNode(Node.Id node, BiConsumer<T, Node.Id> consumer)
     {
         this.topologies.forEach((i, topology) -> {

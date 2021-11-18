@@ -7,6 +7,7 @@ import accord.messages.Request;
 import accord.messages.TxnRequest;
 import accord.messages.TxnRequestScope;
 import accord.txn.Keys;
+import accord.txn.Txn;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
@@ -399,6 +400,11 @@ public class TopologyManager implements ConfigurationService.Listener
             }
             return topologies;
         }
+    }
+
+    public Topologies forTxn(Txn txn)
+    {
+        return forKeys(txn.keys());
     }
 
     public long canProcess(Request request)
