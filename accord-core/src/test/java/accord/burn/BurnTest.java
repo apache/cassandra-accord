@@ -215,14 +215,6 @@ public class BurnTest
 
     public static void main(String[] args) throws Exception
     {
-        PrintStream devnull = new PrintStream(new OutputStream()
-        {
-            @Override
-            public void write(int b) throws IOException
-            {
-            }
-        });
-
         while (true)
         {
             long seed = ThreadLocalRandom.current().nextLong();

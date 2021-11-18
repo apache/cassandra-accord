@@ -84,7 +84,6 @@ public class TxnRequestScope
 
     public static TxnRequestScope forTopologies(Id node, Topologies topologies)
     {
-        // TODO: write some unit tests
         KeyRanges currentRanges = KeyRanges.EMPTY;
         List<EpochRanges> ranges = new ArrayList<>(topologies.size());
         for (int i=topologies.size() - 1; i>=0; i--)

@@ -41,8 +41,6 @@ public class PreAccept extends TxnRequest
             Command command = instance.command(txnId);
             if (!command.witness(txn))
                 return PreAcceptNack.INSTANCE;
-            // TODO: only lookup keys relevant to this instance
-            // TODO: why don't we calculate deps from the executeAt timestamp??
             return new PreAcceptOk(txnId, command.executeAt(), calculateDeps(instance, txnId, txn, txnId));
         }).reduce((r1, r2) -> {
             if (!r1.isOK()) return r1;
