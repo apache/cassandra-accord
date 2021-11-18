@@ -80,7 +80,7 @@ public class TopologyUpdate
 
     public static MessageTask notify(Node originator, Collection<Node.Id> cluster, Topology update)
     {
-        return MessageTask.begin(originator, cluster, (node, from) -> {
+        return MessageTask.begin(originator, cluster, "TopologyNotify:" + update.epoch(), (node, from) -> {
             long nodeEpoch = node.topology().epoch();
             if (nodeEpoch + 1 < update.epoch())
                 return false;
@@ -89,9 +89,9 @@ public class TopologyUpdate
         });
     }
 
-    private static CompletionStage<Void> broadcast(List<Node.Id> cluster, Function<Node.Id, Node> lookup, BiConsumer<Node, Node.Id> process)
+    private static CompletionStage<Void> broadcast(List<Node.Id> cluster, Function<Node.Id, Node> lookup, String desc, BiConsumer<Node, Node.Id> process)
     {
-        return map(cluster, node -> MessageTask.apply(lookup.apply(node), cluster, process));
+        return map(cluster, node -> MessageTask.apply(lookup.apply(node), cluster, desc, process));
     }
 
     public static CompletionStage<Void> sync(Node node, long syncEpoch)
@@ -104,7 +104,10 @@ public class TopologyUpdate
         Consumer<Command> commandConsumer = command -> syncMessages.put(command.txnId(), new CommandSync(command));
         node.local().forEach(commandStore -> commandStore.forCommittedInEpoch(syncTopology.ranges(), syncEpoch, commandConsumer));
 
-        Iterator<MessageTask> iter = syncMessages.values().stream().map(cmd -> MessageTask.of(node, nextTopology.forKeys(cmd.txn.keys).nodes(), cmd::process)).iterator();
+        Iterator<MessageTask> iter = syncMessages.values().stream().map(cmd -> MessageTask.of(node,
+                                                                                              nextTopology.forKeys(cmd.txn.keys).nodes(),
+                                                                                              "Sync:" + syncEpoch,
+                                                                                              cmd::process)).iterator();
 
         if (!iter.hasNext())
         {
@@ -132,18 +135,18 @@ public class TopologyUpdate
         // notify
         notify(originator, cluster, update)
                 // acknowledge
-                .thenCompose(v -> broadcast(cluster, lookup, (node, from) -> node.onEpochAcknowledgement(from, epoch)))
+                .thenCompose(v -> broadcast(cluster, lookup, "EpochAcknowledge:" + epoch, (node, from) -> node.onEpochAcknowledgement(from, epoch)))
                 // sync operations
                 .thenCompose(v -> map(cluster, node -> sync(lookup.apply(node), epoch - 1)))
                 // inform sync complete
-                .thenCompose(v -> broadcast(cluster, lookup, (node, from) -> node.onEpochSyncComplete(from, epoch)));
+                .thenCompose(v -> broadcast(cluster, lookup, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(from, epoch)));
     }
 
     public static CompletionStage<Void> acknowledgeAndSync(Node originator, long epoch, Collection<Node.Id> cluster)
     {
-        return MessageTask.apply(originator, cluster, (node, from) -> node.onEpochAcknowledgement(from, epoch))
+        return MessageTask.apply(originator, cluster, "EpochAcknowledge:" + epoch, (node, from) -> node.onEpochAcknowledgement(from, epoch))
                 .thenCompose(v -> TopologyUpdate.sync(originator, epoch - 1))
-                .thenCompose(v -> MessageTask.apply(originator, cluster, (node, from) -> node.onEpochSyncComplete(from, epoch)));
+                .thenCompose(v -> MessageTask.apply(originator, cluster, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(from, epoch)));
     }
 
 

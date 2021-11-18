@@ -222,7 +222,6 @@ public class BurnTest
             Random random = new Random(seed);
             try
             {
-                ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME)).setLevel(Level.DEBUG);
                 List<Id> clients =  generateIds(true, 1 + random.nextInt(4));
                 List<Id> nodes =  generateIds(false, 5 + random.nextInt(5));
                 burn(random, new TopologyFactory<>(nodes.size() == 5 ? 3 : (2 + random.nextInt(3)), IntHashKey.ranges(4 + random.nextInt(12))),
