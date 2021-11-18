@@ -2,6 +2,7 @@ package accord.burn;
 
 import accord.api.ConfigurationService;
 import accord.api.MessageSink;
+import accord.api.TestableConfigurationService;
 import accord.local.Node;
 import accord.messages.Callback;
 import accord.messages.Reply;
@@ -9,22 +10,25 @@ import accord.messages.Request;
 import accord.topology.Topology;
 
 import java.util.*;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 // TODO: merge with MockConfigurationService?
-public class RandomConfigurationService implements ConfigurationService
+public class RandomConfigurationService implements TestableConfigurationService
 {
     private final Node.Id node;
     private final MessageSink messageSink;
+    private final Function<Node.Id, Node> lookup;
     private final Supplier<Random> randomSupplier;
     private final List<Topology> epochs = new ArrayList<>();
     private final List<ConfigurationService.Listener> listeners = new ArrayList<>();
 
-    public RandomConfigurationService(Node.Id node, MessageSink messageSink, Supplier<Random> randomSupplier, Topology topology)
+    public RandomConfigurationService(Node.Id node, MessageSink messageSink, Supplier<Random> randomSupplier, Topology topology, Function<Node.Id, Node> lookup)
     {
         this.node = node;
         this.messageSink = messageSink;
         this.randomSupplier = randomSupplier;
+        this.lookup = lookup;
         epochs.add(Topology.EMPTY);
         epochs.add(topology);
     }
@@ -155,36 +159,15 @@ public class RandomConfigurationService implements ConfigurationService
             fetch.onComplete(onComplete);
     }
 
-    public static class EpochAcknowledgeMessage implements Request
-    {
-        public final long epoch;
-
-        public EpochAcknowledgeMessage(long epoch)
-        {
-            this.epoch = epoch;
-        }
-
-        @Override
-        public void process(Node node, Node.Id from, long messageId)
-        {
-            node.onEpochAcknowledgement(from, epoch);
-        }
-
-        @Override
-        public String toString()
-        {
-            return "EpochAcknowledgeMessage{" + epoch + '}';
-        }
-    }
-
     @Override
     public void acknowledgeEpoch(long epoch)
     {
-        EpochAcknowledgeMessage message = new EpochAcknowledgeMessage(epoch);
         Topology topology = getTopologyForEpoch(epoch);
-        topology.nodes().forEach(to -> messageSink.send(to, message));
+        Node originator = lookup.apply(node);
+        TopologyUpdate.acknowledgeAndSync(originator, epoch, topology.nodes());
     }
 
+    @Override
     public synchronized void reportTopology(Topology topology)
     {
         if (topology.epoch() < epochs.size())

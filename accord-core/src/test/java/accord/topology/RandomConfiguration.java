@@ -1,10 +1,9 @@
 package accord.topology;
 
 import accord.api.KeyRange;
-import accord.burn.RandomConfigurationService;
+import accord.burn.TopologyUpdate;
 import accord.impl.IntHashKey;
 import accord.local.Node;
-import accord.messages.Request;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,8 +32,6 @@ public class RandomConfiguration
         BOUNDARY(RandomConfiguration::updateBoundary),
         MEMBERSHIP(RandomConfiguration::updateMembership),
         FASTPATH(RandomConfiguration::updateFastPath);
-
-
 
         private final BiFunction<Shard[], Random, Shard[]> function;
 
@@ -157,29 +154,6 @@ public class RandomConfiguration
         return shards;
     }
 
-    private static class AdvertiseTopology implements Request
-    {
-        private final Topology topology;
-
-        public AdvertiseTopology(Topology topology)
-        {
-            this.topology = topology;
-        }
-
-        @Override
-        public void process(Node on, Node.Id from, long messageId)
-        {
-            RandomConfigurationService configService = (RandomConfigurationService) on.configService();
-            configService.reportTopology(topology);
-        }
-
-        @Override
-        public String toString()
-        {
-            return "AdvertiseTopology{" + topology.epoch() + '}';
-        }
-    }
-
     public synchronized void maybeUpdateTopology()
     {
         if (randomSupplier.get().nextInt(50) != 0)
@@ -201,11 +175,9 @@ public class RandomConfiguration
         epochs.add(nextTopology);
 
         List<Node.Id> nodes = new ArrayList<>(nextTopology.nodes());
-        AdvertiseTopology message = new AdvertiseTopology(nextTopology);
 
         int originatorIdx = randomSupplier.get().nextInt(nodes.size());
         Node originator = lookup.apply(nodes.remove(originatorIdx));
-        message.process(originator, null, -1);
-        originator.send(nodes, message);
+        TopologyUpdate.notify(originator, nextTopology.nodes(), nextTopology);
     }
 }

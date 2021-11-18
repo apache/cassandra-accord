@@ -1,7 +1,5 @@
 package accord.impl.basic;
 
-import java.io.OutputStream;
-import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -152,7 +150,7 @@ public class Cluster implements Scheduler
             for (Id node : nodes)
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
-                RandomConfigurationService configService = new RandomConfigurationService(node, messageSink, randomSupplier, topology);
+                RandomConfigurationService configService = new RandomConfigurationService(node, messageSink, randomSupplier, topology, lookup::get);
                 lookup.put(node, new Node(node, messageSink, configService, randomSupplier.get(),
                                           nowSupplier.get(), ListStore::new, ListAgent.INSTANCE, sinks, CommandStore.Factory.SYNCHRONIZED));
             }

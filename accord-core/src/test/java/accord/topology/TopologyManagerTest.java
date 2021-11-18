@@ -13,6 +13,7 @@ import static accord.impl.IntKey.range;
 public class TopologyManagerTest
 {
     private static final Node.Id ID = new Node.Id(1);
+
     @Test
     void fastPathReconfiguration()
     {
@@ -34,8 +35,6 @@ public class TopologyManagerTest
 
         service.onEpochAcknowledgement(id(2), 2);
         Assertions.assertTrue(service.getEpochStateUnsafe(2).acknowledged());
-
-        // TODO: test fast path enabling
     }
 
     private static TopologyManager tracker()
@@ -82,6 +81,31 @@ public class TopologyManagerTest
         Assertions.assertFalse(service.getEpochStateUnsafe(2).syncCompleteFor(keys(250)));
     }
 
+    /**
+     * If a node receives sync acks for epochs it's not aware of, it should apply them when it finds out about the epoch
+     */
+    @Test
+    void pendingSync()
+    {
+        KeyRange range = range(100, 200);
+        Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
+        Topology topology2 = topology(2, shard(range, idList(1, 2, 3), idSet(2, 3)));
+
+        TopologyManager service = new TopologyManager(ID, epoch -> {});
+        service.onTopologyUpdate(topology1);
+
+        // sync epoch 2
+        service.onEpochAcknowledgement(id(1), 2);
+        service.onEpochSyncComplete(id(1), 2);
+        service.onEpochAcknowledgement(id(2), 2);
+        service.onEpochSyncComplete(id(2), 2);
+
+        // learn of epoch 2
+        service.onTopologyUpdate(topology2);
+        Assertions.assertTrue(service.getEpochStateUnsafe(2).acknowledged());
+        Assertions.assertTrue(service.getEpochStateUnsafe(2).syncComplete());
+    }
+
     @Test
     void forKeys()
     {
@@ -103,7 +127,9 @@ public class TopologyManagerTest
                                 service.forKeys(keys));
 
         service.onEpochAcknowledgement(id(1), 2);
+        service.onEpochSyncComplete(id(1), 2);
         service.onEpochAcknowledgement(id(2), 2);
+        service.onEpochSyncComplete(id(2), 2);
         Assertions.assertEquals(topologies(topology2.forKeys(keys)),
                                 service.forKeys(keys));
     }
@@ -113,7 +139,7 @@ public class TopologyManagerTest
      * if the previous epoch is awaiting acknowledgement from all nodes
      */
     @Test
-    void forKeysPartiallyAcknowledged()
+    void forKeysPartiallySynced()
     {
         Topology topology1 = topology(1,
                                       shard(range(100, 200), idList(1, 2, 3), idSet(1, 2)),
@@ -132,8 +158,12 @@ public class TopologyManagerTest
 
         // first topology acked, so only the second shard should be included
         service.onEpochAcknowledgement(id(1), 2);
+        service.onEpochSyncComplete(id(1), 2);
         service.onEpochAcknowledgement(id(2), 2);
+        service.onEpochSyncComplete(id(2), 2);
+        Topologies actual = service.forKeys(keys(150, 250));
         Assertions.assertEquals(topologies(topology2, topology(1, shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)))),
-                                service.forKeys(keys(150, 250)));
+                                actual);
+        Assertions.assertFalse(actual.fastPathPermitted());
     }
 }

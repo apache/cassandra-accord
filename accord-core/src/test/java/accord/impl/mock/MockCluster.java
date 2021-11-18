@@ -29,7 +29,7 @@ import java.util.function.LongSupplier;
 
 import static accord.Utils.*;
 
-public class MockCluster implements Network, AutoCloseable
+public class MockCluster implements Network, AutoCloseable, Iterable<Node>
 {
     private static final Logger logger = LoggerFactory.getLogger(MockCluster.class);
 
@@ -54,6 +54,12 @@ public class MockCluster implements Network, AutoCloseable
         this.onFetchTopology = builder.onFetchTopology;
 
         init(builder.topology);
+    }
+
+    @Override
+    public Iterator<Node> iterator()
+    {
+        return nodes.values().iterator();
     }
 
     @Override
@@ -215,11 +221,6 @@ public class MockCluster implements Network, AutoCloseable
         for (Id id : ids)
             rlist.add(get(id));
         return rlist;
-    }
-
-    public void forEachNode(Consumer<Node> consumer)
-    {
-        nodes.values().forEach(consumer);
     }
 
     public Iterable<Node> nodes(int... ids)

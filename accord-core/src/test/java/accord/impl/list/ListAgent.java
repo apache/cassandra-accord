@@ -23,6 +23,6 @@ public class ListAgent implements Agent
     @Override
     public void onInconsistentTimestamp(Command command, Timestamp prev, Timestamp next)
     {
-        throw new AssertionError();
+        throw new AssertionError("Inconsistent execution timestamp detected for txnId " + command.txnId() + ": " + prev + " != " + next);
     }
 }

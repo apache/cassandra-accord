@@ -1,7 +1,7 @@
 package accord.impl.mock;
 
-import accord.api.ConfigurationService;
 import accord.api.MessageSink;
+import accord.api.TestableConfigurationService;
 import accord.local.Node;
 import accord.messages.Request;
 import accord.topology.Topology;
@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Assertions;
 
 import java.util.*;
 
-public class MockConfigurationService implements ConfigurationService
+public class MockConfigurationService implements TestableConfigurationService
 {
     private final MessageSink messageSink;
     private final List<Topology> epochs = new ArrayList<>();
@@ -90,6 +90,7 @@ public class MockConfigurationService implements ConfigurationService
         topology.nodes().forEach(to -> messageSink.send(to, message));
     }
 
+    @Override
     public synchronized void reportTopology(Topology topology)
     {
         Assertions.assertEquals(topology.epoch(), epochs.size());

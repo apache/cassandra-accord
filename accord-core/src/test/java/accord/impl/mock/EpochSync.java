@@ -24,11 +24,11 @@ public class EpochSync implements Runnable
 {
     private final Logger logger = LoggerFactory.getLogger(EpochSync.class);
 
-    private final MockCluster cluster;
+    private final Iterable<Node> cluster;
     private final long syncEpoch;
     private final long nextEpoch;
 
-    public EpochSync(MockCluster cluster, long syncEpoch)
+    public EpochSync(Iterable<Node> cluster, long syncEpoch)
     {
         this.cluster = cluster;
         this.syncEpoch = syncEpoch;
@@ -162,7 +162,7 @@ public class EpochSync implements Runnable
     public void run()
     {
         logger.info("Beginning sync of epoch: {}", syncEpoch);
-        cluster.forEachNode(this::syncNode);
+        cluster.forEach(this::syncNode);
     }
 
     public static void sync(MockCluster cluster, long epoch)

@@ -11,6 +11,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 import java.util.*;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 
 /**
@@ -27,6 +29,7 @@ public class TopologyManager implements ConfigurationService.Listener
 {
     static class ShardEpochTracker extends AbstractResponseTracker.ShardTracker
     {
+        // FIXME: remove acknowledgement??
         /*
          * Until a quorum of nodes has acknowledged a superseding configuration, they need to be included in the replica
          * set of operations
@@ -188,22 +191,43 @@ public class TopologyManager implements ConfigurationService.Listener
             }, Boolean.TRUE);
             return result == Boolean.TRUE;
         }
+
+        boolean shardIsUnsynced(int idx, Shard shard)
+        {
+            return !tracker.unsafeGet(idx).quorumSyncComplete();
+        }
+    }
+
+    private static <T> List<T> consumeFirstAndCopyTail(List<T> l, Consumer<T> consumer)
+    {
+        if (l.isEmpty())
+            return new ArrayList<>();
+        consumer.accept(l.get(0));
+        return new ArrayList<>(l.subList(1, l.size()));
     }
 
     private class Epochs
     {
-
         private final long maxEpoch;
         private final long minEpoch;
         private final EpochState[] epochs;
+        private final List<Set<Node.Id>> pendingAcknowledge;
+        private final List<Set<Node.Id>> pendingSyncComplete;
 
-        private Epochs(EpochState[] epochs)
+        private Epochs(EpochState[] epochs, List<Set<Node.Id>> pendingAcknowledge, List<Set<Node.Id>> pendingSyncComplete)
         {
             this.maxEpoch = epochs.length > 0 ? epochs[0].epoch() : 0;
+            this.pendingAcknowledge = pendingAcknowledge;
+            this.pendingSyncComplete = pendingSyncComplete;
             for (int i=1; i<epochs.length; i++)
                 Preconditions.checkArgument(epochs[i].epoch() == epochs[i-1].epoch() - 1);
             this.minEpoch = epochs.length > 0 ? epochs[epochs.length - 1].epoch() : 0;
             this.epochs = epochs;
+        }
+
+        private Epochs(EpochState[] epochs)
+        {
+            this(epochs, new ArrayList<>(), new ArrayList<>());
         }
 
         public long nextEpoch()
@@ -221,20 +245,44 @@ public class TopologyManager implements ConfigurationService.Listener
             Preconditions.checkArgument(topology.epoch == nextEpoch());
             EpochState[] nextEpochs = new EpochState[epochs.length + 1];
             System.arraycopy(epochs, 0, nextEpochs, 1, epochs.length);
-            nextEpochs[0] = new EpochState(topology, current());
-            return new Epochs(nextEpochs);
+
+            EpochState nextEpochState = new EpochState(topology, current());
+            nextEpochs[0] = nextEpochState;
+            return new Epochs(nextEpochs,
+                              consumeFirstAndCopyTail(pendingAcknowledge, ids -> ids.forEach(nextEpochState::recordAcknowledgement)),
+                              consumeFirstAndCopyTail(pendingSyncComplete, ids -> ids.forEach(nextEpochState::recordSyncComplete)));
         }
 
-        public void acknowledge(Node.Id node, long epoch)
+        private void applyToEpoch(Node.Id node,
+                                  long epoch,
+                                  BiConsumer<EpochState, Node.Id> consumer,
+                                  List<Set<Node.Id>> pendingList)
         {
-            for (int i=0; i<epochs.length && epochs[i].epoch() <= epoch; i++)
-                epochs[i].recordAcknowledgement(node);
+            for (long e=minEpoch; e<=epoch; e++)
+            {
+                if (e > maxEpoch)
+                {
+                    int idx = (int) (e - maxEpoch - 1);
+                    for (int i=pendingList.size(); i<=idx; i++)
+                        pendingList.add(new HashSet<>());
+
+                    pendingList.get(idx).add(node);
+                }
+                else
+                {
+                    consumer.accept(get(e), node);
+                }
+            }
+        }
+
+        public void acknowledge(Node.Id node, long ackEpoch)
+        {
+            applyToEpoch(node, ackEpoch, EpochState::recordAcknowledgement, pendingAcknowledge);
         }
 
         public void syncComplete(Node.Id node, long epoch)
         {
-            for (int i=0; i<epochs.length && epochs[i].epoch() <= epoch; i++)
-                epochs[i].recordSyncComplete(node);
+            applyToEpoch(node, epoch, EpochState::recordSyncComplete, pendingSyncComplete);
         }
 
         private EpochState get(long epoch)
@@ -332,9 +380,9 @@ public class TopologyManager implements ConfigurationService.Listener
 
         EpochState epochState = current.get(maxEpoch);
         Topology topology = epochState.topology.forKeys(keys);
-        if (epochState.acknowledgedFor(keys))
+        if (epochState.syncCompleteFor(keys))
         {
-            return new Topologies.Singleton(topology, epochState.syncCompleteFor(keys));
+            return new Topologies.Singleton(topology, true);
         }
         else
         {
@@ -345,8 +393,8 @@ public class TopologyManager implements ConfigurationService.Listener
                 // FIXME: again, this is confusing
                 EpochState nextState = current.epochs[i-1];
                 epochState = current.epochs[i];
-                topologies.add(nextState.previous.forKeys(keys, nextState::shardIsUnacknowledged));
-                if (epochState.acknowledgedFor(keys))
+                topologies.add(nextState.previous.forKeys(keys, nextState::shardIsUnsynced));
+                if (epochState.syncCompleteFor(keys))
                     break;
             }
             return topologies;
