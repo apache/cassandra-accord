@@ -161,7 +161,7 @@ public class BurnTest
                 queue.add(requests[i]);
             }
 
-            logger.info("{}", reply);
+            logger.debug("{}", reply);
             serializable.begin();
 
             ListUpdate update = (ListUpdate) ((ListRequest) requests[(int)packet.replyId].message).txn.update;
@@ -206,8 +206,8 @@ public class BurnTest
         {
             for (int i = 0 ; i < requests.length ; ++i)
             {
-                logger.info("{}", requests[i]);
-                logger.info("\t\t" + replies[i]);
+                logger.debug("{}", requests[i]);
+                logger.debug("\t\t" + replies[i]);
             }
             throw new AssertionError("Incomplete set of responses");
         }

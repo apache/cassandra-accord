@@ -61,7 +61,7 @@ public class Cluster implements Scheduler
 
     private void add(Packet packet)
     {
-        logger.debug("{} SEND {}", clock++, packet);
+        logger.trace("{} SEND {}", clock++, packet);
         if (lookup.apply(packet.dst) == null) responseSink.accept(packet);
         else pending.add(packet);
     }
@@ -95,10 +95,10 @@ public class Cluster implements Scheduler
                             || !partitionSet.contains(deliver.src) && !partitionSet.contains(deliver.dst));
             if (drop)
             {
-                logger.debug("{} DROP {}", clock++, deliver);
+                logger.trace("{} DROP {}", clock++, deliver);
                 return true;
             }
-            logger.debug("{} RECV {}", clock++, deliver);
+            logger.trace("{} RECV {}", clock++, deliver);
             if (deliver.message instanceof Reply)
             {
                 Reply reply = (Reply) deliver.message;
