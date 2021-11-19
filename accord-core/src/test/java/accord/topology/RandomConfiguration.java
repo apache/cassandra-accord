@@ -70,7 +70,7 @@ public class RandomConfiguration
 
         shards[idx] = new Shard(IntHashKey.range(leftRange.start(), newBound), left.nodes, left.fastPathElectorate, left.pending);
         shards[idx+1] = new Shard(IntHashKey.range(newBound, rightRange.end()), right.nodes, right.fastPathElectorate, right.pending);
-        logger.debug("Updated boundary on {} & {}\n{} {}\n{} {}", idx, idx + 1, left, right, shards[idx], shards[idx + 1]);
+        logger.debug("Updated boundary on {} & {} {} {} {} {}", idx, idx + 1, left, right, shards[idx], shards[idx + 1]);
 
         return shards;
     }
@@ -119,7 +119,7 @@ public class RandomConfiguration
 
         shards[idxLeft] = new Shard(shardLeft.range, nodesLeft, newFastPath(nodesLeft, random), shardLeft.pending);
         shards[idxRight] = new Shard(shardRight.range, nodesRight, newFastPath(nodesRight, random), shardLeft.pending);
-        logger.debug("updated membership on {} & {}\n{} {}\n{} {}",
+        logger.debug("updated membership on {} & {} {} {} {} {}",
                     idxLeft, idxRight,
                     shardLeft.toString(true), shardRight.toString(true),
                     shards[idxLeft].toString(true), shards[idxRight].toString(true));
@@ -150,7 +150,7 @@ public class RandomConfiguration
         int idx = random.nextInt(shards.length);
         Shard shard = shards[idx];
         shards[idx] = new Shard(shard.range, shard.nodes, newFastPath(shard.nodes, random), shard.pending);
-        logger.debug("Updated fast path on {}\n{}\n{}", idx, shard.toString(true), shards[idx].toString(true));
+        logger.debug("Updated fast path on {} {} {}", idx, shard.toString(true), shards[idx].toString(true));
         return shards;
     }
 
@@ -171,7 +171,7 @@ public class RandomConfiguration
 
         Topology nextTopology = new Topology(current.epoch + 1, shards);
 
-        logger.debug("topology update to: \n{}\nfrom: \n{}", nextTopology, current);
+        logger.debug("topology update to: {} from: {}", nextTopology, current);
         epochs.add(nextTopology);
 
         List<Node.Id> nodes = new ArrayList<>(nextTopology.nodes());
