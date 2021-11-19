@@ -163,6 +163,7 @@ public class TopologyUpdate
         Topology localTopology = syncTopology.forNode(node.id());
         Topology nextTopology = node.configService().getTopologyForEpoch(nextEpoch);
         Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> allNodesFor(cmd.txn, syncTopology, nextTopology);
+        Function<CommandSync, Collection<Node.Id>> nextNodes = cmd -> allNodesFor(cmd.txn, nextTopology);
 
         // backfill new replicas with operations from prior epochs
         Stream<MessageTask> messageStream = Stream.empty();
@@ -174,23 +175,17 @@ public class TopologyUpdate
                 if (syncShard.range.equals(nextShard.range) && syncShard.nodeSet.equals(nextShard.nodeSet))
                     continue;
 
-                // if there's an intersection
                 KeyRange intersection = syncShard.range.intersection(nextShard.range);
-//                Set<Node.Id> newNodes = Sets.difference(nextShard.nodeSet, syncShard.nodeSet);
-//                if (intersection == null || newNodes.isEmpty())
-//                    continue;
 
-//                if (intersection == null || nextShard.nodeSet.equals(syncShard.nodeSet))
                 if (intersection == null)
                     continue;
 
-                // FIXME: should only need to replicate to nodes that are gaining ranges, not all replicas
                 KeyRanges ranges = KeyRanges.singleton(intersection);
                 for (long epoch=1; epoch<syncEpoch; epoch++)
                     messageStream = Stream.concat(messageStream, syncEpochCommands(node,
                                                                                    epoch,
                                                                                    ranges,
-//                                                                                   id -> newNodes));
+//                                                                                   nextNodes));
                                                                                    allNodes));
             }
         }
@@ -247,6 +242,4 @@ public class TopologyUpdate
                 .thenCompose(v -> sync(originator, epoch - 1))
                 .thenCompose(v -> MessageTask.apply(originator, cluster, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(from, epoch))));
     }
-
-
 }
