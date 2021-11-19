@@ -14,7 +14,8 @@ import accord.txn.Txn;
 import accord.txn.TxnId;
 import accord.utils.MessageTask;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Sets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -28,6 +29,8 @@ import java.util.stream.Stream;
 
 public class TopologyUpdate
 {
+    private static final Logger logger = LoggerFactory.getLogger(TopologyUpdate.class);
+
     private static class CountDownFuture<T> extends CompletableFuture<T>
     {
         private final AtomicInteger remaining;
@@ -73,6 +76,20 @@ public class TopologyUpdate
         }
     }
 
+    public static <T> Function<Throwable, T> dieOnException()
+    {
+        return throwable -> {
+            logger.error("", throwable);
+            System.exit(1);
+            return null;
+        };
+    }
+
+    public static <T> CompletionStage<T> dieExceptionally(CompletionStage<T> stage)
+    {
+        return stage.exceptionally(dieOnException());
+    }
+
     private static <T> CompletionStage<Void> map(Collection<T> items, Function<T, CompletionStage<Void>> function)
     {
         CountDownFuture<Void> latch = new CountDownFuture<>(items.size());
@@ -107,43 +124,89 @@ public class TopologyUpdate
         return result;
     }
 
-    private static Stream<MessageTask> transmitEpochCommands(Node node, long epoch, KeyRanges ranges, Function<CommandSync, Collection<Node.Id>> recipients)
+    private static Stream<MessageTask> syncEpochCommands(Node node, long epoch, KeyRanges ranges, Function<CommandSync, Collection<Node.Id>> recipients)
     {
         Map<TxnId, CommandSync> syncMessages = new ConcurrentHashMap<>();
         Consumer<Command> commandConsumer = command -> syncMessages.put(command.txnId(), new CommandSync(command));
         node.local().forEach(commandStore -> commandStore.forCommittedInEpoch(ranges, epoch, commandConsumer));
-        return syncMessages.values().stream().map(cmd -> MessageTask.of(node, recipients.apply(cmd), "Sync:" + epoch, cmd::process));
-
+        return syncMessages.values().stream().map(cmd -> MessageTask.of(node, recipients.apply(cmd), "Sync:" + cmd.txnId + ':' + epoch, cmd::process));
     }
 
-    public static CompletionStage<Void> sync(Node node, long syncEpoch)
+    /**
+     * Syncs all replicated commands. Overkill, but useful for confirming issues in optimizedSync
+     */
+    private static Stream<MessageTask> thoroughSync(Node node, long syncEpoch)
     {
         long nextEpoch = syncEpoch + 1;
-        Topology syncTopology = node.configService().getTopologyForEpoch(syncEpoch).forNode(node.id());
+        Topology syncTopology = node.configService().getTopologyForEpoch(syncEpoch);
+        Topology localTopology = syncTopology.forNode(node.id());
         Topology nextTopology = node.configService().getTopologyForEpoch(nextEpoch);
+        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> allNodesFor(cmd.txn, syncTopology, nextTopology);
+
+        KeyRanges ranges = localTopology.ranges();
+        Stream<MessageTask> messageStream = Stream.empty();
+        for (long epoch=1; epoch<=syncEpoch; epoch++)
+        {
+            messageStream = Stream.concat(messageStream, syncEpochCommands(node, epoch, ranges, allNodes));
+        }
+        return messageStream;
+    }
+
+    /**
+     * Syncs all newly replicated commands when nodes are gaining ranges and the current epoch
+     * FIXME: causes correctness issues after multiple ownership changes, unclear why
+     */
+    private static Stream<MessageTask> optimizedSync(Node node, long syncEpoch)
+    {
+        long nextEpoch = syncEpoch + 1;
+        Topology syncTopology = node.configService().getTopologyForEpoch(syncEpoch);
+        Topology localTopology = syncTopology.forNode(node.id());
+        Topology nextTopology = node.configService().getTopologyForEpoch(nextEpoch);
+        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> allNodesFor(cmd.txn, syncTopology, nextTopology);
 
         // backfill new replicas with operations from prior epochs
         Stream<MessageTask> messageStream = Stream.empty();
-        for (Shard syncShard : syncTopology)
+        for (Shard syncShard : localTopology)
         {
             for (Shard nextShard : nextTopology)
             {
-                KeyRange intersection = syncShard.range.intersection(nextShard.range);
-                Set<Node.Id> newNodes = Sets.difference(nextShard.nodeSet, syncShard.nodeSet);
-                if (intersection == null || newNodes.isEmpty())
+                // do nothing if there's no change
+                if (syncShard.range.equals(nextShard.range) && syncShard.nodeSet.equals(nextShard.nodeSet))
                     continue;
 
+                // if there's an intersection
+                KeyRange intersection = syncShard.range.intersection(nextShard.range);
+//                Set<Node.Id> newNodes = Sets.difference(nextShard.nodeSet, syncShard.nodeSet);
+//                if (intersection == null || newNodes.isEmpty())
+//                    continue;
+
+//                if (intersection == null || nextShard.nodeSet.equals(syncShard.nodeSet))
+                if (intersection == null)
+                    continue;
+
+                // FIXME: should only need to replicate to nodes that are gaining ranges, not all replicas
                 KeyRanges ranges = KeyRanges.singleton(intersection);
                 for (long epoch=1; epoch<syncEpoch; epoch++)
-                    messageStream = Stream.concat(messageStream, transmitEpochCommands(node, epoch, ranges, cmd -> newNodes));
+                    messageStream = Stream.concat(messageStream, syncEpochCommands(node,
+                                                                                   epoch,
+                                                                                   ranges,
+//                                                                                   id -> newNodes));
+                                                                                   allNodes));
             }
         }
 
         // update all current and future replicas with the contents of the sync epoch
-        messageStream = Stream.concat(messageStream, transmitEpochCommands(node,
-                                                                           syncEpoch,
-                                                                           syncTopology.ranges(),
-                                                                           cmd -> allNodesFor(cmd.txn, syncTopology, nextTopology)));
+        messageStream = Stream.concat(messageStream, syncEpochCommands(node,
+                                                                       syncEpoch,
+                                                                       localTopology.ranges(),
+                                                                       allNodes));
+        return messageStream;
+    }
+
+    public static CompletionStage<Void> sync(Node node, long syncEpoch)
+    {
+        Stream<MessageTask> messageStream = thoroughSync(node, syncEpoch);
+//        Stream<MessageTask> messageStream = optimizedSync(node, syncEpoch);
 
         Iterator<MessageTask> iter = messageStream.iterator();
         if (!iter.hasNext())
@@ -163,27 +226,26 @@ public class TopologyUpdate
         }
 
         first.run();
-        return last;
+        return dieExceptionally(last);
     }
 
     public static void update(Node originator, Topology update, List<Node.Id> cluster, Function<Node.Id, Node> lookup)
     {
         long epoch = update.epoch();
         // notify
-        notify(originator, cluster, update)
+        dieExceptionally(notify(originator, cluster, update)
                 // acknowledge
                 .thenCompose(v -> broadcast(cluster, lookup, "EpochAcknowledge:" + epoch, (node, from) -> node.onEpochAcknowledgement(from, epoch)))
                 // sync operations
                 .thenCompose(v -> map(cluster, node -> sync(lookup.apply(node), epoch - 1)))
                 // inform sync complete
-                .thenCompose(v -> broadcast(cluster, lookup, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(from, epoch)));
+                .thenCompose(v -> broadcast(cluster, lookup, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(from, epoch))));
     }
-
     public static CompletionStage<Void> acknowledgeAndSync(Node originator, long epoch, Collection<Node.Id> cluster)
     {
-        return MessageTask.apply(originator, cluster, "EpochAcknowledge:" + epoch, (node, from) -> node.onEpochAcknowledgement(from, epoch))
-                .thenCompose(v -> TopologyUpdate.sync(originator, epoch - 1))
-                .thenCompose(v -> MessageTask.apply(originator, cluster, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(from, epoch)));
+        return dieExceptionally(MessageTask.apply(originator, cluster, "EpochAcknowledge:" + epoch, (node, from) -> node.onEpochAcknowledgement(from, epoch))
+                .thenCompose(v -> sync(originator, epoch - 1))
+                .thenCompose(v -> MessageTask.apply(originator, cluster, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(from, epoch))));
     }
 
 
