@@ -1,9 +1,12 @@
 package accord.burn;
 
+import accord.api.KeyRange;
 import accord.api.TestableConfigurationService;
 import accord.local.Command;
 import accord.local.Node;
 import accord.local.Status;
+import accord.topology.KeyRanges;
+import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.txn.Dependencies;
 import accord.txn.Timestamp;
@@ -11,6 +14,7 @@ import accord.txn.Txn;
 import accord.txn.TxnId;
 import accord.utils.MessageTask;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Sets;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -20,6 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 public class TopologyUpdate
 {
@@ -102,21 +107,45 @@ public class TopologyUpdate
         return result;
     }
 
+    private static Stream<MessageTask> transmitEpochCommands(Node node, long epoch, KeyRanges ranges, Function<CommandSync, Collection<Node.Id>> recipients)
+    {
+        Map<TxnId, CommandSync> syncMessages = new ConcurrentHashMap<>();
+        Consumer<Command> commandConsumer = command -> syncMessages.put(command.txnId(), new CommandSync(command));
+        node.local().forEach(commandStore -> commandStore.forCommittedInEpoch(ranges, epoch, commandConsumer));
+        return syncMessages.values().stream().map(cmd -> MessageTask.of(node, recipients.apply(cmd), "Sync:" + epoch, cmd::process));
+
+    }
+
     public static CompletionStage<Void> sync(Node node, long syncEpoch)
     {
         long nextEpoch = syncEpoch + 1;
         Topology syncTopology = node.configService().getTopologyForEpoch(syncEpoch).forNode(node.id());
         Topology nextTopology = node.configService().getTopologyForEpoch(nextEpoch);
 
-        Map<TxnId, CommandSync> syncMessages = new ConcurrentHashMap<>();
-        Consumer<Command> commandConsumer = command -> syncMessages.put(command.txnId(), new CommandSync(command));
-        node.local().forEach(commandStore -> commandStore.forCommittedInEpoch(syncTopology.ranges(), syncEpoch, commandConsumer));
+        // backfill new replicas with operations from prior epochs
+        Stream<MessageTask> messageStream = Stream.empty();
+        for (Shard syncShard : syncTopology)
+        {
+            for (Shard nextShard : nextTopology)
+            {
+                KeyRange intersection = syncShard.range.intersection(nextShard.range);
+                Set<Node.Id> newNodes = Sets.difference(nextShard.nodeSet, syncShard.nodeSet);
+                if (intersection == null || newNodes.isEmpty())
+                    continue;
 
-        Iterator<MessageTask> iter = syncMessages.values().stream().map(cmd -> MessageTask.of(node,
-                                                                                              allNodesFor(cmd.txn, syncTopology, nextTopology),
-                                                                                              "Sync:" + syncEpoch,
-                                                                                              cmd::process)).iterator();
+                KeyRanges ranges = KeyRanges.singleton(intersection);
+                for (long epoch=1; epoch<syncEpoch; epoch++)
+                    messageStream = Stream.concat(messageStream, transmitEpochCommands(node, epoch, ranges, cmd -> newNodes));
+            }
+        }
 
+        // update all current and future replicas with the contents of the sync epoch
+        messageStream = Stream.concat(messageStream, transmitEpochCommands(node,
+                                                                           syncEpoch,
+                                                                           syncTopology.ranges(),
+                                                                           cmd -> allNodesFor(cmd.txn, syncTopology, nextTopology)));
+
+        Iterator<MessageTask> iter = messageStream.iterator();
         if (!iter.hasNext())
         {
             CompletableFuture<Void> future = new CompletableFuture<>();

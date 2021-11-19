@@ -195,4 +195,9 @@ public class KeyRanges implements Iterable<KeyRange>
         return new KeyRanges(result.toArray(KeyRange[]::new));
     }
 
+    public static KeyRanges singleton(KeyRange range)
+    {
+        return new KeyRanges(new KeyRange[]{range});
+    }
+
 }
