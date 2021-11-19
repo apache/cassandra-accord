@@ -74,6 +74,16 @@ public class ShardTest
     }
 
     @Test
+    void slowPathQuorumSizeTest()
+    {
+        Assertions.assertEquals(1, Shard.slowPathQuorumSize(1));
+        Assertions.assertEquals(2, Shard.slowPathQuorumSize(2));
+        Assertions.assertEquals(2, Shard.slowPathQuorumSize(3));
+        Assertions.assertEquals(3, Shard.slowPathQuorumSize(4));
+        Assertions.assertEquals(3, Shard.slowPathQuorumSize(5));
+    }
+
+    @Test
     void fastPathQuorumSizeTest()
     {
         // rf=3

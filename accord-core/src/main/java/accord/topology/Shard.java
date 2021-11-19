@@ -39,7 +39,7 @@ public class Shard
         this.pending = ImmutableSet.copyOf(pending);
         int e = fastPathElectorate.size();
         this.recoveryFastPathSize = (f+1)/2;
-        this.slowPathQuorumSize = f + 1;
+        this.slowPathQuorumSize = slowPathQuorumSize(nodes.size());
         this.fastPathQuorumSize = fastPathQuorumSize(nodes.size(), e, f);
     }
 
@@ -59,6 +59,11 @@ public class Shard
     {
         Preconditions.checkArgument(electorate >= replicas - f);
         return (f + electorate)/2 + 1;
+    }
+
+    static int slowPathQuorumSize(int replicas)
+    {
+        return replicas - maxToleratedFailures(replicas);
     }
 
     public int rf()

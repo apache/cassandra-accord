@@ -8,6 +8,8 @@ import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.topology.Topology;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.function.Function;
@@ -16,6 +18,8 @@ import java.util.function.Supplier;
 // TODO: merge with MockConfigurationService?
 public class RandomConfigurationService implements TestableConfigurationService
 {
+    private static final Logger logger = LoggerFactory.getLogger(RandomConfigurationService.class);
+
     private final Node.Id node;
     private final MessageSink messageSink;
     private final Function<Node.Id, Node> lookup;
@@ -178,6 +182,7 @@ public class RandomConfigurationService implements TestableConfigurationService
             fetchTopologyForEpoch(epochs.size() + 1, () -> reportTopology(topology));
             return;
         }
+        logger.trace("Epoch {} received by {}", topology.epoch(), node);
 
         epochs.add(topology);
 
