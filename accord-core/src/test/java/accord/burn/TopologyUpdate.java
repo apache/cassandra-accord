@@ -8,6 +8,7 @@ import accord.local.Status;
 import accord.topology.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topology;
+import accord.topology.TopologyManager;
 import accord.txn.Dependencies;
 import accord.txn.Timestamp;
 import accord.txn.Txn;
@@ -124,12 +125,12 @@ public class TopologyUpdate
         return result;
     }
 
-    private static Stream<MessageTask> syncEpochCommands(Node node, long epoch, KeyRanges ranges, Function<CommandSync, Collection<Node.Id>> recipients)
+    private static Stream<MessageTask> syncEpochCommands(Node node, long epoch, KeyRanges ranges, Function<CommandSync, Collection<Node.Id>> recipients, long forEpoch)
     {
         Map<TxnId, CommandSync> syncMessages = new ConcurrentHashMap<>();
         Consumer<Command> commandConsumer = command -> syncMessages.put(command.txnId(), new CommandSync(command));
         node.local().forEach(commandStore -> commandStore.forCommittedInEpoch(ranges, epoch, commandConsumer));
-        return syncMessages.values().stream().map(cmd -> MessageTask.of(node, recipients.apply(cmd), "Sync:" + cmd.txnId + ':' + epoch, cmd::process));
+        return syncMessages.values().stream().map(cmd -> MessageTask.of(node, recipients.apply(cmd), "Sync:" + cmd.txnId + ':' + epoch + ':' + forEpoch, cmd::process));
     }
 
     /**
@@ -141,13 +142,15 @@ public class TopologyUpdate
         Topology syncTopology = node.configService().getTopologyForEpoch(syncEpoch);
         Topology localTopology = syncTopology.forNode(node.id());
         Topology nextTopology = node.configService().getTopologyForEpoch(nextEpoch);
-        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> allNodesFor(cmd.txn, syncTopology, nextTopology);
+//        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> allNodesFor(cmd.txn, syncTopology, nextTopology);
+//        TopologyManager topology = node.topology();
+        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().forTxn(cmd.txn).nodes();
 
         KeyRanges ranges = localTopology.ranges();
         Stream<MessageTask> messageStream = Stream.empty();
         for (long epoch=1; epoch<=syncEpoch; epoch++)
         {
-            messageStream = Stream.concat(messageStream, syncEpochCommands(node, epoch, ranges, allNodes));
+            messageStream = Stream.concat(messageStream, syncEpochCommands(node, epoch, ranges, allNodes, syncEpoch));
         }
         return messageStream;
     }
@@ -162,8 +165,10 @@ public class TopologyUpdate
         Topology syncTopology = node.configService().getTopologyForEpoch(syncEpoch);
         Topology localTopology = syncTopology.forNode(node.id());
         Topology nextTopology = node.configService().getTopologyForEpoch(nextEpoch);
-        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> allNodesFor(cmd.txn, syncTopology, nextTopology);
-        Function<CommandSync, Collection<Node.Id>> nextNodes = cmd -> allNodesFor(cmd.txn, nextTopology);
+//        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> allNodesFor(cmd.txn, syncTopology, nextTopology);
+//        Function<CommandSync, Collection<Node.Id>> nextNodes = cmd -> allNodesFor(cmd.txn, nextTopology);
+//        TopologyManager topology = node.topology();
+        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().forTxn(cmd.txn).nodes();
 
         // backfill new replicas with operations from prior epochs
         Stream<MessageTask> messageStream = Stream.empty();
@@ -186,7 +191,8 @@ public class TopologyUpdate
                                                                                    epoch,
                                                                                    ranges,
 //                                                                                   nextNodes));
-                                                                                   allNodes));
+                                                                                   allNodes,
+                                                                                   syncEpoch));
             }
         }
 
@@ -194,14 +200,15 @@ public class TopologyUpdate
         messageStream = Stream.concat(messageStream, syncEpochCommands(node,
                                                                        syncEpoch,
                                                                        localTopology.ranges(),
-                                                                       allNodes));
+                                                                       allNodes,
+                                                                       syncEpoch));
         return messageStream;
     }
 
     public static CompletionStage<Void> sync(Node node, long syncEpoch)
     {
-        Stream<MessageTask> messageStream = thoroughSync(node, syncEpoch);
-//        Stream<MessageTask> messageStream = optimizedSync(node, syncEpoch);
+//        Stream<MessageTask> messageStream = thoroughSync(node, syncEpoch);
+        Stream<MessageTask> messageStream = optimizedSync(node, syncEpoch);
 
         Iterator<MessageTask> iter = messageStream.iterator();
         if (!iter.hasNext())
