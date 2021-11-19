@@ -5,6 +5,7 @@ import accord.api.Key;
 import accord.api.KeyRange;
 import accord.api.Store;
 import accord.topology.KeyRanges;
+import accord.topology.Topology;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
 import accord.txn.TxnId;
@@ -22,6 +23,19 @@ import java.util.function.IntFunction;
  */
 public abstract class CommandStore
 {
+    static class Mapping
+    {
+        static final Mapping EMPTY = new Mapping(KeyRanges.EMPTY, Topology.EMPTY);
+        final KeyRanges ranges;
+        final Topology topology;
+
+        public Mapping(KeyRanges ranges, Topology topology)
+        {
+            this.ranges = ranges;
+            this.topology = topology;
+        }
+    }
+
     public interface Factory
     {
         CommandStore create(int index,
@@ -29,7 +43,7 @@ public abstract class CommandStore
                             Function<Timestamp, Timestamp> uniqueNow,
                             Agent agent,
                             Store store,
-                            IntFunction<RangeMapping> mappingSupplier);
+                            IntFunction<Mapping> mappingSupplier);
         Factory SYNCHRONIZED = Synchronized::new;
         Factory SINGLE_THREAD = SingleThread::new;
         Factory SINGLE_THREAD_DEBUG = SingleThreadDebug::new;
@@ -40,8 +54,8 @@ public abstract class CommandStore
     private final Function<Timestamp, Timestamp> uniqueNow;
     private final Agent agent;
     private final Store store;
-    private final IntFunction<RangeMapping> mappingSupplier;
-    private RangeMapping rangeMap;
+    private final IntFunction<Mapping> mappingSupplier;
+    private Mapping rangeMap;
 
     private final NavigableMap<TxnId, Command> commands = new TreeMap<>();
     private final NavigableMap<Key, CommandsForKey> commandsForKey = new TreeMap<>();
@@ -51,7 +65,7 @@ public abstract class CommandStore
                         Function<Timestamp, Timestamp> uniqueNow,
                         Agent agent,
                         Store store,
-                        IntFunction<RangeMapping> mappingSupplier)
+                        IntFunction<Mapping> mappingSupplier)
     {
         this.index = index;
         this.nodeId = nodeId;
@@ -217,7 +231,7 @@ public abstract class CommandStore
                             Function<Timestamp, Timestamp> uniqueNow,
                             Agent agent,
                             Store store,
-                            IntFunction<RangeMapping> mappingSupplier)
+                            IntFunction<Mapping> mappingSupplier)
         {
             super(index, nodeId, uniqueNow, agent, store, mappingSupplier);
         }
@@ -283,7 +297,7 @@ public abstract class CommandStore
                             Function<Timestamp, Timestamp> uniqueNow,
                             Agent agent,
                             Store store,
-                            IntFunction<RangeMapping> mappingSupplier)
+                            IntFunction<Mapping> mappingSupplier)
         {
             super(index, nodeId, uniqueNow, agent, store, mappingSupplier);
             executor = Executors.newSingleThreadExecutor(r -> {
@@ -325,7 +339,7 @@ public abstract class CommandStore
                                  Function<Timestamp, Timestamp> uniqueNow,
                                  Agent agent,
                                  Store store,
-                                 IntFunction<RangeMapping> mappingSupplier)
+                                 IntFunction<Mapping> mappingSupplier)
         {
             super(index, nodeId, uniqueNow, agent, store, mappingSupplier);
         }

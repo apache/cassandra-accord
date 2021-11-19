@@ -3,6 +3,7 @@ package accord.local;
 import accord.api.Agent;
 import accord.api.KeyRange;
 import accord.api.Store;
+import accord.local.CommandStore.Mapping;
 import accord.topology.KeyRanges;
 import accord.topology.Topology;
 import accord.txn.Keys;
@@ -23,20 +24,43 @@ import java.util.stream.StreamSupport;
  */
 public class CommandStores
 {
+    static class Mappings
+    {
+        final Topology cluster;
+        final Topology local;
+        final Mapping[] mappings;
+
+        public Mappings(Topology cluster, Topology local, Mapping[] mappings)
+        {
+            this.cluster = cluster;
+            this.local = local;
+            this.mappings = mappings;
+        }
+
+        static Mappings empty(int size)
+        {
+            Mapping[] mappings = new Mapping[size];
+            for (int i=0; i<size; i++)
+                mappings[i] = Mapping.EMPTY;
+
+            return new Mappings(Topology.EMPTY, Topology.EMPTY, mappings);
+        }
+    }
+
     private final Node.Id node;
     private final CommandStore[] commandStores;
-    private volatile RangeMapping.Multi rangeMappings;
+    private volatile Mappings rangeMappings;
 
     public CommandStores(int num, Node.Id node, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store, CommandStore.Factory shardFactory)
     {
         this.node = node;
         this.commandStores = new CommandStore[num];
-        this.rangeMappings = RangeMapping.Multi.empty(num);
+        this.rangeMappings = Mappings.empty(num);
         for (int i=0; i<num; i++)
             commandStores[i] = shardFactory.create(i, node, uniqueNow, agent, store, this::getRangeMapping);
     }
 
-    private RangeMapping getRangeMapping(int idx)
+    private Mapping getRangeMapping(int idx)
     {
         return rangeMappings.mappings[idx];
     }
@@ -93,15 +117,15 @@ public class CommandStores
         KeyRanges added = local.ranges().difference(current);
         List<KeyRanges> sharded = shardRanges(added, commandStores.length);
 
-        RangeMapping[] newMappings = new RangeMapping[rangeMappings.mappings.length];
+        Mapping[] newMappings = new Mapping[rangeMappings.mappings.length];
 
         for (int i=0; i<rangeMappings.mappings.length; i++)
         {
             KeyRanges newRanges = rangeMappings.mappings[i].ranges.union(sharded.get(i)).mergeTouching();
-            newMappings[i] = new RangeMapping(newRanges, local);
+            newMappings[i] = new Mapping(newRanges, local);
         }
 
-        rangeMappings = new RangeMapping.Multi(cluster, local, newMappings);
+        rangeMappings = new Mappings(cluster, local, newMappings);
     }
 
     private class ShardSpliterator implements Spliterator<CommandStore>

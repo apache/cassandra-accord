@@ -32,7 +32,7 @@ public class CommandTest
 
     private static class CommandStoreSupport
     {
-        final AtomicReference<RangeMapping> mapping = new AtomicReference<>(RangeMapping.EMPTY);
+        final AtomicReference<CommandStore.Mapping> mapping = new AtomicReference<>(CommandStore.Mapping.EMPTY);
         final MockStore data = new MockStore();
         final AtomicReference<Timestamp> nextTimestamp = new AtomicReference<>(Timestamp.NONE);
         final Function<Timestamp, Timestamp> uniqueNow = atleast -> {
@@ -42,10 +42,10 @@ public class CommandTest
         };
     }
 
-    private static void setMappingEpoch(AtomicReference<RangeMapping> mapping, long epoch)
+    private static void setMappingEpoch(AtomicReference<CommandStore.Mapping> mapping, long epoch)
     {
-        RangeMapping current = mapping.get();
-        RangeMapping next = new RangeMapping(current.ranges, current.topology.withEpoch(epoch));
+        CommandStore.Mapping current = mapping.get();
+        CommandStore.Mapping next = new CommandStore.Mapping(current.ranges, current.topology.withEpoch(epoch));
         mapping.set(next);
     }
 
