@@ -12,14 +12,14 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-public class RandomConfiguration
+public class TopologyRandomizer
 {
-    private static final Logger logger = LoggerFactory.getLogger(RandomConfiguration.class);
+    private static final Logger logger = LoggerFactory.getLogger(TopologyRandomizer.class);
     private final Supplier<Random> randomSupplier;
     private final Function<Node.Id, Node> lookup;
     private final List<Topology> epochs = new ArrayList<>();
 
-    public RandomConfiguration(Supplier<Random> randomSupplier, Topology initialTopology, Function<Node.Id, Node> lookup)
+    public TopologyRandomizer(Supplier<Random> randomSupplier, Topology initialTopology, Function<Node.Id, Node> lookup)
     {
         this.randomSupplier = randomSupplier;
         this.lookup = lookup;
@@ -29,9 +29,9 @@ public class RandomConfiguration
 
     private enum UpdateType
     {
-        BOUNDARY(RandomConfiguration::updateBoundary),
-        MEMBERSHIP(RandomConfiguration::updateMembership),
-        FASTPATH(RandomConfiguration::updateFastPath);
+        BOUNDARY(TopologyRandomizer::updateBoundary),
+        MEMBERSHIP(TopologyRandomizer::updateMembership),
+        FASTPATH(TopologyRandomizer::updateFastPath);
 
         private final BiFunction<Shard[], Random, Shard[]> function;
 

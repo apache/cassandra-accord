@@ -189,8 +189,8 @@ public class TopologyUpdate
                     messageStream = Stream.concat(messageStream, syncEpochCommands(node,
                                                                                    epoch,
                                                                                    ranges,
-                                                                                   nextNodes,
-//                                                                                   allNodes,
+//                                                                                   nextNodes,
+                                                                                   allNodes,
                                                                                    syncEpoch));
             }
         }

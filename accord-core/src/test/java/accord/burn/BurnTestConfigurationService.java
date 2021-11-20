@@ -16,9 +16,9 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 // TODO: merge with MockConfigurationService?
-public class RandomConfigurationService implements TestableConfigurationService
+public class BurnTestConfigurationService implements TestableConfigurationService
 {
-    private static final Logger logger = LoggerFactory.getLogger(RandomConfigurationService.class);
+    private static final Logger logger = LoggerFactory.getLogger(BurnTestConfigurationService.class);
 
     private final Node.Id node;
     private final MessageSink messageSink;
@@ -27,7 +27,7 @@ public class RandomConfigurationService implements TestableConfigurationService
     private final List<Topology> epochs = new ArrayList<>();
     private final List<ConfigurationService.Listener> listeners = new ArrayList<>();
 
-    public RandomConfigurationService(Node.Id node, MessageSink messageSink, Supplier<Random> randomSupplier, Topology topology, Function<Node.Id, Node> lookup)
+    public BurnTestConfigurationService(Node.Id node, MessageSink messageSink, Supplier<Random> randomSupplier, Topology topology, Function<Node.Id, Node> lookup)
     {
         this.node = node;
         this.messageSink = messageSink;

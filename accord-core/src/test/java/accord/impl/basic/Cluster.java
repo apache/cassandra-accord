@@ -16,7 +16,7 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 import accord.api.MessageSink;
-import accord.burn.RandomConfigurationService;
+import accord.burn.BurnTestConfigurationService;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -27,7 +27,7 @@ import accord.impl.list.ListStore;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
-import accord.topology.RandomConfiguration;
+import accord.topology.TopologyRandomizer;
 import accord.topology.Topology;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -143,14 +143,14 @@ public class Cluster implements Scheduler
     {
         Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> lookup = new HashMap<>();
-        RandomConfiguration configRandomizer = new RandomConfiguration(randomSupplier, topology, lookup::get);
+        TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, lookup::get);
         try
         {
             Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink);
             for (Id node : nodes)
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
-                RandomConfigurationService configService = new RandomConfigurationService(node, messageSink, randomSupplier, topology, lookup::get);
+                BurnTestConfigurationService configService = new BurnTestConfigurationService(node, messageSink, randomSupplier, topology, lookup::get);
                 lookup.put(node, new Node(node, messageSink, configService, randomSupplier.get(),
                                           nowSupplier.get(), ListStore::new, ListAgent.INSTANCE, sinks, CommandStore.Factory.SYNCHRONIZED));
             }
