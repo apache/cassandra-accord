@@ -25,16 +25,16 @@ public class TopologyManagerTest
 
         Assertions.assertSame(Topology.EMPTY, service.current());
         service.onTopologyUpdate(topology1);
-        Assertions.assertTrue(service.getEpochStateUnsafe(1).acknowledged());
+        Assertions.assertFalse(service.getEpochStateUnsafe(1).syncComplete());
 
         service.onTopologyUpdate(topology2);
-        Assertions.assertFalse(service.getEpochStateUnsafe(2).acknowledged());
+        Assertions.assertFalse(service.getEpochStateUnsafe(1).syncComplete());
 
-        service.onEpochAcknowledgement(id(1), 2);
-        Assertions.assertFalse(service.getEpochStateUnsafe(2).acknowledged());
+        service.onEpochSyncComplete(id(1), 1);
+        Assertions.assertFalse(service.getEpochStateUnsafe(1).syncComplete());
 
-        service.onEpochAcknowledgement(id(2), 2);
-        Assertions.assertTrue(service.getEpochStateUnsafe(2).acknowledged());
+        service.onEpochSyncComplete(id(2), 1);
+        Assertions.assertTrue(service.getEpochStateUnsafe(1).syncComplete());
     }
 
     private static TopologyManager tracker()
@@ -54,31 +54,16 @@ public class TopologyManagerTest
     }
 
     @Test
-    void acknowledgedFor()
-    {
-        TopologyManager service = tracker();
-
-        Assertions.assertFalse(service.getEpochStateUnsafe(2).acknowledged());
-        service.onEpochAcknowledgement(id(1), 2);
-        service.onEpochAcknowledgement(id(2), 2);
-        Assertions.assertFalse(service.getEpochStateUnsafe(2).acknowledged());
-        Assertions.assertTrue(service.getEpochStateUnsafe(2).acknowledgedFor(keys(150)));
-        Assertions.assertFalse(service.getEpochStateUnsafe(2).acknowledgedFor(keys(250)));
-    }
-
-    @Test
     void syncCompleteFor()
     {
         TopologyManager service = tracker();
 
         Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
-        service.onEpochAcknowledgement(id(1), 2);
-        service.onEpochSyncComplete(id(1), 2);
-        service.onEpochAcknowledgement(id(2), 2);
-        service.onEpochSyncComplete(id(2), 2);
-        Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
-        Assertions.assertTrue(service.getEpochStateUnsafe(2).syncCompleteFor(keys(150)));
-        Assertions.assertFalse(service.getEpochStateUnsafe(2).syncCompleteFor(keys(250)));
+        service.onEpochSyncComplete(id(1), 1);
+        service.onEpochSyncComplete(id(2), 1);
+        Assertions.assertFalse(service.getEpochStateUnsafe(1).syncComplete());
+        Assertions.assertTrue(service.getEpochStateUnsafe(1).syncCompleteFor(keys(150)));
+        Assertions.assertFalse(service.getEpochStateUnsafe(1).syncCompleteFor(keys(250)));
     }
 
     /**
@@ -95,15 +80,12 @@ public class TopologyManagerTest
         service.onTopologyUpdate(topology1);
 
         // sync epoch 2
-        service.onEpochAcknowledgement(id(1), 2);
-        service.onEpochSyncComplete(id(1), 2);
-        service.onEpochAcknowledgement(id(2), 2);
-        service.onEpochSyncComplete(id(2), 2);
+        service.onEpochSyncComplete(id(1), 1);
+        service.onEpochSyncComplete(id(2), 1);
 
         // learn of epoch 2
         service.onTopologyUpdate(topology2);
-        Assertions.assertTrue(service.getEpochStateUnsafe(2).acknowledged());
-        Assertions.assertTrue(service.getEpochStateUnsafe(2).syncComplete());
+        Assertions.assertTrue(service.getEpochStateUnsafe(1).syncComplete());
     }
 
     @Test
@@ -117,19 +99,16 @@ public class TopologyManagerTest
 
         Assertions.assertSame(Topology.EMPTY, service.current());
         service.onTopologyUpdate(topology1);
-        Assertions.assertTrue(service.getEpochStateUnsafe(1).acknowledged());
 
         service.onTopologyUpdate(topology2);
-        Assertions.assertFalse(service.getEpochStateUnsafe(2).acknowledged());
+        Assertions.assertFalse(service.getEpochStateUnsafe(1).syncComplete());
 
         Keys keys = keys(150);
         Assertions.assertEquals(topologies(topology2.forKeys(keys), topology1.forKeys(keys)),
                                 service.forKeys(keys));
 
-        service.onEpochAcknowledgement(id(1), 2);
-        service.onEpochSyncComplete(id(1), 2);
-        service.onEpochAcknowledgement(id(2), 2);
-        service.onEpochSyncComplete(id(2), 2);
+        service.onEpochSyncComplete(id(1), 1);
+        service.onEpochSyncComplete(id(2), 1);
         Assertions.assertEquals(topologies(topology2.forKeys(keys)),
                                 service.forKeys(keys));
     }
@@ -157,10 +136,8 @@ public class TopologyManagerTest
                                 service.forKeys(keys(150, 250)));
 
         // first topology acked, so only the second shard should be included
-        service.onEpochAcknowledgement(id(1), 2);
-        service.onEpochSyncComplete(id(1), 2);
-        service.onEpochAcknowledgement(id(2), 2);
-        service.onEpochSyncComplete(id(2), 2);
+        service.onEpochSyncComplete(id(1), 1);
+        service.onEpochSyncComplete(id(2), 1);
         Topologies actual = service.forKeys(keys(150, 250));
         Assertions.assertEquals(topologies(topology2, topology(1, shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)))),
                                 actual);

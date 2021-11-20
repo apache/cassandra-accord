@@ -168,7 +168,7 @@ public class RandomConfigurationService implements TestableConfigurationService
     {
         Topology topology = getTopologyForEpoch(epoch);
         Node originator = lookup.apply(node);
-        TopologyUpdate.acknowledgeAndSync(originator, epoch, topology.nodes());
+        TopologyUpdate.syncEpoch(originator, epoch, topology.nodes());
     }
 
     @Override

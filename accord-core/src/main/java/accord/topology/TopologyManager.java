@@ -1,7 +1,7 @@
 package accord.topology;
 
 import accord.api.ConfigurationService;
-import accord.coordinate.tracking.AbstractResponseTracker;
+import accord.coordinate.tracking.QuorumTracker;
 import accord.local.Node;
 import accord.messages.Request;
 import accord.messages.TxnRequest;
@@ -12,8 +12,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 import java.util.*;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 
 /**
@@ -28,148 +26,36 @@ import java.util.function.LongConsumer;
  */
 public class TopologyManager implements ConfigurationService.Listener
 {
-    static class ShardEpochTracker extends AbstractResponseTracker.ShardTracker
-    {
-        // FIXME: remove acknowledgement??
-        /*
-         * Until a quorum of nodes has acknowledged a superseding configuration, they need to be included in the replica
-         * set of operations
-         */
-        private int acknowledged = 0;
-        private final Set<Node.Id> unacknowledged;
-
-        private int syncComplete = 0;
-        private final Set<Node.Id> pendingSync;
-
-        public ShardEpochTracker(Shard shard)
-        {
-            super(shard);
-            this.unacknowledged = new HashSet<>(shard.nodes);
-            this.pendingSync = new HashSet<>(shard.nodes);
-        }
-
-        public boolean acknowledge(Node.Id id)
-        {
-            if (!unacknowledged.remove(id))
-                return false;
-            acknowledged++;
-            return true;
-        }
-
-        public boolean quorumAcknowledged()
-        {
-            return acknowledged >= shard.slowPathQuorumSize;
-        }
-
-        public boolean syncComplete(Node.Id id)
-        {
-            if (!pendingSync.remove(id))
-                return false;
-            syncComplete++;
-            return true;
-        }
-
-        public boolean quorumSyncComplete()
-        {
-            return syncComplete >= shard.slowPathQuorumSize;
-        }
-    }
-
-    private static class EpochTracker extends AbstractResponseTracker<ShardEpochTracker>
-    {
-        public EpochTracker(Topologies topologies)
-        {
-            super(topologies, ShardEpochTracker[]::new, ShardEpochTracker::new);
-        }
-
-        public void recordAcknowledgement(Node.Id node)
-        {
-            forEachTrackerForNode(node, ShardEpochTracker::acknowledge);
-        }
-
-        public boolean epochAcknowledged()
-        {
-            return all(ShardEpochTracker::quorumAcknowledged);
-        }
-
-        public void recordSyncComplete(Node.Id node)
-        {
-            forEachTrackerForNode(node, ShardEpochTracker::syncComplete);
-        }
-
-        public boolean epochSynced()
-        {
-            return all(ShardEpochTracker::quorumSyncComplete);
-        }
-    }
-
     class EpochState
     {
         private final Topology topology;
         private final Topology local;
-        private final Topology previous;
-        private final EpochTracker tracker;
-        private boolean acknowledged = false;
+        private final QuorumTracker syncTracker;
         private boolean syncComplete = false;
 
         private void updateState()
         {
-            acknowledged = tracker.epochAcknowledged();
-            syncComplete = tracker.epochSynced();
+            syncComplete = syncTracker.hasReachedQuorum();
         }
 
-        EpochState(Topology topology, Topology previous)
+        EpochState(Topology topology)
         {
             Preconditions.checkArgument(!topology.isSubset());
-            Preconditions.checkArgument(!previous.isSubset());
             this.topology = topology;
             this.local = topology.forNode(node);
-            this.previous = previous;
-            this.tracker = new EpochTracker(new Topologies.Singleton(previous, false));
-            updateState();
-        }
-
-        public void recordAcknowledgement(Node.Id node)
-        {
-            tracker.recordAcknowledgement(node);
+            this.syncTracker = new QuorumTracker(new Topologies.Singleton(topology, false));
             updateState();
         }
 
         public void recordSyncComplete(Node.Id node)
         {
-            tracker.recordSyncComplete(node);
+            syncTracker.recordSuccess(node);
             updateState();
         }
 
         long epoch()
         {
             return topology.epoch;
-        }
-
-        boolean acknowledged()
-        {
-            return acknowledged;
-        }
-
-        /**
-         * determine if all shards intersecting with the given keys have acknowledged the new epoch
-         */
-        boolean acknowledgedFor(Keys keys)
-        {
-            if (acknowledged)
-                return true;
-            Boolean result = previous.accumulateForKeys(keys, (i, shard, acc) -> {
-                if (acc == Boolean.FALSE)
-                    return acc;
-                ShardEpochTracker shardTracker = tracker.unsafeGet(i);
-                return Boolean.valueOf(shardTracker.quorumAcknowledged());
-            }, Boolean.TRUE);
-            return result == Boolean.TRUE;
-        }
-
-        boolean shardIsUnacknowledged(int idx, Shard shard)
-        {
-            return !tracker.unsafeGet(idx).quorumAcknowledged();
         }
 
         boolean syncComplete()
@@ -184,27 +70,18 @@ public class TopologyManager implements ConfigurationService.Listener
         {
             if (syncComplete)
                 return true;
-            Boolean result = previous.accumulateForKeys(keys, (i, shard, acc) -> {
+            Boolean result = topology.accumulateForKeys(keys, (i, shard, acc) -> {
                 if (acc == Boolean.FALSE)
                     return acc;
-                ShardEpochTracker shardTracker = tracker.unsafeGet(i);
-                return Boolean.valueOf(shardTracker.quorumSyncComplete());
+                return Boolean.valueOf(syncTracker.unsafeGet(i).hasReachedQuorum());
             }, Boolean.TRUE);
             return result == Boolean.TRUE;
         }
 
         boolean shardIsUnsynced(int idx, Shard shard)
         {
-            return !tracker.unsafeGet(idx).quorumSyncComplete();
+            return !syncTracker.unsafeGet(idx).hasReachedQuorum();
         }
-    }
-
-    private static <T> List<T> consumeFirstAndCopyTail(List<T> l, Consumer<T> consumer)
-    {
-        if (l.isEmpty())
-            return new ArrayList<>();
-        consumer.accept(l.get(0));
-        return new ArrayList<>(l.subList(1, l.size()));
     }
 
     private class Epochs
@@ -212,13 +89,11 @@ public class TopologyManager implements ConfigurationService.Listener
         private final long maxEpoch;
         private final long minEpoch;
         private final EpochState[] epochs;
-        private final List<Set<Node.Id>> pendingAcknowledge;
         private final List<Set<Node.Id>> pendingSyncComplete;
 
-        private Epochs(EpochState[] epochs, List<Set<Node.Id>> pendingAcknowledge, List<Set<Node.Id>> pendingSyncComplete)
+        private Epochs(EpochState[] epochs, List<Set<Node.Id>> pendingSyncComplete)
         {
             this.maxEpoch = epochs.length > 0 ? epochs[0].epoch() : 0;
-            this.pendingAcknowledge = pendingAcknowledge;
             this.pendingSyncComplete = pendingSyncComplete;
             for (int i=1; i<epochs.length; i++)
                 Preconditions.checkArgument(epochs[i].epoch() == epochs[i-1].epoch() - 1);
@@ -228,7 +103,7 @@ public class TopologyManager implements ConfigurationService.Listener
 
         private Epochs(EpochState[] epochs)
         {
-            this(epochs, new ArrayList<>(), new ArrayList<>());
+            this(epochs, new ArrayList<>());
         }
 
         public long nextEpoch()
@@ -245,45 +120,36 @@ public class TopologyManager implements ConfigurationService.Listener
         {
             Preconditions.checkArgument(topology.epoch == nextEpoch());
             EpochState[] nextEpochs = new EpochState[epochs.length + 1];
+            List<Set<Node.Id>> pendingSync = pendingSyncComplete;
+            if (!pendingSync.isEmpty())
+            {
+                EpochState currentEpoch = epochs[0];
+                pendingSync.remove(0).forEach(currentEpoch::recordSyncComplete);
+            }
             System.arraycopy(epochs, 0, nextEpochs, 1, epochs.length);
 
-            EpochState nextEpochState = new EpochState(topology, current());
+            EpochState nextEpochState = new EpochState(topology);
             nextEpochs[0] = nextEpochState;
-            return new Epochs(nextEpochs,
-                              consumeFirstAndCopyTail(pendingAcknowledge, ids -> ids.forEach(nextEpochState::recordAcknowledgement)),
-                              consumeFirstAndCopyTail(pendingSyncComplete, ids -> ids.forEach(nextEpochState::recordSyncComplete)));
-        }
-
-        private void applyToEpoch(Node.Id node,
-                                  long epoch,
-                                  BiConsumer<EpochState, Node.Id> consumer,
-                                  List<Set<Node.Id>> pendingList)
-        {
-            for (long e=minEpoch; e<=epoch; e++)
-            {
-                if (e > maxEpoch)
-                {
-                    int idx = (int) (e - maxEpoch - 1);
-                    for (int i=pendingList.size(); i<=idx; i++)
-                        pendingList.add(new HashSet<>());
-
-                    pendingList.get(idx).add(node);
-                }
-                else
-                {
-                    consumer.accept(get(e), node);
-                }
-            }
-        }
-
-        public void acknowledge(Node.Id node, long ackEpoch)
-        {
-            applyToEpoch(node, ackEpoch, EpochState::recordAcknowledgement, pendingAcknowledge);
+            return new Epochs(nextEpochs, pendingSync);
         }
 
         public void syncComplete(Node.Id node, long epoch)
         {
-            applyToEpoch(node, epoch, EpochState::recordSyncComplete, pendingSyncComplete);
+            for (long e=minEpoch; e<=epoch; e++)
+            {
+                if (e > maxEpoch - 1)
+                {
+                    int idx = (int) (e - maxEpoch);
+                    for (int i=pendingSyncComplete.size(); i<=idx; i++)
+                        pendingSyncComplete.add(new HashSet<>());
+
+                    pendingSyncComplete.get(idx).add(node);
+                }
+                else
+                {
+                    get(e).recordSyncComplete(node);
+                }
+            }
         }
 
         private EpochState get(long epoch)
@@ -327,6 +193,11 @@ public class TopologyManager implements ConfigurationService.Listener
 
             return 0;
         }
+
+        boolean requiresHistoricalTopologiesFor(Keys keys)
+        {
+            return epochs.length > 1 && !epochs[1].syncCompleteFor(keys);
+        }
     }
 
     private final Node.Id node;
@@ -344,12 +215,6 @@ public class TopologyManager implements ConfigurationService.Listener
     public synchronized void onTopologyUpdate(Topology topology)
     {
         epochs = epochs.add(topology);
-    }
-
-    @Override
-    public void onEpochAcknowledgement(Node.Id node, long epoch)
-    {
-        epochs.acknowledge(node, epoch);
     }
 
     @Override
@@ -381,7 +246,7 @@ public class TopologyManager implements ConfigurationService.Listener
 
         EpochState epochState = current.get(maxEpoch);
         Topology topology = epochState.topology.forKeys(keys);
-        if (epochState.syncCompleteFor(keys))
+        if (!epochs.requiresHistoricalTopologiesFor(keys))
         {
             return new Topologies.Singleton(topology, true);
         }
@@ -391,12 +256,10 @@ public class TopologyManager implements ConfigurationService.Listener
             topologies.add(topology);
             for (int i=1; i<current.epochs.length; i++)
             {
-                // FIXME: again, this is confusing
-                EpochState nextState = current.epochs[i-1];
                 epochState = current.epochs[i];
-                topologies.add(nextState.previous.forKeys(keys, nextState::shardIsUnsynced));
-                if (epochState.syncCompleteFor(keys))
+                if (i > 1 && epochState.syncCompleteFor(keys))
                     break;
+                topologies.add(epochState.topology.forKeys(keys, epochState::shardIsUnsynced));
             }
             return topologies;
         }

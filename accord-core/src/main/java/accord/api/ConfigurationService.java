@@ -18,11 +18,6 @@ public interface ConfigurationService
         void onTopologyUpdate(Topology topology);
 
         /**
-         * Called when the given node the configuration service learns that a node has acknowledged a config epoch
-         */
-        void onEpochAcknowledgement(Node.Id node, long epoch);
-
-        /**
          * Called when accord data associated with a superseded epoch has been sync'd across current replicas
          */
         void onEpochSyncComplete(Node.Id node, long epoch);

@@ -11,7 +11,7 @@ import accord.topology.Topologies;
 
 public class AbstractQuorumTracker<T extends AbstractQuorumTracker.QuorumShardTracker> extends AbstractResponseTracker<T>
 {
-    static class QuorumShardTracker extends ShardTracker
+    public static class QuorumShardTracker extends ShardTracker
     {
         private final Set<Node.Id> inflight;
         private int success = 0;
@@ -43,7 +43,7 @@ public class AbstractQuorumTracker<T extends AbstractQuorumTracker.QuorumShardTr
             return failures >= shard.slowPathQuorumSize;
         }
 
-        boolean hasReachedQuorum()
+        public boolean hasReachedQuorum()
         {
             return success >= shard.slowPathQuorumSize;
         }

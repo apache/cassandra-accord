@@ -8,7 +8,6 @@ import accord.local.Status;
 import accord.topology.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topology;
-import accord.topology.TopologyManager;
 import accord.txn.Dependencies;
 import accord.txn.Timestamp;
 import accord.txn.Txn;
@@ -236,17 +235,14 @@ public class TopologyUpdate
         long epoch = update.epoch();
         // notify
         dieExceptionally(notify(originator, cluster, update)
-                // acknowledge
-                .thenCompose(v -> broadcast(cluster, lookup, "EpochAcknowledge:" + epoch, (node, from) -> node.onEpochAcknowledgement(from, epoch)))
                 // sync operations
                 .thenCompose(v -> map(cluster, node -> sync(lookup.apply(node), epoch - 1)))
                 // inform sync complete
                 .thenCompose(v -> broadcast(cluster, lookup, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(from, epoch))));
     }
-    public static CompletionStage<Void> acknowledgeAndSync(Node originator, long epoch, Collection<Node.Id> cluster)
+    public static CompletionStage<Void> syncEpoch(Node originator, long epoch, Collection<Node.Id> cluster)
     {
-        return dieExceptionally(MessageTask.apply(originator, cluster, "EpochAcknowledge:" + epoch, (node, from) -> node.onEpochAcknowledgement(from, epoch))
-                .thenCompose(v -> sync(originator, epoch - 1))
+        return dieExceptionally(sync(originator, epoch - 1)
                 .thenCompose(v -> MessageTask.apply(originator, cluster, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(from, epoch))));
     }
 }

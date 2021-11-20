@@ -3,7 +3,6 @@ package accord.impl.mock;
 import accord.api.MessageSink;
 import accord.api.TestableConfigurationService;
 import accord.local.Node;
-import accord.messages.Request;
 import accord.topology.Topology;
 import accord.utils.EpochFunction;
 import com.google.common.collect.ImmutableSet;
@@ -66,28 +65,9 @@ public class MockConfigurationService implements TestableConfigurationService
         fetchTopologyHandler.apply(epoch, this);
     }
 
-    public static class EpochAcknowledgeMessage implements Request
-    {
-        public final long epoch;
-
-        public EpochAcknowledgeMessage(long epoch)
-        {
-            this.epoch = epoch;
-        }
-
-        @Override
-        public void process(Node node, Node.Id from, long messageId)
-        {
-            node.onEpochAcknowledgement(from, epoch);
-        }
-    }
-
     @Override
     public void acknowledgeEpoch(long epoch)
     {
-        EpochAcknowledgeMessage message = new EpochAcknowledgeMessage(epoch);
-        Topology topology = getTopologyForEpoch(epoch);
-        topology.nodes().forEach(to -> messageSink.send(to, message));
     }
 
     @Override

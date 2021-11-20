@@ -145,12 +145,6 @@ public class Node implements ConfigurationService.Listener
     }
 
     @Override
-    public void onEpochAcknowledgement(Id node, long epoch)
-    {
-        topology.onEpochAcknowledgement(node, epoch);
-    }
-
-    @Override
     public void onEpochSyncComplete(Id node, long epoch)
     {
         topology.onEpochSyncComplete(node, epoch);
