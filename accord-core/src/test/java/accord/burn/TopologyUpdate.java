@@ -165,7 +165,7 @@ public class TopologyUpdate
         Topology localTopology = syncTopology.forNode(node.id());
         Topology nextTopology = node.configService().getTopologyForEpoch(nextEpoch);
 //        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> allNodesFor(cmd.txn, syncTopology, nextTopology);
-//        Function<CommandSync, Collection<Node.Id>> nextNodes = cmd -> allNodesFor(cmd.txn, nextTopology);
+        Function<CommandSync, Collection<Node.Id>> nextNodes = cmd -> allNodesFor(cmd.txn, nextTopology);
 //        TopologyManager topology = node.topology();
         Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().forTxn(cmd.txn).nodes();
 
@@ -189,8 +189,8 @@ public class TopologyUpdate
                     messageStream = Stream.concat(messageStream, syncEpochCommands(node,
                                                                                    epoch,
                                                                                    ranges,
-//                                                                                   nextNodes));
-                                                                                   allNodes,
+                                                                                   nextNodes,
+//                                                                                   allNodes,
                                                                                    syncEpoch));
             }
         }

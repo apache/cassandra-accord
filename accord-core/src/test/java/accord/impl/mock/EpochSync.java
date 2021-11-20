@@ -147,8 +147,7 @@ public class EpochSync implements Runnable
             for (SyncMessage message : syncMessages.values())
                 CommandSync.sync(node, message, nextTopology);
 
-            // FIXME: which epoch to mark sync complete is confusing
-            SyncComplete syncComplete = new SyncComplete(nextEpoch);
+            SyncComplete syncComplete = new SyncComplete(syncEpoch);
             node.send(nextTopology.nodes(), syncComplete);
         }
     }
