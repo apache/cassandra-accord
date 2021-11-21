@@ -8,12 +8,10 @@ import accord.local.Status;
 import accord.topology.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topology;
-import accord.txn.Dependencies;
-import accord.txn.Timestamp;
-import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.txn.*;
 import accord.utils.MessageTask;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,6 +54,7 @@ public class TopologyUpdate
 
     private static class CommandSync
     {
+        private final Status status;
         private final TxnId txnId;
         private final Txn txn;
         private final Timestamp executeAt;
@@ -64,15 +63,34 @@ public class TopologyUpdate
 
         public CommandSync(Command command)
         {
-            Preconditions.checkArgument(command.hasBeen(Status.Committed));
+            Preconditions.checkArgument(command.hasBeen(Status.PreAccepted));
             this.txnId = command.txnId();
             this.txn = command.txn();
+            this.status = command.status();
             this.executeAt = command.executeAt();
             this.deps = command.savedDeps();
         }
         public void process(Node node)
         {
-            node.local(txn.keys()).forEach(commandStore -> commandStore.command(txnId).commit(txn, deps, executeAt));
+            node.local(txn.keys()).forEach(commandStore -> {
+                switch (status)
+                {
+                    case PreAccepted:
+                        commandStore.command(txnId).witness(txn);
+                        break;
+                    case Accepted:
+                        commandStore.command(txnId).accept(Ballot.ZERO, txn, executeAt, deps);
+                        break;
+                    case Committed:
+                    case ReadyToExecute:
+                    case Executed:
+                    case Applied:
+                        commandStore.command(txnId).commit(txn, deps, executeAt);
+                        break;
+                    default:
+                        throw new IllegalStateException();
+                }
+            });
         }
     }
 
@@ -124,13 +142,18 @@ public class TopologyUpdate
         return result;
     }
 
-    private static Stream<MessageTask> syncEpochCommands(Node node, long epoch, KeyRanges ranges, Function<CommandSync, Collection<Node.Id>> recipients, long forEpoch)
+    private static Stream<MessageTask> syncEpochCommands(Node node, long epoch, KeyRanges ranges, Function<CommandSync, Collection<Node.Id>> recipients, long forEpoch, boolean committedOnly)
     {
         Map<TxnId, CommandSync> syncMessages = new ConcurrentHashMap<>();
         Consumer<Command> commandConsumer = command -> syncMessages.put(command.txnId(), new CommandSync(command));
-        node.local().forEach(commandStore -> commandStore.forCommittedInEpoch(ranges, epoch, commandConsumer));
+        if (committedOnly)
+            node.local().forEach(commandStore -> commandStore.forCommittedInEpoch(ranges, epoch, commandConsumer));
+        else
+            node.local().forEach(commandStore -> commandStore.forEpochCommands(ranges, epoch, commandConsumer));
         return syncMessages.values().stream().map(cmd -> MessageTask.of(node, recipients.apply(cmd), "Sync:" + cmd.txnId + ':' + epoch + ':' + forEpoch, cmd::process));
     }
+
+    private static final boolean COMMITTED_ONLY = true;
 
     /**
      * Syncs all replicated commands. Overkill, but useful for confirming issues in optimizedSync
@@ -149,7 +172,7 @@ public class TopologyUpdate
         Stream<MessageTask> messageStream = Stream.empty();
         for (long epoch=1; epoch<=syncEpoch; epoch++)
         {
-            messageStream = Stream.concat(messageStream, syncEpochCommands(node, epoch, ranges, allNodes, syncEpoch));
+            messageStream = Stream.concat(messageStream, syncEpochCommands(node, epoch, ranges, allNodes, syncEpoch, COMMITTED_ONLY));
         }
         return messageStream;
     }
@@ -184,23 +207,26 @@ public class TopologyUpdate
                 if (intersection == null)
                     continue;
 
+                Set<Node.Id> newNodes = Sets.difference(nextShard.nodeSet, syncShard.nodeSet);
                 KeyRanges ranges = KeyRanges.singleton(intersection);
                 for (long epoch=1; epoch<syncEpoch; epoch++)
                     messageStream = Stream.concat(messageStream, syncEpochCommands(node,
                                                                                    epoch,
                                                                                    ranges,
 //                                                                                   nextNodes,
-                                                                                   allNodes,
-                                                                                   syncEpoch));
+//                                                                                   allNodes,
+                                                                                   cmd -> newNodes,
+                                                                                   syncEpoch, COMMITTED_ONLY));
             }
         }
+
 
         // update all current and future replicas with the contents of the sync epoch
         messageStream = Stream.concat(messageStream, syncEpochCommands(node,
                                                                        syncEpoch,
                                                                        localTopology.ranges(),
                                                                        allNodes,
-                                                                       syncEpoch));
+                                                                       syncEpoch, COMMITTED_ONLY));
         return messageStream;
     }
 
@@ -242,7 +268,7 @@ public class TopologyUpdate
     }
     public static CompletionStage<Void> syncEpoch(Node originator, long epoch, Collection<Node.Id> cluster)
     {
-        return dieExceptionally(sync(originator, epoch - 1)
-                .thenCompose(v -> MessageTask.apply(originator, cluster, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(from, epoch))));
+        return dieExceptionally(sync(originator, epoch)
+                .thenCompose(v -> MessageTask.apply(originator, cluster, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(originator.id(), epoch))));
     }
 }

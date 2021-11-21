@@ -71,7 +71,7 @@ public class BeginRecovery extends TxnRequest
                                               .filter(c -> c.savedDeps().contains(txnId))
                                               .collect(Dependencies::new, Dependencies::add, Dependencies::addAll);
             }
-            return new RecoverOk(command.status(), command.accepted(), command.executeAt(), deps, earlierCommittedWitness, earlierAcceptedNoWitness, rejectsFastPath, command.writes(), command.result());
+            return new RecoverOk(txnId, command.status(), command.accepted(), command.executeAt(), deps, earlierCommittedWitness, earlierAcceptedNoWitness, rejectsFastPath, command.writes(), command.result());
         }).reduce((r1, r2) -> {
             if (!r1.isOK()) return r1;
             if (!r2.isOK()) return r2;
@@ -120,14 +120,14 @@ public class BeginRecovery extends TxnRequest
             ok1.earlierAcceptedNoWitness.addAll(ok2.earlierAcceptedNoWitness);
             ok1.earlierAcceptedNoWitness.removeAll(ok1.earlierCommittedWitness);
             return new RecoverOk(
-            ok1.status,
-            Ballot.max(ok1.accepted, ok2.accepted),
-            Timestamp.max(ok1.executeAt, ok2.executeAt),
-            deps,
-            ok1.earlierCommittedWitness,
-            ok1.earlierAcceptedNoWitness,
-                ok1.rejectsFastPath | ok2.rejectsFastPath,
-            ok1.writes, ok1.result);
+                    txnId, ok1.status,
+                    Ballot.max(ok1.accepted, ok2.accepted),
+                    Timestamp.max(ok1.executeAt, ok2.executeAt),
+                    deps,
+                    ok1.earlierCommittedWitness,
+                    ok1.earlierAcceptedNoWitness,
+                    ok1.rejectsFastPath | ok2.rejectsFastPath,
+                    ok1.writes, ok1.result);
         }).orElseThrow();
 
         node.reply(replyToNode, replyToMessage, reply);
@@ -147,6 +147,7 @@ public class BeginRecovery extends TxnRequest
 
     public static class RecoverOk implements RecoverReply
     {
+        public final TxnId txnId;
         public final Status status;
         public final Ballot accepted;
         public final Timestamp executeAt;
@@ -157,8 +158,9 @@ public class BeginRecovery extends TxnRequest
         public final Writes writes;
         public final Result result;
 
-        RecoverOk(Status status, Ballot accepted, Timestamp executeAt, Dependencies deps, Dependencies earlierCommittedWitness, Dependencies earlierAcceptedNoWitness, boolean rejectsFastPath, Writes writes, Result result)
+        RecoverOk(TxnId txnId, Status status, Ballot accepted, Timestamp executeAt, Dependencies deps, Dependencies earlierCommittedWitness, Dependencies earlierAcceptedNoWitness, boolean rejectsFastPath, Writes writes, Result result)
         {
+            this.txnId = txnId;
             this.accepted = accepted;
             this.executeAt = executeAt;
             this.status = status;
@@ -180,7 +182,8 @@ public class BeginRecovery extends TxnRequest
         public String toString()
         {
             return "RecoverOk{" +
-                   "status:" + status +
+                   "txnId:" + txnId +
+                   ", status:" + status +
                    ", accepted:" + accepted +
                    ", executeAt:" + executeAt +
                    ", deps:" + deps +

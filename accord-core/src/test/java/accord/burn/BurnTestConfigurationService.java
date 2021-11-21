@@ -168,7 +168,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
     {
         Topology topology = getTopologyForEpoch(epoch);
         Node originator = lookup.apply(node);
-        TopologyUpdate.syncEpoch(originator, epoch, topology.nodes());
+        TopologyUpdate.syncEpoch(originator, epoch - 1, topology.nodes());
     }
 
     @Override
