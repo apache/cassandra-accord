@@ -22,6 +22,7 @@ public class Shard
     public final Set<Id> nodeSet;
     public final Set<Id> fastPathElectorate;
     public final Set<Id> pending;
+    public final int maxFailures;
     public final int recoveryFastPathSize;
     public final int fastPathQuorumSize;
     public final int slowPathQuorumSize;
@@ -34,13 +35,13 @@ public class Shard
         this.nodes = ImmutableList.copyOf(nodes);
         this.nodeSet = ImmutableSet.copyOf(nodes);
         Preconditions.checkArgument(nodes.size() == nodeSet.size());
-        int f = maxToleratedFailures(nodes.size());
+        this.maxFailures = maxToleratedFailures(nodes.size());
         this.fastPathElectorate = ImmutableSet.copyOf(fastPathElectorate);
         this.pending = ImmutableSet.copyOf(pending);
         int e = fastPathElectorate.size();
-        this.recoveryFastPathSize = (f+1)/2;
+        this.recoveryFastPathSize = (maxFailures+1)/2;
         this.slowPathQuorumSize = slowPathQuorumSize(nodes.size());
-        this.fastPathQuorumSize = fastPathQuorumSize(nodes.size(), e, f);
+        this.fastPathQuorumSize = fastPathQuorumSize(nodes.size(), e, maxFailures);
     }
 
     public Shard(KeyRange range, List<Id> nodes, Set<Id> fastPathElectorate)

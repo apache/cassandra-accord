@@ -40,7 +40,7 @@ public class AbstractQuorumTracker<T extends AbstractQuorumTracker.QuorumShardTr
 
         boolean hasFailed()
         {
-            return failures >= shard.slowPathQuorumSize;
+            return failures > shard.maxFailures;
         }
 
         public boolean hasReachedQuorum()
