@@ -32,25 +32,33 @@ public class TopologyManager implements ConfigurationService.Listener
         private final Topology local;
         private final QuorumTracker syncTracker;
         private boolean syncComplete = false;
+        private boolean prevSynced;
 
-        private void updateState()
+        private boolean updateState(boolean prevSynced)
         {
-            syncComplete = syncTracker.hasReachedQuorum();
+            this.prevSynced = prevSynced;
+            if (!syncComplete)
+            {
+                syncComplete = syncTracker.hasReachedQuorum();
+                return syncComplete;
+            }
+            return false;
         }
 
-        EpochState(Topology topology)
+        EpochState(Topology topology, boolean prevSynced)
         {
             Preconditions.checkArgument(!topology.isSubset());
             this.topology = topology;
             this.local = topology.forNode(node);
             this.syncTracker = new QuorumTracker(new Topologies.Singleton(topology, false));
-            updateState();
+            this.prevSynced = prevSynced;
+            updateState(prevSynced);
         }
 
-        public void recordSyncComplete(Node.Id node)
+        public boolean recordSyncComplete(Node.Id node, boolean prevSynced)
         {
             syncTracker.recordSuccess(node);
-            updateState();
+            return updateState(prevSynced);
         }
 
         long epoch()
@@ -60,7 +68,7 @@ public class TopologyManager implements ConfigurationService.Listener
 
         boolean syncComplete()
         {
-            return syncComplete;
+            return prevSynced && syncComplete;
         }
 
         /**
@@ -68,6 +76,8 @@ public class TopologyManager implements ConfigurationService.Listener
          */
         boolean syncCompleteFor(Keys keys)
         {
+            if (!prevSynced)
+                return false;
             if (syncComplete)
                 return true;
             Boolean result = topology.accumulateForKeys(keys, (i, shard, acc) -> {
@@ -123,31 +133,37 @@ public class TopologyManager implements ConfigurationService.Listener
             List<Set<Node.Id>> pendingSync = pendingSyncComplete;
             if (!pendingSync.isEmpty())
             {
+                boolean prevSynced = epochs.length <= 1 || epochs[1].syncComplete();
                 EpochState currentEpoch = epochs[0];
-                pendingSync.remove(0).forEach(currentEpoch::recordSyncComplete);
+                pendingSync.remove(0).forEach(id -> currentEpoch.recordSyncComplete(id, prevSynced));
             }
             System.arraycopy(epochs, 0, nextEpochs, 1, epochs.length);
 
-            EpochState nextEpochState = new EpochState(topology);
+            boolean prevSynced = epochs.length == 0 || epochs[0].syncComplete();
+            EpochState nextEpochState = new EpochState(topology, prevSynced);
             nextEpochs[0] = nextEpochState;
             return new Epochs(nextEpochs, pendingSync);
         }
 
         public void syncComplete(Node.Id node, long epoch)
         {
-            for (long e=minEpoch; e<=epoch; e++)
+            Preconditions.checkArgument(epoch > 0);
+            if (epoch > maxEpoch - 1)
             {
-                if (e > maxEpoch - 1)
-                {
-                    int idx = (int) (e - maxEpoch);
-                    for (int i=pendingSyncComplete.size(); i<=idx; i++)
-                        pendingSyncComplete.add(new HashSet<>());
+                int idx = (int) (epoch - maxEpoch);
+                for (int i=pendingSyncComplete.size(); i<=idx; i++)
+                    pendingSyncComplete.add(new HashSet<>());
 
-                    pendingSyncComplete.get(idx).add(node);
-                }
-                else
+                pendingSyncComplete.get(idx).add(node);
+            }
+            else
+            {
+                boolean prevSynced = epoch == minEpoch || get(epoch - 1).syncComplete();
+                boolean hasChanged = get(epoch).recordSyncComplete(node, prevSynced);
+                for (epoch++ ;hasChanged && epoch <= maxEpoch; epoch++)
                 {
-                    get(e).recordSyncComplete(node);
+                    prevSynced = get(epoch - 1).syncComplete();
+                    hasChanged = get(epoch).updateState(prevSynced);
                 }
             }
         }

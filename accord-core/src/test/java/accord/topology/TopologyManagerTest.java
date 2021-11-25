@@ -67,10 +67,44 @@ public class TopologyManagerTest
     }
 
     /**
+     * Epochs should only report being synced if every preceding epoch is also reporting synced
+     */
+    @Test
+    void existingEpochPendingSync()
+    {
+        KeyRange range = range(100, 200);
+        Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
+        Topology topology2 = topology(2, shard(range, idList(1, 2, 3), idSet(2, 3)));
+        Topology topology3 = topology(3, shard(range, idList(1, 2, 3), idSet(1, 2)));
+
+        TopologyManager service = new TopologyManager(ID, epoch -> {});
+        service.onTopologyUpdate(topology1);
+        service.onTopologyUpdate(topology2);
+        service.onTopologyUpdate(topology3);
+
+        Assertions.assertFalse(service.getEpochStateUnsafe(1).syncComplete());
+        Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
+
+        // sync epoch 2
+        service.onEpochSyncComplete(id(1), 2);
+        service.onEpochSyncComplete(id(2), 2);
+
+        Assertions.assertFalse(service.getEpochStateUnsafe(1).syncComplete());
+        Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
+
+        // sync epoch 1
+        service.onEpochSyncComplete(id(1), 1);
+        service.onEpochSyncComplete(id(2), 1);
+
+        Assertions.assertTrue(service.getEpochStateUnsafe(1).syncComplete());
+        Assertions.assertTrue(service.getEpochStateUnsafe(2).syncComplete());
+    }
+
+    /**
      * If a node receives sync acks for epochs it's not aware of, it should apply them when it finds out about the epoch
      */
     @Test
-    void pendingSync()
+    void futureEpochPendingSync()
     {
         KeyRange range = range(100, 200);
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
