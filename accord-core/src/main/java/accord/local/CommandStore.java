@@ -148,6 +148,23 @@ public abstract class CommandStore
         }
     }
 
+    public void forEpochCommands(KeyRanges ranges, long epoch, Consumer<Command> consumer)
+    {
+        Timestamp minTimestamp = new Timestamp(epoch, Long.MIN_VALUE, Integer.MIN_VALUE, Node.Id.NONE);
+        Timestamp maxTimestamp = new Timestamp(epoch, Long.MAX_VALUE, Integer.MAX_VALUE, Node.Id.MAX);
+        for (KeyRange range : ranges)
+        {
+            Iterable<CommandsForKey> rangeCommands = commandsForKey.subMap(range.start(),
+                                                                           range.startInclusive(),
+                                                                           range.end(),
+                                                                           range.endInclusive()).values();
+            for (CommandsForKey commands : rangeCommands)
+            {
+                commands.forWitnessed(minTimestamp, maxTimestamp, consumer);
+            }
+        }
+    }
+
     public void forCommittedInEpoch(KeyRanges ranges, long epoch, Consumer<Command> consumer)
     {
         Timestamp minTimestamp = new Timestamp(epoch, Long.MIN_VALUE, Integer.MIN_VALUE, Node.Id.NONE);
