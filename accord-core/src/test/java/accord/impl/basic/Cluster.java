@@ -61,7 +61,8 @@ public class Cluster implements Scheduler
 
     private void add(Packet packet)
     {
-        logger.trace("{} SEND {}", clock++, packet);
+        boolean isReply = packet.message instanceof Reply;
+        logger.trace("{} {} {}", clock++, isReply ? "RPLY" : "SEND", packet);
         if (lookup.apply(packet.dst) == null) responseSink.accept(packet);
         else pending.add(packet);
     }

@@ -122,10 +122,9 @@ public class Node implements ConfigurationService.Listener
         return messageSink;
     }
 
-    public void maybeReportEpoch(long epoch)
+    public long epoch()
     {
-        if (epoch > configService.currentEpoch())
-            configService.fetchTopologyForEpoch(epoch);
+        return topology().epoch();
     }
 
     private synchronized void onTopologyUpdate(Topology topology, boolean acknowledge)
