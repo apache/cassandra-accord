@@ -95,10 +95,10 @@ public class Cluster implements Scheduler
                             || !partitionSet.contains(deliver.src) && !partitionSet.contains(deliver.dst));
             if (drop)
             {
-                logger.trace("{} DROP {}", clock++, deliver);
+                logger.trace("{} DROP[{}] {}", clock++, on.epoch(), deliver);
                 return true;
             }
-            logger.trace("{} RECV {}", clock++, deliver);
+            logger.trace("{} RECV[{}] {}", clock++, on.epoch(), deliver);
             if (deliver.message instanceof Reply)
             {
                 Reply reply = (Reply) deliver.message;

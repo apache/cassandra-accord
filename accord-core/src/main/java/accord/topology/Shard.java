@@ -82,14 +82,29 @@ public class Shard
         String s = "Shard[" + range.start() + ',' + range.end() + ']';
 
         if (extendedInfo)
-            s = s + ":(" + nodes + '/' + fastPathElectorate + ')';
+        {
+            StringBuilder sb = new StringBuilder(s);
+            sb.append(":(");
+            for (int i=0, mi=nodes.size(); i<mi; i++)
+            {
+                if (i > 0)
+                    sb.append(", ");
+
+                Id node = nodes.get(i);
+                sb.append(node);
+                if (fastPathElectorate.contains(node))
+                    sb.append('f');
+            }
+            sb.append(')');
+            s = sb.toString();
+        }
         return s;
     }
 
     @Override
     public String toString()
     {
-        return "Shard[" + range.start() + ',' + range.end() + ']';
+        return toString(true);
     }
 
     @Override
