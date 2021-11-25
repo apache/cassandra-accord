@@ -68,8 +68,8 @@ public class TopologyRandomizer
 
         IntHashKey newBound = IntHashKey.forHash(minBound.hash + random.nextInt(maxBound.hash - minBound.hash));
 
-        shards[idx] = new Shard(IntHashKey.range(leftRange.start(), newBound), left.nodes, left.fastPathElectorate, left.pending);
-        shards[idx+1] = new Shard(IntHashKey.range(newBound, rightRange.end()), right.nodes, right.fastPathElectorate, right.pending);
+        shards[idx] = new Shard(IntHashKey.range(leftRange.start(), newBound), left.nodes, left.fastPathElectorate, left.joining);
+        shards[idx+1] = new Shard(IntHashKey.range(newBound, rightRange.end()), right.nodes, right.fastPathElectorate, right.joining);
         logger.debug("Updated boundary on {} & {} {} {} to {} {}", idx, idx + 1, left, right,
                      shards[idx].toString(true), shards[idx + 1].toString(true));
 
@@ -118,8 +118,8 @@ public class TopologyRandomizer
         nodesLeft.add(toLeft);
         nodesRight.add(toRight);
 
-        shards[idxLeft] = new Shard(shardLeft.range, nodesLeft, newFastPath(nodesLeft, random), shardLeft.pending);
-        shards[idxRight] = new Shard(shardRight.range, nodesRight, newFastPath(nodesRight, random), shardLeft.pending);
+        shards[idxLeft] = new Shard(shardLeft.range, nodesLeft, newFastPath(nodesLeft, random), shardLeft.joining);
+        shards[idxRight] = new Shard(shardRight.range, nodesRight, newFastPath(nodesRight, random), shardLeft.joining);
         logger.debug("updated membership on {} & {} {} {} to {} {}",
                     idxLeft, idxRight,
                     shardLeft.toString(true), shardRight.toString(true),
@@ -150,7 +150,7 @@ public class TopologyRandomizer
     {
         int idx = random.nextInt(shards.length);
         Shard shard = shards[idx];
-        shards[idx] = new Shard(shard.range, shard.nodes, newFastPath(shard.nodes, random), shard.pending);
+        shards[idx] = new Shard(shard.range, shard.nodes, newFastPath(shard.nodes, random), shard.joining);
         logger.debug("Updated fast path on {} {} to {}", idx, shard.toString(true), shards[idx].toString(true));
         return shards;
     }

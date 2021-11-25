@@ -21,23 +21,23 @@ public class Shard
     public final List<Id> nodes;
     public final Set<Id> nodeSet;
     public final Set<Id> fastPathElectorate;
-    public final Set<Id> pending;
+    public final Set<Id> joining;
     public final int maxFailures;
     public final int recoveryFastPathSize;
     public final int fastPathQuorumSize;
     public final int slowPathQuorumSize;
 
-    public Shard(KeyRange range, List<Id> nodes, Set<Id> fastPathElectorate, Set<Id> pending)
+    public Shard(KeyRange range, List<Id> nodes, Set<Id> fastPathElectorate, Set<Id> joining)
     {
-        Preconditions.checkArgument(Iterables.all(pending, nodes::contains),
-                                    "pending nodes must also be present in nodes");
+        Preconditions.checkArgument(Iterables.all(joining, nodes::contains),
+                                    "joining nodes must also be present in nodes");
         this.range = range;
         this.nodes = ImmutableList.copyOf(nodes);
         this.nodeSet = ImmutableSet.copyOf(nodes);
         Preconditions.checkArgument(nodes.size() == nodeSet.size());
         this.maxFailures = maxToleratedFailures(nodes.size());
         this.fastPathElectorate = ImmutableSet.copyOf(fastPathElectorate);
-        this.pending = ImmutableSet.copyOf(pending);
+        this.joining = ImmutableSet.copyOf(joining);
         int e = fastPathElectorate.size();
         this.recoveryFastPathSize = (maxFailures+1)/2;
         this.slowPathQuorumSize = slowPathQuorumSize(nodes.size());
@@ -120,7 +120,7 @@ public class Shard
             && nodes.equals(shard.nodes)
             && nodeSet.equals(shard.nodeSet)
             && fastPathElectorate.equals(shard.fastPathElectorate)
-            && pending.equals(shard.pending);
+            && joining.equals(shard.joining);
     }
 
     @Override
@@ -130,7 +130,7 @@ public class Shard
                             nodes,
                             nodeSet,
                             fastPathElectorate,
-                            pending,
+                            joining,
                             recoveryFastPathSize,
                             fastPathQuorumSize,
                             slowPathQuorumSize);
