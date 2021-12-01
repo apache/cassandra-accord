@@ -2,9 +2,7 @@ package accord.api;
 
 import accord.local.Node;
 import accord.topology.Topology;
-
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
+import org.apache.cassandra.utils.concurrent.Future;
 
 /**
  * ConfigurationService is responsible for:
@@ -74,7 +72,7 @@ public interface ConfigurationService
      * runnable once the corresponding topology has been received and applied. If the configuration service is already
      * aware of the reported epoch, the runnable should be run immediately.
      */
-    void fetchTopologyForEpoch(long epoch, Runnable onComplete);
+    Future<Void> fetchTopologyForEpoch(long epoch);
 
     /**
      * Alert the configuration service of epochs it may not be aware of. This is called called for every TxnRequest
@@ -82,14 +80,7 @@ public interface ConfigurationService
      */
     default void reportEpoch(long epoch)
     {
-        fetchTopologyForEpoch(epoch, null);
-    }
-
-    default CompletionStage<Void> fetchTopologyForEpochStage(long epoch)
-    {
-        CompletableFuture<Void> result = new CompletableFuture<>();
-        fetchTopologyForEpoch(epoch, () -> result.complete(null));
-        return result;
+        fetchTopologyForEpoch(epoch);
     }
 
     /**

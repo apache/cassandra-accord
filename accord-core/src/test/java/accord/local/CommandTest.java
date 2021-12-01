@@ -32,7 +32,7 @@ public class CommandTest
 
     private static class CommandStoreSupport
     {
-        final AtomicReference<CommandStore.Mapping> mapping = new AtomicReference<>(CommandStore.Mapping.EMPTY);
+        final AtomicReference<Topology> local = new AtomicReference<>(TOPOLOGY);
         final MockStore data = new MockStore();
         final AtomicReference<Timestamp> nextTimestamp = new AtomicReference<>(Timestamp.NONE);
         final Function<Timestamp, Timestamp> uniqueNow = atleast -> {
@@ -42,22 +42,22 @@ public class CommandTest
         };
     }
 
-    private static void setMappingEpoch(AtomicReference<CommandStore.Mapping> mapping, long epoch)
+    private static void setTopologyEpoch(AtomicReference<Topology> topology, long epoch)
     {
-        CommandStore.Mapping current = mapping.get();
-        CommandStore.Mapping next = new CommandStore.Mapping(current.ranges, current.local.withEpoch(epoch));
-        mapping.set(next);
+        topology.set(topology.get().withEpoch(epoch));
     }
 
     private static CommandStore createStore(CommandStoreSupport storeSupport)
     {
         return new CommandStore.Synchronized(0,
+                                             0,
+                                             1,
                                              ID1,
                                              storeSupport.uniqueNow,
                                              new TestAgent(),
                                              storeSupport.data,
-                                             storeSupport.mapping.get(),
-                                             i -> storeSupport.mapping.get());
+                                             storeSupport.local.get().ranges(),
+                                             storeSupport.local::get);
     }
 
     @Test
@@ -92,7 +92,7 @@ public class CommandTest
         Assertions.assertEquals(Status.NotWitnessed, command.status());
         Assertions.assertNull(command.executeAt());
 
-        setMappingEpoch(support.mapping, 2);
+        setTopologyEpoch(support.local, 2);
         Timestamp expectedTimestamp = new Timestamp(2, 110, 0, ID1);
         support.nextTimestamp.set(expectedTimestamp);
         commands.process((Consumer<? super CommandStore>) cstore -> command.witness(txn));

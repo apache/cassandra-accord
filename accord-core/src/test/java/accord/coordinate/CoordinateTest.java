@@ -26,7 +26,7 @@ public class CoordinateTest
 
             TxnId txnId = new TxnId(1, 100, 0, node.id());
             Txn txn = writeTxn(keys(10));
-            Result result = Coordinate.execute(node, txnId, txn).toCompletableFuture().get();
+            Result result = Coordinate.execute(node, txnId, txn).get();
             Assertions.assertEquals(MockStore.RESULT, result);
         }
     }
@@ -43,7 +43,7 @@ public class CoordinateTest
 
             TxnId txnId = new TxnId(1, 100, 0, node.id());
             Txn txn = writeTxn(keys(10));
-            Result result = Coordinate.execute(node, txnId, txn).toCompletableFuture().get();
+            Result result = Coordinate.execute(node, txnId, txn).get();
             Assertions.assertEquals(MockStore.RESULT, result);
         }
     }
@@ -52,7 +52,7 @@ public class CoordinateTest
     {
         TxnId txnId = new TxnId(1, clock, 0, node.id());
         Txn txn = writeTxn(keys);
-        Result result = Coordinate.execute(node, txnId, txn).toCompletableFuture().get();
+        Result result = Coordinate.execute(node, txnId, txn).get();
         Assertions.assertEquals(MockStore.RESULT, result);
         return txnId;
     }

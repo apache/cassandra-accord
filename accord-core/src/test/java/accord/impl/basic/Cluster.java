@@ -108,7 +108,7 @@ public class Cluster implements Scheduler
                 if (callback != null)
                     on.scheduler().now(() -> callback.onSuccess(deliver.src, reply));
             }
-            else on.receive((Request) deliver.message, deliver.src, deliver.requestId);
+            else on.receive((Request) deliver.message, deliver.src, deliver);
         }
         else
         {
@@ -153,7 +153,7 @@ public class Cluster implements Scheduler
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(node, messageSink, randomSupplier, topology, lookup::get);
                 lookup.put(node, new Node(node, messageSink, configService,
-                                          nowSupplier.get(), ListStore::new, ListAgent.INSTANCE, sinks, CommandStore.Factory.SYNCHRONIZED));
+                                          nowSupplier.get(), () -> new ListStore(node), ListAgent.INSTANCE, sinks, CommandStore.Factory.SYNCHRONIZED));
             }
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));

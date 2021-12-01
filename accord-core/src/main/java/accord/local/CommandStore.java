@@ -10,91 +10,70 @@ import accord.txn.Keys;
 import accord.txn.Timestamp;
 import accord.txn.TxnId;
 import com.google.common.base.Preconditions;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.Promise;
 
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.IntFunction;
+import java.util.function.Supplier;
 
 /**
  * Single threaded internal shard of accord transaction metadata
  */
 public abstract class CommandStore
 {
-    // TODO: consider sharding on key hash, rather than splitting ranges
-    static class Mapping
-    {
-        static final Mapping EMPTY = new Mapping(KeyRanges.EMPTY, Topology.EMPTY);
-        final KeyRanges ranges;
-        final Topology local;
-
-        public Mapping(KeyRanges ranges, Topology local)
-        {
-            this.ranges = ranges;
-            this.local = local;
-        }
-
-        public Mapping withNewLocalTopology(Topology local)
-        {
-            return new Mapping(ranges, local);
-        }
-
-        static void withNewLocalTopology(Mapping[] current, Topology local, Mapping[] dst)
-        {
-            for (int i=0; i<current.length; i++)
-                dst[i] = current[i].withNewLocalTopology(local);
-        }
-
-        static Mapping[] withNewLocalTopology(Mapping[] current, Topology locals)
-        {
-            Mapping[] result = new Mapping[current.length];
-            withNewLocalTopology(current, locals, result);
-            return result;
-        }
-    }
-
     public interface Factory
     {
-        CommandStore create(int index,
+        CommandStore create(int generation,
+                            int index,
+                            int numShards,
                             Node.Id nodeId,
                             Function<Timestamp, Timestamp> uniqueNow,
                             Agent agent,
                             Store store,
-                            Mapping initialMapping,
-                            IntFunction<Mapping> mappingSupplier);
+                            KeyRanges ranges,
+                            Supplier<Topology> localTopologySupplier);
         Factory SYNCHRONIZED = Synchronized::new;
         Factory SINGLE_THREAD = SingleThread::new;
         Factory SINGLE_THREAD_DEBUG = SingleThreadDebug::new;
     }
 
+    private final int generation;
     private final int index;
+    private final int numShards;
     private final Node.Id nodeId;
     private final Function<Timestamp, Timestamp> uniqueNow;
     private final Agent agent;
     private final Store store;
-    private final IntFunction<Mapping> mappingSupplier;
-    private Mapping rangeMap;
+    private final KeyRanges ranges;
+    private final Supplier<Topology> localTopologySupplier;
 
     private final NavigableMap<TxnId, Command> commands = new TreeMap<>();
     private final NavigableMap<Key, CommandsForKey> commandsForKey = new TreeMap<>();
 
-    public CommandStore(int index,
+    public CommandStore(int generation,
+                        int index,
+                        int numShards,
                         Node.Id nodeId,
                         Function<Timestamp, Timestamp> uniqueNow,
                         Agent agent,
                         Store store,
-                        Mapping initialMapping,
-                        IntFunction<Mapping> mappingSupplier)
+                        KeyRanges ranges,
+                        Supplier<Topology> localTopologySupplier)
     {
+        this.generation = generation;
         this.index = index;
+        this.numShards = numShards;
         this.nodeId = nodeId;
         this.uniqueNow = uniqueNow;
         this.agent = agent;
         this.store = store;
-        this.rangeMap = initialMapping;
-        this.mappingSupplier = mappingSupplier;
+        this.ranges = ranges;
+        this.localTopologySupplier = localTopologySupplier;
     }
 
     public Command command(TxnId txnId)
@@ -139,13 +118,12 @@ public abstract class CommandStore
 
     public long epoch()
     {
-        return rangeMap.local.epoch();
+        return localTopologySupplier.get().epoch();
     }
 
     public KeyRanges ranges()
     {
-        // TODO: check thread safety of callers
-        return rangeMap.ranges;
+        return ranges;
     }
 
     void purgeRanges(KeyRanges removed)
@@ -161,7 +139,7 @@ public abstract class CommandStore
                 if (forKey != null)
                 {
                     for (Command command : forKey)
-                        if (command.txn() != null && !rangeMap.ranges.intersects(command.txn().keys))
+                        if (command.txn() != null && !ranges.intersects(command.txn().keys))
                             commands.remove(command.txnId());
                 }
                 keyIterator.remove();
@@ -213,9 +191,14 @@ public abstract class CommandStore
         return index;
     }
 
+    public boolean hashIntersects(Key key)
+    {
+        return CommandStores.keyIndex(key, numShards) == index;
+    }
+
     public boolean intersects(Keys keys)
     {
-        return rangeMap.ranges.intersects(keys);
+        return keys.any(ranges, this::hashIntersects);
     }
 
     public static void onEach(Collection<CommandStore> stores, Consumer<? super CommandStore> consumer)
@@ -224,47 +207,38 @@ public abstract class CommandStore
             store.process(consumer);
     }
 
-    private void refreshRangeMap()
-    {
-        rangeMap = mappingSupplier.apply(index);
-    }
-
-    <R> void processInternal(Function<? super CommandStore, R> function, CompletableFuture<R> future)
+    <R> void processInternal(Function<? super CommandStore, R> function, Promise<R> promise)
     {
         try
         {
-            refreshRangeMap();
-            future.complete(function.apply(this));
+            promise.setSuccess(function.apply(this));
         }
         catch (Throwable e)
         {
-            future.completeExceptionally(e);
+            promise.tryFailure(e);
         }
     }
 
-    void processInternal(Consumer<? super CommandStore> consumer, CompletableFuture<Void> future)
+    void processInternal(Consumer<? super CommandStore> consumer, Promise<Void> promise)
     {
         try
         {
-            refreshRangeMap();
             consumer.accept(this);
-            future.complete(null);
+            promise.setSuccess(null);
         }
         catch (Throwable e)
         {
-            future.completeExceptionally(e);
+            promise.tryFailure(e);
         }
     }
 
-    public abstract <R> CompletionStage<R> process(Function<? super CommandStore, R> function);
-
-    public abstract CompletionStage<Void> process(Consumer<? super CommandStore> consumer);
+    public abstract Future<Void> process(Consumer<? super CommandStore> consumer);
 
     public void processBlocking(Consumer<? super CommandStore> consumer)
     {
         try
         {
-            process(consumer).toCompletableFuture().get();
+            process(consumer).get();
         }
         catch (InterruptedException e)
         {
@@ -280,31 +254,25 @@ public abstract class CommandStore
 
     public static class Synchronized extends CommandStore
     {
-        public Synchronized(int index,
+        public Synchronized(int generation,
+                            int index,
+                            int numShards,
                             Node.Id nodeId,
                             Function<Timestamp, Timestamp> uniqueNow,
                             Agent agent,
                             Store store,
-                            Mapping initialMapping,
-                            IntFunction<Mapping> mappingSupplier)
+                            KeyRanges ranges,
+                            Supplier<Topology> localTopologySupplier)
         {
-            super(index, nodeId, uniqueNow, agent, store, initialMapping, mappingSupplier);
+            super(generation, index, numShards, nodeId, uniqueNow, agent, store, ranges, localTopologySupplier);
         }
 
         @Override
-        public synchronized <R> CompletionStage<R> process(Function<? super CommandStore, R> func)
+        public synchronized Future<Void> process(Consumer<? super CommandStore> consumer)
         {
-            CompletableFuture<R> future = new CompletableFuture<>();
-            processInternal(func, future);
-            return future;
-        }
-
-        @Override
-        public synchronized CompletionStage<Void> process(Consumer<? super CommandStore> consumer)
-        {
-            CompletableFuture<Void> future = new CompletableFuture<>();
-            processInternal(consumer, future);
-            return future;
+            AsyncPromise<Void> promise = new AsyncPromise<>();
+            processInternal(consumer, promise);
+            return promise;
         }
 
         @Override
@@ -315,23 +283,7 @@ public abstract class CommandStore
     {
         private final ExecutorService executor;
 
-        private class FunctionWrapper<R> extends CompletableFuture<R> implements Runnable
-        {
-            private final Function<? super CommandStore, R> function;
-
-            public FunctionWrapper(Function<? super CommandStore, R> function)
-            {
-                this.function = function;
-            }
-
-            @Override
-            public void run()
-            {
-                processInternal(function, this);
-            }
-        }
-
-        private class ConsumerWrapper extends CompletableFuture<Void> implements Runnable
+        private class ConsumerWrapper extends AsyncPromise<Void> implements Runnable
         {
             private final Consumer<? super CommandStore> consumer;
 
@@ -347,15 +299,17 @@ public abstract class CommandStore
             }
         }
 
-        public SingleThread(int index,
+        public SingleThread(int generation,
+                            int index,
+                            int numShards,
                             Node.Id nodeId,
                             Function<Timestamp, Timestamp> uniqueNow,
                             Agent agent,
                             Store store,
-                            Mapping initialMapping,
-                            IntFunction<Mapping> mappingSupplier)
+                            KeyRanges ranges,
+                            Supplier<Topology> localTopologySupplier)
         {
-            super(index, nodeId, uniqueNow, agent, store, initialMapping, mappingSupplier);
+            super(generation, index, numShards, nodeId, uniqueNow, agent, store, ranges, localTopologySupplier);
             executor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
                 thread.setName(CommandStore.class.getSimpleName() + '[' + nodeId + ':' + index + ']');
@@ -364,15 +318,7 @@ public abstract class CommandStore
         }
 
         @Override
-        public <R> CompletionStage<R> process(Function<? super CommandStore, R> function)
-        {
-            FunctionWrapper<R> future = new FunctionWrapper<>(function);
-            executor.execute(future);
-            return future;
-        }
-
-        @Override
-        public CompletionStage<Void> process(Consumer<? super CommandStore> consumer)
+        public Future<Void> process(Consumer<? super CommandStore> consumer)
         {
             ConsumerWrapper future = new ConsumerWrapper(consumer);
             executor.execute(future);
@@ -390,15 +336,17 @@ public abstract class CommandStore
     {
         private final AtomicReference<Thread> expectedThread = new AtomicReference<>();
 
-        public SingleThreadDebug(int index,
+        public SingleThreadDebug(int generation,
+                                 int index,
+                                 int numShards,
                                  Node.Id nodeId,
                                  Function<Timestamp, Timestamp> uniqueNow,
                                  Agent agent,
                                  Store store,
-                                 Mapping initialMapping,
-                                 IntFunction<Mapping> mappingSupplier)
+                                 KeyRanges ranges,
+                                 Supplier<Topology> localTopologySupplier)
         {
-            super(index, nodeId, uniqueNow, agent, store, initialMapping, mappingSupplier);
+            super(generation, index, numShards, nodeId, uniqueNow, agent, store, ranges, localTopologySupplier);
         }
 
         private void assertThread()
@@ -444,14 +392,14 @@ public abstract class CommandStore
         }
 
         @Override
-        <R> void processInternal(Function<? super CommandStore, R> function, CompletableFuture<R> future)
+        <R> void processInternal(Function<? super CommandStore, R> function, Promise<R> future)
         {
             assertThread();
             super.processInternal(function, future);
         }
 
         @Override
-        void processInternal(Consumer<? super CommandStore> consumer, CompletableFuture<Void> future)
+        void processInternal(Consumer<? super CommandStore> consumer, Promise<Void> future)
         {
             assertThread();
             super.processInternal(consumer, future);

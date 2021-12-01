@@ -31,9 +31,9 @@ public class PreAccept extends TxnRequest
         this(Scope.forTopologies(to, topologies, txn), txnId, txn);
     }
 
-    public void process(Node node, Id from, long messageId)
+    public void process(Node node, Id from, ReplyContext replyContext)
     {
-        node.reply(from, messageId, node.local(scope()).map(instance -> {
+        node.reply(from, replyContext, node.local(scope()).map(instance -> {
             // note: this diverges from the paper, in that instead of waiting for JoinShard,
             //       we PreAccept to both old and new topologies and require quorums in both.
             //       This necessitates sending to ALL replicas of old topology, not only electorate (as fast path may be unreachable).
@@ -53,8 +53,20 @@ public class PreAccept extends TxnRequest
         }).orElseThrow());
     }
 
+    @Override
+    public MessageType type()
+    {
+        return MessageType.PREACCEPT_REQ;
+    }
+
     public interface PreAcceptReply extends Reply
     {
+        @Override
+        default MessageType type()
+        {
+            return MessageType.PREACCEPT_RSP;
+        }
+
         boolean isOK();
     }
 

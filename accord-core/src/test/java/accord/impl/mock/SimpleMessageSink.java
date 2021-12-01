@@ -4,6 +4,7 @@ import accord.local.Node;
 import accord.api.MessageSink;
 import accord.messages.Callback;
 import accord.messages.Reply;
+import accord.messages.ReplyContext;
 import accord.messages.Request;
 
 public class SimpleMessageSink implements MessageSink
@@ -30,8 +31,8 @@ public class SimpleMessageSink implements MessageSink
     }
 
     @Override
-    public void reply(Node.Id replyingToNode, long replyingToMessage, Reply reply)
+    public void reply(Node.Id replyingToNode, ReplyContext replyContext, Reply reply)
     {
-        network.reply(node, replyingToNode, replyingToMessage, reply);
+        network.reply(node, replyingToNode, Network.getMessageId(replyContext), reply);
     }
 }

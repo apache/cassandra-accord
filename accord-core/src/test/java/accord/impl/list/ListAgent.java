@@ -1,5 +1,6 @@
 package accord.impl.list;
 
+import accord.impl.mock.Network;
 import accord.local.Node;
 import accord.api.Agent;
 import accord.api.Result;
@@ -16,7 +17,7 @@ public class ListAgent implements Agent
         if (success != null)
         {
             ListResult result = (ListResult) success;
-            node.reply(result.client, result.requestId, result);
+            node.reply(result.client, Network.replyCtxFor(result.requestId), result);
         }
     }
 

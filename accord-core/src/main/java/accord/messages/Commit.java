@@ -11,8 +11,8 @@ import accord.txn.TxnId;
 // TODO: CommitOk responses, so we can send again if no reply received? Or leave to recovery?
 public class Commit extends ReadData
 {
-    final Dependencies deps;
-    final boolean read;
+    public final Dependencies deps;
+    public final boolean read;
 
     public Commit(Scope scope, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, boolean read)
     {
@@ -26,10 +26,16 @@ public class Commit extends ReadData
         this(Scope.forTopologies(to, topologies, txn), txnId, txn, executeAt, deps, read);
     }
 
-    public void process(Node node, Id from, long messageId)
+    public void process(Node node, Id from, ReplyContext replyContext)
     {
         node.local(scope()).forEach(instance -> instance.command(txnId).commit(txn, deps, executeAt));
-        if (read) super.process(node, from, messageId);
+        if (read) super.process(node, from, replyContext);
+    }
+
+    @Override
+    public MessageType type()
+    {
+        return MessageType.COMMIT_REQ;
     }
 
     @Override

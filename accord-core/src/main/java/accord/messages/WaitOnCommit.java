@@ -17,16 +17,16 @@ public class WaitOnCommit extends TxnRequest
         final Node node;
         final Id replyToNode;
         final TxnId txnId;
-        final long replyToMessage;
+        final ReplyContext replyContext;
 
         final AtomicInteger waitingOn = new AtomicInteger();
 
-        LocalWait(Node node, Id replyToNode, TxnId txnId, long replyToMessage)
+        LocalWait(Node node, Id replyToNode, TxnId txnId, ReplyContext replyContext)
         {
             this.node = node;
             this.replyToNode = replyToNode;
             this.txnId = txnId;
-            this.replyToMessage = replyToMessage;
+            this.replyContext = replyContext;
         }
 
         @Override
@@ -54,7 +54,7 @@ public class WaitOnCommit extends TxnRequest
         private void ack()
         {
             if (waitingOn.decrementAndGet() == 0)
-                node.reply(replyToNode, replyToMessage, new WaitOnCommitOk());
+                node.reply(replyToNode, replyContext, WaitOnCommitOk.INSTANCE);
         }
 
         void process(CommandStore instance)
@@ -84,8 +84,8 @@ public class WaitOnCommit extends TxnRequest
         }
     }
 
-    final TxnId txnId;
-    final Keys keys;
+    public final TxnId txnId;
+    public final Keys keys;
 
     public WaitOnCommit(Scope scope, TxnId txnId, Keys keys)
     {
@@ -99,12 +99,27 @@ public class WaitOnCommit extends TxnRequest
         this(Scope.forTopologies(to, topologies, keys), txnId, keys);
     }
 
-    public void process(Node node, Id replyToNode, long replyToMessage)
+    public void process(Node node, Id replyToNode, ReplyContext replyContext)
     {
-        new LocalWait(node, replyToNode, txnId, replyToMessage).setup(keys);
+        new LocalWait(node, replyToNode, txnId, replyContext).setup(keys);
+    }
+
+    @Override
+    public MessageType type()
+    {
+        return MessageType.WAIT_ON_COMMIT_REQ;
     }
 
     public static class WaitOnCommitOk implements Reply
     {
+        public static final WaitOnCommitOk INSTANCE = new WaitOnCommitOk();
+
+        private WaitOnCommitOk() {}
+
+        @Override
+        public MessageType type()
+        {
+            return MessageType.WAIT_ON_COMMIT_RSP;
+        }
     }
 }

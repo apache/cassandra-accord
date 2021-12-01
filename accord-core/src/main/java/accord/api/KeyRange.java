@@ -138,12 +138,6 @@ public abstract class KeyRange<K extends Key<K>>
 
     public abstract KeyRange<K> subRange(K start, K end);
 
-    /**
-     * Split this range into roughly equally sized subranges
-     * @param count the number of subranges to create
-     */
-    public abstract KeyRanges split(int count);
-
     @Override
     public boolean equals(Object o)
     {

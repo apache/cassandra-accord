@@ -1,24 +1,20 @@
 package accord.utils;
 
 import accord.local.Node;
-import accord.messages.Callback;
-import accord.messages.Reply;
-import accord.messages.Request;
+import accord.messages.*;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
 
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 /**
  * Message task that will continue sending messages to a set of nodes until all
  * nodes ack the message.
  */
-public class MessageTask extends CompletableFuture<Void> implements Runnable
+public class MessageTask extends AsyncPromise<Void> implements Runnable
 {
     public interface NodeProcess
     {
@@ -27,6 +23,12 @@ public class MessageTask extends CompletableFuture<Void> implements Runnable
 
     private static final Reply SUCCESS = new Reply() {
         @Override
+        public MessageType type()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public String toString()
         {
             return "SUCCESS";
@@ -34,6 +36,12 @@ public class MessageTask extends CompletableFuture<Void> implements Runnable
     };
 
     private static final Reply FAILURE = new Reply() {
+        @Override
+        public MessageType type()
+        {
+            throw new UnsupportedOperationException();
+        }
+
         @Override
         public String toString()
         {
@@ -59,9 +67,15 @@ public class MessageTask extends CompletableFuture<Void> implements Runnable
         }
 
         @Override
-        public void process(Node on, Node.Id from, long messageId)
+        public void process(Node on, Node.Id from, ReplyContext replyContext)
         {
-            on.reply(from, messageId, process.process(on, from) ? SUCCESS : FAILURE);
+            on.reply(from, replyContext, process.process(on, from) ? SUCCESS : FAILURE);
+        }
+
+        @Override
+        public MessageType type()
+        {
+            throw new UnsupportedOperationException();
         }
 
         @Override
@@ -94,7 +108,7 @@ public class MessageTask extends CompletableFuture<Void> implements Runnable
             {
                 this.outstanding.remove(from);
                 if (outstanding.isEmpty())
-                    complete(null);
+                    setSuccess(null);
             }
         }
 

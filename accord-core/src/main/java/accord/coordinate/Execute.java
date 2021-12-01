@@ -1,8 +1,6 @@
 package accord.coordinate;
 
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 
 import accord.api.Data;
 import accord.coordinate.tracking.ReadTracker;
@@ -18,8 +16,10 @@ import accord.local.Node.Id;
 import accord.messages.Commit;
 import accord.messages.ReadData;
 import accord.messages.ReadData.ReadOk;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
+import org.apache.cassandra.utils.concurrent.Future;
 
-class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
+class Execute extends AsyncPromise<Result> implements Callback<ReadReply>
 {
     final Node node;
     final TxnId txnId;
@@ -47,7 +47,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         {
             node.send(topologies.nodes(),
                       to -> new Apply(to, topologies, txnId, txn, executeAt, agreed.deps, agreed.applied, agreed.result));
-            complete(agreed.result);
+            setSuccess(agreed.result);
         }
         else
         {
@@ -86,7 +86,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
 
         if (!reply.isOK())
         {
-            completeExceptionally(new Preempted());
+            tryFailure(new Preempted());
             return;
         }
 
@@ -100,7 +100,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
             Result result = txn.result(data);
             Writes writes = txn.execute(executeAt, data);
             node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, executeAt, deps, writes, result));
-            complete(result);
+            setSuccess(result);
         }
     }
 
@@ -120,11 +120,11 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         }
         else if (readTracker.hasFailed())
         {
-            completeExceptionally(throwable);
+            tryFailure(throwable);
         }
     }
 
-    static CompletionStage<Result> execute(Node instance, Agreed agreed)
+    static Future<Result> execute(Node instance, Agreed agreed)
     {
         return new Execute(instance, agreed);
     }

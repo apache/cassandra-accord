@@ -140,7 +140,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         }
 
         logger.info("processing message[{}] from {} to {}: {}", messageId, from, to, request);
-        node.receive(request, from, messageId);
+        node.receive(request, from, Network.replyCtxFor(messageId));
     }
 
     @Override

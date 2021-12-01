@@ -32,4 +32,15 @@ public class KeysTest
                      keys(99, 100, 101, 199, 200, 201, 299, 300, 301)
                              .intersection(ranges(r(100, 200), r(200, 300))));
     }
+
+    @Test
+    void mergeTest()
+    {
+        assertEquals(keys(0, 1, 2, 3, 4),
+                     keys(0, 1, 2, 3, 4).merge(keys(0, 1, 2, 3, 4)));
+        assertEquals(keys(0, 1, 2, 3, 4),
+                     keys(0, 1).merge(keys(2, 3, 4)));
+        assertEquals(keys(0, 1, 2, 3, 4),
+                     keys(0, 2, 4).merge(keys(1, 3)));
+    }
 }

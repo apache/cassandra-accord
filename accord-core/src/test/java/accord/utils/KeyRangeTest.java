@@ -32,12 +32,6 @@ public class KeyRangeTest
         {
             return new EndInclusiveIntRange(start, end);
         }
-
-        @Override
-        public KeyRanges split(int count)
-        {
-            return IntKey.splitRange(this, count, EndInclusiveIntRange::new);
-        }
     }
 
     private static class StartInclusiveIntRange extends KeyRange.StartInclusive<IntKey>
@@ -51,12 +45,6 @@ public class KeyRangeTest
         public KeyRange<IntKey> subRange(IntKey start, IntKey end)
         {
             return new StartInclusiveIntRange(start, end);
-        }
-
-        @Override
-        public KeyRanges split(int count)
-        {
-            return IntKey.splitRange(this, count, StartInclusiveIntRange::new);
         }
     }
 

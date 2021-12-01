@@ -1,8 +1,6 @@
 package accord.local;
 
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -14,6 +12,10 @@ import java.util.stream.Stream;
 import accord.api.*;
 import accord.coordinate.Coordinate;
 import accord.messages.*;
+import accord.messages.Callback;
+import accord.messages.ReplyContext;
+import accord.messages.Request;
+import accord.messages.Reply;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.topology.TopologyManager;
@@ -21,6 +23,7 @@ import accord.txn.Keys;
 import accord.txn.Timestamp;
 import accord.txn.Txn;
 import accord.txn.TxnId;
+import org.apache.cassandra.utils.concurrent.Future;
 
 public class Node implements ConfigurationService.Listener
 {
@@ -83,7 +86,7 @@ public class Node implements ConfigurationService.Listener
     // TODO: this really needs to be thought through some more, as it needs to be per-instance in some cases, and per-node in others
     private final Scheduler scheduler;
 
-    private final Map<TxnId, CompletionStage<Result>> coordinating = new ConcurrentHashMap<>();
+    private final Map<TxnId, Future<Result>> coordinating = new ConcurrentHashMap<>();
     private final Set<TxnId> pendingRecovery = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier,
@@ -266,9 +269,9 @@ public class Node implements ConfigurationService.Listener
         messageSink.send(to, send);
     }
 
-    public void reply(Id replyingToNode, long replyingToMessage, Reply send)
+    public void reply(Id replyingToNode, ReplyContext replyContext, Reply send)
     {
-        messageSink.reply(replyingToNode, replyingToMessage, send);
+        messageSink.reply(replyingToNode, replyContext, send);
     }
 
     public TxnId nextTxnId()
@@ -276,30 +279,29 @@ public class Node implements ConfigurationService.Listener
         return new TxnId(uniqueNow());
     }
 
-    public CompletionStage<Result> coordinate(TxnId txnId, Txn txn)
+    public Future<Result> coordinate(TxnId txnId, Txn txn)
     {
         // TODO: The combination of updating the epoch of the next timestamp with epochs we don’t have topologies for,
         //  and requiring preaccept to talk to its topology epoch means that learning of a new epoch via timestamp
         //  (ie not via config service) will halt any new txns from a node until it receives this topology
         if (txnId.epoch > configService.currentEpoch())
-            return configService.fetchTopologyForEpochStage(txnId.epoch).thenCompose(v -> coordinate(txnId, txn));
+            return configService.fetchTopologyForEpoch(txnId.epoch).flatMap(v -> coordinate(txnId, txn));
 
-        CompletionStage<Result> result = Coordinate.execute(this, txnId, txn);
+        Future<Result> result = Coordinate.execute(this, txnId, txn);
         coordinating.put(txnId, result);
         // TODO (now): error handling
-        result.handle((success, fail) ->
-                      {
-                          coordinating.remove(txnId);
-                          // if we don't succeed, try again in 30s to make sure somebody finishes it
-                          // TODO: this is an ugly liveness mechanism
-                          if (fail != null && pendingRecovery.add(txnId))
-                              scheduler.once(() -> { pendingRecovery.remove(txnId); recover(txnId, txn); } , 30L, TimeUnit.SECONDS);
-                          return null;
-                      });
+        result.addCallback((success, fail) ->
+            {
+            coordinating.remove(txnId);
+            // if we don't succeed, try again in 30s to make sure somebody finishes it
+            // TODO: this is an ugly liveness mechanism
+            if (fail != null && pendingRecovery.add(txnId))
+            scheduler.once(() -> { pendingRecovery.remove(txnId); recover(txnId, txn); } , 30L, TimeUnit.SECONDS);
+            });
         return result;
     }
 
-    public CompletionStage<Result> coordinate(Txn txn)
+    public Future<Result> coordinate(Txn txn)
     {
         return coordinate(nextTxnId(), txn);
     }
@@ -309,43 +311,42 @@ public class Node implements ConfigurationService.Listener
     {
         if (txnId.epoch > configService.currentEpoch())
         {
-            configService.fetchTopologyForEpoch(txnId.epoch, () -> recover(txnId, txn));
+            configService.fetchTopologyForEpoch(txnId.epoch).addListener(() -> recover(txnId, txn));
             return;
         }
 
-        CompletionStage<Result> result = coordinating.get(txnId);
+        Future<Result> result = coordinating.get(txnId);
         if (result != null)
             return;
 
         if (txnId.epoch > topology().epoch())
         {
-            configService().fetchTopologyForEpoch(txnId.epoch, () -> recover(txnId, txn));
+            configService().fetchTopologyForEpoch(txnId.epoch).addListener(() -> recover(txnId, txn));
             return;
         }
 
         result = Coordinate.recover(this, txnId, txn);
         coordinating.putIfAbsent(txnId, result);
         // TODO (now): error handling
-        result.handle((success, fail) -> {
-            coordinating.remove(txnId);
-            agent.onRecover(this, success, fail);
-            // if we don't succeed, try again in 30s to make sure somebody finishes it
-            // TODO: this is an ugly liveness mechanism
-            if (fail != null && pendingRecovery.add(txnId))
-                scheduler.once(() -> { pendingRecovery.remove(txnId); recover(txnId, txn); } , 30L, TimeUnit.SECONDS);
-            return null;
+        result.addCallback((success, fail) -> {
+                coordinating.remove(txnId);
+                agent.onRecover(this, success, fail);
+                // if we don't succeed, try again in 30s to make sure somebody finishes it
+                // TODO: this is an ugly liveness mechanism
+                if (fail != null && pendingRecovery.add(txnId))
+                    scheduler.once(() -> { pendingRecovery.remove(txnId); recover(txnId, txn); } , 30L, TimeUnit.SECONDS);
         });
     }
 
-    public void receive(Request request, Id from, long messageId)
+    public void receive(Request request, Id from, ReplyContext replyContext)
     {
         long unknownEpoch = topology().maxUnknownEpoch(request);
         if (unknownEpoch > 0)
         {
-            configService.fetchTopologyForEpoch(unknownEpoch, () -> receive(request, from, messageId));
+            configService.fetchTopologyForEpoch(unknownEpoch).addListener(() -> receive(request, from, replyContext));
             return;
         }
-        scheduler.now(() -> request.process(this, from, messageId));
+        scheduler.now(() -> request.process(this, from, replyContext));
     }
 
     public Scheduler scheduler()

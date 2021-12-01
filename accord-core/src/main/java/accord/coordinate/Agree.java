@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.CompletionStage;
 
 import accord.coordinate.tracking.FastPathTracker;
 import accord.topology.Shard;
@@ -22,6 +21,7 @@ import accord.txn.Txn;
 import accord.txn.TxnId;
 import accord.messages.PreAccept.PreAcceptReply;
 import com.google.common.collect.Sets;
+import org.apache.cassandra.utils.concurrent.Future;
 
 /**
  * Perform initial rounds of PreAccept and Accept until we have reached agreement about when we should execute.
@@ -150,7 +150,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
 
         tracker.recordFailure(from);
         if (tracker.hasFailed())
-            completeExceptionally(new Timeout());
+            tryFailure(new Timeout());
 
         // if no other responses are expected and the slow quorum has been satisfied, proceed
         if (shouldSlowPathAccept())
@@ -184,7 +184,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
         if (!receive.isOK())
         {
             // we've been preempted by a recovery coordinator; defer to it, and wait to hear any result
-            completeExceptionally(new Preempted());
+            tryFailure(new Preempted());
             return;
         }
 
@@ -197,7 +197,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
         if (!fastPath && ok.witnessedAt.epoch > txnId.epoch)
         {
             if (tracker.recordSupersedingEpoch(ok.witnessedAt.epoch))
-                node.configService().fetchTopologyForEpoch(ok.witnessedAt.epoch, this::onEpochUpdate);
+                node.configService().fetchTopologyForEpoch(ok.witnessedAt.epoch).addListener(this::onEpochUpdate);
         }
 
         if (!tracker.hasSupersedingEpoch() && (tracker.hasMetFastPathCriteria() || shouldSlowPathAccept()))
@@ -246,7 +246,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
         return preacceptOutcome != null;
     }
 
-    static CompletionStage<Agreed> agree(Node node, TxnId txnId, Txn txn)
+    static Future<Agreed> agree(Node node, TxnId txnId, Txn txn)
     {
         return new Agree(node, txnId, txn);
     }

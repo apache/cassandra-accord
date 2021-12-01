@@ -3,6 +3,7 @@ package accord.maelstrom;
 import java.io.IOException;
 
 import accord.maelstrom.Packet.Type;
+import accord.messages.MessageType;
 import com.google.gson.stream.JsonWriter;
 import accord.messages.Reply;
 
@@ -26,5 +27,11 @@ public class Error extends Body implements Reply
         out.value(code);
         out.name("text");
         out.value(text);
+    }
+
+    @Override
+    public MessageType type()
+    {
+        throw new UnsupportedOperationException();
     }
 }

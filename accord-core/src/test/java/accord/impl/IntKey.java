@@ -24,33 +24,6 @@ public class IntKey implements Key<IntKey>
         {
             return new Range(start, end);
         }
-
-        @Override
-        public KeyRanges split(int count)
-        {
-            return splitRange(this, count, Range::new);
-        }
-    }
-
-    public static KeyRanges splitRange(KeyRange<IntKey> range, int count, BiFunction<IntKey, IntKey, KeyRange<IntKey>> ctor)
-    {
-        int start = range.start().key;
-        int end = range.end().key;
-        int currentSize = end - start;
-        if (currentSize < count)
-            return new KeyRanges(new KeyRange[]{range});
-        int interval =  currentSize / count;
-
-        int nextStart = start;
-        KeyRange[] ranges = new KeyRange[count];
-        for (int i=0; i<count; i++)
-        {
-            int subStart = nextStart;
-            int subEnd = i < count - 1 ? subStart + interval : end;
-            ranges[i] = ctor.apply(key(subStart), key(subEnd));
-            nextStart = subEnd;
-        }
-        return new KeyRanges(ranges);
     }
 
     public final int key;
@@ -135,5 +108,11 @@ public class IntKey implements Key<IntKey>
     public int hashCode()
     {
         return Objects.hash(key);
+    }
+
+    @Override
+    public int keyHash()
+    {
+        return hashCode();
     }
 }

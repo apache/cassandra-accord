@@ -13,12 +13,13 @@ import accord.txn.*;
 import accord.utils.MessageTask;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Sets;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
@@ -30,7 +31,7 @@ public class TopologyUpdate
 {
     private static final Logger logger = LoggerFactory.getLogger(TopologyUpdate.class);
 
-    private static class CountDownFuture<T> extends CompletableFuture<T>
+    private static class CountDownFuture<T> extends AsyncPromise<T>
     {
         private final AtomicInteger remaining;
         private final T value;
@@ -49,7 +50,7 @@ public class TopologyUpdate
         public void countDown()
         {
             if (remaining.decrementAndGet() == 0)
-                complete(value);
+                setSuccess(value);
         }
     }
 
@@ -101,26 +102,28 @@ public class TopologyUpdate
         }
     }
 
-    public static <T> Function<Throwable, T> dieOnException()
+    public static <T> BiConsumer<T, Throwable> dieOnException()
     {
-        return throwable -> {
-            logger.error("", throwable);
-            System.exit(1);
-            return null;
+        return (result, throwable) -> {
+            if (throwable != null)
+            {
+                logger.error("", throwable);
+                System.exit(1);
+            }
         };
     }
 
-    public static <T> CompletionStage<T> dieExceptionally(CompletionStage<T> stage)
+    public static <T> Future<T> dieExceptionally(Future<T> stage)
     {
-        return stage.exceptionally(dieOnException());
+        return stage.addCallback(dieOnException());
     }
 
-    private static <T> CompletionStage<Void> map(Collection<T> items, Function<T, CompletionStage<Void>> function)
+    private static <T> Future<Void> map(Collection<T> items, Function<T, Future<Void>> function)
     {
         CountDownFuture<Void> latch = new CountDownFuture<>(items.size());
         for (T item : items)
         {
-            function.apply(item).thenRun(latch::countDown);
+            function.apply(item).addListener(latch::countDown);
         }
         return latch;
     }
@@ -136,7 +139,7 @@ public class TopologyUpdate
         });
     }
 
-    private static CompletionStage<Void> broadcast(List<Node.Id> cluster, Function<Node.Id, Node> lookup, String desc, BiConsumer<Node, Node.Id> process)
+    private static Future<Void> broadcast(List<Node.Id> cluster, Function<Node.Id, Node> lookup, String desc, BiConsumer<Node, Node.Id> process)
     {
         return map(cluster, node -> MessageTask.apply(lookup.apply(node), cluster, desc, process));
     }
@@ -160,7 +163,7 @@ public class TopologyUpdate
         return syncMessages.values().stream().map(cmd -> MessageTask.of(node, recipients.apply(cmd), "Sync:" + cmd.txnId + ':' + epoch + ':' + forEpoch, cmd::process));
     }
 
-    private static final boolean COMMITTED_ONLY = false;
+    private static final boolean COMMITTED_ONLY = true;
 
     /**
      * Syncs all replicated commands. Overkill, but useful for confirming issues in optimizedSync
@@ -228,16 +231,14 @@ public class TopologyUpdate
         return messageStream;
     }
 
-    public static CompletionStage<Void> sync(Node node, long syncEpoch)
+    public static Future<Void> sync(Node node, long syncEpoch)
     {
         Stream<MessageTask> messageStream = optimizedSync(node, syncEpoch);
 
         Iterator<MessageTask> iter = messageStream.iterator();
         if (!iter.hasNext())
         {
-            CompletableFuture<Void> future = new CompletableFuture<>();
-            future.complete(null);
-            return future;
+            return ImmediateFuture.success(null);
         }
 
         MessageTask first = iter.next();
@@ -245,7 +246,7 @@ public class TopologyUpdate
         while (iter.hasNext())
         {
             MessageTask next = iter.next();
-            last.thenRun(next);
+            last.addListener(next);
             last = next;
         }
 
@@ -259,13 +260,14 @@ public class TopologyUpdate
         // notify
         dieExceptionally(notify(originator, cluster, update)
                 // sync operations
-                .thenCompose(v -> map(cluster, node -> sync(lookup.apply(node), epoch - 1)))
+                .flatMap(v -> map(cluster, node -> sync(lookup.apply(node), epoch - 1)))
                 // inform sync complete
-                .thenCompose(v -> broadcast(cluster, lookup, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(from, epoch))));
+                .flatMap(v -> broadcast(cluster, lookup, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(from, epoch))));
     }
-    public static CompletionStage<Void> syncEpoch(Node originator, long epoch, Collection<Node.Id> cluster)
+
+    public static Future<Void> syncEpoch(Node originator, long epoch, Collection<Node.Id> cluster)
     {
         return dieExceptionally(sync(originator, epoch)
-                .thenCompose(v -> MessageTask.apply(originator, cluster, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(originator.id(), epoch))));
+                .flatMap(v -> MessageTask.apply(originator, cluster, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(originator.id(), epoch))));
     }
 }

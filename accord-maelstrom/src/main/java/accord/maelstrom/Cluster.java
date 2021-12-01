@@ -20,6 +20,7 @@ import accord.local.Node.Id;
 import accord.api.MessageSink;
 import accord.messages.Callback;
 import accord.messages.Reply;
+import accord.messages.ReplyContext;
 import accord.messages.Request;
 import accord.api.Scheduler;
 import accord.topology.Topology;
@@ -77,8 +78,9 @@ public class Cluster implements Scheduler
         }
 
         @Override
-        public void reply(Id replyToNode, long replyToMessage, Reply reply)
+        public void reply(Id replyToNode, ReplyContext replyContext, Reply reply)
         {
+            long replyToMessage = ((Packet) replyContext).body.msg_id;
             parent.add(self, replyToNode, replyToMessage, reply);
         }
     }
@@ -146,7 +148,7 @@ public class Cluster implements Scheduler
                 case txn:
                     err.println(clock++ + " RECV " + deliver);
                     err.flush();
-                    on.receive((MaelstromRequest)deliver.body, deliver.src, deliver.body.msg_id);
+                    on.receive((MaelstromRequest)deliver.body, deliver.src, deliver);
                     break;
                 default:
                     // Drop the message if it goes across the partition
@@ -168,7 +170,7 @@ public class Cluster implements Scheduler
                         if (callback != null)
                             on.scheduler().now(() -> callback.onSuccess(deliver.src, reply));
                     }
-                    else on.receive((Request)((Wrapper)deliver.body).body, deliver.src, deliver.body.msg_id);
+                    else on.receive((Request)((Wrapper)deliver.body).body, deliver.src, deliver);
             }
         }
         else

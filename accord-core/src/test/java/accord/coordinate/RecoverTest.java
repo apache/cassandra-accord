@@ -13,8 +13,8 @@ import accord.txn.TxnId;
 import org.junit.jupiter.api.Assertions;
 
 import java.util.List;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 
 import static accord.NetworkFilter.*;
 import static accord.Utils.id;
@@ -49,11 +49,11 @@ public class RecoverTest
         Assertions.assertFalse(commandStore.hasCommand(txnId));
     }
 
-    private static void assertTimeout(CompletionStage<?> f)
+    private static void assertTimeout(Future<?> f)
     {
         try
         {
-            f.toCompletableFuture().get();
+            f.get();
             Assertions.fail("expected timeout");
         }
         catch (ExecutionException e)
@@ -96,7 +96,7 @@ public class RecoverTest
             //
             cluster.networkFilter.clear();
             cluster.networkFilter.isolate(ids(1, 4));
-            Coordinate.recover(cluster.get(8), txnId2, txn2).toCompletableFuture().get();
+            Coordinate.recover(cluster.get(8), txnId2, txn2).get();
 
             List<Node> nodes = cluster.nodes(ids(5, 9));
             Assertions.assertTrue(txnId2.compareTo(txnId1) < 0);

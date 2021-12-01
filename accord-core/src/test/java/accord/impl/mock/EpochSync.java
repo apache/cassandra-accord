@@ -2,18 +2,16 @@ package accord.impl.mock;
 
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.*;
-import accord.messages.Callback;
-import accord.messages.Reply;
-import accord.messages.Request;
+import accord.messages.*;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.txn.*;
 import com.google.common.base.Preconditions;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
@@ -52,13 +50,19 @@ public class EpochSync implements Runnable
         }
 
         @Override
-        public void process(Node node, Node.Id from, long messageId)
+        public void process(Node node, Node.Id from, ReplyContext replyContext)
         {
             node.local().forEach(commandStore -> {
                 Command command = commandStore.command(txnId);
                 command.commit(txn, deps, executeAt);
             });
-            node.reply(from, messageId, SyncAck.INSTANCE);
+            node.reply(from, replyContext, SyncAck.INSTANCE);
+        }
+
+        @Override
+        public MessageType type()
+        {
+            throw new UnsupportedOperationException();
         }
     }
 
@@ -66,9 +70,15 @@ public class EpochSync implements Runnable
     {
         private static final SyncAck INSTANCE = new SyncAck();
         private SyncAck() {}
+
+        @Override
+        public MessageType type()
+        {
+            throw new UnsupportedOperationException();
+        }
     }
 
-    private static class CommandSync extends CompletableFuture<Void> implements Callback<SyncAck>
+    private static class CommandSync extends AsyncPromise<Void> implements Callback<SyncAck>
     {
         private final QuorumTracker tracker;
 
@@ -84,7 +94,7 @@ public class EpochSync implements Runnable
         {
             tracker.recordSuccess(from);
             if (tracker.hasReachedQuorum())
-                complete(null);
+                setSuccess(null);
         }
 
         @Override
@@ -92,14 +102,14 @@ public class EpochSync implements Runnable
         {
             tracker.recordFailure(from);
             if (tracker.hasFailed())
-                completeExceptionally(throwable);
+                tryFailure(throwable);
         }
 
         public static void sync(Node node, SyncMessage message, Topology topology)
         {
             try
             {
-                new CommandSync(node, message, topology).toCompletableFuture().get();
+                new CommandSync(node, message, topology).get();
             }
             catch (InterruptedException | ExecutionException e)
             {
@@ -118,9 +128,15 @@ public class EpochSync implements Runnable
         }
 
         @Override
-        public void process(Node on, Node.Id from, long messageId)
+        public void process(Node on, Node.Id from, ReplyContext replyContext)
         {
             configService(on).reportSyncComplete(from, epoch);
+        }
+
+        @Override
+        public MessageType type()
+        {
+            throw new UnsupportedOperationException();
         }
     }
 

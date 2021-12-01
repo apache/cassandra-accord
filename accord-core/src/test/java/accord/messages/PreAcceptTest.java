@@ -35,6 +35,8 @@ public class PreAcceptTest
     private static final List<Id> IDS = List.of(ID1, ID2, ID3);
     private static final Topology TOPOLOGY = TopologyFactory.toTopology(IDS, 3, IntKey.range(0, 100));
 
+    private static final ReplyContext REPLY_CONTEXT = Network.replyCtxFor(0);
+
     private static Node createNode(Id nodeId, MessageSink messageSink, Clock clock)
     {
         MockStore store = new MockStore();
@@ -77,7 +79,7 @@ public class PreAcceptTest
             Txn txn = writeTxn(Keys.of(key));
             PreAccept preAccept = preAccept(txnId, txn);
             clock.increment(10);
-            preAccept.process(node, ID2, 0);
+            preAccept.process(node, ID2, REPLY_CONTEXT);
 
             Command command = commandStore.commandsForKey(key).uncommitted.get(txnId);
             Assertions.assertEquals(Status.PreAccepted, command.status());
@@ -108,7 +110,7 @@ public class PreAcceptTest
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
             PreAccept preAccept = preAccept(txnId, txn);
-            preAccept.process(node, ID2, 0);
+            preAccept.process(node, ID2, REPLY_CONTEXT);
         }
         finally
         {
@@ -132,14 +134,14 @@ public class PreAcceptTest
 
             IntKey key1 = IntKey.key(10);
             PreAccept preAccept1 = preAccept(clock.idForNode(1, ID2), writeTxn(Keys.of(key1)));
-            preAccept1.process(node, ID2, 0);
+            preAccept1.process(node, ID2, REPLY_CONTEXT);
 
             messageSink.clearHistory();
             IntKey key2 = IntKey.key(11);
             TxnId txnId2 = new TxnId(1, 50, 0, ID3);
             PreAccept preAccept2 = preAccept(txnId2, writeTxn(Keys.of(key1, key2)));
             clock.increment(10);
-            preAccept2.process(node, ID3, 0);
+            preAccept2.process(node, ID3, REPLY_CONTEXT);
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID3, messageSink.responses.get(0).to);
@@ -169,7 +171,7 @@ public class PreAcceptTest
         {
             TxnId txnId = new TxnId(1, 110, 0, ID2);
             PreAccept preAccept = preAccept(txnId, writeTxn(Keys.of(key)));
-            preAccept.process(node, ID2, 0);
+            preAccept.process(node, ID2, REPLY_CONTEXT);
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
@@ -203,7 +205,7 @@ public class PreAcceptTest
             PreAccept preAccept = preAccept(txnId, txn);
 
             clock.increment(10);
-            preAccept.process(node, ID2, 0);
+            preAccept.process(node, ID2, REPLY_CONTEXT);
 
             Command command = commandStore.commandsForKey(key).uncommitted.get(txnId);
             Assertions.assertEquals(Status.PreAccepted, command.status());

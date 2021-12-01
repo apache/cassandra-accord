@@ -18,6 +18,7 @@ import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Scheduler;
+import accord.messages.ReplyContext;
 import accord.topology.Topology;
 import accord.utils.ThreadPoolScheduler;
 import accord.maelstrom.Packet.Type;
@@ -98,9 +99,9 @@ public class Main
         }
 
         @Override
-        public void reply(Id replyToNode, long replyToMessage, Reply reply)
+        public void reply(Id replyToNode, ReplyContext replyContext, Reply reply)
         {
-            send(new Packet(self, replyToNode, replyToMessage, reply));
+            send(new Packet(self, replyToNode, MaelstromReplyContext.messageIdFor(replyContext), reply));
         }
     }
 
@@ -163,7 +164,7 @@ public class Main
                 switch (next.body.type)
                 {
                     case txn:
-                        on.receive((MaelstromRequest)next.body, next.src, next.body.msg_id);
+                        on.receive((MaelstromRequest)next.body, next.src, MaelstromReplyContext.contextFor(next.body.msg_id));
                         break;
                     default:
                         if (next.body.in_reply_to > Body.SENTINEL_MSG_ID)
@@ -174,7 +175,7 @@ public class Main
                             if (callback != null)
                                 scheduler.now(() -> callback.callback.onSuccess(next.src, reply));
                         }
-                        else on.receive((Request)((Wrapper)next.body).body, next.src, next.body.msg_id);
+                        else on.receive((Request)((Wrapper)next.body).body, next.src, MaelstromReplyContext.contextFor(next.body.msg_id));
                 }
             }
         }
