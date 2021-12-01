@@ -1,6 +1,5 @@
 package accord.api;
 
-import accord.topology.KeyRanges;
 import accord.txn.Timestamp;
 
 /**
@@ -10,5 +9,5 @@ import accord.txn.Timestamp;
  */
 public interface Write
 {
-    void apply(KeyRanges range, Timestamp executeAt, Store store);
+    void apply(Key key, Timestamp executeAt, Store store);
 }

@@ -12,13 +12,13 @@ import accord.txn.TxnId;
 
 public class Apply extends TxnRequest
 {
-    final TxnId txnId;
-    final Txn txn;
+    public final TxnId txnId;
+    public final Txn txn;
     // TODO: these only need to be sent if we don't know if this node has witnessed a Commit
-    final Dependencies deps;
-    final Timestamp executeAt;
-    final Writes writes;
-    final Result result;
+    public final Dependencies deps;
+    public final Timestamp executeAt;
+    public final Writes writes;
+    public final Result result;
 
     public Apply(Scope scope, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, Writes writes, Result result)
     {
@@ -36,9 +36,15 @@ public class Apply extends TxnRequest
         this(Scope.forTopologies(to, topologies, txn), txnId, txn, executeAt, deps, writes, result);
     }
 
-    public void process(Node node, Id replyToNode, long replyToMessage)
+    public void process(Node node, Id replyToNode, ReplyContext replyContext)
     {
         node.local(scope()).forEach(instance -> instance.command(txnId).apply(txn, deps, executeAt, writes, result));
+    }
+
+    @Override
+    public MessageType type()
+    {
+        return MessageType.APPLY_REQ;
     }
 
     @Override

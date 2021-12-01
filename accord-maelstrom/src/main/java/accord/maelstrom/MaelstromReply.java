@@ -6,6 +6,7 @@ import java.util.TreeMap;
 
 import accord.local.Node;
 import accord.api.Key;
+import accord.messages.MessageType;
 import accord.txn.Keys;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
@@ -21,6 +22,12 @@ public class MaelstromReply extends Body implements Reply
     {
         super(Type.txn_ok, SENTINEL_MSG_ID, in_reply_to);
         this.result = result;
+    }
+
+    @Override
+    public MessageType type()
+    {
+        throw new UnsupportedOperationException();
     }
 
     @Override

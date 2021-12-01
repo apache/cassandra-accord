@@ -24,9 +24,9 @@ import static accord.messages.PreAccept.calculateDeps;
 
 public class BeginRecovery extends TxnRequest
 {
-    final TxnId txnId;
-    final Txn txn;
-    final Ballot ballot;
+    public final TxnId txnId;
+    public final Txn txn;
+    public final Ballot ballot;
 
     public BeginRecovery(Scope scope, TxnId txnId, Txn txn, Ballot ballot)
     {
@@ -41,7 +41,7 @@ public class BeginRecovery extends TxnRequest
         this(Scope.forTopologies(to, topologies, txn), txnId, txn, ballot);
     }
 
-    public void process(Node node, Id replyToNode, long replyToMessage)
+    public void process(Node node, Id replyToNode, ReplyContext replyContext)
     {
         RecoverReply reply = node.local(scope()).map(instance -> {
             Command command = instance.command(txnId);
@@ -142,7 +142,7 @@ public class BeginRecovery extends TxnRequest
                     ok1.writes, ok1.result);
         }).orElseThrow();
 
-        node.reply(replyToNode, replyToMessage, reply);
+        node.reply(replyToNode, replyContext, reply);
         if (reply instanceof RecoverOk && ((RecoverOk) reply).status == Applied)
         {
             // disseminate directly
@@ -150,7 +150,7 @@ public class BeginRecovery extends TxnRequest
             ConfigurationService configService = node.configService();
             if (ok.executeAt.epoch > configService.currentEpoch())
             {
-                configService.fetchTopologyForEpoch(ok.executeAt.epoch, () -> disseminateApply(node, ok));
+                configService.fetchTopologyForEpoch(ok.executeAt.epoch).addListener(() -> disseminateApply(node, ok));
                 return;
             }
             disseminateApply(node, ok);
@@ -163,9 +163,21 @@ public class BeginRecovery extends TxnRequest
         Topologies topologies = node.topology().forKeys(txn.keys, ok.executeAt.epoch);
         node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, ok.executeAt, ok.deps, ok.writes, ok.result));
     }
+    
+    @Override
+    public MessageType type()
+    {
+        return MessageType.RECOVER_REQ;
+    }
 
     public interface RecoverReply extends Reply
     {
+        @Override
+        default MessageType type()
+        {
+            return MessageType.RECOVER_RSP;
+        }
+
         boolean isOK();
     }
 
@@ -182,7 +194,7 @@ public class BeginRecovery extends TxnRequest
         public final Writes writes;
         public final Result result;
 
-        RecoverOk(TxnId txnId, Status status, Ballot accepted, Timestamp executeAt, Dependencies deps, Dependencies earlierCommittedWitness, Dependencies earlierAcceptedNoWitness, boolean rejectsFastPath, Writes writes, Result result)
+        public RecoverOk(TxnId txnId, Status status, Ballot accepted, Timestamp executeAt, Dependencies deps, Dependencies earlierCommittedWitness, Dependencies earlierAcceptedNoWitness, boolean rejectsFastPath, Writes writes, Result result)
         {
             this.txnId = txnId;
             this.accepted = accepted;
@@ -222,8 +234,8 @@ public class BeginRecovery extends TxnRequest
 
     public static class RecoverNack implements RecoverReply
     {
-        final Ballot supersededBy;
-        private RecoverNack(Ballot supersededBy)
+        public final Ballot supersededBy;
+        public RecoverNack(Ballot supersededBy)
         {
             this.supersededBy = supersededBy;
         }

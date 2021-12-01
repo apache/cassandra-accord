@@ -79,22 +79,22 @@ public abstract class TxnRequest implements Request
         }
 
         private final long maxEpoch;
-        private final KeysForEpoch[] ranges;
+        private final KeysForEpoch[] epochs;
 
         public Scope(long maxEpoch, KeysForEpoch... epochKeys)
         {
             this.maxEpoch = maxEpoch;
-            this.ranges = epochKeys;
+            this.epochs = epochKeys;
         }
 
         public int size()
         {
-            return ranges.length;
+            return epochs.length;
         }
 
         public KeysForEpoch get(int i)
         {
-            return ranges[i];
+            return epochs[i];
         }
 
         public static Scope forTopologies(Node.Id node, Topologies topologies, Keys keys)
@@ -125,7 +125,7 @@ public abstract class TxnRequest implements Request
 
         public boolean intersects(KeyRanges ranges)
         {
-            for (KeysForEpoch keysForEpoch : this.ranges)
+            for (KeysForEpoch keysForEpoch : this.epochs)
             {
                 if (ranges.intersects(keysForEpoch.keys))
                     return true;
@@ -134,20 +134,28 @@ public abstract class TxnRequest implements Request
             return false;
         }
 
+        public Keys keys()
+        {
+            Keys keys = epochs[0].keys;
+            for (int i = 1; i< epochs.length; i++)
+                keys = keys.merge(epochs[i].keys);
+            return keys;
+        }
+
         @Override
         public boolean equals(Object o)
         {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
             Scope that = (Scope) o;
-            return maxEpoch == that.maxEpoch && Arrays.equals(ranges, that.ranges);
+            return maxEpoch == that.maxEpoch && Arrays.equals(epochs, that.epochs);
         }
 
         @Override
         public int hashCode()
         {
             int result = Objects.hash(maxEpoch);
-            result = 31 * result + Arrays.hashCode(ranges);
+            result = 31 * result + Arrays.hashCode(epochs);
             return result;
         }
 
@@ -155,7 +163,7 @@ public abstract class TxnRequest implements Request
         public String toString()
         {
             return "TxnRequestScope{" +
-                    "ranges=" + Arrays.toString(ranges) +
+                    "epochs=" + Arrays.toString(epochs) +
                     '}';
         }
     }

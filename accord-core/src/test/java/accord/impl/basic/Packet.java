@@ -1,11 +1,13 @@
 package accord.impl.basic;
 
+import accord.impl.mock.Network;
 import accord.local.Node.Id;
 import accord.messages.Message;
 import accord.messages.Reply;
+import accord.messages.ReplyContext;
 import accord.messages.Request;
 
-public class Packet implements Pending
+public class Packet implements Pending, ReplyContext
 {
     static final int SENTINEL_MESSAGE_ID = Integer.MIN_VALUE;
 
@@ -41,5 +43,12 @@ public class Packet implements Pending
         + (requestId != SENTINEL_MESSAGE_ID ? "id:" + requestId + ", " : "")
         + (replyId != SENTINEL_MESSAGE_ID ? "replyTo:" + replyId + ", " : "")
         + "body:" + message + "}";
+    }
+
+    public static long getMessageId(ReplyContext context)
+    {
+        if (context instanceof Network.MessageId)
+            return ((Network.MessageId) context).msgId;
+        return ((Packet) context).requestId;
     }
 }

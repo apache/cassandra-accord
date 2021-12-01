@@ -18,8 +18,14 @@ public class Writes
 
     public void apply(CommandStore commandStore)
     {
-        if (write != null)
-            write.apply(commandStore.ranges(), executeAt, commandStore.store());
+        if (write == null)
+            return;
+
+        keys.accumulate(commandStore.ranges(), (key, accumulate) -> {
+            if (commandStore.hashIntersects(key))
+                write.apply(key, executeAt, commandStore.store());
+            return accumulate;
+        });
     }
 
     @Override

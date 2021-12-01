@@ -3,6 +3,7 @@ package accord.impl.mock;
 import accord.local.Node;
 import accord.messages.Callback;
 import accord.messages.Reply;
+import accord.messages.ReplyContext;
 import accord.messages.Request;
 
 import org.junit.jupiter.api.Assertions;
@@ -49,10 +50,10 @@ public class RecordingMessageSink extends SimpleMessageSink
     }
 
     @Override
-    public void reply(Node.Id replyingToNode, long replyingToMessage, Reply reply)
+    public void reply(Node.Id replyingToNode, ReplyContext replyContext, Reply reply)
     {
         responses.add(new Envelope<>(replyingToNode, reply, null));
-        super.reply(replyingToNode, replyingToMessage, reply);
+        super.reply(replyingToNode, replyContext, reply);
     }
 
     public void assertHistorySizes(int requests, int responses)

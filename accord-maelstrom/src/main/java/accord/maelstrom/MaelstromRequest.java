@@ -5,6 +5,8 @@ import java.util.NavigableSet;
 import java.util.TreeSet;
 
 import accord.api.Key;
+import accord.messages.MessageType;
+import accord.messages.ReplyContext;
 import accord.txn.Keys;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
@@ -25,14 +27,19 @@ public class MaelstromRequest extends Body implements Request
         this.txn = txn;
     }
 
-    public void process(Node node, Id client, long messageId)
+    public void process(Node node, Id client, ReplyContext replyContext)
     {
         // TODO (now): error handling
-        node.coordinate(txn).handle((success, fail) -> {
-            if (success != null) node.reply(client, messageId, new MaelstromReply(messageId, (MaelstromResult) success));
+        node.coordinate(txn).addCallback((success, fail) -> {
+            if (success != null) node.reply(client, replyContext, new MaelstromReply(MaelstromReplyContext.messageIdFor(replyContext), (MaelstromResult) success));
 //            else node.reply(client, messageId, new Error(messageId, 13, fail.getMessage()));
-            return null;
         });
+    }
+
+    @Override
+    public MessageType type()
+    {
+        throw new UnsupportedOperationException();
     }
 
     @Override

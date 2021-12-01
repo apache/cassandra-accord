@@ -5,17 +5,20 @@ import accord.api.TestableConfigurationService;
 import accord.local.Node;
 import accord.topology.Topology;
 import accord.utils.EpochFunction;
-import com.google.common.collect.ImmutableSet;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import org.junit.jupiter.api.Assertions;
 
 import java.util.*;
 
 public class MockConfigurationService implements TestableConfigurationService
 {
+    private static final Future<Void> SUCCESS = ImmediateFuture.success(null);
     private final MessageSink messageSink;
     private final List<Topology> epochs = new ArrayList<>();
     private final List<Listener> listeners = new ArrayList<>();
-    private final Map<Long, Set<Runnable>> waiting = new HashMap<>();
+    private final Map<Long, AsyncPromise<Void>> pending = new HashMap<>();
     private final EpochFunction<MockConfigurationService> fetchTopologyHandler;
 
     public MockConfigurationService(MessageSink messageSink, EpochFunction<MockConfigurationService> fetchTopologyHandler)
@@ -50,19 +53,16 @@ public class MockConfigurationService implements TestableConfigurationService
     }
 
     @Override
-    public synchronized void fetchTopologyForEpoch(long epoch, Runnable onComplete)
+    public synchronized Future<Void> fetchTopologyForEpoch(long epoch)
     {
         if (epoch < epochs.size())
         {
-            if (onComplete != null) onComplete.run();
-            return;
+            return SUCCESS;
         }
 
-        Set<Runnable> runnables = waiting.computeIfAbsent(epoch, e -> new HashSet<>());
-        if (onComplete != null)
-            runnables.add(onComplete);
-
+        Future<Void> future = pending.computeIfAbsent(epoch, e -> new AsyncPromise<>());
         fetchTopologyHandler.apply(epoch, this);
+        return future;
     }
 
     @Override
@@ -79,16 +79,10 @@ public class MockConfigurationService implements TestableConfigurationService
         for (Listener listener : listeners)
             listener.onTopologyUpdate(topology);
 
-        Set<Runnable> runnables = waiting.remove(topology.epoch());
-        if (runnables == null)
+        AsyncPromise<Void> promise = pending.remove(topology.epoch());
+        if (promise == null)
             return;
-
-        runnables.forEach(Runnable::run);
-    }
-
-    public synchronized Set<Long> pendingEpochs()
-    {
-        return ImmutableSet.copyOf(waiting.keySet());
+        promise.setSuccess(null);
     }
 
     public synchronized void reportSyncComplete(Node.Id node, long epoch)

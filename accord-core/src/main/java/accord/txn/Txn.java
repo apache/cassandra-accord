@@ -88,15 +88,16 @@ public class Txn
         return "read:" + read.toString() + (update != null ? ", update:" + update : "");
     }
 
-    public Data read(KeyRanges range, Store store)
+    public Data read(Command command, Keys keyScope)
     {
-        return read.read(range, store);
-    }
+        return keyScope.accumulate(command.commandStore.ranges(), (key, accumulate) -> {
+            CommandStore commandStore = command.commandStore;
+            if (!commandStore.hashIntersects(key))
+                return accumulate;
 
-    public Data read(Command command)
-    {
-        CommandStore commandStore = command.commandStore;
-        return read(commandStore.ranges(), commandStore.store());
+            Data result = read.read(key, command.executeAt(), commandStore.store());
+            return accumulate != null ? accumulate.merge(result) : result;
+        });
     }
 
     public Timestamp maxConflict(CommandStore commandStore)

@@ -12,6 +12,7 @@ import accord.local.Node.Id;
 import accord.api.MessageSink;
 import accord.messages.Callback;
 import accord.messages.Reply;
+import accord.messages.ReplyContext;
 import accord.messages.Request;
 
 import static accord.impl.basic.Packet.SENTINEL_MESSAGE_ID;
@@ -53,8 +54,8 @@ public class NodeSink implements MessageSink
     }
 
     @Override
-    public void reply(Id replyToNode, long replyToMessage, Reply reply)
+    public void reply(Id replyToNode, ReplyContext replyContext, Reply reply)
     {
-        parent.add(self, replyToNode, replyToMessage, reply);
+        parent.add(self, replyToNode, Packet.getMessageId(replyContext), reply);
     }
 }

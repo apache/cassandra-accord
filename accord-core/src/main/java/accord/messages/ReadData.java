@@ -11,6 +11,7 @@ import accord.local.Node.Id;
 import accord.api.Data;
 import accord.topology.KeyRanges;
 import accord.topology.Topologies;
+import accord.txn.Keys;
 import accord.txn.Txn;
 import accord.txn.TxnId;
 import accord.txn.Timestamp;
@@ -24,19 +25,21 @@ public class ReadData extends TxnRequest
         final TxnId txnId;
         final Node node;
         final Node.Id replyToNode;
-        final long replyToMessage;
+        final Keys keyScope;
+        final ReplyContext replyContext;
 
         Data data;
         boolean isObsolete; // TODO: respond with the Executed result we have stored?
         Set<CommandStore> waitingOn;
         Scheduled waitingOnReporter;
 
-        LocalRead(TxnId txnId, Node node, Id replyToNode, long replyToMessage)
+        LocalRead(TxnId txnId, Node node, Id replyToNode, Keys keyScope, ReplyContext replyContext)
         {
             this.txnId = txnId;
             this.node = node;
             this.replyToNode = replyToNode;
-            this.replyToMessage = replyToMessage;
+            this.keyScope = keyScope;
+            this.replyContext = replyContext;
             // TODO: this is messy, we want a complete separate liveness mechanism that ensures progress for all transactions
             this.waitingOnReporter = node.scheduler().once(new ReportWaiting(), 1L, TimeUnit.SECONDS);
         }
@@ -59,7 +62,7 @@ public class ReadData extends TxnRequest
                 if (blockedBy == null) return;
                 blockedBy.addListener(this);
                 assert blockedBy.status().compareTo(Status.NotWitnessed) > 0;
-                node.reply(replyToNode, replyToMessage, new ReadWaiting(txnId, blockedBy.txnId(), blockedBy.txn(), blockedBy.executeAt(), blockedBy.status()));
+                node.reply(replyToNode, replyContext, new ReadWaiting(txnId, blockedBy.txnId(), blockedBy.txn(), blockedBy.executeAt(), blockedBy.status()));
             }
         }
 
@@ -88,14 +91,14 @@ public class ReadData extends TxnRequest
         private void read(Command command)
         {
             // TODO: threading/futures (don't want to perform expensive reads within this mutually exclusive context)
-            Data next = command.txn().read(command);
+            Data next = command.txn().read(command, keyScope);
             data = data == null ? next : data.merge(next);
 
             waitingOn.remove(command.commandStore);
             if (waitingOn.isEmpty())
             {
                 waitingOnReporter.cancel();
-                node.reply(replyToNode, replyToMessage, new ReadOk(data));
+                node.reply(replyToNode, replyContext, new ReadOk(data));
             }
         }
 
@@ -114,7 +117,7 @@ public class ReadData extends TxnRequest
                 });
                 // FIXME: this may result in redundant messages being sent when a shard is split across several command shards
                 node.send(nodes, to -> new Apply(to, topologies, command.txnId(), command.txn(), command.executeAt(), command.savedDeps(), command.writes(), command.result()));
-                node.reply(replyToNode, replyToMessage, new ReadNack());
+                node.reply(replyToNode, replyContext, new ReadNack());
             }
         }
 
@@ -149,9 +152,9 @@ public class ReadData extends TxnRequest
         }
     }
 
-    final TxnId txnId;
-    final Txn txn;
-    final Timestamp executeAt;
+    public final TxnId txnId;
+    public final Txn txn;
+    public final Timestamp executeAt;
 
     public ReadData(Scope scope, TxnId txnId, Txn txn, Timestamp executeAt)
     {
@@ -166,13 +169,25 @@ public class ReadData extends TxnRequest
         this(Scope.forTopologies(to, topologies, txn), txnId, txn, executeAt);
     }
 
-    public void process(Node node, Node.Id from, long messageId)
+    public void process(Node node, Node.Id from, ReplyContext replyContext)
     {
-        new LocalRead(txnId, node, from, messageId).setup(txnId, txn, scope());
+        new LocalRead(txnId, node, from, scope().keys(), replyContext).setup(txnId, txn, scope());
+    }
+
+    @Override
+    public MessageType type()
+    {
+        return MessageType.READ_REQ;
     }
 
     public static class ReadReply implements Reply
     {
+        @Override
+        public MessageType type()
+        {
+            return MessageType.READ_RSP;
+        }
+
         public boolean isOK()
         {
             return true;

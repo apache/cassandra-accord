@@ -56,9 +56,9 @@ public class TopologyRandomizer
     {
         int idx = random.nextInt(shards.length - 1);
         Shard left = shards[idx];
-        KeyRange<IntHashKey> leftRange = left.range;
+        IntHashKey.Range leftRange = (IntHashKey.Range) left.range;
         Shard right = shards[idx + 1];
-        KeyRange<IntHashKey> rightRange = right.range;
+        IntHashKey.Range rightRange = (IntHashKey.Range) right.range;
         IntHashKey minBound = (IntHashKey) leftRange.split(2).get(0).end();
         IntHashKey maxBound = (IntHashKey) rightRange.split(2).get(0).start();
 

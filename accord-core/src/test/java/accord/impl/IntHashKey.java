@@ -12,7 +12,7 @@ import accord.txn.Keys;
 
 public class IntHashKey implements Key<IntHashKey>
 {
-    private static class Range extends KeyRange.EndInclusive<IntHashKey>
+    public static class Range extends KeyRange.EndInclusive<IntHashKey>
     {
         public Range(IntHashKey start, IntHashKey end)
         {
@@ -25,7 +25,6 @@ public class IntHashKey implements Key<IntHashKey>
             return new Range(start, end);
         }
 
-        @Override
         public KeyRanges split(int count)
         {
             int startHash = start().hash;
@@ -142,5 +141,11 @@ public class IntHashKey implements Key<IntHashKey>
         crc32c.update(key >> 16);
         crc32c.update(key >> 24);
         return (int)crc32c.getValue();
+    }
+
+    @Override
+    public int keyHash()
+    {
+        return hash;
     }
 }

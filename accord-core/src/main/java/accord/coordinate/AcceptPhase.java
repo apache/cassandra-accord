@@ -2,7 +2,6 @@ package accord.coordinate;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 
 import accord.coordinate.tracking.QuorumTracker;
 import accord.topology.Topologies;
@@ -17,8 +16,9 @@ import accord.txn.TxnId;
 import accord.messages.Accept;
 import accord.messages.Accept.AcceptOk;
 import accord.messages.Accept.AcceptReply;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
 
-class AcceptPhase extends CompletableFuture<Agreed>
+class AcceptPhase extends AsyncPromise<Agreed>
 {
     final Node node;
     final Ballot ballot;
@@ -55,7 +55,7 @@ class AcceptPhase extends CompletableFuture<Agreed>
             {
                 acceptTracker.recordFailure(from);
                 if (acceptTracker.hasFailed())
-                    completeExceptionally(new Timeout());
+                    tryFailure(new Timeout());
             }
         });
     }
@@ -67,7 +67,7 @@ class AcceptPhase extends CompletableFuture<Agreed>
 
         if (!reply.isOK())
         {
-            completeExceptionally(new Preempted());
+            tryFailure(new Preempted());
             return;
         }
 
@@ -89,6 +89,6 @@ class AcceptPhase extends CompletableFuture<Agreed>
 
     protected void agreed(Timestamp executeAt, Dependencies deps, Topologies topologies)
     {
-        complete(new Agreed(txnId, txn, executeAt, deps, topologies, null, null));
+        setSuccess(new Agreed(txnId, txn, executeAt, deps, topologies, null, null));
     }
 }

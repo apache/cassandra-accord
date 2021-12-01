@@ -6,6 +6,7 @@ import java.util.stream.IntStream;
 
 import accord.local.Node.Id;
 import accord.api.Result;
+import accord.messages.MessageType;
 import accord.txn.Keys;
 import accord.messages.Reply;
 
@@ -24,6 +25,12 @@ public class ListResult implements Result, Reply
         this.keys = keys;
         this.read = read;
         this.update = update;
+    }
+
+    @Override
+    public MessageType type()
+    {
+        throw new UnsupportedOperationException();
     }
 
     @Override

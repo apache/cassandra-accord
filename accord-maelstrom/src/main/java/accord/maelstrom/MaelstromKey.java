@@ -5,6 +5,7 @@ import java.io.IOException;
 import accord.api.Key;
 import accord.api.KeyRange;
 import accord.topology.KeyRanges;
+import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
 import com.google.common.primitives.Ints;
 import com.google.gson.TypeAdapter;
@@ -24,30 +25,6 @@ public class MaelstromKey extends Datum<MaelstromKey> implements Key<MaelstromKe
         public KeyRange<MaelstromKey> subRange(MaelstromKey start, MaelstromKey end)
         {
             return new Range(start, end);
-        }
-
-        @Override
-        public KeyRanges split(int count)
-        {
-            Preconditions.checkArgument(start().kind == Kind.HASH);
-            Preconditions.checkArgument(end().kind == Kind.HASH);
-            long startHash = ((Hash) start().value).hash;
-            long endHash = end().value != null ? ((Hash) end().value).hash : Integer.MAX_VALUE;
-            long currentSize = endHash - startHash;
-            if (currentSize < count)
-                return new KeyRanges(new KeyRange[]{this});
-            long interval =  currentSize / count;
-
-            long subEnd = 0;
-            KeyRange[] ranges = new KeyRange[count];
-            for (int i=0; i<count; i++)
-            {
-                long subStart = i > 0 ? subEnd : startHash;
-                subEnd = i < count - 1 ? subStart + interval : endHash;
-                ranges[i] = new Range(new MaelstromKey(Kind.HASH, new Hash(Ints.checkedCast(subStart))),
-                                      i < count - 1 ? new MaelstromKey(Kind.HASH, new Hash(Ints.checkedCast(subEnd))) : end());
-            }
-            return new KeyRanges(ranges);
         }
     }
 
@@ -96,4 +73,10 @@ public class MaelstromKey extends Datum<MaelstromKey> implements Key<MaelstromKe
             return MaelstromKey.read(in);
         }
     };
- }
+
+    @Override
+    public int keyHash()
+    {
+        return Objects.hashCode(kind, value);
+    }
+}

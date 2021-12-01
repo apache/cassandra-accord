@@ -7,18 +7,14 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
 
+import accord.messages.*;
 import com.google.gson.JsonObject;
 import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
-import accord.messages.Apply;
-import accord.messages.BeginRecovery;
-import accord.messages.ReadData;
-import accord.messages.Reply;
-import accord.messages.Request;
 import accord.local.Node.Id;
 
-public class Packet
+public class Packet implements ReplyContext
 {
     public enum Type
     {

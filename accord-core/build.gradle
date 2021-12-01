@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'maven'
 }
 
 group 'accord'
@@ -33,6 +34,7 @@ dependencies {
     implementation 'com.google.guava:guava:30.1.1-jre'
     implementation 'com.google.code.gson:gson:2.8.7'
     implementation 'ch.qos.logback:logback-classic:1.2.3'
+    implementation 'io.netty:netty-all:4.1.58.Final'
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.7.0'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.7.0'
 }
@@ -45,4 +47,28 @@ task burn(type: JavaExec) {
     classpath sourceSets.main.runtimeClasspath, sourceSets.test.output
     main = 'accord.burn.BurnTest'
     jvmArgs '-Dlogback.configurationFile=burn-logback.xml'
+}
+
+configure(install.repositories.mavenInstaller) {
+    pom.project {
+        groupId 'accord'
+        artifactId 'accord'
+        inceptionYear '2021'
+        packaging 'jar'
+    }
+}
+
+task sourcesJar(type: Jar, dependsOn:classes) {
+    classifier = 'sources'
+    from sourceSets.main.allSource
+}
+
+task javadocJar(type: Jar, dependsOn:javadoc) {
+    classifier = 'javadoc'
+    from javadoc.destinationDir
+}
+
+artifacts {
+    archives sourcesJar
+    archives javadocJar
 }

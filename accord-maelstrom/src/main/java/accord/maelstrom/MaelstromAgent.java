@@ -16,7 +16,7 @@ public class MaelstromAgent implements Agent
         if (success != null)
         {
             MaelstromResult result = (MaelstromResult) success;
-            node.reply(result.client, result.requestId, new MaelstromReply(result.requestId, result));
+            node.reply(result.client, MaelstromReplyContext.contextFor(result.requestId), new MaelstromReply(result.requestId, result));
         }
     }
 
