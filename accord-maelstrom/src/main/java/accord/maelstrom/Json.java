@@ -353,9 +353,9 @@ public class Json
             out.name("writes");
             MaelstromWrite write = (MaelstromWrite) value.write;
             out.beginArray();
-            for (int i = 0 ; i < keys.size() ; ++i)
+            for (Key key : keys.keys())
             {
-                Value append = write.get(keys.get(i));
+                Value append = write.get(key);
                 if (append == null) out.nullValue();
                 else append.write(out);
             }

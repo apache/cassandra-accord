@@ -215,7 +215,11 @@ public class Datum<D extends Datum<D>> implements Comparable<D>
             out.beginArray();
             out.value(kind.toString());
             if (kind == Kind.HASH)
-                out.value(((Hash)value).hash);
+            {
+                out.value(value != null);
+                if (value != null)
+                    out.value(((Hash)value).hash);
+            }
             out.endArray();
             return;
         }
@@ -244,7 +248,7 @@ public class Datum<D extends Datum<D>> implements Comparable<D>
             case BEGIN_ARRAY:
                 in.beginArray();
                 type = Kind.valueOf(in.nextString());
-                if (type == Kind.HASH) value = new Hash(in.nextInt());
+                if (type == Kind.HASH && in.nextBoolean()) value = new Hash(in.nextInt());
                 else value = null;
                 in.endArray();
                 break;

@@ -9,6 +9,7 @@ import accord.api.Key;
 import accord.api.Query;
 import accord.api.Result;
 import accord.txn.Keys;
+import accord.txn.NamespaceKeys;
 
 public class MaelstromQuery implements Query
 {
@@ -28,9 +29,10 @@ public class MaelstromQuery implements Query
     @Override
     public Result compute(Data data)
     {
-        Value[] values = new Value[read.size()];
+        NamespaceKeys readKeys = read.get(MaelstromKey.NAMESPACE);
+        Value[] values = new Value[readKeys.size()];
         for (Map.Entry<Key, Value> e : ((MaelstromData)data).entrySet())
-            values[read.indexOf(e.getKey())] = e.getValue();
+            values[readKeys.indexOf(e.getKey())] = e.getValue();
         return new MaelstromResult(client, requestId, read, values, update);
     }
 }
