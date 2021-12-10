@@ -186,6 +186,80 @@ public class KeyRanges implements Iterable<KeyRange>
         return union(new KeyRanges(new KeyRange[]{range}));
     }
 
+    private static KeyRange tryMerge(KeyRange range1, KeyRange range2)
+    {
+        if (range1 == null || range2 == null)
+            return null;
+        return range1.tryMerge(range2);
+    }
+
+    public KeyRanges merge(KeyRanges that)
+    {
+        List<KeyRange> result = new ArrayList<>(this.size() + that.size());
+        int thisIdx = 0, thisSize = this.size();
+        int thatIdx = 0, thatSize = that.size();
+
+        KeyRange merging = null;
+        while (thisIdx < thisSize || thatIdx < thatSize)
+        {
+            KeyRange merged;
+            KeyRange thisRange = thisIdx < thisSize ? this.get(thisIdx) : null;
+            KeyRange thatRange = thatIdx < thatSize ? that.get(thatIdx) : null;
+            if ((merged = tryMerge(merging, thisRange)) != null)
+            {
+                merging = merged;
+                thisIdx++;
+            }
+            else if ((merged = tryMerge(merging, thatRange)) != null)
+            {
+                merging = merged;
+                thatIdx++;
+            }
+            else if (merging != null)
+            {
+                result.add(merging);
+                merging = null;
+            }
+            else if (thisRange == null)
+            {
+                result.add(thatRange);
+                thatIdx++;
+            }
+            else if (thatRange == null)
+            {
+                result.add(thisRange);
+                thisIdx++;
+            }
+            else
+            {
+                int cmp = thisRange.compareIntersecting(thatRange);
+                if (cmp > 0)
+                {
+                    result.add(thatRange);
+                    thatIdx++;
+                }
+                else if (cmp < 0)
+                {
+                    result.add(thisRange);
+                    thisIdx++;
+                }
+                else
+                {
+                    merging = thisRange.tryMerge(thatRange);
+                    thisIdx++;
+                    thatIdx++;
+                    Preconditions.checkState(merging != null);
+                }
+            }
+        }
+
+        if (merging != null)
+            result.add(merging);
+
+
+        return new KeyRanges(result.toArray(KeyRange[]::new));
+    }
+
     public KeyRanges mergeTouching()
     {
         if (ranges.length == 0)

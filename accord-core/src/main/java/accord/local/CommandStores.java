@@ -4,6 +4,7 @@ import accord.api.Agent;
 import accord.api.KeyRange;
 import accord.api.Store;
 import accord.local.CommandStore.Mapping;
+import accord.messages.TxnRequestScope;
 import accord.topology.KeyRanges;
 import accord.topology.Topology;
 import accord.txn.Keys;
@@ -79,6 +80,16 @@ public class CommandStores
     public Stream<CommandStore> forKeys(Keys keys)
     {
         IntPredicate predicate = i -> rangeMappings.mappings[i].ranges.intersects(keys);
+        return StreamSupport.stream(new ShardSpliterator(predicate), false);
+    }
+
+    public Stream<CommandStore> forKeys(Keys keys, TxnRequestScope scope)
+    {
+        IntPredicate predicate = i -> {
+            KeyRanges ranges = rangeMappings.mappings[i].ranges;
+            return ranges.intersects(keys) && scope.intersects(ranges);
+        };
+
         return StreamSupport.stream(new ShardSpliterator(predicate), false);
     }
 

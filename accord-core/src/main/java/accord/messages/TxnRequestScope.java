@@ -1,6 +1,5 @@
 package accord.messages;
 
-import accord.api.Namespace;
 import accord.local.Node.Id;
 import accord.topology.KeyRanges;
 import accord.topology.Topologies;

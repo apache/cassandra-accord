@@ -66,6 +66,23 @@ public class KeyRangesTest
         Assertions.assertThrows(IllegalArgumentException.class, () -> ranges(r(0, 50)).union(ranges(r(25, 75))));
     }
 
+    private static void assertMergeResult(KeyRanges expected, KeyRanges input1, KeyRanges input2)
+    {
+        Assertions.assertEquals(expected, input1.merge(input2));
+        Assertions.assertEquals(expected, input2.merge(input1));
+    }
+
+    @Test
+    void mergeTest()
+    {
+        assertMergeResult(ranges(r(0, 50), r(100, 350)),
+                          ranges(r(100, 250), r(300, 350)),
+                          ranges(r(0, 50), r(200, 300), r(310, 315)));
+        assertMergeResult(ranges(r(0, 100)),
+                          KeyRanges.EMPTY,
+                          ranges(r(0, 100)));
+    }
+
     @Test
     void mergeTouchingTest()
     {

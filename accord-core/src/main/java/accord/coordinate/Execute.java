@@ -34,7 +34,6 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
     final Dependencies deps;
     final ReadTracker tracker;
     private Data data;
-    final int replicaIndex;
 
     private Execute(Node node, Agreed agreed)
     {
@@ -46,7 +45,6 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         this.executeAt = agreed.executeAt;
         this.topologies = agreed.topologies;
         this.tracker = new ReadTracker(topologies);
-        this.replicaIndex = node.random().nextInt(topologies.get(0).get(0).nodes.size());
 
         // TODO: perhaps compose these different behaviours differently?
         if (agreed.applied != null)

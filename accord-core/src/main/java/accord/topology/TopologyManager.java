@@ -281,9 +281,19 @@ public class TopologyManager implements ConfigurationService.Listener
         }
     }
 
+    public Topologies forEpoch(Keys keys, long epoch)
+    {
+        return new Topologies.Singleton(epochs.get(epoch).topology.forKeys(keys), true);
+    }
+
     public Topologies forTxn(Txn txn)
     {
         return forKeys(txn.keys());
+    }
+
+    public Topologies forEpoch(Txn txn, long epoch)
+    {
+        return forEpoch(txn.keys(), epoch);
     }
 
     public long canProcess(Request request)
