@@ -76,7 +76,6 @@ public class Node implements ConfigurationService.Listener
     private final MessageSink messageSink;
     private final ConfigurationService configService;
     private final TopologyManager topology;
-    private final Random random;
 
     private final LongSupplier nowSupplier;
     private final AtomicReference<Timestamp> now;
@@ -88,11 +87,10 @@ public class Node implements ConfigurationService.Listener
     private final Map<TxnId, CompletionStage<Result>> coordinating = new ConcurrentHashMap<>();
     private final Set<TxnId> pendingRecovery = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
-    public Node(Id id, MessageSink messageSink, ConfigurationService configService, Random random, LongSupplier nowSupplier,
+    public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier,
                 Supplier<Store> dataSupplier, Agent agent, Scheduler scheduler, CommandStore.Factory commandStoreFactory)
     {
         this.id = id;
-        this.random = random;
         this.agent = agent;
         this.messageSink = messageSink;
         this.configService = configService;
@@ -330,11 +328,6 @@ public class Node implements ConfigurationService.Listener
     public Scheduler scheduler()
     {
         return scheduler;
-    }
-
-    public Random random()
-    {
-        return random;
     }
 
     public Agent agent()

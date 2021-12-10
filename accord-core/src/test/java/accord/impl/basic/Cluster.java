@@ -152,7 +152,7 @@ public class Cluster implements Scheduler
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(node, messageSink, randomSupplier, topology, lookup::get);
-                lookup.put(node, new Node(node, messageSink, configService, randomSupplier.get(),
+                lookup.put(node, new Node(node, messageSink, configService,
                                           nowSupplier.get(), ListStore::new, ListAgent.INSTANCE, sinks, CommandStore.Factory.SYNCHRONIZED));
             }
 

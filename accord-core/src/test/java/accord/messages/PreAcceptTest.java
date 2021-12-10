@@ -38,13 +38,11 @@ public class PreAcceptTest
 
     private static Node createNode(Id nodeId, MessageSink messageSink, Clock clock)
     {
-        Random random = new Random();
         MockStore store = new MockStore();
         Scheduler scheduler = new ThreadPoolScheduler();
         return new Node(nodeId,
                         messageSink,
                         new MockConfigurationService(messageSink, EpochFunction.noop(), TOPOLOGY),
-                        random,
                         clock,
                         () -> store,
                         new TestAgent(),

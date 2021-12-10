@@ -86,7 +86,6 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         return new Node(id,
                         messageSink,
                         configurationService,
-                        new Random(random.nextLong()),
                         nowSupplier,
                         () -> store,
                         new TestAgent(),

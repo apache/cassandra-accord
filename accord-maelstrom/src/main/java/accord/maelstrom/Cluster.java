@@ -261,7 +261,7 @@ public class Cluster implements Scheduler
             for (Id node : nodes)
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
-                lookup.put(node, new Node(node, messageSink, new SimpleConfigService(topology), randomSupplier.get(),
+                lookup.put(node, new Node(node, messageSink, new SimpleConfigService(topology),
                                           nowSupplier.get(), MaelstromStore::new, MaelstromAgent.INSTANCE, sinks, CommandStore.Factory.SINGLE_THREAD));
             }
 
