@@ -294,11 +294,17 @@ public class Node implements ConfigurationService.Listener
     }
 
     // TODO: encapsulate in Coordinate, so we can request that e.g. commits be re-sent?
-    public CompletionStage<Result> recover(TxnId txnId, Txn txn)
+    public void recover(TxnId txnId, Txn txn)
     {
         CompletionStage<Result> result = coordinating.get(txnId);
         if (result != null)
-            return result;
+            return;
+
+        if (txnId.epoch > topology().epoch())
+        {
+            configService().fetchTopologyForEpoch(txnId.epoch, () -> recover(txnId, txn));
+            return;
+        }
 
         result = Coordinate.recover(this, txnId, txn);
         coordinating.putIfAbsent(txnId, result);
@@ -311,7 +317,6 @@ public class Node implements ConfigurationService.Listener
                 scheduler.once(() -> { pendingRecovery.remove(txnId); recover(txnId, txn); } , 30L, TimeUnit.SECONDS);
             return null;
         });
-        return result;
     }
 
     public void receive(Request request, Id from, long messageId)

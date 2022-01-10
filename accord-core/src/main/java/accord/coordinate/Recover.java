@@ -30,9 +30,11 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
     class RetryAfterCommits implements Callback<WaitOnCommitOk>
     {
         final QuorumTracker retryTracker;
+        final Topologies topologies;
 
         RetryAfterCommits(Dependencies waitOn)
         {
+            topologies = node.topology().forTxn(txn);
             retryTracker = new QuorumTracker(topologies);
             for (Map.Entry<TxnId, Txn> e : waitOn)
                 node.send(topologies.nodes(), to -> new WaitOnCommit(to, topologies, e.getKey(), e.getValue().keys()), this);
@@ -103,17 +105,15 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
 
     final List<RecoverOk> recoverOks = new ArrayList<>();
     final FastPathTracker<ShardTracker> tracker;
-    final Topologies topologies;
 
     public Recover(Node node, Ballot ballot, TxnId txnId, Txn txn)
     {
-        this(node, ballot, txnId, txn, node.topology().forTxn(txn));
+        this(node, ballot, txnId, txn, node.topology().forEpoch(txn, txnId.epoch));
     }
 
     private Recover(Node node, Ballot ballot, TxnId txnId, Txn txn, Topologies topologies)
     {
         super(node, ballot, txnId, txn);
-        this.topologies = topologies;
         this.tracker = new FastPathTracker<>(topologies, ShardTracker[]::new, ShardTracker::new);
         node.send(tracker.nodes(), to -> new BeginRecovery(to, topologies, txnId, txn, ballot), this);
     }
@@ -158,13 +158,13 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
             switch (acceptOrCommit.status)
             {
                 case Accepted:
-                    startAccept(acceptOrCommit.executeAt, acceptOrCommit.deps, topologies);
+                    startAccept(acceptOrCommit.executeAt, acceptOrCommit.deps, node.topology().forTxn(txn));
                     return;
                 case Committed:
                 case ReadyToExecute:
                 case Executed:
                 case Applied:
-                    complete(new Agreed(txnId, txn, acceptOrCommit.executeAt, acceptOrCommit.deps, topologies, acceptOrCommit.writes, acceptOrCommit.result));
+                    complete(new Agreed(txnId, txn, acceptOrCommit.executeAt, acceptOrCommit.deps, node.topology().forTxn(txn), acceptOrCommit.writes, acceptOrCommit.result));
                     return;
             }
         }
@@ -200,7 +200,7 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
             executeAt = txnId;
         }
 
-        startAccept(executeAt, deps, topologies);
+        startAccept(executeAt, deps, node.topology().forTxn(txn));
     }
 
     @Override

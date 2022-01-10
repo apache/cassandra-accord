@@ -1,5 +1,6 @@
 package accord.messages;
 
+import accord.api.Namespace;
 import accord.local.Node.Id;
 import accord.topology.KeyRanges;
 import accord.topology.Topologies;
@@ -106,6 +107,17 @@ public class TxnRequestScope
     public long maxEpoch()
     {
         return maxEpoch;
+    }
+
+    public boolean intersects(KeyRanges ranges)
+    {
+        for (EpochRanges epochRanges : this.ranges)
+        {
+            if (epochRanges.ranges.intersects(ranges))
+                return true;
+        }
+
+        return false;
     }
 
     @Override

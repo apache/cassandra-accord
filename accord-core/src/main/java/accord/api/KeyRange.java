@@ -190,6 +190,11 @@ public abstract class KeyRange<K extends Key<K>>
         return 0;
     }
 
+    public boolean intersects(KeyRange<K> that)
+    {
+        return compareIntersecting(that) == 0;
+    }
+
     public boolean fullyContains(KeyRange<K> that)
     {
         return that.start.compareTo(this.start) >= 0 && that.end.compareTo(this.end) <= 0;

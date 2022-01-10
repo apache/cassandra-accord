@@ -103,6 +103,20 @@ public class KeyRanges implements Iterable<KeyRange>
         return false;
     }
 
+    public boolean intersects(KeyRanges ranges)
+    {
+        // TODO: efficiency
+        for (KeyRange thisRange : this.ranges)
+        {
+            for (KeyRange thatRange : ranges)
+            {
+                if (thisRange.intersects(thatRange))
+                    return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Subtracts the given set of key ranges from this
      * @param that
