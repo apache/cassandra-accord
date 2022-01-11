@@ -20,15 +20,20 @@ public class Apply extends TxnRequest
     final Writes writes;
     final Result result;
 
-    public Apply(Node.Id to, Topologies topologies, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, Writes writes, Result result)
+    public Apply(TxnRequestScope scope, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, Writes writes, Result result)
     {
-        super(to, topologies);
+        super(scope);
         this.txnId = txnId;
         this.txn = txn;
         this.deps = deps;
         this.executeAt = executeAt;
         this.writes = writes;
         this.result = result;
+    }
+
+    public Apply(Node.Id to, Topologies topologies, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, Writes writes, Result result)
+    {
+        this(TxnRequestScope.forTopologies(to, topologies, txn), txnId, txn, executeAt, deps, writes, result);
     }
 
     public void process(Node node, Id replyToNode, long replyToMessage)

@@ -1,6 +1,7 @@
 package accord.txn;
 
 import java.util.Comparator;
+import java.util.Objects;
 import java.util.stream.Stream;
 
 import accord.api.*;
@@ -33,6 +34,21 @@ public class Txn
         this.read = read;
         this.update = update;
         this.query = query;
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Txn txn = (Txn) o;
+        return kind == txn.kind && keys.equals(txn.keys) && read.equals(txn.read) && query.equals(txn.query) && Objects.equals(update, txn.update);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hash(kind, keys, read, query, update);
     }
 
     public boolean isWrite()

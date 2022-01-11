@@ -4,6 +4,8 @@ import accord.local.Node.Id;
 import accord.topology.KeyRanges;
 import accord.topology.Topologies;
 import accord.topology.Topology;
+import accord.txn.Keys;
+import accord.txn.Txn;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -27,15 +29,13 @@ public class TxnRequestScope
             this.ranges = ranges;
         }
 
-        static EpochRanges forTopology(Topology topology, Id node, KeyRanges previous)
+        static EpochRanges forTopology(Topology topology, Id node, Keys keys)
         {
             KeyRanges topologyRanges = topology.rangesForNode(node);
             if (topologyRanges == null)
                 return null;
-            KeyRanges ranges = topologyRanges.difference(previous);
-            if (ranges.isEmpty())
-                return null;
-            return new EpochRanges(topology.epoch(), ranges);
+            topologyRanges = topologyRanges.intersection(keys);
+            return !topologyRanges.isEmpty() ? new EpochRanges(topology.epoch(), topologyRanges) : null;
         }
 
         @Override
@@ -82,25 +82,25 @@ public class TxnRequestScope
         return ranges[i];
     }
 
-    public static TxnRequestScope forTopologies(Id node, Topologies topologies)
+    public static TxnRequestScope forTopologies(Id node, Topologies topologies, Keys keys)
     {
-        KeyRanges currentRanges = KeyRanges.EMPTY;
         List<EpochRanges> ranges = new ArrayList<>(topologies.size());
         for (int i=topologies.size() - 1; i>=0; i--)
         {
             Topology topology = topologies.get(i);
-            EpochRanges epochRanges = EpochRanges.forTopology(topology, node, currentRanges);
+            EpochRanges epochRanges = EpochRanges.forTopology(topology, node, keys);
             if (epochRanges != null)
             {
                 ranges.add(epochRanges);
-                // TODO: should this range math be done on the replica side? Is probably also useful when determining
-                //  whether to respond to a range we no longer replicate. IE: if we lose a range after a reconfig, but
-                //  need to respond to satisfy multi-quorum requirements, this will make whether to respond unabiguous
-                currentRanges = currentRanges.union(epochRanges.ranges).mergeTouching();
             }
         }
 
         return new TxnRequestScope(topologies.currentEpoch(), ranges.toArray(EpochRanges[]::new));
+    }
+
+    public static TxnRequestScope forTopologies(Id node, Topologies topologies, Txn txn)
+    {
+        return forTopologies(node, topologies, txn.keys());
     }
 
     public long maxEpoch()
@@ -125,13 +125,15 @@ public class TxnRequestScope
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         TxnRequestScope that = (TxnRequestScope) o;
-        return Arrays.equals(ranges, that.ranges);
+        return maxEpoch == that.maxEpoch && Arrays.equals(ranges, that.ranges);
     }
 
     @Override
     public int hashCode()
     {
-        return Arrays.hashCode(ranges);
+        int result = Objects.hash(maxEpoch);
+        result = 31 * result + Arrays.hashCode(ranges);
+        return result;
     }
 
     @Override

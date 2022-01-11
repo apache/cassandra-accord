@@ -153,12 +153,17 @@ public class ReadData extends TxnRequest
     final Txn txn;
     final Timestamp executeAt;
 
-    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Txn txn, Timestamp executeAt)
+    public ReadData(TxnRequestScope scope, TxnId txnId, Txn txn, Timestamp executeAt)
     {
-        super(to, topologies);
+        super(scope);
         this.txnId = txnId;
         this.txn = txn;
         this.executeAt = executeAt;
+    }
+
+    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Txn txn, Timestamp executeAt)
+    {
+        this(TxnRequestScope.forTopologies(to, topologies, txn), txnId, txn, executeAt);
     }
 
     public void process(Node node, Node.Id from, long messageId)

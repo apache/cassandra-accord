@@ -20,19 +20,16 @@ public class PreAccept extends TxnRequest
     public final TxnId txnId;
     public final Txn txn;
 
-    public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn)
+    public PreAccept(TxnRequestScope scope, TxnId txnId, Txn txn)
     {
-        super(to, topologies);
+        super(scope);
         this.txnId = txnId;
         this.txn = txn;
     }
 
-    @VisibleForTesting
-    PreAccept(TxnId txnId, Txn txn)
+    public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn)
     {
-        super(null);
-        this.txnId = txnId;
-        this.txn = txn;
+        this(TxnRequestScope.forTopologies(to, topologies, txn), txnId, txn);
     }
 
     public void process(Node node, Id from, long messageId)

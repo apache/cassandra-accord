@@ -87,6 +87,45 @@ public class KeyRanges implements Iterable<KeyRange>
         return new KeyRanges(selection);
     }
 
+    public KeyRanges intersection(Keys keys)
+    {
+        List<KeyRange<?>> result = null;
+
+        int keyLB = 0;
+        int keyHB = keys.size();
+        int rangeLB = 0;
+        int rangeHB = rangeIndexForKey(keys.get(keyHB-1));
+        rangeHB = rangeHB < 0 ? -1 - rangeHB : rangeHB + 1;
+
+        for (;rangeLB<rangeHB && keyLB<keyHB;)
+        {
+            Key key = keys.get(keyLB);
+            rangeLB = rangeIndexForKey(rangeLB, size(), key);
+
+            if (rangeLB < 0)
+            {
+                rangeLB = -1 -rangeLB;
+                if (rangeLB >= rangeHB)
+                    break;
+                keyLB = ranges[rangeLB].lowKeyIndex(keys, keyLB, keyHB);
+            }
+            else
+            {
+                if (result == null)
+                    result = new ArrayList<>(Math.min(rangeHB - rangeLB, keyHB - keyLB));
+                KeyRange<?> range = ranges[rangeLB];
+                result.add(range);
+                keyLB = range.higherKeyIndex(keys, keyLB, keyHB);
+                rangeLB++;
+            }
+
+            if (keyLB < 0)
+                keyLB = -1 - keyLB;
+        }
+
+        return result != null ? new KeyRanges(result.toArray(KeyRange[]::new)) : EMPTY;
+    }
+
     public boolean intersects(Keys keys)
     {
         for (int i=0; i<ranges.length; i++)

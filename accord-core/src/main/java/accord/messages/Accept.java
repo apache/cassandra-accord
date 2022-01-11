@@ -19,14 +19,19 @@ public class Accept extends TxnRequest
     public final Timestamp executeAt;
     public final Dependencies deps;
 
-    public Accept(Node.Id dst, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps)
+    public Accept(TxnRequestScope scope, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps)
     {
-        super(dst, topologies);
+        super(scope);
         this.ballot = ballot;
         this.txnId = txnId;
         this.txn = txn;
         this.executeAt = executeAt;
         this.deps = deps;
+    }
+
+    public Accept(Node.Id dst, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps)
+    {
+        this(TxnRequestScope.forTopologies(dst, topologies, txn), ballot, txnId, txn, executeAt, deps);
     }
 
     public void process(Node on, Node.Id replyToNode, long replyToMessage)
