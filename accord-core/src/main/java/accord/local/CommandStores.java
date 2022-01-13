@@ -83,13 +83,9 @@ public class CommandStores
         return StreamSupport.stream(new ShardSpliterator(predicate), false);
     }
 
-    public Stream<CommandStore> forKeys(Keys keys, TxnRequestScope scope)
+    public Stream<CommandStore> forScope(TxnRequestScope scope)
     {
-        IntPredicate predicate = i -> {
-            KeyRanges ranges = rangeMappings.mappings[i].ranges;
-            return ranges.intersects(keys) && scope.intersects(ranges);
-        };
-
+        IntPredicate predicate = i ->  scope.intersects(rangeMappings.mappings[i].ranges);
         return StreamSupport.stream(new ShardSpliterator(predicate), false);
     }
 

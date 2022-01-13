@@ -197,9 +197,9 @@ public class Node implements ConfigurationService.Listener
         return commandStores.forKeys(txn.keys());
     }
 
-    public Stream<CommandStore> local(Txn txn, TxnRequestScope scope)
+    public Stream<CommandStore> local(TxnRequestScope scope)
     {
-        return commandStores.forKeys(txn.keys());
+        return commandStores.forScope(scope);
     }
 
     public Stream<CommandStore> local()

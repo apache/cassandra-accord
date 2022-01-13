@@ -118,10 +118,10 @@ public class ReadData extends TxnRequest
             }
         }
 
-        synchronized void setup(TxnId txnId, Txn txn)
+        synchronized void setup(TxnId txnId, Txn txn, TxnRequestScope scope)
         {
             // TODO: simple hash set supporting concurrent modification, or else avoid concurrent modification
-            waitingOn = node.local(txn).collect(Collectors.toCollection(() -> new DeterministicIdentitySet<>()));
+            waitingOn = node.local(scope).collect(Collectors.toCollection(() -> new DeterministicIdentitySet<>()));
             // FIXME: fix/check thread safety
             CommandStore.onEach(waitingOn, instance -> {
                 Command command = instance.command(txnId);
@@ -168,7 +168,7 @@ public class ReadData extends TxnRequest
 
     public void process(Node node, Node.Id from, long messageId)
     {
-        new LocalRead(txnId, node, from, messageId).setup(txnId, txn);
+        new LocalRead(txnId, node, from, messageId).setup(txnId, txn, scope());
     }
 
     public static class ReadReply implements Reply

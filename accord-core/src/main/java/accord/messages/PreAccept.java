@@ -13,7 +13,6 @@ import accord.local.Command;
 import accord.txn.Dependencies;
 import accord.txn.Txn;
 import accord.txn.TxnId;
-import com.google.common.annotations.VisibleForTesting;
 
 public class PreAccept extends TxnRequest
 {
@@ -34,7 +33,7 @@ public class PreAccept extends TxnRequest
 
     public void process(Node node, Id from, long messageId)
     {
-        node.reply(from, messageId, node.local(txn).map(instance -> {
+        node.reply(from, messageId, node.local(scope()).map(instance -> {
             Command command = instance.command(txnId);
             if (!command.witness(txn))
                 return PreAcceptNack.INSTANCE;

@@ -188,7 +188,7 @@ public class TopologyManager implements ConfigurationService.Listener
                 {
                     lastState = epochState;
                 }
-                else if (lastState != null && requestRanges.ranges.difference(lastState.local.ranges()).isEmpty())
+                else if (lastState != null && lastState.local.ranges().intersects(requestRanges.keys))
                 {
                     // we don't have the most recent epoch, but still replicate the requested ranges
                     continue;
@@ -201,7 +201,7 @@ public class TopologyManager implements ConfigurationService.Listener
 
                 // validate requested ranges
                 KeyRanges localRanges = epochState.local.ranges();
-                if (!requestRanges.ranges.difference(localRanges).isEmpty())
+                if (!localRanges.intersects(requestRanges.keys))
                     throw new RuntimeException("Received request for ranges not replicated by this node");
             }
             if (scope.maxEpoch() > 0)

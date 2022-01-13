@@ -21,12 +21,12 @@ public class TxnRequestScope
     public static class EpochRanges
     {
         public final long epoch;
-        public final KeyRanges ranges;
+        public final Keys keys;
 
-        public EpochRanges(long epoch, KeyRanges ranges)
+        public EpochRanges(long epoch, Keys keys)
         {
             this.epoch = epoch;
-            this.ranges = ranges;
+            this.keys = keys;
         }
 
         static EpochRanges forTopology(Topology topology, Id node, Keys keys)
@@ -35,7 +35,8 @@ public class TxnRequestScope
             if (topologyRanges == null)
                 return null;
             topologyRanges = topologyRanges.intersection(keys);
-            return !topologyRanges.isEmpty() ? new EpochRanges(topology.epoch(), topologyRanges) : null;
+            Keys scopeKeys = keys.intersection(topologyRanges);
+            return !topologyRanges.isEmpty() ? new EpochRanges(topology.epoch(), scopeKeys) : null;
         }
 
         @Override
@@ -44,13 +45,13 @@ public class TxnRequestScope
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
             EpochRanges that = (EpochRanges) o;
-            return epoch == that.epoch && ranges.equals(that.ranges);
+            return epoch == that.epoch && keys.equals(that.keys);
         }
 
         @Override
         public int hashCode()
         {
-            return Objects.hash(epoch, ranges);
+            return Objects.hash(epoch, keys);
         }
 
         @Override
@@ -58,7 +59,7 @@ public class TxnRequestScope
         {
             return "EpochRanges{" +
                     "epoch=" + epoch +
-                    ", ranges=" + ranges +
+                    ", keys=" + keys +
                     '}';
         }
     }
@@ -112,7 +113,7 @@ public class TxnRequestScope
     {
         for (EpochRanges epochRanges : this.ranges)
         {
-            if (epochRanges.ranges.intersects(ranges))
+            if (ranges.intersects(epochRanges.keys))
                 return true;
         }
 

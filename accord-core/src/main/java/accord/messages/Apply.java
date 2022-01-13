@@ -38,7 +38,7 @@ public class Apply extends TxnRequest
 
     public void process(Node node, Id replyToNode, long replyToMessage)
     {
-        node.local(txn).forEach(instance -> instance.command(txnId).apply(txn, deps, executeAt, writes, result));
+        node.local(scope()).forEach(instance -> instance.command(txnId).apply(txn, deps, executeAt, writes, result));
     }
 
     @Override

@@ -41,7 +41,7 @@ public class BeginRecovery extends TxnRequest
 
     public void process(Node node, Id replyToNode, long replyToMessage)
     {
-        RecoverReply reply = node.local(txn, scope()).map(instance -> {
+        RecoverReply reply = node.local(scope()).map(instance -> {
             Command command = instance.command(txnId);
 
             if (!command.recover(txn, ballot))

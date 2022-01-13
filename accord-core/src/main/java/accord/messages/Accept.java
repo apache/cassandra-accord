@@ -36,7 +36,7 @@ public class Accept extends TxnRequest
 
     public void process(Node on, Node.Id replyToNode, long replyToMessage)
     {
-        on.reply(replyToNode, replyToMessage, on.local(txn).map(instance -> {
+        on.reply(replyToNode, replyToMessage, on.local(scope()).map(instance -> {
             Command command = instance.command(txnId);
             if (!command.accept(ballot, txn, executeAt, deps))
                 return new AcceptNack(txnId, command.promised());
