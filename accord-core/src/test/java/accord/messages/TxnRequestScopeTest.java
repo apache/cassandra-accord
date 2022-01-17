@@ -1,7 +1,6 @@
 package accord.messages;
 
-import accord.api.KeyRange;
-import accord.messages.TxnRequest.Scope;
+import accord.topology.KeyRange;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.txn.Keys;
@@ -15,11 +14,6 @@ import static accord.impl.IntKey.range;
 
 public class TxnRequestScopeTest
 {
-    private static Scope scope(long epoch, Keys keys)
-    {
-        return new Scope(epoch, keys);
-    }
-
     @Test
     void createDisjointScopeTest()
     {
@@ -32,10 +26,10 @@ public class TxnRequestScopeTest
         topologies.add(topology2);
         topologies.add(topology1);
 
-        Assertions.assertEquals(scope(1, keys(150)),
-                                Scope.forTopologies(id(1), topologies, keys));
-        Assertions.assertEquals(scope(2, keys(150)),
-                                Scope.forTopologies(id(4), topologies, keys));
+        Assertions.assertEquals(keys(150), TxnRequest.computeScope(id(1), topologies, keys));
+        Assertions.assertEquals(1, TxnRequest.computeWaitForEpoch(id(1), topologies, keys));
+        Assertions.assertEquals(keys(150), TxnRequest.computeScope(id(4), topologies, keys));
+        Assertions.assertEquals(2, TxnRequest.computeWaitForEpoch(id(4), topologies, keys));
     }
 
     @Test
@@ -55,9 +49,10 @@ public class TxnRequestScopeTest
         Topologies.Multi topologies = new Topologies.Multi();
         topologies.add(topology2);
         topologies.add(topology1);
-        Assertions.assertEquals(scope(2, keys(150, 250)),
-                                Scope.forTopologies(id(1), topologies, keys));
-        Assertions.assertEquals(scope(2, keys(250, 150)),
-                                Scope.forTopologies(id(4), topologies, keys));
+
+        Assertions.assertEquals(keys(150, 250), TxnRequest.computeScope(id(1), topologies, keys));
+        Assertions.assertEquals(2, TxnRequest.computeWaitForEpoch(id(1), topologies, keys));
+        Assertions.assertEquals(keys(150, 250), TxnRequest.computeScope(id(4), topologies, keys));
+        Assertions.assertEquals(2, TxnRequest.computeWaitForEpoch(id(4), topologies, keys));
     }
 }

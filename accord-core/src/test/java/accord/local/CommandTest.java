@@ -49,15 +49,17 @@ public class CommandTest
 
     private static CommandStore createStore(CommandStoreSupport storeSupport)
     {
-        return new CommandStore.Synchronized(0,
-                                             0,
-                                             1,
-                                             ID1,
-                                             storeSupport.uniqueNow,
-                                             new TestAgent(),
-                                             storeSupport.data,
-                                             storeSupport.local.get().ranges(),
-                                             storeSupport.local::get);
+        return null;
+        // TODO (now)!
+//        return new CommandStore.Synchronized(0,
+//                                             0,
+//                                             1,
+//                                             ID1,
+//                                             storeSupport.uniqueNow,
+//                                             new TestAgent(),
+//                                             storeSupport.data,
+//                                             storeSupport.local.get().ranges(),
+//                                             storeSupport.local::get);
     }
 
     @Test
@@ -73,7 +75,7 @@ public class CommandTest
         Assertions.assertEquals(Status.NotWitnessed, command.status());
         Assertions.assertNull(command.executeAt());
 
-        command.witness(txn);
+        command.preaccept(txn, KEY, KEY);
         Assertions.assertEquals(Status.PreAccepted, command.status());
         Assertions.assertEquals(txnId, command.executeAt());
     }
@@ -95,7 +97,7 @@ public class CommandTest
         setTopologyEpoch(support.local, 2);
         Timestamp expectedTimestamp = new Timestamp(2, 110, 0, ID1);
         support.nextTimestamp.set(expectedTimestamp);
-        commands.process((Consumer<? super CommandStore>) cstore -> command.witness(txn));
+        commands.process((Consumer<? super CommandStore>) cstore -> command.preaccept(txn, KEY, KEY));
         Assertions.assertEquals(Status.PreAccepted, command.status());
         Assertions.assertEquals(expectedTimestamp, command.executeAt());
     }

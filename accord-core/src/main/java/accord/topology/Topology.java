@@ -4,12 +4,13 @@ import java.util.*;
 import java.util.function.IntFunction;
 import java.util.stream.IntStream;
 
-import accord.api.KeyRange;
+import accord.local.CommandStores;
 import accord.local.Node.Id;
 import accord.api.Key;
 import accord.txn.Keys;
 import accord.utils.IndexedConsumer;
 import accord.utils.IndexedBiFunction;
+import accord.utils.IndexedIntFunction;
 import accord.utils.IndexedPredicate;
 
 public class Topology extends AbstractCollection<Shard>
@@ -142,6 +143,7 @@ public class Topology extends AbstractCollection<Shard>
         return info != null ? info.ranges : null;
     }
 
+    // TODO: optimised HomeKey concept containing the Key, Shard and Topology to avoid lookups when topology hasn't changed
     public Shard forKey(Key key)
     {
         int i = ranges.rangeIndexForKey(key);
@@ -286,6 +288,37 @@ public class Topology extends AbstractCollection<Shard>
             }
         }
         return count;
+    }
+
+    public int foldlIntOn(Id on, IndexedIntFunction<Shard> consumer, int offset, int initialValue, int terminalValue)
+    {
+        // TODO: this can be done by divide-and-conquer splitting of the lists and recursion, which should be more efficient
+        NodeInfo info = nodeLookup.get(on);
+        if (info == null)
+            return initialValue;
+        int[] a = supersetRangeIndexes, b = info.supersetIndexes;
+        int ai = 0, bi = 0;
+        while (ai < a.length && bi < b.length)
+        {
+            if (a[ai] == b[bi])
+            {
+                initialValue = consumer.apply(offset + ai, shards[a[ai]], initialValue);
+                if (terminalValue == initialValue)
+                    return terminalValue;
+                ++ai; ++bi;
+            }
+            else if (a[ai] < b[bi])
+            {
+                ai = Arrays.binarySearch(a, ai + 1, a.length, b[bi]);
+                if (ai < 0) ai = -1 -ai;
+            }
+            else
+            {
+                bi = Arrays.binarySearch(b, bi + 1, b.length, a[ai]);
+                if (bi < 0) bi = -1 -bi;
+            }
+        }
+        return initialValue;
     }
 
     public void forEach(IndexedConsumer<Shard> consumer)

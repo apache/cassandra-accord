@@ -3,6 +3,7 @@ package accord.impl.list;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 import accord.api.Key;
 import accord.api.Data;
@@ -25,5 +26,13 @@ public class ListUpdate extends TreeMap<Key, Integer> implements Update
         to = Arrays.copyOf(to, to.length + 1);
         to[to.length - 1] = append;
         return to;
+    }
+
+    @Override
+    public String toString()
+    {
+        return entrySet().stream()
+                         .map(e -> e.getKey() + ":" + e.getValue())
+                         .collect(Collectors.joining(", ", "{", "}"));
     }
 }

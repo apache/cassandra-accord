@@ -9,5 +9,5 @@ import accord.txn.Timestamp;
  */
 public interface Write
 {
-    void apply(Key key, Timestamp executeAt, Store store);
+    void apply(Key key, Timestamp executeAt, DataStore store);
 }

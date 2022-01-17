@@ -22,7 +22,7 @@ public class FastPathTracker<T extends FastPathTracker.FastPathShardTracker> ext
 
         public void onSuccess(Node.Id node, boolean withFastPathTimestamp)
         {
-            if (onSuccess(node) && includeInFastPath(node, withFastPathTimestamp))
+            if (oneSuccess(node) && includeInFastPath(node, withFastPathTimestamp))
                 fastPathAccepts++;
         }
 

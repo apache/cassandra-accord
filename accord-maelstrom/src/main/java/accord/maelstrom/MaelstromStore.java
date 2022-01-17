@@ -4,10 +4,10 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import accord.api.Key;
-import accord.api.Store;
+import accord.api.DataStore;
 import accord.utils.Timestamped;
 
-public class MaelstromStore implements Store
+public class MaelstromStore implements DataStore
 {
     final Map<Key, Timestamped<Value>> data = new ConcurrentHashMap<>();
 

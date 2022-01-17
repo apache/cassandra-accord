@@ -1,6 +1,11 @@
 package accord.coordinate;
 
 import accord.api.ConfigurationService;
+
+import com.google.common.base.Preconditions;
+
+import accord.api.Key;
+import accord.local.Node;
 import accord.api.Result;
 import accord.local.Node;
 import accord.txn.Ballot;
@@ -28,13 +33,14 @@ public class Coordinate
         return agree.flatMap(agreed -> fetchEpochOrExecute(node, agreed));
     }
 
-    public static Future<Result> execute(Node node, TxnId txnId, Txn txn)
+    public static Future<Result> execute(Node node, TxnId txnId, Txn txn, Key homeKey)
     {
-        return andThenExecute(node, Agree.agree(node, txnId, txn));
+        Preconditions.checkArgument(node.isReplicaOf(txnId, homeKey));
+        return andThenExecute(node, Agree.agree(node, txnId, txn, homeKey));
     }
 
-    public static Future<Result> recover(Node node, TxnId txnId, Txn txn)
+    public static Future<Result> recover(Node node, TxnId txnId, Txn txn, Key homeKey)
     {
-        return andThenExecute(node, new Recover(node, new Ballot(node.uniqueNow()), txnId, txn));
+        return andThenExecute(node, new Recover(node, new Ballot(node.uniqueNow()), txnId, txn, homeKey));
     }
 }

@@ -11,8 +11,9 @@ public class QuorumTracker extends AbstractQuorumTracker<QuorumShardTracker>
         super(topologies, QuorumShardTracker[]::new, QuorumShardTracker::new);
     }
 
-    public void recordSuccess(Node.Id node)
+    // return true iff hasReachedQuorum()
+    public boolean success(Node.Id node)
     {
-        forEachTrackerForNode(node, QuorumShardTracker::onSuccess);
+        return allForNode(node, QuorumShardTracker::success) && hasReachedQuorum();
     }
 }

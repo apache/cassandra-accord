@@ -78,13 +78,13 @@ public class RecoverTest
 
             TxnId txnId1 = new TxnId(1, 100, 0, id(100));
             Txn txn1 = writeTxn(Keys.of(key));
-            assertTimeout(Coordinate.execute(cluster.get(1), txnId1, txn1));
+            assertTimeout(Coordinate.execute(cluster.get(1), txnId1, txn1, key));
 
             TxnId txnId2 = new TxnId(1, 50, 0, id(101));
             Txn txn2 = writeTxn(Keys.of(key));
             cluster.networkFilter.clear();
             cluster.networkFilter.isolate(ids(1, 7));
-            assertTimeout(Coordinate.execute(cluster.get(9), txnId2, txn2));
+            assertTimeout(Coordinate.execute(cluster.get(9), txnId2, txn2, key));
 
             cluster.nodes(ids(1, 4)).forEach(n -> assertStatus(n, key, txnId1, Status.Accepted));
             cluster.nodes(ids(5, 6)).forEach(n -> assertStatus(n, key, txnId1, Status.PreAccepted));
@@ -96,7 +96,7 @@ public class RecoverTest
             //
             cluster.networkFilter.clear();
             cluster.networkFilter.isolate(ids(1, 4));
-            Coordinate.recover(cluster.get(8), txnId2, txn2).get();
+            Coordinate.recover(cluster.get(8), txnId2, txn2, key).get();
 
             List<Node> nodes = cluster.nodes(ids(5, 9));
             Assertions.assertTrue(txnId2.compareTo(txnId1) < 0);

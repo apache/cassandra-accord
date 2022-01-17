@@ -11,6 +11,10 @@ public interface Topologies
 {
     Topology current();
 
+    int findEarliestSinceEpoch(long epoch);
+
+    long oldestEpoch();
+
     default long currentEpoch()
     {
         return current().epoch;
@@ -90,12 +94,12 @@ public interface Topologies
         return sb.toString();
     }
 
-    class Singleton implements Topologies
+    class Single implements Topologies
     {
         private final Topology topology;
         private final boolean fastPathPermitted;
 
-        public Singleton(Topology topology, boolean fastPathPermitted)
+        public Single(Topology topology, boolean fastPathPermitted)
         {
             this.topology = topology;
             this.fastPathPermitted = fastPathPermitted;
@@ -105,6 +109,18 @@ public interface Topologies
         public Topology current()
         {
             return topology;
+        }
+
+        @Override
+        public long oldestEpoch()
+        {
+            return currentEpoch();
+        }
+
+        @Override
+        public int findEarliestSinceEpoch(long epoch)
+        {
+            return 0;
         }
 
         @Override
@@ -189,6 +205,26 @@ public interface Topologies
         }
 
         @Override
+        public long oldestEpoch()
+        {
+            return get(size() - 1).epoch;
+        }
+
+        @Override
+        public int findEarliestSinceEpoch(long epoch)
+        {
+            long current = current().epoch;
+            if (current < epoch)
+                return 0;
+
+            long index = current - epoch;
+            if (index > topologies.size())
+                return topologies.size() - 1;
+
+            return (int) index;
+        }
+
+        @Override
         public boolean fastPathPermitted()
         {
             return false;
@@ -233,7 +269,7 @@ public interface Topologies
             if (epoch <= topologies.get(0).epoch())
                 return this;
             if (epoch == current)
-                return new Singleton(current(), fastPathPermitted());
+                return new Single(current(), fastPathPermitted());
 
             int numEpochs = (int) (current - epoch + 1);
             Topology[] result = new Topology[numEpochs];

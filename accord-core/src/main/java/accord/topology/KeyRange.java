@@ -1,6 +1,6 @@
-package accord.api;
+package accord.topology;
 
-import accord.topology.KeyRanges;
+import accord.api.Key;
 import accord.txn.Keys;
 import com.google.common.base.Preconditions;
 

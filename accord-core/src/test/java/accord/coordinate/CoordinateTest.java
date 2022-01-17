@@ -10,6 +10,7 @@ import accord.txn.TxnId;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import static accord.Utils.id;
 import static accord.Utils.ids;
 import static accord.Utils.writeTxn;
 import static accord.impl.IntKey.keys;
@@ -26,7 +27,7 @@ public class CoordinateTest
 
             TxnId txnId = new TxnId(1, 100, 0, node.id());
             Txn txn = writeTxn(keys(10));
-            Result result = Coordinate.execute(node, txnId, txn).get();
+            Result result = Coordinate.execute(node, txnId, txn, txn.keys().get(0)).get();
             Assertions.assertEquals(MockStore.RESULT, result);
         }
     }
@@ -41,9 +42,8 @@ public class CoordinateTest
             Node node = cluster.get(1);
             Assertions.assertNotNull(node);
 
-            TxnId txnId = new TxnId(1, 100, 0, node.id());
             Txn txn = writeTxn(keys(10));
-            Result result = Coordinate.execute(node, txnId, txn).get();
+            Result result = cluster.get(id(1)).coordinate(txn).get();
             Assertions.assertEquals(MockStore.RESULT, result);
         }
     }
@@ -52,7 +52,7 @@ public class CoordinateTest
     {
         TxnId txnId = new TxnId(1, clock, 0, node.id());
         Txn txn = writeTxn(keys);
-        Result result = Coordinate.execute(node, txnId, txn).get();
+        Result result = Coordinate.execute(node, txnId, txn, node.selectHomeKey(txnId, txn.keys)).get();
         Assertions.assertEquals(MockStore.RESULT, result);
         return txnId;
     }

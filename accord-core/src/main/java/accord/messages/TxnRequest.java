@@ -5,100 +5,115 @@ import accord.topology.KeyRanges;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.txn.Keys;
-import accord.txn.Txn;
 
-import java.util.Objects;
-
-public abstract class TxnRequest implements Request
+public abstract class TxnRequest implements EpochRequest
 {
-    private final Scope scope;
+    private final Keys scope;
+    private final long waitForEpoch;
 
-    public TxnRequest(Scope scope)
+    public TxnRequest(Node.Id to, Topologies topologies, Keys keys)
     {
-        this.scope = scope;
+        int startIndex = findLatestRelevantEpochIndex(to, topologies, keys);
+        this.scope = computeScope(to, topologies, keys, startIndex);
+        this.waitForEpoch = computeWaitForEpoch(to, topologies, startIndex);
     }
 
-    public Scope scope()
+    public TxnRequest(Keys scope, long waitForEpoch)
+    {
+        this.scope = scope;
+        this.waitForEpoch = waitForEpoch;
+    }
+
+    public Keys scope()
     {
         return scope;
     }
 
-    /**
-     * Indicates the keys the coordinator expects the recipient to service for a request, and
-     * the minimum epochs the recipient will need to be aware of for each set of keys
-     */
-    public static class Scope
+    public long waitForEpoch()
     {
-        private final long minRequiredEpoch;
-        private final Keys keys;
+        return waitForEpoch;
+    }
 
-        public Scope(long minRequiredEpoch, Keys keys)
+    private static int findLatestRelevantEpochIndex(Node.Id node, Topologies topologies, Keys keys)
+    {
+        KeyRanges latest = topologies.get(0).rangesForNode(node);
+
+        if (latest != null && latest.intersects(keys))
+            return 0;
+
+        int i = 0;
+        int mi = topologies.size();
+
+        // find first non-null for node
+        while (latest == null)
         {
-            this.minRequiredEpoch = minRequiredEpoch;
-            this.keys = keys;
+            if (++i == mi)
+                return mi;
+
+            latest = topologies.get(i).rangesForNode(node);
         }
 
-        public static Scope forTopologies(Node.Id node, Topologies topologies, Keys txnKeys)
+        if (latest.intersects(keys))
+            return i;
+
+        // find first non-empty intersection for node
+        while (++i < mi)
         {
-            long minEpoch = 0;
-            Keys scopeKeys = Keys.EMPTY;
-            Keys lastKeys = null;
-            for (int i=topologies.size() - 1; i>=0; i--)
+            KeyRanges next = topologies.get(i).rangesForNode(node);
+            if (!next.equals(latest))
             {
-                Topology topology = topologies.get(i);
-                KeyRanges topologyRanges = topology.rangesForNode(node);
-                if (topologyRanges == null)
-                    continue;
-                topologyRanges = topologyRanges.intersection(txnKeys);
-                Keys epochKeys = txnKeys.intersection(topologyRanges);
-                if (lastKeys == null || !lastKeys.containsAll(epochKeys))
-                {
-                    minEpoch = topology.epoch();
-                    scopeKeys = scopeKeys.merge(epochKeys);
-                }
-                lastKeys = epochKeys;
+                if (next.intersects(keys))
+                    return i;
+                latest = next;
             }
-
-            return new Scope(minEpoch, scopeKeys);
         }
+        return mi;
+    }
 
-        public static Scope forTopologies(Node.Id node, Topologies topologies, Txn txn)
+    // for now use a simple heuristic of whether the node's ownership ranges have changed,
+    // on the assumption that this might also mean some local shard rearrangement
+    // except if the latest epoch is empty for the keys
+    public static long computeWaitForEpoch(Node.Id node, Topologies topologies, Keys keys)
+    {
+        return computeWaitForEpoch(node, topologies, findLatestRelevantEpochIndex(node, topologies, keys));
+    }
+
+    public static long computeWaitForEpoch(Node.Id node, Topologies topologies, int startIndex)
+    {
+        int i = startIndex;
+        int mi = topologies.size();
+        if (i == mi)
+            return topologies.oldestEpoch();
+
+        KeyRanges latest = topologies.get(i).rangesForNode(node);
+        while (++i < mi)
         {
-            return forTopologies(node, topologies, txn.keys());
+            Topology topology = topologies.get(i);
+            KeyRanges ranges = topology.rangesForNode(node);
+            if (ranges == null || !ranges.equals(latest))
+                break;
         }
+        return topologies.get(i - 1).epoch();
+    }
 
-        public long minRequiredEpoch()
-        {
-            return minRequiredEpoch;
-        }
+    public static Keys computeScope(Node.Id node, Topologies topologies, Keys keys)
+    {
+        return computeScope(node, topologies, keys, findLatestRelevantEpochIndex(node, topologies, keys));
+    }
 
-        public Keys keys()
+    public static Keys computeScope(Node.Id node, Topologies topologies, Keys keys, int startIndex)
+    {
+        KeyRanges last = null;
+        Keys scopeKeys = Keys.EMPTY;
+        for (int i = startIndex, mi = topologies.size() ; i < mi ; ++i)
         {
-            return keys;
-        }
+            Topology topology = topologies.get(i);
+            KeyRanges ranges = topology.rangesForNode(node);
+            if (ranges != last && ranges != null && !ranges.equals(last))
+                scopeKeys = scopeKeys.union(keys.intersect(ranges));
 
-        @Override
-        public boolean equals(Object o)
-        {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            Scope scope = (Scope) o;
-            return minRequiredEpoch == scope.minRequiredEpoch && keys.equals(scope.keys);
+            last = ranges;
         }
-
-        @Override
-        public int hashCode()
-        {
-            return Objects.hash(minRequiredEpoch, keys);
-        }
-
-        @Override
-        public String toString()
-        {
-            return "Scope{" +
-                    "maxEpoch=" + minRequiredEpoch +
-                    ", keys=" + keys +
-                    '}';
-        }
+        return scopeKeys;
     }
 }

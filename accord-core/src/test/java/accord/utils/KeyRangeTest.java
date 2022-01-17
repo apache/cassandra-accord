@@ -1,7 +1,7 @@
 package accord.utils;
 
 import accord.api.Key;
-import accord.api.KeyRange;
+import accord.topology.KeyRange;
 import accord.impl.IntKey;
 import accord.topology.KeyRanges;
 import accord.txn.Keys;

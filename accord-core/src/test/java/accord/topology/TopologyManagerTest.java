@@ -1,6 +1,5 @@
 package accord.topology;
 
-import accord.api.KeyRange;
 import accord.local.Node;
 import accord.txn.Keys;
 import org.junit.jupiter.api.Assertions;
@@ -139,12 +138,12 @@ public class TopologyManagerTest
 
         Keys keys = keys(150);
         Assertions.assertEquals(topologies(topology2.forKeys(keys), topology1.forKeys(keys)),
-                                service.forKeys(keys));
+                                service.syncForKeys(keys, 0, Long.MAX_VALUE));
 
         service.onEpochSyncComplete(id(1), 1);
         service.onEpochSyncComplete(id(2), 1);
         Assertions.assertEquals(topologies(topology2.forKeys(keys)),
-                                service.forKeys(keys));
+                                service.syncForKeys(keys, 0, Long.MAX_VALUE));
     }
 
     /**
@@ -167,12 +166,12 @@ public class TopologyManagerTest
 
         // no acks, so all epoch 1 shards should be included
         Assertions.assertEquals(topologies(topology2, topology1),
-                                service.forKeys(keys(150, 250)));
+                                service.syncForKeys(keys(150, 250), 0, Long.MAX_VALUE));
 
         // first topology acked, so only the second shard should be included
         service.onEpochSyncComplete(id(1), 1);
         service.onEpochSyncComplete(id(2), 1);
-        Topologies actual = service.forKeys(keys(150, 250));
+        Topologies actual = service.syncForKeys(keys(150, 250), 0, Long.MAX_VALUE);
         Assertions.assertEquals(topologies(topology2, topology(1, shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)))),
                                 actual);
         Assertions.assertFalse(actual.fastPathPermitted());

@@ -2,7 +2,6 @@ package accord.topology;
 
 import accord.Utils;
 import accord.api.Key;
-import accord.api.KeyRange;
 import accord.impl.IntKey;
 import accord.impl.TopologyFactory;
 import accord.local.Node;

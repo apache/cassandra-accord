@@ -3,7 +3,7 @@ package accord.maelstrom;
 import java.io.IOException;
 
 import accord.api.Key;
-import accord.api.KeyRange;
+import accord.topology.KeyRange;
 import accord.topology.KeyRanges;
 import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;

@@ -11,9 +11,9 @@ import java.util.*;
 
 public class ReadTracker extends AbstractResponseTracker<ReadTracker.ReadShardTracker>
 {
-    static class ReadShardTracker extends AbstractResponseTracker.ShardTracker
+    public static class ReadShardTracker extends AbstractResponseTracker.ShardTracker
     {
-        private final Set<Id> inflight = new HashSet<>();
+        protected final Set<Id> inflight = new HashSet<>();
         private boolean hasData = false;
         private int contacted;
 
@@ -29,11 +29,11 @@ public class ReadTracker extends AbstractResponseTracker<ReadTracker.ReadShardTr
             ++contacted;
         }
 
-        public void recordReadSuccess(Id node)
+        public boolean recordReadSuccess(Id node)
         {
             Preconditions.checkArgument(shard.nodes.contains(node));
-            inflight.remove(node);
             hasData = true;
+            return inflight.remove(node);
         }
 
         public boolean shouldRead()
@@ -41,9 +41,9 @@ public class ReadTracker extends AbstractResponseTracker<ReadTracker.ReadShardTr
             return !hasData && inflight.isEmpty();
         }
 
-        public void recordReadFailure(Id node)
+        public boolean recordReadFailure(Id node)
         {
-            inflight.remove(node);
+            return inflight.remove(node);
         }
 
         public boolean hasCompletedRead()
@@ -57,6 +57,7 @@ public class ReadTracker extends AbstractResponseTracker<ReadTracker.ReadShardTr
         }
     }
 
+    // TODO: abstract the candidate selection process so the implementation may prioritise based on distance/health etc
     private final List<Id> candidates;
 
     public ReadTracker(Topologies topologies)
@@ -105,6 +106,8 @@ public class ReadTracker extends AbstractResponseTracker<ReadTracker.ReadShardTr
      * Return the smallest set of nodes needed to satisfy required reads.
      *
      * Returns null if the read cannot be completed.
+     *
+     * TODO: prioritisation of nodes should be implementation-defined
      */
     public Set<Id> computeMinimalReadSetAndMarkInflight()
     {

@@ -6,7 +6,7 @@ import java.util.Objects;
 import java.util.function.BiFunction;
 
 import accord.api.Key;
-import accord.api.KeyRange;
+import accord.topology.KeyRange;
 import accord.topology.KeyRanges;
 import accord.txn.Keys;
 

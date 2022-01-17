@@ -98,4 +98,10 @@ public class DeterministicIdentitySet<T> extends AbstractSet<T>
             next = next.next;
         }
     }
+
+    @Override
+    public String toString()
+    {
+        return super.toString();
+    }
 }
