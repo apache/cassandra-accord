@@ -76,6 +76,7 @@ public class TopologyRandomizer
         return shards;
     }
 
+    // TODO (review): to really stress the protocol it might be nice to do total redistributions
     private static Shard[] updateMembership(Shard[] shards, Random random)
     {
         if (shards.length <= 1)
