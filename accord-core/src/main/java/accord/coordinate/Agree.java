@@ -131,6 +131,8 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
         super(node, Ballot.ZERO, txnId, txn);
         this.keys = txn.keys();
         tracker = new PreacceptTracker(node.topology().forKeys(txn.keys()));
+        // TODO: consider sending only to electorate of most recent topology (as only these PreAccept votes matter)
+        // note that we must send to all replicas of old topology, as electorate may not be reachable
         node.send(tracker.nodes(), to -> new PreAccept(to, tracker.topologies(), txnId, txn), this);
     }
 

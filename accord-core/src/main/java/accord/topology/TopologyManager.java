@@ -28,6 +28,7 @@ public class TopologyManager implements ConfigurationService.Listener
 {
     class EpochState
     {
+        // TODO (review): rename to global?
         private final Topology topology;
         private final Topology local;
         private final QuorumTracker syncTracker;
@@ -255,6 +256,7 @@ public class TopologyManager implements ConfigurationService.Listener
         return epochs.get(epoch);
     }
 
+    // TODO (review): maybe accept epoch?
     public Topologies forKeys(Keys keys)
     {
         Epochs current = epochs;

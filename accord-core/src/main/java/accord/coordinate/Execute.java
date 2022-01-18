@@ -102,6 +102,8 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         if (tracker.hasCompletedRead())
         {
             Result result = txn.result(data);
+            // TODO (review): we definitely *dont* want to send this to topologies that are from before the execution epoch,
+            //                as they'll be dangling unappliable operations
             node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, executeAt, deps, txn.execute(executeAt, data), result));
             complete(result);
         }

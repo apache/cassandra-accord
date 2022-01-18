@@ -34,6 +34,9 @@ public class PreAccept extends TxnRequest
     public void process(Node node, Id from, long messageId)
     {
         node.reply(from, messageId, node.local(scope()).map(instance -> {
+            // note: this diverges from the paper, in that instead of waiting for JoinShard,
+            //       we PreAccept to both old and new topologies and require quorums in both.
+            //       This necessitates sending to ALL replicas of old topology, not only electorate (as fast path may be unreachable).
             Command command = instance.command(txnId);
             if (!command.witness(txn))
                 return PreAcceptNack.INSTANCE;

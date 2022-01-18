@@ -29,6 +29,7 @@ public class FastPathTracker<T extends FastPathTracker.FastPathShardTracker> ext
         public abstract boolean hasMetFastPathCriteria();
     }
 
+    // TODO (review): topologies earlier than most recent should only seek votes for the complement of the fast path
     public FastPathTracker(Topologies topologies, IntFunction<T[]> arrayFactory, Function<Shard, T> trackerFactory)
     {
         super(topologies, arrayFactory, trackerFactory);

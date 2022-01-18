@@ -17,6 +17,8 @@ import java.util.function.Predicate;
 public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.ShardTracker>
 {
     private final Topologies topologies;
+    // TODO (review): for efficiency in normal case, might be better to partition these inside a single linear array?
+    //                (could pick max shards per topology and multiply by number of topologies for simplicity)
     private final T[][] trackerSets;
 
     public static class ShardTracker

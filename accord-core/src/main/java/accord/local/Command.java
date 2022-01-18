@@ -113,6 +113,8 @@ public class Command implements Listener, Consumer<Listener>
         // unlike in the Accord paper, we partition shards within a node, so that to ensure a total order we must either:
         //  - use a global logical clock to issue new timestamps; or
         //  - assign each shard _and_ process a unique id, and use both as components of the timestamp
+        // TODO (review): if the commandStore.epoch() is lower, are we issuing a Timestamp that is less than the txnId? It looks like we are,
+        //                which would *seem* to be a bug, so should investigate why not spotting it with automated exploration
         Timestamp witnessed = txnId.compareTo(max) > 0 && txnId.epoch >= commandStore.epoch() ? txnId : commandStore.uniqueNow(max);
 
         this.txn = txn;

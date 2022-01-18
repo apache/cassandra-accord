@@ -52,6 +52,7 @@ public class CommandsForKey implements Listener, Iterable<Command>
                 .filter(cmd -> cmd.hasBeen(Status.PreAccepted)).forEach(consumer);
         committedById.subMap(minTs, true, maxTs, true).values().forEach(consumer);
         committedByExecuteAt.subMap(minTs, true, maxTs, true).values().stream()
+                // TODO (review): should this be cmd.txnId().compareTo(minTs) < 0 || cmd.txnId().compareTo(maxTs) > 0?
                 .filter(cmd -> !cmd.txnId().equals(cmd.executeAt())).forEach(consumer);
     }
 
