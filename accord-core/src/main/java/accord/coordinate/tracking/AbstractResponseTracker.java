@@ -16,10 +16,10 @@ import java.util.function.Predicate;
 
 public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.ShardTracker>
 {
+    private static final int[] SINGLETON_OFFSETS = new int[0];
     private final Topologies topologies;
-    // TODO (review): for efficiency in normal case, might be better to partition these inside a single linear array?
-    //                (could pick max shards per topology and multiply by number of topologies for simplicity)
-    private final T[][] trackerSets;
+    private final T[] trackers;
+    private final int[] offsets;
 
     public static class ShardTracker
     {
@@ -34,12 +34,32 @@ public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.
     public AbstractResponseTracker(Topologies topologies, IntFunction<T[]> arrayFactory, Function<Shard, T> trackerFactory)
     {
         this.topologies = topologies;
-        this.trackerSets = (T[][]) new ShardTracker[topologies.size()][];
+        this.trackers = arrayFactory.apply(topologies.totalShards());
+
+        if (topologies.size() > 1)
+        {
+            this.offsets = new int[topologies.size() - 1];
+            int offset = topologies.get(0).size();
+            for (int i=1, mi=topologies.size(); i<mi; i++)
+            {
+                this.offsets[i - 1] = offset;
+                offset += topologies.get(i).size();
+            }
+        }
+        else
+        {
+            this.offsets = SINGLETON_OFFSETS;
+        }
+
         this.topologies.forEach((i, topology) -> {
-            T[] trackers = arrayFactory.apply(topology.size());
-            topology.forEach((j, shard) -> trackers[j] = trackerFactory.apply(shard));
-            this.trackerSets[i] = trackers;
+            int offset = topologyOffset(i);
+            topology.forEach((j, shard) -> trackers[offset + j] = trackerFactory.apply(shard));
         });
+    }
+
+    protected int topologyOffset(int topologyIdx)
+    {
+        return topologyIdx > 0 ? offsets[topologyIdx - 1] : 0;
     }
 
     public Topologies topologies()
@@ -50,8 +70,8 @@ public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.
     protected void forEachTrackerForNode(Node.Id node, BiConsumer<T, Node.Id> consumer)
     {
         this.topologies.forEach((i, topology) -> {
-            T[] trackers = trackerSets[i];
-            topology.forEachOn(node, (j, shard) -> consumer.accept(trackers[j], node));
+            int offset = topologyOffset(i);
+            topology.forEachOn(node, (j, shard) -> consumer.accept(trackers[offset + j], node));
         });
     }
 
@@ -61,35 +81,32 @@ public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.
         for (int i=0, mi=topologies.size(); i<mi; i++)
         {
             Topology topology = topologies.get(i);
-            T[] trackers = trackerSets[i];
-            matches += topology.matchesOn(node, (j, shard) -> consumer.test(trackers[j]));
+            int offset = topologyOffset(i);
+            matches += topology.matchesOn(node, (j, shard) -> consumer.test(trackers[offset + j]));
         }
         return matches;
     }
 
     protected boolean all(Predicate<T> predicate)
     {
-        for (T[] trackers : trackerSets)
-            for (T tracker : trackers)
-                if (!predicate.test(tracker))
-                    return false;
+        for (T tracker : trackers)
+            if (!predicate.test(tracker))
+                return false;
         return true;
     }
 
     protected boolean any(Predicate<T> predicate)
     {
-        for (T[] trackers : trackerSets)
-            for (T tracker : trackers)
-                if (predicate.test(tracker))
-                    return true;
+        for (T tracker : trackers)
+            if (predicate.test(tracker))
+                return true;
         return false;
     }
 
     protected <V> V accumulate(BiFunction<T, V, V> function, V start)
     {
-        for (T[] trackers : trackerSets)
-            for (T tracker : trackers)
-                start = function.apply(tracker, start);
+        for (T tracker : trackers)
+            start = function.apply(tracker, start);
         return start;
     }
 
@@ -101,12 +118,12 @@ public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.
     @VisibleForTesting
     public T unsafeGet(int topologyIdx, int shardIdx)
     {
-        return trackerSets[topologyIdx][shardIdx];
+        return trackers[topologyOffset(topologyIdx) + shardIdx];
     }
 
     public T unsafeGet(int i)
     {
-        Preconditions.checkArgument(trackerSets.length == 1);
+        Preconditions.checkArgument(offsets.length == 0);
         return unsafeGet(0, i);
     }
 }

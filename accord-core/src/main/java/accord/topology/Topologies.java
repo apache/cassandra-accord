@@ -21,6 +21,8 @@ public interface Topologies
     Topology get(int i);
     int size();
 
+    int totalShards();
+
     Set<Node.Id> nodes();
 
     default void forEach(IndexedConsumer<Topology> consumer)
@@ -122,6 +124,12 @@ public interface Topologies
         }
 
         @Override
+        public int totalShards()
+        {
+            return topology.size();
+        }
+
+        @Override
         public Set<Node.Id> nodes()
         {
             return topology.nodes();
@@ -184,6 +192,15 @@ public interface Topologies
         public int size()
         {
             return topologies.size();
+        }
+
+        @Override
+        public int totalShards()
+        {
+            int count = 0;
+            for (int i=0, mi= topologies.size(); i<mi; i++)
+                count += topologies.get(i).size();
+            return count;
         }
 
         @Override
