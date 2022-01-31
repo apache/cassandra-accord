@@ -62,6 +62,15 @@ public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.
         return topologyIdx > 0 ? offsets[topologyIdx - 1] : 0;
     }
 
+    protected int topologyLength(int topologyIdx)
+    {
+        if (topologyIdx > offsets.length)
+            throw new IndexOutOfBoundsException();
+
+        int endIdx = topologyIdx == offsets.length ? trackers.length : topologyOffset(topologyIdx + 1);
+        return endIdx - topologyOffset(topologyIdx);
+    }
+
     public Topologies topologies()
     {
         return topologies;
@@ -118,6 +127,8 @@ public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.
     @VisibleForTesting
     public T unsafeGet(int topologyIdx, int shardIdx)
     {
+        if (shardIdx >= topologyLength(topologyIdx))
+            throw new IndexOutOfBoundsException();
         return trackers[topologyOffset(topologyIdx) + shardIdx];
     }
 
