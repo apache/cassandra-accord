@@ -25,6 +25,8 @@ public interface Topologies
 
     Set<Node.Id> nodes();
 
+    Topologies withMinEpoch(long epoch);
+
     default void forEach(IndexedConsumer<Topology> consumer)
     {
         for (int i=0, mi=size(); i<mi; i++)
@@ -136,6 +138,14 @@ public interface Topologies
         }
 
         @Override
+        public Topologies withMinEpoch(long epoch)
+        {
+            if (epoch > topology.epoch())
+                throw new IndexOutOfBoundsException();
+            return this;
+        }
+
+        @Override
         public boolean equals(Object obj)
         {
             return Topologies.equals(this, obj);
@@ -210,6 +220,27 @@ public interface Topologies
             for (int i=0,mi=size(); i<mi; i++)
                 result.addAll(get(i).nodes());
             return result;
+        }
+
+        @Override
+        public Topologies withMinEpoch(long epoch)
+        {
+            long current = currentEpoch();
+            if (epoch > current)
+                throw new IndexOutOfBoundsException();
+            if (epoch <= topologies.get(0).epoch())
+                return this;
+            if (epoch == current)
+                return new Singleton(current(), fastPathPermitted());
+
+            int numEpochs = (int) (current - epoch + 1);
+            Topology[] result = new Topology[numEpochs];
+            int startIdx = topologies.size() - numEpochs;
+            for (int i=0; i<result.length; i++)
+                result[i] = topologies.get(startIdx + 1);
+            Preconditions.checkState(result[0].epoch() >= epoch);
+            Preconditions.checkState(current == result[result.length - 1].epoch());
+            return new Multi(result);
         }
 
         public void add(Topology topology)

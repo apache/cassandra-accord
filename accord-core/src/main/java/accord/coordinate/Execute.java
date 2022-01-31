@@ -10,15 +10,11 @@ import accord.api.Result;
 import accord.messages.Callback;
 import accord.local.Node;
 import accord.topology.Topologies;
-import accord.txn.Dependencies;
+import accord.txn.*;
 import accord.messages.Apply;
 import accord.messages.ReadData.ReadReply;
 import accord.messages.ReadData.ReadWaiting;
 import accord.local.Node.Id;
-import accord.txn.Timestamp;
-import accord.txn.Txn;
-import accord.txn.TxnId;
-import accord.txn.Keys;
 import accord.messages.Commit;
 import accord.messages.ReadData;
 import accord.messages.ReadData.ReadOk;
@@ -102,9 +98,9 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         if (tracker.hasCompletedRead())
         {
             Result result = txn.result(data);
-            // TODO (review): we definitely *dont* want to send this to topologies that are from before the execution epoch,
-            //                as they'll be dangling unappliable operations
-            node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, executeAt, deps, txn.execute(executeAt, data), result));
+            Topologies applyTopologies = topologies.withMinEpoch(executeAt.epoch);
+            Writes writes = txn.execute(executeAt, data);
+            node.send(applyTopologies.nodes(), to -> new Apply(to, applyTopologies, txnId, txn, executeAt, deps, writes, result));
             complete(result);
         }
     }
