@@ -6,6 +6,7 @@ import accord.local.Node.Id;
 import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.impl.mock.MockCluster.Clock;
+import accord.messages.TxnRequestScope.EpochRanges;
 import accord.topology.Topology;
 import accord.txn.Dependencies;
 import accord.txn.Txn;
@@ -50,6 +51,16 @@ public class PreAcceptTest
                         CommandStore.Factory.SINGLE_THREAD);
     }
 
+    private static TxnRequestScope scope(TxnId txnId, Txn txn)
+    {
+        return new TxnRequestScope(txnId.epoch, new EpochRanges(txnId.epoch, txn.keys()));
+    }
+
+    private static PreAccept preAccept(TxnId txnId, Txn txn)
+    {
+        return new PreAccept(scope(txnId, txn), txnId, txn);
+    }
+
     @Test
     void initialCommandTest()
     {
@@ -66,7 +77,7 @@ public class PreAcceptTest
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
-            PreAccept preAccept = new PreAccept(null, txnId, txn);
+            PreAccept preAccept = preAccept(txnId, txn);
             clock.increment(10);
             preAccept.process(node, ID2, 0);
 
@@ -98,7 +109,7 @@ public class PreAcceptTest
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
-            PreAccept preAccept = new PreAccept(null, txnId, txn);
+            PreAccept preAccept = preAccept(txnId, txn);
             preAccept.process(node, ID2, 0);
         }
         finally
@@ -122,13 +133,13 @@ public class PreAcceptTest
         {
 
             IntKey key1 = IntKey.key(10);
-            PreAccept preAccept1 = new PreAccept(null, clock.idForNode(1, ID2), writeTxn(Keys.of(key1)));
+            PreAccept preAccept1 = preAccept(clock.idForNode(1, ID2), writeTxn(Keys.of(key1)));
             preAccept1.process(node, ID2, 0);
 
             messageSink.clearHistory();
             IntKey key2 = IntKey.key(11);
             TxnId txnId2 = new TxnId(1, 50, 0, ID3);
-            PreAccept preAccept2 = new PreAccept(null, txnId2, writeTxn(Keys.of(key1, key2)));
+            PreAccept preAccept2 = preAccept(txnId2, writeTxn(Keys.of(key1, key2)));
             clock.increment(10);
             preAccept2.process(node, ID3, 0);
 
@@ -159,7 +170,7 @@ public class PreAcceptTest
         try
         {
             TxnId txnId = new TxnId(1, 110, 0, ID2);
-            PreAccept preAccept = new PreAccept(null, txnId, writeTxn(Keys.of(key)));
+            PreAccept preAccept = preAccept(txnId, writeTxn(Keys.of(key)));
             preAccept.process(node, ID2, 0);
 
             messageSink.assertHistorySizes(0, 1);
@@ -191,7 +202,7 @@ public class PreAcceptTest
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
-            PreAccept preAccept = new PreAccept(null, txnId, txn);
+            PreAccept preAccept = preAccept(txnId, txn);
 
             clock.increment(10);
             preAccept.process(node, ID2, 0);

@@ -67,7 +67,7 @@ public class TxnRequestScope
     private final long maxEpoch;
     private final EpochRanges[] ranges;
 
-    public TxnRequestScope(long maxEpoch, EpochRanges[] ranges)
+    public TxnRequestScope(long maxEpoch, EpochRanges... ranges)
     {
         this.maxEpoch = maxEpoch;
         this.ranges = ranges;
