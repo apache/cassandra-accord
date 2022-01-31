@@ -28,8 +28,7 @@ public class TopologyManager implements ConfigurationService.Listener
 {
     class EpochState
     {
-        // TODO (review): rename to global?
-        private final Topology topology;
+        private final Topology global;
         private final Topology local;
         private final QuorumTracker syncTracker;
         private boolean syncComplete = false;
@@ -46,12 +45,12 @@ public class TopologyManager implements ConfigurationService.Listener
             return false;
         }
 
-        EpochState(Topology topology, boolean prevSynced)
+        EpochState(Topology global, boolean prevSynced)
         {
-            Preconditions.checkArgument(!topology.isSubset());
-            this.topology = topology;
-            this.local = topology.forNode(node);
-            this.syncTracker = new QuorumTracker(new Topologies.Singleton(topology, false));
+            Preconditions.checkArgument(!global.isSubset());
+            this.global = global;
+            this.local = global.forNode(node);
+            this.syncTracker = new QuorumTracker(new Topologies.Singleton(global, false));
             this.prevSynced = prevSynced;
             updateState(prevSynced);
         }
@@ -64,7 +63,7 @@ public class TopologyManager implements ConfigurationService.Listener
 
         long epoch()
         {
-            return topology.epoch;
+            return global.epoch;
         }
 
         boolean syncComplete()
@@ -81,7 +80,7 @@ public class TopologyManager implements ConfigurationService.Listener
                 return false;
             if (syncComplete)
                 return true;
-            Boolean result = topology.accumulateForKeys(keys, (i, shard, acc) -> {
+            Boolean result = global.accumulateForKeys(keys, (i, shard, acc) -> {
                 if (acc == Boolean.FALSE)
                     return acc;
                 return Boolean.valueOf(syncTracker.unsafeGet(i).hasReachedQuorum());
@@ -124,7 +123,7 @@ public class TopologyManager implements ConfigurationService.Listener
 
         public Topology current()
         {
-            return epochs.length > 0 ? epochs[0].topology : Topology.EMPTY;
+            return epochs.length > 0 ? epochs[0].global : Topology.EMPTY;
         }
 
         public Epochs add(Topology topology)
@@ -263,7 +262,7 @@ public class TopologyManager implements ConfigurationService.Listener
         long maxEpoch = current.maxEpoch;
 
         EpochState epochState = current.get(maxEpoch);
-        Topology topology = epochState.topology.forKeys(keys);
+        Topology topology = epochState.global.forKeys(keys);
         if (!epochs.requiresHistoricalTopologiesFor(keys))
         {
             return new Topologies.Singleton(topology, true);
@@ -277,7 +276,7 @@ public class TopologyManager implements ConfigurationService.Listener
                 epochState = current.epochs[i];
                 if (i > 1 && epochState.syncCompleteFor(keys))
                     break;
-                topologies.add(epochState.topology.forKeys(keys, epochState::shardIsUnsynced));
+                topologies.add(epochState.global.forKeys(keys, epochState::shardIsUnsynced));
             }
             return topologies;
         }
@@ -285,7 +284,7 @@ public class TopologyManager implements ConfigurationService.Listener
 
     public Topologies forEpoch(Keys keys, long epoch)
     {
-        return new Topologies.Singleton(epochs.get(epoch).topology.forKeys(keys), true);
+        return new Topologies.Singleton(epochs.get(epoch).global.forKeys(keys), true);
     }
 
     public Topologies forTxn(Txn txn)
