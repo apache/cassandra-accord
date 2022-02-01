@@ -141,7 +141,7 @@ public interface Topologies
         public Topologies withMinEpoch(long epoch)
         {
             if (epoch > topology.epoch())
-                throw new IndexOutOfBoundsException();
+                throw new IndexOutOfBoundsException(epoch + " is greater than current epoch " + topology.epoch());
             return this;
         }
 
@@ -227,7 +227,7 @@ public interface Topologies
         {
             long current = currentEpoch();
             if (epoch > current)
-                throw new IndexOutOfBoundsException();
+                throw new IndexOutOfBoundsException(epoch + " is greater than current epoch " + current);
             if (epoch <= topologies.get(0).epoch())
                 return this;
             if (epoch == current)

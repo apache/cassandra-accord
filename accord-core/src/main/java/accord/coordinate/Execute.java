@@ -39,7 +39,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         this.keys = txn.keys();
         this.deps = agreed.deps;
         this.executeAt = agreed.executeAt;
-        this.topologies = agreed.topologies;
+        this.topologies = node.topology().forTxn(agreed.txn).withMinEpoch(agreed.executeAt.epoch);
         this.tracker = new ReadTracker(topologies);
 
         // TODO: perhaps compose these different behaviours differently?
@@ -98,9 +98,8 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         if (tracker.hasCompletedRead())
         {
             Result result = txn.result(data);
-            Topologies applyTopologies = topologies.withMinEpoch(executeAt.epoch);
             Writes writes = txn.execute(executeAt, data);
-            node.send(applyTopologies.nodes(), to -> new Apply(to, applyTopologies, txnId, txn, executeAt, deps, writes, result));
+            node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, executeAt, deps, writes, result));
             complete(result);
         }
     }
