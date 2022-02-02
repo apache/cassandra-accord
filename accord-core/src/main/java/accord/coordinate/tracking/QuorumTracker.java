@@ -8,7 +8,7 @@ public class QuorumTracker extends AbstractQuorumTracker<QuorumShardTracker>
 {
     public QuorumTracker(Topologies topologies)
     {
-        super(topologies, QuorumShardTracker[]::new, QuorumShardTracker::new);
+        super(topologies, QuorumShardTracker[]::new, (shard, epoch) -> new QuorumShardTracker(shard));
     }
 
     public void recordSuccess(Node.Id node)

@@ -58,7 +58,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
 
         public PreacceptTracker(Topologies topologies, boolean fastPathPermitted)
         {
-            super(topologies, Agree.ShardTracker[]::new, Agree.ShardTracker::new);
+            super(topologies, Agree.ShardTracker[]::new, (shard, epoch) -> new Agree.ShardTracker(shard));
             this.fastPathPermitted = fastPathPermitted;
         }
 

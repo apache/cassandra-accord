@@ -10,7 +10,6 @@ import com.google.common.base.Preconditions;
 import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
-import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.function.Predicate;
 
@@ -20,6 +19,7 @@ public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.
     private final Topologies topologies;
     private final T[] trackers;
     private final int[] offsets;
+
 
     public static class ShardTracker
     {
@@ -31,7 +31,12 @@ public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.
         }
     }
 
-    public AbstractResponseTracker(Topologies topologies, IntFunction<T[]> arrayFactory, Function<Shard, T> trackerFactory)
+    public interface ShardTrackerFactory<T extends ShardTracker>
+    {
+        T create(Shard shard, long epoch);
+    }
+
+    public AbstractResponseTracker(Topologies topologies, IntFunction<T[]> arrayFactory, ShardTrackerFactory<T> trackerFactory)
     {
         this.topologies = topologies;
         this.trackers = arrayFactory.apply(topologies.totalShards());
@@ -53,7 +58,7 @@ public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.
 
         this.topologies.forEach((i, topology) -> {
             int offset = topologyOffset(i);
-            topology.forEach((j, shard) -> trackers[offset + j] = trackerFactory.apply(shard));
+            topology.forEach((j, shard) -> trackers[offset + j] = trackerFactory.create(shard, topology.epoch()));
         });
     }
 

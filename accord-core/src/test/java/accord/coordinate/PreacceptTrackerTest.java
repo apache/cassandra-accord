@@ -1,20 +1,16 @@
 package accord.coordinate;
 
 import accord.Utils;
-import accord.api.KeyRange;
 import accord.coordinate.tracking.FastPathTracker;
 import accord.impl.TopologyUtils;
 import accord.local.Node;
 import accord.topology.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topology;
-import accord.txn.Keys;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import static accord.Utils.*;
-import static accord.impl.IntKey.keys;
-import static accord.impl.IntKey.range;
 
 public class PreacceptTrackerTest
 {
@@ -42,7 +38,7 @@ public class PreacceptTrackerTest
     void singleShard()
     {
         Topology subTopology = topology(topology.get(0));
-        FastPathTracker responses = new FastPathTracker<>(topologies(subTopology), Agree.ShardTracker[]::new, Agree.ShardTracker::new);
+        FastPathTracker responses = new FastPathTracker<>(topologies(subTopology), Agree.ShardTracker[]::new, (shard, epoch) -> new Agree.ShardTracker(shard));
 
         responses.recordSuccess(ids[0], false);
         assertResponseState(responses, false, false, false, true);
@@ -58,7 +54,7 @@ public class PreacceptTrackerTest
     void singleShardFastPath()
     {
         Topology subTopology = topology(topology.get(0));
-        FastPathTracker responses = new FastPathTracker<>(topologies(subTopology), Agree.ShardTracker[]::new, Agree.ShardTracker::new);
+        FastPathTracker responses = new FastPathTracker<>(topologies(subTopology), Agree.ShardTracker[]::new, (shard, epoch) -> new Agree.ShardTracker(shard));
 
         responses.recordSuccess(ids[0], true);
         assertResponseState(responses, false, false, false, true);
@@ -77,7 +73,7 @@ public class PreacceptTrackerTest
     void unexpectedResponsesAreIgnored()
     {
         Topology subTopology = topology(topology.get(0));
-        FastPathTracker responses = new FastPathTracker<>(topologies(subTopology), Agree.ShardTracker[]::new, Agree.ShardTracker::new);
+        FastPathTracker responses = new FastPathTracker<>(topologies(subTopology), Agree.ShardTracker[]::new, (shard, epoch) -> new Agree.ShardTracker(shard));
 
         responses.recordSuccess(ids[0], false);
         assertResponseState(responses, false, false, false, true);
@@ -94,7 +90,7 @@ public class PreacceptTrackerTest
     void failure()
     {
         Topology subTopology = topology(topology.get(0));
-        FastPathTracker<?> responses = new FastPathTracker<>(topologies(subTopology), Agree.ShardTracker[]::new, Agree.ShardTracker::new);
+        FastPathTracker<?> responses = new FastPathTracker<>(topologies(subTopology), Agree.ShardTracker[]::new, (shard, epoch) -> new Agree.ShardTracker(shard));
 
         responses.recordSuccess(ids[0], true);
         assertResponseState(responses, false, false, false, true);
@@ -110,7 +106,7 @@ public class PreacceptTrackerTest
     void multiShard()
     {
         Topology subTopology = new Topology(1, new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
-        FastPathTracker<Agree.ShardTracker> responses = new FastPathTracker<>(topologies(subTopology), Agree.ShardTracker[]::new, Agree.ShardTracker::new);
+        FastPathTracker<Agree.ShardTracker> responses = new FastPathTracker<>(topologies(subTopology), Agree.ShardTracker[]::new, (shard, epoch) -> new Agree.ShardTracker(shard));
         /*
         (000, 100](100, 200](200, 300]
         [1, 2, 3] [2, 3, 4] [3, 4, 5]
