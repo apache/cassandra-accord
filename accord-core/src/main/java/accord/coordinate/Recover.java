@@ -108,12 +108,6 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
 
     public Recover(Node node, Ballot ballot, TxnId txnId, Txn txn)
     {
-        // TODO (review): I'm a little concerned that this differs from PreAccept, as I believe its correctness
-        //                depends on hitting earlier epochs to ensure all dependencies are caught. Since we
-        //                are always performing Accept (or later) operations here to collect dependencies that issue
-        //                is probably avoided.
-        //                However, how does this process handle collecting the superseding/wait sets in the case where the
-        //                voters are no longer replicas?
         this(node, ballot, txnId, txn, node.topology().forEpoch(txn, txnId.epoch));
     }
 
@@ -161,19 +155,17 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
 
         if (acceptOrCommit != null)
         {
+            long minEpoch = Timestamp.min(txnId, acceptOrCommit.executeAt).epoch;
             switch (acceptOrCommit.status)
             {
                 case Accepted:
-                    // TODO (review): for correct recovery (if recovery fails) this _must_ include txnId.epoch, which this seems not ... so question is why it works now...
-                    //                (should be the Topology for txnId.epoch and executeAt.epoch, plus any trailing ones)
-                    startAccept(acceptOrCommit.executeAt, acceptOrCommit.deps, node.topology().forTxn(txn));
+                    startAccept(acceptOrCommit.executeAt, acceptOrCommit.deps, node.topology().forTxn(txn, minEpoch));
                     return;
                 case Committed:
                 case ReadyToExecute:
                 case Executed:
                 case Applied:
-                    // TODO (review): should be the Topology for txnId.epoch and executeAt.epoch
-                    complete(new Agreed(txnId, txn, acceptOrCommit.executeAt, acceptOrCommit.deps, node.topology().forTxn(txn), acceptOrCommit.writes, acceptOrCommit.result));
+                    complete(new Agreed(txnId, txn, acceptOrCommit.executeAt, acceptOrCommit.deps, node.topology().forTxn(txn, minEpoch), acceptOrCommit.writes, acceptOrCommit.result));
                     return;
             }
         }
@@ -209,8 +201,7 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
             executeAt = txnId;
         }
 
-        // TODO (review): should be the Topology for txnId.epoch and executeAt.epoch
-        startAccept(executeAt, deps, node.topology().forTxn(txn));
+        startAccept(executeAt, deps, node.topology().forTxn(txn, Timestamp.min(txnId, executeAt).epoch));
     }
 
     @Override

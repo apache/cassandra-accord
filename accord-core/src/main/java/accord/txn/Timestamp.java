@@ -65,6 +65,11 @@ public class Timestamp implements Comparable<Timestamp>
         return a.compareTo(b) >= 0 ? a : b;
     }
 
+    public static <T extends Timestamp> T min(T a, T b)
+    {
+        return a.compareTo(b) <= 0 ? a : b;
+    }
+
     @Override
     public String toString()
     {

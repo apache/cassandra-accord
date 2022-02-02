@@ -255,15 +255,19 @@ public class TopologyManager implements ConfigurationService.Listener
         return epochs.get(epoch);
     }
 
-    // TODO (review): maybe accept epoch?
-    public Topologies forKeys(Keys keys)
+    public Topologies forKeys(Keys keys, long minEpoch)
     {
         Epochs current = epochs;
-        long maxEpoch = current.maxEpoch;
 
-        EpochState epochState = current.get(maxEpoch);
+        EpochState epochState = current.get(current.maxEpoch);
         Topology topology = epochState.global.forKeys(keys);
-        if (!epochs.requiresHistoricalTopologiesFor(keys))
+
+        if (minEpoch == Long.MAX_VALUE)
+            minEpoch = topology.epoch();
+        else
+            Preconditions.checkArgument(minEpoch <= topology.epoch() && minEpoch >= 0);
+
+        if (topology.epoch() == minEpoch && !epochs.requiresHistoricalTopologiesFor(keys))
         {
             return new Topologies.Singleton(topology, true);
         }
@@ -274,12 +278,21 @@ public class TopologyManager implements ConfigurationService.Listener
             for (int i=1; i<current.epochs.length; i++)
             {
                 epochState = current.epochs[i];
-                if (i > 1 && epochState.syncCompleteFor(keys))
+                if (i > 1 && epochState.syncCompleteFor(keys) && epochState.epoch() < minEpoch)
                     break;
-                topologies.add(epochState.global.forKeys(keys, epochState::shardIsUnsynced));
+
+                if (epochState.epoch() < minEpoch)
+                    topologies.add(epochState.global.forKeys(keys, epochState::shardIsUnsynced));
+                else
+                    topologies.add(epochState.global.forKeys(keys));
             }
             return topologies;
         }
+    }
+
+    public Topologies forKeys(Keys keys)
+    {
+        return forKeys(keys, Long.MAX_VALUE);
     }
 
     public Topologies forEpoch(Keys keys, long epoch)
@@ -287,9 +300,14 @@ public class TopologyManager implements ConfigurationService.Listener
         return new Topologies.Singleton(epochs.get(epoch).global.forKeys(keys), true);
     }
 
+    public Topologies forTxn(Txn txn, long minEpoch)
+    {
+        return forKeys(txn.keys(), minEpoch);
+    }
+
     public Topologies forTxn(Txn txn)
     {
-        return forKeys(txn.keys());
+        return forKeys(txn.keys(), Long.MAX_VALUE);
     }
 
     public Topologies forEpoch(Txn txn, long epoch)

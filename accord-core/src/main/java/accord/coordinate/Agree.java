@@ -130,7 +130,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
     {
         super(node, Ballot.ZERO, txnId, txn);
         this.keys = txn.keys();
-        tracker = new PreacceptTracker(node.topology().forKeys(txn.keys()));
+        tracker = new PreacceptTracker(node.topology().forKeys(txn.keys(), txnId.epoch));
         // TODO: consider sending only to electorate of most recent topology (as only these PreAccept votes matter)
         // note that we must send to all replicas of old topology, as electorate may not be reachable
         node.send(tracker.nodes(), to -> new PreAccept(to, tracker.topologies(), txnId, txn), this);
@@ -161,7 +161,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
     {
         if (!tracker.hasSupersedingEpoch())
             return;
-        Topologies newTopologies = node.topology().forKeys(txn.keys());
+        Topologies newTopologies = node.topology().forKeys(txn.keys(), txnId.epoch);
         if (newTopologies.currentEpoch() < tracker.supersedingEpoch)
             return;
         Set<Id> previousNodes = tracker.nodes();

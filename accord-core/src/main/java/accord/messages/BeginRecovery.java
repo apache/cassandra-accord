@@ -140,8 +140,7 @@ public class BeginRecovery extends TxnRequest
         {
             // disseminate directly
             RecoverOk ok = (RecoverOk) reply;
-            // TODO (review): should this attempt to send to the topology for the execution epoch too?
-            Topologies topologies = node.topology().forKeys(txn.keys);
+            Topologies topologies = node.topology().forKeys(txn.keys, ok.executeAt.epoch);
             node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, ok.executeAt, ok.deps, ok.writes, ok.result));
         }
     }

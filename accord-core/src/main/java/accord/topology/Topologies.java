@@ -18,7 +18,9 @@ public interface Topologies
 
     boolean fastPathPermitted();
 
+    // topologies are stored in reverse epoch order, with the highest epoch at idx 0
     Topology get(int i);
+
     int size();
 
     int totalShards();
