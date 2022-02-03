@@ -92,7 +92,7 @@ public class Node implements ConfigurationService.Listener
         this.agent = agent;
         this.messageSink = messageSink;
         this.configService = configService;
-        this.topology = new TopologyManager(id, configService::fetchTopologyForEpoch);
+        this.topology = new TopologyManager(id, configService::reportEpoch);
         Topology topology = configService.currentTopology();
         this.now = new AtomicReference<>(new Timestamp(topology.epoch(), nowSupplier.getAsLong(), 0, id));
         this.nowSupplier = nowSupplier;

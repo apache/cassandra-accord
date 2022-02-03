@@ -204,7 +204,7 @@ public class TopologyManager implements ConfigurationService.Listener
                     throw new RuntimeException("Received request for ranges not replicated by this node");
             }
             if (scope.maxEpoch() > 0)
-                missingEpochNotify.accept(scope.maxEpoch());
+                epochReporter.accept(scope.maxEpoch());
 
             return 0;
         }
@@ -216,13 +216,13 @@ public class TopologyManager implements ConfigurationService.Listener
     }
 
     private final Node.Id node;
-    private final LongConsumer missingEpochNotify;
+    private final LongConsumer epochReporter;
     private volatile Epochs epochs;
 
-    public TopologyManager(Node.Id node, LongConsumer missingEpochNotify)
+    public TopologyManager(Node.Id node, LongConsumer epochReporter)
     {
         this.node = node;
-        this.missingEpochNotify = missingEpochNotify;
+        this.epochReporter = epochReporter;
         this.epochs = new Epochs(new EpochState[0]);
     }
 

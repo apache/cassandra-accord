@@ -5,7 +5,7 @@ import accord.topology.Topology;
 
 /**
  * Cluster configuration service. Manages linearizable cluster configuration changes. Any node reporting a
- * configuration with epoch n is guaranteed to have previously seen applied every previous epoch configuration
+ * configuration with epoch n is guaranteed to have previously seen and applied every previous epoch configuration
  */
 public interface ConfigurationService
 {
@@ -38,12 +38,17 @@ public interface ConfigurationService
     Topology getTopologyForEpoch(long epoch);
 
     /**
-     * if a process becomes aware of a configuration with a higher epoch, it can report it here. The configuration
-     * service will fetch the given epoch, and any preceding epochs, and call onComplete when finished.
+     * Method for reporting epochs the configuration service may not be aware of, and optionally running a supplied
+     * runnable once the corresponding topology has been received and applied. If the configuration service is already
+     * aware of the reported epoch, the runnable should be run immediately.
      */
     void fetchTopologyForEpoch(long epoch, Runnable onComplete);
 
-    default void fetchTopologyForEpoch(long epoch)
+    /**
+     * Alert the configuration service of epochs it may not be aware of. This is called called for every TxnRequest
+     * received by Accord, so implementations should be lightweight, and avoid blocking or heavy computation.
+     */
+    default void reportEpoch(long epoch)
     {
         fetchTopologyForEpoch(epoch, null);
     }
