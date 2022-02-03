@@ -29,6 +29,9 @@ public interface Topologies
 
     Topologies withMinEpoch(long epoch);
 
+    // TODO: rename
+    Topologies onlyCurrentEpoch();
+
     default void forEach(IndexedConsumer<Topology> consumer)
     {
         for (int i=0, mi=size(); i<mi; i++)
@@ -148,6 +151,12 @@ public interface Topologies
         }
 
         @Override
+        public Topologies onlyCurrentEpoch()
+        {
+            return this;
+        }
+
+        @Override
         public boolean equals(Object obj)
         {
             return Topologies.equals(this, obj);
@@ -243,6 +252,12 @@ public interface Topologies
             Preconditions.checkState(result[0].epoch() >= epoch);
             Preconditions.checkState(current == result[result.length - 1].epoch());
             return new Multi(result);
+        }
+
+        @Override
+        public Topologies onlyCurrentEpoch()
+        {
+            return new Singleton(current(), false);
         }
 
         public void add(Topology topology)

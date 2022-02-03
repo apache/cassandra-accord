@@ -28,7 +28,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
     final Topologies topologies;
     final Keys keys;
     final Dependencies deps;
-    final ReadTracker tracker;
+    final ReadTracker readTracker;
     private Data data;
 
     private Execute(Node node, Agreed agreed)
@@ -40,7 +40,7 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         this.deps = agreed.deps;
         this.executeAt = agreed.executeAt;
         this.topologies = node.topology().forTxn(agreed.txn).withMinEpoch(agreed.executeAt.epoch);
-        this.tracker = new ReadTracker(topologies);
+        this.readTracker = new ReadTracker(topologies.onlyCurrentEpoch());
 
         // TODO: perhaps compose these different behaviours differently?
         if (agreed.applied != null)
@@ -51,8 +51,8 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         }
         else
         {
-            Set<Id> readSet = tracker.computeMinimalReadSetAndMarkInflight();
-            for (Node.Id to : tracker.nodes())
+            Set<Id> readSet = readTracker.computeMinimalReadSetAndMarkInflight();
+            for (Node.Id to : readTracker.nodes())
             {
                 boolean read = readSet.contains(to);
                 Commit send = new Commit(to, topologies, txnId, txn, executeAt, agreed.deps, read);
@@ -93,9 +93,9 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         data = data == null ? ((ReadOk) reply).data
                             : data.merge(((ReadOk) reply).data);
 
-        tracker.recordReadSuccess(from);
+        readTracker.recordReadSuccess(from);
 
-        if (tracker.hasCompletedRead())
+        if (readTracker.hasCompletedRead())
         {
             Result result = txn.result(data);
             Writes writes = txn.execute(executeAt, data);
@@ -112,13 +112,13 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         if (!(throwable instanceof Timeout))
             throwable.printStackTrace();
 
-        tracker.recordReadFailure(from);
-        Set<Id> readFrom = tracker.computeMinimalReadSetAndMarkInflight();
+        readTracker.recordReadFailure(from);
+        Set<Id> readFrom = readTracker.computeMinimalReadSetAndMarkInflight();
         if (readFrom != null)
         {
             node.send(readFrom, to -> new ReadData(to, topologies, txnId, txn, executeAt), this);
         }
-        else if (tracker.hasFailed())
+        else if (readTracker.hasFailed())
         {
             completeExceptionally(throwable);
         }
