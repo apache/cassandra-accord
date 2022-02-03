@@ -2,6 +2,7 @@ package accord.coordinate.tracking;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.IntFunction;
 
 import accord.local.Node;
@@ -53,7 +54,7 @@ public class AbstractQuorumTracker<T extends AbstractQuorumTracker.QuorumShardTr
         }
     }
 
-    public AbstractQuorumTracker(Topologies topologies, IntFunction<T[]> arrayFactory, ShardTrackerFactory<T> trackerFactory)
+    public AbstractQuorumTracker(Topologies topologies, IntFunction<T[]> arrayFactory, Function<Shard, T> trackerFactory)
     {
         super(topologies, arrayFactory, trackerFactory);
     }

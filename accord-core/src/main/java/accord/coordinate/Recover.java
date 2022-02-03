@@ -114,7 +114,7 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
     private Recover(Node node, Ballot ballot, TxnId txnId, Txn txn, Topologies topologies)
     {
         super(node, ballot, txnId, txn);
-        this.tracker = new FastPathTracker<>(topologies, ShardTracker[]::new, (shard, epoch) -> new ShardTracker(shard));
+        this.tracker = new FastPathTracker<>(topologies, ShardTracker[]::new, ShardTracker::new);
         node.send(tracker.nodes(), to -> new BeginRecovery(to, topologies, txnId, txn, ballot), this);
     }
 

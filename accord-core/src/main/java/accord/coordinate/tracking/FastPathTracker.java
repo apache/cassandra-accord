@@ -1,5 +1,6 @@
 package accord.coordinate.tracking;
 
+import java.util.function.Function;
 import java.util.function.IntFunction;
 
 import accord.local.Node;
@@ -28,7 +29,7 @@ public class FastPathTracker<T extends FastPathTracker.FastPathShardTracker> ext
         public abstract boolean hasMetFastPathCriteria();
     }
 
-    public FastPathTracker(Topologies topologies, IntFunction<T[]> arrayFactory, ShardTrackerFactory<T> trackerFactory)
+    public FastPathTracker(Topologies topologies, IntFunction<T[]> arrayFactory, Function<Shard, T> trackerFactory)
     {
         super(topologies, arrayFactory, trackerFactory);
     }

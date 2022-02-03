@@ -13,15 +13,13 @@ public class ReadTracker extends AbstractResponseTracker<ReadTracker.ReadShardTr
 {
     static class ReadShardTracker extends AbstractResponseTracker.ShardTracker
     {
-        private final long epoch;
         private final Set<Id> inflight = new HashSet<>();
         private boolean hasData = false;
         private int contacted;
 
-        public ReadShardTracker(Shard shard, long epoch)
+        public ReadShardTracker(Shard shard)
         {
             super(shard);
-            this.epoch = epoch;
         }
 
         public void recordInflightRead(Id node)
@@ -110,8 +108,9 @@ public class ReadTracker extends AbstractResponseTracker<ReadTracker.ReadShardTr
      */
     public Set<Id> computeMinimalReadSetAndMarkInflight()
     {
+        // TODO (review): should this only be consulting the latest topology?
         Set<ReadShardTracker> toRead = accumulate((tracker, accumulate) -> {
-            if (tracker.epoch != topologies().currentEpoch() || !tracker.shouldRead())
+            if (!tracker.shouldRead())
                 return accumulate;
 
             if (accumulate == null)
