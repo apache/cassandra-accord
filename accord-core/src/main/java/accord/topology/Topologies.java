@@ -27,10 +27,7 @@ public interface Topologies
 
     Set<Node.Id> nodes();
 
-    Topologies withMinEpoch(long epoch);
-
-    // TODO: rename
-    Topologies onlyCurrentEpoch();
+    Topologies removeEpochsBefore(long epoch);
 
     default void forEach(IndexedConsumer<Topology> consumer)
     {
@@ -143,16 +140,10 @@ public interface Topologies
         }
 
         @Override
-        public Topologies withMinEpoch(long epoch)
+        public Topologies removeEpochsBefore(long epoch)
         {
             if (epoch > topology.epoch())
                 throw new IndexOutOfBoundsException(epoch + " is greater than current epoch " + topology.epoch());
-            return this;
-        }
-
-        @Override
-        public Topologies onlyCurrentEpoch()
-        {
             return this;
         }
 
@@ -234,7 +225,7 @@ public interface Topologies
         }
 
         @Override
-        public Topologies withMinEpoch(long epoch)
+        public Topologies removeEpochsBefore(long epoch)
         {
             long current = currentEpoch();
             if (epoch > current)
@@ -252,12 +243,6 @@ public interface Topologies
             Preconditions.checkState(result[0].epoch() >= epoch);
             Preconditions.checkState(current == result[result.length - 1].epoch());
             return new Multi(result);
-        }
-
-        @Override
-        public Topologies onlyCurrentEpoch()
-        {
-            return new Singleton(current(), false);
         }
 
         public void add(Topology topology)

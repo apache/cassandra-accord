@@ -39,8 +39,8 @@ class Execute extends CompletableFuture<Result> implements Callback<ReadReply>
         this.keys = txn.keys();
         this.deps = agreed.deps;
         this.executeAt = agreed.executeAt;
-        this.topologies = node.topology().forTxn(agreed.txn).withMinEpoch(agreed.executeAt.epoch);
-        this.readTracker = new ReadTracker(topologies.onlyCurrentEpoch());
+        this.topologies = node.topology().forTxn(agreed.txn).removeEpochsBefore(agreed.executeAt.epoch);
+        this.readTracker = new ReadTracker(topologies.removeEpochsBefore(topologies.currentEpoch()));
 
         // TODO: perhaps compose these different behaviours differently?
         if (agreed.applied != null)
