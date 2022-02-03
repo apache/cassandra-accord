@@ -33,6 +33,11 @@ public class Timestamp implements Comparable<Timestamp>
         return minEpoch <= epoch ? this : new Timestamp(minEpoch, real, logical, node);
     }
 
+    public Timestamp logicalNext(Id node)
+    {
+        return new Timestamp(epoch, real, logical + 1, node);
+    }
+
     @Override
     public int compareTo(Timestamp that)
     {

@@ -174,10 +174,10 @@ public class Node implements ConfigurationService.Listener
     {
         if (now.get().compareTo(atLeast) < 0)
             now.accumulateAndGet(atLeast, (current, proposed) -> {
-                Timestamp timestamp = proposed.compareTo(current) <= 0
-                        ? new Timestamp(current.epoch, current.real, current.logical + 1, id)
-                        : proposed;
-                return timestamp.withMinEpoch(topology.epoch());
+                long minEpoch = topology.epoch();
+                current = current.withMinEpoch(minEpoch);
+                proposed = proposed.withMinEpoch(minEpoch);
+                return proposed.compareTo(current) <= 0 ? current.logicalNext(id) : proposed;
             });
         return uniqueNow();
     }
