@@ -5,6 +5,7 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.List;
@@ -23,6 +24,7 @@ import java.util.function.Consumer;
 
 import accord.impl.IntHashKey;
 import accord.impl.basic.Cluster;
+import accord.impl.basic.PropagatingPendingQueue;
 import accord.impl.basic.RandomDelayQueue.Factory;
 import accord.impl.IntKey;
 import accord.impl.TopologyFactory;
@@ -40,6 +42,7 @@ import accord.local.Node.Id;
 import accord.api.Key;
 import accord.txn.Txn;
 import accord.txn.Keys;
+import accord.verify.StrictSerializabilityVerifier;
 import ch.qos.logback.classic.Level;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -143,10 +146,10 @@ public class BurnTest
 
     static void burn(Random random, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency)
     {
-        PendingQueue queue = new Factory(random).get();
+        List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
+        PendingQueue queue = new PropagatingPendingQueue(failures, new Factory(random).get());
 
-        SerializabilityVerifier serializable = new SerializabilityVerifier(keyCount);
-        Map<Integer, LinearizabilityVerifier> linearizableMap = new HashMap<>();
+        StrictSerializabilityVerifier strictSerializable = new StrictSerializabilityVerifier(keyCount);
 
         Packet[] requests = generate(random, clients, nodes, keyCount, operations).toArray(Packet[]::new);
         int[] starts = new int[requests.length];
@@ -174,40 +177,37 @@ public class BurnTest
                 queue.add(requests[i]);
             }
 
-            logger.debug("{}", reply);
-            serializable.begin();
-
-            ListUpdate update = (ListUpdate) ((ListRequest) requests[(int)packet.replyId].message).txn.update;
-            int start = starts[(int)packet.replyId];
-            int end = clock.incrementAndGet();
-            replies[(int)packet.replyId] = packet;
-
-            for (int i = 0 ; i < reply.read.length ; ++i)
+            try
             {
-                Key key = reply.keys.get(i);
-                int k = key(key);
 
-                int[] read = reply.read[i];
-                int write = reply.update.getOrDefault(key, -1);
+                int start = starts[(int)packet.replyId];
+                int end = clock.incrementAndGet();
 
-                if (read != null)
+                logger.debug("{} at [{}, {}]", reply, start, end);
+
+                replies[(int)packet.replyId] = packet;
+                strictSerializable.begin();
+
+                for (int i = 0 ; i < reply.read.length ; ++i)
                 {
-                    // TODO: standardise read to include/exclude write
-                    serializable.witnessRead(k, read);
+                    Key key = reply.keys.get(i);
+                    int k = key(key);
+
+                    int[] read = reply.read[i];
+                    int write = reply.update.getOrDefault(key, -1);
+
+                    if (read != null)
+                        strictSerializable.witnessRead(k, read);
                     if (write >= 0)
-                        read = append(read, write);
-                    linearizableMap.computeIfAbsent(k, LinearizabilityVerifier::new)
-                              .witnessRead(new Observation(read, start, end));
+                        strictSerializable.witnessWrite(k, write);
                 }
-                if (write >= 0)
-                {
-                    serializable.witnessWrite(k, write);
-                    linearizableMap.computeIfAbsent(k, LinearizabilityVerifier::new)
-                                   .witnessWrite(write, start, end, true);
-                }
-            }
 
-            serializable.apply();
+                strictSerializable.apply(start, end);
+            }
+            catch (Throwable t)
+            {
+                failures.add(t);
+            }
         };
 
         Cluster.run(nodes.toArray(Id[]::new), () -> queue,
@@ -228,9 +228,11 @@ public class BurnTest
 
     public static void main(String[] args) throws Exception
     {
-        while (true)
+        Long overrideSeed = 1270818742825595267L;
+//        Long overrideSeed = null;
+        do
         {
-            long seed = ThreadLocalRandom.current().nextLong();
+            long seed = overrideSeed != null ? overrideSeed : ThreadLocalRandom.current().nextLong();
             logger.info("Seed: {}", seed);
             Random random = new Random(seed);
             try
@@ -241,7 +243,7 @@ public class BurnTest
                      clients,
                      nodes,
                      5 + random.nextInt(15),
-                     100,
+                     200,
                      10 + random.nextInt(30));
             }
             catch (Throwable t)
@@ -249,7 +251,7 @@ public class BurnTest
                 logger.error("Exception running burn test:", t);
                 throw t;
             }
-        }
+        } while (overrideSeed == null);
     }
 
     private static List<Id> generateIds(boolean clients, int count)
@@ -262,7 +264,7 @@ public class BurnTest
 
     private static int key(Key key)
     {
-        return ((IntKey) key).key;
+        return ((IntHashKey) key).key;
     }
 
     private static int[] append(int[] to, int append)

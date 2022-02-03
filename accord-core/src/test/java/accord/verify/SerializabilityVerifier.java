@@ -25,6 +25,7 @@ import java.util.stream.IntStream;
  * That is, we maintain links to the maximum predecessor step for each key, at each step for each key.
  * In combination with a linearizability verifier for each register/partition, we verify strict-serializability.
  *
+ * TODO: session serializability, i.e. use each client's sequence of events as additional happens-before relations
  * TODO: find and report a path when we encounter a violation
  */
 public class SerializabilityVerifier

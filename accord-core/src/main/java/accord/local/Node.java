@@ -286,6 +286,7 @@ public class Node implements ConfigurationService.Listener
 
         CompletionStage<Result> result = Coordinate.execute(this, txnId, txn);
         coordinating.put(txnId, result);
+        // TODO (now): error handling
         result.handle((success, fail) ->
                       {
                           coordinating.remove(txnId);
@@ -324,6 +325,7 @@ public class Node implements ConfigurationService.Listener
 
         result = Coordinate.recover(this, txnId, txn);
         coordinating.putIfAbsent(txnId, result);
+        // TODO (now): error handling
         result.handle((success, fail) -> {
             coordinating.remove(txnId);
             agent.onRecover(this, success, fail);
