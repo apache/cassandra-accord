@@ -31,18 +31,7 @@ public class TopologyManager implements ConfigurationService.Listener
         private final Topology local;
         private final QuorumTracker syncTracker;
         private boolean syncComplete = false;
-        private boolean prevSynced;
-
-        private boolean updateState(boolean prevSynced)
-        {
-            this.prevSynced = prevSynced;
-            if (!syncComplete)
-            {
-                syncComplete = syncTracker.hasReachedQuorum();
-                return syncComplete;
-            }
-            return false;
-        }
+        private boolean prevSynced = false;
 
         EpochState(Topology global, boolean prevSynced)
         {
@@ -50,14 +39,19 @@ public class TopologyManager implements ConfigurationService.Listener
             this.global = global;
             this.local = global.forNode(node);
             this.syncTracker = new QuorumTracker(new Topologies.Singleton(global, false));
-            this.prevSynced = prevSynced;
-            updateState(prevSynced);
+            if (prevSynced)
+                markPrevSynced();
         }
 
-        public boolean recordSyncComplete(Node.Id node, boolean prevSynced)
+        void markPrevSynced()
+        {
+            prevSynced = true;
+        }
+
+        public void recordSyncComplete(Node.Id node)
         {
             syncTracker.recordSuccess(node);
-            return updateState(prevSynced);
+            syncComplete = syncTracker.hasReachedQuorum();
         }
 
         long epoch()
@@ -89,7 +83,7 @@ public class TopologyManager implements ConfigurationService.Listener
 
         boolean shardIsUnsynced(int idx, Shard shard)
         {
-            return !syncTracker.unsafeGet(idx).hasReachedQuorum();
+            return !prevSynced || !syncTracker.unsafeGet(idx).hasReachedQuorum();
         }
     }
 
@@ -136,18 +130,22 @@ public class TopologyManager implements ConfigurationService.Listener
             List<Set<Node.Id>> pendingSync = new ArrayList<>(pendingSyncComplete);
             if (!pendingSync.isEmpty())
             {
-                boolean prevSynced = epochs.length <= 1 || epochs[1].syncComplete();
-                EpochState currentEpoch = epochs[0];
-                pendingSync.remove(0).forEach(id -> currentEpoch.recordSyncComplete(id, prevSynced));
+                EpochState current = epochs[0];
+                if (epochs.length <= 1 || epochs[1].syncComplete())
+                    current.markPrevSynced();
+                pendingSync.remove(0).forEach(current::recordSyncComplete);
             }
             System.arraycopy(epochs, 0, nextEpochs, 1, epochs.length);
 
             boolean prevSynced = epochs.length == 0 || epochs[0].syncComplete();
-            EpochState nextEpochState = new EpochState(topology, prevSynced);
-            nextEpochs[0] = nextEpochState;
+            nextEpochs[0] = new EpochState(topology, prevSynced);
             return new Epochs(nextEpochs, pendingSync);
         }
 
+        /**
+         * Mark sync complete for the given node/epoch, and if this epoch
+         * is now synced, update the prevSynced flag on superseding epochs
+         */
         public void syncComplete(Node.Id node, long epoch)
         {
             Preconditions.checkArgument(epoch > 0);
@@ -161,12 +159,12 @@ public class TopologyManager implements ConfigurationService.Listener
             }
             else
             {
-                boolean prevSynced = epoch == minEpoch || get(epoch - 1).syncComplete();
-                boolean hasChanged = get(epoch).recordSyncComplete(node, prevSynced);
-                for (epoch++ ;hasChanged && epoch <= maxEpoch; epoch++)
+                EpochState state = get(epoch);
+                state.recordSyncComplete(node);
+                for (epoch++ ;state.syncComplete() && epoch <= maxEpoch; epoch++)
                 {
-                    prevSynced = get(epoch - 1).syncComplete();
-                    hasChanged = get(epoch).updateState(prevSynced);
+                    state = get(epoch);
+                    state.markPrevSynced();
                 }
             }
         }
