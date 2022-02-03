@@ -98,6 +98,10 @@ public class TopologyManager implements ConfigurationService.Listener
         private final long maxEpoch;
         private final long minEpoch;
         private final EpochState[] epochs;
+        // nodes we've received sync complete notifications from, for epochs we do not yet have topologies for.
+        // Pending sync notifications are indexed by epoch, with the current epoch as index[0], and future epochs
+        // as index[epoch - currentEpoch]. Sync complete notifications for the current epoch are marked pending
+        // until the superseding epoch has been applied
         private final List<Set<Node.Id>> pendingSyncComplete;
 
         private Epochs(EpochState[] epochs, List<Set<Node.Id>> pendingSyncComplete)
@@ -129,7 +133,7 @@ public class TopologyManager implements ConfigurationService.Listener
         {
             Preconditions.checkArgument(topology.epoch == nextEpoch());
             EpochState[] nextEpochs = new EpochState[epochs.length + 1];
-            List<Set<Node.Id>> pendingSync = pendingSyncComplete;
+            List<Set<Node.Id>> pendingSync = new ArrayList<>(pendingSyncComplete);
             if (!pendingSync.isEmpty())
             {
                 boolean prevSynced = epochs.length <= 1 || epochs[1].syncComplete();
