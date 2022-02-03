@@ -13,30 +13,30 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Indicates the ranges the coordinator expects the recipient to service for a request, and
- * the minimum epochs the recipient will need to be aware of for each range
+ * Indicates the keys the coordinator expects the recipient to service for a request, and
+ * the minimum epochs the recipient will need to be aware of for each set of keys
  */
-public class TxnRequestScope
+public class RequestScope
 {
-    public static class EpochRanges
+    public static class KeysForEpoch
     {
         public final long epoch;
         public final Keys keys;
 
-        public EpochRanges(long epoch, Keys keys)
+        public KeysForEpoch(long epoch, Keys keys)
         {
             this.epoch = epoch;
             this.keys = keys;
         }
 
-        static EpochRanges forTopology(Topology topology, Id node, Keys keys)
+        static KeysForEpoch forTopology(Topology topology, Id node, Keys keys)
         {
             KeyRanges topologyRanges = topology.rangesForNode(node);
             if (topologyRanges == null)
                 return null;
             topologyRanges = topologyRanges.intersection(keys);
             Keys scopeKeys = keys.intersection(topologyRanges);
-            return !topologyRanges.isEmpty() ? new EpochRanges(topology.epoch(), scopeKeys) : null;
+            return !topologyRanges.isEmpty() ? new KeysForEpoch(topology.epoch(), scopeKeys) : null;
         }
 
         @Override
@@ -44,7 +44,7 @@ public class TxnRequestScope
         {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
-            EpochRanges that = (EpochRanges) o;
+            KeysForEpoch that = (KeysForEpoch) o;
             return epoch == that.epoch && keys.equals(that.keys);
         }
 
@@ -65,12 +65,12 @@ public class TxnRequestScope
     }
 
     private final long maxEpoch;
-    private final EpochRanges[] ranges;
+    private final KeysForEpoch[] ranges;
 
-    public TxnRequestScope(long maxEpoch, EpochRanges... ranges)
+    public RequestScope(long maxEpoch, KeysForEpoch... epochKeys)
     {
         this.maxEpoch = maxEpoch;
-        this.ranges = ranges;
+        this.ranges = epochKeys;
     }
 
     public int size()
@@ -78,28 +78,28 @@ public class TxnRequestScope
         return ranges.length;
     }
 
-    public EpochRanges get(int i)
+    public KeysForEpoch get(int i)
     {
         return ranges[i];
     }
 
-    public static TxnRequestScope forTopologies(Id node, Topologies topologies, Keys keys)
+    public static RequestScope forTopologies(Id node, Topologies topologies, Keys keys)
     {
-        List<EpochRanges> ranges = new ArrayList<>(topologies.size());
+        List<KeysForEpoch> ranges = new ArrayList<>(topologies.size());
         for (int i=topologies.size() - 1; i>=0; i--)
         {
             Topology topology = topologies.get(i);
-            EpochRanges epochRanges = EpochRanges.forTopology(topology, node, keys);
-            if (epochRanges != null)
+            KeysForEpoch keysForEpoch = KeysForEpoch.forTopology(topology, node, keys);
+            if (keysForEpoch != null)
             {
-                ranges.add(epochRanges);
+                ranges.add(keysForEpoch);
             }
         }
 
-        return new TxnRequestScope(topologies.currentEpoch(), ranges.toArray(EpochRanges[]::new));
+        return new RequestScope(topologies.currentEpoch(), ranges.toArray(KeysForEpoch[]::new));
     }
 
-    public static TxnRequestScope forTopologies(Id node, Topologies topologies, Txn txn)
+    public static RequestScope forTopologies(Id node, Topologies topologies, Txn txn)
     {
         return forTopologies(node, topologies, txn.keys());
     }
@@ -111,9 +111,9 @@ public class TxnRequestScope
 
     public boolean intersects(KeyRanges ranges)
     {
-        for (EpochRanges epochRanges : this.ranges)
+        for (KeysForEpoch keysForEpoch : this.ranges)
         {
-            if (ranges.intersects(epochRanges.keys))
+            if (ranges.intersects(keysForEpoch.keys))
                 return true;
         }
 
@@ -125,7 +125,7 @@ public class TxnRequestScope
     {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        TxnRequestScope that = (TxnRequestScope) o;
+        RequestScope that = (RequestScope) o;
         return maxEpoch == that.maxEpoch && Arrays.equals(ranges, that.ranges);
     }
 

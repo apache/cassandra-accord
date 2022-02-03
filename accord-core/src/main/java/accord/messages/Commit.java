@@ -14,7 +14,7 @@ public class Commit extends ReadData
     final Dependencies deps;
     final boolean read;
 
-    public Commit(TxnRequestScope scope, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, boolean read)
+    public Commit(RequestScope scope, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, boolean read)
     {
         super(scope, txnId, txn, executeAt);
         this.deps = deps;
@@ -23,7 +23,7 @@ public class Commit extends ReadData
 
     public Commit(Id to, Topologies topologies, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, boolean read)
     {
-        this(TxnRequestScope.forTopologies(to, topologies, txn), txnId, txn, executeAt, deps, read);
+        this(RequestScope.forTopologies(to, topologies, txn), txnId, txn, executeAt, deps, read);
     }
 
     public void process(Node node, Id from, long messageId)

@@ -5,7 +5,7 @@ import accord.coordinate.tracking.QuorumTracker;
 import accord.local.Node;
 import accord.messages.Request;
 import accord.messages.TxnRequest;
-import accord.messages.TxnRequestScope;
+import accord.messages.RequestScope;
 import accord.txn.Keys;
 import accord.txn.Txn;
 import com.google.common.annotations.VisibleForTesting;
@@ -176,12 +176,12 @@ public class TopologyManager implements ConfigurationService.Listener
             return epochs[(int) (maxEpoch - epoch)];
         }
 
-        long canProcess(TxnRequestScope scope)
+        long canProcess(RequestScope scope)
         {
             EpochState lastState = null;
             for (int i=0, mi=scope.size(); i<mi; i++)
             {
-                TxnRequestScope.EpochRanges requestRanges = scope.get(i);
+                RequestScope.KeysForEpoch requestRanges = scope.get(i);
                 EpochState epochState = get(requestRanges.epoch);
 
                 if (epochState != null)

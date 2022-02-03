@@ -2,14 +2,14 @@ package accord.messages;
 
 public abstract class TxnRequest implements Request
 {
-    private final TxnRequestScope scope;
+    private final RequestScope scope;
 
-    public TxnRequest(TxnRequestScope scope)
+    public TxnRequest(RequestScope scope)
     {
         this.scope = scope;
     }
 
-    public TxnRequestScope scope()
+    public RequestScope scope()
     {
         return scope;
     }

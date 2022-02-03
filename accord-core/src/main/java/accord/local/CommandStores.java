@@ -4,7 +4,7 @@ import accord.api.Agent;
 import accord.api.KeyRange;
 import accord.api.Store;
 import accord.local.CommandStore.Mapping;
-import accord.messages.TxnRequestScope;
+import accord.messages.RequestScope;
 import accord.topology.KeyRanges;
 import accord.topology.Topology;
 import accord.txn.Keys;
@@ -83,7 +83,7 @@ public class CommandStores
         return StreamSupport.stream(new ShardSpliterator(predicate), false);
     }
 
-    public Stream<CommandStore> forScope(TxnRequestScope scope)
+    public Stream<CommandStore> forScope(RequestScope scope)
     {
         IntPredicate predicate = i ->  scope.intersects(rangeMappings.mappings[i].ranges);
         return StreamSupport.stream(new ShardSpliterator(predicate), false);

@@ -15,7 +15,7 @@ import accord.coordinate.Coordinate;
 import accord.messages.Callback;
 import accord.messages.Request;
 import accord.messages.Reply;
-import accord.messages.TxnRequestScope;
+import accord.messages.RequestScope;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.topology.TopologyManager;
@@ -197,7 +197,7 @@ public class Node implements ConfigurationService.Listener
         return commandStores.forKeys(txn.keys());
     }
 
-    public Stream<CommandStore> local(TxnRequestScope scope)
+    public Stream<CommandStore> local(RequestScope scope)
     {
         return commandStores.forScope(scope);
     }

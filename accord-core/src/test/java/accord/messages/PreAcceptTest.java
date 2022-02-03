@@ -6,7 +6,7 @@ import accord.local.Node.Id;
 import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.impl.mock.MockCluster.Clock;
-import accord.messages.TxnRequestScope.EpochRanges;
+import accord.messages.RequestScope.KeysForEpoch;
 import accord.topology.Topology;
 import accord.txn.Dependencies;
 import accord.txn.Txn;
@@ -23,7 +23,6 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.Random;
 
 import static accord.Utils.id;
 import static accord.Utils.writeTxn;
@@ -51,9 +50,9 @@ public class PreAcceptTest
                         CommandStore.Factory.SINGLE_THREAD);
     }
 
-    private static TxnRequestScope scope(TxnId txnId, Txn txn)
+    private static RequestScope scope(TxnId txnId, Txn txn)
     {
-        return new TxnRequestScope(txnId.epoch, new EpochRanges(txnId.epoch, txn.keys()));
+        return new RequestScope(txnId.epoch, new KeysForEpoch(txnId.epoch, txn.keys()));
     }
 
     private static PreAccept preAccept(TxnId txnId, Txn txn)

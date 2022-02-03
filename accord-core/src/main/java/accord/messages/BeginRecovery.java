@@ -26,7 +26,7 @@ public class BeginRecovery extends TxnRequest
     final Txn txn;
     final Ballot ballot;
 
-    public BeginRecovery(TxnRequestScope scope, TxnId txnId, Txn txn, Ballot ballot)
+    public BeginRecovery(RequestScope scope, TxnId txnId, Txn txn, Ballot ballot)
     {
         super(scope);
         this.txnId = txnId;
@@ -36,7 +36,7 @@ public class BeginRecovery extends TxnRequest
 
     public BeginRecovery(Id to, Topologies topologies, TxnId txnId, Txn txn, Ballot ballot)
     {
-        this(TxnRequestScope.forTopologies(to, topologies, txn), txnId, txn, ballot);
+        this(RequestScope.forTopologies(to, topologies, txn), txnId, txn, ballot);
     }
 
     public void process(Node node, Id replyToNode, long replyToMessage)
