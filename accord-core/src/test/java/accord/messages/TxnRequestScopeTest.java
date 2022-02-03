@@ -2,6 +2,8 @@ package accord.messages;
 
 import accord.api.KeyRange;
 import accord.impl.IntKey;
+import accord.messages.TxnRequest.Scope;
+import accord.messages.TxnRequest.Scope.KeysForEpoch;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.txn.Keys;
@@ -12,21 +14,21 @@ import static accord.Utils.*;
 import static accord.Utils.idSet;
 import static accord.impl.IntKey.range;
 
-public class RequestScopeTest
+public class TxnRequestScopeTest
 {
-    private static RequestScope.KeysForEpoch epochRanges(long epoch, Keys keys)
+    private static KeysForEpoch epochRanges(long epoch, Keys keys)
     {
-        return new RequestScope.KeysForEpoch(epoch, keys);
+        return new KeysForEpoch(epoch, keys);
     }
 
-    private static RequestScope.KeysForEpoch epochRanges(long epoch, int... keys)
+    private static KeysForEpoch epochRanges(long epoch, int... keys)
     {
         return epochRanges(epoch, IntKey.keys(keys));
     }
 
-    private static RequestScope scope(long epoch, RequestScope.KeysForEpoch... epochKeys)
+    private static Scope scope(long epoch, KeysForEpoch... epochKeys)
     {
-        return new RequestScope(epoch, epochKeys);
+        return new Scope(epoch, epochKeys);
     }
 
     @Test
@@ -42,9 +44,9 @@ public class RequestScopeTest
         topologies.add(topology1);
 
         Assertions.assertEquals(scope(2, epochRanges(1, 150)),
-                                RequestScope.forTopologies(id(1), topologies, keys));
+                                Scope.forTopologies(id(1), topologies, keys));
         Assertions.assertEquals(scope(2, epochRanges(2, 150)),
-                                RequestScope.forTopologies(id(4), topologies, keys));
+                                Scope.forTopologies(id(4), topologies, keys));
     }
 
     @Test
@@ -65,8 +67,8 @@ public class RequestScopeTest
         topologies.add(topology2);
         topologies.add(topology1);
         Assertions.assertEquals(scope(2, epochRanges(1, 150), epochRanges(2, 250)),
-                                RequestScope.forTopologies(id(1), topologies, keys));
+                                Scope.forTopologies(id(1), topologies, keys));
         Assertions.assertEquals(scope(2, epochRanges(1, 250), epochRanges(2, 150)),
-                                RequestScope.forTopologies(id(4), topologies, keys));
+                                Scope.forTopologies(id(4), topologies, keys));
     }
 }

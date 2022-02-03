@@ -19,7 +19,7 @@ public class PreAccept extends TxnRequest
     public final TxnId txnId;
     public final Txn txn;
 
-    public PreAccept(RequestScope scope, TxnId txnId, Txn txn)
+    public PreAccept(Scope scope, TxnId txnId, Txn txn)
     {
         super(scope);
         this.txnId = txnId;
@@ -28,7 +28,7 @@ public class PreAccept extends TxnRequest
 
     public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn)
     {
-        this(RequestScope.forTopologies(to, topologies, txn), txnId, txn);
+        this(Scope.forTopologies(to, topologies, txn), txnId, txn);
     }
 
     public void process(Node node, Id from, long messageId)

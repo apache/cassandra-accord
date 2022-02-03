@@ -20,7 +20,7 @@ public class Apply extends TxnRequest
     final Writes writes;
     final Result result;
 
-    public Apply(RequestScope scope, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, Writes writes, Result result)
+    public Apply(Scope scope, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, Writes writes, Result result)
     {
         super(scope);
         this.txnId = txnId;
@@ -33,7 +33,7 @@ public class Apply extends TxnRequest
 
     public Apply(Node.Id to, Topologies topologies, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, Writes writes, Result result)
     {
-        this(RequestScope.forTopologies(to, topologies, txn), txnId, txn, executeAt, deps, writes, result);
+        this(Scope.forTopologies(to, topologies, txn), txnId, txn, executeAt, deps, writes, result);
     }
 
     public void process(Node node, Id replyToNode, long replyToMessage)

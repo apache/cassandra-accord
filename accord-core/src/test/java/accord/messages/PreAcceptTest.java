@@ -6,7 +6,6 @@ import accord.local.Node.Id;
 import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.impl.mock.MockCluster.Clock;
-import accord.messages.RequestScope.KeysForEpoch;
 import accord.topology.Topology;
 import accord.txn.Dependencies;
 import accord.txn.Txn;
@@ -50,9 +49,9 @@ public class PreAcceptTest
                         CommandStore.Factory.SINGLE_THREAD);
     }
 
-    private static RequestScope scope(TxnId txnId, Txn txn)
+    private static TxnRequest.Scope scope(TxnId txnId, Txn txn)
     {
-        return new RequestScope(txnId.epoch, new KeysForEpoch(txnId.epoch, txn.keys()));
+        return new TxnRequest.Scope(txnId.epoch, new TxnRequest.Scope.KeysForEpoch(txnId.epoch, txn.keys()));
     }
 
     private static PreAccept preAccept(TxnId txnId, Txn txn)

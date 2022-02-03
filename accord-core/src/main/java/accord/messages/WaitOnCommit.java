@@ -81,7 +81,7 @@ public class WaitOnCommit extends TxnRequest
     final TxnId txnId;
     final Keys keys;
 
-    public WaitOnCommit(RequestScope scope, TxnId txnId, Keys keys)
+    public WaitOnCommit(Scope scope, TxnId txnId, Keys keys)
     {
         super(scope);
         this.txnId = txnId;
@@ -90,7 +90,7 @@ public class WaitOnCommit extends TxnRequest
 
     public WaitOnCommit(Id to, Topologies topologies, TxnId txnId, Keys keys)
     {
-        this(RequestScope.forTopologies(to, topologies, keys), txnId, keys);
+        this(Scope.forTopologies(to, topologies, keys), txnId, keys);
     }
 
     public void process(Node node, Id replyToNode, long replyToMessage)

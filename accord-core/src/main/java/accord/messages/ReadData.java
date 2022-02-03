@@ -118,7 +118,7 @@ public class ReadData extends TxnRequest
             }
         }
 
-        synchronized void setup(TxnId txnId, Txn txn, RequestScope scope)
+        synchronized void setup(TxnId txnId, Txn txn, Scope scope)
         {
             // TODO: simple hash set supporting concurrent modification, or else avoid concurrent modification
             waitingOn = node.local(scope).collect(Collectors.toCollection(() -> new DeterministicIdentitySet<>()));
@@ -153,7 +153,7 @@ public class ReadData extends TxnRequest
     final Txn txn;
     final Timestamp executeAt;
 
-    public ReadData(RequestScope scope, TxnId txnId, Txn txn, Timestamp executeAt)
+    public ReadData(Scope scope, TxnId txnId, Txn txn, Timestamp executeAt)
     {
         super(scope);
         this.txnId = txnId;
@@ -163,7 +163,7 @@ public class ReadData extends TxnRequest
 
     public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Txn txn, Timestamp executeAt)
     {
-        this(RequestScope.forTopologies(to, topologies, txn), txnId, txn, executeAt);
+        this(Scope.forTopologies(to, topologies, txn), txnId, txn, executeAt);
     }
 
     public void process(Node node, Node.Id from, long messageId)
