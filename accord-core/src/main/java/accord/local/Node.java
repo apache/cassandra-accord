@@ -327,10 +327,10 @@ public class Node implements ConfigurationService.Listener
 
     public void receive(Request request, Id from, long messageId)
     {
-        long waitingOnEpoch = topology().canProcess(request);
-        if (waitingOnEpoch > 0)
+        long unknownEpoch = topology().maxUnknownEpoch(request);
+        if (unknownEpoch > 0)
         {
-            configService.fetchTopologyForEpoch(waitingOnEpoch, () -> receive(request, from, messageId));
+            configService.fetchTopologyForEpoch(unknownEpoch, () -> receive(request, from, messageId));
             return;
         }
         scheduler.now(() -> request.process(this, from, messageId));

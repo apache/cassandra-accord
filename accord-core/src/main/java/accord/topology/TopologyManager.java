@@ -176,7 +176,7 @@ public class TopologyManager implements ConfigurationService.Listener
             return epochs[(int) (maxEpoch - epoch)];
         }
 
-        long canProcess(RequestScope scope)
+        long maxUnknownEpoch(RequestScope scope)
         {
             EpochState lastState = null;
             for (int i=0, mi=scope.size(); i<mi; i++)
@@ -315,11 +315,11 @@ public class TopologyManager implements ConfigurationService.Listener
         return forEpoch(txn.keys(), epoch);
     }
 
-    public long canProcess(Request request)
+    public long maxUnknownEpoch(Request request)
     {
         if (!(request instanceof TxnRequest))
             return 0;
 
-        return epochs.canProcess(((TxnRequest) request).scope());
+        return epochs.maxUnknownEpoch(((TxnRequest) request).scope());
     }
 }
