@@ -160,12 +160,8 @@ public class TopologyUpdate
      */
     private static Stream<MessageTask> thoroughSync(Node node, long syncEpoch)
     {
-        long nextEpoch = syncEpoch + 1;
         Topology syncTopology = node.configService().getTopologyForEpoch(syncEpoch);
         Topology localTopology = syncTopology.forNode(node.id());
-        Topology nextTopology = node.configService().getTopologyForEpoch(nextEpoch);
-//        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> allNodesFor(cmd.txn, syncTopology, nextTopology);
-//        TopologyManager topology = node.topology();
         Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().forTxn(cmd.txn).nodes();
 
         KeyRanges ranges = localTopology.ranges();
@@ -179,7 +175,6 @@ public class TopologyUpdate
 
     /**
      * Syncs all newly replicated commands when nodes are gaining ranges and the current epoch
-     * FIXME: causes correctness issues after multiple ownership changes, unclear why
      */
     private static Stream<MessageTask> optimizedSync(Node node, long syncEpoch)
     {
@@ -187,9 +182,7 @@ public class TopologyUpdate
         Topology syncTopology = node.configService().getTopologyForEpoch(syncEpoch);
         Topology localTopology = syncTopology.forNode(node.id());
         Topology nextTopology = node.configService().getTopologyForEpoch(nextEpoch);
-//        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> allNodesFor(cmd.txn, syncTopology, nextTopology);
         Function<CommandSync, Collection<Node.Id>> nextNodes = cmd -> allNodesFor(cmd.txn, nextTopology);
-//        TopologyManager topology = node.topology();
         Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().forTxn(cmd.txn).nodes();
 
         // backfill new replicas with operations from prior epochs
@@ -213,8 +206,6 @@ public class TopologyUpdate
                     messageStream = Stream.concat(messageStream, syncEpochCommands(node,
                                                                                    epoch,
                                                                                    ranges,
-//                                                                                   nextNodes,
-//                                                                                   allNodes,
                                                                                    cmd -> newNodes,
                                                                                    syncEpoch, COMMITTED_ONLY));
             }
@@ -232,7 +223,6 @@ public class TopologyUpdate
 
     public static CompletionStage<Void> sync(Node node, long syncEpoch)
     {
-//        Stream<MessageTask> messageStream = thoroughSync(node, syncEpoch);
         Stream<MessageTask> messageStream = optimizedSync(node, syncEpoch);
 
         Iterator<MessageTask> iter = messageStream.iterator();

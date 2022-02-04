@@ -21,7 +21,10 @@ public interface ConfigurationService
         void onTopologyUpdate(Topology topology);
 
         /**
-         * Called when accord data associated with a superseded epoch has been sync'd across current replicas
+         * Called when accord data associated with a superseded epoch has been sync'd across current replicas. Before
+         * calling this, implementations need to ensure any new electorates are aware of all fast path decisions made
+         * in previous epochs, and that replicas of new ranges have learned of the transaction history for their
+         * replicated ranges.
          */
         void onEpochSyncComplete(Node.Id node, long epoch);
     }
