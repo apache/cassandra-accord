@@ -117,15 +117,28 @@ public class BurnTest
 
     static void reconcile(long seed, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency) throws IOException, ExecutionException, InterruptedException, TimeoutException
     {
+        ReconcilingLogger logReconciler = new ReconcilingLogger(logger);
+
         Random random1 = new Random(), random2 = new Random();
         random1.setSeed(seed);
         random2.setSeed(seed);
         ExecutorService exec = Executors.newFixedThreadPool(2);
-        Future<?> f1 = exec.submit(() -> burn(random1, topologyFactory, clients, nodes, keyCount, operations, concurrency));
-        Future<?> f2 = exec.submit(() -> burn(random2, topologyFactory, clients, nodes, keyCount, operations, concurrency));
+        Future<?> f1;
+        try (ReconcilingLogger.Session session = logReconciler.nextSession())
+        {
+            f1 = exec.submit(() -> burn(random1, topologyFactory, clients, nodes, keyCount, operations, concurrency));
+        }
+
+        Future<?> f2;
+        try (ReconcilingLogger.Session session = logReconciler.nextSession())
+        {
+            f2 = exec.submit(() -> burn(random2, topologyFactory, clients, nodes, keyCount, operations, concurrency));
+        }
         exec.shutdown();
         f1.get();
         f2.get();
+
+        assert logReconciler.reconcile();
     }
 
     static void burn(Random random, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency)
