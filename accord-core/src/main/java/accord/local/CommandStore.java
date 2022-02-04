@@ -23,6 +23,7 @@ import java.util.function.IntFunction;
  */
 public abstract class CommandStore
 {
+    // TODO: consider sharding on key hash, rather than splitting ranges
     static class Mapping
     {
         static final Mapping EMPTY = new Mapping(KeyRanges.EMPTY, Topology.EMPTY);

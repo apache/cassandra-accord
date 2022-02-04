@@ -108,7 +108,6 @@ public class ReadTracker extends AbstractResponseTracker<ReadTracker.ReadShardTr
      */
     public Set<Id> computeMinimalReadSetAndMarkInflight()
     {
-        // TODO (review): should this only be consulting the latest topology?
         Set<ReadShardTracker> toRead = accumulate((tracker, accumulate) -> {
             if (!tracker.shouldRead())
                 return accumulate;
