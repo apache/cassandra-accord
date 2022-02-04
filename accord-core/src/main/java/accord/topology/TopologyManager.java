@@ -89,8 +89,7 @@ public class TopologyManager implements ConfigurationService.Listener
 
     private class Epochs
     {
-        private final long maxEpoch;
-        private final long minEpoch;
+        private final long currentEpoch;
         private final EpochState[] epochs;
         // nodes we've received sync complete notifications from, for epochs we do not yet have topologies for.
         // Pending sync notifications are indexed by epoch, with the current epoch as index[0], and future epochs
@@ -100,11 +99,10 @@ public class TopologyManager implements ConfigurationService.Listener
 
         private Epochs(EpochState[] epochs, List<Set<Node.Id>> pendingSyncComplete)
         {
-            this.maxEpoch = epochs.length > 0 ? epochs[0].epoch() : 0;
+            this.currentEpoch = epochs.length > 0 ? epochs[0].epoch() : 0;
             this.pendingSyncComplete = pendingSyncComplete;
             for (int i=1; i<epochs.length; i++)
                 Preconditions.checkArgument(epochs[i].epoch() == epochs[i-1].epoch() - 1);
-            this.minEpoch = epochs.length > 0 ? epochs[epochs.length - 1].epoch() : 0;
             this.epochs = epochs;
         }
 
@@ -149,9 +147,9 @@ public class TopologyManager implements ConfigurationService.Listener
         public void syncComplete(Node.Id node, long epoch)
         {
             Preconditions.checkArgument(epoch > 0);
-            if (epoch > maxEpoch - 1)
+            if (epoch > currentEpoch - 1)
             {
-                int idx = (int) (epoch - maxEpoch);
+                int idx = (int) (epoch - currentEpoch);
                 for (int i=pendingSyncComplete.size(); i<=idx; i++)
                     pendingSyncComplete.add(new HashSet<>());
 
@@ -161,7 +159,7 @@ public class TopologyManager implements ConfigurationService.Listener
             {
                 EpochState state = get(epoch);
                 state.recordSyncComplete(node);
-                for (epoch++ ;state.syncComplete() && epoch <= maxEpoch; epoch++)
+                for (epoch++ ; state.syncComplete() && epoch <= currentEpoch; epoch++)
                 {
                     state = get(epoch);
                     state.markPrevSynced();
@@ -171,10 +169,10 @@ public class TopologyManager implements ConfigurationService.Listener
 
         private EpochState get(long epoch)
         {
-            if (epoch > maxEpoch || epoch < maxEpoch - epochs.length)
+            if (epoch > currentEpoch || epoch < currentEpoch - epochs.length)
                 return null;
 
-            return epochs[(int) (maxEpoch - epoch)];
+            return epochs[(int) (currentEpoch - epoch)];
         }
 
         long maxUnknownEpoch(TxnRequest.Scope scope)
@@ -258,27 +256,27 @@ public class TopologyManager implements ConfigurationService.Listener
 
     public Topologies forKeys(Keys keys, long minEpoch)
     {
-        Epochs current = epochs;
+        Epochs snapshot = epochs;
 
-        EpochState epochState = current.get(current.maxEpoch);
-        Topology topology = epochState.global.forKeys(keys);
+        EpochState epochState = snapshot.get(snapshot.currentEpoch);
+        Topology currentTopology = epochState.global.forKeys(keys);
 
         if (minEpoch == Long.MAX_VALUE)
-            minEpoch = topology.epoch();
+            minEpoch = currentTopology.epoch();
         else
-            Preconditions.checkArgument(minEpoch <= topology.epoch() && minEpoch >= 0);
+            Preconditions.checkArgument(minEpoch <= currentTopology.epoch() && minEpoch >= 0);
 
-        if (topology.epoch() == minEpoch && !epochs.requiresHistoricalTopologiesFor(keys))
+        if (currentTopology.epoch() == minEpoch && !epochs.requiresHistoricalTopologiesFor(keys))
         {
-            return new Topologies.Singleton(topology, true);
+            return new Topologies.Singleton(currentTopology, true);
         }
         else
         {
             Topologies.Multi topologies = new Topologies.Multi(2);
-            topologies.add(topology);
-            for (int i=1; i<current.epochs.length; i++)
+            topologies.add(currentTopology);
+            for (int i=1; i<snapshot.epochs.length; i++)
             {
-                epochState = current.epochs[i];
+                epochState = snapshot.epochs[i];
                 if (i > 1 && epochState.syncCompleteFor(keys) && epochState.epoch() < minEpoch)
                     break;
 
