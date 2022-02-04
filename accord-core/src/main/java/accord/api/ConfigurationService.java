@@ -3,6 +3,9 @@ package accord.api;
 import accord.local.Node;
 import accord.topology.Topology;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+
 /**
  * Cluster configuration service. Manages linearizable cluster configuration changes. Any node reporting a
  * configuration with epoch n is guaranteed to have previously seen and applied every previous epoch configuration
@@ -51,6 +54,13 @@ public interface ConfigurationService
     default void reportEpoch(long epoch)
     {
         fetchTopologyForEpoch(epoch, null);
+    }
+
+    default CompletionStage<Void> fetchTopologyForEpochStage(long epoch)
+    {
+        CompletableFuture<Void> result = new CompletableFuture<>();
+        fetchTopologyForEpoch(epoch, () -> result.complete(null));
+        return result;
     }
 
     /**

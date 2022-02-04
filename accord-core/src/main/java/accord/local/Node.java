@@ -1,6 +1,7 @@
 package accord.local;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -277,6 +278,12 @@ public class Node implements ConfigurationService.Listener
 
     public CompletionStage<Result> coordinate(TxnId txnId, Txn txn)
     {
+        // TODO: The combination of updating the epoch of the next timestamp with epochs we don’t have topologies for,
+        //  and requiring preaccept to talk to its topology epoch means that learning of a new epoch via timestamp
+        //  (ie not via config service) will halt any new txns from a node until it receives this topology
+        if (txnId.epoch > configService.currentEpoch())
+            return configService.fetchTopologyForEpochStage(txnId.epoch).thenCompose(v -> coordinate(txnId, txn));
+
         CompletionStage<Result> result = Coordinate.execute(this, txnId, txn);
         coordinating.put(txnId, result);
         result.handle((success, fail) ->
@@ -299,6 +306,12 @@ public class Node implements ConfigurationService.Listener
     // TODO: encapsulate in Coordinate, so we can request that e.g. commits be re-sent?
     public void recover(TxnId txnId, Txn txn)
     {
+        if (txnId.epoch > configService.currentEpoch())
+        {
+            configService.fetchTopologyForEpoch(txnId.epoch, () -> recover(txnId, txn));
+            return;
+        }
+
         CompletionStage<Result> result = coordinating.get(txnId);
         if (result != null)
             return;
