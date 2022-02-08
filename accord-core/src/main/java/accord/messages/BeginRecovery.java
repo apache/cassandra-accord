@@ -1,5 +1,6 @@
 package accord.messages;
 
+import accord.api.ConfigurationService;
 import accord.api.Result;
 import accord.topology.Topologies;
 import accord.txn.Writes;
@@ -12,6 +13,7 @@ import accord.txn.Dependencies;
 import accord.local.Status;
 import accord.txn.Txn;
 import accord.txn.TxnId;
+import com.google.common.base.Preconditions;
 
 import static accord.local.Status.Accepted;
 import static accord.local.Status.Applied;
@@ -140,9 +142,21 @@ public class BeginRecovery extends TxnRequest
         {
             // disseminate directly
             RecoverOk ok = (RecoverOk) reply;
-            Topologies topologies = node.topology().forKeys(txn.keys, ok.executeAt.epoch);
-            node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, ok.executeAt, ok.deps, ok.writes, ok.result));
+            ConfigurationService configService = node.configService();
+            if (ok.executeAt.epoch > configService.currentEpoch())
+            {
+                configService.fetchTopologyForEpoch(ok.executeAt.epoch, () -> disseminateApply(node, ok));
+                return;
+            }
+            disseminateApply(node, ok);
         }
+    }
+
+    private void disseminateApply(Node node, RecoverOk ok)
+    {
+        Preconditions.checkArgument(ok.status == Applied);
+        Topologies topologies = node.topology().forKeys(txn.keys, ok.executeAt.epoch);
+        node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, ok.executeAt, ok.deps, ok.writes, ok.result));
     }
 
     public interface RecoverReply extends Reply
