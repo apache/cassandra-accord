@@ -1,6 +1,7 @@
 package accord.messages;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import accord.local.*;
@@ -15,14 +16,16 @@ public class WaitOnCommit extends TxnRequest
     {
         final Node node;
         final Id replyToNode;
+        final TxnId txnId;
         final long replyToMessage;
 
-        int waitingOn;
+        final AtomicInteger waitingOn = new AtomicInteger();
 
-        LocalWait(Node node, Id replyToNode, long replyToMessage)
+        LocalWait(Node node, Id replyToNode, TxnId txnId, long replyToMessage)
         {
             this.node = node;
             this.replyToNode = replyToNode;
+            this.txnId = txnId;
             this.replyToMessage = replyToMessage;
         }
 
@@ -50,31 +53,34 @@ public class WaitOnCommit extends TxnRequest
 
         private void ack()
         {
-            if (--waitingOn == 0)
+            if (waitingOn.decrementAndGet() == 0)
                 node.reply(replyToNode, replyToMessage, new WaitOnCommitOk());
         }
 
-        synchronized void setup(TxnId txnId, Keys keys)
+        void process(CommandStore instance)
+        {
+            Command command = instance.command(txnId);
+            switch (command.status())
+            {
+                case NotWitnessed:
+                case PreAccepted:
+                case Accepted:
+                    command.addListener(this);
+                    break;
+
+                case Committed:
+                case Executed:
+                case Applied:
+                case ReadyToExecute:
+                    ack();
+            }
+        }
+
+        synchronized void setup(Keys keys)
         {
             List<CommandStore> instances = node.local(keys).collect(Collectors.toList());
-            waitingOn = instances.size();
-            instances.forEach(instance -> {
-                Command command = instance.command(txnId);
-                switch (command.status())
-                {
-                    case NotWitnessed:
-                    case PreAccepted:
-                    case Accepted:
-                        command.addListener(this);
-                        break;
-
-                    case Committed:
-                    case Executed:
-                    case Applied:
-                    case ReadyToExecute:
-                        ack();
-                }
-            });
+            waitingOn.set(instances.size());
+            instances.forEach(instance -> instance.processBlocking(this::process));
         }
     }
 
@@ -95,7 +101,7 @@ public class WaitOnCommit extends TxnRequest
 
     public void process(Node node, Id replyToNode, long replyToMessage)
     {
-        new LocalWait(node, replyToNode, replyToMessage).setup(txnId, keys);
+        new LocalWait(node, replyToNode, txnId, replyToMessage).setup(keys);
     }
 
     public static class WaitOnCommitOk implements Reply

@@ -62,6 +62,8 @@ public class BeginRecovery extends TxnRequest
             }
             else
             {
+                // if accepted or committed txns with a later txnid exist and they do not contain
+                // our txnid as a dependency, it could not have been witnessed by a quorum
                 rejectsFastPath = txn.uncommittedStartedAfter(instance, txnId)
                                              .filter(c -> c.hasBeen(Accepted))
                                              .anyMatch(c -> !c.savedDeps().contains(txnId));
@@ -69,13 +71,14 @@ public class BeginRecovery extends TxnRequest
                     rejectsFastPath = txn.committedExecutesAfter(instance, txnId)
                                          .anyMatch(c -> !c.savedDeps().contains(txnId));
 
+                // committed txns with an earlier txnid and have our txnid as a dependency
                 earlierCommittedWitness = txn.committedStartedBefore(instance, txnId)
                                              .filter(c -> c.savedDeps().contains(txnId))
                                              .collect(Dependencies::new, Dependencies::add, Dependencies::addAll);
 
+                // accepted txns with an earlier txnid that don't have our txnid as a dependency
                 earlierAcceptedNoWitness = txn.uncommittedStartedBefore(instance, txnId)
                                               .filter(c -> c.is(Accepted) && !c.savedDeps().contains(txnId))
-                                              .filter(c -> c.savedDeps().contains(txnId))
                                               .collect(Dependencies::new, Dependencies::add, Dependencies::addAll);
             }
             return new RecoverOk(txnId, command.status(), command.accepted(), command.executeAt(), deps, earlierCommittedWitness, earlierAcceptedNoWitness, rejectsFastPath, command.writes(), command.result());

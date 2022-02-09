@@ -3,6 +3,9 @@ package accord.coordinate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import accord.coordinate.tracking.FastPathTracker;
 import accord.coordinate.tracking.QuorumTracker;
@@ -27,53 +30,55 @@ import static accord.local.Status.Accepted;
 // TODO: rename to Recover (verb); rename Recover message to not clash
 class Recover extends AcceptPhase implements Callback<RecoverReply>
 {
-    class RetryAfterCommits implements Callback<WaitOnCommitOk>
+    private static final Object SENTINEL = new Object();
+    static class AwaitCommit extends CompletableFuture<Object> implements Callback<WaitOnCommitOk>
     {
-        final QuorumTracker retryTracker;
-        final Topologies topologies;
+        final QuorumTracker tracker;
 
-        RetryAfterCommits(Dependencies waitOn)
+        AwaitCommit(Node node, TxnId txnId, Txn txn)
         {
-            topologies = node.topology().forTxn(txn);
-            retryTracker = new QuorumTracker(topologies);
-            for (Map.Entry<TxnId, Txn> e : waitOn)
-                node.send(topologies.nodes(), to -> new WaitOnCommit(to, topologies, e.getKey(), e.getValue().keys()), this);
+            Topologies topologies = node.topology().forTxn(txn, txnId.epoch);
+            this.tracker = new QuorumTracker(topologies);
+            node.send(topologies.nodes(), to -> new WaitOnCommit(to, topologies, txnId, txn.keys()), this);
         }
 
         @Override
-        public void onSuccess(Id from, WaitOnCommitOk response)
+        public synchronized void onSuccess(Id from, WaitOnCommitOk response)
         {
-            synchronized (Recover.this)
-            {
-                if (isDone() || retryTracker.hasReachedQuorum())
-                    return;
+            if (isDone()) return;
 
-                retryTracker.recordSuccess(from);
-
-                if (retryTracker.hasReachedQuorum())
-                {
-                    new Recover(node, ballot, txnId, txn, topologies).handle((success, failure) -> {
-                        if (success != null) complete(success);
-                        else completeExceptionally(failure);
-                        return null;
-                    });
-                }
-            }
+            tracker.recordSuccess(from);
+            if(tracker.hasReachedQuorum())
+                complete(SENTINEL);
         }
 
         @Override
-        public void onFailure(Id from, Throwable throwable)
+        public synchronized void onFailure(Id from, Throwable throwable)
         {
-            synchronized (Recover.this)
-            {
-                if (isDone())
-                    return;
+            if (isDone()) return;
 
-                retryTracker.recordFailure(from);
-                if (retryTracker.hasFailed())
-                    completeExceptionally(new Timeout());
-            }
+            tracker.recordFailure(from);
+            if (tracker.hasFailed())
+                completeExceptionally(new Timeout());
         }
+    }
+
+    static CompletionStage<Object> awaitCommits(Node node, Dependencies waitOn)
+    {
+        AtomicInteger remaining = new AtomicInteger(waitOn.size());
+        CompletableFuture<Object> future = new CompletableFuture<>();
+        for (Map.Entry<TxnId, Txn> e : waitOn)
+        {
+            new AwaitCommit(node, e.getKey(), e.getValue()).whenComplete((success, failure) -> {
+                if (future.isDone())
+                    return;
+                if (success != null && remaining.decrementAndGet() == 0)
+                    future.complete(SENTINEL);
+                else
+                    future.completeExceptionally(failure);
+            });
+        }
+        return future;
     }
 
     // TODO: not sure it makes sense to extend FastPathTracker, as intent here is a bit different
@@ -195,13 +200,24 @@ class Recover extends AcceptPhase implements Callback<RecoverReply>
             earlierAcceptedNoWitness.removeAll(earlierCommittedWitness);
             if (!earlierAcceptedNoWitness.isEmpty())
             {
-                new RetryAfterCommits(earlierCommittedWitness);
+                awaitCommits(node, earlierAcceptedNoWitness).whenComplete((success, failure) -> {
+                    if (success != null) retry();
+                    else completeExceptionally(new Timeout());
+                });
                 return;
             }
             executeAt = txnId;
         }
 
         startAccept(executeAt, deps, node.topology().forTxn(txn, Timestamp.min(txnId, executeAt).epoch));
+    }
+
+    private void retry()
+    {
+        new Recover(node, ballot, txnId, txn, node.topology().forEpoch(txn, txnId.epoch)).whenComplete((success, failure) -> {
+            if (success != null) complete(success);
+            else completeExceptionally(failure);
+        });
     }
 
     @Override

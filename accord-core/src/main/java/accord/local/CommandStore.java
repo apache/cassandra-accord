@@ -240,6 +240,22 @@ public abstract class CommandStore
 
     public abstract CompletionStage<Void> process(Consumer<? super CommandStore> consumer);
 
+    public void processBlocking(Consumer<? super CommandStore> consumer)
+    {
+        try
+        {
+            process(consumer).toCompletableFuture().get();
+        }
+        catch (InterruptedException e)
+        {
+            Thread.currentThread().interrupt();
+        }
+        catch (ExecutionException e)
+        {
+            throw new RuntimeException(e.getCause());
+        }
+    }
+
     public abstract void shutdown();
 
     public static class Synchronized extends CommandStore
