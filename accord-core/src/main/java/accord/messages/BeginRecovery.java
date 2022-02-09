@@ -78,7 +78,9 @@ public class BeginRecovery extends TxnRequest
 
                 // accepted txns with an earlier txnid that don't have our txnid as a dependency
                 earlierAcceptedNoWitness = txn.uncommittedStartedBefore(instance, txnId)
-                                              .filter(c -> c.is(Accepted) && !c.savedDeps().contains(txnId))
+                                              .filter(c -> c.is(Accepted)
+                                                        && !c.savedDeps().contains(txnId)
+                                                        && c.executeAt().compareTo(txnId) > 0)
                                               .collect(Dependencies::new, Dependencies::add, Dependencies::addAll);
             }
             return new RecoverOk(txnId, command.status(), command.accepted(), command.executeAt(), deps, earlierCommittedWitness, earlierAcceptedNoWitness, rejectsFastPath, command.writes(), command.result());
