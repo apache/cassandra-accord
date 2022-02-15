@@ -1,6 +1,7 @@
 package accord.burn;
 
 import accord.api.KeyRange;
+import accord.api.Result;
 import accord.api.TestableConfigurationService;
 import accord.local.Command;
 import accord.local.Node;
@@ -60,6 +61,8 @@ public class TopologyUpdate
         private final Timestamp executeAt;
 
         private final Dependencies deps;
+        private final Writes writes;
+        private final Result result;
 
         public CommandSync(Command command)
         {
@@ -69,6 +72,8 @@ public class TopologyUpdate
             this.status = command.status();
             this.executeAt = command.executeAt();
             this.deps = command.savedDeps();
+            this.writes = command.writes();
+            this.result = command.result();
         }
         public void process(Node node)
         {
@@ -83,9 +88,11 @@ public class TopologyUpdate
                         break;
                     case Committed:
                     case ReadyToExecute:
+                        commandStore.command(txnId).commit(txn, deps, executeAt);
+                        break;
                     case Executed:
                     case Applied:
-                        commandStore.command(txnId).commit(txn, deps, executeAt);
+                        commandStore.command(txnId).apply(txn, deps, executeAt, writes, result);
                         break;
                     default:
                         throw new IllegalStateException();
