@@ -14,9 +14,7 @@ import com.google.common.base.Preconditions;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.function.IntPredicate;
+import java.util.function.*;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -27,6 +25,7 @@ public class CommandStores
 {
     static class Mappings
     {
+        static final Mappings EMPTY = new Mappings(Topology.EMPTY, Topology.EMPTY, new Mapping[0]);
         final Topology cluster;
         final Topology local;
         final Mapping[] mappings;
@@ -38,55 +37,71 @@ public class CommandStores
             this.mappings = mappings;
         }
 
-        static Mappings empty(int size)
+        Mappings withNewTopology(Topology cluster, Topology local)
         {
-            Mapping[] mappings = new Mapping[size];
-            for (int i=0; i<size; i++)
-                mappings[i] = Mapping.EMPTY;
+            return new Mappings(cluster, local, Mapping.withNewLocalTopology(mappings, local));
+        }
+    }
 
-            return new Mappings(Topology.EMPTY, Topology.EMPTY, mappings);
+    static class StoresAndMappings
+    {
+        static final StoresAndMappings EMPTY = new StoresAndMappings(new CommandStore[0], Mappings.EMPTY);
+        private final CommandStore[] commandStores;
+        private final Mappings rangeMappings;
+
+        public StoresAndMappings(CommandStore[] commandStores, Mappings rangeMappings)
+        {
+            Preconditions.checkArgument(commandStores.length == rangeMappings.mappings.length);
+            this.commandStores = commandStores;
+            this.rangeMappings = rangeMappings;
+        }
+
+        int size()
+        {
+            return commandStores.length;
         }
     }
 
     private final Node.Id node;
-    private final CommandStore[] commandStores;
-    private volatile Mappings rangeMappings;
+    private final BiFunction<Integer, Mapping, CommandStore> shardFactory;
+    private final int numShards;
+    private volatile StoresAndMappings mappings = StoresAndMappings.EMPTY;
 
     public CommandStores(int num, Node.Id node, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store, CommandStore.Factory shardFactory)
     {
         this.node = node;
-        this.commandStores = new CommandStore[num];
-        this.rangeMappings = Mappings.empty(num);
-        for (int i=0; i<num; i++)
-            commandStores[i] = shardFactory.create(i, node, uniqueNow, agent, store, this::getRangeMapping);
+        this.numShards = num;
+        this.shardFactory = (idx, mapping) -> shardFactory.create(idx, node, uniqueNow, agent, store, mapping, this::getRangeMapping);
     }
 
     private Mapping getRangeMapping(int idx)
     {
-        return rangeMappings.mappings[idx];
+        return mappings.rangeMappings.mappings[idx];
     }
 
     public synchronized void shutdown()
     {
-        for (CommandStore commandStore : commandStores)
+        for (CommandStore commandStore : mappings.commandStores)
             commandStore.shutdown();
     }
 
     public Stream<CommandStore> stream()
     {
-        return StreamSupport.stream(new ShardSpliterator(), false);
+        return StreamSupport.stream(new ShardSpliterator(mappings.commandStores), false);
     }
 
     public Stream<CommandStore> forKeys(Keys keys)
     {
-        IntPredicate predicate = i -> rangeMappings.mappings[i].ranges.intersects(keys);
-        return StreamSupport.stream(new ShardSpliterator(predicate), false);
+        StoresAndMappings stores = mappings;
+        IntPredicate predicate = i -> stores.rangeMappings.mappings[i].ranges.intersects(keys);
+        return StreamSupport.stream(new ShardSpliterator(stores.commandStores, predicate), false);
     }
 
     public Stream<CommandStore> forScope(TxnRequest.Scope scope)
     {
-        IntPredicate predicate = i ->  scope.intersects(rangeMappings.mappings[i].ranges);
-        return StreamSupport.stream(new ShardSpliterator(predicate), false);
+        StoresAndMappings stores = mappings;
+        IntPredicate predicate = i ->  scope.intersects(stores.rangeMappings.mappings[i].ranges);
+        return StreamSupport.stream(new ShardSpliterator(stores.commandStores, predicate), false);
     }
 
     static List<KeyRanges> shardRanges(KeyRanges ranges, int shards)
@@ -116,38 +131,53 @@ public class CommandStores
     {
         Preconditions.checkArgument(!cluster.isSubset(), "Use full topology for CommandStores.updateTopology");
 
-        if (cluster.epoch() <= rangeMappings.cluster.epoch())
+        StoresAndMappings current = mappings;
+        if (cluster.epoch() <= current.rangeMappings.cluster.epoch())
             return;
 
         Topology local = cluster.forNode(node);
-        KeyRanges current = Arrays.stream(rangeMappings.mappings).map(mapping -> mapping.ranges).reduce(KeyRanges.EMPTY, (l, r) -> l.union(r)).mergeTouching();
-        KeyRanges added = local.ranges().difference(current);
-        List<KeyRanges> sharded = shardRanges(added, commandStores.length);
+        KeyRanges currentRanges = Arrays.stream(current.rangeMappings.mappings).map(mapping -> mapping.ranges).reduce(KeyRanges.EMPTY, (l, r) -> l.union(r)).mergeTouching();
+        KeyRanges added = local.ranges().difference(currentRanges);
 
-        Mapping[] newMappings = new Mapping[rangeMappings.mappings.length];
-
-        for (int i=0; i<rangeMappings.mappings.length; i++)
+        if (added.isEmpty())
         {
-            KeyRanges newRanges = rangeMappings.mappings[i].ranges.union(sharded.get(i)).mergeTouching();
-            newMappings[i] = new Mapping(newRanges, local);
+            mappings = new StoresAndMappings(current.commandStores, current.rangeMappings.withNewTopology(cluster, local));
+            return;
         }
 
-        rangeMappings = new Mappings(cluster, local, newMappings);
+
+        List<KeyRanges> sharded = shardRanges(added, numShards);
+        Mapping[] newMappings = new Mapping[current.size() + sharded.size()];
+        CommandStore[] newStores = new CommandStore[current.size() + sharded.size()];
+        Mapping.withNewLocalTopology(current.rangeMappings.mappings, local, newMappings);
+        System.arraycopy(current.commandStores, 0, newStores, 0, current.size());
+
+        for (int i=0; i<sharded.size(); i++)
+        {
+            int idx = current.size() + i;
+            Mapping mapping = new Mapping(sharded.get(i), local);
+            newMappings[idx] = mapping;
+            newStores[idx] = shardFactory.apply(idx, mapping);
+        }
+
+        mappings = new StoresAndMappings(newStores, new Mappings(cluster, local, newMappings));
     }
 
-    private class ShardSpliterator implements Spliterator<CommandStore>
+    private static class ShardSpliterator implements Spliterator<CommandStore>
     {
         int i = 0;
+        final CommandStore[] commandStores;
         final IntPredicate predicate;
 
-        public ShardSpliterator(IntPredicate predicate)
+        public ShardSpliterator(CommandStore[] commandStores, IntPredicate predicate)
         {
+            this.commandStores = commandStores;
             this.predicate = predicate;
         }
 
-        public ShardSpliterator()
+        public ShardSpliterator(CommandStore[] commandStores)
         {
-            this (i -> true);
+            this (commandStores, i -> true);
         }
 
         @Override

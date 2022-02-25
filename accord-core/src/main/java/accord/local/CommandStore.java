@@ -28,12 +28,30 @@ public abstract class CommandStore
     {
         static final Mapping EMPTY = new Mapping(KeyRanges.EMPTY, Topology.EMPTY);
         final KeyRanges ranges;
-        final Topology topology;
+        final Topology local;
 
-        public Mapping(KeyRanges ranges, Topology topology)
+        public Mapping(KeyRanges ranges, Topology local)
         {
             this.ranges = ranges;
-            this.topology = topology;
+            this.local = local;
+        }
+
+        public Mapping withNewLocalTopology(Topology local)
+        {
+            return new Mapping(ranges, local);
+        }
+
+        static void withNewLocalTopology(Mapping[] current, Topology local, Mapping[] dst)
+        {
+            for (int i=0; i<current.length; i++)
+                dst[i] = current[i].withNewLocalTopology(local);
+        }
+
+        static Mapping[] withNewLocalTopology(Mapping[] current, Topology locals)
+        {
+            Mapping[] result = new Mapping[current.length];
+            withNewLocalTopology(current, locals, result);
+            return result;
         }
     }
 
@@ -44,6 +62,7 @@ public abstract class CommandStore
                             Function<Timestamp, Timestamp> uniqueNow,
                             Agent agent,
                             Store store,
+                            Mapping initialMapping,
                             IntFunction<Mapping> mappingSupplier);
         Factory SYNCHRONIZED = Synchronized::new;
         Factory SINGLE_THREAD = SingleThread::new;
@@ -66,6 +85,7 @@ public abstract class CommandStore
                         Function<Timestamp, Timestamp> uniqueNow,
                         Agent agent,
                         Store store,
+                        Mapping initialMapping,
                         IntFunction<Mapping> mappingSupplier)
     {
         this.index = index;
@@ -73,8 +93,8 @@ public abstract class CommandStore
         this.uniqueNow = uniqueNow;
         this.agent = agent;
         this.store = store;
+        this.rangeMap = initialMapping;
         this.mappingSupplier = mappingSupplier;
-        rangeMap = mappingSupplier.apply(index);
     }
 
     public Command command(TxnId txnId)
@@ -119,7 +139,7 @@ public abstract class CommandStore
 
     public long epoch()
     {
-        return rangeMap.topology.epoch();
+        return rangeMap.local.epoch();
     }
 
     public KeyRanges ranges()
@@ -265,9 +285,10 @@ public abstract class CommandStore
                             Function<Timestamp, Timestamp> uniqueNow,
                             Agent agent,
                             Store store,
+                            Mapping initialMapping,
                             IntFunction<Mapping> mappingSupplier)
         {
-            super(index, nodeId, uniqueNow, agent, store, mappingSupplier);
+            super(index, nodeId, uniqueNow, agent, store, initialMapping, mappingSupplier);
         }
 
         @Override
@@ -331,9 +352,10 @@ public abstract class CommandStore
                             Function<Timestamp, Timestamp> uniqueNow,
                             Agent agent,
                             Store store,
+                            Mapping initialMapping,
                             IntFunction<Mapping> mappingSupplier)
         {
-            super(index, nodeId, uniqueNow, agent, store, mappingSupplier);
+            super(index, nodeId, uniqueNow, agent, store, initialMapping, mappingSupplier);
             executor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
                 thread.setName(CommandStore.class.getSimpleName() + '[' + nodeId + ':' + index + ']');
@@ -373,9 +395,10 @@ public abstract class CommandStore
                                  Function<Timestamp, Timestamp> uniqueNow,
                                  Agent agent,
                                  Store store,
+                                 Mapping initialMapping,
                                  IntFunction<Mapping> mappingSupplier)
         {
-            super(index, nodeId, uniqueNow, agent, store, mappingSupplier);
+            super(index, nodeId, uniqueNow, agent, store, initialMapping, mappingSupplier);
         }
 
         private void assertThread()

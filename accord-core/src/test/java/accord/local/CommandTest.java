@@ -45,7 +45,7 @@ public class CommandTest
     private static void setMappingEpoch(AtomicReference<CommandStore.Mapping> mapping, long epoch)
     {
         CommandStore.Mapping current = mapping.get();
-        CommandStore.Mapping next = new CommandStore.Mapping(current.ranges, current.topology.withEpoch(epoch));
+        CommandStore.Mapping next = new CommandStore.Mapping(current.ranges, current.local.withEpoch(epoch));
         mapping.set(next);
     }
 
@@ -56,6 +56,7 @@ public class CommandTest
                                              storeSupport.uniqueNow,
                                              new TestAgent(),
                                              storeSupport.data,
+                                             storeSupport.mapping.get(),
                                              i -> storeSupport.mapping.get());
     }
 
