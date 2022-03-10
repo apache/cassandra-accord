@@ -21,12 +21,18 @@ public class DeterministicIdentitySet<T> extends AbstractSet<T>
     }
 
     // TODO: an identity hash map that doesn't mind concurrent modification / iteration
-    final IdentityHashMap<T, Entry<T>> lookup = new IdentityHashMap<>();
+    final IdentityHashMap<T, Entry<T>> lookup;
     final Entry<T> head = new Entry<T>(null);
 
     public DeterministicIdentitySet()
     {
+        this(0);
+    }
+
+    public DeterministicIdentitySet(int size)
+    {
         head.prev = head.next = head;
+        lookup = new IdentityHashMap<>(size);
     }
 
     @Override

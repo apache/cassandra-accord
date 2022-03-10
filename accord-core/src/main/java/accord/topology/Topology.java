@@ -118,11 +118,6 @@ public class Topology extends AbstractCollection<Shard>
         return supersetRangeIndexes.length < shards.length;
     }
 
-    public boolean isSubsetOf(Topology topology)
-    {
-        return epoch() == topology.epoch() && Arrays.equals(this.shards, topology.shards);
-    }
-
     public Topology withEpoch(long epoch)
     {
         return new Topology(epoch, shards, ranges, nodeLookup, subsetOfRanges, supersetRangeIndexes);
@@ -192,7 +187,7 @@ public class Topology extends AbstractCollection<Shard>
         return forKeys(select, (i, shard) -> true);
     }
 
-    public <T> T accumulateForKeys(Keys select, IndexedBiFunction<Shard, T, T> function, T start)
+    public <T> T foldl(Keys select, IndexedBiFunction<Shard, T, T> function, T accumulator)
     {
         int subsetIndex = 0;
         for (int i = 0 ; i < select.size() ; )
@@ -203,11 +198,11 @@ public class Topology extends AbstractCollection<Shard>
                 throw new IllegalArgumentException("Range not found for " + select.get(i));
             int supersetIndex = supersetRangeIndexes[subsetIndex];
             Shard shard = shards[supersetIndex];
-            start = function.apply(subsetIndex, shard, start);
+            accumulator = function.apply(subsetIndex, shard, accumulator);
             // find the first key outside this range
             i = shard.range.higherKeyIndex(select, i, select.size());
         }
-        return start;
+        return accumulator;
     }
 
     /**

@@ -18,6 +18,7 @@ public class TopologyRandomizer
     private final Supplier<Random> randomSupplier;
     private final Function<Node.Id, Node> lookup;
     private final List<Topology> epochs = new ArrayList<>();
+    private final Map<Node.Id, KeyRanges> previouslyReplicated = new HashMap<>();
 
     public TopologyRandomizer(Supplier<Random> randomSupplier, Topology initialTopology, Function<Node.Id, Node> lookup)
     {
@@ -25,6 +26,8 @@ public class TopologyRandomizer
         this.lookup = lookup;
         this.epochs.add(Topology.EMPTY);
         this.epochs.add(initialTopology);
+        for (Node.Id node : initialTopology.nodes())
+            previouslyReplicated.put(node, initialTopology.rangesForNode(node));
     }
 
     private enum UpdateType
@@ -155,9 +158,41 @@ public class TopologyRandomizer
         return shards;
     }
 
+    private static Map<Node.Id, KeyRanges> getAdditions(Topology current, Topology next)
+    {
+        Map<Node.Id, KeyRanges> additions = new HashMap<>();
+        for (Node.Id node : next.nodes())
+        {
+            KeyRanges prev = current.rangesForNode(node);
+            if (prev == null) prev = KeyRanges.EMPTY;
+
+            KeyRanges added = next.rangesForNode(node).difference(prev);
+            if (added.isEmpty())
+                continue;
+
+            additions.put(node, added);
+        }
+        return additions;
+    }
+
+    private static boolean reassignsRanges(Topology current, Shard[] nextShards, Map<Node.Id, KeyRanges> previouslyReplicated)
+    {
+        Topology next = new Topology(current.epoch + 1, nextShards);
+        Map<Node.Id, KeyRanges> additions = getAdditions(current, next);
+
+        for (Map.Entry<Node.Id, KeyRanges> entry : additions.entrySet())
+        {
+            if (previouslyReplicated.getOrDefault(entry.getKey(), KeyRanges.EMPTY).intersects(entry.getValue()))
+                return true;
+        }
+        return false;
+    }
+
     public synchronized void maybeUpdateTopology()
     {
-        if (randomSupplier.get().nextInt(50) != 0)
+        // if we don't limit the number of pending topology changes in flight,
+        // the topology randomizer will keep the burn test busy indefinitely
+        if (TopologyUpdate.pendingTopologies() > 5 || randomSupplier.get().nextInt(200) != 0)
             return;
 
         Random random = randomSupplier.get();
@@ -171,6 +206,21 @@ public class TopologyRandomizer
         }
 
         Topology nextTopology = new Topology(current.epoch + 1, shards);
+
+        // FIXME: remove this (and the corresponding check in CommandStores) once lower bounds are implemented.
+        //  In the meantime, the logic needed to support acquiring ranges that we previously replicated is pretty
+        //  convoluted without the ability to jettison epochs.
+        if (reassignsRanges(current, shards, previouslyReplicated))
+            return;
+
+        Map<Node.Id, KeyRanges> nextAdditions = getAdditions(current, nextTopology);
+        for (Map.Entry<Node.Id, KeyRanges> entry : nextAdditions.entrySet())
+        {
+            KeyRanges previous = previouslyReplicated.getOrDefault(entry.getKey(), KeyRanges.EMPTY);
+            KeyRanges added = entry.getValue();
+            KeyRanges merged = previous.merge(added).mergeTouching();
+            previouslyReplicated.put(entry.getKey(), merged);
+        }
 
         logger.debug("topology update to: {} from: {}", nextTopology, current);
         epochs.add(nextTopology);

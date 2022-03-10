@@ -9,6 +9,9 @@ import accord.txn.Keys;
 import accord.txn.Txn;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 import java.util.*;
 import java.util.function.LongConsumer;
@@ -25,13 +28,14 @@ import java.util.function.LongConsumer;
  */
 public class TopologyManager implements ConfigurationService.Listener
 {
+    private static final Future<Void> SUCCESS = ImmediateFuture.success(null);
     class EpochState
     {
         private final Topology global;
         private final Topology local;
         private final QuorumTracker syncTracker;
         private boolean syncComplete = false;
-        private boolean prevSynced = false;
+        private boolean prevSynced;
 
         EpochState(Topology global, boolean prevSynced)
         {
@@ -39,8 +43,7 @@ public class TopologyManager implements ConfigurationService.Listener
             this.global = global;
             this.local = global.forNode(node);
             this.syncTracker = new QuorumTracker(new Topologies.Singleton(global, false));
-            if (prevSynced)
-                markPrevSynced();
+            this.prevSynced = prevSynced;
         }
 
         void markPrevSynced()
@@ -73,7 +76,7 @@ public class TopologyManager implements ConfigurationService.Listener
                 return false;
             if (syncComplete)
                 return true;
-            Boolean result = global.accumulateForKeys(keys, (i, shard, acc) -> {
+            Boolean result = global.foldl(keys, (i, shard, acc) -> {
                 if (acc == Boolean.FALSE)
                     return acc;
                 return Boolean.valueOf(syncTracker.unsafeGet(i).hasReachedQuorum());
@@ -97,10 +100,16 @@ public class TopologyManager implements ConfigurationService.Listener
         // until the superseding epoch has been applied
         private final List<Set<Node.Id>> pendingSyncComplete;
 
-        private Epochs(EpochState[] epochs, List<Set<Node.Id>> pendingSyncComplete)
+        // list of promises to be completed as newer epochs become active. This is to support processes that
+        // are waiting on future epochs to begin (ie: txn requests from futures epochs). Index 0 is for
+        // currentEpoch + 1
+        private final List<AsyncPromise<Void>> futureEpochFutures;
+
+        private Epochs(EpochState[] epochs, List<Set<Node.Id>> pendingSyncComplete, List<AsyncPromise<Void>> futureEpochFutures)
         {
             this.currentEpoch = epochs.length > 0 ? epochs[0].epoch() : 0;
             this.pendingSyncComplete = pendingSyncComplete;
+            this.futureEpochFutures = futureEpochFutures;
             for (int i=1; i<epochs.length; i++)
                 Preconditions.checkArgument(epochs[i].epoch() == epochs[i-1].epoch() - 1);
             this.epochs = epochs;
@@ -108,7 +117,19 @@ public class TopologyManager implements ConfigurationService.Listener
 
         private Epochs(EpochState[] epochs)
         {
-            this(epochs, new ArrayList<>());
+            this(epochs, new ArrayList<>(), new ArrayList<>());
+        }
+
+        public Future<Void> awaitEpoch(long epoch)
+        {
+            if (epoch <= currentEpoch)
+                return SUCCESS;
+
+            int diff = (int) (epoch - currentEpoch);
+            while (futureEpochFutures.size() < diff)
+                futureEpochFutures.add(new AsyncPromise<>());
+
+            return futureEpochFutures.get(diff - 1);
         }
 
         public long nextEpoch()
@@ -119,25 +140,6 @@ public class TopologyManager implements ConfigurationService.Listener
         public Topology current()
         {
             return epochs.length > 0 ? epochs[0].global : Topology.EMPTY;
-        }
-
-        public Epochs add(Topology topology)
-        {
-            Preconditions.checkArgument(topology.epoch == nextEpoch());
-            EpochState[] nextEpochs = new EpochState[epochs.length + 1];
-            List<Set<Node.Id>> pendingSync = new ArrayList<>(pendingSyncComplete);
-            if (!pendingSync.isEmpty())
-            {
-                EpochState current = epochs[0];
-                if (epochs.length <= 1 || epochs[1].syncComplete())
-                    current.markPrevSynced();
-                pendingSync.remove(0).forEach(current::recordSyncComplete);
-            }
-            System.arraycopy(epochs, 0, nextEpochs, 1, epochs.length);
-
-            boolean prevSynced = epochs.length == 0 || epochs[0].syncComplete();
-            nextEpochs[0] = new EpochState(topology, prevSynced);
-            return new Epochs(nextEpochs, pendingSync);
         }
 
         /**
@@ -177,35 +179,8 @@ public class TopologyManager implements ConfigurationService.Listener
 
         long maxUnknownEpoch(TxnRequest.Scope scope)
         {
-            EpochState lastState = null;
-            for (int i=0, mi=scope.size(); i<mi; i++)
-            {
-                TxnRequest.Scope.KeysForEpoch requestRanges = scope.get(i);
-                EpochState epochState = get(requestRanges.epoch);
-
-                if (epochState != null)
-                {
-                    lastState = epochState;
-                }
-                else if (lastState != null && lastState.local.ranges().intersects(requestRanges.keys))
-                {
-                    // we don't have the most recent epoch, but still replicate the requested ranges
-                    continue;
-                }
-                else
-                {
-                    // we don't have the most recent epoch, and we don't replicate the requested ranges
-                    return scope.maxEpoch();
-                }
-
-                // validate requested ranges
-                KeyRanges localRanges = epochState.local.ranges();
-                if (!localRanges.intersects(requestRanges.keys))
-                    throw new RuntimeException("Received request for ranges not replicated by this node");
-            }
-            if (scope.maxEpoch() > 0)
-                epochReporter.accept(scope.maxEpoch());
-
+            if (currentEpoch < scope.minRequiredEpoch())
+                return scope.minRequiredEpoch();
             return 0;
         }
 
@@ -229,7 +204,33 @@ public class TopologyManager implements ConfigurationService.Listener
     @Override
     public synchronized void onTopologyUpdate(Topology topology)
     {
-        epochs = epochs.add(topology);
+        Epochs current = epochs;
+
+        Preconditions.checkArgument(topology.epoch == current.nextEpoch());
+        EpochState[] nextEpochs = new EpochState[current.epochs.length + 1];
+        List<Set<Node.Id>> pendingSync = new ArrayList<>(current.pendingSyncComplete);
+        if (!pendingSync.isEmpty())
+        {
+            EpochState currentEpoch = current.epochs[0];
+            if (current.epochs.length <= 1 || current.epochs[1].syncComplete())
+                currentEpoch.markPrevSynced();
+            pendingSync.remove(0).forEach(currentEpoch::recordSyncComplete);
+        }
+        System.arraycopy(current.epochs, 0, nextEpochs, 1, current.epochs.length);
+
+        boolean prevSynced = current.epochs.length == 0 || current.epochs[0].syncComplete();
+        nextEpochs[0] = new EpochState(topology, prevSynced);
+
+        List<AsyncPromise<Void>> futureEpochFutures = new ArrayList<>(current.futureEpochFutures);
+        AsyncPromise<Void> toComplete = !futureEpochFutures.isEmpty() ? futureEpochFutures.remove(0) : null;
+        epochs = new Epochs(nextEpochs, pendingSync, futureEpochFutures);
+        if (toComplete != null)
+            toComplete.trySuccess(null);
+    }
+
+    public synchronized Future<Void> awaitEpoch(long epoch)
+    {
+        return epochs.awaitEpoch(epoch);
     }
 
     @Override

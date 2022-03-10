@@ -8,7 +8,6 @@ import java.util.stream.Stream;
 import accord.api.Key;
 import accord.api.KeyRange;
 import accord.topology.KeyRanges;
-import com.google.common.base.Preconditions;
 
 @SuppressWarnings("rawtypes")
 public class Keys implements Iterable<Key>
@@ -65,6 +64,42 @@ public class Keys implements Iterable<Key>
         for (int i = 0 ; i < indexes.length ; ++i)
             selection[i] = keys[indexes[i]];
         return new Keys(selection);
+    }
+
+    /**
+     * return true if this keys collection contains all keys found in the given keys
+     */
+    public boolean containsAll(Keys that)
+    {
+        if (isEmpty())
+            return that.isEmpty();
+
+        for (int thisIdx=0, thatIdx=0, thisSize=size(), thatSize=that.size();
+             thatIdx<thatSize;
+             thisIdx++, thatIdx++)
+        {
+            if (thisIdx >= thisSize)
+                return false;
+
+            Key thatKey = that.keys[thatIdx];
+            Key thisKey = this.keys[thisIdx];
+            int cmp = thisKey.compareTo(thatKey);
+
+            if (cmp == 0)
+                continue;
+
+            // if this key is greater that that key, we can't contain that key
+            if (cmp > 0)
+                return false;
+
+            // if search returns a positive index, a match was found and
+            // no further comparison is needed
+            thisIdx = Arrays.binarySearch(keys, thisIdx, thisSize, thatKey);
+            if (thisIdx < 0)
+                return false;
+        }
+
+        return true;
     }
 
     public Keys merge(Keys that)
@@ -225,20 +260,65 @@ public class Keys implements Iterable<Key>
         return result != null ? new Keys(result) : EMPTY;
     }
 
-    public interface KeyAccumulator<V>
+    public interface KeyFold<V>
     {
-        V accumulate(Key key, V value);
-        default boolean isDone()
-        {
-            return false;
-        }
+        V fold(Key key, V value);
     }
 
     /**
      * Count the number of keys matching the predicate and intersecting with the given ranges.
      * If terminateAfter is greater than 0, the method will return once terminateAfter matches are encountered
      */
-    public <V> V accumulate(KeyRanges ranges, KeyAccumulator<V> accumulator, V value)
+    public <V> V foldl(KeyRanges ranges, KeyFold<V> fold, V accumulator)
+    {
+        int keyLB = 0;
+        int keyHB = size();
+        int rangeLB = 0;
+        int rangeHB = ranges.rangeIndexForKey(keys[keyHB-1]);
+        rangeHB = rangeHB < 0 ? -1 - rangeHB : rangeHB + 1;
+
+        for (;rangeLB<rangeHB && keyLB<keyHB;)
+        {
+            Key key = keys[keyLB];
+            rangeLB = ranges.rangeIndexForKey(rangeLB, rangeHB, key);
+
+            if (rangeLB < 0)
+            {
+                rangeLB = -1 -rangeLB;
+                if (rangeLB >= rangeHB)
+                    break;
+                keyLB = ranges.get(rangeLB).lowKeyIndex(this, keyLB, keyHB);
+            }
+            else
+            {
+                KeyRange<?> range = ranges.get(rangeLB);
+                int highKey = range.higherKeyIndex(this, keyLB, keyHB);
+
+                for (int i=keyLB; i<highKey; i++)
+                    accumulator = fold.fold(keys[i], accumulator);
+
+                keyLB = highKey;
+                rangeLB++;
+            }
+
+            if (keyLB < 0)
+                keyLB = -1 - keyLB;
+        }
+
+        return accumulator;
+    }
+
+    public boolean any(KeyRanges ranges, Predicate<Key> predicate)
+    {
+        return 1 == foldl(ranges, (key, i1, i2) -> predicate.test(key) ? 1 : 0, 0, 0, 1);
+    }
+
+    public interface FoldKeysToLong
+    {
+        long apply(Key key, long param, long prev);
+    }
+
+    public long foldl(KeyRanges ranges, FoldKeysToLong fold, long param, long initialValue, long terminalValue)
     {
         int keyLB = 0;
         int keyHB = size();
@@ -265,9 +345,9 @@ public class Keys implements Iterable<Key>
 
                 for (int i=keyLB; i<highKey; i++)
                 {
-                    value = accumulator.accumulate(keys[i], value);
-                    if (accumulator.isDone())
-                        return value;
+                    initialValue = fold.apply(keys[i], param, initialValue);
+                    if (terminalValue == initialValue)
+                        return initialValue;
                 }
 
                 keyLB = highKey;
@@ -278,43 +358,6 @@ public class Keys implements Iterable<Key>
                 keyLB = -1 - keyLB;
         }
 
-        return value;
-    }
-
-    public <V> V accumulate(KeyRanges ranges, KeyAccumulator<V> accumulator)
-    {
-        return accumulate(ranges, accumulator, null);
-    }
-
-    private static class TerminatingKeyAccumulator<V> implements KeyAccumulator<V>
-    {
-        private boolean isDone = false;
-        private final Predicate<Key> predicate;
-
-        public TerminatingKeyAccumulator(Predicate<Key> predicate)
-        {
-            this.predicate = predicate;
-        }
-
-        @Override
-        final public V accumulate(Key key, V value)
-        {
-            Preconditions.checkState(!isDone);
-            isDone = predicate.test(key);
-            return value;
-        }
-
-        @Override
-        final public boolean isDone()
-        {
-            return isDone;
-        }
-    }
-
-    public boolean any(KeyRanges ranges, Predicate<Key> predicate)
-    {
-        TerminatingKeyAccumulator<Void> accumulator = new TerminatingKeyAccumulator<>(predicate);
-        accumulate(ranges, accumulator, null);
-        return accumulator.isDone();
+        return initialValue;
     }
 }

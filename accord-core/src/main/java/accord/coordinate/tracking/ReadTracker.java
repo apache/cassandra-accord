@@ -108,7 +108,7 @@ public class ReadTracker extends AbstractResponseTracker<ReadTracker.ReadShardTr
      */
     public Set<Id> computeMinimalReadSetAndMarkInflight()
     {
-        Set<ReadShardTracker> toRead = accumulate((tracker, accumulate) -> {
+        Set<ReadShardTracker> toRead = foldl((tracker, accumulate) -> {
             if (!tracker.shouldRead())
                 return accumulate;
 

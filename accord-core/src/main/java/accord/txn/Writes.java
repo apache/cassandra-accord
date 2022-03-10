@@ -21,11 +21,11 @@ public class Writes
         if (write == null)
             return;
 
-        keys.accumulate(commandStore.ranges(), (key, accumulate) -> {
+        keys.foldl(commandStore.ranges(), (key, accumulate) -> {
             if (commandStore.hashIntersects(key))
                 write.apply(key, executeAt, commandStore.store());
             return accumulate;
-        });
+        }, null);
     }
 
     @Override

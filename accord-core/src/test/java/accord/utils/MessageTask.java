@@ -123,6 +123,7 @@ public class MessageTask extends AsyncPromise<Void> implements Runnable
                         List<Node.Id> recipients,
                         String desc, NodeProcess process)
     {
+        Preconditions.checkArgument(!recipients.isEmpty());
         this.originator = originator;
         this.recipients = ImmutableList.copyOf(recipients);
         this.desc = desc;

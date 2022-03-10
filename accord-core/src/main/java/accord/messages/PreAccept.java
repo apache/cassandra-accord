@@ -33,7 +33,7 @@ public class PreAccept extends TxnRequest
 
     public void process(Node node, Id from, ReplyContext replyContext)
     {
-        node.reply(from, replyContext, node.local(scope()).map(instance -> {
+        node.reply(from, replyContext, node.mapReduceLocal(scope(), instance -> {
             // note: this diverges from the paper, in that instead of waiting for JoinShard,
             //       we PreAccept to both old and new topologies and require quorums in both.
             //       This necessitates sending to ALL replicas of old topology, not only electorate (as fast path may be unreachable).
@@ -41,7 +41,7 @@ public class PreAccept extends TxnRequest
             if (!command.witness(txn))
                 return PreAcceptNack.INSTANCE;
             return new PreAcceptOk(txnId, command.executeAt(), calculateDeps(instance, txnId, txn, txnId));
-        }).reduce((r1, r2) -> {
+        }, (r1, r2) -> {
             if (!r1.isOK()) return r1;
             if (!r2.isOK()) return r2;
             PreAcceptOk ok1 = (PreAcceptOk) r1;
@@ -50,7 +50,7 @@ public class PreAccept extends TxnRequest
             if (ok1 != okMax && !ok1.deps.isEmpty()) okMax.deps.addAll(ok1.deps);
             if (ok2 != okMax && !ok2.deps.isEmpty()) okMax.deps.addAll(ok2.deps);
             return okMax;
-        }).orElseThrow());
+        }));
     }
 
     @Override

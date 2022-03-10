@@ -10,7 +10,8 @@ public class MaelstromData extends TreeMap<Key, Value> implements Data
     @Override
     public Data merge(Data data)
     {
-        this.putAll(((MaelstromData)data));
+        if (data != null)
+            this.putAll(((MaelstromData)data));
         return this;
     }
 }

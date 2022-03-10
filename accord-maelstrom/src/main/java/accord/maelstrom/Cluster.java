@@ -14,7 +14,7 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 import accord.coordinate.Timeout;
-import accord.local.CommandStore;
+import accord.local.CommandStores;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.MessageSink;
@@ -264,7 +264,7 @@ public class Cluster implements Scheduler
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
                 lookup.put(node, new Node(node, messageSink, new SimpleConfigService(topology),
-                                          nowSupplier.get(), MaelstromStore::new, MaelstromAgent.INSTANCE, sinks, CommandStore.Factory.SINGLE_THREAD));
+                                          nowSupplier.get(), MaelstromStore::new, MaelstromAgent.INSTANCE, sinks, CommandStores.SingleThread::new));
             }
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));

@@ -4,7 +4,7 @@ import accord.NetworkFilter;
 import accord.api.MessageSink;
 import accord.coordinate.Timeout;
 import accord.impl.TopologyUtils;
-import accord.local.CommandStore;
+import accord.local.CommandStores;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.topology.KeyRanges;
@@ -24,7 +24,6 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
-import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
 import static accord.Utils.*;
@@ -90,7 +89,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                         () -> store,
                         new TestAgent(),
                         new ThreadPoolScheduler(),
-                        CommandStore.Factory.SINGLE_THREAD);
+                        CommandStores.SingleThread::new);
     }
 
     private void init(Topology topology)

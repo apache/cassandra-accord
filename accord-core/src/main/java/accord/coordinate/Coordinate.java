@@ -14,9 +14,11 @@ public class Coordinate
     {
         long executeEpoch = agreed.executeAt.epoch;
         ConfigurationService configService = node.configService();
-        if (executeEpoch > configService.currentEpoch())
-            return configService.fetchTopologyForEpoch(executeEpoch)
-                                .flatMap(v -> fetchEpochOrExecute(node, agreed));
+        if (executeEpoch > node.topology().epoch())
+        {
+            configService.fetchTopologyForEpoch(executeEpoch);
+            return node.topology().awaitEpoch(executeEpoch).flatMap(v -> fetchEpochOrExecute(node, agreed));
+        }
 
         return Execute.execute(node, agreed);
     }

@@ -43,7 +43,7 @@ public class BeginRecovery extends TxnRequest
 
     public void process(Node node, Id replyToNode, ReplyContext replyContext)
     {
-        RecoverReply reply = node.local(scope()).map(instance -> {
+        RecoverReply reply = node.mapReduceLocal(scope(), instance -> {
             Command command = instance.command(txnId);
 
             if (!command.recover(txn, ballot))
@@ -84,7 +84,7 @@ public class BeginRecovery extends TxnRequest
                                               .collect(Dependencies::new, Dependencies::add, Dependencies::addAll);
             }
             return new RecoverOk(txnId, command.status(), command.accepted(), command.executeAt(), deps, earlierCommittedWitness, earlierAcceptedNoWitness, rejectsFastPath, command.writes(), command.result());
-        }).reduce((r1, r2) -> {
+        }, (r1, r2) -> {
             if (!r1.isOK()) return r1;
             if (!r2.isOK()) return r2;
             RecoverOk ok1 = (RecoverOk) r1;
@@ -140,7 +140,7 @@ public class BeginRecovery extends TxnRequest
                     ok1.earlierAcceptedNoWitness,
                     ok1.rejectsFastPath | ok2.rejectsFastPath,
                     ok1.writes, ok1.result);
-        }).orElseThrow();
+        });
 
         node.reply(replyToNode, replyContext, reply);
         if (reply instanceof RecoverOk && ((RecoverOk) reply).status == Applied)
@@ -148,9 +148,10 @@ public class BeginRecovery extends TxnRequest
             // disseminate directly
             RecoverOk ok = (RecoverOk) reply;
             ConfigurationService configService = node.configService();
-            if (ok.executeAt.epoch > configService.currentEpoch())
+            if (ok.executeAt.epoch > node.topology().epoch())
             {
-                configService.fetchTopologyForEpoch(ok.executeAt.epoch).addListener(() -> disseminateApply(node, ok));
+                configService.fetchTopologyForEpoch(ok.executeAt.epoch);
+                node.topology().awaitEpoch(ok.executeAt.epoch).addListener(() -> disseminateApply(node, ok));
                 return;
             }
             disseminateApply(node, ok);
@@ -160,6 +161,12 @@ public class BeginRecovery extends TxnRequest
     private void disseminateApply(Node node, RecoverOk ok)
     {
         Preconditions.checkArgument(ok.status == Applied);
+        if (ok.executeAt.epoch > node.epoch())
+        {
+            node.configService().fetchTopologyForEpoch(ok.executeAt.epoch);
+            node.topology().awaitEpoch(ok.executeAt.epoch).addListener(() -> disseminateApply(node, ok));
+            return;
+        }
         Topologies topologies = node.topology().forKeys(txn.keys, ok.executeAt.epoch);
         node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, ok.executeAt, ok.deps, ok.writes, ok.result));
     }

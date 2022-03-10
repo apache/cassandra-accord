@@ -112,11 +112,11 @@ public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.
         return false;
     }
 
-    protected <V> V accumulate(BiFunction<T, V, V> function, V start)
+    protected <V> V foldl(BiFunction<T, V, V> function, V accumulator)
     {
         for (T tracker : trackers)
-            start = function.apply(tracker, start);
-        return start;
+            accumulator = function.apply(tracker, accumulator);
+        return accumulator;
     }
 
     public Set<Node.Id> nodes()

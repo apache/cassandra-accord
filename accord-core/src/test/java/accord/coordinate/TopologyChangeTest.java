@@ -55,7 +55,7 @@ public class TopologyChangeTest
             TxnId txnId1 = node1.nextTxnId();
             Txn txn1 = writeTxn(keys);
             node1.coordinate(txnId1, txn1).get();
-            node1.local(keys).forEach(commands -> {
+            node1.forEachLocal(keys, commands -> {
                 Command command = commands.command(txnId1);
                 Assertions.assertTrue(command.savedDeps().isEmpty());
             });
@@ -69,20 +69,15 @@ public class TopologyChangeTest
 
             // new nodes should have the previous epochs operation as a dependency
             cluster.nodes(4, 5, 6).forEach(node -> {
-                node.local(keys).forEach(commands -> {
+                node.forEachLocal(keys, commands -> {
                     Command command = commands.command(txnId2);
                     Assertions.assertTrue(command.savedDeps().contains(txnId1));
                 });
             });
 
-            // old nodes should be aware of the new epoch
-            cluster.configServices(1, 2, 3).forEach(config -> {
-                Assertions.assertEquals(2, config.currentEpoch());
-            });
-
             // ...and participated in consensus
             cluster.nodes(1, 2, 3).forEach(node -> {
-                node.local(keys).forEach(commands -> {
+                node.forEachLocal(keys, commands -> {
                     Command command = commands.command(txnId2);
                     Assertions.assertTrue(command.hasBeen(Status.Committed));
                 });
@@ -105,7 +100,7 @@ public class TopologyChangeTest
             RecordingMessageSink messageSink = (RecordingMessageSink) node1.messageSink();
             messageSink.clearHistory();
             TxnId txnId1 = coordinate(node1, keys);
-            node1.local(keys).forEach(commands -> {
+            node1.forEachLocal(keys, commands -> {
                 Command command = commands.command(txnId1);
                 Assertions.assertTrue(command.savedDeps().isEmpty());
             });
@@ -127,7 +122,7 @@ public class TopologyChangeTest
             }).collect(Collectors.toSet());
             Assertions.assertEquals(idSet(1, 2, 3), accepts);
 
-            node1.local(keys).forEach(commands -> {
+            node1.forEachLocal(keys, commands -> {
                 Command command = commands.command(txnId2);
                 Assertions.assertTrue(command.hasBeen(Status.Committed));
                 Assertions.assertTrue(command.savedDeps().contains(txnId1));
@@ -140,7 +135,7 @@ public class TopologyChangeTest
             messageSink.clearHistory();
             TxnId txnId3 = coordinate(node1, keys);
             Assertions.assertFalse(messageSink.requests.stream().anyMatch(env -> env.payload instanceof Accept));
-            node1.local(keys).forEach(commands -> {
+            node1.forEachLocal(keys, commands -> {
                 Command command = commands.command(txnId3);
                 Assertions.assertTrue(command.hasBeen(Status.Committed));
                 Assertions.assertTrue(command.savedDeps().contains(txnId1));

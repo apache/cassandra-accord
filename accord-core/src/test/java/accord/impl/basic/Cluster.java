@@ -17,7 +17,7 @@ import java.util.function.Supplier;
 
 import accord.api.MessageSink;
 import accord.burn.BurnTestConfigurationService;
-import accord.local.CommandStore;
+import accord.local.CommandStores;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Scheduler;
@@ -96,10 +96,10 @@ public class Cluster implements Scheduler
                             || !partitionSet.contains(deliver.src) && !partitionSet.contains(deliver.dst));
             if (drop)
             {
-                logger.trace("{} DROP[{}] {}", clock++, on.epoch(), deliver);
+                logger.debug("{} DROP[{}] {}", clock++, on.epoch(), deliver);
                 return true;
             }
-            logger.trace("{} RECV[{}] {}", clock++, on.epoch(), deliver);
+            logger.debug("{} RECV[{}] {}", clock++, on.epoch(), deliver);
             if (deliver.message instanceof Reply)
             {
                 Reply reply = (Reply) deliver.message;
@@ -153,7 +153,7 @@ public class Cluster implements Scheduler
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(node, messageSink, randomSupplier, topology, lookup::get);
                 lookup.put(node, new Node(node, messageSink, configService,
-                                          nowSupplier.get(), () -> new ListStore(node), ListAgent.INSTANCE, sinks, CommandStore.Factory.SYNCHRONIZED));
+                                          nowSupplier.get(), () -> new ListStore(node), ListAgent.INSTANCE, sinks, CommandStores.Synchronized::new));
             }
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));

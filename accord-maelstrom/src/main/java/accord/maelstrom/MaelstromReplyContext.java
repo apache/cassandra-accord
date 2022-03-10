@@ -18,6 +18,8 @@ public class MaelstromReplyContext implements ReplyContext
 
     public static long messageIdFor(ReplyContext replyContext)
     {
+        if (replyContext instanceof Packet)
+            return ((Packet) replyContext).body.msg_id;
         return ((MaelstromReplyContext) replyContext).messageId;
     }
 }

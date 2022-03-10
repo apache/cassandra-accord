@@ -124,7 +124,7 @@ public class ReadData extends TxnRequest
         synchronized void setup(TxnId txnId, Txn txn, Scope scope)
         {
             // TODO: simple hash set supporting concurrent modification, or else avoid concurrent modification
-            waitingOn = node.local(scope).collect(Collectors.toCollection(() -> new DeterministicIdentitySet<>()));
+            waitingOn = node.collectLocal(scope, DeterministicIdentitySet::new);
             // FIXME: fix/check thread safety
             CommandStore.onEach(waitingOn, instance -> {
                 Command command = instance.command(txnId);

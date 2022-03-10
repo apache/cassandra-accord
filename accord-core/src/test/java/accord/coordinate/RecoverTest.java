@@ -25,7 +25,7 @@ public class RecoverTest
 {
     private static CommandStore getCommandShard(Node node, Key key)
     {
-        return node.local(key).orElseThrow();
+        return node.unsafeForKey(key);
     }
 
     private static Command getCommand(Node node, Key key, TxnId txnId)

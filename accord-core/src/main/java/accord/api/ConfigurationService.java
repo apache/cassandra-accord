@@ -68,11 +68,10 @@ public interface ConfigurationService
     Topology getTopologyForEpoch(long epoch);
 
     /**
-     * Method for reporting epochs the configuration service may not be aware of, and optionally running a supplied
-     * runnable once the corresponding topology has been received and applied. If the configuration service is already
-     * aware of the reported epoch, the runnable should be run immediately.
+     * Method for reporting epochs the configuration service may not be aware of. To be notified when the new epoch
+     * is available locally, use {@link accord.topology.TopologyManager#awaitEpoch(long)}
      */
-    Future<Void> fetchTopologyForEpoch(long epoch);
+    void fetchTopologyForEpoch(long epoch);
 
     /**
      * Alert the configuration service of epochs it may not be aware of. This is called called for every TxnRequest
