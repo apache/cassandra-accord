@@ -60,4 +60,9 @@ public class CommandsForKey implements Listener, Iterable<Command>
     {
         return Iterators.concat(uncommitted.values().iterator(), committedByExecuteAt.values().iterator());
     }
+
+    public boolean isEmpty()
+    {
+        return uncommitted.isEmpty() && committedById.isEmpty();
+    }
 }

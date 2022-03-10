@@ -354,10 +354,10 @@ public class Command implements Listener, Consumer<Listener>
     {
         return "Command{" +
                "txnId=" + txnId +
+               ", status=" + status +
                ", txn=" + txn +
                ", executeAt=" + executeAt +
                ", deps=" + deps +
-               ", status=" + status +
                '}';
     }
 }

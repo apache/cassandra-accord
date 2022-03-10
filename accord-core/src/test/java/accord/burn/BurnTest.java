@@ -247,7 +247,7 @@ public class BurnTest
             }
             catch (Throwable t)
             {
-                logger.error("Exception running burn test:", t);
+                logger.error("Exception running burn test for seed {}:", seed, t);
                 throw t;
             }
         } while (overrideSeed == null);

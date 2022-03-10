@@ -7,9 +7,6 @@ import accord.topology.Topology;
 import accord.txn.Keys;
 import accord.txn.Txn;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 import java.util.Objects;
 
 public abstract class TxnRequest implements Request
@@ -32,85 +29,37 @@ public abstract class TxnRequest implements Request
      */
     public static class Scope
     {
-        public static class KeysForEpoch
+        private final long minRequiredEpoch;
+        private final Keys keys;
+
+        public Scope(long minRequiredEpoch, Keys keys)
         {
-            public final long epoch;
-            public final Keys keys;
-
-            public KeysForEpoch(long epoch, Keys keys)
-            {
-                this.epoch = epoch;
-                this.keys = keys;
-            }
-
-            static KeysForEpoch forTopology(Topology topology, Node.Id node, Keys keys)
-            {
-                KeyRanges topologyRanges = topology.rangesForNode(node);
-                if (topologyRanges == null)
-                    return null;
-                topologyRanges = topologyRanges.intersection(keys);
-                Keys scopeKeys = keys.intersection(topologyRanges);
-                return !topologyRanges.isEmpty() ? new KeysForEpoch(topology.epoch(), scopeKeys) : null;
-            }
-
-            @Override
-            public boolean equals(Object o)
-            {
-                if (this == o) return true;
-                if (o == null || getClass() != o.getClass()) return false;
-                KeysForEpoch that = (KeysForEpoch) o;
-                return epoch == that.epoch && keys.equals(that.keys);
-            }
-
-            @Override
-            public int hashCode()
-            {
-                return Objects.hash(epoch, keys);
-            }
-
-            @Override
-            public String toString()
-            {
-                return "EpochRanges{" +
-                        "epoch=" + epoch +
-                        ", keys=" + keys +
-                        '}';
-            }
+            this.minRequiredEpoch = minRequiredEpoch;
+            this.keys = keys;
         }
 
-        private final long maxEpoch;
-        private final KeysForEpoch[] epochs;
-
-        public Scope(long maxEpoch, KeysForEpoch... epochKeys)
+        public static Scope forTopologies(Node.Id node, Topologies topologies, Keys txnKeys)
         {
-            this.maxEpoch = maxEpoch;
-            this.epochs = epochKeys;
-        }
-
-        public int size()
-        {
-            return epochs.length;
-        }
-
-        public KeysForEpoch get(int i)
-        {
-            return epochs[i];
-        }
-
-        public static Scope forTopologies(Node.Id node, Topologies topologies, Keys keys)
-        {
-            List<KeysForEpoch> ranges = new ArrayList<>(topologies.size());
+            long minEpoch = 0;
+            Keys scopeKeys = Keys.EMPTY;
+            Keys lastKeys = null;
             for (int i=topologies.size() - 1; i>=0; i--)
             {
                 Topology topology = topologies.get(i);
-                KeysForEpoch keysForEpoch = KeysForEpoch.forTopology(topology, node, keys);
-                if (keysForEpoch != null)
+                KeyRanges topologyRanges = topology.rangesForNode(node);
+                if (topologyRanges == null)
+                    continue;
+                topologyRanges = topologyRanges.intersection(txnKeys);
+                Keys epochKeys = txnKeys.intersection(topologyRanges);
+                if (lastKeys == null || !lastKeys.containsAll(epochKeys))
                 {
-                    ranges.add(keysForEpoch);
+                    minEpoch = topology.epoch();
+                    scopeKeys = scopeKeys.merge(epochKeys);
                 }
+                lastKeys = epochKeys;
             }
 
-            return new Scope(topologies.currentEpoch(), ranges.toArray(KeysForEpoch[]::new));
+            return new Scope(minEpoch, scopeKeys);
         }
 
         public static Scope forTopologies(Node.Id node, Topologies topologies, Txn txn)
@@ -118,27 +67,13 @@ public abstract class TxnRequest implements Request
             return forTopologies(node, topologies, txn.keys());
         }
 
-        public long maxEpoch()
+        public long minRequiredEpoch()
         {
-            return maxEpoch;
-        }
-
-        public boolean intersects(KeyRanges ranges)
-        {
-            for (KeysForEpoch keysForEpoch : this.epochs)
-            {
-                if (ranges.intersects(keysForEpoch.keys))
-                    return true;
-            }
-
-            return false;
+            return minRequiredEpoch;
         }
 
         public Keys keys()
         {
-            Keys keys = epochs[0].keys;
-            for (int i = 1; i< epochs.length; i++)
-                keys = keys.merge(epochs[i].keys);
             return keys;
         }
 
@@ -147,23 +82,22 @@ public abstract class TxnRequest implements Request
         {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
-            Scope that = (Scope) o;
-            return maxEpoch == that.maxEpoch && Arrays.equals(epochs, that.epochs);
+            Scope scope = (Scope) o;
+            return minRequiredEpoch == scope.minRequiredEpoch && keys.equals(scope.keys);
         }
 
         @Override
         public int hashCode()
         {
-            int result = Objects.hash(maxEpoch);
-            result = 31 * result + Arrays.hashCode(epochs);
-            return result;
+            return Objects.hash(minRequiredEpoch, keys);
         }
 
         @Override
         public String toString()
         {
-            return "TxnRequestScope{" +
-                    "epochs=" + Arrays.toString(epochs) +
+            return "Scope{" +
+                    "maxEpoch=" + minRequiredEpoch +
+                    ", keys=" + keys +
                     '}';
         }
     }

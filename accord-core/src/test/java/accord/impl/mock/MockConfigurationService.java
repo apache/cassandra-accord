@@ -18,7 +18,6 @@ public class MockConfigurationService implements TestableConfigurationService
     private final MessageSink messageSink;
     private final List<Topology> epochs = new ArrayList<>();
     private final List<Listener> listeners = new ArrayList<>();
-    private final Map<Long, AsyncPromise<Void>> pending = new HashMap<>();
     private final EpochFunction<MockConfigurationService> fetchTopologyHandler;
 
     public MockConfigurationService(MessageSink messageSink, EpochFunction<MockConfigurationService> fetchTopologyHandler)
@@ -53,16 +52,13 @@ public class MockConfigurationService implements TestableConfigurationService
     }
 
     @Override
-    public synchronized Future<Void> fetchTopologyForEpoch(long epoch)
+    public synchronized void fetchTopologyForEpoch(long epoch)
     {
         if (epoch < epochs.size())
-        {
-            return SUCCESS;
-        }
+            return;
 
-        Future<Void> future = pending.computeIfAbsent(epoch, e -> new AsyncPromise<>());
         fetchTopologyHandler.apply(epoch, this);
-        return future;
+        return;
     }
 
     @Override
@@ -78,11 +74,6 @@ public class MockConfigurationService implements TestableConfigurationService
 
         for (Listener listener : listeners)
             listener.onTopologyUpdate(topology);
-
-        AsyncPromise<Void> promise = pending.remove(topology.epoch());
-        if (promise == null)
-            return;
-        promise.setSuccess(null);
     }
 
     public synchronized void reportSyncComplete(Node.Id node, long epoch)

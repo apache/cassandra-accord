@@ -35,9 +35,9 @@ public class SimpleConfigService implements ConfigurationService
     }
 
     @Override
-    public Future<Void> fetchTopologyForEpoch(long epoch)
+    public void fetchTopologyForEpoch(long epoch)
     {
-        return SUCCESS;
+        return;
     }
 
     @Override

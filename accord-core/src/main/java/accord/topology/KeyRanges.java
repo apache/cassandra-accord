@@ -64,6 +64,11 @@ public class KeyRanges implements Iterable<KeyRange>
         return rangeIndexForKey(0, ranges.length, key);
     }
 
+    public boolean contains(Key key)
+    {
+        return rangeIndexForKey(key) >= 0;
+    }
+
     public int size()
     {
         return ranges.length;

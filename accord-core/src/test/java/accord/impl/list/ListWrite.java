@@ -1,6 +1,8 @@
 package accord.impl.list;
 
+import java.util.Arrays;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 import accord.api.Key;
 import accord.api.Store;
@@ -22,5 +24,13 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
         int[] data = get(key);
         s.data.merge(key, new Timestamped<>(executeAt, data), Timestamped::merge);
         logger.trace("WRITE on {} at {} key:{} -> {}", s.node, executeAt, key, data);
+    }
+
+    @Override
+    public String toString()
+    {
+        return entrySet().stream()
+                         .map(e -> e.getKey() + "=" + Arrays.toString(e.getValue()))
+                         .collect(Collectors.joining(", ", "{", "}"));
     }
 }

@@ -52,7 +52,7 @@ public class EpochSync implements Runnable
         @Override
         public void process(Node node, Node.Id from, ReplyContext replyContext)
         {
-            node.local().forEach(commandStore -> {
+            node.forEachLocal(commandStore -> {
                 Command command = commandStore.command(txnId);
                 command.commit(txn, deps, executeAt);
             });
@@ -158,7 +158,7 @@ public class EpochSync implements Runnable
         {
             Map<TxnId, SyncMessage> syncMessages = new ConcurrentHashMap<>();
             Consumer<Command> commandConsumer = command -> syncMessages.put(command.txnId(), new SyncMessage(command));
-            node.local().forEach(commandStore -> commandStore.forCommittedInEpoch(syncTopology.ranges(), syncEpoch, commandConsumer));
+            node.forEachLocal(commandStore -> commandStore.forCommittedInEpoch(syncTopology.ranges(), syncEpoch, commandConsumer));
 
             for (SyncMessage message : syncMessages.values())
                 CommandSync.sync(node, message, nextTopology);

@@ -6,9 +6,9 @@ import accord.api.TestableConfigurationService;
 import accord.local.Node;
 import accord.messages.*;
 import accord.topology.Topology;
+import com.google.common.base.Preconditions;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
-import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -16,18 +16,95 @@ import java.util.*;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-// TODO: merge with MockConfigurationService?
 public class BurnTestConfigurationService implements TestableConfigurationService
 {
     private static final Logger logger = LoggerFactory.getLogger(BurnTestConfigurationService.class);
-    private static final Future<Void> SUCCESS = ImmediateFuture.success(null);
 
     private final Node.Id node;
     private final MessageSink messageSink;
     private final Function<Node.Id, Node> lookup;
     private final Supplier<Random> randomSupplier;
-    private final List<Topology> epochs = new ArrayList<>();
+    private final Map<Long, FetchTopology> pendingEpochs = new HashMap<>();
+
+    private final EpochHistory epochs = new EpochHistory();
     private final List<ConfigurationService.Listener> listeners = new ArrayList<>();
+
+    private static class EpochState
+    {
+        private final long epoch;
+        private final AsyncPromise<Topology> received = new AsyncPromise<>();
+        private final AsyncPromise<Void> acknowledged = new AsyncPromise<>();
+        private final AsyncPromise<Void> synced = new AsyncPromise<>();
+
+        private Topology topology = null;
+
+        public EpochState(long epoch)
+        {
+            this.epoch = epoch;
+        }
+    }
+
+    private static class EpochHistory
+    {
+        // TODO: move pendingEpochs / FetchTopology into here?
+        private final List<EpochState> epochs = new ArrayList<>();
+
+        private long lastReceived = 0;
+        private long lastAcknowledged = 0;
+        private long lastSyncd = 0;
+
+        private EpochState get(long epoch)
+        {
+            for (long addEpoch = epochs.size() - 1; addEpoch <= epoch; addEpoch++)
+                epochs.add(new EpochState(addEpoch));
+            return epochs.get((int) epoch);
+        }
+
+        EpochHistory receive(Topology topology)
+        {
+            long epoch = topology.epoch();
+            Preconditions.checkState(epoch == 0 || lastReceived == epoch - 1);
+            lastReceived = epoch;
+            EpochState state = get(epoch);
+            state.topology = topology;
+            state.received.setSuccess(topology);
+            return this;
+        }
+
+        Future<Topology> receiveFuture(long epoch)
+        {
+            return get(epoch).received;
+        }
+
+        Topology topologyFor(long epoch)
+        {
+            return get(epoch).topology;
+        }
+
+        EpochHistory acknowledge(long epoch)
+        {
+            Preconditions.checkState(epoch == 0 || lastAcknowledged == epoch - 1);
+            lastAcknowledged = epoch;
+            get(epoch).acknowledged.setSuccess(null);
+            return this;
+        }
+
+        Future<Void> acknowledgeFuture(long epoch)
+        {
+            return get(epoch).acknowledged;
+        }
+
+        EpochHistory syncComplete(long epoch)
+        {
+            Preconditions.checkState(epoch == 0 || lastSyncd == epoch - 1);
+            EpochState state = get(epoch);
+            Preconditions.checkState(state.received.isDone());
+            Preconditions.checkState(state.acknowledged.isDone());
+            lastSyncd = epoch;
+            get(epoch).synced.setSuccess(null);
+            return this;
+        }
+    }
 
     public BurnTestConfigurationService(Node.Id node, MessageSink messageSink, Supplier<Random> randomSupplier, Topology topology, Function<Node.Id, Node> lookup)
     {
@@ -35,8 +112,8 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         this.messageSink = messageSink;
         this.randomSupplier = randomSupplier;
         this.lookup = lookup;
-        epochs.add(Topology.EMPTY);
-        epochs.add(topology);
+        epochs.receive(Topology.EMPTY).acknowledge(0).syncComplete(0);
+        epochs.receive(topology).acknowledge(1).syncComplete(1);
     }
 
     @Override
@@ -48,13 +125,13 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
     @Override
     public synchronized Topology currentTopology()
     {
-        return epochs.get(epochs.size() - 1);
+        return epochs.topologyFor(epochs.lastReceived);
     }
 
     @Override
     public synchronized Topology getTopologyForEpoch(long epoch)
     {
-        return epoch >= epochs.size() ? null : epochs.get((int) epoch);
+        return epochs.topologyFor(epoch);
     }
 
     private static class FetchTopologyRequest implements Request
@@ -114,8 +191,6 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         private final FetchTopologyRequest request;
         private final List<Node.Id> candidates;
 
-        private final Set<Runnable> onComplete = new HashSet<>();
-
         public FetchTopology(long epoch)
         {
             this.request = new FetchTopologyRequest(epoch);
@@ -151,23 +226,19 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         }
     }
 
-    private final Map<Long, FetchTopology> pendingEpochs = new HashMap<>();
-
     @Override
-    public synchronized Future<Void> fetchTopologyForEpoch(long epoch)
+    public synchronized void fetchTopologyForEpoch(long epoch)
     {
-        if (epoch < epochs.size())
-        {
-            return SUCCESS;
-        }
+        if (epoch <= epochs.lastReceived)
+            return;
 
-        FetchTopology fetch = pendingEpochs.computeIfAbsent(epoch, FetchTopology::new);
-        return fetch;
+        pendingEpochs.computeIfAbsent(epoch, FetchTopology::new);
     }
 
     @Override
-    public void acknowledgeEpoch(long epoch)
+    public synchronized void acknowledgeEpoch(long epoch)
     {
+        epochs.acknowledge(epoch);
         Topology topology = getTopologyForEpoch(epoch);
         Node originator = lookup.apply(node);
         TopologyUpdate.syncEpoch(originator, epoch - 1, topology.nodes());
@@ -176,18 +247,26 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
     @Override
     public synchronized void reportTopology(Topology topology)
     {
-        if (topology.epoch() < epochs.size())
+        long lastReceived = epochs.lastReceived;
+        if (topology.epoch() <= lastReceived)
             return;
 
-        if (topology.epoch() > epochs.size())
+        if (topology.epoch() > lastReceived + 1)
         {
-            fetchTopologyForEpoch(epochs.size() + 1).addListener(() -> reportTopology(topology));
+            fetchTopologyForEpoch(lastReceived + 1);
+            epochs.receiveFuture(lastReceived + 1).addListener(() -> reportTopology(topology));
+            return;
+        }
+
+        long lastAcked = epochs.lastAcknowledged;
+        if (topology.epoch() > lastAcked + 1)
+        {
+            epochs.acknowledgeFuture(lastAcked + 1).addListener(() -> reportTopology(topology));
             return;
         }
         logger.trace("Epoch {} received by {}", topology.epoch(), node);
 
-        epochs.add(topology);
-
+        epochs.receive(topology);
         for (Listener listener : listeners)
             listener.onTopologyUpdate(topology);
 
@@ -197,5 +276,4 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
 
         fetch.setSuccess(null);
     }
-
 }

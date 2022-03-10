@@ -15,6 +15,7 @@ import java.util.function.Supplier;
 
 import accord.coordinate.Timeout;
 import accord.local.CommandStore;
+import accord.local.CommandStores;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Scheduler;
@@ -139,7 +140,8 @@ public class Main
             MaelstromInit init = (MaelstromInit) packet.body;
             topology = topologyFactory.toTopology(init.cluster);
             sink = new StdoutSink(System::currentTimeMillis, scheduler, start, init.self, out, err);
-            on = new Node(init.self, sink, new SimpleConfigService(topology), System::currentTimeMillis, MaelstromStore::new, MaelstromAgent.INSTANCE, scheduler, CommandStore.Factory.SINGLE_THREAD);
+            on = new Node(init.self, sink, new SimpleConfigService(topology), System::currentTimeMillis,
+                          MaelstromStore::new, MaelstromAgent.INSTANCE, scheduler, CommandStores.SingleThread::new);
             err.println("Initialized node " + init.self);
             err.flush();
             sink.send(packet.src, new Body(Type.init_ok, Body.SENTINEL_MSG_ID, init.msg_id));

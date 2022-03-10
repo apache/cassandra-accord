@@ -36,12 +36,12 @@ public class Accept extends TxnRequest
 
     public void process(Node on, Node.Id replyToNode, ReplyContext replyContext)
     {
-        on.reply(replyToNode, replyContext, on.local(scope()).map(instance -> {
+        on.reply(replyToNode, replyContext, on.mapReduceLocal(scope(), instance -> {
             Command command = instance.command(txnId);
             if (!command.accept(ballot, txn, executeAt, deps))
                 return new AcceptNack(txnId, command.promised());
             return new AcceptOk(txnId, calculateDeps(instance, txnId, txn, executeAt));
-        }).reduce((r1, r2) -> {
+        }, (r1, r2) -> {
             if (!r1.isOK()) return r1;
             if (!r2.isOK()) return r2;
             AcceptOk ok1 = (AcceptOk) r1;
@@ -50,7 +50,7 @@ public class Accept extends TxnRequest
             if (ok2.deps.isEmpty()) return ok1;
             ok1.deps.addAll(ok2.deps);
             return ok1;
-        }).orElseThrow());
+        }));
     }
 
     @Override

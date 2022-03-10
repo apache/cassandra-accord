@@ -48,12 +48,12 @@ public class PreAcceptTest
                         () -> store,
                         new TestAgent(),
                         scheduler,
-                        CommandStore.Factory.SINGLE_THREAD);
+                        CommandStores.SingleThread::new);
     }
 
     private static TxnRequest.Scope scope(TxnId txnId, Txn txn)
     {
-        return new TxnRequest.Scope(txnId.epoch, new TxnRequest.Scope.KeysForEpoch(txnId.epoch, txn.keys()));
+        return new TxnRequest.Scope(txnId.epoch, txn.keys());
     }
 
     private static PreAccept preAccept(TxnId txnId, Txn txn)
@@ -72,7 +72,7 @@ public class PreAcceptTest
         try
         {
             IntKey key = IntKey.key(10);
-            CommandStore commandStore = node.local(key).orElseThrow();
+            CommandStore commandStore = node.unsafeForKey(key);
             Assertions.assertFalse(commandStore.hasCommandsForKey(key));
 
             TxnId txnId = clock.idForNode(1, ID2);
@@ -104,7 +104,7 @@ public class PreAcceptTest
         try
         {
             IntKey key = IntKey.key(10);
-            CommandStore commandStore = node.local(key).orElseThrow();
+            CommandStore commandStore = node.unsafeForKey(key);
             Assertions.assertFalse(commandStore.hasCommandsForKey(key));
 
             TxnId txnId = clock.idForNode(1, ID2);
@@ -195,7 +195,7 @@ public class PreAcceptTest
         try
         {
             IntKey key = IntKey.key(10);
-            CommandStore commandStore = node.local(key).orElseThrow();
+            CommandStore commandStore = node.unsafeForKey(key);
 
             configService(node).reportTopology(node.topology().current().withEpoch(2));
             messageSink.clearHistory();

@@ -4,10 +4,14 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.IntFunction;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
-import java.util.stream.Stream;
+
+import com.google.common.annotations.VisibleForTesting;
 
 import accord.api.*;
 import accord.coordinate.Coordinate;
@@ -90,7 +94,7 @@ public class Node implements ConfigurationService.Listener
     private final Set<TxnId> pendingRecovery = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier,
-                Supplier<Store> dataSupplier, Agent agent, Scheduler scheduler, CommandStore.Factory commandStoreFactory)
+                Supplier<Store> dataSupplier, Agent agent, Scheduler scheduler, CommandStores.Factory factory)
     {
         this.id = id;
         this.agent = agent;
@@ -101,12 +105,7 @@ public class Node implements ConfigurationService.Listener
         this.now = new AtomicReference<>(new Timestamp(topology.epoch(), nowSupplier.getAsLong(), 0, id));
         this.nowSupplier = nowSupplier;
         this.scheduler = scheduler;
-        this.commandStores = new CommandStores(numCommandShards(),
-                                               id,
-                                               this::uniqueNow,
-                                               agent,
-                                               dataSupplier.get(),
-                                               commandStoreFactory);
+        this.commandStores = factory.create(numCommandShards(), id, this::uniqueNow, agent, dataSupplier.get());
 
         configService.registerListener(this);
         onTopologyUpdate(topology, false);
@@ -188,31 +187,39 @@ public class Node implements ConfigurationService.Listener
         return nowSupplier.getAsLong();
     }
 
-    public Stream<CommandStore> local(Keys keys)
+    public void forEachLocal(Consumer<CommandStore> forEach)
     {
-        return commandStores.forKeys(keys);
+        commandStores.forEach(forEach);
     }
 
-    public Stream<CommandStore> local(Txn txn)
+    public void forEachLocal(Keys keys, Consumer<CommandStore> forEach)
     {
-        return commandStores.forKeys(txn.keys());
+        commandStores.forEach(keys, forEach);
     }
 
-    public Stream<CommandStore> local(TxnRequest.Scope scope)
+    public void forEachLocal(Txn txn, Consumer<CommandStore> forEach)
     {
-        return commandStores.forScope(scope);
+        forEachLocal(txn.keys, forEach);
     }
 
-    public Stream<CommandStore> local()
+    public void forEachLocal(TxnRequest.Scope scope, Consumer<CommandStore> forEach)
     {
-        return commandStores.stream();
+        commandStores.forEach(scope, forEach);
     }
 
-    public Optional<CommandStore> local(Key key)
+    public <T> T mapReduceLocal(TxnRequest.Scope scope, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
-        return local(Keys.of(key)).reduce((i1, i2) -> {
-            throw new IllegalStateException("more than one instance encountered for key");
-        });
+        return commandStores.mapReduce(scope, map, reduce);
+    }
+
+    public <T extends Collection<CommandStore>> T collectLocal(Keys keys, IntFunction<T> factory)
+    {
+        return commandStores.collect(keys, factory);
+    }
+
+    public <T extends Collection<CommandStore>> T collectLocal(TxnRequest.Scope scope, IntFunction<T> factory)
+    {
+        return commandStores.collect(scope, factory);
     }
 
     // send to every node besides ourselves
@@ -284,8 +291,11 @@ public class Node implements ConfigurationService.Listener
         // TODO: The combination of updating the epoch of the next timestamp with epochs we don’t have topologies for,
         //  and requiring preaccept to talk to its topology epoch means that learning of a new epoch via timestamp
         //  (ie not via config service) will halt any new txns from a node until it receives this topology
-        if (txnId.epoch > configService.currentEpoch())
-            return configService.fetchTopologyForEpoch(txnId.epoch).flatMap(v -> coordinate(txnId, txn));
+        if (txnId.epoch > topology().epoch())
+        {
+            configService.fetchTopologyForEpoch(txnId.epoch);
+            return topology().awaitEpoch(txnId.epoch).flatMap(v -> coordinate(txnId, txn));
+        }
 
         Future<Result> result = Coordinate.execute(this, txnId, txn);
         coordinating.put(txnId, result);
@@ -309,21 +319,16 @@ public class Node implements ConfigurationService.Listener
     // TODO: encapsulate in Coordinate, so we can request that e.g. commits be re-sent?
     public void recover(TxnId txnId, Txn txn)
     {
-        if (txnId.epoch > configService.currentEpoch())
+        if (txnId.epoch > topology.epoch())
         {
-            configService.fetchTopologyForEpoch(txnId.epoch).addListener(() -> recover(txnId, txn));
+            configService.fetchTopologyForEpoch(txnId.epoch);
+            topology().awaitEpoch(txnId.epoch).addListener(() -> recover(txnId, txn));
             return;
         }
 
         Future<Result> result = coordinating.get(txnId);
         if (result != null)
             return;
-
-        if (txnId.epoch > topology().epoch())
-        {
-            configService().fetchTopologyForEpoch(txnId.epoch).addListener(() -> recover(txnId, txn));
-            return;
-        }
 
         result = Coordinate.recover(this, txnId, txn);
         coordinating.putIfAbsent(txnId, result);
@@ -343,7 +348,8 @@ public class Node implements ConfigurationService.Listener
         long unknownEpoch = topology().maxUnknownEpoch(request);
         if (unknownEpoch > 0)
         {
-            configService.fetchTopologyForEpoch(unknownEpoch).addListener(() -> receive(request, from, replyContext));
+            configService.fetchTopologyForEpoch(unknownEpoch);
+            topology().awaitEpoch(unknownEpoch).addListener(() -> receive(request, from, replyContext));
             return;
         }
         scheduler.now(() -> request.process(this, from, replyContext));
@@ -369,4 +375,11 @@ public class Node implements ConfigurationService.Listener
     {
         return "Node{" + id + '}';
     }
+
+    @VisibleForTesting
+    public CommandStore unsafeForKey(Key key)
+    {
+        return commandStores.unsafeForKey(key);
+    }
+
 }

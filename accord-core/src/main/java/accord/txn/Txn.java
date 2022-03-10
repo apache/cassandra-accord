@@ -6,7 +6,6 @@ import java.util.stream.Stream;
 
 import accord.api.*;
 import accord.local.*;
-import accord.topology.KeyRanges;
 
 public class Txn
 {
@@ -90,14 +89,14 @@ public class Txn
 
     public Data read(Command command, Keys keyScope)
     {
-        return keyScope.accumulate(command.commandStore.ranges(), (key, accumulate) -> {
+        return keyScope.foldl(command.commandStore.ranges(), (key, accumulate) -> {
             CommandStore commandStore = command.commandStore;
             if (!commandStore.hashIntersects(key))
                 return accumulate;
 
             Data result = read.read(key, command.executeAt(), commandStore.store());
             return accumulate != null ? accumulate.merge(result) : result;
-        });
+        }, null);
     }
 
     public Timestamp maxConflict(CommandStore commandStore)
