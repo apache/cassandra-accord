@@ -58,7 +58,7 @@ public class PreAcceptTest
 
     private static PreAccept preAccept(TxnId txnId, Txn txn, Key homeKey)
     {
-        return new PreAccept(txn.keys, txnId.epoch, txnId.epoch, txnId.epoch, txnId, txn, homeKey);
+        return new PreAccept(txn.keys, txnId.epoch, txnId, txn, homeKey);
     }
 
     @Test

@@ -18,39 +18,30 @@ import accord.txn.Dependencies;
 import accord.txn.Txn;
 import accord.txn.TxnId;
 
-public class PreAccept extends TxnRequest
+public class PreAccept extends TxnRequest.WithUnsync
 {
-    public final TxnId txnId;
     public final Txn txn;
-    public final Key homeKey;
-    public final long minEpoch;
     public final long maxEpoch;
 
     public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey)
     {
-        super(to, topologies, txn.keys);
-        this.txnId = txnId;
+        super(to, topologies, txn.keys, txnId, homeKey);
         this.txn = txn;
-        this.homeKey = homeKey;
-        this.minEpoch = topologies.oldestEpoch();
         this.maxEpoch = topologies.currentEpoch();
     }
 
     @VisibleForTesting
-    public PreAccept(Keys scope, long waitForEpoch, long minEpoch, long maxEpoch, TxnId txnId, Txn txn, Key homeKey)
+    public PreAccept(Keys scope, long epoch, TxnId txnId, Txn txn, Key homeKey)
     {
-        super(scope, waitForEpoch);
-        this.txnId = txnId;
+        super(scope, epoch, txnId, homeKey);
         this.txn = txn;
-        this.homeKey = homeKey;
-        this.minEpoch = minEpoch;
-        this.maxEpoch = maxEpoch;
+        this.maxEpoch = epoch;
     }
 
     public void process(Node node, Id from, ReplyContext replyContext)
     {
         // TODO: verify we handle all of the scope() keys
-        Key progressKey = node.trySelectProgressKey(waitForEpoch(), txn.keys, homeKey);
+        Key progressKey = doNotComputeProgressKey ? null : node.trySelectProgressKey(waitForEpoch(), txn.keys, homeKey);
         node.reply(from, replyContext, node.mapReduceLocal(scope(), minEpoch, maxEpoch, instance -> {
             // note: this diverges from the paper, in that instead of waiting for JoinShard,
             //       we PreAccept to both old and new topologies and require quorums in both.

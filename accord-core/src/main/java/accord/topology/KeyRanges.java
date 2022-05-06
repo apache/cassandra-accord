@@ -250,11 +250,14 @@ public class KeyRanges implements Iterable<KeyRange>
     // optimised for case where one contains the other
     public KeyRanges union(KeyRanges that)
     {
-        // pick the larger one
-        KeyRange[] as = this.ranges, bs = that.ranges;
-        if (as.length < bs.length) { KeyRange[] tmp = as; as = bs; bs = tmp; }
-
         int ai = 0, bi = 0;
+        KeyRange[] as = this.ranges, bs = that.ranges;
+        if (as.length < bs.length)
+        {
+            KeyRange[] tmp = as; as = bs; bs = tmp;
+        }
+
+        // TODO: this doesn't correctly handle as.length == bs.length if bs > as
         while (ai < as.length && bi < bs.length)
         {
             KeyRange a = as[ai];
@@ -290,37 +293,23 @@ public class KeyRanges implements Iterable<KeyRange>
             }
             else
             {
-                c = a.start().compareTo(b.start());
-                if (c < 0 && a.fullyContains(b))
+                KeyRange merged = a.subRange(c < 0 ? a.start() : b.start(), a.end().compareTo(b.end()) > 0 ? a.end() : b.end());
+                ai++;
+                bi++;
+                while (ai < as.length || bi < bs.length)
                 {
-                    bi++;
-                    continue;
+                    KeyRange min;
+                    if (ai == as.length) min = bs[bi];
+                    else if (bi == bs.length) min = a = as[ai];
+                    else min = as[ai].start().compareTo(bs[bi].start()) < 0 ? a = as[ai] : bs[bi];
+                    if (min.start().compareTo(merged.end()) > 0)
+                        break;
+                    if (min.end().compareTo(merged.end()) > 0)
+                        merged = merged.subRange(merged.start(), min.end());
+                    if (a == min) ai++;
+                    else bi++;
                 }
-                else if (c > 0 && b.fullyContains(a))
-                {
-                    ai++;
-                    continue;
-                }
-                else
-                {
-                    KeyRange merged = a.subRange(c < 0 ? a.start() : b.start(), a.end().compareTo(b.end()) > 0 ? a.end() : b.end());
-                    ai++;
-                    bi++;
-                    while (ai < as.length || bi < bs.length)
-                    {
-                        KeyRange min;
-                        if (ai == as.length) min = b = bs[bi];
-                        else if (bi == bs.length) min = a = as[ai];
-                        else min = as[ai].start().compareTo(bs[bi].start()) < 0 ? as[ai] : bs[bi];
-                        if (min.start().compareTo(merged.end()) > 0)
-                            break;
-                        if (min.end().compareTo(merged.end()) > 0)
-                            merged = merged.subRange(merged.start(), min.end());
-                        if (a == min) ai++;
-                        else bi++;
-                    }
-                    result[count++] = merged;
-                }
+                result[count++] = merged;
             }
         }
 

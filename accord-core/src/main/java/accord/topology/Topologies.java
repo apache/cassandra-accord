@@ -11,7 +11,7 @@ public interface Topologies
 {
     Topology current();
 
-    int findEarliestSinceEpoch(long epoch);
+    Topology forEpoch(long epoch);
 
     long oldestEpoch();
 
@@ -30,8 +30,6 @@ public interface Topologies
     int totalShards();
 
     Set<Node.Id> nodes();
-
-    Topologies removeEpochsBefore(long epoch);
 
     default void forEach(IndexedConsumer<Topology> consumer)
     {
@@ -112,15 +110,17 @@ public interface Topologies
         }
 
         @Override
-        public long oldestEpoch()
+        public Topology forEpoch(long epoch)
         {
-            return currentEpoch();
+            if (topology.epoch != epoch)
+                throw new IndexOutOfBoundsException();
+            return topology;
         }
 
         @Override
-        public int findEarliestSinceEpoch(long epoch)
+        public long oldestEpoch()
         {
-            return 0;
+            return currentEpoch();
         }
 
         @Override
@@ -153,14 +153,6 @@ public interface Topologies
         public Set<Node.Id> nodes()
         {
             return topology.nodes();
-        }
-
-        @Override
-        public Topologies removeEpochsBefore(long epoch)
-        {
-            if (epoch > topology.epoch())
-                throw new IndexOutOfBoundsException(epoch + " is greater than current epoch " + topology.epoch());
-            return this;
         }
 
         @Override
@@ -205,23 +197,18 @@ public interface Topologies
         }
 
         @Override
-        public long oldestEpoch()
+        public Topology forEpoch(long epoch)
         {
-            return get(size() - 1).epoch;
+            long index = get(0).epoch - epoch;
+            if (index < 0 || index > size())
+                throw new IndexOutOfBoundsException();
+            return get((int)index);
         }
 
         @Override
-        public int findEarliestSinceEpoch(long epoch)
+        public long oldestEpoch()
         {
-            long current = current().epoch;
-            if (current < epoch)
-                return 0;
-
-            long index = current - epoch;
-            if (index > topologies.size())
-                return topologies.size() - 1;
-
-            return (int) index;
+            return get(size() - 1).epoch;
         }
 
         @Override
@@ -258,27 +245,6 @@ public interface Topologies
             for (int i=0,mi=size(); i<mi; i++)
                 result.addAll(get(i).nodes());
             return result;
-        }
-
-        @Override
-        public Topologies removeEpochsBefore(long epoch)
-        {
-            long current = currentEpoch();
-            if (epoch > current)
-                throw new IndexOutOfBoundsException(epoch + " is greater than current epoch " + current);
-            if (epoch <= topologies.get(0).epoch())
-                return this;
-            if (epoch == current)
-                return new Single(current(), fastPathPermitted());
-
-            int numEpochs = (int) (current - epoch + 1);
-            Topology[] result = new Topology[numEpochs];
-            int startIdx = topologies.size() - numEpochs;
-            for (int i=0; i<result.length; i++)
-                result[i] = topologies.get(startIdx + 1);
-            Preconditions.checkState(result[0].epoch() >= epoch);
-            Preconditions.checkState(current == result[result.length - 1].epoch());
-            return new Multi(result);
         }
 
         public void add(Topology topology)

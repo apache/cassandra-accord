@@ -12,23 +12,19 @@ import accord.txn.TxnId;
 
 import static accord.messages.PreAccept.calculateDeps;
 
-public class Accept extends TxnRequest
+public class Accept extends TxnRequest.WithUnsync
 {
     public final Ballot ballot;
-    public final TxnId txnId;
     public final Txn txn;
-    public final Key homeKey;
     public final long minEpoch;
     public final Timestamp executeAt;
     public final Dependencies deps;
 
     public Accept(Node.Id to, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Dependencies deps)
     {
-        super(to, topologies, txn.keys);
+        super(to, topologies, txn.keys, txnId, homeKey);
         this.ballot = ballot;
-        this.txnId = txnId;
         this.txn = txn;
-        this.homeKey = homeKey;
         this.minEpoch = topologies.oldestEpoch();
         this.executeAt = executeAt;
         this.deps = deps;
@@ -36,7 +32,7 @@ public class Accept extends TxnRequest
 
     public void process(Node node, Node.Id replyToNode, ReplyContext replyContext)
     {
-        Key progressKey = node.trySelectProgressKey(waitForEpoch(), txn.keys, homeKey);
+        Key progressKey = progressKey(node);
         // TODO: when we begin expunging old epochs we need to ensure we handle the case where we do not fully handle the keys;
         //       since this will likely imply the transaction has been applied or aborted we can indicate the coordinator
         //       should enquire as to the result

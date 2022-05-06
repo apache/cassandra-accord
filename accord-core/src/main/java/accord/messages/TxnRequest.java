@@ -1,21 +1,88 @@
 package accord.messages;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+
+import accord.api.Key;
 import accord.local.Node;
+import accord.local.Node.Id;
 import accord.topology.KeyRanges;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.txn.Keys;
+import accord.txn.TxnId;
+
+import static java.lang.Long.min;
 
 public abstract class TxnRequest implements EpochRequest
 {
+    public static abstract class WithUnsync extends TxnRequest
+    {
+        public final TxnId txnId;
+        public final Key homeKey;
+        public final long minEpoch;
+        protected final boolean doNotComputeProgressKey;
+
+        public WithUnsync(Id to, Topologies topologies, Keys keys, TxnId txnId, Key homeKey)
+        {
+            this(to, topologies, keys, txnId, homeKey, latestRelevantEpochIndex(to, topologies, keys));
+        }
+
+        private WithUnsync(Id to, Topologies topologies, Keys keys, TxnId txnId, Key homeKey, int startIndex)
+        {
+            super(to, topologies, keys, startIndex);
+            this.txnId = txnId;
+            this.homeKey = homeKey;
+            this.minEpoch = topologies.oldestEpoch();
+            this.doNotComputeProgressKey = waitForEpoch() < txnId.epoch && startIndex > 0
+                                           && topologies.get(startIndex).epoch() < txnId.epoch;
+
+            KeyRanges ranges = topologies.forEpoch(txnId.epoch).rangesForNode(to);
+            if (doNotComputeProgressKey)
+            {
+                Preconditions.checkState(ranges == null || !ranges.intersects(keys)); // confirm dest is not a replica on txnId.epoch
+            }
+            else
+            {
+                boolean intersects = ranges != null && ranges.intersects(keys);
+                long progressEpoch = Math.min(waitForEpoch(), txnId.epoch);
+                KeyRanges computesRangesOn = topologies.forEpoch(progressEpoch).rangesForNode(to);
+                boolean check = computesRangesOn != null && computesRangesOn.intersects(keys);
+                if (check != intersects)
+                    throw new IllegalStateException();
+            }
+        }
+
+        Key progressKey(Node node)
+        {
+            // if waitForEpoch < txnId.epoch, then this replica's ownership is unchanged
+            long progressEpoch = min(waitForEpoch(), txnId.epoch);
+            return doNotComputeProgressKey ? null : node.trySelectProgressKey(progressEpoch, scope(), homeKey);
+        }
+
+        @VisibleForTesting
+        public WithUnsync(Keys scope, long epoch, TxnId txnId, Key homeKey)
+        {
+            super(scope, epoch);
+            this.txnId = txnId;
+            this.homeKey = homeKey;
+            this.minEpoch = epoch;
+            this.doNotComputeProgressKey = false;
+        }
+    }
+
     private final Keys scope;
     private final long waitForEpoch;
 
     public TxnRequest(Node.Id to, Topologies topologies, Keys keys)
     {
-        int startIndex = findLatestRelevantEpochIndex(to, topologies, keys);
-        this.scope = computeScope(to, topologies, keys, startIndex);
-        this.waitForEpoch = computeWaitForEpoch(to, topologies, startIndex);
+        this(to, topologies, keys, 0);
+    }
+
+    public TxnRequest(Node.Id to, Topologies topologies, Keys keys, int startIndex)
+    {
+        this(computeScope(to, topologies, keys, startIndex),
+             computeWaitForEpoch(to, topologies, startIndex));
     }
 
     public TxnRequest(Keys scope, long waitForEpoch)
@@ -34,7 +101,9 @@ public abstract class TxnRequest implements EpochRequest
         return waitForEpoch;
     }
 
-    private static int findLatestRelevantEpochIndex(Node.Id node, Topologies topologies, Keys keys)
+
+
+    protected static int latestRelevantEpochIndex(Node.Id node, Topologies topologies, Keys keys)
     {
         KeyRanges latest = topologies.get(0).rangesForNode(node);
 
@@ -75,7 +144,7 @@ public abstract class TxnRequest implements EpochRequest
     // except if the latest epoch is empty for the keys
     public static long computeWaitForEpoch(Node.Id node, Topologies topologies, Keys keys)
     {
-        return computeWaitForEpoch(node, topologies, findLatestRelevantEpochIndex(node, topologies, keys));
+        return computeWaitForEpoch(node, topologies, latestRelevantEpochIndex(node, topologies, keys));
     }
 
     public static long computeWaitForEpoch(Node.Id node, Topologies topologies, int startIndex)
@@ -98,7 +167,7 @@ public abstract class TxnRequest implements EpochRequest
 
     public static Keys computeScope(Node.Id node, Topologies topologies, Keys keys)
     {
-        return computeScope(node, topologies, keys, findLatestRelevantEpochIndex(node, topologies, keys));
+        return computeScope(node, topologies, keys, latestRelevantEpochIndex(node, topologies, keys));
     }
 
     public static Keys computeScope(Node.Id node, Topologies topologies, Keys keys, int startIndex)
