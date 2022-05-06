@@ -38,7 +38,7 @@ public class CheckOnUncommitted extends CheckOnCommitted
 
     public boolean hasCommitted()
     {
-        return max != null && max.status.compareTo(Committed) >= 0;
+        return max != null && max.status.hasBeen(Committed);
     }
 
     @Override

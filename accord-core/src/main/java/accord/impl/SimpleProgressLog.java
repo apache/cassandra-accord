@@ -67,6 +67,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
     enum Progress
     {
         NoneExpected, Expected, NoProgress, Investigating, Done;
+
         static Progress advance(Progress current)
         {
             switch (current)
@@ -98,11 +99,23 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
         enum LocalStatus
         {
             NotWitnessed, Uncommitted, Committed, ReadyToExecute, Done;
+            boolean isAtMost(LocalStatus equalOrLessThan)
+            {
+                return compareTo(equalOrLessThan) <= 0;
+            }
+            boolean isAtLeast(LocalStatus equalOrGreaterThan)
+            {
+                return compareTo(equalOrGreaterThan) >= 0;
+            }
         }
 
         enum GlobalStatus
         {
-            NotExecuted, Disseminating, PendingDurable, Durable, Done // TODO: manage propagating from Durable to everyone
+            NotExecuted, Disseminating, PendingDurable, Durable, Done; // TODO: manage propagating from Durable to everyone
+            boolean isAtLeast(GlobalStatus equalOrGreaterThan)
+            {
+                return compareTo(equalOrGreaterThan) >= 0;
+            }
         }
 
         LocalStatus local = LocalStatus.NotWitnessed;
@@ -119,7 +132,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
 
         void ensureAtLeast(LocalStatus newStatus, Progress newProgress, Node node, Command command)
         {
-            if (newStatus == Committed && global.compareTo(Durable) >= 0 && !command.executes())
+            if (newStatus == Committed && global.isAtLeast(Durable) && !command.executes())
             {
                 local = LocalStatus.Done;
                 localProgress = Done;
@@ -209,7 +222,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
                 global = Durable;
                 globalProgress = Expected;
                 refreshGlobal(node, command, null, persistedOn);
-                if (local.compareTo(Committed) >= 0 && !command.executes())
+                if (local.isAtLeast(Committed) && !command.executes())
                 {
                     local = LocalStatus.Done;
                     localProgress = Done;
@@ -258,7 +271,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
                 case ReadyToExecute:
                 {
                     Key homeKey = command.homeKey();
-                    long homeEpoch = (local.compareTo(Uncommitted) <= 0 ? txnId : command.executeAt()).epoch;
+                    long homeEpoch = (local.isAtMost(Uncommitted) ? txnId : command.executeAt()).epoch;
                     Shard homeShard = node.topology().forEpochIfKnown(homeKey, homeEpoch);
                     if (homeShard == null)
                     {
@@ -266,33 +279,30 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
                         localProgress = Expected;
                         break;
                     }
-                    if (local.compareTo(Committed) >= 0 && global.compareTo(Durable) >= 0)
+                    if (global.isAtLeast(PendingDurable))
                     {
                         checkOnCommitted(node, txnId, command.txn(), homeKey, homeShard, homeEpoch)
                         .addCallback((success, fail) -> {
                             // should have found enough information to apply the result, but in case we did not reset progress
-                            if (localProgress.compareTo(Done) < 0 && localProgress == Investigating)
+                            if (localProgress != Done && localProgress == Investigating)
                                 localProgress = Expected;
                         });
                     }
                     else
                     {
-
                         Future<CheckStatusOk> recover = maybeRecover(node, txnId, command.txn(),
-                                                                              homeKey, homeShard, homeEpoch,
-                                                                              maxStatus, maxPromised, maxPromiseHasBeenAccepted);
+                                                                     homeKey, homeShard, homeEpoch,
+                                                                     maxStatus, maxPromised, maxPromiseHasBeenAccepted);
+
                         recover.addCallback((success, fail) -> {
-                            if (local.compareTo(ReadyToExecute) <= 0 && localProgress == Investigating)
+                            if (local.isAtMost(ReadyToExecute) && localProgress == Investigating)
                             {
-                                if (fail == null && success == null)
+                                localProgress = Expected;
+                                if (success != null)
                                 {
-                                    // we have globally persisted the result, so move to waiting for the result to be fully replicated amongst our shards
-                                    executedOnAllShards(node, command, null);
-                                }
-                                else
-                                {
-                                    localProgress = Expected;
-                                    if (success != null)
+                                    if (success.hasExecutedOnAllShards)
+                                        executedOnAllShards(node, command, null);
+                                    else
                                         updateMax(success);
                                 }
                             }
@@ -417,11 +427,11 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
                     case NotWitnessed:
                         // TODO: this should instead invalidate the transaction on this shard, which invalidates it for all shards,
                         //       but we need to first support invalidation
-                        inform(node, txnId, command.txn(), homeKey);
-                        progress = Expected;
+                        inform(node, txnId, command.txn(), homeKey).addListener(() -> progress = Expected);
                         break;
                     case PreAccepted:
                     case Accepted:
+                        progress = Expected;
                         break;
                     case Committed:
                     case ReadyToExecute:
@@ -594,8 +604,8 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
         private void ensureSafeOrAtLeast(TxnId txnId, boolean isProgressShard, boolean isHomeShard, LocalStatus newStatus, Progress newProgress)
         {
             State state = null;
-            assert newStatus.compareTo(ReadyToExecute) <= 0;
-            if (newStatus.compareTo(LocalStatus.Committed) >= 0)
+            assert newStatus.isAtMost(ReadyToExecute);
+            if (newStatus.isAtLeast(LocalStatus.Committed))
                 state = recordCommit(txnId);
 
             if (isProgressShard)

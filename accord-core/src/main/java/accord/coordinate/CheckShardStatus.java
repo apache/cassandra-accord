@@ -13,6 +13,7 @@ import accord.messages.Callback;
 import accord.messages.CheckStatus;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.CheckStatusReply;
+import accord.messages.CheckStatus.IncludeInfo;
 import accord.topology.Shard;
 import accord.txn.Txn;
 import accord.txn.TxnId;
@@ -60,12 +61,12 @@ public abstract class CheckShardStatus extends AsyncFuture<CheckStatusOk> implem
     final Tracker tracker;
     final List<Id> candidates;
     final long epoch;
-    final byte includeInfo;
+    final IncludeInfo includeInfo;
 
     CheckStatusOk max;
     Throwable failure;
 
-    CheckShardStatus(Node node, TxnId txnId, Txn txn, Key key, Shard shard, long epoch, byte includeInfo)
+    CheckShardStatus(Node node, TxnId txnId, Txn txn, Key key, Shard shard, long epoch, IncludeInfo includeInfo)
     {
         this.epoch = epoch;
         Preconditions.checkNotNull(txn);

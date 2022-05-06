@@ -203,7 +203,7 @@ public class TopologyManager implements ConfigurationService.Listener
     }
 
     private final Node.Id node;
-    // TODO (now): this is unused!?
+    // TODO: this is unused!?
     private final LongConsumer epochReporter;
     private volatile Epochs epochs;
 

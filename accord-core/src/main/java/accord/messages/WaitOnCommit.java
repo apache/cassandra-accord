@@ -85,18 +85,16 @@ public class WaitOnCommit extends TxnRequest
     }
 
     public final TxnId txnId;
-    public final Keys keys; // TODO (now): redundant with TxnRequest.Scope
 
     public WaitOnCommit(Id to, Topologies topologies, TxnId txnId, Keys keys)
     {
         super(to, topologies, keys);
         this.txnId = txnId;
-        this.keys = keys;
     }
 
     public void process(Node node, Id replyToNode, ReplyContext replyContext)
     {
-        new LocalWait(node, replyToNode, txnId, replyContext).setup(keys);
+        new LocalWait(node, replyToNode, txnId, replyContext).setup(scope());
     }
 
     @Override

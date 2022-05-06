@@ -26,9 +26,9 @@ public class MaybeRecover extends CheckShardStatus implements BiConsumer<Object,
     final Ballot knownPromised;
     final boolean knownPromisedHasBeenAccepted;
 
-    MaybeRecover(Node node, TxnId txnId, Txn txn, Key homeKey, Shard homeShard, long homeEpoch, Status knownStatus, Ballot knownPromised, boolean knownPromiseHasBeenAccepted, byte includeInfo)
+    MaybeRecover(Node node, TxnId txnId, Txn txn, Key homeKey, Shard homeShard, long homeEpoch, Status knownStatus, Ballot knownPromised, boolean knownPromiseHasBeenAccepted)
     {
-        super(node, txnId, txn, homeKey, homeShard, homeEpoch, includeInfo);
+        super(node, txnId, txn, homeKey, homeShard, homeEpoch, IncludeInfo.OnlyIfExecuted);
         this.knownStatus = knownStatus;
         this.knownPromised = knownPromised;
         this.knownPromisedHasBeenAccepted = knownPromiseHasBeenAccepted;
@@ -55,17 +55,11 @@ public class MaybeRecover extends CheckShardStatus implements BiConsumer<Object,
                                || (!knownPromisedHasBeenAccepted && knownStatus == Accepted && max.accepted.equals(knownPromised)));
     }
 
-    // TODO (now): invoke from {node} so we may have mutual exclusion with other attempts to recover or coordinate
+    // TODO: invoke from {node} so we may have mutual exclusion with other attempts to recover or coordinate
     public static Future<CheckStatusOk> maybeRecover(Node node, TxnId txnId, Txn txn, Key homeKey, Shard homeShard, long homeEpoch,
-                                                     Status knownStatus, Ballot knownPromised, boolean knownPromiseHasBeenAccepted)
+                                                               Status knownStatus, Ballot knownPromised, boolean knownPromiseHasBeenAccepted)
     {
-        return maybeRecover(node, txnId, txn, homeKey, homeShard, homeEpoch, knownStatus, knownPromised, knownPromiseHasBeenAccepted, (byte)0);
-    }
-
-    private static Future<CheckStatusOk> maybeRecover(Node node, TxnId txnId, Txn txn, Key homeKey, Shard homeShard, long homeEpoch,
-                                                               Status knownStatus, Ballot knownPromised, boolean knownPromiseHasBeenAccepted, byte includeInfo)
-    {
-        MaybeRecover maybeRecover = new MaybeRecover(node, txnId, txn, homeKey, homeShard, homeEpoch, knownStatus, knownPromised, knownPromiseHasBeenAccepted, includeInfo);
+        MaybeRecover maybeRecover = new MaybeRecover(node, txnId, txn, homeKey, homeShard, homeEpoch, knownStatus, knownPromised, knownPromiseHasBeenAccepted);
         maybeRecover.start();
         return maybeRecover;
     }
@@ -93,30 +87,14 @@ public class MaybeRecover extends CheckShardStatus implements BiConsumer<Object,
 
             case Executed:
             case Applied:
-                if (max.hasExecutedOnAllShards)
+                CheckStatusOkFull full = (CheckStatusOkFull) max;
+                if (!max.hasExecutedOnAllShards)
                 {
-                    // TODO: persist this knowledge locally?
-                    trySuccess(null);
-                }
-                else if (max instanceof CheckStatusOkFull)
-                {
-                    CheckStatusOkFull full = (CheckStatusOkFull) max;
-                    // TODO (now): consider topology choice here
-                    Persist.persist(node, node.topology().syncForKeys(txn.keys, full.executeAt.epoch), txnId, key, txn, full.executeAt, full.deps, full.writes, full.result)
+                    Persist.persist(node, node.topology().unsyncForKeys(txn.keys, full.executeAt.epoch), txnId, key, txn, full.executeAt, full.deps, full.writes, full.result)
                            .addCallback(this);
                 }
-                else
-                {
-                    maybeRecover(node, txnId, txn, key, tracker.shard, epoch, max.status, max.promised, max.accepted.equals(max.promised), IncludeInfo.all())
-                    .addCallback((success, fail) -> {
-                        if (fail != null) tryFailure(fail);
-                        else
-                        {
-                            assert success == null;
-                            trySuccess(null);
-                        }
-                    });
-                }
+                // TODO: apply locally too, in case missing?
+                trySuccess(full);
         }
     }
 }

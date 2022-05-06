@@ -10,7 +10,6 @@ import accord.txn.Txn;
 import accord.txn.TxnId;
 
 import static accord.local.Status.Executed;
-import static accord.local.Status.NotWitnessed;
 
 /**
  * Check on the status of a locally-uncommitted transaction. Returns early if any result indicates Committed, otherwise
@@ -22,7 +21,7 @@ public class CheckOnCommitted extends CheckShardStatus
 {
     CheckOnCommitted(Node node, TxnId txnId, Txn txn, Key homeKey, Shard homeShard, long homeEpoch)
     {
-        super(node, txnId, txn, homeKey, homeShard, homeEpoch, IncludeInfo.all());
+        super(node, txnId, txn, homeKey, homeShard, homeEpoch, IncludeInfo.Always);
     }
 
     public static CheckOnCommitted checkOnCommitted(Node node, TxnId txnId, Txn txn, Key someKey, Shard someShard, long shardEpoch)
@@ -40,7 +39,7 @@ public class CheckOnCommitted extends CheckShardStatus
 
     public boolean hasApplied()
     {
-        return max != null && max.status.compareTo(Executed) >= 0;
+        return max != null && max.status.hasBeen(Executed);
     }
 
     void onSuccessCriteriaOrExhaustion(CheckStatusOkFull max)

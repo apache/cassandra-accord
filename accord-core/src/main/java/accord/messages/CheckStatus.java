@@ -17,40 +17,25 @@ public class CheckStatus implements Request
     // order is important
     public enum IncludeInfo
     {
-        HomeKey, ExecuteAt, Dependencies, Writes, Result;
-
-        public byte asBits()
+        No, OnlyIfExecuted, Always;
+        boolean include(Status status)
         {
-            return (byte) (1 << ordinal());
-        }
-
-        public byte and(IncludeInfo info)
-        {
-            return (byte) (info.asBits() | asBits());
-        }
-
-        public byte and(int bits)
-        {
-            return (byte) (bits | asBits());
-        }
-
-        public boolean isSet(byte bits)
-        {
-            return (bits & asBits()) != 0;
-        }
-
-        public static byte all()
-        {
-            return 31;
+            switch (this)
+            {
+                default: throw new IllegalStateException();
+                case No: return false;
+                case Always: return true;
+                case OnlyIfExecuted: return status.hasBeen(Status.Executed);
+            }
         }
     }
 
     final TxnId txnId;
     final Key key; // the key's commandStore to consult - not necessarily the homeKey
     final long epoch;
-    final byte includeInfo;
+    final IncludeInfo includeInfo;
 
-    public CheckStatus(TxnId txnId, Key key, long epoch, byte includeInfo)
+    public CheckStatus(TxnId txnId, Key key, long epoch, IncludeInfo includeInfo)
     {
         this.txnId = txnId;
         this.key = key;
@@ -63,16 +48,17 @@ public class CheckStatus implements Request
 
         Reply reply = node.ifLocal(key, epoch, instance -> {
             Command command = instance.command(txnId);
-            if (includeInfo != 0)
+            boolean includeInfo = this.includeInfo.include(command.status());
+            if (includeInfo)
             {
                 return (CheckStatusReply) new CheckStatusOkFull(command.status(), command.promised(), command.accepted(),
                                                                 node.isCoordinating(txnId, command.promised()),
                                                                 command.isGloballyPersistent(),
-                                                                IncludeInfo.HomeKey.isSet(includeInfo) ? command.homeKey() : null,
-                                                                IncludeInfo.ExecuteAt.isSet(includeInfo) ? command.executeAt() : null,
-                                                                IncludeInfo.Dependencies.isSet(includeInfo) ? command.savedDeps() : null,
-                                                                IncludeInfo.Writes.isSet(includeInfo) ? command.writes() : null,
-                                                                IncludeInfo.Result.isSet(includeInfo) ? command.result() : null);
+                                                                command.homeKey(),
+                                                                command.executeAt(),
+                                                                command.savedDeps(),
+                                                                command.writes(),
+                                                                command.result());
             }
 
             return new CheckStatusOk(command.status(), command.promised(), command.accepted(),
@@ -139,6 +125,9 @@ public class CheckStatus implements Request
 
         public CheckStatusOk merge(CheckStatusOk that)
         {
+            if (that.status.compareTo(this.status) > 0)
+                return that.merge(this);
+
             // preferentially select the one that is coordinating, if any
             CheckStatusOk prefer = this.isCoordinating ? this : that;
             CheckStatusOk defer = prefer == this ? that : this;

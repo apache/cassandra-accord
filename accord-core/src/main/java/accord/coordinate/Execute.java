@@ -41,7 +41,6 @@ class Execute extends AsyncPromise<Result> implements Callback<ReadReply>
         this.keys = txn.keys();
         this.deps = agreed.deps;
         this.executeAt = agreed.executeAt;
-        // TODO (now): why do we removeEpochsBefore rather than do forTxn(agreed.txn, agreed.executeAt.epoch)?
         Topologies coordinationTopologies = node.topology().unsyncForTxn(agreed.txn, agreed.executeAt.epoch);
         Topologies readTopologies = node.topology().unsyncForKeys(agreed.txn.read.keys(), agreed.executeAt.epoch);
         this.readTracker = new ReadTracker(readTopologies);
