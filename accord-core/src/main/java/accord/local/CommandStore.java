@@ -21,7 +21,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.LongFunction;
 
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
@@ -46,6 +45,7 @@ public abstract class CommandStore
     {
         KeyRanges at(long epoch);
         KeyRanges since(long epoch);
+        boolean intersects(long epoch, Keys keys);
     }
 
     private final int generation;

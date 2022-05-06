@@ -27,6 +27,8 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+import javax.annotation.Nullable;
+
 import static accord.Utils.id;
 import static accord.Utils.writeTxn;
 
@@ -83,12 +85,17 @@ public class CommandTest
         }
 
         @Override
+        public void invalidate(TxnId txnId, boolean isProgressShard, boolean isHomeShard)
+        {
+        }
+
+        @Override
         public void executedOnAllShards(TxnId txnId, Set<Id> persistedOn)
         {
         }
 
         @Override
-        public void waiting(TxnId blockedBy, Key homeKey)
+        public void waiting(TxnId blockedBy, @Nullable Keys someKeys)
         {
         }
     }

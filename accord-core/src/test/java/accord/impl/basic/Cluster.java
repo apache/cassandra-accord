@@ -40,6 +40,7 @@ public class Cluster implements Scheduler
 
     final Function<Id, Node> lookup;
     final PendingQueue pending;
+    final List<Runnable> onDone = new ArrayList<>();
     final Consumer<Packet> responseSink;
     final Map<Id, NodeSink> sinks = new HashMap<>();
     int clock;
@@ -108,9 +109,22 @@ public class Cluster implements Scheduler
             {
                 Reply reply = (Reply) deliver.message;
                 Callback callback = reply.isFinal() ? sinks.get(deliver.dst).callbacks.remove(deliver.replyId)
-                        : sinks.get(deliver.dst).callbacks.get(deliver.replyId);
+                                                    : sinks.get(deliver.dst).callbacks.get(deliver.replyId);
+
                 if (callback != null)
-                    on.scheduler().now(() -> callback.onSuccess(deliver.src, reply));
+                {
+                    on.scheduler().now(() -> {
+                        try
+                        {
+                            callback.onSuccess(deliver.src, reply);
+                        }
+                        catch (Throwable t)
+                        {
+                            callback.onCallbackFailure(t);
+                            on.agent().onUncaughtException(t);
+                        }
+                    });
+                }
             }
             else on.receive((Request) deliver.message, deliver.src, deliver);
         }
@@ -136,6 +150,11 @@ public class Cluster implements Scheduler
         RecurringPendingRunnable result = new RecurringPendingRunnable(null, run, false, delay, units);
         pending.add(result, delay, units);
         return result;
+    }
+
+    public void onDone(Runnable run)
+    {
+        onDone.add(run);
     }
 
     @Override
@@ -174,6 +193,9 @@ public class Cluster implements Scheduler
             while ((next = in.get()) != null)
                 sinks.add(next);
 
+            while (sinks.processPending());
+            sinks.onDone.forEach(Runnable::run);
+            sinks.onDone.clear();
             while (sinks.processPending());
             System.out.println();
         }

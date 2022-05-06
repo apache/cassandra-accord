@@ -79,6 +79,9 @@ public class TopologyUpdate
                     case Accepted:
                         commandStore.command(txnId).accept(Ballot.ZERO, txn, homeKey, progressKey, executeAt, deps);
                         break;
+                    case AcceptedInvalidate:
+                        commandStore.command(txnId).acceptInvalidate(Ballot.ZERO);
+                        break;
                     case Committed:
                     case ReadyToExecute:
                         commandStore.command(txnId).commit(txn, homeKey, progressKey, executeAt, deps);
@@ -87,6 +90,8 @@ public class TopologyUpdate
                     case Applied:
                         commandStore.command(txnId).apply(txn, homeKey, progressKey, executeAt, deps, writes, result);
                         break;
+                    case Invalidated:
+                        commandStore.command(txnId).commitInvalidate();
                     default:
                         throw new IllegalStateException();
                 }
@@ -150,7 +155,7 @@ public class TopologyUpdate
     {
         Topology syncTopology = node.configService().getTopologyForEpoch(syncEpoch);
         Topology localTopology = syncTopology.forNode(node.id());
-        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().forTxn(cmd.txn, syncEpoch).nodes();
+        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().withUnsyncEpochs(cmd.txn, syncEpoch).nodes();
 
         KeyRanges ranges = localTopology.ranges();
         Stream<MessageTask> messageStream = Stream.empty();
@@ -171,7 +176,7 @@ public class TopologyUpdate
         Topology localTopology = syncTopology.forNode(node.id());
         Topology nextTopology = node.configService().getTopologyForEpoch(nextEpoch);
         Function<CommandSync, Collection<Node.Id>> nextNodes = cmd -> allNodesFor(cmd.txn, nextTopology);
-        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().forTxn(cmd.txn, syncEpoch).nodes();
+        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().withUnsyncEpochs(cmd.txn, syncEpoch).nodes();
 
         // backfill new replicas with operations from prior epochs
         Stream<MessageTask> messageStream = Stream.empty();

@@ -5,7 +5,7 @@ import accord.local.Command;
 import accord.local.Node;
 import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.topology.Shard;
-import accord.txn.Txn;
+import accord.txn.Keys;
 import accord.txn.TxnId;
 
 import static accord.local.Status.Committed;
@@ -18,14 +18,16 @@ import static accord.local.Status.Committed;
  */
 public class CheckOnUncommitted extends CheckOnCommitted
 {
-    CheckOnUncommitted(Node node, TxnId txnId, Txn txn, Key someKey, Shard someShard, long shardEpoch)
+    final Keys someKeys;
+    CheckOnUncommitted(Node node, TxnId txnId, Keys someKeys, Key someKey, Shard someShard, long shardEpoch)
     {
-        super(node, txnId, txn, someKey, someShard, shardEpoch);
+        super(node, txnId, someKey, someShard, shardEpoch);
+        this.someKeys = someKeys;
     }
 
-    public static CheckOnUncommitted checkOnUncommitted(Node node, TxnId txnId, Txn txn, Key someKey, Shard someShard, long shardEpoch)
+    public static CheckOnUncommitted checkOnUncommitted(Node node, TxnId txnId, Keys someKeys, Key someKey, Shard someShard, long shardEpoch)
     {
-        CheckOnUncommitted checkOnUncommitted = new CheckOnUncommitted(node, txnId, txn, someKey, someShard, shardEpoch);
+        CheckOnUncommitted checkOnUncommitted = new CheckOnUncommitted(node, txnId, someKeys, someKey, someShard, shardEpoch);
         checkOnUncommitted.start();
         return checkOnUncommitted;
     }
@@ -47,11 +49,18 @@ public class CheckOnUncommitted extends CheckOnCommitted
         switch (full.status)
         {
             default: throw new IllegalStateException();
+            case Invalidated:
+                node.forEachLocalSince(someKeys, txnId.epoch, commandStore -> {
+                    Command command = commandStore.ifPresent(txnId);
+                    if (command != null)
+                        command.commitInvalidate();
+                });
             case NotWitnessed:
+            case AcceptedInvalidate:
                 break;
             case PreAccepted:
             case Accepted:
-                node.forEachLocalSince(txn.keys, txnId.epoch, commandStore -> {
+                node.forEachLocalSince(full.txn.keys, txnId.epoch, commandStore -> {
                     Command command = commandStore.ifPresent(txnId);
                     if (command != null)
                         command.homeKey(full.homeKey);

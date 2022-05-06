@@ -6,7 +6,6 @@ import accord.coordinate.Timeout;
 import accord.impl.TopologyUtils;
 import accord.local.CommandStores;
 import accord.impl.SimpleProgressLog;
-import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.topology.KeyRanges;
@@ -131,7 +130,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         {
             // TODO: more flexible timeouts
             if (callback != null)
-                callback.onFailure(to, new Timeout());
+                callback.onFailure(to, new Timeout(null, null));
             logger.info("discarding filtered message from {} to {}: {}", from, to, request);
             return;
         }
@@ -163,7 +162,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         {
             logger.info("discarding filtered reply from {} to {}: {}", from, reply, reply);
             if (callback != null)
-                callback.onFailure(from, new Timeout());
+                callback.onFailure(from, new Timeout(null, null));
             return;
         }
 

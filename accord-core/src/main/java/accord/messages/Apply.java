@@ -41,6 +41,7 @@ public class Apply extends TxnRequest
         Key progressKey = node.trySelectProgressKey(txnId, txn.keys, homeKey);
         node.forEachLocalSince(scope(), executeAt,
                                instance -> instance.command(txnId).apply(txn, homeKey, progressKey, executeAt, deps, writes, result));
+        // note, we do not also commit here if txnId.epoch != executeAt.epoch, as the scope() for a commit would be different
         node.reply(replyToNode, replyContext, ApplyOk.INSTANCE);
     }
 

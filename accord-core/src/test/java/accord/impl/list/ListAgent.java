@@ -6,6 +6,7 @@ import accord.api.Agent;
 import accord.api.Result;
 import accord.local.Command;
 import accord.txn.Timestamp;
+import accord.txn.Txn;
 
 public class ListAgent implements Agent
 {
@@ -25,5 +26,11 @@ public class ListAgent implements Agent
     public void onInconsistentTimestamp(Command command, Timestamp prev, Timestamp next)
     {
         throw new AssertionError("Inconsistent execution timestamp detected for txnId " + command.txnId() + ": " + prev + " != " + next);
+    }
+
+    @Override
+    public void onUncaughtException(Throwable t)
+    {
+        // TODO (now): ensure reported to runner
     }
 }

@@ -21,12 +21,14 @@ import accord.txn.TxnId;
 
 public class PreAccept extends WithUnsynced
 {
+    public final Key homeKey;
     public final Txn txn;
     public final long maxEpoch;
 
     public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey)
     {
-        super(to, topologies, txn.keys, txnId, homeKey);
+        super(to, topologies, txn.keys, txnId);
+        this.homeKey = homeKey;
         this.txn = txn;
         this.maxEpoch = topologies.currentEpoch();
     }
@@ -34,7 +36,8 @@ public class PreAccept extends WithUnsynced
     @VisibleForTesting
     public PreAccept(Keys scope, long epoch, TxnId txnId, Txn txn, Key homeKey)
     {
-        super(scope, epoch, txnId, homeKey);
+        super(scope, epoch, txnId);
+        this.homeKey = homeKey;
         this.txn = txn;
         this.maxEpoch = epoch;
     }
@@ -42,7 +45,7 @@ public class PreAccept extends WithUnsynced
     public void process(Node node, Id from, ReplyContext replyContext)
     {
         // TODO: verify we handle all of the scope() keys
-        Key progressKey = doNotComputeProgressKey ? null : node.trySelectProgressKey(waitForEpoch(), txn.keys, homeKey);
+        Key progressKey = progressKey(node, homeKey);
         node.reply(from, replyContext, node.mapReduceLocal(scope(), minEpoch, maxEpoch, instance -> {
             // note: this diverges from the paper, in that instead of waiting for JoinShard,
             //       we PreAccept to both old and new topologies and require quorums in both.
