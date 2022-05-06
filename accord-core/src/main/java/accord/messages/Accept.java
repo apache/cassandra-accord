@@ -16,7 +16,6 @@ public class Accept extends TxnRequest.WithUnsync
 {
     public final Ballot ballot;
     public final Txn txn;
-    public final long minEpoch;
     public final Timestamp executeAt;
     public final Dependencies deps;
 
@@ -25,7 +24,6 @@ public class Accept extends TxnRequest.WithUnsync
         super(to, topologies, txn.keys, txnId, homeKey);
         this.ballot = ballot;
         this.txn = txn;
-        this.minEpoch = topologies.oldestEpoch();
         this.executeAt = executeAt;
         this.deps = deps;
     }
