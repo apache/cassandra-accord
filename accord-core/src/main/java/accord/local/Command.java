@@ -201,9 +201,6 @@ public class Command implements Listener, Consumer<Listener>
         this.waitingOnCommit = new TreeMap<>();
         this.waitingOnApply = new TreeMap<>();
 
-        // TODO (now): we need to consider the epoch of the dependencies to decide if they're a dependency on this
-        //             commandStore (and node), otherwise we may take a false dependency and wait for a transaction
-        //             that won't be applied to us
         for (TxnId id : savedDeps().on(commandStore, executeAt))
         {
             Command command = commandStore.command(id);

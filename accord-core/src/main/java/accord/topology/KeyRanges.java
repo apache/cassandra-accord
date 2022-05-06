@@ -247,72 +247,93 @@ public class KeyRanges implements Iterable<KeyRange>
         return range1.tryMerge(range2);
     }
 
-    // TODO (now): optimise for case where one contains the other
+    // optimised for case where one contains the other
     public KeyRanges union(KeyRanges that)
     {
-        List<KeyRange> result = new ArrayList<>(this.size() + that.size());
-        int thisIdx = 0, thisSize = this.size();
-        int thatIdx = 0, thatSize = that.size();
+        // pick the larger one
+        KeyRange[] as = this.ranges, bs = that.ranges;
+        if (as.length < bs.length) { KeyRange[] tmp = as; as = bs; bs = tmp; }
 
-        KeyRange merging = null;
-        while (thisIdx < thisSize || thatIdx < thatSize)
+        int ai = 0, bi = 0;
+        while (ai < as.length && bi < bs.length)
         {
-            KeyRange merged;
-            KeyRange thisRange = thisIdx < thisSize ? this.get(thisIdx) : null;
-            KeyRange thatRange = thatIdx < thatSize ? that.get(thatIdx) : null;
-            if ((merged = tryMerge(merging, thisRange)) != null)
+            KeyRange a = as[ai];
+            KeyRange b = bs[bi];
+            int c = a.compareIntersecting(b);
+            if (c < 0) ai++;
+            else if (c > 0 || !a.fullyContains(b)) break;
+            else bi++;
+        }
+
+        if (bi == bs.length)
+            return as == this.ranges ? this : that;
+
+        KeyRange[] result = new KeyRange[as.length + (bs.length - bi)];
+        System.arraycopy(as, 0, result, 0, ai);
+        int count = ai;
+
+        while (ai < as.length && bi < bs.length)
+        {
+            KeyRange a = as[ai];
+            KeyRange b = bs[bi];
+
+            int c = a.compareIntersecting(b);
+            if (c < 0)
             {
-                merging = merged;
-                thisIdx++;
+                result[count++] = a;
+                ai++;
             }
-            else if ((merged = tryMerge(merging, thatRange)) != null)
+            else if (c > 0)
             {
-                merging = merged;
-                thatIdx++;
-            }
-            else if (merging != null)
-            {
-                result.add(merging);
-                merging = null;
-            }
-            else if (thisRange == null)
-            {
-                result.add(thatRange);
-                thatIdx++;
-            }
-            else if (thatRange == null)
-            {
-                result.add(thisRange);
-                thisIdx++;
+                result[count++] = b;
+                bi++;
             }
             else
             {
-                int cmp = thisRange.compareIntersecting(thatRange);
-                if (cmp > 0)
+                c = a.start().compareTo(b.start());
+                if (c < 0 && a.fullyContains(b))
                 {
-                    result.add(thatRange);
-                    thatIdx++;
+                    bi++;
+                    continue;
                 }
-                else if (cmp < 0)
+                else if (c > 0 && b.fullyContains(a))
                 {
-                    result.add(thisRange);
-                    thisIdx++;
+                    ai++;
+                    continue;
                 }
                 else
                 {
-                    merging = thisRange.tryMerge(thatRange);
-                    thisIdx++;
-                    thatIdx++;
-                    Preconditions.checkState(merging != null);
+                    KeyRange merged = a.subRange(c < 0 ? a.start() : b.start(), a.end().compareTo(b.end()) > 0 ? a.end() : b.end());
+                    ai++;
+                    bi++;
+                    while (ai < as.length || bi < bs.length)
+                    {
+                        KeyRange min;
+                        if (ai == as.length) min = b = bs[bi];
+                        else if (bi == bs.length) min = a = as[ai];
+                        else min = as[ai].start().compareTo(bs[bi].start()) < 0 ? as[ai] : bs[bi];
+                        if (min.start().compareTo(merged.end()) > 0)
+                            break;
+                        if (min.end().compareTo(merged.end()) > 0)
+                            merged = merged.subRange(merged.start(), min.end());
+                        if (a == min) ai++;
+                        else bi++;
+                    }
+                    result[count++] = merged;
                 }
             }
         }
 
-        if (merging != null)
-            result.add(merging);
+        while (ai < as.length)
+            result[count++] = as[ai++];
 
+        while (bi < bs.length)
+            result[count++] = bs[bi++];
 
-        return new KeyRanges(result.toArray(KeyRange[]::new));
+        if (count < result.length)
+            result = Arrays.copyOf(result, count);
+
+        return new KeyRanges(result);
     }
 
     public KeyRanges mergeTouching()

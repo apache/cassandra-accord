@@ -18,7 +18,7 @@ public class ListRequest implements Request
 
     public void process(Node node, Id client, ReplyContext replyContext)
     {
-        // TODO (now): error handling
+        // TODO: error handling
         node.coordinate(txn).addCallback((success, fail) -> {
             if (success != null)
                 node.reply(client, replyContext, (ListResult) success);

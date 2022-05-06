@@ -410,7 +410,6 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
                 progress = Expected;
                 return;
             }
-            // TODO (now): if we have a quorum of PreAccept and we have contacted the home shard then we can set NonHomeSafe
             CheckShardStatus check = blockedOn == Executed ? checkOnCommitted(node, txnId, command.txn(), someKey, someShard, txnId.epoch)
                                                            : checkOnUncommitted(node, txnId, command.txn(), someKey, someShard, txnId.epoch);
 
@@ -670,8 +669,9 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
     {
         for (Instance instance : instances)
         {
-            // TODO (now): we need to be able to poll others about pending dependencies to check forward progress,
-            //             as we don't know all dependencies locally (or perhaps any, at execution time)
+            // TODO: we want to be able to poll others about pending dependencies to check forward progress,
+            //       as we don't know all dependencies locally (or perhaps any, at execution time) so we may
+            //       begin expecting forward progress too early
             instance.stateMap.values().forEach(state -> state.update(node));
         }
     }
@@ -686,7 +686,6 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
         static Future<Void> applyAndCheck(Node node, TxnId txnId, Command command, HomeState state)
         {
             CoordinateApplyAndCheck coordinate = new CoordinateApplyAndCheck(txnId, command, state);
-            // TODO (now): whether we need to send to future shards depends on sync logic
             Topologies topologies = node.topology().unsyncForTxn(command.txn(), command.executeAt().epoch);
             state.globalNotPersisted.retainAll(topologies.nodes()); // we might have had some nodes from older shards that are now redundant
             node.send(state.globalNotPersisted, id -> new ApplyAndCheck(id, topologies,

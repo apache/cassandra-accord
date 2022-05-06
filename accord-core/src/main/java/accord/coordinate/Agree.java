@@ -139,7 +139,7 @@ class Agree extends Propose implements Callback<PreAcceptReply>
     {
         super(node, Ballot.ZERO, txnId, txn, homeKey);
         this.keys = txn.keys();
-        tracker = new PreacceptTracker(node.topology().syncForKeys(txn.keys(), txnId.epoch, txnId.epoch));
+        tracker = new PreacceptTracker(node.topology().withUnsyncEpochs(txn.keys(), txnId.epoch, txnId.epoch));
         // TODO: consider sending only to electorate of most recent topology (as only these PreAccept votes matter)
         // note that we must send to all replicas of old topology, as electorate may not be reachable
         node.send(tracker.nodes(), to -> new PreAccept(to, tracker.topologies(), txnId, txn, homeKey), this);
@@ -169,7 +169,7 @@ class Agree extends Propose implements Callback<PreAcceptReply>
     {
         if (!tracker.hasSupersedingEpoch())
             return;
-        Topologies newTopologies = node.topology().syncForKeys(txn.keys(), txnId.epoch, tracker.supersedingEpoch);
+        Topologies newTopologies = node.topology().withUnsyncEpochs(txn.keys(), txnId.epoch, tracker.supersedingEpoch);
         if (newTopologies.currentEpoch() < tracker.supersedingEpoch)
             return;
         Set<Id> previousNodes = tracker.nodes();

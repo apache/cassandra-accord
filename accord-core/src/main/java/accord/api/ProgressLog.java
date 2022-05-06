@@ -111,8 +111,6 @@ public interface ProgressLog
      * to either complete or invalidate it, so that we may make progress.
      *
      * In all other scenarios, the implementation is free to choose its course of action.
-     *
-     * TODO (aborts): waitingOnTxn should not be a parameter; only known locally involved keys (not necessarily all keys)
      */
     void waiting(TxnId blockedBy, Key homeKey);
 }

@@ -181,7 +181,6 @@ public abstract class CommandStores
         long shards(Keys keys, long minEpoch, long maxEpoch)
         {
             long accumulate = 0L;
-            // TODO (now): it should be safe to only evaluate in the two precise epochs that are relevant, but confirm
             for (int i = Math.max(0, indexForEpoch(minEpoch)), maxi = indexForEpoch(maxEpoch); i <= maxi ; ++i)
             {
                 accumulate = keys.foldl(ranges[i], ShardedRanges::addKeyIndex, shards.length, accumulate, -1L);

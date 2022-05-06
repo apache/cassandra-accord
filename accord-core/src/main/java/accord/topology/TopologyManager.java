@@ -268,7 +268,7 @@ public class TopologyManager implements ConfigurationService.Listener
         return epochs.get(epoch);
     }
 
-    public Topologies syncForKeys(Keys keys, long minEpoch, long maxEpoch)
+    public Topologies withUnsyncEpochs(Keys keys, long minEpoch, long maxEpoch)
     {
         Epochs snapshot = epochs;
 
@@ -295,12 +295,12 @@ public class TopologyManager implements ConfigurationService.Listener
         return topologies;
     }
 
-    public Topologies syncForKeys(Keys keys, long epoch)
+    public Topologies withUnsyncEpochs(Keys keys, long epoch)
     {
-        return syncForKeys(keys, epoch, epoch);
+        return withUnsyncEpochs(keys, epoch, epoch);
     }
 
-    public Topologies unsyncForKeys(Keys keys, long minEpoch, long maxEpoch)
+    public Topologies preciseEpochs(Keys keys, long minEpoch, long maxEpoch)
     {
         Epochs snapshot = epochs;
 
@@ -315,15 +315,9 @@ public class TopologyManager implements ConfigurationService.Listener
         return topologies;
     }
 
-    public Topologies unsyncForKeys(Keys keys, long epoch)
+    public Topologies preciseEpochs(Keys keys, long epoch)
     {
-        return unsyncForKeys(keys, epoch, epoch);
-    }
-
-    public Topologies currentForKeys(Keys keys)
-    {
-        Epochs snapshot = epochs;
-        return new Single(snapshot.get(snapshot.currentEpoch).global().forKeys(keys), false);
+        return preciseEpochs(keys, epoch, epoch);
     }
 
     public Topologies forEpoch(Keys keys, long epoch)
@@ -346,27 +340,27 @@ public class TopologyManager implements ConfigurationService.Listener
 
     public Topologies forTxn(Txn txn, long epoch)
     {
-        return syncForKeys(txn.keys(), epoch, epoch);
+        return withUnsyncEpochs(txn.keys(), epoch, epoch);
     }
 
     public Topologies forTxn(Txn txn, long minEpoch, long maxEpoch)
     {
-        return syncForKeys(txn.keys(), minEpoch, maxEpoch);
+        return withUnsyncEpochs(txn.keys(), minEpoch, maxEpoch);
     }
 
     public Topologies forTxn(Txn txn, Timestamp min, Timestamp max)
     {
-        return syncForKeys(txn.keys(), min.epoch, max.epoch);
+        return withUnsyncEpochs(txn.keys(), min.epoch, max.epoch);
     }
 
     public Topologies unsyncForTxn(Txn txn, long epoch)
     {
-        return unsyncForKeys(txn.keys(), epoch, epoch);
+        return preciseEpochs(txn.keys(), epoch, epoch);
     }
 
     public Topologies unsyncForTxn(Txn txn, long minEpoch, long maxEpoch)
     {
-        return syncForKeys(txn.keys(), minEpoch, maxEpoch);
+        return withUnsyncEpochs(txn.keys(), minEpoch, maxEpoch);
     }
 
     public Topology localForEpoch(long epoch)

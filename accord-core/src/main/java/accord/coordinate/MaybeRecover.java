@@ -90,7 +90,7 @@ public class MaybeRecover extends CheckShardStatus implements BiConsumer<Object,
                 CheckStatusOkFull full = (CheckStatusOkFull) max;
                 if (!max.hasExecutedOnAllShards)
                 {
-                    Persist.persist(node, node.topology().unsyncForKeys(txn.keys, full.executeAt.epoch), txnId, key, txn, full.executeAt, full.deps, full.writes, full.result)
+                    Persist.persist(node, node.topology().preciseEpochs(txn.keys, full.executeAt.epoch), txnId, key, txn, full.executeAt, full.deps, full.writes, full.result)
                            .addCallback(this);
                 }
                 // TODO: apply locally too, in case missing?

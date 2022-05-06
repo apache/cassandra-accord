@@ -42,7 +42,7 @@ class Execute extends AsyncPromise<Result> implements Callback<ReadReply>
         this.deps = agreed.deps;
         this.executeAt = agreed.executeAt;
         Topologies coordinationTopologies = node.topology().unsyncForTxn(agreed.txn, agreed.executeAt.epoch);
-        Topologies readTopologies = node.topology().unsyncForKeys(agreed.txn.read.keys(), agreed.executeAt.epoch);
+        Topologies readTopologies = node.topology().preciseEpochs(agreed.txn.read.keys(), agreed.executeAt.epoch);
         this.readTracker = new ReadTracker(readTopologies);
         this.topologies = coordinationTopologies;
 

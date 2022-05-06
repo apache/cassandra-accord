@@ -350,7 +350,7 @@ public class Node implements ConfigurationService.Listener
         }
 
         coordinating.putIfAbsent(txnId, result);
-        // TODO (now): if we fail, nominate another node to try instead
+        // TODO: if we fail, nominate another node to try instead
         result.addCallback((success, fail) -> coordinating.remove(txnId, result));
         return result;
     }
@@ -436,7 +436,7 @@ public class Node implements ConfigurationService.Listener
         result.addCallback((success, fail) -> {
             coordinating.remove(txnId, result);
             agent.onRecover(this, success, fail);
-            // TODO (now): if we fail, nominate another node to try instead
+            // TODO: if we fail, nominate another node to try instead
         });
         return result;
     }
