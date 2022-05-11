@@ -10,14 +10,14 @@ import accord.coordinate.tracking.AbstractQuorumTracker.QuorumShardTracker;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.topology.Shard;
 import accord.topology.Topologies;
-import accord.txn.Ballot;
+import accord.primitives.Ballot;
 import accord.messages.Callback;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.txn.Timestamp;
-import accord.txn.Dependencies;
+import accord.primitives.Timestamp;
+import accord.primitives.Deps;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 import accord.messages.Accept;
 import accord.messages.Accept.AcceptOk;
 import accord.messages.Accept.AcceptReply;
@@ -51,17 +51,17 @@ class Propose implements Callback<AcceptReply>
     }
 
     public static void propose(Node node, Ballot ballot, TxnId txnId, Txn txn, Key homeKey,
-                               Timestamp executeAt, Dependencies dependencies, BiConsumer<Result, Throwable> callback)
+                               Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
     {
         Topologies topologies = node.topology().withUnsyncEpochs(txn, txnId, executeAt);
-        propose(node, topologies, ballot, txnId, txn, homeKey, executeAt, dependencies, callback);
+        propose(node, topologies, ballot, txnId, txn, homeKey, executeAt, deps, callback);
     }
 
     public static void propose(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, Key homeKey,
-                               Timestamp executeAt, Dependencies dependencies, BiConsumer<Result, Throwable> callback)
+                               Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
     {
         Propose propose = new Propose(node, topologies, ballot, txnId, txn, homeKey, executeAt, callback);
-        node.send(propose.acceptTracker.nodes(), to -> new Accept(to, topologies, ballot, txnId, homeKey, txn, executeAt, dependencies), propose);
+        node.send(propose.acceptTracker.nodes(), to -> new Accept(to, topologies, ballot, txnId, homeKey, txn, executeAt, deps), propose);
     }
 
     @Override
@@ -103,10 +103,7 @@ class Propose implements Callback<AcceptReply>
     private void onAccepted()
     {
         isDone = true;
-        Dependencies deps = new Dependencies();
-        for (AcceptOk acceptOk : acceptOks)
-            deps.addAll(acceptOk.deps);
-
+        Deps deps = Deps.merge(txn.keys, acceptOks, ok -> ok.deps);
         Execute.execute(node, txnId, txn, homeKey, executeAt, deps, callback);
     }
 

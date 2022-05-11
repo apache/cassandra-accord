@@ -9,10 +9,12 @@ import accord.coordinate.tracking.ReadTracker;
 import accord.api.Result;
 import accord.messages.Callback;
 import accord.local.Node;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.txn.*;
 import accord.messages.ReadData.ReadReply;
-import accord.txn.Dependencies;
+import accord.primitives.Deps;
 import accord.local.Node.Id;
 import accord.messages.Commit;
 import accord.messages.ReadData;
@@ -25,21 +27,21 @@ class Execute implements Callback<ReadReply>
     final Txn txn;
     final Key homeKey;
     final Timestamp executeAt;
-    final Dependencies dependencies;
+    final Deps deps;
     final Topologies topologies;
     final ReadTracker readTracker;
     final BiConsumer<Result, Throwable> callback;
     private Data data;
     private boolean isDone;
 
-    private Execute(Node node, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Dependencies dependencies, BiConsumer<Result, Throwable> callback)
+    private Execute(Node node, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
     {
         this.node = node;
         this.txnId = txnId;
         this.txn = txn;
         this.homeKey = homeKey;
         this.executeAt = executeAt;
-        this.dependencies = dependencies;
+        this.deps = deps;
         this.topologies = node.topology().forEpoch(txn, executeAt.epoch);
         Topologies readTopologies = node.topology().forEpoch(txn.read.keys(), executeAt.epoch);
         this.readTracker = new ReadTracker(readTopologies);
@@ -49,12 +51,12 @@ class Execute implements Callback<ReadReply>
     private void start()
     {
         Set<Id> readSet = readTracker.computeMinimalReadSetAndMarkInflight();
-        Commit.commitAndRead(node, topologies, txnId, txn, homeKey, executeAt, dependencies, readSet, this);
+        Commit.commitAndRead(node, topologies, txnId, txn, homeKey, executeAt, deps, readSet, this);
     }
 
-    public static void execute(Node node, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Dependencies dependencies, BiConsumer<Result, Throwable> callback)
+    public static void execute(Node node, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
     {
-        Execute execute = new Execute(node, txnId, txn, homeKey, executeAt, dependencies, callback);
+        Execute execute = new Execute(node, txnId, txn, homeKey, executeAt, deps, callback);
         execute.start();
     }
 
@@ -84,7 +86,7 @@ class Execute implements Callback<ReadReply>
             isDone = true;
             Result result = txn.result(data);
             callback.accept(result, null);
-            Persist.persist(node, topologies, txnId, homeKey, txn, executeAt, dependencies, txn.execute(executeAt, data), result);
+            Persist.persist(node, topologies, txnId, homeKey, txn, executeAt, deps, txn.execute(executeAt, data), result);
         }
     }
 

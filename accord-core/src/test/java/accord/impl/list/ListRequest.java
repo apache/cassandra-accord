@@ -1,6 +1,5 @@
 package accord.impl.list;
 
-import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 
 import accord.api.Key;
@@ -16,7 +15,7 @@ import accord.messages.MessageType;
 import accord.messages.ReplyContext;
 import accord.txn.Txn;
 import accord.messages.Request;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 
 public class ListRequest implements Request
 {

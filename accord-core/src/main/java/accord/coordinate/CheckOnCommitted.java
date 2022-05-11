@@ -6,9 +6,7 @@ import accord.local.Node;
 import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.messages.CheckStatus.IncludeInfo;
 import accord.topology.Shard;
-import accord.txn.Keys;
-import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 
 import static accord.local.Status.Executed;
 

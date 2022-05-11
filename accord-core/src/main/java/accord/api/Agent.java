@@ -2,7 +2,8 @@ package accord.api;
 
 import accord.local.Node;
 import accord.local.Command;
-import accord.txn.Timestamp;
+import accord.primitives.Timestamp;
+import accord.txn.Txn;
 
 /**
  * Facility for augmenting node behaviour at specific points

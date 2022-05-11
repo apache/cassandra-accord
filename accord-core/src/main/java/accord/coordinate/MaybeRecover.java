@@ -10,9 +10,9 @@ import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.messages.CheckStatus.IncludeInfo;
 import accord.messages.Commit;
 import accord.topology.Shard;
-import accord.txn.Ballot;
+import accord.primitives.Ballot;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 import org.apache.cassandra.utils.concurrent.Future;
 
 import static accord.local.Status.Accepted;
@@ -91,10 +91,12 @@ public class MaybeRecover extends CheckShardStatus<CheckStatusOk> implements BiC
             case Executed:
             case Applied:
                 CheckStatusOkFull full = (CheckStatusOkFull) max;
-                if (!max.hasExecutedOnAllShards)
-                    Persist.persistAndCommit(node, txnId, someKey, txn, full.executeAt, full.deps, full.writes, full.result);
-                else // TODO (now): we shouldn't need to do this?
-                    Commit.commit(node, txnId, txn, full.homeKey, full.executeAt, full.deps);
+                node.withEpoch(full.executeAt.epoch, () -> {
+                    if (!max.hasExecutedOnAllShards)
+                        Persist.persistAndCommit(node, txnId, someKey, txn, full.executeAt, full.deps, full.writes, full.result);
+                    else // TODO (now): we shouldn't need to do this?
+                        Commit.commit(node, txnId, txn, full.homeKey, full.executeAt, full.deps);
+                });
                 trySuccess(full);
                 break;
 

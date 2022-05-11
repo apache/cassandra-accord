@@ -3,7 +3,7 @@ package accord.coordinate.tracking;
 import accord.Utils;
 import accord.impl.TopologyUtils;
 import accord.local.Node;
-import accord.topology.KeyRanges;
+import accord.primitives.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import com.google.common.collect.Sets;

@@ -15,10 +15,10 @@ import accord.messages.Commit;
 import accord.messages.InformOfPersistence;
 import accord.topology.Shard;
 import accord.topology.Topologies;
-import accord.txn.Dependencies;
-import accord.txn.Timestamp;
+import accord.primitives.Deps;
+import accord.primitives.Timestamp;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 import accord.txn.Writes;
 
 // TODO: do not extend AsyncFuture, just use a simple BiConsumer callback
@@ -32,13 +32,13 @@ public class Persist implements Callback<ApplyOk>
     final Set<Id> persistedOn;
     boolean isDone;
 
-    public static void persist(Node node, Topologies topologies, TxnId txnId, Key homeKey, Txn txn, Timestamp executeAt, Dependencies deps, Writes writes, Result result)
+    public static void persist(Node node, Topologies topologies, TxnId txnId, Key homeKey, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         Persist persist = new Persist(node, topologies, txnId, homeKey, executeAt);
         node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, homeKey, executeAt, deps, writes, result), persist);
     }
 
-    public static void persistAndCommit(Node node, TxnId txnId, Key homeKey, Txn txn, Timestamp executeAt, Dependencies deps, Writes writes, Result result)
+    public static void persistAndCommit(Node node, TxnId txnId, Key homeKey, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         Topologies persistTo = node.topology().preciseEpochs(txn, executeAt.epoch);
         Persist persist = new Persist(node, persistTo, txnId, homeKey, executeAt);

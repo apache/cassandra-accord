@@ -4,14 +4,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.NavigableMap;
 import java.util.NavigableSet;
-import java.util.TreeMap;
 import java.util.TreeSet;
 
 import accord.local.Node;
 import accord.api.Result;
-import accord.txn.Dependencies.TxnAndHomeKey;
+import accord.primitives.Deps.Entry;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.TypeAdapter;
@@ -20,13 +18,13 @@ import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
 import accord.local.Node.Id;
 import accord.api.Key;
-import accord.txn.Dependencies;
+import accord.primitives.Deps;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 import accord.txn.Writes;
-import accord.txn.Ballot;
-import accord.txn.Keys;
-import accord.txn.Timestamp;
+import accord.primitives.Ballot;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
 import accord.messages.ReadData.ReadOk;
 
 public class Json
@@ -288,56 +286,55 @@ public class Json
             buildKeys.addAll(buildReadKeys);
             Keys readKeys = new Keys(buildReadKeys);
             Keys keys = new Keys(buildKeys);
-            MaelstromRead read = new MaelstromRead(keys);
-            MaelstromQuery query = new MaelstromQuery(client, requestId, readKeys, update);
+            MaelstromRead read = new MaelstromRead(keys, readKeys);
+            MaelstromQuery query = new MaelstromQuery(client, requestId);
 
             return new Txn(keys, read, query, update);
         }
     };
 
-    public static final TypeAdapter<Dependencies> DEPS_ADAPTER = new TypeAdapter<>()
+    public static final TypeAdapter<Deps> DEPS_ADAPTER = new TypeAdapter<>()
     {
         @Override
-        public void write(JsonWriter out, Dependencies value) throws IOException
+        public void write(JsonWriter out, Deps value) throws IOException
         {
             out.beginArray();
-            for (Map.Entry<TxnId, TxnAndHomeKey> e : value.deps.entrySet())
+            for (Map.Entry<Key, TxnId> e : value)
             {
                 out.beginArray();
-                GSON.toJson(e.getKey(), TxnId.class, out);
-                out.beginArray();
-                ((MaelstromKey)e.getValue().homeKey).write(out);
-                TXN_ADAPTER.write(out, e.getValue().txn);
-                out.endArray();
+                ((MaelstromKey)e.getKey()).write(out);
+                GSON.toJson(e.getValue(), TxnId.class, out);
                 out.endArray();
             }
             out.endArray();
         }
 
         @Override
-        public Dependencies read(JsonReader in) throws IOException
+        public Deps read(JsonReader in) throws IOException
         {
-            Dependencies deps = new Dependencies();
             in.beginArray();
             if (!in.hasNext())
             {
                 in.endArray();
-                return new Dependencies();
+                return Deps.NONE;
             }
 
+            List<Deps.Entry> entries = new ArrayList<>();
             while (in.hasNext())
             {
                 in.beginArray();
+                Key key = MaelstromKey.read(in);
                 TxnId txnId = GSON.fromJson(in, TxnId.class);
-                in.beginArray();
-                Key homeKey = MaelstromKey.read(in);
-                Txn txn = TXN_ADAPTER.read(in);
-                in.endArray();
-                deps.add(txnId, txn, homeKey);
+                entries.add(new Deps.Entry(key, txnId));
                 in.endArray();
             }
             in.endArray();
-            return deps;
+
+            Keys keys = new Keys(entries.stream().map(Entry::getKey).sorted().toArray(Key[]::new));
+            Deps.Builder builder = Deps.builder(keys);
+            for (Entry entry : entries)
+                builder.add(entry.getKey(), entry.getValue());
+            return builder.build();
         }
     };
 
@@ -479,7 +476,7 @@ public class Json
                                 .registerTypeAdapter(Writes.class, TXN_WRITES_ADAPTER)
                                 .registerTypeAdapter(MaelstromResult.class, MaelstromResult.GSON_ADAPTER)
                                 .registerTypeAdapter(ReadOk.class, READ_OK_ADAPTER)
-                                .registerTypeAdapter(Dependencies.class, Json.DEPS_ADAPTER)
+                                .registerTypeAdapter(Deps.class, Json.DEPS_ADAPTER)
                                 .registerTypeAdapter(Keys.class, KEYS_ADAPTER)
                                 .registerTypeAdapter(Body.class, Body.FAIL_READ)
                                 .registerTypeAdapter(Result.class, MaelstromResult.GSON_ADAPTER)

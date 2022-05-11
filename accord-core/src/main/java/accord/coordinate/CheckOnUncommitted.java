@@ -5,8 +5,8 @@ import accord.local.Command;
 import accord.local.Node;
 import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.topology.Shard;
-import accord.txn.Keys;
-import accord.txn.TxnId;
+import accord.primitives.Keys;
+import accord.primitives.TxnId;
 
 import static accord.local.Status.Committed;
 

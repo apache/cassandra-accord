@@ -4,13 +4,13 @@ import accord.messages.TxnRequest.WithUnsynced;
 import accord.local.Node.Id;
 import accord.topology.Topologies;
 import accord.api.Key;
-import accord.txn.Ballot;
+import accord.primitives.Ballot;
 import accord.local.Node;
-import accord.txn.Timestamp;
+import accord.primitives.Timestamp;
 import accord.local.Command;
-import accord.txn.Dependencies;
+import accord.primitives.Deps;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 
 import static accord.messages.PreAccept.calculateDeps;
 
@@ -20,9 +20,9 @@ public class Accept extends WithUnsynced
     public final Key homeKey;
     public final Txn txn;
     public final Timestamp executeAt;
-    public final Dependencies deps;
+    public final Deps deps;
 
-    public Accept(Id to, Topologies topologies, Ballot ballot, TxnId txnId, Key homeKey, Txn txn, Timestamp executeAt, Dependencies deps)
+    public Accept(Id to, Topologies topologies, Ballot ballot, TxnId txnId, Key homeKey, Txn txn, Timestamp executeAt, Deps deps)
     {
         super(to, topologies, txn.keys, txnId);
         this.ballot = ballot;
@@ -50,8 +50,7 @@ public class Accept extends WithUnsynced
             AcceptOk ok2 = (AcceptOk) r2;
             if (ok1.deps.isEmpty()) return ok2;
             if (ok2.deps.isEmpty()) return ok1;
-            ok1.deps.addAll(ok2.deps);
-            return ok1;
+            return new AcceptOk(txnId, ok1.deps.with(ok2.deps));
         }));
     }
 
@@ -93,7 +92,7 @@ public class Accept extends WithUnsynced
         @Override
         public String toString()
         {
-            return "AcceptInvalidate{" + ballot + '}';
+            return "AcceptInvalidate{ballot:" + ballot + ", txnId:" + txnId + ", key:" + someKey + '}';
         }
 
         @Override
@@ -117,9 +116,9 @@ public class Accept extends WithUnsynced
     public static class AcceptOk implements AcceptReply
     {
         public final TxnId txnId;
-        public final Dependencies deps;
+        public final Deps deps;
 
-        public AcceptOk(TxnId txnId, Dependencies deps)
+        public AcceptOk(TxnId txnId, Deps deps)
         {
             this.txnId = txnId;
             this.deps = deps;

@@ -16,7 +16,6 @@ import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.api.Result;
 import accord.coordinate.CheckOnCommitted;
-import accord.coordinate.CheckShardStatus;
 import accord.coordinate.Invalidate;
 import accord.impl.SimpleProgressLog.HomeState.LocalStatus;
 import accord.local.Command;
@@ -32,12 +31,12 @@ import accord.messages.Reply;
 import accord.messages.ReplyContext;
 import accord.topology.Shard;
 import accord.topology.Topologies;
-import accord.txn.Ballot;
-import accord.txn.Dependencies;
-import accord.txn.Keys;
-import accord.txn.Timestamp;
+import accord.primitives.Ballot;
+import accord.primitives.Deps;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 import accord.txn.Writes;
 import org.apache.cassandra.utils.concurrent.AsyncFuture;
 import org.apache.cassandra.utils.concurrent.Future;
@@ -173,15 +172,15 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
             }
         }
 
-        private void refreshGlobal(@Nullable Node node, @Nullable Command command, @Nullable Id persistedOn, @Nullable Set<Id> persistedOns)
+        private boolean refreshGlobal(@Nullable Node node, @Nullable Command command, @Nullable Id persistedOn, @Nullable Set<Id> persistedOns)
         {
             if (global == NotExecuted)
-                return;
+                return false;
 
             if (globalPendingDurable != null)
             {
                 if (node == null || command == null || command.is(Status.NotWitnessed))
-                    return;
+                    return false;
 
                 if (persistedOns == null) persistedOns = globalPendingDurable.persistedOn;
                 else persistedOns.addAll(globalPendingDurable.persistedOn);
@@ -194,7 +193,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
             {
                 assert node != null && command != null;
                 if (!node.topology().hasEpoch(command.executeAt().epoch))
-                    return;
+                    return false;
 
                 globalNotPersisted = new HashSet<>(node.topology().preciseEpochs(command.txn(), command.executeAt().epoch).nodes());
                 if (local == LocalStatus.Done)
@@ -213,6 +212,8 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
                     globalProgress = Done;
                 }
             }
+
+            return true;
         }
 
         void executedOnAllShards(Node node, Command command, Set<Id> persistedOn)
@@ -329,7 +330,8 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
 
         void updateGlobal(Node node, TxnId txnId, Command command)
         {
-            refreshGlobal(node, command, null, null);
+            if (!refreshGlobal(node, command, null, null))
+                return;
 
             if (global != Disseminating)
                 return;
@@ -375,6 +377,8 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
         void recordBlocking(Command blocking, Keys someKeys)
         {
             this.blocking = blocking;
+            if (blocking.txn() != null && !blocking.txn().keys.containsAll(someKeys))
+                throw new IllegalStateException();
             switch (blocking.status())
             {
                 default: throw new IllegalStateException();
@@ -423,8 +427,11 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
             // 2. otherwise record the homeKey for future reference and set the status based on whether progress has been made
             long onEpoch = (command.hasBeen(Status.Committed) ? command.executeAt() : txnId).epoch;
             node.withEpoch(onEpoch, () -> {
-                Keys someKeys = this.someKeys == null ? command.someKeys() : this.someKeys;
-                Key someKey = this.someKeys == null ? command.someKey() : someKeys.get(0);
+                Key someKey; Keys someKeys; {
+                    Keys tmpKeys = Keys.union(this.someKeys, command.someKeys());
+                    someKey = command.homeKey() == null ? tmpKeys.get(0) : command.homeKey();
+                    someKeys = tmpKeys.with(someKey);
+                }
 
                 Shard someShard = node.topology().forEpoch(someKey, onEpoch);
                 CheckOnCommitted check = blockedOn == Executed ? checkOnCommitted(node, txnId, someKey, someShard, onEpoch)
@@ -441,6 +448,13 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
                     switch (success.status)
                     {
                         default: throw new IllegalStateException();
+                        case AcceptedInvalidate:
+                            // we may or may not know the homeShard at this point; if the response doesn't know
+                            // then assume we potentially need to pick up the invalidation
+                            if (success.homeKey != null)
+                                break;
+                            // TODO (now): probably don't want to immediately go to Invalidate,
+                            //             instead first give in-flight one a chance to complete
                         case NotWitnessed:
                             progress = Investigating;
                             // TODO: this should instead invalidate the transaction on this shard, which invalidates it for all shards,
@@ -463,7 +477,8 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
                             break;
                         case PreAccepted:
                         case Accepted:
-                        case AcceptedInvalidate:
+                            // either it's the home shard and it's managing progress,
+                            // or we now know the home shard and will contact it next time
                             break;
                         case Committed:
                         case ReadyToExecute:
@@ -779,7 +794,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
     static class ApplyAndCheck extends Apply
     {
         final Set<Id> notPersisted;
-        ApplyAndCheck(Id id, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Dependencies deps, Timestamp executeAt, Writes writes, Result result, Set<Id> notPersisted)
+        ApplyAndCheck(Id id, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Deps deps, Timestamp executeAt, Writes writes, Result result, Set<Id> notPersisted)
         {
             super(id, topologies, txnId, txn, homeKey, executeAt, deps, writes, result);
             this.notPersisted = notPersisted;

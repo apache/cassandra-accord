@@ -31,16 +31,16 @@ import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
 import accord.messages.Reply;
-import accord.topology.KeyRange;
-import accord.topology.KeyRanges;
+import accord.primitives.KeyRange;
+import accord.primitives.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.topology.TopologyManager;
-import accord.txn.Ballot;
-import accord.txn.Keys;
-import accord.txn.Timestamp;
+import accord.primitives.Ballot;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 import org.apache.cassandra.utils.concurrent.Future;
 
 public class Node implements ConfigurationService.Listener
@@ -411,7 +411,7 @@ public class Node implements ConfigurationService.Listener
     @VisibleForTesting
     public @Nullable Key trySelectHomeKey(TxnId txnId, Keys keys)
     {
-        int i = topology().localForEpoch(txnId.epoch).ranges().findFirstIntersecting(keys);
+        int i = topology().localForEpoch(txnId.epoch).ranges().findFirstKey(keys);
         return i >= 0 ? keys.get(i) : null;
     }
 
@@ -440,7 +440,7 @@ public class Node implements ConfigurationService.Listener
         if (topology.ranges().contains(homeKey))
             return homeKey;
 
-        int i = topology.ranges().findFirstIntersecting(keys);
+        int i = topology.ranges().findFirstKey(keys);
         if (i < 0)
             return null;
         return keys.get(i);

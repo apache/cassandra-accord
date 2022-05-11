@@ -7,7 +7,7 @@ import java.util.TreeMap;
 import accord.local.Node;
 import accord.api.Key;
 import accord.messages.MessageType;
-import accord.txn.Keys;
+import accord.primitives.Keys;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;

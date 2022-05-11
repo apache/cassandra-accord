@@ -1,8 +1,8 @@
 package accord.utils;
 
-import accord.topology.KeyRange;
+import accord.primitives.KeyRange;
 import accord.impl.IntKey;
-import accord.topology.KeyRanges;
+import accord.primitives.KeyRanges;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -61,9 +61,7 @@ public class KeyRangesTest
     void addTest()
     {
         Assertions.assertEquals(ranges(r(0, 50), r(50, 100), r(100, 150), r(150, 200)),
-                                ranges(r(0, 50), r(100, 150)).combine(ranges(r(50, 100), r(150, 200))));
-
-        Assertions.assertThrows(IllegalArgumentException.class, () -> ranges(r(0, 50)).combine(ranges(r(25, 75))));
+                                ranges(r(0, 50), r(100, 150)).union(ranges(r(50, 100), r(150, 200))));
     }
 
     private static void assertMergeResult(KeyRanges expected, KeyRanges input1, KeyRanges input2)
@@ -96,16 +94,5 @@ public class KeyRangesTest
     {
         KeyRanges testRanges = ranges(r(0, 100), r(100, 200), r(200, 300), r(300, 400), r(400, 500));
         Assertions.assertEquals(ranges(testRanges.get(1), testRanges.get(3)), testRanges.select(new int[]{1, 3}));
-    }
-
-    @Test
-    void keyIntersectionTest()
-    {
-        KeyRanges allRanges = ranges(r(0, 40), r(50, 100), r(100, 150), r(150, 160), r(200, 250), r(250, 300));
-        Assertions.assertEquals(ranges(r(50, 100), r(100, 150), r(200, 250)),
-                                allRanges.intersection(IntKey.keys(45, 61, 62, 99, 100, 101, 175, 225)));
-        Assertions.assertEquals(ranges(r(0, 40)),
-                                allRanges.intersection(IntKey.keys(-20, 20, 400)));
-
     }
 }

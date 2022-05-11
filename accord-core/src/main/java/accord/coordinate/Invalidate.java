@@ -2,8 +2,9 @@ package accord.coordinate;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.function.BiConsumer;
+
+import com.google.common.base.Preconditions;
 
 import accord.api.Key;
 import accord.api.Result;
@@ -18,10 +19,10 @@ import accord.messages.BeginRecovery.RecoverReply;
 import accord.messages.Callback;
 import accord.messages.Commit;
 import accord.topology.Shard;
-import accord.txn.Ballot;
-import accord.txn.Keys;
+import accord.primitives.Ballot;
+import accord.primitives.Keys;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 import org.apache.cassandra.utils.concurrent.AsyncFuture;
 
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
@@ -43,6 +44,7 @@ public class Invalidate extends AsyncFuture<Outcome> implements Callback<Recover
 
     private Invalidate(Node node, Shard shard, Ballot ballot, TxnId txnId, Keys someKeys, Key someKey)
     {
+        Preconditions.checkArgument(someKeys.contains(someKey));
         this.node = node;
         this.ballot = ballot;
         this.txnId = txnId;
@@ -110,21 +112,13 @@ public class Invalidate extends AsyncFuture<Outcome> implements Callback<Recover
                 case PreAccepted:
                     throw new IllegalStateException("Should only have Accepted or later statuses here");
                 case Accepted:
-                    node.withEpoch(acceptOrCommit.executeAt.epoch, () -> {
-                        Recover recover = new Recover(node, ballot, txnId, acceptOrCommit.txn, acceptOrCommit.homeKey);
-                        recover.addCallback(this);
-
-                        Set<Id> nodes = recover.tracker.topologies().copyOfNodes();
-                        for (int i = 0 ; i < invalidateOks.size() ; ++i)
-                        {
-                            if (invalidateOks.get(i).executeAt != null)
-                            {
-                                recover.onSuccess(invalidateOksFrom.get(i), invalidateOks.get(i));
-                                nodes.remove(invalidateOksFrom.get(i));
-                            }
-                        }
-                        recover.start(nodes);
-                    });
+                    // note: we do not propagate our responses to the Recover instance to avoid mistakes;
+                    //       since invalidate contacts only one key, only responses from nodes that replicate
+                    //       *only* that key for the transaction will be valid, as the shards on the replica
+                    //       that own the other keys may not have responded. It would be possible to filter
+                    //       replies now that we have the transaction, but safer to just start from scratch.
+                    Recover.recover(node, ballot, txnId, acceptOrCommit.txn, acceptOrCommit.homeKey)
+                           .addCallback(this);
                     return;
                 case AcceptedInvalidate:
                     break; // latest accept also invalidating, so we're on the same page and should finish our invalidation

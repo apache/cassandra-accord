@@ -5,9 +5,9 @@ import java.util.List;
 
 import accord.api.Key;
 import accord.impl.IntKey;
-import accord.topology.KeyRange;
-import accord.topology.KeyRanges;
-import accord.txn.Keys;
+import accord.primitives.KeyRange;
+import accord.primitives.KeyRanges;
+import accord.primitives.Keys;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -32,13 +32,13 @@ public class KeysTest
     {
         assertEquals(keys(150, 250),
                      keys(100, 150, 200, 250, 300)
-                             .intersect(ranges(r(125, 175), r(225, 275))));
+                             .slice(ranges(r(125, 175), r(225, 275))));
         assertEquals(keys(101, 199, 200),
                      keys(99, 100, 101, 199, 200, 201)
-                             .intersect(ranges(r(100, 200))));
+                             .slice(ranges(r(100, 200))));
         assertEquals(keys(101, 199, 200, 201, 299, 300),
                      keys(99, 100, 101, 199, 200, 201, 299, 300, 301)
-                             .intersect(ranges(r(100, 200), r(200, 300))));
+                             .slice(ranges(r(100, 200), r(200, 300))));
     }
 
     @Test
@@ -56,22 +56,22 @@ public class KeysTest
     void foldlTest()
     {
         List<Key> keys = new ArrayList<>();
-        long result = keys(150, 250, 350, 450, 550).foldl(ranges(r(200, 400)), (key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
+        long result = keys(150, 250, 350, 450, 550).foldl(ranges(r(200, 400)), (i, key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
         assertEquals(16, result);
         assertEquals(keys(250, 350), new Keys(keys));
 
         keys.clear();
-        result = keys(150, 250, 350, 450, 550).foldl(ranges(r(0, 500)), (key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
+        result = keys(150, 250, 350, 450, 550).foldl(ranges(r(0, 500)), (i, key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
         assertEquals(3616, result);
         assertEquals(keys(150, 250, 350, 450), new Keys(keys));
 
         keys.clear();
-        result = keys(150, 250, 350, 450, 550).foldl(ranges(r(500, 1000)), (key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
+        result = keys(150, 250, 350, 450, 550).foldl(ranges(r(500, 1000)), (i, key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
         assertEquals(1, result);
         assertEquals(keys(550), new Keys(keys));
 
         keys.clear();
-        result = keys(150, 250, 350, 450, 550).foldl(ranges(r(0, 20), r(100, 140), r(149, 151), r(560, 2000)), (key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
+        result = keys(150, 250, 350, 450, 550).foldl(ranges(r(0, 20), r(100, 140), r(149, 151), r(560, 2000)), (i, key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
         assertEquals(1, result);
         assertEquals(keys(150), new Keys(keys));
     }

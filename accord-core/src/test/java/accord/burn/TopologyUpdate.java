@@ -6,8 +6,11 @@ import accord.api.TestableConfigurationService;
 import accord.local.Command;
 import accord.local.Node;
 import accord.local.Status;
-import accord.topology.KeyRange;
-import accord.topology.KeyRanges;
+import accord.primitives.Deps;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.primitives.KeyRange;
+import accord.primitives.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.txn.*;
@@ -41,12 +44,13 @@ public class TopologyUpdate
         private final Timestamp executeAt;
         private final long epoch;
 
-        private final Dependencies deps;
+        private final Deps deps;
         private final Writes writes;
         private final Result result;
 
         public CommandSync(Command command, long epoch)
         {
+            // TODO (now): AcceptInvalidate and CommitInvalidate can leave these fields null
             Preconditions.checkArgument(command.hasBeen(Status.PreAccepted));
             this.txnId = command.txnId();
             this.txn = command.txn();
@@ -73,14 +77,12 @@ public class TopologyUpdate
             node.forEachLocalSince(txn.keys, epoch, commandStore -> {
                 switch (status)
                 {
-                    case PreAccepted:
-                        commandStore.command(txnId).preaccept(txn, homeKey, progressKey);
-                        break;
-                    case Accepted:
-                        commandStore.command(txnId).accept(Ballot.ZERO, txn, homeKey, progressKey, executeAt, deps);
-                        break;
                     case AcceptedInvalidate:
-                        commandStore.command(txnId).acceptInvalidate(Ballot.ZERO);
+                        if (txn == null)
+                            break;
+                    case PreAccepted:
+                    case Accepted:
+                        commandStore.command(txnId).preaccept(txn, homeKey, progressKey);
                         break;
                     case Committed:
                     case ReadyToExecute:
@@ -198,7 +200,7 @@ public class TopologyUpdate
                 if (newNodes.isEmpty())
                     continue;
 
-                KeyRanges ranges = KeyRanges.singleton(intersection);
+                KeyRanges ranges = KeyRanges.single(intersection);
                 for (long epoch=1; epoch<syncEpoch; epoch++)
                     messageStream = Stream.concat(messageStream, syncEpochCommands(node,
                                                                                    epoch,

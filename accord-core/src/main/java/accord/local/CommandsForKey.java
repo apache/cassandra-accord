@@ -5,7 +5,7 @@ import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.function.Consumer;
 
-import accord.txn.Timestamp;
+import accord.primitives.Timestamp;
 import com.google.common.collect.Iterators;
 
 public class CommandsForKey implements Listener, Iterable<Command>

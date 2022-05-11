@@ -11,16 +11,16 @@ import accord.api.Result;
 import accord.coordinate.tracking.FastPathTracker;
 import accord.topology.Shard;
 import accord.topology.Topologies;
-import accord.txn.Ballot;
+import accord.primitives.Ballot;
 import accord.messages.Callback;
 import accord.local.Node;
-import accord.txn.Dependencies;
+import accord.primitives.Deps;
 import accord.local.Node.Id;
-import accord.txn.Timestamp;
+import accord.primitives.Timestamp;
 import accord.messages.PreAccept;
 import accord.messages.PreAccept.PreAcceptOk;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 import accord.messages.PreAccept.PreAcceptReply;
 import com.google.common.collect.Sets;
 
@@ -245,26 +245,17 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
         if (tracker.hasMetFastPathCriteria())
         {
             isPreAccepted = true;
-            Dependencies deps = new Dependencies();
-            for (PreAcceptOk preAcceptOk : preAcceptOks)
-            {
-                if (preAcceptOk.witnessedAt.equals(txnId))
-                    deps.addAll(preAcceptOk.deps);
-            }
-
+            Deps deps = Deps.merge(txn.keys, preAcceptOks, ok -> ok.witnessedAt.equals(txnId) ? ok.deps : null);
             Execute.execute(node, txnId, txn, homeKey, txnId, deps, this);
         }
         else
         {
-            Dependencies deps = new Dependencies();
+            Deps deps = Deps.merge(txn.keys, preAcceptOks, ok -> ok.deps);
             Timestamp executeAt; {
-                Timestamp tmp = Timestamp.NONE;
+                Timestamp accumulate = Timestamp.NONE;
                 for (PreAcceptOk preAcceptOk : preAcceptOks)
-                {
-                    deps.addAll(preAcceptOk.deps);
-                    tmp = Timestamp.max(tmp, preAcceptOk.witnessedAt);
-                }
-                executeAt = tmp;
+                    accumulate = Timestamp.max(accumulate, preAcceptOk.witnessedAt);
+                executeAt = accumulate;
             }
 
             // TODO: perhaps don't submit Accept immediately if we almost have enough for fast-path,

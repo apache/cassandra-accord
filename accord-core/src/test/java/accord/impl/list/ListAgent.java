@@ -1,16 +1,22 @@
 package accord.impl.list;
 
+import java.util.function.Consumer;
+
 import accord.impl.mock.Network;
 import accord.local.Node;
 import accord.api.Agent;
 import accord.api.Result;
 import accord.local.Command;
-import accord.txn.Timestamp;
+import accord.primitives.Timestamp;
 import accord.txn.Txn;
 
 public class ListAgent implements Agent
 {
-    public static final ListAgent INSTANCE = new ListAgent();
+    final Consumer<Throwable> onFailure;
+    public ListAgent(Consumer<Throwable> onFailure)
+    {
+        this.onFailure = onFailure;
+    }
 
     @Override
     public void onRecover(Node node, Result success, Throwable fail)
@@ -31,6 +37,6 @@ public class ListAgent implements Agent
     @Override
     public void onUncaughtException(Throwable t)
     {
-        // TODO (now): ensure reported to runner
+        onFailure.accept(t);
     }
 }

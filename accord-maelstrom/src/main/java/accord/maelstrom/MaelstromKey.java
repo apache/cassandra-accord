@@ -3,11 +3,10 @@ package accord.maelstrom;
 import java.io.IOException;
 
 import accord.api.Key;
-import accord.topology.KeyRange;
-import accord.topology.KeyRanges;
+import accord.primitives.KeyRange;
+
 import com.google.common.base.Objects;
-import com.google.common.base.Preconditions;
-import com.google.common.primitives.Ints;
+
 import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
@@ -75,8 +74,14 @@ public class MaelstromKey extends Datum<MaelstromKey> implements Key<MaelstromKe
     };
 
     @Override
-    public int keyHash()
+    public int routingHash()
     {
         return Objects.hashCode(kind, value);
+    }
+
+    @Override
+    public Key toRoutingKey()
+    {
+        return this;
     }
 }

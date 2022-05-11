@@ -5,6 +5,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -36,7 +38,7 @@ import org.slf4j.LoggerFactory;
 public class Cluster implements Scheduler
 {
     private static final Logger logger = LoggerFactory.getLogger(Cluster.class);
-    private static final Logger trace = LoggerFactory.getLogger("accord.impl.basic.Trace");
+    public static final Logger trace = LoggerFactory.getLogger("accord.impl.basic.Trace");
 
     final Function<Id, Node> lookup;
     final PendingQueue pending;
@@ -101,7 +103,7 @@ public class Cluster implements Scheduler
                             || !partitionSet.contains(deliver.src) && !partitionSet.contains(deliver.dst));
             if (drop)
             {
-                logger.trace("{} DROP[{}] {}", clock++, on.epoch(), deliver);
+                trace.trace("{} DROP[{}] {}", clock++, on.epoch(), deliver);
                 return true;
             }
             trace.trace("{} RECV[{}] {}", clock++, on.epoch(), deliver);
@@ -138,7 +140,7 @@ public class Cluster implements Scheduler
     @Override
     public Scheduled recurring(Runnable run, long delay, TimeUnit units)
     {
-        RecurringPendingRunnable result = new RecurringPendingRunnable(pending, run, true, delay, units);
+        RecurringPendingRunnable result = new RecurringPendingRunnable(pending, run, delay, units);
         ++recurring;
         pending.add(result, delay, units);
         return result;
@@ -147,7 +149,7 @@ public class Cluster implements Scheduler
     @Override
     public Scheduled once(Runnable run, long delay, TimeUnit units)
     {
-        RecurringPendingRunnable result = new RecurringPendingRunnable(null, run, false, delay, units);
+        RecurringPendingRunnable result = new RecurringPendingRunnable(null, run, delay, units);
         pending.add(result, delay, units);
         return result;
     }
@@ -163,10 +165,12 @@ public class Cluster implements Scheduler
         run.run();
     }
 
-    public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, Supplier<Random> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in)
+    // TODO (now): there remains some inconsistency of execution, at least causing different partitions if prior runs have happened;
+    //             unclear what source is, but might be deterministic based on prior runs (some evidence of this), or non-deterministic
+    public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, Consumer<Throwable> onFailure, Supplier<Random> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in)
     {
         Topology topology = topologyFactory.toTopology(nodes);
-        Map<Id, Node> lookup = new HashMap<>();
+        Map<Id, Node> lookup = new LinkedHashMap<>();
         TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, lookup::get);
         try
         {
@@ -176,17 +180,17 @@ public class Cluster implements Scheduler
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(node, messageSink, randomSupplier, topology, lookup::get);
                 lookup.put(node, new Node(node, messageSink, configService,
-                                          nowSupplier.get(), () -> new ListStore(node), ListAgent.INSTANCE,
+                                          nowSupplier.get(), () -> new ListStore(node), new ListAgent(onFailure),
                                           randomSupplier.get(), sinks, SimpleProgressLog::new, CommandStores.Synchronized::new));
             }
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));
-            sinks.recurring(() ->
-                            {
-                                Collections.shuffle(nodesList, randomSupplier.get());
-                                int partitionSize = randomSupplier.get().nextInt((topologyFactory.rf+1)/2);
-                                sinks.partitionSet = new HashSet<>(nodesList.subList(0, partitionSize));
-                            }, 5L, TimeUnit.SECONDS);
+            Random shuffleRandom = randomSupplier.get();
+            sinks.recurring(() -> {
+                Collections.shuffle(nodesList, shuffleRandom);
+                int partitionSize = shuffleRandom.nextInt((topologyFactory.rf+1)/2);
+                sinks.partitionSet = new LinkedHashSet<>(nodesList.subList(0, partitionSize));
+            }, 5L, TimeUnit.SECONDS);
             sinks.recurring(configRandomizer::maybeUpdateTopology, 1L, TimeUnit.SECONDS);
 
             Packet next;
