@@ -72,8 +72,8 @@ public class TopologyRandomizer
 
         IntHashKey newBound = IntHashKey.forHash(minBound.hash + random.nextInt(maxBound.hash - minBound.hash));
 
-        shards[idx] = new Shard(IntHashKey.range(leftRange.start(), newBound), left.nodes, left.fastPathElectorate, left.joining);
-        shards[idx+1] = new Shard(IntHashKey.range(newBound, rightRange.end()), right.nodes, right.fastPathElectorate, right.joining);
+        shards[idx] = new Shard(IntHashKey.range((IntHashKey) leftRange.start(), newBound), left.nodes, left.fastPathElectorate, left.joining);
+        shards[idx+1] = new Shard(IntHashKey.range(newBound, (IntHashKey) rightRange.end()), right.nodes, right.fastPathElectorate, right.joining);
         logger.debug("Updated boundary on {} & {} {} {} to {} {}", idx, idx + 1, left, right,
                      shards[idx].toString(true), shards[idx + 1].toString(true));
 

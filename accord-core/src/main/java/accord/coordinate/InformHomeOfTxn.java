@@ -1,54 +1,59 @@
 package accord.coordinate;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.coordinate.tracking.AbstractQuorumTracker.QuorumShardTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Callback;
-import accord.messages.InformOfTxn;
-import accord.messages.InformOfTxn.InformOfTxnReply;
+import accord.messages.InformOfTxnId;
+import accord.messages.SimpleReply;
 import accord.topology.Shard;
-import accord.txn.Txn;
 import accord.primitives.TxnId;
 import org.apache.cassandra.utils.concurrent.AsyncFuture;
 import org.apache.cassandra.utils.concurrent.Future;
 
-public class InformHomeOfTxn extends AsyncFuture<Void> implements Callback<InformOfTxnReply>
+public class InformHomeOfTxn extends AsyncFuture<Void> implements Callback<SimpleReply>
 {
     final TxnId txnId;
-    final Key homeKey;
+    final RoutingKey homeKey;
     final QuorumShardTracker tracker;
     Throwable failure;
 
-    InformHomeOfTxn(TxnId txnId, Key homeKey, Shard homeShard)
+    InformHomeOfTxn(TxnId txnId, RoutingKey homeKey, Shard homeShard)
     {
         this.txnId = txnId;
         this.homeKey = homeKey;
         this.tracker = new QuorumShardTracker(homeShard);
     }
 
-    public static Future<Void> inform(Node node, TxnId txnId, Txn txn, Key homeKey)
+    public static Future<Void> inform(Node node, TxnId txnId, RoutingKey homeKey)
     {
         // TODO: we should not need to send the Txn here, but to avoid that we need to support no-ops
         return node.withEpoch(txnId.epoch, () -> {
             Shard homeShard = node.topology().forEpoch(homeKey, txnId.epoch);
             InformHomeOfTxn inform = new InformHomeOfTxn(txnId, homeKey, homeShard);
-            node.send(homeShard.nodes, new InformOfTxn(txnId, homeKey, txn), inform);
+            node.send(homeShard.nodes, new InformOfTxnId(txnId, homeKey), inform);
             return inform;
         });
     }
 
     @Override
-    public void onSuccess(Id from, InformOfTxnReply response)
+    public void onSuccess(Id from, SimpleReply reply)
     {
-        if (response.isOk())
+        switch (reply)
         {
-            if (tracker.success(from))
-                trySuccess(null);
-        }
-        else
-        {
-            onFailure(from, new StaleTopology());
+            default:
+            case InProgress:
+                throw new IllegalStateException();
+
+            case Ok:
+                if (tracker.success(from))
+                    trySuccess(null);
+                break;
+
+            case Nack:
+                // TODO: stale topology should be impossible right now
+                onFailure(from, new StaleTopology());
         }
     }
 

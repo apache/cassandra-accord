@@ -28,8 +28,8 @@ import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
-// TODO (now): test Keys with no contents
-// TODO (now): test without
+// TODO: test Keys with no contents
+// TODO: test #without
 public class DepsTest
 {
     private static final Logger logger = LoggerFactory.getLogger(DepsTest.class);
@@ -182,7 +182,7 @@ public class DepsTest
                 builder.append(e.getValue());
             }
             builder.append("}");
-            Assertions.assertEquals(builder.toString(), test.toString());
+            Assertions.assertEquals(builder.toString(), test.toSimpleString());
         }
 
         TreeMap<TxnId, List<Key>> invertCanonical()
@@ -260,8 +260,8 @@ public class DepsTest
             int emptyKeys = 1 + random.nextInt(emptyKeysRange - 1);
             int totalCount = random.nextInt(Math.min(totalCountRange, uniqueKeys * uniqueTxnIds));
             return DepsTest.Deps.generate(random, uniqueTxnIds,
-                                          epochRange, realRange, logicalRange, nodeRange,
-                                          uniqueKeys, emptyKeys, keyRange, totalCount);
+                                                  epochRange, realRange, logicalRange, nodeRange,
+                                                  uniqueKeys, emptyKeys, keyRange, totalCount);
         };
     }
 

@@ -37,7 +37,6 @@ import org.slf4j.LoggerFactory;
 
 public class Cluster implements Scheduler
 {
-    private static final Logger logger = LoggerFactory.getLogger(Cluster.class);
     public static final Logger trace = LoggerFactory.getLogger("accord.impl.basic.Trace");
 
     final Function<Id, Node> lookup;
@@ -82,6 +81,16 @@ public class Cluster implements Scheduler
         add(new Packet(from, to, replyId, send));
     }
 
+    public void processAll()
+    {
+        List<Object> pending = new ArrayList<>();
+        while (this.pending.size() > 0)
+            pending.add(this.pending.poll());
+
+        for (Object next : pending)
+            processNext(next);
+    }
+
     public boolean processPending()
     {
         if (pending.size() == recurring)
@@ -91,6 +100,12 @@ public class Cluster implements Scheduler
         if (next == null)
             return false;
 
+        processNext(next);
+        return true;
+    }
+
+    private void processNext(Object next)
+    {
         if (next instanceof Packet)
         {
             Packet deliver = (Packet) next;
@@ -99,13 +114,14 @@ public class Cluster implements Scheduler
             // TODO (now): random drop chance independent of partition; also port flaky connections etc. from simulator
             // Drop the message if it goes across the partition
             boolean drop = ((Packet) next).src.id >= 0 &&
-                    !(partitionSet.contains(deliver.src) && partitionSet.contains(deliver.dst)
-                            || !partitionSet.contains(deliver.src) && !partitionSet.contains(deliver.dst));
+                           !(partitionSet.contains(deliver.src) && partitionSet.contains(deliver.dst)
+                             || !partitionSet.contains(deliver.src) && !partitionSet.contains(deliver.dst));
             if (drop)
             {
                 trace.trace("{} DROP[{}] {}", clock++, on.epoch(), deliver);
-                return true;
+                return;
             }
+
             trace.trace("{} RECV[{}] {}", clock++, on.epoch(), deliver);
             if (deliver.message instanceof Reply)
             {
@@ -134,7 +150,6 @@ public class Cluster implements Scheduler
         {
             ((Runnable) next).run();
         }
-        return true;
     }
 
     @Override
@@ -142,6 +157,7 @@ public class Cluster implements Scheduler
     {
         RecurringPendingRunnable result = new RecurringPendingRunnable(pending, run, delay, units);
         ++recurring;
+        result.onCancellation(() -> --recurring);
         pending.add(result, delay, units);
         return result;
     }
@@ -165,8 +181,9 @@ public class Cluster implements Scheduler
         run.run();
     }
 
-    // TODO (now): there remains some inconsistency of execution, at least causing different partitions if prior runs have happened;
-    //             unclear what source is, but might be deterministic based on prior runs (some evidence of this), or non-deterministic
+    // TODO: there may remain some inconsistency of execution, at least causing different partitions if prior runs have happened;
+    //       unclear what source is, but less frequence now we split cluster partitioning recurring task to its own random
+    //       might be deterministic based on prior runs (some evidence of this), or non-deterministic
     public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, Consumer<Throwable> onFailure, Supplier<Random> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in)
     {
         Topology topology = topologyFactory.toTopology(nodes);
@@ -186,22 +203,37 @@ public class Cluster implements Scheduler
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));
             Random shuffleRandom = randomSupplier.get();
-            sinks.recurring(() -> {
+            Scheduled chaos = sinks.recurring(() -> {
                 Collections.shuffle(nodesList, shuffleRandom);
                 int partitionSize = shuffleRandom.nextInt((topologyFactory.rf+1)/2);
                 sinks.partitionSet = new LinkedHashSet<>(nodesList.subList(0, partitionSize));
             }, 5L, TimeUnit.SECONDS);
-            sinks.recurring(configRandomizer::maybeUpdateTopology, 1L, TimeUnit.SECONDS);
+            Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1L, TimeUnit.SECONDS);
 
             Packet next;
             while ((next = in.get()) != null)
                 sinks.add(next);
 
             while (sinks.processPending());
-            sinks.onDone.forEach(Runnable::run);
-            sinks.onDone.clear();
-            while (sinks.processPending());
-            System.out.println();
+
+            chaos.cancel();
+            reconfigure.cancel();
+            sinks.partitionSet = Collections.emptySet();
+
+            // give progress log et al a chance to finish
+            // TODO: would be nice to make this more certain than an arbitrary number of additional rounds
+            for (int i = 0 ; i < 10 ; ++i)
+            {
+                sinks.processAll();
+                while (sinks.processPending());
+            }
+
+            while (!sinks.onDone.isEmpty())
+            {
+                sinks.onDone.forEach(Runnable::run);
+                sinks.onDone.clear();
+                while (sinks.processPending());
+            }
         }
         finally
         {

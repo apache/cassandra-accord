@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class KeysTest
 {
-    private static KeyRange<IntKey> r(int start, int end)
+    private static KeyRange r(int start, int end)
     {
         return IntKey.range(start, end);
     }

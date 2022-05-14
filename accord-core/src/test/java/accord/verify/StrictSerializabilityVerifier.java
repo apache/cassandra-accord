@@ -12,6 +12,8 @@ import java.util.TreeSet;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
+import com.google.common.base.Preconditions;
+
 /**
  * Nomenclature:
  *  register: the values associated with a given key
@@ -289,7 +291,7 @@ public class StrictSerializabilityVerifier
         void setSuccessor(Step successor)
         {
             this.successor = successor;
-            successor.predecessorStep = successor;
+            successor.predecessorStep = this;
         }
 
         boolean updatePeers(int[] newPeers, UnknownStepHolder[] unknownSteps)
@@ -510,7 +512,7 @@ public class StrictSerializabilityVerifier
                 throw new AssertionError();
             if (null != byTimestamp.putIfAbsent(end, unknownStep))
                 throw new AssertionError();
-            // TODO (now): verify this propagation
+            // TODO: verify this propagation
             unknownSteps[ofKey].step.receivePropagatedPredecessors(this, StrictSerializabilityVerifier.this);
         }
 
@@ -615,7 +617,7 @@ public class StrictSerializabilityVerifier
             else if (unknownSteps != null && unknownSteps[key] != null)
             {
                 assert writes[key] >= 0;
-                // TODO (now): might we create false loops here before we process unwitnessed values? (i.e. produce wrong error message)
+                // TODO: might we create false loops here before we process unwitnessed values? (i.e. produce wrong error message)
                 futureWrites.register(unknownSteps, start, end);
                 step = futureWrites;
             }

@@ -3,6 +3,7 @@ package accord.local;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -14,6 +15,7 @@ import com.google.common.annotations.VisibleForTesting;
 
 import accord.api.*;
 import accord.coordinate.Coordinate;
+import accord.coordinate.FetchData;
 import accord.coordinate.MaybeRecover;
 
 import javax.annotation.Nullable;
@@ -25,22 +27,29 @@ import accord.api.Result;
 import accord.api.ProgressLog;
 import accord.api.Scheduler;
 import accord.api.DataStore;
+import accord.coordinate.Preempted;
 import accord.coordinate.Recover;
+import accord.coordinate.Recover.Outcome;
+import accord.coordinate.RecoverWithRoute;
 import accord.messages.Callback;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
 import accord.messages.Reply;
+import accord.primitives.AbstractKeys;
+import accord.primitives.AbstractRoute;
 import accord.primitives.KeyRange;
 import accord.primitives.KeyRanges;
+import accord.primitives.Route;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.topology.TopologyManager;
 import accord.primitives.Ballot;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
-import accord.txn.Txn;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import org.apache.cassandra.utils.concurrent.AsyncFuture;
 import org.apache.cassandra.utils.concurrent.Future;
 
 public class Node implements ConfigurationService.Listener
@@ -110,7 +119,7 @@ public class Node implements ConfigurationService.Listener
     // TODO: this really needs to be thought through some more, as it needs to be per-instance in some cases, and per-node in others
     private final Scheduler scheduler;
 
-    private final Map<TxnId, Future<Result>> coordinating = new ConcurrentHashMap<>();
+    private final Map<TxnId, Future<?>> coordinating = new ConcurrentHashMap<>();
 
     public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier,
                 Supplier<DataStore> dataSupplier, Agent agent, Random random, Scheduler scheduler,
@@ -239,72 +248,72 @@ public class Node implements ConfigurationService.Listener
         commandStores.forEach(forEach);
     }
 
-    public void forEachLocal(Keys keys, long epoch, Consumer<CommandStore> forEach)
+    public void forEachLocal(AbstractKeys<?, ?> keys, long epoch, Consumer<CommandStore> forEach)
     {
         commandStores.forEach(keys, epoch, forEach);
     }
 
-    public void forEachLocal(Keys keys, long minEpoch, long maxEpoch, Consumer<CommandStore> forEach)
+    public void forEachLocal(AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch, Consumer<CommandStore> forEach)
     {
         commandStores.forEach(keys, minEpoch, maxEpoch, forEach);
     }
 
-    public void forEachLocal(Keys keys, Timestamp minAt, Timestamp maxAt, Consumer<CommandStore> forEach)
+    public void forEachLocal(AbstractKeys<?, ?> keys, Timestamp minAt, Timestamp maxAt, Consumer<CommandStore> forEach)
     {
         commandStores.forEach(keys, minAt.epoch, maxAt.epoch, forEach);
     }
 
-    public void forEachLocalSince(Keys keys, Timestamp since, Consumer<CommandStore> forEach)
+    public void forEachLocalSince(AbstractKeys<?, ?> keys, Timestamp since, Consumer<CommandStore> forEach)
     {
         commandStores.forEach(keys, since.epoch, Long.MAX_VALUE, forEach);
     }
 
-    public void forEachLocalSince(Keys keys, long sinceEpoch, Consumer<CommandStore> forEach)
+    public void forEachLocalSince(AbstractKeys<?, ?> keys, long sinceEpoch, Consumer<CommandStore> forEach)
     {
         commandStores.forEach(keys, sinceEpoch, Long.MAX_VALUE, forEach);
     }
 
-    public <T> T mapReduceLocal(Keys keys, Timestamp at, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T mapReduceLocal(AbstractKeys<?, ?> keys, Timestamp at, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
         return commandStores.mapReduce(keys, at.epoch, at.epoch, map, reduce);
     }
 
-    public <T> T mapReduceLocal(Keys keys, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T mapReduceLocal(AbstractKeys<?, ?> keys, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
         return commandStores.mapReduce(keys, epoch, epoch, map, reduce);
     }
 
-    public <T> T mapReduceLocal(Keys keys, long minEpoch, long maxEpoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T mapReduceLocal(AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
         return commandStores.mapReduce(keys, minEpoch, maxEpoch, map, reduce);
     }
 
-    public <T> T mapReduceLocalSince(Keys keys, Timestamp since, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T mapReduceLocalSince(AbstractKeys<?, ?> keys, Timestamp since, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
         return commandStores.mapReduce(keys, since.epoch, Long.MAX_VALUE, map, reduce);
     }
 
-    public <T> T ifLocal(Key key, Timestamp at, Function<CommandStore, T> ifLocal)
+    public <T> T ifLocal(RoutingKey key, Timestamp at, Function<CommandStore, T> ifLocal)
     {
         return ifLocal(key, at.epoch, ifLocal);
     }
 
-    public <T> T ifLocal(Key key, long epoch, Function<CommandStore, T> ifLocal)
+    public <T> T ifLocal(RoutingKey key, long epoch, Function<CommandStore, T> ifLocal)
     {
         return commandStores.mapReduce(key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
     }
 
-    public <T> T ifLocalSince(Key key, Timestamp since, Function<CommandStore, T> ifLocal)
+    public <T> T ifLocalSince(RoutingKey key, Timestamp since, Function<CommandStore, T> ifLocal)
     {
         return ifLocalSince(key, since.epoch, ifLocal);
     }
 
-    public <T> T ifLocalSince(Key key, long epoch, Function<CommandStore, T> ifLocal)
+    public <T> T ifLocalSince(RoutingKey key, long epoch, Function<CommandStore, T> ifLocal)
     {
         return commandStores.mapReduceSince(key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
     }
 
-    public <T extends Collection<CommandStore>> T collectLocal(Keys keys, Timestamp at, IntFunction<T> factory)
+    public <T extends Collection<CommandStore>> T collectLocal(AbstractKeys<?, ?> keys, Timestamp at, IntFunction<T> factory)
     {
         return commandStores.collect(keys, at.epoch, factory);
     }
@@ -399,42 +408,52 @@ public class Node implements ConfigurationService.Listener
 
     private Future<Result> initiateCoordination(TxnId txnId, Txn txn)
     {
-        Key homeKey = trySelectHomeKey(txnId, txn.keys);
-        if (homeKey == null)
-        {
-            homeKey = selectRandomHomeKey(txnId);
-            txn = new Txn(txn.keys.with(homeKey), txn.read, txn.query, txn.update);
-        }
-        return Coordinate.coordinate(this, txnId, txn, homeKey);
+        return Coordinate.coordinate(this, txnId, txn, computeRoute(txnId, txn.keys));
     }
 
-    @VisibleForTesting
-    public @Nullable Key trySelectHomeKey(TxnId txnId, Keys keys)
+    public Route computeRoute(TxnId txnId, Keys keys)
+    {
+        RoutingKey homeKey = trySelectHomeKey(txnId, keys);
+        if (homeKey == null)
+            homeKey = selectRandomHomeKey(txnId);
+        return keys.toRoute(homeKey);
+    }
+
+    private @Nullable RoutingKey trySelectHomeKey(TxnId txnId, Keys keys)
     {
         int i = topology().localForEpoch(txnId.epoch).ranges().findFirstKey(keys);
-        return i >= 0 ? keys.get(i) : null;
+        return i >= 0 ? keys.get(i).toRoutingKey() : null;
     }
 
-    public Key selectHomeKey(TxnId txnId, Keys keys)
+    public RoutingKey selectProgressKey(TxnId txnId, AbstractRoute route)
     {
-        Key key = trySelectHomeKey(txnId, keys);
-        return key != null ? key : selectRandomHomeKey(txnId);
+        return selectProgressKey(txnId, route, route.homeKey);
     }
 
-    public Key selectProgressKey(TxnId txnId, Keys keys, Key homeKey)
+    public RoutingKey selectProgressKey(TxnId txnId, AbstractKeys<?, ?> keys, RoutingKey homeKey)
     {
-        Key progressKey = trySelectProgressKey(txnId, keys, homeKey);
+        return selectProgressKey(txnId.epoch, keys, homeKey);
+    }
+
+    public RoutingKey selectProgressKey(long epoch, AbstractKeys<?, ?> keys, RoutingKey homeKey)
+    {
+        RoutingKey progressKey = trySelectProgressKey(epoch, keys, homeKey);
         if (progressKey == null)
             throw new IllegalStateException();
         return progressKey;
     }
 
-    public Key trySelectProgressKey(TxnId txnId, Keys keys, Key homeKey)
+    public RoutingKey trySelectProgressKey(TxnId txnId, AbstractRoute route)
+    {
+        return trySelectProgressKey(txnId, route, route.homeKey);
+    }
+
+    public RoutingKey trySelectProgressKey(TxnId txnId, AbstractKeys<?, ?> keys, RoutingKey homeKey)
     {
         return trySelectProgressKey(txnId.epoch, keys, homeKey);
     }
 
-    public Key trySelectProgressKey(long epoch, Keys keys, Key homeKey)
+    public RoutingKey trySelectProgressKey(long epoch, AbstractKeys<?, ?> keys, RoutingKey homeKey)
     {
         Topology topology = this.topology.localForEpoch(epoch);
         if (topology.ranges().contains(homeKey))
@@ -443,44 +462,92 @@ public class Node implements ConfigurationService.Listener
         int i = topology.ranges().findFirstKey(keys);
         if (i < 0)
             return null;
-        return keys.get(i);
+        return keys.get(i).toRoutingKey();
     }
 
-    public Key selectRandomHomeKey(TxnId txnId)
+    public RoutingKey selectRandomHomeKey(TxnId txnId)
     {
         KeyRanges ranges = topology().localForEpoch(txnId.epoch).ranges();
         KeyRange range = ranges.get(ranges.size() == 1 ? 0 : random.nextInt(ranges.size()));
         return range.endInclusive() ? range.end() : range.start();
     }
 
+    static class RecoverFuture<T> extends AsyncFuture<T> implements BiConsumer<T, Throwable>
+    {
+        @Override
+        public void accept(T success, Throwable fail)
+        {
+            if (fail != null) tryFailure(fail);
+            else trySuccess(success);
+        }
+    }
+
     // TODO: encapsulate in Coordinate, so we can request that e.g. commits be re-sent?
-    public Future<Result> recover(TxnId txnId, Txn txn, Key homeKey)
+    public Future<Outcome> recover(TxnId txnId, Txn txn, Route route)
     {
         {
-            Future<Result> result = coordinating.get(txnId);
+            Future<Outcome> result = existingRecover(txnId);
             if (result != null)
                 return result;
         }
 
-        Future<Result> result = withEpoch(txnId.epoch, () -> Recover.recover(this, txnId, txn, homeKey));
+        Future<Outcome> result = withEpoch(txnId.epoch, () -> {
+            RecoverFuture<Outcome> future = new RecoverFuture();
+            Recover.recover(this, txnId, txn, route, future);
+            return future;
+        });
         coordinating.putIfAbsent(txnId, result);
         result.addCallback((success, fail) -> {
             coordinating.remove(txnId, result);
-            agent.onRecover(this, success, fail);
             // TODO: if we fail, nominate another node to try instead
         });
         return result;
     }
 
+    public Future<Outcome> recover(TxnId txnId, Route route)
+    {
+        {
+            Future<Outcome> result = existingRecover(txnId);
+            if (result != null)
+                return result;
+        }
+
+        Future<Outcome> result = withEpoch(txnId.epoch, () -> {
+            RecoverFuture<Outcome> future = new RecoverFuture();
+            RecoverWithRoute.recover(this, txnId, route, future);
+            return future;
+        });
+        coordinating.putIfAbsent(txnId, result);
+        result.addCallback((success, fail) -> {
+            coordinating.remove(txnId, result);
+            // TODO: if we fail, nominate another node to try instead
+        });
+        return result;
+    }
+
+    private Future<Outcome> existingRecover(TxnId txnId)
+    {
+        Future<?> result = coordinating.get(txnId);
+        if (result == null)
+            return null;
+
+        if (result instanceof Coordinate)
+            return result.map(ignore -> Outcome.Executed);
+        else
+            return (Future<Outcome>)result;
+    }
+
     // TODO: coalesce other maybeRecover calls also? perhaps have mutable knownStatuses so we can inject newer ones?
-    public Future<CheckStatusOk> maybeRecover(TxnId txnId, Txn txn, Key homeKey, Shard homeShard, long homeEpoch,
+    public Future<CheckStatusOk> maybeRecover(TxnId txnId, RoutingKey homeKey, @Nullable AbstractRoute route,
                                               Status knownStatus, Ballot knownPromised, boolean knownPromiseHasBeenAccepted)
     {
-        Future<Result> result = coordinating.get(txnId);
+        Future<?> result = coordinating.get(txnId);
         if (result != null)
             return result.map(r -> null);
 
-        return MaybeRecover.maybeRecover(this, txnId, txn, homeKey, homeShard, homeEpoch, knownStatus, knownPromised, knownPromiseHasBeenAccepted);
+        RecoverFuture<CheckStatusOk> future = new RecoverFuture<>();
+        MaybeRecover.maybeRecover(this, txnId, homeKey, route, knownStatus, knownPromised, knownPromiseHasBeenAccepted, future);
+        return future;
     }
 
     public void receive(Request request, Id from, ReplyContext replyContext)
@@ -493,16 +560,6 @@ public class Node implements ConfigurationService.Listener
             return;
         }
         scheduler.now(() -> request.process(this, from, replyContext));
-    }
-
-    public boolean isReplicaOf(Timestamp at, Key key)
-    {
-        return topology().localForEpoch(at.epoch).ranges().contains(key);
-    }
-
-    public boolean isReplicaOf(long epoch, Key key)
-    {
-        return topology().localForEpoch(epoch).ranges().contains(key);
     }
 
     public Scheduler scheduler()

@@ -2,7 +2,7 @@ package accord.coordinate;
 
 import javax.annotation.Nullable;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.primitives.TxnId;
 
 /**
@@ -11,7 +11,7 @@ import accord.primitives.TxnId;
  */
 public class Preempted extends CoordinateFailed
 {
-    public Preempted(TxnId txnId, @Nullable Key homeKey)
+    public Preempted(TxnId txnId, @Nullable RoutingKey homeKey)
     {
         super(txnId, homeKey);
     }

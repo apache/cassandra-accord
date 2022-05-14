@@ -1,4 +1,4 @@
-package accord.txn;
+package accord.primitives;
 
 import accord.api.Write;
 import accord.local.CommandStore;

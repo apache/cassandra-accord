@@ -4,12 +4,12 @@ public enum Status
 {
     NotWitnessed(0),
     PreAccepted(10),
-    Accepted(20),
     AcceptedInvalidate(20),
+    Accepted(20),
     Committed(30),
-    ReadyToExecute(40),
+    ReadyToExecute(30),
     Executed(50),
-    Applied(60),
+    Applied(50),
     Invalidated(60);
 
     final int logicalOrdinal;

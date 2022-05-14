@@ -3,59 +3,61 @@ package accord.maelstrom;
 import java.io.IOException;
 
 import accord.api.Key;
+import accord.api.RoutingKey;
+import accord.maelstrom.Datum.Kind;
 import accord.primitives.KeyRange;
-
-import com.google.common.base.Objects;
 
 import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
-public class MaelstromKey extends Datum<MaelstromKey> implements Key<MaelstromKey>
+public class MaelstromKey implements Key
 {
-    public static class Range extends KeyRange.EndInclusive<MaelstromKey>
+    public static class Range extends KeyRange.EndInclusive
     {
-        public Range(MaelstromKey start, MaelstromKey end)
+        public Range(RoutingKey start, RoutingKey end)
         {
             super(start, end);
         }
 
         @Override
-        public KeyRange<MaelstromKey> subRange(MaelstromKey start, MaelstromKey end)
+        public KeyRange subRange(RoutingKey start, RoutingKey end)
         {
             return new Range(start, end);
         }
     }
 
+    final Datum datum;
+
     public MaelstromKey(Kind kind, Object value)
     {
-        super(kind, value);
+        datum = new Datum(kind, value);
     }
 
     public MaelstromKey(String value)
     {
-        super(value);
+        datum = new Datum(value);
     }
 
     public MaelstromKey(Long value)
     {
-        super(value);
+        datum = new Datum(value);
     }
 
     public MaelstromKey(Double value)
     {
-        super(value);
+        datum = new Datum(value);
     }
 
     @Override
-    public int compareTo(MaelstromKey that)
+    public int compareTo(RoutingKey that)
     {
-        return compareTo((Datum) that);
+        return datum.compareTo(((MaelstromKey) that).datum);
     }
 
     public static MaelstromKey read(JsonReader in) throws IOException
     {
-        return read(in, MaelstromKey::new);
+        return Datum.read(in, MaelstromKey::new);
     }
 
     public static final TypeAdapter<MaelstromKey> GSON_ADAPTER = new TypeAdapter<>()
@@ -63,7 +65,7 @@ public class MaelstromKey extends Datum<MaelstromKey> implements Key<MaelstromKe
         @Override
         public void write(JsonWriter out, MaelstromKey value) throws IOException
         {
-            value.write(out);
+            value.datum.write(out);
         }
 
         @Override
@@ -76,7 +78,7 @@ public class MaelstromKey extends Datum<MaelstromKey> implements Key<MaelstromKe
     @Override
     public int routingHash()
     {
-        return Objects.hashCode(kind, value);
+        return datum.hashCode();
     }
 
     @Override

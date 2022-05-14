@@ -3,8 +3,10 @@ package accord.local;
 import accord.api.Agent;
 import accord.api.Key;
 import accord.api.DataStore;
+import accord.api.RoutingKey;
 import accord.local.CommandStore.RangesForEpoch;
 import accord.api.ProgressLog;
+import accord.primitives.AbstractKeys;
 import accord.primitives.KeyRanges;
 import accord.topology.Topology;
 import accord.primitives.Keys;
@@ -42,44 +44,6 @@ public abstract class CommandStores
     interface Select<Scope>
     {
         long select(ShardedRanges ranges, Scope scope, long minEpoch, long maxEpoch);
-    }
-
-    static class KeysAndEpoch
-    {
-        final Keys keys;
-        final long epoch;
-
-        KeysAndEpoch(Keys keys, long epoch)
-        {
-            this.keys = keys;
-            this.epoch = epoch;
-        }
-    }
-
-    static class KeysAndEpochRange
-    {
-        final Keys keys;
-        final long minEpoch;
-        final long maxEpoch;
-
-        KeysAndEpochRange(Keys keys, long minEpoch, long maxEpoch)
-        {
-            this.keys = keys;
-            this.minEpoch = minEpoch;
-            this.maxEpoch = maxEpoch;
-        }
-    }
-
-    static class KeyAndEpoch
-    {
-        final Key key;
-        final long epoch;
-
-        KeyAndEpoch(Key key, long epoch)
-        {
-            this.key = key;
-            this.epoch = epoch;
-        }
     }
 
     private static class Supplier
@@ -151,8 +115,30 @@ public abstract class CommandStores
         {
             int i = Arrays.binarySearch(epochs, epoch);
             if (i < 0) i = -2 -i;
-            if (i < 0) return null;
+            if (i < 0) return KeyRanges.EMPTY;
             return ranges[i];
+        }
+
+        KeyRanges rangesBetweenEpochs(long fromInclusive, long toInclusive)
+        {
+            if (fromInclusive > toInclusive)
+                throw new IndexOutOfBoundsException();
+
+            if (fromInclusive == toInclusive)
+                return rangesForEpoch(fromInclusive);
+
+            int i = Arrays.binarySearch(epochs, fromInclusive);
+            if (i < 0) i = -2 - i;
+            if (i < 0) i = 0;
+
+            int j = Arrays.binarySearch(epochs, toInclusive);
+            if (j < 0) j = -2 - j;
+            if (i > j) return KeyRanges.EMPTY;
+
+            KeyRanges result = ranges[i++];
+            while (i <= j)
+                result = result.union(ranges[i++]);
+            return result;
         }
 
         KeyRanges rangesSinceEpoch(long epoch)
@@ -177,7 +163,7 @@ public abstract class CommandStores
             return -1L >>> (64 - shards.length);
         }
 
-        long shards(Keys keys, long minEpoch, long maxEpoch)
+        long shards(AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch)
         {
             long accumulate = 0L;
             for (int i = Math.max(0, indexForEpoch(minEpoch)), maxi = indexForEpoch(maxEpoch); i <= maxi ; ++i)
@@ -187,7 +173,7 @@ public abstract class CommandStores
             return accumulate;
         }
 
-        long shard(Key scope, long minEpoch, long maxEpoch)
+        long shard(RoutingKey scope, long minEpoch, long maxEpoch)
         {
             long result = 0L;
             for (int i = Math.max(0, indexForEpoch(minEpoch)), maxi = indexForEpoch(maxEpoch); i <= maxi ; ++i)
@@ -205,12 +191,12 @@ public abstract class CommandStores
             return ranges[ranges.length - 1];
         }
 
-        static long keyIndex(Key key, long numShards)
+        static long keyIndex(RoutingKey key, long numShards)
         {
             return Integer.toUnsignedLong(key.routingHash()) % numShards;
         }
 
-        private static long addKeyIndex(int i, Key key, long numShards, long accumulate)
+        private static long addKeyIndex(int i, RoutingKey key, long numShards, long accumulate)
         {
             return accumulate | (1L << keyIndex(key, numShards));
         }
@@ -317,16 +303,27 @@ public abstract class CommandStores
             }
 
             @Override
+            public KeyRanges between(long fromInclusive, long toInclusive)
+            {
+                return current.ranges[generation].rangesBetweenEpochs(fromInclusive, toInclusive);
+            }
+
+            @Override
             public KeyRanges since(long epoch)
             {
                 return current.ranges[generation].rangesSinceEpoch(epoch);
             }
 
             @Override
-            public boolean intersects(long epoch, Keys keys)
+            public boolean owns(long epoch, RoutingKey key)
             {
-                KeyRanges ranges = at(epoch);
-                return ranges != null && ranges.intersects(keys);
+                return current.ranges[generation].rangesForEpoch(epoch).contains(key);
+            }
+
+            @Override
+            public boolean intersects(long epoch, AbstractKeys<?, ?> keys)
+            {
+                return at(epoch).intersects(keys);
             }
         };
     }
@@ -346,37 +343,37 @@ public abstract class CommandStores
         forEach((s, i, min, max) -> s.all(), null, 0, 0, forEach);
     }
 
-    public void forEach(Keys keys, long epoch, Consumer<CommandStore> forEach)
+    public void forEach(AbstractKeys<?, ?> keys, long epoch, Consumer<CommandStore> forEach)
     {
         forEach(keys, epoch, epoch, forEach);
     }
 
-    public void forEach(Keys keys, long minEpoch, long maxEpoch, Consumer<CommandStore> forEach)
+    public void forEach(AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch, Consumer<CommandStore> forEach)
     {
         forEach(ShardedRanges::shards, keys, minEpoch, maxEpoch, forEach);
     }
 
-    public <T> T mapReduce(Keys keys, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T mapReduce(AbstractKeys<?, ?> keys, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
         return mapReduce(keys, epoch, epoch, map, reduce);
     }
 
-    public <T> T mapReduce(Keys keys, long minEpoch, long maxEpoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T mapReduce(AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
         return mapReduce(ShardedRanges::shards, keys, minEpoch, maxEpoch, map, reduce);
     }
 
-    public <T> T mapReduce(Key key, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T mapReduce(RoutingKey key, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
         return mapReduce(ShardedRanges::shard, key, epoch, epoch, map, reduce);
     }
 
-    public <T> T mapReduceSince(Key key, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T mapReduceSince(RoutingKey key, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
         return mapReduce(ShardedRanges::shard, key, epoch, Long.MAX_VALUE, map, reduce);
     }
 
-    public <T extends Collection<CommandStore>> T collect(Keys keys, long epoch, IntFunction<T> factory)
+    public <T extends Collection<CommandStore>> T collect(AbstractKeys<?, ?> keys, long epoch, IntFunction<T> factory)
     {
         return foldl(ShardedRanges::shards, keys, epoch, epoch, CommandStores::append, null, null, factory);
     }

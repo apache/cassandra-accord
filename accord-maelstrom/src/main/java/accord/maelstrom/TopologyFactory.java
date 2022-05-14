@@ -19,7 +19,7 @@ public class TopologyFactory
     final int shards;
     final int rf;
     final Kind[] kinds;
-    final KeyRange<MaelstromKey>[][] ranges;
+    final KeyRange[][] ranges;
 
     public TopologyFactory(int shards, int rf)
     {

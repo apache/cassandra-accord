@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 
 public class KeyRangesTest
 {
-    private static KeyRange<IntKey> r(int start, int end)
+    private static KeyRange r(int start, int end)
     {
         return IntKey.range(start, end);
     }

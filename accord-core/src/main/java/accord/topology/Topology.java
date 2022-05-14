@@ -4,8 +4,10 @@ import java.util.*;
 import java.util.function.IntFunction;
 import java.util.stream.IntStream;
 
+import accord.api.RoutingKey;
 import accord.local.Node.Id;
 import accord.api.Key;
+import accord.primitives.AbstractKeys;
 import accord.primitives.KeyRange;
 import accord.primitives.KeyRanges;
 import accord.primitives.Keys;
@@ -13,6 +15,9 @@ import accord.utils.IndexedConsumer;
 import accord.utils.IndexedBiFunction;
 import accord.utils.IndexedIntFunction;
 import accord.utils.IndexedPredicate;
+import accord.utils.SortedArrays;
+
+import static accord.utils.SortedArrays.exponentialSearch;
 
 public class Topology extends AbstractCollection<Shard>
 {
@@ -141,11 +146,11 @@ public class Topology extends AbstractCollection<Shard>
     public KeyRanges rangesForNode(Id node)
     {
         NodeInfo info = nodeLookup.get(node);
-        return info != null ? info.ranges : null;
+        return info != null ? info.ranges : KeyRanges.EMPTY;
     }
 
     // TODO: optimised HomeKey concept containing the Key, Shard and Topology to avoid lookups when topology hasn't changed
-    public Shard forKey(Key key)
+    public Shard forKey(RoutingKey key)
     {
         int i = ranges.rangeIndexForKey(key);
         if (i < 0 || i >= ranges.size())
@@ -153,7 +158,7 @@ public class Topology extends AbstractCollection<Shard>
         return shards[i];
     }
 
-    public Topology forKeys(Keys select, IndexedPredicate<Shard> predicate)
+    public Topology forKeys(AbstractKeys<?, ?> select, IndexedPredicate<Shard> predicate)
     {
         int subsetIndex = 0;
         int count = 0;
@@ -185,12 +190,12 @@ public class Topology extends AbstractCollection<Shard>
         return new Topology(epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
     }
 
-    public Topology forKeys(Keys select)
+    public Topology forKeys(AbstractKeys<?, ?> select)
     {
         return forKeys(select, (i, shard) -> true);
     }
 
-    public <T> T foldl(Keys select, IndexedBiFunction<Shard, T, T> function, T accumulator)
+    public <T> T foldl(AbstractKeys<?, ?> select, IndexedBiFunction<Shard, T, T> function, T accumulator)
     {
         int subsetIndex = 0;
         for (int i = 0 ; i < select.size() ; )
@@ -234,7 +239,6 @@ public class Topology extends AbstractCollection<Shard>
 
     public void forEachOn(Id on, IndexedConsumer<Shard> consumer)
     {
-        // TODO: this can be done by divide-and-conquer splitting of the lists and recursion, which should be more efficient
         NodeInfo info = nodeLookup.get(on);
         if (info == null)
             return;
@@ -249,12 +253,12 @@ public class Topology extends AbstractCollection<Shard>
             }
             else if (a[ai] < b[bi])
             {
-                ai = Arrays.binarySearch(a, ai + 1, a.length, b[bi]);
+                ai = exponentialSearch(a, ai + 1, a.length, b[bi]);
                 if (ai < 0) ai = -1 -ai;
             }
             else
             {
-                bi = Arrays.binarySearch(b, bi + 1, b.length, a[ai]);
+                bi = exponentialSearch(b, bi + 1, b.length, a[ai]);
                 if (bi < 0) bi = -1 -bi;
             }
         }
@@ -279,12 +283,12 @@ public class Topology extends AbstractCollection<Shard>
             }
             else if (a[ai] < b[bi])
             {
-                ai = Arrays.binarySearch(a, ai + 1, a.length, b[bi]);
+                ai = exponentialSearch(a, ai + 1, a.length, b[bi]);
                 if (ai < 0) ai = -1 -ai;
             }
             else
             {
-                bi = Arrays.binarySearch(b, bi + 1, b.length, a[ai]);
+                bi = exponentialSearch(b, bi + 1, b.length, a[ai]);
                 if (bi < 0) bi = -1 -bi;
             }
         }
@@ -310,12 +314,12 @@ public class Topology extends AbstractCollection<Shard>
             }
             else if (a[ai] < b[bi])
             {
-                ai = Arrays.binarySearch(a, ai + 1, a.length, b[bi]);
+                ai = exponentialSearch(a, ai + 1, a.length, b[bi]);
                 if (ai < 0) ai = -1 -ai;
             }
             else
             {
-                bi = Arrays.binarySearch(b, bi + 1, b.length, a[ai]);
+                bi = exponentialSearch(b, bi + 1, b.length, a[ai]);
                 if (bi < 0) bi = -1 -bi;
             }
         }

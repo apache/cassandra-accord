@@ -7,7 +7,7 @@ import accord.primitives.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.topology.Topology;
-import accord.txn.Txn;
+import accord.primitives.Txn;
 import accord.primitives.Keys;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Sets;

@@ -2,7 +2,7 @@ package accord.coordinate;
 
 import javax.annotation.Nullable;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.primitives.TxnId;
 
 /**
@@ -10,12 +10,12 @@ import accord.primitives.TxnId;
  */
 public class Timeout extends CoordinateFailed
 {
-    public Timeout(TxnId txnId, @Nullable Key homeKey)
+    public Timeout(TxnId txnId, @Nullable RoutingKey homeKey)
     {
         super(txnId, homeKey);
     }
 
-    Timeout with(TxnId txnId, Key homeKey)
+    Timeout with(TxnId txnId, RoutingKey homeKey)
     {
         if (this.txnId == null || (this.homeKey == null && homeKey != null))
             return new Timeout(txnId, homeKey);

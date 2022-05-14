@@ -1,5 +1,6 @@
 package accord.api;
 
+import accord.primitives.KeyRanges;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 
@@ -12,4 +13,6 @@ public interface Read
 {
     Keys keys();
     Data read(Key key, Timestamp executeAt, DataStore store);
+    Read slice(KeyRanges ranges);
+    Read merge(Read other);
 }

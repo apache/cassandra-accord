@@ -1,6 +1,5 @@
 package accord.primitives;
 
-import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.utils.SortedArrays;
 
@@ -9,6 +8,7 @@ import com.google.common.collect.Iterators;
 
 import java.util.*;
 
+// TODO (now): randomised testing
 public class KeyRanges implements Iterable<KeyRange>
 {
     public static final KeyRanges EMPTY = new KeyRanges(new KeyRange[0]);
@@ -54,23 +54,24 @@ public class KeyRanges implements Iterable<KeyRange>
         return Iterators.forArray(ranges);
     }
 
-    public int rangeIndexForKey(int lowerBound, int upperBound, Key key)
+    // TODO: reconsider users of this method, in light of newer facilities like foldl, findNext etc
+    public int rangeIndexForKey(int lowerBound, int upperBound, RoutingKey key)
     {
         return Arrays.binarySearch(ranges, lowerBound, upperBound, key,
-                                   (r, k) -> -((KeyRange) r).compareKey((Key) k));
+                                   (r, k) -> -((KeyRange) r).compareKey((RoutingKey) k));
     }
 
-    public int rangeIndexForKey(Key key)
+    public int rangeIndexForKey(RoutingKey key)
     {
         return rangeIndexForKey(0, ranges.length, key);
     }
 
-    public boolean contains(Key key)
+    public boolean contains(RoutingKey key)
     {
         return rangeIndexForKey(key) >= 0;
     }
 
-    public boolean containsAll(Keys keys)
+    public boolean containsAll(AbstractKeys<?, ?> keys)
     {
         return keys.rangeFoldl(this, (from, to, p, v) -> v + (to - from), 0, 0, 0) == keys.size();
     }
@@ -98,7 +99,7 @@ public class KeyRanges implements Iterable<KeyRange>
         return new KeyRanges(selection);
     }
 
-    public boolean intersects(Keys keys)
+    public boolean intersects(AbstractKeys<?, ?> keys)
     {
         return findNextIntersection(0, keys, 0) >= 0;
     }
@@ -113,34 +114,34 @@ public class KeyRanges implements Iterable<KeyRange>
         return SortedArrays.findNextIntersection(this.ranges, 0, that.ranges, 0, KeyRange::compareIntersecting) >= 0;
     }
 
-    public int findFirstKey(Keys keys)
+    public int findFirstKey(AbstractKeys<?, ?> keys)
     {
         return findNextKey(0, keys, 0);
     }
 
-    public int findNextKey(int ri, Keys keys, int ki)
+    public int findNextKey(int ri, AbstractKeys<?, ?> keys, int ki)
     {
         return (int) (findNextIntersection(ri, keys, ki) >> 32);
     }
 
     // returns ki in top 32 bits, ri in bottom, or -1 if no match found
-    public long findNextIntersection(int ri, Keys keys, int ki)
+    public long findNextIntersection(int ri, AbstractKeys<?, ?> keys, int ki)
     {
         return SortedArrays.findNextIntersectionWithOverlaps(keys.keys, ki, ranges, ri);
     }
 
-    public int findFirstKey(Key[] keys)
+    public int findFirstKey(RoutingKey[] keys)
     {
         return findNextKey(0, keys, 0);
     }
 
-    public int findNextKey(int ri, Key[] keys, int ki)
+    public int findNextKey(int ri, RoutingKey[] keys, int ki)
     {
         return (int) (findNextIntersection(ri, keys, ki) >> 32);
     }
 
     // returns ki in top 32 bits, ri in bottom, or -1 if no match found
-    public long findNextIntersection(int ri, Key[] keys, int ki)
+    public long findNextIntersection(int ri, RoutingKey[] keys, int ki)
     {
         return SortedArrays.findNextIntersectionWithOverlaps(keys, ki, ranges, ri);
     }
@@ -310,8 +311,8 @@ public class KeyRanges implements Iterable<KeyRange>
             }
             else
             {
-                Key start = a.start().compareTo(b.start()) <= 0 ? a.start() : b.start();
-                Key end = a.end().compareTo(b.end()) >= 0 ? a.end() : b.end();
+                RoutingKey start = a.start().compareTo(b.start()) <= 0 ? a.start() : b.start();
+                RoutingKey end = a.end().compareTo(b.end()) >= 0 ? a.end() : b.end();
                 ai++;
                 bi++;
                 while (ai < as.length || bi < bs.length)
@@ -363,7 +364,7 @@ public class KeyRanges implements Iterable<KeyRange>
 
         int count = 0;
         KeyRange prev = src[srcPosition];
-        Key end = prev.end();
+        RoutingKey end = prev.end();
         for (int i = 1 ; i < srcCount ; ++i)
         {
             KeyRange next = src[srcPosition + i];
@@ -382,7 +383,7 @@ public class KeyRanges implements Iterable<KeyRange>
         return count;
     }
 
-    private static KeyRange maybeUpdateEnd(KeyRange range, Key withEnd)
+    private static KeyRange maybeUpdateEnd(KeyRange range, RoutingKey withEnd)
     {
         return withEnd == range.end() ? range : range.subRange(range.start(), withEnd);
     }
@@ -391,5 +392,4 @@ public class KeyRanges implements Iterable<KeyRange>
     {
         return new KeyRanges(new KeyRange[]{range});
     }
-
 }

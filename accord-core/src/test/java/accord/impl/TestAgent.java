@@ -5,7 +5,6 @@ import accord.api.Agent;
 import accord.api.Result;
 import accord.local.Command;
 import accord.primitives.Timestamp;
-import accord.txn.Txn;
 
 public class TestAgent implements Agent
 {
@@ -25,6 +24,11 @@ public class TestAgent implements Agent
 
     @Override
     public void onUncaughtException(Throwable t)
+    {
+    }
+
+    @Override
+    public void onHandledException(Throwable t)
     {
     }
 }

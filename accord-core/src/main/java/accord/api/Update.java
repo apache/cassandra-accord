@@ -1,5 +1,6 @@
 package accord.api;
 
+import accord.primitives.KeyRanges;
 import accord.primitives.Keys;
 
 /**
@@ -11,4 +12,6 @@ public interface Update
 {
     Keys keys();
     Write apply(Data data);
+    Update slice(KeyRanges ranges);
+    Update merge(Update other);
 }

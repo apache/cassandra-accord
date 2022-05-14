@@ -55,7 +55,7 @@ public class MaelstromResult implements Result
                 if (reads[i] != null)
                 {
                     out.beginArray();
-                    key.write(out);
+                    key.datum.write(out);
                     reads[i].write(out);
                     out.endArray();
                 }
@@ -69,7 +69,7 @@ public class MaelstromResult implements Result
                 if (update != null && update.containsKey(key))
                 {
                     out.beginArray();
-                    key.write(out);
+                    key.datum.write(out);
                     update.get(key).write(out);
                     out.endArray();
                 }

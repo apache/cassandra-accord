@@ -46,7 +46,7 @@ public class MaelstromReply extends Body implements Reply
             {
                 out.beginArray();
                 out.value("r");
-                key.write(out);
+                key.datum.write(out);
                 reads[i].writeVerbose(out);
                 out.endArray();
             }
@@ -56,7 +56,7 @@ public class MaelstromReply extends Body implements Reply
                 {
                     out.beginArray();
                     out.value("append");
-                    key.write(out);
+                    key.datum.write(out);
                     append.write(out);
                     out.endArray();
                 }

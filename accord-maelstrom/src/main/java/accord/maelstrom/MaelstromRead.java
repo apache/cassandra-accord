@@ -1,6 +1,7 @@
 package accord.maelstrom;
 
 import accord.api.*;
+import accord.primitives.KeyRanges;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 
@@ -28,5 +29,24 @@ public class MaelstromRead implements Read
         MaelstromData result = new MaelstromData();
         result.put(key, s.get(key));
         return result;
+    }
+
+    @Override
+    public Read slice(KeyRanges ranges)
+    {
+        return new MaelstromRead(readKeys.slice(ranges), keys.slice(ranges));
+    }
+
+    @Override
+    public Read merge(Read other)
+    {
+        MaelstromRead that = (MaelstromRead) other;
+        Keys readKeys = this.readKeys.union(that.readKeys);
+        Keys keys = this.keys.union(that.keys);
+        if (readKeys == this.readKeys && keys == this.keys)
+            return this;
+        if (readKeys == that.readKeys && keys == that.keys)
+            return that;
+        return new MaelstromRead(readKeys.union(that.readKeys), keys.union(that.keys));
     }
 }

@@ -6,95 +6,99 @@ import java.util.function.BiConsumer;
 
 import com.google.common.base.Preconditions;
 
-import accord.api.Key;
-import accord.api.Result;
-import accord.coordinate.Invalidate.Outcome;
+import accord.api.RoutingKey;
+import accord.coordinate.Recover.Outcome;
 import accord.coordinate.tracking.AbstractQuorumTracker.QuorumShardTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.messages.BeginInvalidate;
-import accord.messages.BeginInvalidate.InvalidateNack;
-import accord.messages.BeginInvalidate.InvalidateOk;
-import accord.messages.BeginRecovery.RecoverReply;
+import accord.local.Status;
+import accord.messages.BeginInvalidation;
+import accord.messages.BeginInvalidation.InvalidateNack;
+import accord.messages.BeginInvalidation.InvalidateOk;
+import accord.messages.BeginInvalidation.InvalidateReply;
 import accord.messages.Callback;
-import accord.messages.Commit;
+import accord.primitives.AbstractRoute;
+import accord.primitives.Route;
+import accord.primitives.RoutingKeys;
 import accord.topology.Shard;
 import accord.primitives.Ballot;
-import accord.primitives.Keys;
-import accord.txn.Txn;
 import accord.primitives.TxnId;
-import org.apache.cassandra.utils.concurrent.AsyncFuture;
 
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
-import static accord.messages.BeginRecovery.RecoverOk.maxAcceptedOrLater;
+import static accord.local.Status.Accepted;
+import static accord.local.Status.PreAccepted;
+import static accord.messages.Commit.Invalidate.commitInvalidate;
 
-public class Invalidate extends AsyncFuture<Outcome> implements Callback<RecoverReply>, BiConsumer<Result, Throwable>
+public class Invalidate implements Callback<InvalidateReply>
 {
-    public enum Outcome { PREEMPTED, EXECUTED, INVALIDATED }
-
     final Node node;
     final Ballot ballot;
     final TxnId txnId;
-    final Keys someKeys;
-    final Key someKey;
+    final RoutingKeys someKeys;
+    final RoutingKey someKey;
+    final Status recoverIfAtLeast;
+    final BiConsumer<Outcome, Throwable> callback;
 
-    final List<Id> invalidateOksFrom = new ArrayList<>();
+    boolean isDone;
     final List<InvalidateOk> invalidateOks = new ArrayList<>();
     final QuorumShardTracker preacceptTracker;
 
-    private Invalidate(Node node, Shard shard, Ballot ballot, TxnId txnId, Keys someKeys, Key someKey)
+    private Invalidate(Node node, Shard shard, Ballot ballot, TxnId txnId, RoutingKeys someKeys, RoutingKey someKey, Status recoverIfAtLeast, BiConsumer<Outcome, Throwable> callback)
     {
+        this.callback = callback;
         Preconditions.checkArgument(someKeys.contains(someKey));
         this.node = node;
         this.ballot = ballot;
         this.txnId = txnId;
         this.someKeys = someKeys;
         this.someKey = someKey;
+        this.recoverIfAtLeast = recoverIfAtLeast;
         this.preacceptTracker = new QuorumShardTracker(shard);
     }
 
-    public static Invalidate invalidate(Node node, TxnId txnId, Keys someKeys, Key someKey)
+    public static Invalidate invalidateIfNotWitnessed(Node node, TxnId txnId, RoutingKeys someKeys, RoutingKey someKey, BiConsumer<Outcome, Throwable> callback)
+    {
+        return invalidate(node, txnId, someKeys, someKey, PreAccepted, callback);
+    }
+
+    public static Invalidate invalidate(Node node, TxnId txnId, RoutingKeys someKeys, RoutingKey someKey, BiConsumer<Outcome, Throwable> callback)
+    {
+        return invalidate(node, txnId, someKeys, someKey, Accepted, callback);
+    }
+
+    private static Invalidate invalidate(Node node, TxnId txnId, RoutingKeys someKeys, RoutingKey someKey, Status recoverIfAtLeast, BiConsumer<Outcome, Throwable> callback)
     {
         Ballot ballot = new Ballot(node.uniqueNow());
         Shard shard = node.topology().forEpochIfKnown(someKey, txnId.epoch);
-        Invalidate invalidate = new Invalidate(node, shard, ballot, txnId, someKeys, someKey);
-        node.send(shard.nodes, to -> new BeginInvalidate(txnId, someKey, ballot), invalidate);
+        Invalidate invalidate = new Invalidate(node, shard, ballot, txnId, someKeys, someKey, recoverIfAtLeast, callback);
+        node.send(shard.nodes, to -> new BeginInvalidation(txnId, someKey, ballot), invalidate);
         return invalidate;
     }
 
     @Override
-    public synchronized void onSuccess(Id from, RecoverReply response)
+    public synchronized void onSuccess(Id from, InvalidateReply reply)
     {
-        if (isDone() || preacceptTracker.hasReachedQuorum())
+        if (isDone || preacceptTracker.hasReachedQuorum())
             return;
 
-        if (!response.isOK())
+        if (!reply.isOk())
         {
-            InvalidateNack nack = (InvalidateNack) response;
-            if (nack.homeKey != null && nack.txn != null)
+            InvalidateNack nack = (InvalidateNack) reply;
+            if (nack.homeKey != null)
             {
-                Key progressKey = node.trySelectProgressKey(txnId.epoch, nack.txn.keys, nack.homeKey);
-                // TODO (now): this shouldn't be ifLocalSince - should be range up to the blocked txn only (but consider more)
                 node.ifLocalSince(someKey, txnId, instance -> {
-                    instance.command(txnId).preaccept(nack.txn, nack.homeKey, progressKey);
+                    instance.command(txnId).updateHomeKey(nack.homeKey);
                     return null;
                 });
             }
-            else if (nack.homeKey != null)
-            {
-                // TODO (now): this shouldn't be ifLocalSince - should be range up to the blocked txn only (but consider more)
-                node.ifLocalSince(someKey, txnId, instance -> {
-                    instance.command(txnId).homeKey(nack.homeKey);
-                    return null;
-                });
-            }
-            trySuccess(Outcome.PREEMPTED);
+
+            isDone = true;
+            callback.accept(null, new Preempted(txnId, null));
             return;
         }
 
-        InvalidateOk ok = (InvalidateOk) response;
+        InvalidateOk ok = (InvalidateOk) reply;
         invalidateOks.add(ok);
-        invalidateOksFrom.add(from);
         if (preacceptTracker.success(from))
             invalidate();
     }
@@ -102,43 +106,52 @@ public class Invalidate extends AsyncFuture<Outcome> implements Callback<Recover
     private void invalidate()
     {
         // first look to see if it has already been
-        InvalidateOk acceptOrCommit = maxAcceptedOrLater(invalidateOks);
-        if (acceptOrCommit != null)
         {
-            switch (acceptOrCommit.status)
+            Status maxStatus = invalidateOks.stream().map(ok -> ok.status).max(Comparable::compareTo).orElseThrow();
+            Route route = InvalidateOk.findRoute(invalidateOks);
+            RoutingKey homeKey = route != null ? route.homeKey : InvalidateOk.findHomeKey(invalidateOks);
+
+            switch (maxStatus)
             {
                 default: throw new IllegalStateException();
                 case NotWitnessed:
+                    break;
                 case PreAccepted:
-                    throw new IllegalStateException("Should only have Accepted or later statuses here");
                 case Accepted:
-                    // note: we do not propagate our responses to the Recover instance to avoid mistakes;
-                    //       since invalidate contacts only one key, only responses from nodes that replicate
-                    //       *only* that key for the transaction will be valid, as the shards on the replica
-                    //       that own the other keys may not have responded. It would be possible to filter
-                    //       replies now that we have the transaction, but safer to just start from scratch.
-                    Recover.recover(node, ballot, txnId, acceptOrCommit.txn, acceptOrCommit.homeKey)
-                           .addCallback(this);
-                    return;
-                case AcceptedInvalidate:
-                    break; // latest accept also invalidating, so we're on the same page and should finish our invalidation
+                    if (recoverIfAtLeast.compareTo(maxStatus) > 0)
+                        break;
+
                 case Committed:
                 case ReadyToExecute:
-                    node.withEpoch(acceptOrCommit.executeAt.epoch, () -> {
-                        Execute.execute(node, txnId, acceptOrCommit.txn, acceptOrCommit.homeKey, acceptOrCommit.executeAt,
-                                        acceptOrCommit.deps, this);
-                    });
-                    return;
                 case Executed:
                 case Applied:
-                    node.withEpoch(acceptOrCommit.executeAt.epoch, () -> {
-                        Persist.persistAndCommit(node, txnId, acceptOrCommit.homeKey, acceptOrCommit.txn, acceptOrCommit.executeAt,
-                                        acceptOrCommit.deps, acceptOrCommit.writes, acceptOrCommit.result);
-                        trySuccess(Outcome.EXECUTED);
-                    });
+                    if (route != null)
+                    {
+                        RecoverWithRoute.recover(node, ballot, txnId, route, callback);
+                    }
+                    else if (homeKey != null && homeKey.equals(someKey))
+                    {
+                        throw new IllegalStateException("Received a reply from a node that must have known the route, but that did not include it");
+                    }
+                    else if (homeKey != null)
+                    {
+                        RecoverWithHomeKey.recover(node, txnId, homeKey, callback);
+                    }
+                    else
+                    {
+                        throw new IllegalStateException("Received a reply from a node that must have known the homeKey, but that did not include it");
+                    }
                     return;
+
+                case AcceptedInvalidate:
+                    break; // latest accept also invalidating, so we're on the same page and should finish our invalidation
+
                 case Invalidated:
-                    trySuccess(Outcome.INVALIDATED);
+                    node.forEachLocalSince(someKeys, txnId, instance -> {
+                        instance.command(txnId).commitInvalidate();
+                    });
+                    isDone = true;
+                    callback.accept(Outcome.Invalidated, null);
                     return;
             }
         }
@@ -148,21 +161,26 @@ public class Invalidate extends AsyncFuture<Outcome> implements Callback<Recover
         proposeInvalidate(node, ballot, txnId, someKey).addCallback((success, fail) -> {
             if (fail != null)
             {
-                tryFailure(fail);
+                isDone = true;
+                callback.accept(null, fail);
                 return;
             }
 
-            // TODO (now): error handling in other callbacks
             try
             {
-                Commit.commitInvalidate(node, txnId, someKeys, txnId);
+                AbstractRoute route = InvalidateOk.mergeRoutes(invalidateOks);
+                // TODO: commitInvalidate (and others) should skip the network for local applications,
+                //  so we do not need to explicitly do so here before notifying the waiter
+                commitInvalidate(node, txnId, route != null ? route : someKeys, txnId);
+                // TODO: pick a reasonable upper bound, so we don't invalidate into an epoch/commandStore that no longer cares about this command
                 node.forEachLocalSince(someKeys, txnId, instance -> {
                     instance.command(txnId).commitInvalidate();
                 });
             }
             finally
             {
-                trySuccess(Outcome.INVALIDATED);
+                isDone = true;
+                callback.accept(Outcome.Invalidated, null);
             }
         });
     }
@@ -170,31 +188,23 @@ public class Invalidate extends AsyncFuture<Outcome> implements Callback<Recover
     @Override
     public void onFailure(Id from, Throwable failure)
     {
-        if (isDone())
+        if (isDone)
             return;
 
         if (preacceptTracker.failure(from))
-            tryFailure(new Timeout(txnId, null));
+        {
+            isDone = true;
+            callback.accept(null, new Timeout(txnId, null));
+        }
     }
 
     @Override
     public void onCallbackFailure(Throwable failure)
     {
-        tryFailure(failure);
-    }
+        if (isDone)
+            return;
 
-    @Override
-    public void accept(Result result, Throwable fail)
-    {
-        if (fail != null)
-        {
-            if (fail instanceof Invalidated) trySuccess(Outcome.INVALIDATED);
-            else tryFailure(fail);
-        }
-        else
-        {
-            node.agent().onRecover(node, result, fail);
-            trySuccess(Outcome.EXECUTED);
-        }
+        isDone = true;
+        callback.accept(null, failure);
     }
 }

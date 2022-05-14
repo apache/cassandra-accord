@@ -37,7 +37,7 @@ public class ReadTrackerTest
     void singleShard()
     {
         Topology subTopology = topology(topology.get(0));
-        ReadTracker tracker = new ReadTracker(topologies(subTopology));
+        ReadTracker tracker = ReadTracker.create(topologies(subTopology));
 
         tracker.recordInflightRead(ids[0]);
         assertResponseState(tracker, false, false);
@@ -50,7 +50,7 @@ public class ReadTrackerTest
     void singleShardRetry()
     {
         Topology subTopology = topology(topology.get(0));
-        ReadTracker tracker = new ReadTracker(topologies(subTopology));
+        ReadTracker tracker = ReadTracker.create(topologies(subTopology));
 
         tracker.recordInflightRead(ids[0]);
         assertResponseState(tracker, false, false);
@@ -69,7 +69,7 @@ public class ReadTrackerTest
     void singleShardFailure()
     {
         Topology subTopology = topology(topology.get(0));
-        ReadTracker tracker = new ReadTracker(topologies(subTopology));
+        ReadTracker tracker = ReadTracker.create(topologies(subTopology));
 
         tracker.recordInflightRead(ids[0]);
         tracker.recordReadFailure(ids[0]);
@@ -88,7 +88,7 @@ public class ReadTrackerTest
     void multiShardSuccess()
     {
         Topology subTopology = new Topology(1, new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
-        ReadTracker responses = new ReadTracker(topologies(subTopology));
+        ReadTracker responses = ReadTracker.create(topologies(subTopology));
         /*
         (000, 100](100, 200](200, 300]
         [1, 2, 3] [2, 3, 4] [3, 4, 5]
@@ -103,7 +103,7 @@ public class ReadTrackerTest
     void multiShardRetryAndReadSet()
     {
         Topology subTopology = new Topology(1, new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
-        ReadTracker responses = new ReadTracker(topologies(subTopology));
+        ReadTracker responses = ReadTracker.create(topologies(subTopology));
         /*
         (000, 100](100, 200](200, 300]
         [1, 2, 3] [2, 3, 4] [3, 4, 5]

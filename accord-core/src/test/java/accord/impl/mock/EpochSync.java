@@ -1,18 +1,18 @@
 package accord.impl.mock;
 
-import accord.api.Key;
+import accord.coordinate.FetchData;
+import accord.coordinate.FetchData.Outcome;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.*;
 import accord.messages.*;
-import accord.primitives.Deps;
-import accord.primitives.Keys;
+import accord.primitives.AbstractRoute;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies.Single;
 import accord.topology.Topology;
-import accord.txn.*;
-import com.google.common.base.Preconditions;
+
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,6 +22,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
 
 import static accord.impl.mock.MockCluster.configService;
+import static accord.messages.SimpleReply.Ok;
 
 public class EpochSync implements Runnable
 {
@@ -41,32 +42,31 @@ public class EpochSync implements Runnable
     private static class SyncCommitted implements Request
     {
         private final TxnId txnId;
-        private final Txn txn;
-        private final Key homeKey;
+        private AbstractRoute route;
         private final Timestamp executeAt;
-        private final Deps deps;
         private final long epoch;
 
         public SyncCommitted(Command command, long epoch)
         {
             this.epoch = epoch;
-            Preconditions.checkArgument(command.hasBeen(Status.Committed));
             this.txnId = command.txnId();
-            this.txn = command.txn();
-            this.homeKey = command.homeKey();
+            this.route = command.route();
             this.executeAt = command.executeAt();
-            this.deps = command.savedDeps();
+        }
+
+        void update(Command command)
+        {
+            route = AbstractRoute.merge(route, command.route());
         }
 
         @Override
         public void process(Node node, Node.Id from, ReplyContext replyContext)
         {
-            Key progressKey = node.trySelectProgressKey(txnId, txn.keys, homeKey);
-            node.forEachLocalSince(txn.keys, epoch, commandStore -> {
-                Command command = commandStore.command(txnId);
-                command.commit(txn, homeKey, progressKey, executeAt, deps);
+            FetchData.fetchCommitted(node, txnId, route, executeAt, epoch, (outcome, fail) -> {
+                if (fail != null) process(node, from, replyContext);
+                else if (outcome != Outcome.Success) throw new IllegalStateException();
+                else node.reply(from, replyContext, Ok);
             });
-            node.reply(from, replyContext, SyncAck.INSTANCE);
         }
 
         @Override
@@ -76,31 +76,18 @@ public class EpochSync implements Runnable
         }
     }
 
-    private static class SyncAck implements Reply
-    {
-        private static final SyncAck INSTANCE = new SyncAck();
-        private SyncAck() {}
-
-        @Override
-        public MessageType type()
-        {
-            throw new UnsupportedOperationException();
-        }
-    }
-
-    private static class CommandSync extends AsyncPromise<Void> implements Callback<SyncAck>
+    private static class CommandSync extends AsyncPromise<Void> implements Callback<SimpleReply>
     {
         private final QuorumTracker tracker;
 
-        public CommandSync(Node node, SyncCommitted message, Topology topology)
+        public CommandSync(Node node, AbstractRoute route, SyncCommitted message, Topology topology)
         {
-            Keys keys = message.txn.keys();
-            this.tracker = new QuorumTracker(new Single(topology.forKeys(keys), false));
+            this.tracker = new QuorumTracker(new Single(topology.forKeys(route), false));
             node.send(tracker.nodes(), message, this);
         }
 
         @Override
-        public synchronized void onSuccess(Node.Id from, SyncAck response)
+        public synchronized void onSuccess(Node.Id from, SimpleReply reply)
         {
             tracker.success(from);
             if (tracker.hasReachedQuorum())
@@ -121,11 +108,11 @@ public class EpochSync implements Runnable
             tryFailure(failure);
         }
 
-        public static void sync(Node node, SyncCommitted message, Topology topology)
+        public static void sync(Node node, AbstractRoute route, SyncCommitted message, Topology topology)
         {
             try
             {
-                new CommandSync(node, message, topology).get();
+                new CommandSync(node, route, message, topology).get();
             }
             catch (InterruptedException | ExecutionException e)
             {
@@ -173,11 +160,13 @@ public class EpochSync implements Runnable
         public void run()
         {
             Map<TxnId, SyncCommitted> syncMessages = new ConcurrentHashMap<>();
-            Consumer<Command> commandConsumer = command -> syncMessages.put(command.txnId(), new SyncCommitted(command, syncEpoch));
+            Consumer<Command> commandConsumer = command -> syncMessages.computeIfAbsent(command.txnId(), id -> new SyncCommitted(command, syncEpoch))
+                                                               .update(command);
+
             node.forEachLocal(commandStore -> commandStore.forCommittedInEpoch(syncTopology.ranges(), syncEpoch, commandConsumer));
 
-            for (SyncCommitted message : syncMessages.values())
-                CommandSync.sync(node, message, nextTopology);
+            for (SyncCommitted send : syncMessages.values())
+                CommandSync.sync(node, send.route, send, nextTopology);
 
             SyncComplete syncComplete = new SyncComplete(syncEpoch);
             node.send(nextTopology.nodes(), syncComplete);

@@ -128,13 +128,6 @@ public class Shard
     @Override
     public int hashCode()
     {
-        return Objects.hash(range,
-                            nodes,
-                            nodeSet,
-                            fastPathElectorate,
-                            joining,
-                            recoveryFastPathSize,
-                            fastPathQuorumSize,
-                            slowPathQuorumSize);
+        return range.hashCode();
     }
 }

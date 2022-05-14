@@ -38,6 +38,18 @@ public class ListRead implements Read
     }
 
     @Override
+    public Read slice(KeyRanges ranges)
+    {
+        return new ListRead(readKeys, keys.slice(ranges));
+    }
+
+    @Override
+    public Read merge(Read other)
+    {
+        return new ListRead(readKeys, keys.union(((ListRead)other).keys));
+    }
+
+    @Override
     public String toString()
     {
         return keys.toString();

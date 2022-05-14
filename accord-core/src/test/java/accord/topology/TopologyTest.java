@@ -35,7 +35,7 @@ public class TopologyTest
 
     private static Topology topology(List<Node.Id> ids, int rf, KeyRange... ranges)
     {
-        TopologyFactory<IntKey> topologyFactory = new TopologyFactory<>(rf, ranges);
+        TopologyFactory topologyFactory = new TopologyFactory(rf, ranges);
         return topologyFactory.toTopology(ids);
     }
 
@@ -49,7 +49,7 @@ public class TopologyTest
         return topology(1, 1, ranges);
     }
 
-    private static KeyRange<IntKey> r(int start, int end)
+    private static KeyRange r(int start, int end)
     {
         return IntKey.range(start, end);
     }

@@ -13,6 +13,7 @@ import java.util.function.Predicate;
 import com.google.common.base.Preconditions;
 
 import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.utils.InlineHeap;
@@ -21,14 +22,14 @@ import accord.utils.SortedArrays;
 import static accord.utils.SortedArrays.remap;
 import static accord.utils.SortedArrays.remapper;
 
-// TODO (now): switch to RoutingKey
+// TODO: switch to RoutingKey? Would mean adopting execution dependencies less precisely
 public class Deps implements Iterable<Map.Entry<Key, TxnId>>
 {
     private static final TxnId[] NO_TXNIDS = new TxnId[0];
     private static final int[] NO_INTS = new int[0];
     public static final Deps NONE = new Deps(Keys.EMPTY, NO_TXNIDS, NO_INTS);
 
-    public static class Builder
+    public static abstract class AbstractBuilder<T extends Deps>
     {
         final Keys keys;
         final Map<TxnId, Integer> txnIdLookup = new HashMap<>(); // TODO: primitive map
@@ -36,7 +37,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         final int[][] keysToTxnId;
         final int[] keysToTxnIdCounts;
 
-        public Builder(Keys keys)
+        public AbstractBuilder(Keys keys)
         {
             this.keys = keys;
             this.keysToTxnId = new int[keys.size()][4];
@@ -51,7 +52,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         public void add(Command command)
         {
             int idx = ensureTxnIdx(command.txnId());
-            keys.foldlIntersect(command.txn().keys, (li, ri, k, p, v) -> {
+            keys.foldlIntersect(command.partialTxn().keys, (li, ri, k, p, v) -> {
                 if (keysToTxnId[li].length == keysToTxnIdCounts[li])
                     keysToTxnId[li] = Arrays.copyOf(keysToTxnId[li], keysToTxnId[li].length * 2);
                 keysToTxnId[li][keysToTxnIdCounts[li]++] = idx;
@@ -87,7 +88,9 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
             });
         }
 
-        public Deps build()
+        abstract T build(Keys keys, TxnId[] txnIds, int[] keysToTxnIds);
+
+        public T build()
         {
             TxnId[] txnIds = txnIdLookup.keySet().toArray(TxnId[]::new);
             Arrays.sort(txnIds, TxnId::compareTo);
@@ -143,7 +146,21 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
                 keys = new Keys(newKeys);
             }
 
-            return new Deps(keys, txnIds, result);
+            return build(keys, txnIds, result);
+        }
+    }
+
+    public static class Builder extends AbstractBuilder<Deps>
+    {
+        public Builder(Keys keys)
+        {
+            super(keys);
+        }
+
+        @Override
+        Deps build(Keys keys, TxnId[] txnIds, int[] keysToTxnIds)
+        {
+            return new Deps(keys, txnIds, keysToTxnIds);
         }
     }
 
@@ -215,6 +232,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         switch (streamCount)
         {
             case 0: return NONE;
+            // TODO (now): might return a PartialDeps - should strip down to Deps
             case 1: return streams[0].source;
             case 2: return streams[0].source.with(streams[1].source);
         }
@@ -349,23 +367,24 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
             throw new AssertionError();
     }
 
-    public Deps slice(KeyRanges ranges)
+    // TODO: offer option of computing the maximal KeyRanges that covers the same set of keys as covered by the parameter
+    public PartialDeps slice(KeyRanges ranges)
     {
         if (isEmpty())
-            return this;
+            return new PartialDeps(ranges, keys, txnIds, keyToTxnId);
 
         Keys select = keys.slice(ranges);
         if (select.isEmpty())
-            return NONE;
+            return new PartialDeps(ranges, Keys.EMPTY, NO_TXNIDS, NO_INTS);
 
         if (select.size() == keys.size())
-            return this;
+            return new PartialDeps(ranges, keys, txnIds, keyToTxnId);
 
         int i = 0;
         int offset = select.size();
         for (int j = 0 ; j < select.size() ; ++j)
         {
-            i = keys.findNext(select.get(j), i);
+            i = keys.find(select.get(j), i);
             offset += keyToTxnId[i] - (i == 0 ? keys.size() : keyToTxnId[i - 1]);
         }
 
@@ -376,7 +395,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         offset = select.size();
         for (int j = 0 ; j < select.size() ; ++j)
         {
-            i = keys.findNext(select.get(j), i);
+            i = keys.find(select.get(j), i);
             int start = i == 0 ? keys.size() : src[i - 1];
             int count = src[i] - start;
             System.arraycopy(src, start, trg, offset, count);
@@ -385,7 +404,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         }
 
         TxnId[] txnIds = trimUnusedTxnId(select, this.txnIds, trg);
-        return new Deps(select, txnIds, trg);
+        return new PartialDeps(ranges, select, txnIds, trg);
     }
 
     private static TxnId[] trimUnusedTxnId(Keys keys, TxnId[] txnIds, int[] keysToTxnId)
@@ -731,7 +750,35 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         return new Keys(result);
     }
 
-    private void ensureTxnIdToKey()
+    public RoutingKeys someRoutingKeys(TxnId txnId)
+    {
+        int txnIdIndex = Arrays.binarySearch(txnIds, txnId);
+        if (txnIdIndex < 0)
+            return RoutingKeys.EMPTY;
+
+        ensureTxnIdToKey();
+
+        int start = txnIdIndex == 0 ? txnIds.length : txnIdToKey[txnIdIndex - 1];
+        int end = txnIdToKey[txnIdIndex];
+        RoutingKey[] result = new RoutingKey[end - start];
+        if (start == end)
+            return RoutingKeys.EMPTY;
+
+        result[0] = keys.get(txnIdToKey[start]).toRoutingKey();
+        int resultCount = 1;
+        for (int i = start + 1 ; i < end ; ++i)
+        {
+            RoutingKey next = keys.get(txnIdToKey[i]).toRoutingKey();
+            if (!next.equals(result[resultCount - 1]))
+                result[resultCount++] = next;
+        }
+
+        if (resultCount < result.length)
+            result = Arrays.copyOf(result, resultCount);
+        return new RoutingKeys(result);
+    }
+
+    void ensureTxnIdToKey()
     {
         if (txnIdToKey != null)
             return;
@@ -879,6 +926,11 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
 
     @Override
     public String toString()
+    {
+        return toSimpleString();
+    }
+
+    public String toSimpleString()
     {
         if (keys.isEmpty())
             return "{}";

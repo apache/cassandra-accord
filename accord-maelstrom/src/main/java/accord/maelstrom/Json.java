@@ -19,9 +19,9 @@ import com.google.gson.stream.JsonWriter;
 import accord.local.Node.Id;
 import accord.api.Key;
 import accord.primitives.Deps;
-import accord.txn.Txn;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
-import accord.txn.Writes;
+import accord.primitives.Writes;
 import accord.primitives.Ballot;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
@@ -168,7 +168,7 @@ public class Json
         {
             out.beginArray();
             for (Key key : value)
-                ((MaelstromKey)key).write(out);
+                ((MaelstromKey)key).datum.write(out);
             out.endArray();
         }
 
@@ -207,7 +207,7 @@ public class Json
                 MaelstromKey key = (MaelstromKey) keys.get(i);
                 if (read.keys.indexOf(key) >= 0)
                 {
-                    key.write(out);
+                    key.datum.write(out);
                 }
             }
             out.endArray();
@@ -219,7 +219,7 @@ public class Json
                 if (update != null && update.containsKey(key))
                 {
                     out.beginArray();
-                    key.write(out);
+                    key.datum.write(out);
                     update.get(key).write(out);
                     out.endArray();
                 }
@@ -286,7 +286,7 @@ public class Json
             buildKeys.addAll(buildReadKeys);
             Keys readKeys = new Keys(buildReadKeys);
             Keys keys = new Keys(buildKeys);
-            MaelstromRead read = new MaelstromRead(keys, readKeys);
+            MaelstromRead read = new MaelstromRead(readKeys, keys);
             MaelstromQuery query = new MaelstromQuery(client, requestId);
 
             return new Txn(keys, read, query, update);
@@ -302,7 +302,7 @@ public class Json
             for (Map.Entry<Key, TxnId> e : value)
             {
                 out.beginArray();
-                ((MaelstromKey)e.getKey()).write(out);
+                ((MaelstromKey)e.getKey()).datum.write(out);
                 GSON.toJson(e.getValue(), TxnId.class, out);
                 out.endArray();
             }
@@ -421,7 +421,7 @@ public class Json
             for (Map.Entry<Key, Value> e : ((MaelstromData)value.data).entrySet())
             {
                 out.beginArray();
-                ((MaelstromKey)e.getKey()).write(out);
+                ((MaelstromKey)e.getKey()).datum.write(out);
                 e.getValue().write(out);
                 out.endArray();
             }
