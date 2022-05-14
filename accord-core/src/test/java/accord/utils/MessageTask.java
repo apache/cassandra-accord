@@ -36,7 +36,7 @@ public class MessageTask extends AsyncPromise<Void> implements Runnable
 {
     public interface NodeProcess
     {
-        boolean process(Node node, Node.Id from);
+        void process(Node node, Node.Id from, Consumer<Boolean> onDone);
     }
 
     private static final Reply SUCCESS = new Reply() {
@@ -87,7 +87,7 @@ public class MessageTask extends AsyncPromise<Void> implements Runnable
         @Override
         public void process(Node on, Node.Id from, ReplyContext replyContext)
         {
-            on.reply(from, replyContext, process.process(on, from) ? SUCCESS : FAILURE);
+            process.process(on, from, success -> on.reply(from, replyContext, success ? SUCCESS : FAILURE));
         }
 
         @Override
@@ -113,10 +113,10 @@ public class MessageTask extends AsyncPromise<Void> implements Runnable
         }
 
         @Override
-        public void onSuccess(Node.Id from, Reply response)
+        public void onSuccess(Node.Id from, Reply reply)
         {
-            Preconditions.checkArgument(response == SUCCESS || response == FAILURE);
-            if (response == FAILURE)
+            Preconditions.checkArgument(reply == SUCCESS || reply == FAILURE);
+            if (reply == FAILURE)
             {
                 originator.send(from, request, this);
                 return;
@@ -167,21 +167,16 @@ public class MessageTask extends AsyncPromise<Void> implements Runnable
         return task;
     }
 
-    public static MessageTask of(Node originator, Collection<Node.Id> recipients, String desc, Consumer<Node> consumer)
+    public static MessageTask of(Node originator, Collection<Node.Id> recipients, String desc, BiConsumer<Node, Consumer<Boolean>> consumer)
     {
-        NodeProcess process = (node, from) -> {
-            consumer.accept(node);
-            return true;
+        NodeProcess process = (node, from, onDone) -> {
+            consumer.accept(node, onDone);
         };
         return of(originator, recipients, desc, process);
     }
 
-    public static MessageTask apply(Node originator, Collection<Node.Id> recipients, String desc, BiConsumer<Node, Node.Id> consumer)
+    public static MessageTask apply(Node originator, Collection<Node.Id> recipients, String desc, NodeProcess process)
     {
-        NodeProcess process = (node, from) -> {
-            consumer.accept(node, from);
-            return true;
-        };
         MessageTask task = of(originator, recipients, desc, process);
         task.run();
         return task;

@@ -30,6 +30,8 @@ import java.util.TreeSet;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
+import com.google.common.base.Preconditions;
+
 /**
  * Nomenclature:
  *  register: the values associated with a given key
@@ -307,7 +309,7 @@ public class StrictSerializabilityVerifier
         void setSuccessor(Step successor)
         {
             this.successor = successor;
-            successor.predecessorStep = successor;
+            successor.predecessorStep = this;
         }
 
         boolean updatePeers(int[] newPeers, UnknownStepHolder[] unknownSteps)
@@ -362,14 +364,14 @@ public class StrictSerializabilityVerifier
                         maxPredecessorWrittenAfter = newPredecessorStep.writtenAfter;
 
                     newPredecessorStep.push(maxPredecessor);
-                    receivePropagatedPredecessors(newPredecessorStep, verifier);
+                    receiveKnowledgePhasedPredecessors(newPredecessorStep, verifier);
                     updated = true;
                 }
             }
             return updated;
         }
 
-        boolean receivePropagatedPredecessors(Step propagate, StrictSerializabilityVerifier verifier)
+        boolean receiveKnowledgePhasedPredecessors(Step propagate, StrictSerializabilityVerifier verifier)
         {
             if (unknownStepPredecessors != null && propagate.ofStepIndex < Integer.MAX_VALUE && unknownStepPredecessors.containsKey(propagate))
             {
@@ -434,7 +436,7 @@ public class StrictSerializabilityVerifier
             UnknownStepPredecessor predecessor = new UnknownStepPredecessor(this, unknownStep);
             unknownStep.step.push(predecessor);
             unknownStepPredecessors.put(unknownStep.step, predecessor);
-            receivePropagatedPredecessors(unknownStep.step, verifier);
+            receiveKnowledgePhasedPredecessors(unknownStep.step, verifier);
             return true;
         }
 
@@ -497,11 +499,11 @@ public class StrictSerializabilityVerifier
         }
 
         @Override
-        boolean receivePropagatedPredecessors(Step propagate, StrictSerializabilityVerifier verifier)
+        boolean receiveKnowledgePhasedPredecessors(Step propagate, StrictSerializabilityVerifier verifier)
         {
             for (UnknownStepHolder holder : byWriteValue.values())
-                holder.step.receivePropagatedPredecessors(propagate, verifier);
-            return super.receivePropagatedPredecessors(propagate, verifier);
+                holder.step.receiveKnowledgePhasedPredecessors(propagate, verifier);
+            return super.receiveKnowledgePhasedPredecessors(propagate, verifier);
         }
 
         @Override
@@ -529,7 +531,7 @@ public class StrictSerializabilityVerifier
             if (null != byTimestamp.putIfAbsent(end, unknownStep))
                 throw new AssertionError();
             // TODO: verify this propagation by unit test
-            unknownSteps[ofKey].step.receivePropagatedPredecessors(this, StrictSerializabilityVerifier.this);
+            unknownSteps[ofKey].step.receiveKnowledgePhasedPredecessors(this, StrictSerializabilityVerifier.this);
         }
 
         public void checkForUnwitnessed(int start)
@@ -649,7 +651,7 @@ public class StrictSerializabilityVerifier
 
         private void propagateToDirectSuccessor(Step predecessor, Step successor)
         {
-            boolean updated = successor.receivePropagatedPredecessors(predecessor, StrictSerializabilityVerifier.this);
+            boolean updated = successor.receiveKnowledgePhasedPredecessors(predecessor, StrictSerializabilityVerifier.this);
             if (predecessor.witnessedUntil > successor.writtenAfter)
             {
                 successor.writtenAfter = predecessor.witnessedUntil;
@@ -661,7 +663,7 @@ public class StrictSerializabilityVerifier
 
         private void propagateToSuccessor(Step propagate, Step successor)
         {
-            if (successor.receivePropagatedPredecessors(propagate, StrictSerializabilityVerifier.this))
+            if (successor.receiveKnowledgePhasedPredecessors(propagate, StrictSerializabilityVerifier.this))
                 onChange(successor);
         }
 
@@ -671,7 +673,7 @@ public class StrictSerializabilityVerifier
                 throw new HistoryViolation(key, "Cycle detected on key " + key + ", step " + step.ofStepIndex + " " + Arrays.toString(Arrays.copyOf(sequence, step.ofStepIndex)));
 
             if (step.writtenBefore < step.writtenAfter)
-                throw new HistoryViolation(key, key + " timestamp inconsistency, step " + step.ofStepIndex);
+                throw new HistoryViolation(key, key + ": timestamp inconsistency, step " + step.ofStepIndex);
 
             if (step.maxPredecessorWrittenAfter > step.writtenBefore)
                 throw new HistoryViolation(key, key + " must have been written prior to its maximum predecessor in real-time order on step " + step.ofStepIndex);

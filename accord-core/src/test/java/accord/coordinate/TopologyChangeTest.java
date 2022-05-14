@@ -29,7 +29,7 @@ import accord.messages.Accept;
 import accord.primitives.KeyRange;
 import accord.topology.Topology;
 import accord.primitives.Keys;
-import accord.txn.Txn;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.utils.EpochFunction;
 import org.junit.jupiter.api.Assertions;
@@ -40,9 +40,9 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static accord.Utils.*;
-import static accord.impl.InMemoryCommandStores.inMemory;
 import static accord.impl.IntKey.keys;
 import static accord.impl.IntKey.range;
+import static accord.local.PreLoadContext.empty;
 
 public class TopologyChangeTest
 {
@@ -75,10 +75,10 @@ public class TopologyChangeTest
             TxnId txnId1 = node1.nextTxnId();
             Txn txn1 = writeTxn(keys);
             node1.coordinate(txnId1, txn1).get();
-            inMemory(node1).forEachLocal(keys, 1, commands -> {
+            node1.commandStores().forEach(empty(), keys, 1, 1, commands -> {
                 Command command = commands.command(txnId1);
-                Assertions.assertTrue(command.savedDeps().isEmpty());
-            });
+                Assertions.assertTrue(command.partialDeps().isEmpty());
+            }).awaitUninterruptibly();
 
             cluster.configServices(4, 5, 6).forEach(config -> config.reportTopology(topology2));
 
@@ -89,18 +89,18 @@ public class TopologyChangeTest
 
             // new nodes should have the previous epochs operation as a dependency
             cluster.nodes(4, 5, 6).forEach(node -> {
-                inMemory(node).forEachLocal(keys, 2, commands -> {
+                node.commandStores().forEach(empty(), keys, 2, 2, commands -> {
                     Command command = commands.command(txnId2);
-                    Assertions.assertTrue(command.savedDeps().contains(txnId1));
-                });
+                    Assertions.assertTrue(command.partialDeps().contains(txnId1));
+                }).awaitUninterruptibly();
             });
 
             // ...and participated in consensus
             cluster.nodes(1, 2, 3).forEach(node -> {
-                inMemory(node).forEachLocal(keys, 1, commands -> {
+                node.commandStores().forEach(empty(), keys, 1, 1, commands -> {
                     Command command = commands.command(txnId2);
                     Assertions.assertTrue(command.hasBeen(Status.Accepted));
-                });
+                }).awaitUninterruptibly();
             });
         }
     }
@@ -120,10 +120,10 @@ public class TopologyChangeTest
             RecordingMessageSink messageSink = (RecordingMessageSink) node1.messageSink();
             messageSink.clearHistory();
             TxnId txnId1 = coordinate(node1, keys);
-            inMemory(node1).forEachLocal(keys, 1, commands -> {
+            node1.commandStores().forEach(empty(), keys, 1, 1, commands -> {
                 Command command = commands.command(txnId1);
-                Assertions.assertTrue(command.savedDeps().isEmpty());
-            });
+                Assertions.assertTrue(command.partialDeps().isEmpty());
+            }).awaitUninterruptibly();
 
             // check there was no accept phase
             Assertions.assertFalse(new ArrayList<>(messageSink.requests).stream().anyMatch(env -> env.payload instanceof Accept));
@@ -141,12 +141,12 @@ public class TopologyChangeTest
             }).collect(Collectors.toSet());
             Assertions.assertEquals(idSet(1, 2, 3), accepts);
 
-            inMemory(node1).forEachLocal(keys, 2, commands -> {
+            node1.commandStores().forEach(empty(), keys, 2, 2, commands -> {
                 Command command = commands.command(txnId2);
                 Assertions.assertTrue(command.hasBeen(Status.Committed));
-                Assertions.assertTrue(command.savedDeps().contains(txnId1));
+                Assertions.assertTrue(command.partialDeps().contains(txnId1));
                 Assertions.assertEquals(txnId2, command.executeAt());
-            });
+            }).awaitUninterruptibly();
 
             EpochSync.sync(cluster, 1);
 
@@ -154,13 +154,13 @@ public class TopologyChangeTest
             messageSink.clearHistory();
             TxnId txnId3 = coordinate(node1, keys);
             Assertions.assertFalse(new ArrayList<>(messageSink.requests).stream().anyMatch(env -> env.payload instanceof Accept));
-            inMemory(node1).forEachLocal(keys, 2, commands -> {
+            node1.commandStores().forEach(empty(), keys, 2, 2, commands -> {
                 Command command = commands.command(txnId3);
                 Assertions.assertTrue(command.hasBeen(Status.Committed));
-                Assertions.assertTrue(command.savedDeps().contains(txnId1));
-                Assertions.assertTrue(command.savedDeps().contains(txnId2));
+                Assertions.assertTrue(command.partialDeps().contains(txnId1));
+                Assertions.assertTrue(command.partialDeps().contains(txnId2));
                 Assertions.assertEquals(txnId3, command.executeAt());
-            });
+            }).awaitUninterruptibly();
         }
     }
 }

@@ -18,7 +18,7 @@
 
 package accord.topology;
 
-import accord.burn.TopologyUpdate;
+import accord.burn.TopologyUpdates;
 import accord.impl.IntHashKey;
 import accord.local.Node;
 import accord.primitives.KeyRanges;
@@ -38,10 +38,12 @@ public class TopologyRandomizer
     private final Function<Node.Id, Node> lookup;
     private final List<Topology> epochs = new ArrayList<>();
     private final Map<Node.Id, KeyRanges> previouslyReplicated = new HashMap<>();
+    private final TopologyUpdates topologyUpdates;
 
-    public TopologyRandomizer(Supplier<Random> randomSupplier, Topology initialTopology, Function<Node.Id, Node> lookup)
+    public TopologyRandomizer(Supplier<Random> randomSupplier, Topology initialTopology, TopologyUpdates topologyUpdates, Function<Node.Id, Node> lookup)
     {
         this.random = randomSupplier.get();
+        this.topologyUpdates = topologyUpdates;
         this.lookup = lookup;
         this.epochs.add(Topology.EMPTY);
         this.epochs.add(initialTopology);
@@ -211,11 +213,11 @@ public class TopologyRandomizer
     {
         // if we don't limit the number of pending topology changes in flight,
         // the topology randomizer will keep the burn test busy indefinitely
-        if (TopologyUpdate.pendingTopologies() > 5 || random.nextInt(200) != 0)
+        if (topologyUpdates.pendingTopologies() > 5 || random.nextInt(200) != 0)
             return;
 
         Topology current = epochs.get(epochs.size() - 1);
-        Shard[] shards = current.shards();
+        Shard[] shards = current.unsafeGetShards().clone();
         int mutations = random.nextInt(current.size());
         logger.debug("Updating topology with {} mutations", mutations);
         for (int i=0; i<mutations; i++)
@@ -247,6 +249,6 @@ public class TopologyRandomizer
 
         int originatorIdx = random.nextInt(nodes.size());
         Node originator = lookup.apply(nodes.remove(originatorIdx));
-        TopologyUpdate.notify(originator, nextTopology.nodes(), nextTopology);
+        topologyUpdates.notify(originator, nextTopology.nodes(), nextTopology);
     }
 }

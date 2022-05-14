@@ -18,40 +18,38 @@
 
 package accord.impl;
 
-import accord.api.Key;
 import accord.api.Result;
+import accord.api.RoutingKey;
 import accord.local.*;
-import accord.primitives.Ballot;
-import accord.primitives.Deps;
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
-import accord.txn.*;
+import accord.local.Status.Durability;
+import accord.local.Status.Known;
+import accord.primitives.*;
 
-import java.util.NavigableMap;
-import java.util.Objects;
-import java.util.TreeMap;
+import java.util.*;
 
-import static accord.local.Status.NotWitnessed;
+import static accord.local.Status.Durability.Local;
+import static accord.local.Status.Durability.NotDurable;
 
 public class InMemoryCommand extends Command
 {
     public final CommandStore commandStore;
     private final TxnId txnId;
 
-    private Key homeKey, progressKey;
-    private Txn txn;
+    private AbstractRoute route;
+    private RoutingKey homeKey, progressKey;
+    private PartialTxn partialTxn;
     private Ballot promised = Ballot.ZERO, accepted = Ballot.ZERO;
     private Timestamp executeAt;
-    private Deps deps = Deps.NONE;
+    private PartialDeps partialDeps = PartialDeps.NONE;
     private Writes writes;
     private Result result;
 
-    private Status status = NotWitnessed;
+    private SaveStatus status = SaveStatus.NotWitnessed;
 
-    private boolean isGloballyPersistent; // only set on home shard
+    private Durability durability = NotDurable; // only set on home shard
 
-    private NavigableMap<TxnId, PartialCommand> waitingOnCommit;
-    private NavigableMap<TxnId, PartialCommand> waitingOnApply;
+    private NavigableSet<TxnId> waitingOnCommit;
+    private NavigableMap<Timestamp, TxnId> waitingOnApply;
 
     private final Listeners listeners = new Listeners();
 
@@ -71,15 +69,15 @@ public class InMemoryCommand extends Command
                 && txnId.equals(command.txnId)
                 && Objects.equals(homeKey, command.homeKey)
                 && Objects.equals(progressKey, command.progressKey)
-                && Objects.equals(txn, command.txn)
+                && Objects.equals(partialTxn, command.partialTxn)
                 && promised.equals(command.promised)
                 && accepted.equals(command.accepted)
                 && Objects.equals(executeAt, command.executeAt)
-                && deps.equals(command.deps)
+                && partialDeps.equals(command.partialDeps)
                 && Objects.equals(writes, command.writes)
                 && Objects.equals(result, command.result)
                 && status == command.status
-                && isGloballyPersistent == command.isGloballyPersistent
+                && durability == command.durability
                 && Objects.equals(waitingOnCommit, command.waitingOnCommit)
                 && Objects.equals(waitingOnApply, command.waitingOnApply)
                 && Objects.equals(listeners, command.listeners);
@@ -88,7 +86,7 @@ public class InMemoryCommand extends Command
     @Override
     public int hashCode()
     {
-        return Objects.hash(commandStore, txnId, txn, promised, accepted, executeAt, deps, writes, result, status, waitingOnCommit, waitingOnApply, listeners);
+        return Objects.hash(commandStore, txnId, partialTxn, promised, accepted, executeAt, partialDeps, writes, result, status, waitingOnCommit, waitingOnApply, listeners);
     }
 
     @Override
@@ -98,45 +96,58 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public CommandStore commandStore()
-    {
-        return commandStore;
-    }
-
-    @Override
-    public Key homeKey()
+    public RoutingKey homeKey()
     {
         return homeKey;
     }
 
     @Override
-    protected void setHomeKey(Key key)
+    public Txn.Kind kind()
+    {
+        // TODO (now): pack this into TxnId
+        return partialTxn.kind();
+    }
+
+    @Override
+    protected void setHomeKey(RoutingKey key)
     {
         this.homeKey = key;
     }
 
     @Override
-    public Key progressKey()
+    public RoutingKey progressKey()
     {
         return progressKey;
     }
 
     @Override
-    protected void setProgressKey(Key key)
+    protected void setProgressKey(RoutingKey key)
     {
         this.progressKey = key;
     }
 
     @Override
-    public Txn txn()
+    public AbstractRoute route()
     {
-        return txn;
+        return route;
     }
 
     @Override
-    protected void setTxn(Txn txn)
+    protected void setRoute(AbstractRoute route)
     {
-        this.txn = txn;
+        this.route = route;
+    }
+
+    @Override
+    public PartialTxn partialTxn()
+    {
+        return partialTxn;
+    }
+
+    @Override
+    protected void setPartialTxn(PartialTxn txn)
+    {
+        this.partialTxn = txn;
     }
 
     @Override
@@ -146,7 +157,7 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public void promised(Ballot ballot)
+    public void setPromised(Ballot ballot)
     {
         this.promised = ballot;
     }
@@ -158,7 +169,7 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public void accepted(Ballot ballot)
+    public void setAccepted(Ballot ballot)
     {
         this.accepted = ballot;
     }
@@ -170,21 +181,21 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public void executeAt(Timestamp timestamp)
+    public void setExecuteAt(Timestamp timestamp)
     {
         this.executeAt = timestamp;
     }
 
     @Override
-    public Deps savedDeps()
+    public PartialDeps partialDeps()
     {
-        return deps;
+        return partialDeps;
     }
 
     @Override
-    public void savedDeps(Deps deps)
+    public void setPartialDeps(PartialDeps deps)
     {
-        this.deps = deps;
+        this.partialDeps = deps;
     }
 
     @Override
@@ -194,7 +205,7 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public void writes(Writes writes)
+    public void setWrites(Writes writes)
     {
         this.writes = writes;
     }
@@ -206,61 +217,69 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public void result(Result result)
+    public void setResult(Result result)
     {
         this.result = result;
     }
 
     @Override
-    public Status status()
+    public SaveStatus saveStatus()
     {
         return status;
     }
 
     @Override
-    public void status(Status status)
+    public void setSaveStatus(SaveStatus status)
     {
         this.status = status;
     }
 
     @Override
-    public boolean isGloballyPersistent()
+    public Known known()
     {
-        return isGloballyPersistent;
+        return status.known;
     }
 
     @Override
-    public void isGloballyPersistent(boolean v)
+    public Durability durability()
     {
-        isGloballyPersistent = v;
+        if (status.compareTo(SaveStatus.PreApplied) >= 0 && durability == NotDurable)
+            return Local; // not necessary anywhere, but helps for logical consistency
+        return durability;
     }
 
     @Override
-    public Command addListener(Listener listener)
+    public void setDurability(Durability v)
+    {
+        durability = v;
+    }
+
+    @Override
+    public Command addListener(CommandListener listener)
     {
         listeners.add(listener);
         return this;
     }
 
     @Override
-    public void removeListener(Listener listener)
+    public void removeListener(CommandListener listener)
     {
         listeners.remove(listener);
     }
 
     @Override
-    public void notifyListeners()
+    public void notifyListeners(SafeCommandStore safeStore)
     {
-        listeners.forEach(this);
+        listeners.forEach(this, safeStore);
     }
 
     @Override
-    public void addWaitingOnCommit(Command command)
+    public void addWaitingOnCommit(TxnId txnId)
     {
         if (waitingOnCommit == null)
-            waitingOnCommit = new TreeMap<>();
+            waitingOnCommit = new TreeSet<>();
 
-        waitingOnCommit.put(command.txnId(), command);
+        waitingOnCommit.add(txnId);
     }
 
     @Override
@@ -270,26 +289,26 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public void removeWaitingOnCommit(PartialCommand command)
+    public void removeWaitingOnCommit(TxnId txnId)
     {
         if (waitingOnCommit == null)
             return;
-        waitingOnCommit.remove(command.txnId());
+        waitingOnCommit.remove(txnId);
     }
 
     @Override
-    public PartialCommand firstWaitingOnCommit()
+    public TxnId firstWaitingOnCommit()
     {
-        return isWaitingOnCommit() ? waitingOnCommit.firstEntry().getValue() : null;
+        return isWaitingOnCommit() ? waitingOnCommit.first() : null;
     }
 
     @Override
-    public void addWaitingOnApplyIfAbsent(PartialCommand command)
+    public void addWaitingOnApplyIfAbsent(TxnId txnId, Timestamp executeAt)
     {
         if (waitingOnApply == null)
             waitingOnApply = new TreeMap<>();
 
-        waitingOnApply.putIfAbsent(command.txnId(), command);
+        waitingOnApply.put(executeAt, txnId);
     }
 
     @Override
@@ -299,15 +318,17 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public void removeWaitingOnApply(PartialCommand command)
+    public void removeWaitingOn(TxnId txnId, Timestamp executeAt)
     {
-        if (waitingOnApply == null)
-            return;
-        waitingOnApply.remove(command.txnId());
+        if (waitingOnCommit != null)
+            waitingOnCommit.remove(txnId);
+
+        if (waitingOnApply != null)
+            waitingOnApply.remove(executeAt);
     }
 
     @Override
-    public PartialCommand firstWaitingOnApply()
+    public TxnId firstWaitingOnApply()
     {
         return isWaitingOnApply() ? waitingOnApply.firstEntry().getValue() : null;
     }

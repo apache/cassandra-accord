@@ -128,22 +128,22 @@ public class KeysTest
         List<Key> keys = new ArrayList<>();
         long result = keys(150, 250, 350, 450, 550).foldl(ranges(r(200, 400)), (i, key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
         assertEquals(16, result);
-        assertEquals(keys(250, 350), new Keys(keys));
+        assertEquals(keys(250, 350), Keys.of(keys));
 
         keys.clear();
         result = keys(150, 250, 350, 450, 550).foldl(ranges(r(0, 500)), (i, key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
         assertEquals(3616, result);
-        assertEquals(keys(150, 250, 350, 450), new Keys(keys));
+        assertEquals(keys(150, 250, 350, 450), Keys.of(keys));
 
         keys.clear();
         result = keys(150, 250, 350, 450, 550).foldl(ranges(r(500, 1000)), (i, key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
         assertEquals(1, result);
-        assertEquals(keys(550), new Keys(keys));
+        assertEquals(keys(550), Keys.of(keys));
 
         keys.clear();
         result = keys(150, 250, 350, 450, 550).foldl(ranges(r(0, 20), r(100, 140), r(149, 151), r(560, 2000)), (i, key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
         assertEquals(1, result);
-        assertEquals(keys(150), new Keys(keys));
+        assertEquals(keys(150), Keys.of(keys));
     }
 
     @Test
@@ -170,7 +170,7 @@ public class KeysTest
     public void slice()
     {
         qt().forAll(keysGen()).check(list -> {
-            Keys keys = new Keys(list);
+            Keys keys = Keys.of(list);
             // end-inclusive
             int first = list.get(0).key;
             int last = list.get(list.size() - 1).key;
@@ -195,7 +195,7 @@ public class KeysTest
                         range(previous.key - 1, exclude.key - 1),
                         range(exclude.key, last),
                         after);
-                Assertions.assertEquals(new Keys(expected), keys.slice(allButI), "Expected to exclude " + exclude + " at index " + i);
+                Assertions.assertEquals(Keys.of(expected), keys.slice(allButI), "Expected to exclude " + exclude + " at index " + i);
             }
 
             // remove the first
@@ -208,7 +208,7 @@ public class KeysTest
                         // exclusive, inclusive
                         range(first, last),
                         after);
-                Assertions.assertEquals(new Keys(expected), keys.slice(allButI), "Expected to exclude " + first + " at index " + 0);
+                Assertions.assertEquals(Keys.of(expected), keys.slice(allButI), "Expected to exclude " + first + " at index " + 0);
             }
             // remove the last
             {
@@ -221,7 +221,7 @@ public class KeysTest
                         range(first - 1, last - 1),
                         range(last, Integer.MAX_VALUE),
                         after);
-                Assertions.assertEquals(new Keys(expected), keys.slice(allButI), "Expected to exclude " + first + " at index " + 0);
+                Assertions.assertEquals(Keys.of(expected), keys.slice(allButI), "Expected to exclude " + first + " at index " + 0);
             }
         });
     }
@@ -230,7 +230,7 @@ public class KeysTest
     public void foldl()
     {
         qt().forAll(keysGen()).check(list -> {
-            Keys keys = new Keys(list);
+            Keys keys = Keys.of(list);
 
             Assertions.assertEquals(keys.size(), keys.foldl(ranges(range(Integer.MIN_VALUE, Integer.MAX_VALUE)), (index, key, accum) -> accum + 1, 0));
             Assertions.assertEquals(keys.size(), keys.foldl(ranges(range(Integer.MIN_VALUE, Integer.MAX_VALUE)), (index, key, ignore, accum) -> accum + 1, -1, 0, Long.MAX_VALUE));

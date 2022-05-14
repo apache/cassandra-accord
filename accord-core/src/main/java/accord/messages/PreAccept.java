@@ -20,49 +20,56 @@ package accord.messages;
 
 import java.util.Collections;
 import java.util.Objects;
-import java.util.function.Consumer;
-
-import accord.local.*;
-import com.google.common.annotations.VisibleForTesting;
 
 import accord.api.Key;
+import accord.local.*;
+import accord.local.CommandsForKey.CommandTimeseries.TestKind;
+
 import accord.local.Node.Id;
 import accord.messages.TxnRequest.WithUnsynced;
 import accord.topology.Topologies;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
+import javax.annotation.Nullable;
+
+import accord.primitives.*;
+
 import accord.primitives.Deps;
-import accord.txn.Txn;
 import accord.primitives.TxnId;
 
-public class PreAccept extends WithUnsynced
+import static accord.local.CommandsForKey.CommandTimeseries.TestDep.ANY_DEPS;
+import static accord.local.CommandsForKey.CommandTimeseries.TestKind.RorWs;
+import static accord.local.CommandsForKey.CommandTimeseries.TestKind.Ws;
+import static accord.local.CommandsForKey.CommandTimeseries.TestStatus.ANY_STATUS;
+
+public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
 {
     public static class SerializerSupport
     {
-        public static PreAccept create(Keys scope, long epoch, TxnId txnId, Txn txn, Key homeKey)
+        public static PreAccept create(TxnId txnId, PartialRoute scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, long maxEpoch, PartialTxn partialTxn, @Nullable Route fullRoute)
         {
-            return new PreAccept(scope, epoch, txnId, txn, homeKey);
+            return new PreAccept(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey, maxEpoch, partialTxn, fullRoute);
         }
     }
 
-    public final Key homeKey;
-    public final Txn txn;
+    public final PartialTxn partialTxn;
+    public final @Nullable Route route; // ordinarily only set on home shard
     public final long maxEpoch;
 
-    public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey)
+    public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn partialTxn, Route route)
     {
-        super(to, topologies, txn.keys(), txnId);
-        this.homeKey = homeKey;
-        this.txn = txn;
+        super(to, topologies, txnId, route);
+        this.partialTxn = partialTxn.slice(scope.covering, route.contains(route.homeKey));
         this.maxEpoch = topologies.currentEpoch();
+        this.route = scope.contains(scope.homeKey) ? route : null;
     }
 
-    public PreAccept(Keys scope, long epoch, TxnId txnId, Txn txn, Key homeKey)
+    private PreAccept(TxnId txnId, PartialRoute scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, long maxEpoch, PartialTxn partialTxn, @Nullable Route fullRoute)
     {
-        super(scope, epoch, txnId);
-        this.homeKey = homeKey;
-        this.txn = txn;
-        this.maxEpoch = epoch;
+        super(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey);
+        this.partialTxn = partialTxn;
+        this.maxEpoch = maxEpoch;
+        this.route = fullRoute;
     }
 
     @Override
@@ -74,37 +81,52 @@ public class PreAccept extends WithUnsynced
     @Override
     public Iterable<Key> keys()
     {
-        return txn.keys();
+        return partialTxn.keys();
     }
 
-    @VisibleForTesting
-    public PreAcceptReply process(CommandStore instance, Key progressKey)
+    @Override
+    protected void process()
+    {
+        node.mapReduceConsumeLocal(this, minEpoch, maxEpoch, this);
+    }
+
+    public PreAcceptReply apply(SafeCommandStore safeStore)
     {
         // note: this diverges from the paper, in that instead of waiting for JoinShard,
         //       we PreAccept to both old and new topologies and require quorums in both.
         //       This necessitates sending to ALL replicas of old topology, not only electorate (as fast path may be unreachable).
-        Command command = instance.command(txnId);
-        if (!command.preaccept(txn, homeKey, progressKey))
-            return PreAcceptNack.INSTANCE;
-        return new PreAcceptOk(txnId, command.executeAt(), calculateDeps(instance, txnId, txn, txnId));
+        Command command = safeStore.command(txnId);
+        switch (command.preaccept(safeStore, partialTxn, route != null ? route : scope, progressKey))
+        {
+            default:
+            case Success:
+            case Redundant:
+                return new PreAcceptOk(txnId, command.executeAt(), calculatePartialDeps(safeStore, txnId, partialTxn.keys(), partialTxn.kind(), txnId, safeStore.ranges().between(minEpoch, txnId.epoch)));
+
+            case RejectedBallot:
+                return PreAcceptNack.INSTANCE;
+        }
     }
 
-    public void process(Node node, Id from, ReplyContext replyContext)
+    @Override
+    public PreAcceptReply reduce(PreAcceptReply r1, PreAcceptReply r2)
     {
-        // TODO: verify we handle all of the scope() keys
-        Key progressKey = progressKey(node, homeKey);
-        node.reply(from, replyContext, node.mapReduceLocal(this, minEpoch, maxEpoch, cs -> process(cs, progressKey),
-        (r1, r2) -> {
-            if (!r1.isOK()) return r1;
-            if (!r2.isOK()) return r2;
-            PreAcceptOk ok1 = (PreAcceptOk) r1;
-            PreAcceptOk ok2 = (PreAcceptOk) r2;
-            PreAcceptOk okMax = ok1.witnessedAt.compareTo(ok2.witnessedAt) >= 0 ? ok1 : ok2;
-            Deps deps = ok1.deps.with(ok2.deps);
-            if (deps == okMax.deps)
-                return okMax;
-            return new PreAcceptOk(txnId, okMax.witnessedAt, deps);
-        }));
+        if (!r1.isOk()) return r1;
+        if (!r2.isOk()) return r2;
+        PreAcceptOk ok1 = (PreAcceptOk) r1;
+        PreAcceptOk ok2 = (PreAcceptOk) r2;
+        PreAcceptOk okMax = ok1.witnessedAt.compareTo(ok2.witnessedAt) >= 0 ? ok1 : ok2;
+        PartialDeps deps = ok1.deps.with(ok2.deps);
+        if (deps == okMax.deps)
+            return okMax;
+        return new PreAcceptOk(txnId, okMax.witnessedAt, deps);
+    }
+
+    @Override
+    public void accept(PreAcceptReply reply, Throwable failure)
+    {
+        // TODO: communicate back the failure
+        node.reply(replyTo, replyContext, reply);
     }
 
     @Override
@@ -121,16 +143,16 @@ public class PreAccept extends WithUnsynced
             return MessageType.PREACCEPT_RSP;
         }
 
-        boolean isOK();
+        boolean isOk();
     }
 
     public static class PreAcceptOk implements PreAcceptReply
     {
         public final TxnId txnId;
         public final Timestamp witnessedAt;
-        public final Deps deps;
+        public final PartialDeps deps;
 
-        public PreAcceptOk(TxnId txnId, Timestamp witnessedAt, Deps deps)
+        public PreAcceptOk(TxnId txnId, Timestamp witnessedAt, PartialDeps deps)
         {
             this.txnId = txnId;
             this.witnessedAt = witnessedAt;
@@ -138,7 +160,7 @@ public class PreAccept extends WithUnsynced
         }
 
         @Override
-        public boolean isOK()
+        public boolean isOk()
         {
             return true;
         }
@@ -176,7 +198,7 @@ public class PreAccept extends WithUnsynced
         private PreAcceptNack() {}
 
         @Override
-        public boolean isOK()
+        public boolean isOk()
         {
             return false;
         }
@@ -188,22 +210,35 @@ public class PreAccept extends WithUnsynced
         }
     }
 
-    static Deps calculateDeps(CommandStore commandStore, TxnId txnId, Txn txn, Timestamp executeAt)
+    static PartialDeps calculatePartialDeps(SafeCommandStore commandStore, TxnId txnId, Keys keys, Txn.Kind kindOfTxn, Timestamp executeAt, KeyRanges ranges)
     {
-        try (Deps.OrderedBuilder builder = Deps.orderedBuilder(false);)
+        try (PartialDeps.OrderedBuilder builder = PartialDeps.orderedBuilder(ranges, false))
         {
-            txn.keys().forEach(key -> {
-                CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
-                if (forKey == null)
-                    return;
-
-                builder.nextKey(key);
-                forKey.uncommitted().before(executeAt).forEach(conflicts(txnId, txn.isWrite(), builder));
-                forKey.committedByExecuteAt().before(executeAt).forEach(conflicts(txnId, txn.isWrite(), builder));
-            });
-
-            return builder.build();
+            return calculateDeps(commandStore, txnId, keys, kindOfTxn, executeAt, ranges, builder);
         }
+    }
+
+    private static <T extends Deps> T calculateDeps(SafeCommandStore commandStore, TxnId txnId, Keys keys, Txn.Kind kindOfTxn, Timestamp executeAt, KeyRanges ranges, Deps.AbstractOrderedBuilder<T> builder)
+    {
+        keys.foldl(ranges, (i, key, ignore) -> {
+            CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
+            if (forKey == null)
+                return null;
+
+            builder.nextKey(key);
+            TestKind testKind = kindOfTxn.isWrite() ? RorWs : Ws;
+            forKey.uncommitted().before(executeAt, testKind, ANY_DEPS, null, ANY_STATUS, null)
+                    .forEach(info -> {
+                        if (!info.txnId.equals(txnId)) builder.add(info.txnId);
+                    });
+            forKey.committedByExecuteAt().before(executeAt, testKind, ANY_DEPS, null, ANY_STATUS, null)
+                    .forEach(id -> {
+                        if (!id.equals(txnId)) builder.add(id);
+                    });
+            return null;
+        }, null);
+
+        return builder.build();
     }
 
     @Override
@@ -211,16 +246,8 @@ public class PreAccept extends WithUnsynced
     {
         return "PreAccept{" +
                "txnId:" + txnId +
-               ", txn:" + txn +
-               ", homeKey:" + homeKey +
+               ", txn:" + partialTxn +
+               ", scope:" + scope +
                '}';
-    }
-
-    private static Consumer<PartialCommand> conflicts(TxnId txnId, boolean isWrite, Deps.OrderedBuilder builder)
-    {
-        return command -> {
-            if (!txnId.equals(command.txnId()) && (isWrite || command.txn().isWrite()))
-                builder.add(command.txnId());
-        };
     }
 }

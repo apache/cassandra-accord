@@ -32,9 +32,9 @@ import com.google.gson.stream.JsonWriter;
 import accord.local.Node.Id;
 import accord.api.Key;
 import accord.primitives.Deps;
-import accord.txn.Txn;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
-import accord.txn.Writes;
+import accord.primitives.Writes;
 import accord.primitives.Ballot;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
@@ -299,7 +299,7 @@ public class Json
             buildKeys.addAll(buildReadKeys);
             Keys readKeys = new Keys(buildReadKeys);
             Keys keys = new Keys(buildKeys);
-            MaelstromRead read = new MaelstromRead(keys, readKeys);
+            MaelstromRead read = new MaelstromRead(readKeys, keys);
             MaelstromQuery query = new MaelstromQuery(client, requestId);
 
             return new Txn.InMemory(keys, read, query, update);

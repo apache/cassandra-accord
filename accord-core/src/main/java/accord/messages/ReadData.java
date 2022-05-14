@@ -18,236 +18,245 @@
 
 package accord.messages;
 
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
-import accord.primitives.Deps;
-import com.google.common.base.Preconditions;
-
 import accord.api.Key;
+import accord.local.Status.Known;
+import accord.primitives.*;
+
 import accord.local.*;
-import accord.local.Node.Id;
 import accord.api.Data;
 import accord.topology.Topologies;
-import accord.primitives.Keys;
-import accord.primitives.Timestamp;
-import accord.txn.Txn;
-import accord.primitives.TxnId;
-import accord.utils.DeterministicIdentitySet;
-import com.google.common.collect.Iterables;
+import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class ReadData extends TxnRequest
+import javax.annotation.Nullable;
+
+import static accord.local.Status.Committed;
+import static accord.messages.MessageType.READ_RSP;
+import static accord.messages.ReadData.ReadNack.NotCommitted;
+import static accord.messages.ReadData.ReadNack.Redundant;
+import static accord.messages.TxnRequest.*;
+import static accord.utils.MapReduceConsume.forEach;
+
+// TODO (soon): dedup - can currently have infinite pending reads that will be executed independently
+public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements CommandListener
 {
     private static final Logger logger = LoggerFactory.getLogger(ReadData.class);
 
-    static class LocalRead implements Listener, PreLoadContext
-    {
-        final TxnId txnId;
-        final Deps deps;
-        final Node node;
-        final Node.Id replyToNode;
-        final Keys scope;
-        final Keys txnKeys;
-        final ReplyContext replyContext;
-
-        Data data;
-        boolean isObsolete; // TODO: respond with the Executed result we have stored?
-        Set<CommandStore> waitingOn;
-
-        LocalRead(TxnId txnId, Deps deps, Node node, Id replyToNode, Keys scope, Keys txnKeys, ReplyContext replyContext)
-        {
-            Preconditions.checkArgument(!scope.isEmpty());
-            this.txnId = txnId;
-            this.deps = deps;
-            this.node = node;
-            this.replyToNode = replyToNode;
-            this.scope = scope;
-            this.txnKeys = txnKeys;  // TODO (now): is this needed? Does the read update commands per key?
-            this.replyContext = replyContext;
-        }
-
-        @Override
-        public Iterable<TxnId> txnIds()
-        {
-            return Iterables.concat(Collections.singleton(txnId), deps.txnIds());
-        }
-
-        @Override
-        public Iterable<Key> keys()
-        {
-            return txnKeys;
-        }
-
-        @Override
-        public PreLoadContext listenerPreLoadContext(TxnId caller)
-        {
-            Set<TxnId> ids = new HashSet<>(deps.txnIds());
-            ids.add(txnId);
-            ids.add(caller);
-            return PreLoadContext.contextFor(ids, keys());
-        }
-
-        @Override
-        public String toString()
-        {
-            return "ReadData$LocalRead{" + txnId + '}';
-        }
-
-        @Override
-        public synchronized void onChange(Command command)
-        {
-            logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
-                         this, command.txnId(), command.status(), command);
-            switch (command.status())
-            {
-                default: throw new IllegalStateException();
-                case NotWitnessed:
-                case PreAccepted:
-                case Accepted:
-                case AcceptedInvalidate:
-                case Committed:
-                    return;
-
-                case Executed:
-                case Applied:
-                case Invalidated:
-                    obsolete();
-                case ReadyToExecute:
-            }
-
-            command.removeListener(this);
-            if (!isObsolete)
-                read(command);
-        }
-
-        @Override
-        public boolean isTransient()
-        {
-            return true;
-        }
-
-        private synchronized void readComplete(CommandStore commandStore, Data result)
-        {
-            logger.trace("{}: read completed on {}", txnId, commandStore);
-            data = data == null ? result : data.merge(result);
-
-            waitingOn.remove(commandStore);
-            if (waitingOn.isEmpty())
-                node.reply(replyToNode, replyContext, new ReadOk(data));
-        }
-
-        private void read(Command command)
-        {
-            logger.trace("{}: executing read", command.txnId());
-            command.read(scope).addCallback((next, throwable) -> {
-                if (throwable != null)
-                {
-                    logger.trace("{}: read failed for {}: {}", txnId, command.commandStore(), throwable);
-                    node.reply(replyToNode, replyContext, new ReadNack());
-                }
-                else
-                    readComplete(command.commandStore(), next);
-            });
-        }
-
-        void obsolete()
-        {
-            if (!isObsolete)
-            {
-                isObsolete = true;
-                node.reply(replyToNode, replyContext, new ReadNack());
-            }
-        }
-
-        synchronized void setup(TxnId txnId, Txn txn, Key homeKey, Keys keys, Timestamp executeAt)
-        {
-            Key progressKey = node.trySelectProgressKey(txnId, txn.keys(), homeKey);
-            waitingOn = node.collectLocal(keys, executeAt, DeterministicIdentitySet::new);
-            CommandStores.forEachNonBlocking(waitingOn, this, instance -> {
-                Command command = instance.command(txnId);
-                command.preaccept(txn, homeKey, progressKey); // ensure pre-accepted
-                logger.trace("{}: setting up read with status {} on {}", command.txnId(), command.status(), instance);
-
-                switch (command.status())
-                {
-                    default:
-                    case NotWitnessed:
-                        throw new IllegalStateException();
-
-                    case PreAccepted:
-                    case Accepted:
-                    case AcceptedInvalidate:
-                    case Committed:
-                        command.addListener(this);
-                        break;
-
-                    case Executed:
-                    case Applied:
-                    case Invalidated:
-                        obsolete();
-                        break;
-
-                    case ReadyToExecute:
-                        if (!isObsolete)
-                            read(command);
-                }
-            });
-        }
-    }
-
     public static class SerializerSupport
     {
-        public static ReadData create(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Deps deps, Key homeKey, Timestamp executeAt)
+        public static ReadData create(TxnId txnId, Keys scope, long executeAtEpoch, long waitForEpoch)
         {
-            return new ReadData(scope, waitForEpoch, txnId, txn, deps, homeKey, executeAt);
+            return new ReadData(txnId, scope, executeAtEpoch, waitForEpoch);
         }
     }
 
-    public final TxnId txnId;
-    public final Txn txn;
-    public final Deps deps;
-    public final Key homeKey;
-    public final Timestamp executeAt;
+    public final long executeAtEpoch;
+    public final Keys readScope; // TODO: this should be RoutingKeys as we have the Keys locally - but for simplicity for now we use Keys to implement keys()
+    private final long waitForEpoch;
+    private Data data;
+    private transient boolean isObsolete; // TODO: respond with the Executed result we have stored?
+    private transient BitSet waitingOn;
+    private transient int waitingOnCount;
 
-    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Txn txn, Deps deps, Key homeKey, Timestamp executeAt)
+    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Keys readScope, Timestamp executeAt)
     {
-        super(to, topologies, txn.keys());
-        this.txnId = txnId;
-        this.txn = txn;
-        this.deps = deps;
-        this.homeKey = homeKey;
-        this.executeAt = executeAt;
+        super(txnId);
+        this.executeAtEpoch = executeAt.epoch;
+        int startIndex = latestRelevantEpochIndex(to, topologies, readScope);
+        this.readScope = computeScope(to, topologies, readScope, startIndex, Keys::slice, Keys::union);
+        this.waitForEpoch = computeWaitForEpoch(to, topologies, startIndex);
     }
 
-    protected ReadData(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Deps deps, Key homeKey, Timestamp executeAt)
+    ReadData(TxnId txnId, Keys readScope, long executeAtEpoch, long waitForEpoch)
     {
-        super(scope, waitForEpoch);
-        this.txnId = txnId;
-        this.txn = txn;
-        this.deps = deps;
-        this.homeKey = homeKey;
-        this.executeAt = executeAt;
+        super(txnId);
+        this.executeAtEpoch = executeAtEpoch;
+        this.readScope = readScope;
+        this.waitForEpoch = waitForEpoch;
     }
 
-    public void process(Node node, Node.Id from, ReplyContext replyContext)
+    @Override
+    public long waitForEpoch()
     {
-        new LocalRead(txnId, deps, node, from, txn.read().keys().intersect(scope()), txn.keys(), replyContext)
-            .setup(txnId, txn, homeKey, scope(), executeAt);
+        return waitForEpoch;
+    }
+
+    @Override
+    protected void process()
+    {
+        waitingOn = new BitSet();
+        node.mapReduceConsumeLocal(this, readScope, executeAtEpoch, executeAtEpoch, this);
+    }
+
+    @Override
+    public PreLoadContext listenerPreLoadContext(TxnId caller)
+    {
+        Set<TxnId> ids = new HashSet<>();
+        ids.add(txnId);
+        ids.add(caller);
+        return PreLoadContext.contextFor(ids, keys());
+    }
+
+    @Override
+    public boolean isTransient()
+    {
+        return true;
+    }
+
+    @Override
+    public synchronized void onChange(SafeCommandStore safeStore, Command command)
+    {
+        logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
+                this, command.txnId(), command.status(), command);
+        switch (command.status())
+        {
+            default: throw new AssertionError();
+            case NotWitnessed:
+            case PreAccepted:
+            case Accepted:
+            case AcceptedInvalidate:
+            case Committed:
+                return;
+
+            case PreApplied:
+            case Applied:
+            case Invalidated:
+                obsolete();
+            case ReadyToExecute:
+        }
+
+        command.removeListener(this);
+        if (!isObsolete)
+            read(safeStore, command);
+    }
+
+    @Override
+    public synchronized ReadNack apply(SafeCommandStore safeStore)
+    {
+        Command command = safeStore.command(txnId);
+        Status status = command.status();
+        logger.trace("{}: setting up read with status {} on {}", txnId, status, safeStore);
+        switch (command.status()) {
+            default:
+                throw new AssertionError();
+            case Committed:
+                if (command.partialTxn().keys().none(safeStore.commandStore()::hashIntersects))
+                    throw new IllegalStateException();
+            case NotWitnessed:
+            case PreAccepted:
+            case Accepted:
+            case AcceptedInvalidate:
+                waitingOn.set(safeStore.commandStore().id());
+                ++waitingOnCount;
+                command.addListener(this);
+
+                if (status == Committed)
+                    return null;
+
+                safeStore.progressLog().waiting(txnId, Known.ExecutionOrder, readScope.toRoutingKeys());
+                return NotCommitted;
+
+            case ReadyToExecute:
+                waitingOn.set(safeStore.commandStore().id());
+                ++waitingOnCount;
+                if (!isObsolete)
+                    read(safeStore, command);
+                return null;
+
+            case PreApplied:
+            case Applied:
+            case Invalidated:
+                isObsolete = true;
+                return Redundant;
+        }
+    }
+
+    @Override
+    public ReadNack reduce(ReadNack r1, ReadNack r2)
+    {
+        return r1 == null || r2 == null
+                ? r1 == null ? r2 : r1
+                : r1.compareTo(r2) >= 0 ? r1 : r2;
+    }
+
+    @Override
+    public synchronized void accept(ReadNack reply, Throwable failure)
+    {
+        if (reply != null)
+        {
+            node.reply(replyTo, replyContext, reply);
+        }
+        else if (failure != null)
+        {
+            node.reply(replyTo, replyContext, ReadNack.Error);
+            data = null;
+            node.agent().onUncaughtException(failure); // TODO: probably a better way to handle this, as might not be uncaught
+            node.commandStores().mapReduceConsume(this, waitingOn.stream(), forEach(in -> in.command(txnId).removeListener(this), node.agent()));
+        }
+        else
+        {
+            ack();
+        }
+    }
+
+    private void ack()
+    {
+        if (-1 == --waitingOnCount)
+            node.reply(replyTo, replyContext, new ReadOk(data));
+    }
+
+    private synchronized void readComplete(CommandStore commandStore, Data result)
+    {
+        Preconditions.checkState(waitingOn.get(commandStore.id()));
+        logger.trace("{}: read completed on {}", txnId, commandStore);
+        if (result != null)
+            data = data == null ? result : data.merge(result);
+
+        waitingOn.clear(commandStore.id());
+        ack();
+    }
+
+    private void read(SafeCommandStore safeStore, Command command)
+    {
+        logger.trace("{}: executing read", command.txnId());
+        CommandStore unsafeStore = safeStore.commandStore();
+        command.read(safeStore).addCallback((next, throwable) -> {
+            if (throwable != null)
+            {
+                // TODO (now): exception integration (non-trivial, as might be handled)
+                logger.trace("{}: read failed for {}: {}", txnId, unsafeStore, throwable);
+                node.reply(replyTo, replyContext, ReadNack.Error);
+            }
+            else
+                readComplete(unsafeStore, next);
+        });
+    }
+
+    void obsolete()
+    {
+        if (!isObsolete)
+        {
+            isObsolete = true;
+            node.reply(replyTo, replyContext, Redundant);
+        }
     }
 
     @Override
     public Iterable<TxnId> txnIds()
     {
-        return Iterables.concat(Collections.singleton(txnId), deps.txnIds());
+        return Collections.singleton(txnId);
     }
 
     @Override
     public Iterable<Key> keys()
     {
-        return Collections.emptyList();
+        return readScope;
     }
 
     @Override
@@ -256,40 +265,45 @@ public class ReadData extends TxnRequest
         return MessageType.READ_REQ;
     }
 
-    public static class ReadReply implements Reply
+    public interface ReadReply extends Reply
     {
+        boolean isOk();
+    }
+
+    public enum ReadNack implements ReadReply
+    {
+        Invalid, NotCommitted, Redundant, Error;
+
+        @Override
+        public String toString()
+        {
+            return "Read" + name();
+        }
+
         @Override
         public MessageType type()
         {
-            return MessageType.READ_RSP;
+            return READ_RSP;
         }
 
-        public boolean isOK()
-        {
-            return true;
-        }
-    }
-
-    public static class ReadNack extends ReadReply
-    {
         @Override
-        public boolean isOK()
+        public boolean isOk()
         {
             return false;
         }
 
         @Override
-        public String toString()
+        public boolean isFinal()
         {
-            return "ReadNack";
+            return this != NotCommitted;
         }
     }
 
-    public static class ReadOk extends ReadReply
+    public static class ReadOk implements ReadReply
     {
-        public final Data data;
+        public final @Nullable Data data;
 
-        public ReadOk(Data data)
+        public ReadOk(@Nullable Data data)
         {
             this.data = data;
         }
@@ -299,6 +313,17 @@ public class ReadData extends TxnRequest
         {
             return "ReadOk{" + data + '}';
         }
+
+        @Override
+        public MessageType type()
+        {
+            return READ_RSP;
+        }
+
+        public boolean isOk()
+        {
+            return true;
+        }
     }
 
     @Override
@@ -306,7 +331,6 @@ public class ReadData extends TxnRequest
     {
         return "ReadData{" +
                "txnId:" + txnId +
-               ", txn:" + txn +
                '}';
     }
 }

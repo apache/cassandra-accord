@@ -22,213 +22,274 @@ import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.ProgressLog;
+import accord.api.RoutingKey;
 import accord.local.Command;
 import accord.local.CommandStore;
+import accord.local.CommandStore.RangesForEpoch;
 import accord.local.CommandsForKey;
+import accord.local.CommandListener;
 import accord.local.Node;
+import accord.local.NodeTimeService;
+import accord.local.PreLoadContext;
+import accord.local.SafeCommandStore;
+import accord.local.SyncCommandStores;
+import accord.local.SyncCommandStores.SyncCommandStore;
+import accord.impl.InMemoryCommandStore.SingleThread.AsyncState;
+import accord.impl.InMemoryCommandStore.Synchronized.SynchronizedState;
 import accord.primitives.KeyRange;
 import accord.primitives.KeyRanges;
+import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-import accord.local.*;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
-import org.apache.cassandra.utils.concurrent.Promise;
 
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.NavigableMap;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.LongSupplier;
 import java.util.stream.Collectors;
 
-public abstract class InMemoryCommandStore extends CommandStore
+public class InMemoryCommandStore
 {
-    private final NavigableMap<TxnId, Command> commands = new TreeMap<>();
-    private final NavigableMap<Key, CommandsForKey> commandsForKey = new TreeMap<>();
-
-    public static InMemoryCommandStore inMemory(CommandStore commandStore)
+    public static abstract class State implements SafeCommandStore
     {
-        return (InMemoryCommandStore) commandStore;
-    }
+        private final NodeTimeService time;
+        private final Agent agent;
+        private final DataStore store;
+        private final ProgressLog progressLog;
+        private final RangesForEpoch rangesForEpoch;
 
-    public InMemoryCommandStore(int generation, int index, int numShards, Function<Timestamp, Timestamp> uniqueNow, LongSupplier currentEpoch, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpoch rangesForEpoch)
-    {
-        super(generation, index, numShards, uniqueNow, currentEpoch, agent, store, progressLogFactory, rangesForEpoch);
-    }
+        private final CommandStore commandStore;
+        private final NavigableMap<TxnId, Command> commands = new TreeMap<>();
+        private final NavigableMap<RoutingKey, InMemoryCommandsForKey> commandsForKey = new TreeMap<>();
 
-    @Override
-    public Command ifPresent(TxnId txnId)
-    {
-        return commands.get(txnId);
-    }
-
-    @Override
-    public Command command(TxnId txnId)
-    {
-        return commands.computeIfAbsent(txnId, id -> new InMemoryCommand(this, id));
-    }
-
-    public boolean hasCommand(TxnId txnId)
-    {
-        return commands.containsKey(txnId);
-    }
-
-    @Override
-    public CommandsForKey commandsForKey(Key key)
-    {
-        return commandsForKey.computeIfAbsent(key, InMemoryCommandsForKey::new);
-    }
-
-    public boolean hasCommandsForKey(Key key)
-    {
-        return commandsForKey.containsKey(key);
-    }
-
-    @Override
-    public CommandsForKey maybeCommandsForKey(Key key)
-    {
-        return commandsForKey.get(key);
-    }
-
-    public void forEpochCommands(KeyRanges ranges, long epoch, Consumer<Command> consumer)
-    {
-        Timestamp minTimestamp = new Timestamp(epoch, Long.MIN_VALUE, Integer.MIN_VALUE, Node.Id.NONE);
-        Timestamp maxTimestamp = new Timestamp(epoch, Long.MAX_VALUE, Integer.MAX_VALUE, Node.Id.MAX);
-        for (KeyRange range : ranges)
+        public State(NodeTimeService time, Agent agent, DataStore store, ProgressLog progressLog, RangesForEpoch rangesForEpoch, CommandStore commandStore)
         {
-            Iterable<CommandsForKey> rangeCommands = commandsForKey.subMap(range.start(),
-                                                                           range.startInclusive(),
-                                                                           range.end(),
-                                                                           range.endInclusive()).values();
-            for (CommandsForKey commands : rangeCommands)
+            this.time = time;
+            this.agent = agent;
+            this.store = store;
+            this.progressLog = progressLog;
+            this.rangesForEpoch = rangesForEpoch;
+            this.commandStore = commandStore;
+        }
+
+        public Command ifPresent(TxnId txnId)
+        {
+            return commands.get(txnId);
+        }
+
+        public Command ifLoaded(TxnId txnId)
+        {
+            return commands.get(txnId);
+        }
+
+        public Command command(TxnId txnId)
+        {
+            return commands.computeIfAbsent(txnId, id -> new InMemoryCommand(commandStore, id));
+        }
+
+        public boolean hasCommand(TxnId txnId)
+        {
+            return commands.containsKey(txnId);
+        }
+
+        public CommandsForKey commandsForKey(Key key)
+        {
+            return commandsForKey.computeIfAbsent(key, k -> new InMemoryCommandsForKey((Key) k));
+        }
+
+        public boolean hasCommandsForKey(Key key)
+        {
+            return commandsForKey.containsKey(key);
+        }
+
+        public CommandsForKey maybeCommandsForKey(Key key)
+        {
+            return commandsForKey.get(key);
+        }
+
+        public void addAndInvokeListener(TxnId txnId, CommandListener listener)
+        {
+            command(txnId).addListener(listener);
+        }
+
+        @Override
+        public DataStore dataStore()
+        {
+            return store;
+        }
+
+        @Override
+        public CommandStore commandStore()
+        {
+            return commandStore;
+        }
+
+        @Override
+        public Timestamp uniqueNow(Timestamp atLeast)
+        {
+            return time.uniqueNow(atLeast);
+        }
+
+        @Override
+        public Agent agent()
+        {
+            return agent;
+        }
+
+        @Override
+        public ProgressLog progressLog()
+        {
+            return progressLog;
+        }
+
+        @Override
+        public RangesForEpoch ranges()
+        {
+            return rangesForEpoch;
+        }
+
+        @Override
+        public long latestEpoch()
+        {
+            return time.epoch();
+        }
+
+        @Override
+        public Timestamp maxConflict(Keys keys)
+        {
+            return keys.stream()
+                    .map(this::maybeCommandsForKey)
+                    .filter(Objects::nonNull)
+                    .map(CommandsForKey::max)
+                    .max(Comparator.naturalOrder())
+                    .orElse(Timestamp.NONE);
+        }
+
+        public void forEpochCommands(KeyRanges ranges, long epoch, Consumer<Command> consumer)
+        {
+            Timestamp minTimestamp = new Timestamp(epoch, Long.MIN_VALUE, Integer.MIN_VALUE, Node.Id.NONE);
+            Timestamp maxTimestamp = new Timestamp(epoch, Long.MAX_VALUE, Integer.MAX_VALUE, Node.Id.MAX);
+            for (KeyRange range : ranges)
             {
-                commands.forWitnessed(minTimestamp, maxTimestamp, cmd -> consumer.accept((Command) cmd));
+                Iterable<InMemoryCommandsForKey> rangeCommands = commandsForKey.subMap(range.start(),
+                        range.startInclusive(),
+                        range.end(),
+                        range.endInclusive()).values();
+                for (InMemoryCommandsForKey commands : rangeCommands)
+                {
+                    commands.forWitnessed(minTimestamp, maxTimestamp, cmd -> consumer.accept((Command) cmd));
+                }
+            }
+        }
+
+        public void forCommittedInEpoch(KeyRanges ranges, long epoch, Consumer<Command> consumer)
+        {
+            Timestamp minTimestamp = new Timestamp(epoch, Long.MIN_VALUE, Integer.MIN_VALUE, Node.Id.NONE);
+            Timestamp maxTimestamp = new Timestamp(epoch, Long.MAX_VALUE, Integer.MAX_VALUE, Node.Id.MAX);
+            for (KeyRange range : ranges)
+            {
+                Iterable<InMemoryCommandsForKey> rangeCommands = commandsForKey.subMap(range.start(),
+                        range.startInclusive(),
+                        range.end(),
+                        range.endInclusive()).values();
+                for (InMemoryCommandsForKey commands : rangeCommands)
+                {
+
+                    Collection<Command> committed = commands.committedByExecuteAt()
+                            .between(minTimestamp, maxTimestamp).map(cmd -> (Command) cmd).collect(Collectors.toList());
+                    committed.forEach(consumer);
+                }
             }
         }
     }
 
-    public void forCommittedInEpoch(KeyRanges ranges, long epoch, Consumer<Command> consumer)
+    public static class Synchronized extends SyncCommandStore
     {
-        Timestamp minTimestamp = new Timestamp(epoch, Long.MIN_VALUE, Integer.MIN_VALUE, Node.Id.NONE);
-        Timestamp maxTimestamp = new Timestamp(epoch, Long.MAX_VALUE, Integer.MAX_VALUE, Node.Id.MAX);
-        for (KeyRange range : ranges)
+        public static class SynchronizedState extends State implements SyncCommandStores.SafeSyncCommandStore
         {
-            Iterable<CommandsForKey> rangeCommands = commandsForKey.subMap(range.start(),
-                                                                           range.startInclusive(),
-                                                                           range.end(),
-                                                                           range.endInclusive()).values();
-            for (CommandsForKey commands : rangeCommands)
+            public SynchronizedState(NodeTimeService time, Agent agent, DataStore store, ProgressLog progressLog, RangesForEpoch rangesForEpoch, CommandStore commandStore)
             {
-
-                Collection<Command> committed = commands.committedByExecuteAt()
-                        .between(minTimestamp, maxTimestamp).map(cmd -> (Command) cmd).collect(Collectors.toList());
-                committed.forEach(consumer);
-            }
-        }
-    }
-
-    protected void processInternal(Consumer<? super CommandStore> consumer, Promise<Void> promise)
-    {
-        processInternal(cs -> {
-            consumer.accept(cs);
-            return null;
-        }, promise);
-    }
-
-    protected <T> void processInternal(Function<? super CommandStore, T> function, Promise<T> promise)
-    {
-        try
-        {
-            T result = function.apply(this);
-            promise.setSuccess(result);
-        }
-        catch (Throwable e)
-        {
-            promise.tryFailure(e);
-        }
-    }
-
-    public static class Synchronized extends InMemoryCommandStore
-    {
-        public Synchronized(int generation,
-                            int index,
-                            int numShards,
-                            Function<Timestamp, Timestamp> uniqueNow,
-                            LongSupplier currentEpoch,
-                            Agent agent,
-                            DataStore store,
-                            ProgressLog.Factory progressLogFactory,
-                            RangesForEpoch rangesForEpoch)
-        {
-            super(generation, index, numShards, uniqueNow, currentEpoch, agent, store, progressLogFactory, rangesForEpoch);
-        }
-
-        @Override
-        public synchronized Future<Void> processSetup(Consumer<? super CommandStore> function)
-        {
-            AsyncPromise<Void> promise = new AsyncPromise<>();
-            processInternal(function, promise);
-            return promise;
-        }
-
-        @Override
-        public synchronized <T> Future<T> processSetup(Function<? super CommandStore, T> function)
-        {
-            AsyncPromise<T> promise = new AsyncPromise<>();
-            processInternal(function, promise);
-            return promise;
-        }
-
-        @Override
-        public synchronized Future<Void> process(PreLoadContext context, Consumer<? super CommandStore> consumer)
-        {
-            Promise<Void> promise = new AsyncPromise<>();
-            processInternal(consumer, promise);
-            return promise;
-        }
-
-        @Override
-        public synchronized <T> Future<T> process(PreLoadContext context, Function<? super CommandStore, T> function)
-        {
-            AsyncPromise<T> promise = new AsyncPromise<>();
-            processInternal(function, promise);
-            return promise;
-        }
-
-        @Override
-        public synchronized void shutdown() {}
-    }
-
-    public static class SingleThread extends InMemoryCommandStore
-    {
-        private final ExecutorService executor;
-
-        private class ConsumerWrapper extends AsyncPromise<Void> implements Runnable
-        {
-            private final Consumer<? super CommandStore> consumer;
-
-            public ConsumerWrapper(Consumer<? super CommandStore> consumer)
-            {
-                this.consumer = consumer;
+                super(time, agent, store, progressLog, rangesForEpoch, commandStore);
             }
 
             @Override
-            public void run()
+            public Future<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
             {
-                processInternal(consumer, this);
+                return submit(context, i -> { consumer.accept(i); return null; });
+            }
+
+            public synchronized <T> Future<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
+            {
+                AsyncPromise<T> promise = new AsyncPromise<>();
+                try
+                {
+                    T result = function.apply(this);
+                    promise.trySuccess(result);
+                }
+                catch (Throwable t)
+                {
+                    promise.tryFailure(t);
+                }
+                return promise;
+            }
+
+            public synchronized <T> T executeSync(PreLoadContext context, Function<? super SafeCommandStore, T> function)
+            {
+                return function.apply(this);
             }
         }
 
+        final SynchronizedState state;
+
+        public Synchronized(int id, int generation, int shardIndex, int numShards, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpoch rangesForEpoch)
+        {
+            super(id, generation, shardIndex, numShards);
+            this.state = new SynchronizedState(time, agent, store, progressLogFactory.create(this), rangesForEpoch, this);
+        }
+
+        @Override
+        public Agent agent()
+        {
+            return state.agent();
+        }
+
+        @Override
+        public Future<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
+        {
+            return state.execute(context, consumer);
+        }
+
+        @Override
+        public <T> Future<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
+        {
+            return state.submit(context, function);
+        }
+
+        @Override
+        public <T> T executeSync(PreLoadContext context, Function<? super SafeCommandStore, T> function)
+        {
+            return state.executeSync(context, function);
+        }
+
+        @Override
+        public void shutdown() {}
+    }
+
+    public static class SingleThread extends CommandStore
+    {
         private class FunctionWrapper<T> extends AsyncPromise<T> implements Runnable
         {
-            private final Function<? super CommandStore, T> function;
+            private final Function<? super SafeCommandStore, T> function;
 
-            public FunctionWrapper(Function<? super CommandStore, T> function)
+            public FunctionWrapper(Function<? super SafeCommandStore, T> function)
             {
                 this.function = function;
             }
@@ -236,59 +297,74 @@ public abstract class InMemoryCommandStore extends CommandStore
             @Override
             public void run()
             {
-                processInternal(function, this);
+                try
+                {
+                    trySuccess(function.apply(state));
+                }
+                catch (Throwable t)
+                {
+                    tryFailure(t);
+                }
             }
         }
 
-        public SingleThread(int generation,
-                            int index,
-                            int numShards,
-                            Node.Id nodeId,
-                            Function<Timestamp, Timestamp> uniqueNow,
-                            LongSupplier currentEpoch,
-                            Agent agent,
-                            DataStore store,
-                            ProgressLog.Factory progressLogFactory,
-                            RangesForEpoch rangesForEpoch)
+        class AsyncState extends State implements SafeCommandStore
         {
-            super(generation, index, numShards, uniqueNow, currentEpoch, agent, store, progressLogFactory, rangesForEpoch);
+            public AsyncState(NodeTimeService time, Agent agent, DataStore store, ProgressLog progressLog, RangesForEpoch rangesForEpoch, CommandStore commandStore)
+            {
+                super(time, agent, store, progressLog, rangesForEpoch, commandStore);
+            }
+
+            @Override
+            public Future<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
+            {
+                return submit(context, i -> { consumer.accept(i); return null; });
+            }
+
+            @Override
+            public <T> Future<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
+            {
+                FunctionWrapper<T> future = new FunctionWrapper<>(function);
+                executor.execute(future);
+                return future;
+            }
+        }
+
+        private final ExecutorService executor;
+        private final AsyncState state;
+
+        public SingleThread(int id, int generation, int shardIndex, int numShards, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpoch rangesForEpoch)
+        {
+            super(id, generation, shardIndex, numShards);
             executor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
-                thread.setName(CommandStore.class.getSimpleName() + '[' + nodeId + ':' + index + ']');
+                thread.setName(CommandStore.class.getSimpleName() + '[' + time.id() + ':' + shardIndex + ']');
                 return thread;
             });
+            state = newState(time, agent, store, progressLogFactory, rangesForEpoch);
+        }
+
+        AsyncState newState(NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpoch rangesForEpoch)
+        {
+            return new AsyncState(time, agent, store, progressLogFactory.create(this), rangesForEpoch, this);
         }
 
         @Override
-        public Future<Void> processSetup(Consumer<? super CommandStore> function)
+        public Agent agent()
         {
-            ConsumerWrapper future = new ConsumerWrapper(function);
-            executor.execute(future);
-            return future;
+            return state.agent();
         }
 
         @Override
-        public <T> Future<T> processSetup(Function<? super CommandStore, T> function)
+        public Future<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
         {
-            FunctionWrapper<T> future = new FunctionWrapper<>(function);
-            executor.execute(future);
-            return future;
+            return state.execute(context, consumer);
         }
 
         @Override
-        public Future<Void> process(PreLoadContext context, Consumer<? super CommandStore> consumer)
+        public <T> Future<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
         {
-            ConsumerWrapper future = new ConsumerWrapper(consumer);
-            executor.execute(future);
-            return future;
-        }
-
-        @Override
-        public <T> Future<T> process(PreLoadContext context, Function<? super CommandStore, T> function)
-        {
-            FunctionWrapper<T> future = new FunctionWrapper<>(function);
-            executor.execute(future);
-            return future;
+            return state.submit(context, function);
         }
 
         @Override
@@ -298,22 +374,91 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
     }
 
-    public static class SingleThreadDebug extends SingleThread
+    public static class Debug extends SingleThread
     {
+        class DebugState extends AsyncState
+        {
+            public DebugState(NodeTimeService time, Agent agent, DataStore store, ProgressLog progressLog, RangesForEpoch rangesForEpoch, CommandStore commandStore)
+            {
+                super(time, agent, store, progressLog, rangesForEpoch, commandStore);
+            }
+
+            @Override
+            public Command ifPresent(TxnId txnId)
+            {
+                assertThread();
+                return super.ifPresent(txnId);
+            }
+
+            @Override
+            public Command ifLoaded(TxnId txnId)
+            {
+                assertThread();
+                return super.ifLoaded(txnId);
+            }
+
+            @Override
+            public Command command(TxnId txnId)
+            {
+                assertThread();
+                return super.command(txnId);
+            }
+
+            @Override
+            public boolean hasCommand(TxnId txnId)
+            {
+                assertThread();
+                return super.hasCommand(txnId);
+            }
+
+            @Override
+            public CommandsForKey commandsForKey(Key key)
+            {
+                assertThread();
+                return super.commandsForKey(key);
+            }
+
+            @Override
+            public boolean hasCommandsForKey(Key key)
+            {
+                assertThread();
+                return super.hasCommandsForKey(key);
+            }
+
+            @Override
+            public CommandsForKey maybeCommandsForKey(Key key)
+            {
+                assertThread();
+                return super.maybeCommandsForKey(key);
+            }
+
+            @Override
+            public void addAndInvokeListener(TxnId txnId, CommandListener listener)
+            {
+                assertThread();
+                super.addAndInvokeListener(txnId, listener);
+            }
+
+            @Override
+            public void forEpochCommands(KeyRanges ranges, long epoch, Consumer<Command> consumer)
+            {
+                assertThread();
+                super.forEpochCommands(ranges, epoch, consumer);
+            }
+
+            @Override
+            public void forCommittedInEpoch(KeyRanges ranges, long epoch, Consumer<Command> consumer)
+            {
+                assertThread();
+                super.forCommittedInEpoch(ranges, epoch, consumer);
+            }
+        }
+
         private final AtomicReference<Thread> expectedThread = new AtomicReference<>();
 
-        public SingleThreadDebug(int generation,
-                                 int index,
-                                 int numShards,
-                                 Node.Id nodeId,
-                                 Function<Timestamp, Timestamp> uniqueNow,
-                                 LongSupplier currentEpoch,
-                                 Agent agent,
-                                 DataStore store,
-                                 ProgressLog.Factory progressLogFactory,
-                                 RangesForEpoch rangesForEpoch)
+        public Debug(int id, int generation, int shardIndex, int numShards, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpoch rangesForEpoch)
         {
-            super(generation, index, numShards, nodeId, uniqueNow, currentEpoch, agent, store, progressLogFactory, rangesForEpoch);
+            super(id, generation, shardIndex, numShards, time, agent, store, progressLogFactory, rangesForEpoch);
         }
 
         private void assertThread()
@@ -332,38 +477,19 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        public Command command(TxnId txnId)
+        AsyncState newState(NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpoch rangesForEpoch)
         {
-            assertThread();
-            return super.command(txnId);
+            return new DebugState(time, agent, store, progressLogFactory.create(this), rangesForEpoch, this);
         }
+    }
 
-        @Override
-        public boolean hasCommand(TxnId txnId)
-        {
-            assertThread();
-            return super.hasCommand(txnId);
-        }
+    public static State inMemory(CommandStore unsafeStore)
+    {
+        return (unsafeStore instanceof Synchronized) ? ((Synchronized) unsafeStore).state : ((SingleThread) unsafeStore).state;
+    }
 
-        @Override
-        public CommandsForKey commandsForKey(Key key)
-        {
-            assertThread();
-            return super.commandsForKey(key);
-        }
-
-        @Override
-        public boolean hasCommandsForKey(Key key)
-        {
-            assertThread();
-            return super.hasCommandsForKey(key);
-        }
-
-        @Override
-        protected void processInternal(Consumer<? super CommandStore> consumer, Promise<Void> promise)
-        {
-            assertThread();
-            super.processInternal(consumer, promise);
-        }
+    public static State inMemory(SafeCommandStore safeStore)
+    {
+        return (safeStore instanceof SynchronizedState) ? ((SynchronizedState) safeStore) : ((AsyncState) safeStore);
     }
 }

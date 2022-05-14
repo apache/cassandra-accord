@@ -20,9 +20,9 @@ package accord.local;
 
 import accord.primitives.TxnId;
 
-public interface Listener
+public interface CommandListener
 {
-    void onChange(Command command);
+    void onChange(SafeCommandStore safeStore, Command command);
 
     /**
      * Scope needed to run onChange

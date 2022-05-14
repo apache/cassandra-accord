@@ -18,53 +18,69 @@
 
 package accord.local;
 
-import java.util.Iterator;
-import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import accord.api.Key;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-import com.google.common.collect.Iterators;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import static accord.utils.Utils.*;
 
-public abstract class CommandsForKey implements Listener, Iterable<PartialCommand.WithDeps>
+public abstract class CommandsForKey implements CommandListener
 {
     private static final Logger logger = LoggerFactory.getLogger(CommandsForKey.class);
 
-    public interface CommandTimeseries
+    public interface CommandTimeseries<T>
     {
-        PartialCommand.WithDeps get(Timestamp timestamp);
         void add(Timestamp timestamp, Command command);
         void remove(Timestamp timestamp);
 
         boolean isEmpty();
 
+        enum TestDep { WITH, WITHOUT, ANY_DEPS }
+        enum TestStatus
+        {
+            IS, HAS_BEEN, ANY_STATUS;
+            public static boolean test(Status test, TestStatus predicate, Status param)
+            {
+                return predicate == ANY_STATUS || (predicate == IS ? test == param : test.hasBeen(param));
+            }
+        }
+        enum TestKind { Ws, RorWs}
+
         /**
          * All commands before (exclusive of) the given timestamp
+         *
+         * TODO (soon): TestDep should be asynchronous; data should not be kept memory-resident as only used for recovery
          */
-        Stream<PartialCommand.WithDeps> before(Timestamp timestamp);
+        Stream<T> before(Timestamp timestamp, TestKind testKind, TestDep testDep, @Nullable TxnId depId, TestStatus testStatus, @Nullable Status status);
 
         /**
          * All commands after (exclusive of) the given timestamp
          */
-        Stream<PartialCommand.WithDeps> after(Timestamp timestamp);
+        Stream<T> after(Timestamp timestamp, TestKind testKind, TestDep testDep, @Nullable TxnId depId, TestStatus testStatus, @Nullable Status status);
+    }
 
-        /**
-         * All commands between (inclusive of) the given timestamps
-         */
-        Stream<PartialCommand.WithDeps> between(Timestamp min, Timestamp max);
+    public static class TxnIdWithExecuteAt
+    {
+        public final TxnId txnId;
+        public final Timestamp executeAt;
 
-        Stream<PartialCommand.WithDeps> all();
+        public TxnIdWithExecuteAt(TxnId txnId, Timestamp executeAt)
+        {
+            this.txnId = txnId;
+            this.executeAt = executeAt;
+        }
     }
 
     public abstract Key key();
-    public abstract CommandTimeseries uncommitted();
-    public abstract CommandTimeseries committedById();
-    public abstract CommandTimeseries committedByExecuteAt();
+    public abstract CommandTimeseries<? extends TxnIdWithExecuteAt> uncommitted();
+    public abstract CommandTimeseries<TxnId> committedById();
+    public abstract CommandTimeseries<TxnId> committedByExecuteAt();
 
     public abstract Timestamp max();
     public abstract void updateMax(Timestamp timestamp);
@@ -76,7 +92,7 @@ public abstract class CommandsForKey implements Listener, Iterable<PartialComman
     }
 
     @Override
-    public void onChange(Command command)
+    public void onChange(SafeCommandStore safeStore, Command command)
     {
         logger.trace("cfk[{}]: updating as listener in response to change on {} with status {} ({})",
                      key(), command.txnId(), command.status(), command);
@@ -84,7 +100,7 @@ public abstract class CommandsForKey implements Listener, Iterable<PartialComman
         switch (command.status())
         {
             case Applied:
-            case Executed:
+            case PreApplied:
             case Committed:
                 committedById().add(command.txnId(), command);
                 committedByExecuteAt().add(command.executeAt(), command);
@@ -100,21 +116,6 @@ public abstract class CommandsForKey implements Listener, Iterable<PartialComman
         updateMax(command.executeAt());
         uncommitted().add(command.txnId(), command);
         command.addListener(this);
-    }
-
-    public void forWitnessed(Timestamp minTs, Timestamp maxTs, Consumer<PartialCommand> consumer)
-    {
-        uncommitted().between(minTs, maxTs)
-                .filter(cmd -> cmd.hasBeen(Status.PreAccepted)).forEach(consumer);
-        committedById().between(minTs, maxTs).forEach(consumer);
-        committedByExecuteAt().between(minTs, maxTs)
-                .filter(cmd -> cmd.txnId().compareTo(minTs) < 0 || cmd.txnId().compareTo(maxTs) > 0).forEach(consumer);
-    }
-
-    @Override
-    public Iterator<PartialCommand.WithDeps> iterator()
-    {
-        return Iterators.concat(uncommitted().all().iterator(), committedByExecuteAt().all().iterator());
     }
 
     public boolean isEmpty()

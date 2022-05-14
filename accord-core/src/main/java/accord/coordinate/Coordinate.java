@@ -24,9 +24,9 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.BiConsumer;
 
-import accord.api.Key;
 import accord.api.Result;
 import accord.coordinate.tracking.FastPathTracker;
+import accord.primitives.Route;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.primitives.Ballot;
@@ -37,7 +37,7 @@ import accord.local.Node.Id;
 import accord.primitives.Timestamp;
 import accord.messages.PreAccept;
 import accord.messages.PreAccept.PreAcceptOk;
-import accord.txn.Txn;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.messages.PreAccept.PreAcceptReply;
 import com.google.common.collect.Sets;
@@ -147,22 +147,19 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
     final Node node;
     final TxnId txnId;
     final Txn txn;
-    final Key homeKey;
+    final Route route;
 
     private PreacceptTracker tracker;
     private final List<PreAcceptOk> preAcceptOks = new ArrayList<>();
     private boolean preAcceptIsDone;
 
-    // TODO: hybrid fast path? or at least short-circuit accept if we gain a fast-path quorum _and_ proposed one by accept
-    boolean permitHybridFastPath;
-
-    private Coordinate(Node node, TxnId txnId, Txn txn, Key homeKey)
+    private Coordinate(Node node, TxnId txnId, Txn txn, Route route)
     {
         this.node = node;
         this.txnId = txnId;
         this.txn = txn;
-        this.homeKey = homeKey;
-        Topologies topologies = node.topology().withUnsyncedEpochs(txn.keys(), txnId.epoch, txnId.epoch);
+        this.route = route;
+        Topologies topologies = node.topology().withUnsyncedEpochs(route, txnId, txnId);
         this.tracker = new PreacceptTracker(topologies);
     }
 
@@ -170,12 +167,12 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
     {
         // TODO: consider sending only to electorate of most recent topology (as only these PreAccept votes matter)
         // note that we must send to all replicas of old topology, as electorate may not be reachable
-        node.send(tracker.nodes(), to -> new PreAccept(to, tracker.topologies(), txnId, txn, homeKey), this);
+        node.send(tracker.nodes(), to -> new PreAccept(to, tracker.topologies(), txnId, txn, route), this);
     }
 
-    public static Future<Result> coordinate(Node node, TxnId txnId, Txn txn, Key homeKey)
+    public static Future<Result> coordinate(Node node, TxnId txnId, Txn txn, Route route)
     {
-        Coordinate coordinate = new Coordinate(node, txnId, txn, homeKey);
+        Coordinate coordinate = new Coordinate(node, txnId, txn, route);
         coordinate.start();
         return coordinate;
     }
@@ -189,7 +186,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
         if (tracker.failure(from))
         {
             preAcceptIsDone = true;
-            tryFailure(new Timeout(txnId, homeKey));
+            tryFailure(new Timeout(txnId, route.homeKey));
         }
 
         // if no other responses are expected and the slow quorum has been satisfied, proceed
@@ -203,9 +200,10 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
         tryFailure(failure);
     }
 
-    // TODO (soon): do we need to preaccept in later epochs? the sync logic should take care of it for us, since
-    //              either we haven't synced between a majority and the earlier epochs are still involved for
+    // TODO (soon): I don't think we need to preaccept in later epochs? the Sync logic should take care of it for us,
+    //              since either we haven't synced between a majority and the earlier epochs are still involved for
     //              later preaccepts, or they have been sync'd and the earlier transactions are known to the later epochs
+    //              (also, we aren't doing this on recovery, and everything works...)
     private synchronized void onEpochUpdate()
     {
         if (!tracker.hasSupersedingEpoch())
@@ -219,25 +217,25 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
         // send messages to new nodes
         Set<Id> needMessages = Sets.difference(tracker.nodes(), previousNodes);
         if (!needMessages.isEmpty())
-            node.send(needMessages, to -> new PreAccept(to, newTopologies, txnId, txn, homeKey), this);
+            node.send(needMessages, to -> new PreAccept(to, newTopologies, txnId, txn, route), this);
 
         if (tracker.shouldSlowPathAccept())
             onPreAccepted();
     }
 
-    public synchronized void onSuccess(Id from, PreAcceptReply receive)
+    public synchronized void onSuccess(Id from, PreAcceptReply reply)
     {
         if (preAcceptIsDone)
             return;
 
-        if (!receive.isOK())
+        if (!reply.isOk())
         {
             // we've been preempted by a recovery coordinator; defer to it, and wait to hear any result
-            tryFailure(new Preempted(txnId, homeKey));
+            tryFailure(new Preempted(txnId, route.homeKey));
             return;
         }
 
-        PreAcceptOk ok = (PreAcceptOk) receive;
+        PreAcceptOk ok = (PreAcceptOk) reply;
         preAcceptOks.add(ok);
 
         boolean fastPath = ok.witnessedAt.compareTo(txnId) == 0;
@@ -264,7 +262,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
         {
             preAcceptIsDone = true;
             Deps deps = Deps.merge(preAcceptOks, ok -> ok.witnessedAt.equals(txnId) ? ok.deps : null);
-            Execute.execute(node, txnId, txn, homeKey, txnId, deps, this);
+            Execute.execute(node, txnId, txn, route, txnId, deps, this);
         }
         else
         {
@@ -278,14 +276,16 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
 
             // TODO: perhaps don't submit Accept immediately if we almost have enough for fast-path,
             //       but by sending accept we rule out hybrid fast-path
-            permitHybridFastPath = executeAt.compareTo(txnId) == 0;
-            node.withEpoch(executeAt.epoch, () -> Propose.propose(node, tracker.topologies(), Ballot.ZERO, txnId, txn, homeKey, executeAt, deps, this));
+            node.withEpoch(executeAt.epoch, () -> Propose.propose(node, tracker.topologies(), Ballot.ZERO, txnId, txn, route, executeAt, deps, this));
         }
     }
 
     @Override
     public void accept(Result success, Throwable failure)
     {
+        if (failure instanceof Timeout)
+            failure = ((Timeout) failure).with(txnId, route.homeKey);
+
         if (success != null) trySuccess(success);
         else tryFailure(failure);
     }

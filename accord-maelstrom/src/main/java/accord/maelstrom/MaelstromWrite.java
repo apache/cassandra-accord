@@ -21,9 +21,9 @@ package accord.maelstrom;
 import accord.api.Key;
 import accord.api.DataStore;
 import accord.api.Write;
+import accord.local.SafeCommandStore;
 import accord.primitives.Timestamp;
-import accord.local.CommandStore;
-import accord.txn.Writes;
+import accord.primitives.Writes;
 import accord.utils.Timestamped;
 import org.apache.cassandra.utils.concurrent.Future;
 
@@ -32,7 +32,7 @@ import java.util.TreeMap;
 public class MaelstromWrite extends TreeMap<Key, Value> implements Write
 {
     @Override
-    public Future<Void> apply(Key key, CommandStore commandStore, Timestamp executeAt, DataStore store)
+    public Future<Void> apply(Key key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
     {
         MaelstromStore s = (MaelstromStore) store;
         if (containsKey(key))

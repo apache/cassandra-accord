@@ -19,6 +19,7 @@
 package accord.local;
 
 import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.primitives.TxnId;
 
 import java.util.Collections;
@@ -64,5 +65,10 @@ public interface PreLoadContext
     static PreLoadContext contextFor(Key key)
     {
         return contextFor(Collections.emptyList(), Collections.singleton(key));
+    }
+
+    static PreLoadContext empty()
+    {
+        return contextFor(Collections.emptyList(), Collections.emptyList());
     }
 }

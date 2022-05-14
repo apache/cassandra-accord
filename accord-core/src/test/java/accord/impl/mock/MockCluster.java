@@ -42,6 +42,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
 import java.util.function.LongSupplier;
@@ -108,7 +109,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                         nowSupplier,
                         () -> store,
                         new TestAgent(),
-                        new Random(),
+                        new Random(random.nextLong()),
                         new ThreadPoolScheduler(),
                         SimpleProgressLog::new,
                         InMemoryCommandStores.SingleThread::new);
@@ -158,6 +159,10 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         if (callback != null)
         {
             callbacks.put(messageId, callback);
+            node.scheduler().once(() -> {
+                if (callbacks.remove(messageId, callback))
+                    callback.onFailure(to, new Timeout(null, null));
+                }, 2L, TimeUnit.SECONDS);
         }
 
         logger.info("processing message[{}] from {} to {}: {}", messageId, from, to, request);

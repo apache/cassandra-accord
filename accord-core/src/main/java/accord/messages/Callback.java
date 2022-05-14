@@ -26,7 +26,7 @@ import accord.local.Node.Id;
  */
 public interface Callback<T>
 {
-    void onSuccess(Id from, T response);
+    void onSuccess(Id from, T reply);
     default void onSlowResponse(Id from) {}
     void onFailure(Id from, Throwable failure);
     void onCallbackFailure(Id from, Throwable failure);

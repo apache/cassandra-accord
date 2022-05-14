@@ -19,9 +19,11 @@
 package accord.impl.list;
 
 import accord.api.*;
+import accord.local.SafeCommandStore;
+import accord.primitives.KeyRanges;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
-import accord.local.CommandStore;
+import accord.primitives.Txn;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import org.slf4j.Logger;
@@ -47,7 +49,7 @@ public class ListRead implements Read
     }
 
     @Override
-    public Future<Data> read(Key key, boolean forWriteTxn, CommandStore commandStore, Timestamp executeAt, DataStore store)
+    public Future<Data> read(Key key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
     {
         ListStore s = (ListStore)store;
         ListData result = new ListData();
@@ -55,6 +57,18 @@ public class ListRead implements Read
         logger.trace("READ on {} at {} key:{} -> {}", s.node, executeAt, key, data);
         result.put(key, data);
         return ImmediateFuture.success(result);
+    }
+
+    @Override
+    public Read slice(KeyRanges ranges)
+    {
+        return new ListRead(readKeys.slice(ranges), keys.slice(ranges));
+    }
+
+    @Override
+    public Read merge(Read other)
+    {
+        return new ListRead(readKeys.union(((ListRead)other).readKeys), keys.union(((ListRead)other).keys));
     }
 
     @Override

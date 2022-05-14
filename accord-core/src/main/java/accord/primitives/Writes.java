@@ -16,10 +16,11 @@
  * limitations under the License.
  */
 
-package accord.txn;
+package accord.primitives;
 
 import accord.api.Write;
 import accord.local.CommandStore;
+import accord.local.SafeCommandStore;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 import accord.primitives.KeyRanges;
@@ -55,24 +56,29 @@ public class Writes
         return executeAt.equals(writes.executeAt) && keys.equals(writes.keys) && write.equals(writes.write);
     }
 
+    public boolean isEmpty()
+    {
+        return keys.isEmpty();
+    }
+
     @Override
     public int hashCode()
     {
         return Objects.hash(executeAt, keys, write);
     }
 
-    public Future<Void> apply(CommandStore commandStore)
+    public Future<Void> apply(SafeCommandStore safeStore)
     {
         if (write == null)
             return SUCCESS;
 
-        KeyRanges ranges = commandStore.ranges().since(executeAt.epoch);
+        KeyRanges ranges = safeStore.ranges().since(executeAt.epoch);
         if (ranges == null)
             return SUCCESS;
 
         List<Future<Void>> futures = keys.foldl(ranges, (index, key, accumulate) -> {
-            if (commandStore.hashIntersects(key))
-                accumulate.add(write.apply(key, commandStore, executeAt, commandStore.store()));
+            if (safeStore.commandStore().hashIntersects(key))
+                accumulate.add(write.apply(key, safeStore, executeAt, safeStore.dataStore()));
             return accumulate;
         }, new ArrayList<>());
         return ReducingFuture.reduce(futures, (l, r) -> null);

@@ -18,7 +18,10 @@
 
 package accord.api;
 
+import accord.primitives.KeyRanges;
 import accord.primitives.Keys;
+
+import javax.annotation.Nullable;
 
 /**
  * A client-defined update operation (the write equivalent of a query).
@@ -28,5 +31,8 @@ import accord.primitives.Keys;
 public interface Update
 {
     Keys keys();
-    Write apply(Data data);
+    // null is provided only if nothing was read
+    Write apply(@Nullable Data data);
+    Update slice(KeyRanges ranges);
+    Update merge(Update other);
 }

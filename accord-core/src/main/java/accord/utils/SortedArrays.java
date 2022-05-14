@@ -715,6 +715,11 @@ public class SortedArrays
         return ((long)ai << 32) | bi;
     }
 
+    public static long swapHighLow32b(long v)
+    {
+        return (v << 32) | (v >>> 32);
+    }
+
     /**
      * Given two portions of sorted arrays with unique elements, where {@code trg} is a subset of the {@code src},
      * return an int[] with its initial {@code srcLength} elements populated, with the index within {@code trg}
@@ -763,12 +768,12 @@ public class SortedArrays
      * items that are members of both sets (with their corresponding indices).
      */
     @Inline
-    public static <T extends Comparable<? super T>> long foldlIntersection(T[] as, T[] bs, IndexedFoldIntersectToLong<T> fold, long param, long initialValue, long terminalValue)
+    public static <T extends Comparable<? super T>> long foldlIntersection(T[] as, T[] bs, IndexedFoldIntersectToLong<? super T> fold, long param, long initialValue, long terminalValue)
     {
         return foldlIntersection(as, 0, as.length, bs, 0, bs.length, fold, param, initialValue, terminalValue);
     }
 
-    public static <T extends Comparable<? super T>> long foldlIntersection(T[] as, int ai, int alim, T[] bs, int bi, int blim, IndexedFoldIntersectToLong<T> fold, long param, long initialValue, long terminalValue)
+    public static <T extends Comparable<? super T>> long foldlIntersection(T[] as, int ai, int alim, T[] bs, int bi, int blim, IndexedFoldIntersectToLong<? super T> fold, long param, long initialValue, long terminalValue)
     {
         while (true)
         {
@@ -794,7 +799,7 @@ public class SortedArrays
      * A fold variation that invokes the fold function only on those items that are members of {@code as} and NOT {@code bs}
      */
     @Inline
-    public static <T extends Comparable<? super T>> long foldlDifference(T[] as, T[] bs, IndexedFoldToLong<T> fold, long param, long initialValue, long terminalValue)
+    public static <T extends Comparable<? super T>> long foldlDifference(T[] as, T[] bs, IndexedFoldToLong<? super T> fold, long param, long initialValue, long terminalValue)
     {
         int ai = 0, bi = 0;
         while (ai < as.length && bi < bs.length)

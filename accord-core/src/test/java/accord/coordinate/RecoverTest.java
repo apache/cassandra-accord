@@ -19,25 +19,15 @@
 package accord.coordinate;
 
 import accord.local.Node;
-import accord.impl.mock.MockCluster;
-import accord.impl.IntKey;
 import accord.api.Key;
 import accord.local.*;
-import accord.primitives.Keys;
-import accord.messages.PreAccept;
-import accord.txn.Txn;
 import accord.primitives.TxnId;
 
 import org.junit.jupiter.api.Assertions;
 
-import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
-import static accord.NetworkFilter.*;
-import static accord.Utils.id;
-import static accord.Utils.ids;
-import static accord.Utils.writeTxn;
 import static accord.impl.InMemoryCommandStore.inMemory;
 
 public class RecoverTest
@@ -51,7 +41,7 @@ public class RecoverTest
     {
         CommandStore commandStore = getCommandShard(node, key);
         Assertions.assertTrue(inMemory(commandStore).hasCommand(txnId));
-        return commandStore.command(txnId);
+        return inMemory(commandStore).command(txnId);
     }
 
     private static void assertStatus(Node node, Key key, TxnId txnId, Status status)
@@ -87,44 +77,44 @@ public class RecoverTest
     }
 
     // TODO
-    void conflictTest() throws Throwable
-    {
-        Key key = IntKey.key(10);
-        try (MockCluster cluster = MockCluster.builder().nodes(9).replication(9).build())
-        {
-            cluster.networkFilter.isolate(ids(7, 9));
-            cluster.networkFilter.addFilter(anyId(), isId(ids(5, 6)), notMessageType(PreAccept.class));
-
-            TxnId txnId1 = new TxnId(1, 100, 0, id(100));
-            Txn txn1 = writeTxn(Keys.of(key));
-            assertTimeout(Coordinate.coordinate(cluster.get(1), txnId1, txn1, key));
-
-            TxnId txnId2 = new TxnId(1, 50, 0, id(101));
-            Txn txn2 = writeTxn(Keys.of(key));
-            cluster.networkFilter.clear();
-            cluster.networkFilter.isolate(ids(1, 7));
-            assertTimeout(Coordinate.coordinate(cluster.get(9), txnId2, txn2, key));
-
-            cluster.nodes(ids(1, 4)).forEach(n -> assertStatus(n, key, txnId1, Status.Accepted));
-            cluster.nodes(ids(5, 6)).forEach(n -> assertStatus(n, key, txnId1, Status.PreAccepted));
-            cluster.nodes(ids(7, 9)).forEach(n -> assertMissing(n, key, txnId1));
-
-            cluster.nodes(ids(1, 7)).forEach(n -> assertMissing(n, key, txnId2));
-            cluster.nodes(ids(8, 9)).forEach(n -> assertStatus(n, key, txnId2, Status.PreAccepted));
-
-            //
-            cluster.networkFilter.clear();
-            cluster.networkFilter.isolate(ids(1, 4));
-            Recover.recover(cluster.get(8), txnId2, txn2, key).get();
-
-            List<Node> nodes = cluster.nodes(ids(5, 9));
-            Assertions.assertTrue(txnId2.compareTo(txnId1) < 0);
-            nodes.forEach(n -> assertStatus(n, key, txnId2, Status.Applied));
-            nodes.forEach(n -> {
-                assertStatus(n, key, txnId2, Status.Applied);
-                Command command = getCommand(n, key, txnId2);
-                Assertions.assertEquals(txnId1, command.executeAt());
-            });
-        }
-    }
+//    void conflictTest() throws Throwable
+//    {
+//        Key key = IntKey.key(10);
+//        try (MockCluster cluster = MockCluster.builder().nodes(9).replication(9).build())
+//        {
+//            cluster.networkFilter.isolate(ids(7, 9));
+//            cluster.networkFilter.addFilter(anyId(), isId(ids(5, 6)), notMessageType(PreAccept.class));
+//
+//            TxnId txnId1 = new TxnId(1, 100, 0, id(100));
+//            Txn txn1 = writeTxn(Keys.of(key));
+//            assertTimeout(Coordinate.coordinate(cluster.get(1), txnId1, txn1, key));
+//
+//            TxnId txnId2 = new TxnId(1, 50, 0, id(101));
+//            Txn txn2 = writeTxn(Keys.of(key));
+//            cluster.networkFilter.clear();
+//            cluster.networkFilter.isolate(ids(1, 7));
+//            assertTimeout(Coordinate.coordinate(cluster.get(9), txnId2, txn2, key));
+//
+//            cluster.nodes(ids(1, 4)).forEach(n -> assertStatus(n, key, txnId1, Status.Accepted));
+//            cluster.nodes(ids(5, 6)).forEach(n -> assertStatus(n, key, txnId1, Status.PreAccepted));
+//            cluster.nodes(ids(7, 9)).forEach(n -> assertMissing(n, key, txnId1));
+//
+//            cluster.nodes(ids(1, 7)).forEach(n -> assertMissing(n, key, txnId2));
+//            cluster.nodes(ids(8, 9)).forEach(n -> assertStatus(n, key, txnId2, Status.PreAccepted));
+//
+//            //
+//            cluster.networkFilter.clear();
+//            cluster.networkFilter.isolate(ids(1, 4));
+//            Recover.recover(cluster.get(8), txnId2, txn2, key).get();
+//
+//            List<Node> nodes = cluster.nodes(ids(5, 9));
+//            Assertions.assertTrue(txnId2.compareTo(txnId1) < 0);
+//            nodes.forEach(n -> assertStatus(n, key, txnId2, Status.Applied));
+//            nodes.forEach(n -> {
+//                assertStatus(n, key, txnId2, Status.Applied);
+//                Command command = getCommand(n, key, txnId2);
+//                Assertions.assertEquals(txnId1, command.executeAt());
+//            });
+//        }
+//    }
 }

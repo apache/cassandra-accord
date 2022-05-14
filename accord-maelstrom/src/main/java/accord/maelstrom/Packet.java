@@ -24,7 +24,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
-import accord.impl.SimpleProgressLog;
 import accord.messages.*;
 import com.google.gson.JsonObject;
 import com.google.gson.TypeAdapter;
@@ -50,7 +49,7 @@ public class Packet implements ReplyContext
         AcceptNack(accord.messages.Accept.AcceptNack.class),
         Commit(accord.messages.Commit.class),
         Apply(Apply.class),
-        ApplyOk(Apply.ApplyOk.class),
+        ApplyReply(Apply.ApplyReply.class),
         Read(ReadData.class),
         ReadOk(ReadData.ReadOk.class),
         ReadNack(ReadData.ReadNack.class),
@@ -62,12 +61,9 @@ public class Packet implements ReplyContext
         CheckStatus(CheckStatus.class),
         CheckStatusOk(CheckStatus.CheckStatusOk.class),
         CheckStatusOkFull(CheckStatus.CheckStatusOkFull.class),
-        InformOfTxn(InformOfTxn.class),
-        InformOfTxnOk(InformOfTxn.InformOfTxnOk.class),
-        InformOfPersistence(InformOfPersistence.class),
-        InformHomeOfTxn(accord.coordinate.InformHomeOfTxn.class, Json.DEFAULT_ADAPTER),
-        SimpleProgressLog_ApplyAndCheck(SimpleProgressLog.ApplyAndCheck.class),
-        SimpleProgressLog_ApplyAndCheckOk(SimpleProgressLog.ApplyAndCheckOk.class);
+        InformOfTxnId(InformOfTxnId.class, Json.DEFAULT_ADAPTER),
+        SimpleReply(accord.messages.SimpleReply.class, Json.DEFAULT_ADAPTER),
+        ;
 
         private static final Map<Class<?>, Type> LOOKUP_MAP = Arrays.stream(Type.values())
                 .filter(t -> t.type != null)

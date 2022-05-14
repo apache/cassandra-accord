@@ -22,19 +22,20 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
 
-import accord.api.Key;
 import accord.api.Result;
+import accord.api.RoutingKey;
 import accord.coordinate.tracking.AbstractQuorumTracker.QuorumShardTracker;
 import accord.coordinate.tracking.QuorumTracker;
+import accord.messages.Callback;
+import accord.primitives.Route;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.primitives.Ballot;
-import accord.messages.Callback;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.primitives.Timestamp;
 import accord.primitives.Deps;
-import accord.txn.Txn;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.messages.Accept;
 import accord.messages.Accept.AcceptOk;
@@ -47,7 +48,8 @@ class Propose implements Callback<AcceptReply>
     final Ballot ballot;
     final TxnId txnId;
     final Txn txn;
-    final Key homeKey;
+    final Route route;
+    final Deps deps;
 
     private final List<AcceptOk> acceptOks;
     private final Timestamp executeAt;
@@ -55,31 +57,32 @@ class Propose implements Callback<AcceptReply>
     private final BiConsumer<Result, Throwable> callback;
     private boolean isDone;
 
-    Propose(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, BiConsumer<Result, Throwable> callback)
+    Propose(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, Route route, Deps deps, Timestamp executeAt, BiConsumer<Result, Throwable> callback)
     {
         this.node = node;
         this.ballot = ballot;
         this.txnId = txnId;
         this.txn = txn;
-        this.homeKey = homeKey;
+        this.route = route;
+        this.deps = deps;
         this.executeAt = executeAt;
         this.callback = callback;
         this.acceptOks = new ArrayList<>();
         this.acceptTracker = new QuorumTracker(topologies);
     }
 
-    public static void propose(Node node, Ballot ballot, TxnId txnId, Txn txn, Key homeKey,
+    public static void propose(Node node, Ballot ballot, TxnId txnId, Txn txn, Route route,
                                Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
     {
-        Topologies topologies = node.topology().withUnsyncEpochs(txn, txnId, executeAt);
-        propose(node, topologies, ballot, txnId, txn, homeKey, executeAt, deps, callback);
+        Topologies topologies = node.topology().withUnsyncedEpochs(route, txnId, executeAt);
+        propose(node, topologies, ballot, txnId, txn, route, executeAt, deps, callback);
     }
 
-    public static void propose(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, Key homeKey,
+    public static void propose(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, Route route,
                                Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
     {
-        Propose propose = new Propose(node, topologies, ballot, txnId, txn, homeKey, executeAt, callback);
-        node.send(propose.acceptTracker.nodes(), to -> new Accept(to, topologies, ballot, txnId, homeKey, txn, executeAt, deps), propose);
+        Propose propose = new Propose(node, topologies, ballot, txnId, txn, route, deps, executeAt, callback);
+        node.send(propose.acceptTracker.nodes(), to -> new Accept(to, topologies, ballot, txnId, route, executeAt, txn.keys(), deps, txn.kind()), propose);
     }
 
     @Override
@@ -88,17 +91,20 @@ class Propose implements Callback<AcceptReply>
         if (isDone)
             return;
 
-        if (!reply.isOK())
+        switch (reply.outcome())
         {
-            isDone = true;
-            callback.accept(null, new Preempted(txnId, homeKey));
-            return;
+            default: throw new IllegalStateException();
+            case Redundant:
+            case RejectedBallot:
+                isDone = true;
+                callback.accept(null, new Preempted(txnId, route.homeKey));
+                break;
+            case Success:
+                AcceptOk ok = (AcceptOk) reply;
+                acceptOks.add(ok);
+                if (acceptTracker.success(from))
+                    onAccepted();
         }
-
-        AcceptOk ok = (AcceptOk) reply;
-        acceptOks.add(ok);
-        if (acceptTracker.success(from))
-            onAccepted();
     }
 
     @Override
@@ -107,7 +113,7 @@ class Propose implements Callback<AcceptReply>
         if (acceptTracker.failure(from))
         {
             isDone = true;
-            callback.accept(null, new Timeout(txnId, homeKey));
+            callback.accept(null, new Timeout(txnId, route.homeKey));
         }
     }
 
@@ -122,7 +128,7 @@ class Propose implements Callback<AcceptReply>
     {
         isDone = true;
         Deps deps = Deps.merge(acceptOks, ok -> ok.deps);
-        Execute.execute(node, txnId, txn, homeKey, executeAt, deps, callback);
+        Execute.execute(node, txnId, txn, route, executeAt, deps, callback);
     }
 
     // A special version for proposing the invalidation of a transaction; only needs to succeed on one shard
@@ -131,11 +137,11 @@ class Propose implements Callback<AcceptReply>
         final Node node;
         final Ballot ballot;
         final TxnId txnId;
-        final Key someKey;
+        final RoutingKey someKey;
 
         private final QuorumShardTracker acceptTracker;
 
-        Invalidate(Node node, Shard shard, Ballot ballot, TxnId txnId, Key someKey)
+        Invalidate(Node node, Shard shard, Ballot ballot, TxnId txnId, RoutingKey someKey)
         {
             this.node = node;
             this.acceptTracker = new QuorumShardTracker(shard);
@@ -144,7 +150,7 @@ class Propose implements Callback<AcceptReply>
             this.someKey = someKey;
         }
 
-        public static Invalidate proposeInvalidate(Node node, Ballot ballot, TxnId txnId, Key someKey)
+        public static Invalidate proposeInvalidate(Node node, Ballot ballot, TxnId txnId, RoutingKey someKey)
         {
             Shard shard = node.topology().forEpochIfKnown(someKey, txnId.epoch);
             Invalidate invalidate = new Invalidate(node, shard, ballot, txnId, someKey);
@@ -158,7 +164,7 @@ class Propose implements Callback<AcceptReply>
             if (isDone())
                 return;
 
-            if (!reply.isOK())
+            if (!reply.isOk())
             {
                 tryFailure(new Preempted(txnId, null));
                 return;

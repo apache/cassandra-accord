@@ -31,7 +31,7 @@ import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.txn.Txn;
+import accord.primitives.Txn;
 import accord.maelstrom.Packet.Type;
 import accord.messages.Request;
 
@@ -136,7 +136,7 @@ public class MaelstromRequest extends Body implements Request
         buildKeys.addAll(buildReadKeys);
         Keys readKeys = new Keys(buildReadKeys);
         Keys keys = new Keys(buildKeys);
-        MaelstromRead read = new MaelstromRead(keys, readKeys);
+        MaelstromRead read = new MaelstromRead(readKeys, keys);
         MaelstromQuery query = new MaelstromQuery(client, requestId);
 
         return new Txn.InMemory(keys, read, query, update);

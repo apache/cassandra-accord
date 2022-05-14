@@ -1,10 +1,6 @@
 package accord.local;
 
-import accord.primitives.Deps;
-import accord.primitives.Keys;
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
-import accord.txn.Txn;
+import accord.primitives.*;
 
 /**
  * A minimal, read only view of a full command. Provided so C* can denormalize command data onto
@@ -13,35 +9,19 @@ import accord.txn.Txn;
  */
 public interface PartialCommand
 {
-    interface WithDeps extends PartialCommand
-    {
-        Deps savedDeps();
-    }
-
     TxnId txnId();
-    Txn txn();
-
-    default Keys someKeys()
-    {
-        if (txn() != null)
-            return txn().keys();
-
-        return null;
-    }
-
     Timestamp executeAt();
 
+    // TODO: pack this into TxnId
+    Txn.Kind kind();
     Status status();
 
     default boolean hasBeen(Status status)
     {
         return status().hasBeen(status);
     }
-
     default boolean is(Status status)
     {
         return status() == status;
     }
-
-    void removeListener(Listener listener);
 }

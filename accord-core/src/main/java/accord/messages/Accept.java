@@ -18,85 +18,108 @@
 
 package accord.messages;
 
-import accord.primitives.*;
-import accord.local.PreLoadContext;
-import accord.messages.TxnRequest.WithUnsynced;
-import accord.local.Node.Id;
 import accord.api.Key;
-import accord.local.CommandStore;
+import accord.local.SafeCommandStore;
+import accord.primitives.*;
+import accord.local.Node.Id;
 import accord.topology.Topologies;
-import accord.local.Node;
+
+import accord.api.RoutingKey;
+import accord.local.Command.AcceptOutcome;
+import accord.primitives.PartialDeps;
+import accord.primitives.Route;
+import accord.primitives.Txn;
+import accord.primitives.Ballot;
 import accord.local.Command;
-import accord.txn.Txn;
-import com.google.common.annotations.VisibleForTesting;
 
 import java.util.Collections;
+import accord.primitives.Deps;
+import accord.primitives.TxnId;
+
+import static accord.local.Command.AcceptOutcome.RejectedBallot;
+import static accord.local.Command.AcceptOutcome.Success;
 
 import javax.annotation.Nullable;
 
-import static accord.messages.PreAccept.calculateDeps;
+import static accord.messages.PreAccept.calculatePartialDeps;
 
-public class Accept extends WithUnsynced
+// TODO: use different objects for send and receive, so can be more efficient (e.g. serialize without slicing, and without unnecessary fields)
+public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
 {
     public static class SerializerSupport
     {
-        public static Accept create(Keys scope, long epoch, TxnId txnId, Ballot ballot, Key homeKey, Txn txn, Timestamp executeAt, Deps deps)
+        public static Accept create(TxnId txnId, PartialRoute scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Ballot ballot, Timestamp executeAt, Keys keys, PartialDeps partialDeps, Txn.Kind kind)
         {
-            return new Accept(scope, epoch, txnId, ballot, homeKey, txn, executeAt, deps);
+            return new Accept(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey, ballot, executeAt, keys, partialDeps, kind);
         }
     }
 
     public final Ballot ballot;
-    public final Key homeKey;
-    public final Txn txn;
     public final Timestamp executeAt;
-    public final Deps deps;
+    public final Keys keys;
+    public final PartialDeps partialDeps;
+    public final Txn.Kind kind;
 
-    public Accept(Id to, Topologies topologies, Ballot ballot, TxnId txnId, Key homeKey, Txn txn, Timestamp executeAt, Deps deps)
+    public Accept(Id to, Topologies topologies, Ballot ballot, TxnId txnId, Route route, Timestamp executeAt, Keys keys, Deps deps, Txn.Kind kind)
     {
-        super(to, topologies, txn.keys(), txnId);
+        super(to, topologies, txnId, route);
         this.ballot = ballot;
-        this.homeKey = homeKey;
-        this.txn = txn;
         this.executeAt = executeAt;
-        this.deps = deps;
+        this.keys = keys.slice(scope.covering);
+        this.partialDeps = deps.slice(scope.covering);
+        this.kind = kind;
     }
 
-    protected Accept(Keys scope, long epoch, TxnId txnId, Ballot ballot, Key homeKey, Txn txn, Timestamp executeAt, Deps deps)
+    private Accept(TxnId txnId, PartialRoute scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Ballot ballot, Timestamp executeAt, Keys keys, PartialDeps partialDeps, Txn.Kind kind)
     {
-        super(scope, epoch, txnId);
+        super(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey);
         this.ballot = ballot;
-        this.homeKey = homeKey;
-        this.txn = txn;
         this.executeAt = executeAt;
-        this.deps = deps;
+        this.keys = keys;
+        this.partialDeps = partialDeps;
+        this.kind = kind;
     }
 
-    @VisibleForTesting
-    public AcceptReply process(CommandStore instance, Key progressKey)
+    @Override
+    public synchronized AcceptReply apply(SafeCommandStore safeStore)
     {
-        // TODO: when we begin expunging old epochs we need to ensure we handle the case where we do not fully handle the keys;
-        //       since this will likely imply the transaction has been applied or aborted we can indicate the coordinator
-        //       should enquire as to the result
-        Command command = instance.command(txnId);
-        if (!command.accept(ballot, txn, homeKey, progressKey, executeAt, deps))
-            return new AcceptNack(txnId, command.promised());
-        return new AcceptOk(txnId, calculateDeps(instance, txnId, txn, executeAt));
+        Command command = safeStore.command(txnId);
+        switch (command.accept(safeStore, ballot, scope, progressKey, executeAt, partialDeps))
+        {
+            default: throw new IllegalStateException();
+            case Redundant:
+                return AcceptNack.REDUNDANT;
+            case RejectedBallot:
+                return new AcceptNack(RejectedBallot, command.promised());
+            case Success:
+                // TODO: we don't need to calculate deps if executeAt == txnId
+                return new AcceptOk(calculatePartialDeps(safeStore, txnId, keys, kind, executeAt, safeStore.ranges().between(minEpoch, executeAt.epoch)));
+        }
     }
 
-    public void process(Node node, Node.Id replyToNode, ReplyContext replyContext)
+    @Override
+    public AcceptReply reduce(AcceptReply r1, AcceptReply r2)
     {
-        Key progressKey = progressKey(node, homeKey);
-        node.reply(replyToNode, replyContext, node.mapReduceLocal(this, minEpoch, executeAt.epoch, cs -> process(cs, progressKey),
-        (r1, r2) -> {
-            if (!r1.isOK()) return r1;
-            if (!r2.isOK()) return r2;
-            AcceptOk ok1 = (AcceptOk) r1;
-            AcceptOk ok2 = (AcceptOk) r2;
-            if (ok1.deps.isEmpty()) return ok2;
-            if (ok2.deps.isEmpty()) return ok1;
-            return new AcceptOk(txnId, ok1.deps.with(ok2.deps));
-        }));
+        if (!r1.isOk() || !r2.isOk())
+            return r1.outcome().compareTo(r2.outcome()) >= 0 ? r1 : r2;
+
+        AcceptOk ok1 = (AcceptOk) r1;
+        AcceptOk ok2 = (AcceptOk) r2;
+        PartialDeps deps = ok1.deps.with(ok2.deps);
+        if (deps == ok1.deps) return ok1;
+        if (deps == ok2.deps) return ok2;
+        return new AcceptOk(deps);
+    }
+
+    @Override
+    public void accept(AcceptReply reply, Throwable failure)
+    {
+        node.reply(replyTo, replyContext, reply);
+    }
+
+    public void process()
+    {
+        node.mapReduceConsumeLocal(this, minEpoch, executeAt.epoch, this);
     }
 
     @Override
@@ -108,7 +131,7 @@ public class Accept extends WithUnsynced
     @Override
     public Iterable<Key> keys()
     {
-        return txn.keys();
+        return keys;
     }
 
     @Override
@@ -117,40 +140,37 @@ public class Accept extends WithUnsynced
         return MessageType.ACCEPT_REQ;
     }
 
-    // TODO (now): can EpochRequest inherit TxnOperation?
-    public static class Invalidate implements EpochRequest, PreLoadContext
+    public static class Invalidate extends AbstractEpochRequest<AcceptReply>
     {
         public final Ballot ballot;
-        public final TxnId txnId;
-        public final Key someKey;
+        public final RoutingKey someKey;
 
-        public Invalidate(Ballot ballot, TxnId txnId, Key someKey)
+        public Invalidate(Ballot ballot, TxnId txnId, RoutingKey someKey)
         {
+            super(txnId);
             this.ballot = ballot;
-            this.txnId = txnId;
             this.someKey = someKey;
         }
 
-        public void process(Node node, Node.Id replyToNode, ReplyContext replyContext)
+        public void process()
         {
-            node.reply(replyToNode, replyContext, node.ifLocal(this, someKey, txnId.epoch, instance -> {
-                Command command = instance.command(txnId);
-                if (!command.acceptInvalidate(ballot))
-                    return new AcceptNack(txnId, command.promised());
-                return new AcceptOk(txnId, null);
-            }));
+            node.mapReduceConsumeLocal(this, someKey, txnId.epoch, this);
         }
 
         @Override
-        public Iterable<TxnId> txnIds()
+        public AcceptReply apply(SafeCommandStore safeStore)
         {
-            return Collections.singleton(txnId);
-        }
-
-        @Override
-        public Iterable<Key> keys()
-        {
-            return Collections.emptyList();
+            Command command = safeStore.command(txnId);
+            switch (command.acceptInvalidate(safeStore, ballot))
+            {
+                default:
+                case Redundant:
+                    return AcceptNack.REDUNDANT;
+                case Success:
+                    return new AcceptOk(null);
+                case RejectedBallot:
+                    return new AcceptNack(RejectedBallot, command.promised());
+            }
         }
 
         @Override
@@ -172,81 +192,86 @@ public class Accept extends WithUnsynced
         }
     }
 
-    public interface AcceptReply extends Reply
+    public static abstract class AcceptReply implements Reply
     {
         @Override
-        default MessageType type()
+        public MessageType type()
         {
             return MessageType.ACCEPT_RSP;
         }
 
-        boolean isOK();
+        public abstract boolean isOk();
+        public abstract AcceptOutcome outcome();
     }
 
-    public static class AcceptOk implements AcceptReply
+    public static class AcceptOk extends AcceptReply
     {
-        public final TxnId txnId;
         @Nullable
-        public final Deps deps;
+        // TODO: migrate this to PartialDeps? Need to think carefully about semantics when ownership changes between txnId and executeAt
+        public final PartialDeps deps;
 
-        public AcceptOk(TxnId txnId, Deps deps)
+        public AcceptOk(PartialDeps deps)
         {
-            this.txnId = txnId;
             this.deps = deps;
         }
 
         @Override
-        public boolean isOK()
+        public boolean isOk()
         {
             return true;
         }
 
         @Override
-        public String toString()
+        public AcceptOutcome outcome()
         {
-            return "AcceptOk{" +
-                    "txnId=" + txnId +
-                    ", deps=" + deps +
-                    '}';
-        }
-    }
-
-    public static class AcceptNack implements AcceptReply
-    {
-        public final TxnId txnId;
-        public final Timestamp reject;
-
-        public AcceptNack(TxnId txnId, Timestamp reject)
-        {
-            this.txnId = txnId;
-            this.reject = reject;
+            return Success;
         }
 
         @Override
-        public boolean isOK()
+        public String toString()
+        {
+            return "AcceptOk{deps=" + deps + '}';
+        }
+    }
+
+    public static class AcceptNack extends AcceptReply
+    {
+        public static final AcceptNack REDUNDANT = new AcceptNack(AcceptOutcome.Redundant, null);
+
+        public final AcceptOutcome outcome;
+        public final Ballot supersededBy;
+
+        public AcceptNack(AcceptOutcome outcome, Ballot supersededBy)
+        {
+            this.outcome = outcome;
+            this.supersededBy = supersededBy;
+        }
+
+        @Override
+        public boolean isOk()
         {
             return false;
         }
 
         @Override
+        public AcceptOutcome outcome()
+        {
+            return outcome;
+        }
+
+        @Override
         public String toString()
         {
-            return "AcceptNack{" +
-                    "txnId=" + txnId +
-                    ", reject=" + reject +
-                    '}';
+            return "AcceptNack{" + outcome + ",supersededBy=" + supersededBy + '}';
         }
     }
 
-    @Override
-    public String toString()
-    {
+    public String toString() {
         return "Accept{" +
-               "ballot: " + ballot +
-               ", txnId: " + txnId +
-               ", txn: " + txn +
-               ", executeAt: " + executeAt +
-               ", deps: " + deps +
-               '}';
+                "ballot: " + ballot +
+                ", txnId: " + txnId +
+                ", executeAt: " + executeAt +
+                ", deps: " + partialDeps +
+                '}';
     }
 }

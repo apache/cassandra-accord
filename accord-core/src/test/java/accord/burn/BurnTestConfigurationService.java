@@ -46,6 +46,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
 
     private final EpochHistory epochs = new EpochHistory();
     private final List<ConfigurationService.Listener> listeners = new ArrayList<>();
+    private final TopologyUpdates topologyUpdates;
 
     private static class EpochState
     {
@@ -124,12 +125,13 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         }
     }
 
-    public BurnTestConfigurationService(Node.Id node, MessageSink messageSink, Supplier<Random> randomSupplier, Topology topology, Function<Node.Id, Node> lookup)
+    public BurnTestConfigurationService(Node.Id node, MessageSink messageSink, Supplier<Random> randomSupplier, Topology topology, Function<Node.Id, Node> lookup, TopologyUpdates topologyUpdates)
     {
         this.node = node;
         this.messageSink = messageSink;
         this.randomSupplier = randomSupplier;
         this.lookup = lookup;
+        this.topologyUpdates = topologyUpdates;
         epochs.receive(Topology.EMPTY).acknowledge(0).syncComplete(0);
         epochs.receive(topology).acknowledge(1).syncComplete(1);
     }
@@ -229,10 +231,10 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         }
 
         @Override
-        public void onSuccess(Node.Id from, FetchTopologyReply response)
+        public void onSuccess(Node.Id from, FetchTopologyReply reply)
         {
-            if (response.topology != null)
-                reportTopology(response.topology);
+            if (reply.topology != null)
+                reportTopology(reply.topology);
             else
                 sendNext();
         }
@@ -265,7 +267,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         epochs.acknowledge(epoch);
         Topology topology = getTopologyForEpoch(epoch);
         Node originator = lookup.apply(node);
-        TopologyUpdate.syncEpoch(originator, epoch - 1, topology.nodes());
+        topologyUpdates.syncEpoch(originator, epoch - 1, topology.nodes());
     }
 
     @Override

@@ -18,129 +18,155 @@
 
 package accord.messages;
 
-import com.google.common.annotations.VisibleForTesting;
+import java.util.function.BiFunction;
+
+import accord.local.SafeCommandStore;
+import accord.utils.MapReduceConsume;
 import com.google.common.base.Preconditions;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.primitives.AbstractKeys;
+import accord.primitives.AbstractRoute;
 import accord.primitives.KeyRanges;
 import accord.local.PreLoadContext;
+import accord.primitives.PartialRoute;
+import accord.primitives.Route;
 import accord.topology.Topologies;
 import accord.topology.Topology;
-import accord.primitives.Keys;
 import accord.primitives.TxnId;
 
 import static java.lang.Long.min;
 
-public abstract class TxnRequest implements EpochRequest, PreLoadContext
+public abstract class TxnRequest<R> implements EpochRequest, PreLoadContext, MapReduceConsume<SafeCommandStore, R>
 {
-    public static abstract class WithUnsynced extends TxnRequest
+    public static abstract class WithUnsynced<R> extends TxnRequest<R>
     {
-        public final TxnId txnId;
-        public final long minEpoch;
-        protected final boolean doNotComputeProgressKey;
+        public final long minEpoch; // TODO: can this just always be TxnId.epoch?
+        public final boolean doNotComputeProgressKey;
 
-        public WithUnsynced(Id to, Topologies topologies, Keys keys, TxnId txnId)
+        protected WithUnsynced(Id to, Topologies topologies, TxnId txnId, Route route)
         {
-            this(to, topologies, keys, txnId, latestRelevantEpochIndex(to, topologies, keys));
+            this(to, topologies, txnId, route, latestRelevantEpochIndex(to, topologies, route));
         }
 
-        private WithUnsynced(Id to, Topologies topologies, Keys keys, TxnId txnId, int startIndex)
+        protected WithUnsynced(Id to, Topologies topologies, TxnId txnId, Route route, int startIndex)
         {
-            super(to, topologies, keys, startIndex);
-            this.txnId = txnId;
+            super(to, topologies, route, txnId, startIndex);
             this.minEpoch = topologies.oldestEpoch();
-            // to understand this calculation we must bear in mind the following:
-            //  - startIndex is the "latest relevant" which means we skip over recent epochs where we are not owners at all,
-            //    i.e. if this node does not participate in the most recent epoch, startIndex > 0
-            //  - waitForEpoch gives us the most recent epoch with differing ownership information, starting from startIndex
-            // So, we can have some surprising situations arise where a *prior* owner must be contacted for its vote,
-            // and does not need to wait for the latest ring information because from the point of view of its contribution
-            // the stale ring information is sufficient, however we do not want it to compute a progress key with this stale
-            // ring information and mistakenly believe that it is a home shard for the transaction, as it will not receive
-            // updates for the transaction going forward.
-            // So in these cases we send a special flag indicating that the progress key should not be computed
-            // (as it might be done so with stale ring information)
-            this.doNotComputeProgressKey = waitForEpoch() < txnId.epoch && startIndex > 0
-                                           && topologies.get(startIndex).epoch() < txnId.epoch;
+            this.doNotComputeProgressKey = doNotComputeProgressKey(topologies, startIndex, txnId, waitForEpoch());
 
+            // TODO (soon): alongside Invariants class, introduce PARANOID mode for checking extra invariants
             KeyRanges ranges = topologies.forEpoch(txnId.epoch).rangesForNode(to);
             if (doNotComputeProgressKey)
             {
-                Preconditions.checkState(ranges == null || !ranges.intersects(keys)); // confirm dest is not a replica on txnId.epoch
+                Preconditions.checkState(!ranges.intersects(route)); // confirm dest is not a replica on txnId.epoch
             }
             else
             {
-                boolean intersects = ranges != null && ranges.intersects(keys);
+                boolean intersects = ranges.intersects(route);
                 long progressEpoch = Math.min(waitForEpoch(), txnId.epoch);
                 KeyRanges computesRangesOn = topologies.forEpoch(progressEpoch).rangesForNode(to);
-                boolean check = computesRangesOn != null && computesRangesOn.intersects(keys);
+                boolean check = computesRangesOn != null && computesRangesOn.intersects(route);
                 if (check != intersects)
                     throw new IllegalStateException();
             }
         }
 
-        Key progressKey(Node node, Key homeKey)
+        protected WithUnsynced(TxnId txnId, PartialRoute scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey)
         {
-            // if waitForEpoch < txnId.epoch, then this replica's ownership is unchanged
-            long progressEpoch = min(waitForEpoch(), txnId.epoch);
-            return doNotComputeProgressKey ? null : node.trySelectProgressKey(progressEpoch, scope(), homeKey);
+            super(txnId, scope, waitForEpoch);
+            this.minEpoch = minEpoch;
+            this.doNotComputeProgressKey = doNotComputeProgressKey;
         }
 
-        @VisibleForTesting
-        public WithUnsynced(Keys scope, long epoch, TxnId txnId)
+        @Override
+        RoutingKey progressKey(Node node)
         {
-            super(scope, epoch);
-            this.txnId = txnId;
-            this.minEpoch = epoch;
-            this.doNotComputeProgressKey = false;
+            if (doNotComputeProgressKey)
+                return null;
+            return super.progressKey(node);
         }
     }
 
-    private final Keys scope;
-    private final long waitForEpoch;
+    public final TxnId txnId;
+    public final PartialRoute scope;
+    public final long waitForEpoch;
+    protected transient RoutingKey progressKey;
+    protected transient Node node;
+    protected transient Id replyTo;
+    protected transient ReplyContext replyContext;
 
-    public TxnRequest(Node.Id to, Topologies topologies, Keys keys)
+    protected TxnRequest(Id to, Topologies topologies, AbstractRoute route, TxnId txnId)
     {
-        this(to, topologies, keys, 0);
+        this(to, topologies, route, txnId, latestRelevantEpochIndex(to, topologies, route));
     }
 
-    public TxnRequest(Node.Id to, Topologies topologies, Keys keys, int startIndex)
+    protected TxnRequest(Id to, Topologies topologies, AbstractRoute route, TxnId txnId, int startIndex)
     {
-        this(computeScope(to, topologies, keys, startIndex),
-             computeWaitForEpoch(to, topologies, startIndex));
+        this(txnId, computeScope(to, topologies, route, startIndex), computeWaitForEpoch(to, topologies, startIndex));
     }
 
-    public TxnRequest(Keys scope, long waitForEpoch)
+    protected TxnRequest(TxnId txnId, PartialRoute scope, long waitForEpoch)
     {
         Preconditions.checkState(!scope.isEmpty());
+        this.txnId = txnId;
         this.scope = scope;
         this.waitForEpoch = waitForEpoch;
     }
 
-    public Keys scope()
+    /**
+     * The portion of the complete Route that this TxnRequest applies to. Should represent the complete
+     * range owned by the target node for the involved epochs.
+     */
+    public PartialRoute scope()
     {
         return scope;
     }
 
+    /**
+     * The minimum epoch the recipient needs to know in order to process the request. This is computed by the sender
+     * to permit a recipient to process a request before knowing of a topology change if the sender determines it is
+     * safe to do so.
+     */
     public long waitForEpoch()
     {
         return waitForEpoch;
     }
 
-    protected static int latestRelevantEpochIndex(Node.Id node, Topologies topologies, Keys keys)
+    @Override
+    public void process(Node on, Id replyTo, ReplyContext replyContext)
     {
-        KeyRanges latest = topologies.get(0).rangesForNode(node);
+        this.node = on;
+        this.replyTo = replyTo;
+        this.replyContext = replyContext;
+        this.progressKey = progressKey(node); // TODO: not every class that extends TxnRequest needs this set
+        process();
+    }
 
-        if (latest != null && latest.intersects(keys))
+    RoutingKey progressKey(Node node)
+    {
+        // if waitForEpoch < txnId.epoch, then this replica's ownership is unchanged
+        long progressEpoch = min(waitForEpoch(), txnId.epoch);
+        return node.trySelectProgressKey(progressEpoch, scope, scope.homeKey);
+    }
+
+    protected abstract void process();
+
+    // finds the first topology index that intersects with the node
+    protected static int latestRelevantEpochIndex(Node.Id node, Topologies topologies, AbstractKeys<?, ?> keys)
+    {
+        KeyRanges latest = topologies.current().rangesForNode(node);
+
+        if (latest.intersects(keys))
             return 0;
 
         int i = 0;
         int mi = topologies.size();
 
         // find first non-null for node
-        while (latest == null)
+        while (latest.isEmpty())
         {
             if (++i == mi)
                 return mi;
@@ -165,50 +191,93 @@ public abstract class TxnRequest implements EpochRequest, PreLoadContext
         return mi;
     }
 
-    // for now use a simple heuristic of whether the node's ownership ranges have changed,
-    // on the assumption that this might also mean some local shard rearrangement
-    // except if the latest epoch is empty for the keys
-    public static long computeWaitForEpoch(Node.Id node, Topologies topologies, Keys keys)
+    /**
+     * Compute the minimum epoch the recipient must know in order to safely process the request.
+     *
+     * For now use a simple heuristic of whether the node's ownership ranges have changed,
+     * on the assumption that this might also mean some local shard rearrangement
+     * (ignoring the case where the latest epochs do not intersect the keys at all)
+     */
+    public static long computeWaitForEpoch(Node.Id node, Topologies topologies, AbstractKeys<?, ?> keys)
     {
         return computeWaitForEpoch(node, topologies, latestRelevantEpochIndex(node, topologies, keys));
     }
 
     public static long computeWaitForEpoch(Node.Id node, Topologies topologies, int startIndex)
     {
-        int i = startIndex;
+        int i = Math.max(1, startIndex);
         int mi = topologies.size();
         if (i == mi)
             return topologies.oldestEpoch();
 
-        KeyRanges latest = topologies.get(i).rangesForNode(node);
-        while (++i < mi)
+        KeyRanges latest = topologies.get(i - 1).rangesForNode(node);
+        while (i < mi)
         {
             Topology topology = topologies.get(i);
             KeyRanges ranges = topology.rangesForNode(node);
-            if (ranges == null || !ranges.equals(latest))
+            if (!ranges.equals(latest))
                 break;
+            ++i;
         }
         return topologies.get(i - 1).epoch();
     }
 
-    public static Keys computeScope(Node.Id node, Topologies topologies, Keys keys)
+    public static PartialRoute computeScope(Node.Id node, Topologies topologies, Route keys)
     {
         return computeScope(node, topologies, keys, latestRelevantEpochIndex(node, topologies, keys));
     }
 
-    public static Keys computeScope(Node.Id node, Topologies topologies, Keys keys, int startIndex)
+    public static PartialRoute computeScope(Node.Id node, Topologies topologies, AbstractRoute route, int startIndex)
+    {
+        return computeScope(node, topologies, route, startIndex, AbstractRoute::slice, PartialRoute::union);
+    }
+
+    // TODO: move to Topologies
+    public static <I extends AbstractKeys<?, ?>, O extends AbstractKeys<?, ?>> O computeScope(Node.Id node, Topologies topologies, I keys, int startIndex, BiFunction<I, KeyRanges, O> slice, BiFunction<O, O, O> merge)
+    {
+        O scope = computeScopeInternal(node, topologies, keys, startIndex, slice, merge);
+        if (scope == null)
+            throw new IllegalArgumentException("No intersection");
+        return scope;
+    }
+
+    private static <I, O> O computeScopeInternal(Node.Id node, Topologies topologies, I keys, int startIndex, BiFunction<I, KeyRanges, O> slice, BiFunction<O, O, O> merge)
     {
         KeyRanges last = null;
-        Keys scopeKeys = Keys.EMPTY;
+        O scope = null;
         for (int i = startIndex, mi = topologies.size() ; i < mi ; ++i)
         {
             Topology topology = topologies.get(i);
             KeyRanges ranges = topology.rangesForNode(node);
-            if (ranges != last && ranges != null && !ranges.equals(last))
-                scopeKeys = scopeKeys.union(keys.slice(ranges));
+            if (ranges != last && !ranges.equals(last))
+            {
+                O add = slice.apply(keys, ranges);
+                scope = scope == null ? add : merge.apply(scope, add);
+            }
 
             last = ranges;
         }
-        return scopeKeys;
+        if (scope == null)
+            throw new IllegalArgumentException("No intersection");
+        return scope;
+    }
+
+    private static boolean doNotComputeProgressKey(Topologies topologies, int startIndex, TxnId txnId, long waitForEpoch)
+    {
+        // to understand this calculation we must bear in mind the following:
+        //  - startIndex is the "latest relevant" which means we skip over recent epochs where we are not owners at all,
+        //    i.e. if this node does not participate in the most recent epoch, startIndex > 0
+        //  - waitForEpoch gives us the most recent epoch with differing ownership information, starting from startIndex
+        // So, we can have some surprising situations arise where a *prior* owner must be contacted for its vote,
+        // and does not need to wait for the latest ring information because from the point of view of its contribution
+        // the stale ring information is sufficient, however we do not want it to compute a progress key with this stale
+        // ring information and mistakenly believe that it is a home shard for the transaction, as it will not receive
+        // updates for the transaction going forward.
+        // So in these cases we send a special flag indicating that the progress key should not be computed
+        // (as it might be done so with stale ring information)
+
+        // TODO (soon): this would be better defined as "hasProgressKey"
+        return waitForEpoch < txnId.epoch && startIndex > 0
+                && topologies.get(startIndex).epoch() < txnId.epoch;
     }
 }

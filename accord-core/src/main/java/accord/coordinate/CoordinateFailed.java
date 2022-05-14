@@ -20,7 +20,7 @@ package accord.coordinate;
 
 import javax.annotation.Nullable;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.primitives.TxnId;
 
 /**
@@ -29,8 +29,8 @@ import accord.primitives.TxnId;
 public class CoordinateFailed extends Throwable
 {
     public final TxnId txnId;
-    public final @Nullable Key homeKey;
-    public CoordinateFailed(TxnId txnId, @Nullable Key homeKey)
+    public final @Nullable RoutingKey homeKey;
+    public CoordinateFailed(TxnId txnId, @Nullable RoutingKey homeKey)
     {
         this.txnId = txnId;
         this.homeKey = homeKey;
