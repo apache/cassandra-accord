@@ -20,12 +20,15 @@ package accord.topology;
 
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.primitives.KeyRanges;
 import accord.utils.IndexedConsumer;
 import com.google.common.base.Preconditions;
 
 import java.util.*;
 import java.util.function.Consumer;
 
+// TODO: we can probably most efficiently create a new synthetic Topology that applies for a range of epochs
+//       and permit Topology to implement it, so that
 public interface Topologies
 {
     Topology current();
@@ -48,9 +51,13 @@ public interface Topologies
 
     int totalShards();
 
+    boolean contains(Id to);
+
     Set<Node.Id> nodes();
 
     Set<Node.Id> copyOfNodes();
+
+    KeyRanges computeRangesForNode(Id node);
 
     default void forEach(IndexedConsumer<Topology> consumer)
     {
@@ -171,6 +178,12 @@ public interface Topologies
         }
 
         @Override
+        public boolean contains(Id to)
+        {
+            return topology.contains(to);
+        }
+
+        @Override
         public Set<Node.Id> nodes()
         {
             return topology.nodes();
@@ -180,6 +193,12 @@ public interface Topologies
         public Set<Id> copyOfNodes()
         {
             return new HashSet<>(nodes());
+        }
+
+        @Override
+        public KeyRanges computeRangesForNode(Id node)
+        {
+            return topology.rangesForNode(node);
         }
 
         @Override
@@ -269,6 +288,17 @@ public interface Topologies
         }
 
         @Override
+        public boolean contains(Id to)
+        {
+            for (Topology topology : topologies)
+            {
+                if (topology.contains(to))
+                    return true;
+            }
+            return false;
+        }
+
+        @Override
         public Set<Node.Id> nodes()
         {
             Set<Node.Id> result = new HashSet<>();
@@ -281,6 +311,15 @@ public interface Topologies
         public Set<Id> copyOfNodes()
         {
             return nodes();
+        }
+
+        @Override
+        public KeyRanges computeRangesForNode(Id node)
+        {
+            KeyRanges ranges = KeyRanges.EMPTY;
+            for (int i = 0, mi = size() ; i < mi ; i++)
+                ranges = ranges.union(get(i).rangesForNode(node));
+            return ranges;
         }
 
         public void add(Topology topology)

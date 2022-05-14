@@ -23,7 +23,7 @@ import accord.api.Agent;
 import accord.api.Result;
 import accord.local.Command;
 import accord.primitives.Timestamp;
-import accord.txn.Txn;
+import accord.primitives.Txn;
 
 public class MaelstromAgent implements Agent
 {
@@ -48,6 +48,10 @@ public class MaelstromAgent implements Agent
     @Override
     public void onUncaughtException(Throwable t)
     {
+    }
 
+    @Override
+    public void onHandledException(Throwable t)
+    {
     }
 }

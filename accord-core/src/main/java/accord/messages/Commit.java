@@ -19,135 +19,164 @@
 package accord.messages;
 
 import java.util.Collections;
-import java.util.List;
 import java.util.Set;
 
 import accord.api.Key;
-import accord.utils.ReducingFuture;
-import accord.local.Node;
+import accord.local.*;
+import accord.messages.ReadData.ReadNack;
+import accord.messages.ReadData.ReadReply;
+import accord.primitives.*;
 import accord.local.Node.Id;
 import accord.topology.Topologies;
-import accord.primitives.Keys;
-import accord.primitives.Timestamp;
-import accord.primitives.Deps;
-import accord.txn.Txn;
-import accord.primitives.TxnId;
-import com.google.common.collect.Iterables;
-import org.apache.cassandra.utils.concurrent.Future;
+import javax.annotation.Nullable;
+
+import com.google.common.base.Preconditions;
+
+import accord.topology.Topology;
+
+import static accord.local.Status.Known.Definition;
 
 // TODO: CommitOk responses, so we can send again if no reply received? Or leave to recovery?
-public class Commit extends ReadData
+public class Commit extends TxnRequest<ReadNack>
 {
     public static class SerializerSupport
     {
-        public static Commit create(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Deps deps, Key homeKey, Timestamp executeAt, boolean read)
+        public static Commit create(TxnId txnId, PartialRoute scope, long waitForEpoch, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable Route fullRoute, @Nullable ReadData read)
         {
-            return new Commit(scope, waitForEpoch, txnId, txn, deps, homeKey, executeAt, read);
+            return new Commit(txnId, scope, waitForEpoch, executeAt, partialTxn, partialDeps, fullRoute, read);
         }
     }
 
-    public final boolean read;
+    public final Timestamp executeAt;
+    public final @Nullable PartialTxn partialTxn;
+    public final PartialDeps partialDeps;
+    public final @Nullable Route route;
+    public final ReadData read;
 
-    public Commit(Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, boolean read)
+    @SuppressWarnings("MismatchedQueryAndUpdateOfCollection")
+    private transient Defer defer;
+
+    public enum Kind { Minimal, Maximal }
+
+    // TODO: cleanup passing of topologies here - maybe fetch them afresh from Node? Or perhaps introduce well-named
+    //       classes to represent different topology combinations
+    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, Route route, @Nullable Keys readScope, Timestamp executeAt, Deps deps, boolean read)
     {
-        super(to, topologies, txnId, txn, deps, homeKey, executeAt);
+        super(to, topologies, route, txnId);
+
+        Route sendRoute = null;
+        PartialTxn partialTxn = null;
+        if (kind == Kind.Maximal)
+        {
+            boolean isHome = coordinateTopology.rangesForNode(to).contains(route.homeKey);
+            partialTxn = txn.slice(scope.covering, isHome);
+            if (isHome)
+                sendRoute = route;
+        }
+        else if (executeAt.epoch != txnId.epoch)
+        {
+            KeyRanges coordinateRanges = coordinateTopology.rangesForNode(to);
+            KeyRanges executeRanges = topologies.computeRangesForNode(to);
+            KeyRanges extraRanges = executeRanges.difference(coordinateRanges);
+            if (!extraRanges.isEmpty())
+                partialTxn = txn.slice(extraRanges, coordinateRanges.contains(route.homeKey));
+        }
+
+        this.executeAt = executeAt;
+        this.partialTxn = partialTxn;
+        this.partialDeps = deps.slice(scope.covering);
+        this.route = sendRoute;
+        this.read = read ? new ReadData(to, topologies, txnId, readScope, executeAt) : null;
+    }
+
+    Commit(TxnId txnId, PartialRoute scope, long waitForEpoch, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable Route fullRoute, @Nullable ReadData read)
+    {
+        super(txnId, scope, waitForEpoch);
+        this.executeAt = executeAt;
+        this.partialTxn = partialTxn;
+        this.partialDeps = partialDeps;
+        this.route = fullRoute;
         this.read = read;
     }
 
-    public Commit(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Deps deps, Key homeKey, Timestamp executeAt, boolean read)
+    // TODO (soon): accept Topology not Topologies
+    // TODO: do not commit if we're already ready to execute (requires extra info in Accept responses)
+    public static void commitMinimalAndRead(Node node, Topologies executeTopologies, TxnId txnId, Txn txn, Route route, Keys readScope, Timestamp executeAt, Deps deps, Set<Id> readSet, Callback<ReadReply> callback)
     {
-        super(scope, waitForEpoch, txnId, txn, deps, homeKey, executeAt);
-        this.read = read;
-    }
+        Topologies allTopologies = executeTopologies;
+        if (txnId.epoch != executeAt.epoch)
+            allTopologies = node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
 
-    // TODO: accept Topology not Topologies
-    public static void commitAndRead(Node node, Topologies executeTopologies, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Set<Id> readSet, Callback<ReadReply> callback)
-    {
-        for (Node.Id to : executeTopologies.nodes())
+        Topology executeTopology = executeTopologies.forEpoch(executeAt.epoch);
+        Topology coordinateTopology = allTopologies.forEpoch(txnId.epoch);
+        for (Node.Id to : executeTopology.nodes())
         {
             boolean read = readSet.contains(to);
-            Commit send = new Commit(to, executeTopologies, txnId, txn, homeKey, executeAt, deps, read);
+            Commit send = new Commit(Kind.Minimal, to, coordinateTopology, allTopologies, txnId, txn, route, readScope, executeAt, deps, read);
             if (read) node.send(to, send, callback);
             else node.send(to, send);
         }
-        if (txnId.epoch != executeAt.epoch)
+        if (coordinateTopology != executeTopology)
         {
-            Topologies earlierTopologies = node.topology().preciseEpochs(txn, txnId.epoch, executeAt.epoch - 1);
-            Commit.commit(node, earlierTopologies, executeTopologies, txnId, txn, homeKey, executeAt, deps);
-        }
-    }
-
-    public static void commit(Node node, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps)
-    {
-        Topologies commitTo = node.topology().preciseEpochs(txn, txnId.epoch, executeAt.epoch);
-        for (Node.Id to : commitTo.nodes())
-        {
-            Commit send = new Commit(to, commitTo, txnId, txn, homeKey, executeAt, deps, false);
-            node.send(to, send);
-        }
-    }
-
-    public static void commit(Node node, Topologies commitTo, Set<Id> doNotCommitTo, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps)
-    {
-        for (Node.Id to : commitTo.nodes())
-        {
-            if (doNotCommitTo.contains(to))
-                continue;
-
-            Commit send = new Commit(to, commitTo, txnId, txn, homeKey, executeAt, deps, false);
-            node.send(to, send);
-        }
-    }
-
-    public static void commit(Node node, Topologies commitTo, Topologies appliedTo, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps)
-    {
-        // TODO: if we switch to Topology rather than Topologies we can avoid sending commits to nodes that Apply the same
-        commit(node, commitTo, Collections.emptySet(), txnId, txn, homeKey, executeAt, deps);
-    }
-
-    public static void commitInvalidate(Node node, TxnId txnId, Keys someKeys, Timestamp until)
-    {
-        Topologies commitTo = node.topology().preciseEpochs(someKeys, txnId.epoch, until.epoch);
-        commitInvalidate(node, commitTo, txnId, someKeys);
-    }
-
-    public static void commitInvalidate(Node node, Topologies commitTo, TxnId txnId, Keys someKeys)
-    {
-        for (Node.Id to : commitTo.nodes())
-        {
-            // TODO (now) confirm somekeys == txnkeys
-            Invalidate send = new Invalidate(to, commitTo, txnId, someKeys, someKeys);
-            node.send(to, send);
+            for (Node.Id to : allTopologies.nodes())
+            {
+                if (!executeTopology.contains(to))
+                    node.send(to, new Commit(Kind.Minimal, to, coordinateTopology, allTopologies, txnId, txn, route, readScope, executeAt, deps, false));
+            }
         }
     }
 
     @Override
     public Iterable<TxnId> txnIds()
     {
-        return Iterables.concat(Collections.singleton(txnId), deps.txnIds());
+        return Collections.singleton(txnId);
     }
 
     @Override
     public Iterable<Key> keys()
     {
-        return txn.keys();
+        return Collections.emptyList();
     }
 
-    public void process(Node node, Id from, ReplyContext replyContext)
+    public void process()
     {
-        Key progressKey = node.trySelectProgressKey(txnId, txn.keys(), homeKey);
-        List<Future<Void>> futures = node.mapLocal(this, txnId.epoch, executeAt.epoch,
-                                                   instance -> instance.command(txnId).commitAndBeginExecution(txn, homeKey, progressKey, executeAt, deps));
+        node.mapReduceConsumeLocal(this, txnId.epoch, executeAt.epoch, this);
+    }
 
-        if (read)
+    // TODO (soon): do not guard with synchronized; let mapReduceLocal decide how to enforce mutual exclusivity
+    @Override
+    public synchronized ReadNack apply(SafeCommandStore safeStore)
+    {
+        Command command = safeStore.command(txnId);
+        switch (command.commit(safeStore, route != null ? route : scope, progressKey, partialTxn, executeAt, partialDeps))
         {
-            ReducingFuture.reduce(futures, (l, r) -> null).addCallback((unused, throwable) -> {
-                if (throwable == null)
-                    super.process(node, from, replyContext);
-                else
-                    node.reply(from, replyContext, new ReadNack());
-            });
+            default:
+            case Success:
+            case Redundant:
+                return null;
+
+            case Insufficient:
+                Preconditions.checkState(!command.hasBeenWitnessed());
+                if (defer == null)
+                    defer = new Defer(Definition, Commit.this);
+                defer.add(command, safeStore.commandStore());
+                return ReadNack.NotCommitted;
         }
+    }
+
+    @Override
+    public ReadNack reduce(ReadNack r1, ReadNack r2)
+    {
+        return r1 != null ? r1 : r2;
+    }
+
+    @Override
+    public void accept(ReadNack reply, Throwable failure)
+    {
+        if (reply != null)
+            node.reply(replyTo, replyContext, reply);
+        else if (read != null)
+            read.process(node, replyTo, replyContext);
     }
 
     @Override
@@ -161,36 +190,64 @@ public class Commit extends ReadData
     {
         return "Commit{txnId: " + txnId +
                ", executeAt: " + executeAt +
-               ", deps: " + deps +
+               ", deps: " + partialDeps +
                ", read: " + read +
                '}';
     }
 
-    public static class Invalidate extends TxnRequest
+    public static class Invalidate implements EpochRequest, PreLoadContext
     {
         public static class SerializerSupport
         {
-            public static Invalidate create(Keys scope, long waitForEpoch, TxnId txnId, Keys txnKeys)
+            public static Invalidate create(TxnId txnId, RoutingKeys scope, long waitForEpoch, long invalidateUntilEpoch)
             {
-                return new Invalidate(scope, waitForEpoch, txnId, txnKeys);
+                return new Invalidate(txnId, scope, waitForEpoch, invalidateUntilEpoch);
+            }
+        }
+
+        public static void commitInvalidate(Node node, TxnId txnId, RoutingKeys someKeys, Timestamp until)
+        {
+            commitInvalidate(node, txnId, someKeys, until.epoch);
+        }
+
+        public static void commitInvalidate(Node node, TxnId txnId, RoutingKeys someKeys, long untilEpoch)
+        {
+            // TODO: this kind of check needs to be inserted in all equivalent methods
+            Preconditions.checkState(untilEpoch >= txnId.epoch);
+            Preconditions.checkState(node.topology().hasEpoch(untilEpoch));
+            Topologies commitTo = node.topology().preciseEpochs(someKeys, txnId.epoch, untilEpoch);
+            commitInvalidate(node, commitTo, txnId, someKeys);
+        }
+
+        public static void commitInvalidate(Node node, Topologies commitTo, TxnId txnId, RoutingKeys someKeys)
+        {
+            for (Node.Id to : commitTo.nodes())
+            {
+                Invalidate send = new Invalidate(to, commitTo, txnId, someKeys);
+                node.send(to, send);
             }
         }
 
         public final TxnId txnId;
-        public final Keys txnKeys;
+        public final RoutingKeys scope;
+        public final long waitForEpoch;
+        public final long invalidateUntilEpoch;
 
-        public Invalidate(Id to, Topologies topologies, TxnId txnId, Keys txnKeys, Keys someKeys)
+        Invalidate(Id to, Topologies topologies, TxnId txnId, RoutingKeys someKeys)
         {
-            super(to, topologies, someKeys);
             this.txnId = txnId;
-            this.txnKeys = txnKeys;
+            int latestRelevantIndex = latestRelevantEpochIndex(to, topologies, someKeys);
+            this.scope = computeScope(to, topologies, someKeys, latestRelevantIndex, RoutingKeys::slice, RoutingKeys::union);
+            this.waitForEpoch = computeWaitForEpoch(to, topologies, latestRelevantIndex);
+            this.invalidateUntilEpoch = topologies.currentEpoch();
         }
 
-        protected Invalidate(Keys scope, long waitForEpoch, TxnId txnId, Keys txnKeys)
+        Invalidate(TxnId txnId, RoutingKeys scope, long waitForEpoch, long invalidateUntilEpoch)
         {
-            super(scope, waitForEpoch);
             this.txnId = txnId;
-            this.txnKeys = txnKeys;
+            this.scope = scope;
+            this.waitForEpoch = waitForEpoch;
+            this.invalidateUntilEpoch = invalidateUntilEpoch;
         }
 
         @Override
@@ -205,9 +262,17 @@ public class Commit extends ReadData
             return Collections.emptyList();
         }
 
+        @Override
+        public long waitForEpoch()
+        {
+            return waitForEpoch;
+        }
+
         public void process(Node node, Id from, ReplyContext replyContext)
         {
-            node.forEachLocal(this, txnId.epoch, instance -> instance.command(txnId).commitInvalidate());
+            node.forEachLocal(this, scope, txnId.epoch, invalidateUntilEpoch,
+                            safeStore -> safeStore.command(txnId).commitInvalidate(safeStore))
+                    .addCallback(node.agent());
         }
 
         @Override

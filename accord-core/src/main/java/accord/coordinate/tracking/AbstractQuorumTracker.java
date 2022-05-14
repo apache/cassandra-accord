@@ -69,6 +69,11 @@ public class AbstractQuorumTracker<T extends AbstractQuorumTracker.QuorumShardTr
             return failures > shard.maxFailures;
         }
 
+        public boolean hasFailures()
+        {
+            return failures > 0;
+        }
+
         public boolean hasReachedQuorum()
         {
             return success >= shard.slowPathQuorumSize;
@@ -97,6 +102,11 @@ public class AbstractQuorumTracker<T extends AbstractQuorumTracker.QuorumShardTr
     }
 
     public boolean hasFailed()
+    {
+        return any(QuorumShardTracker::hasFailed);
+    }
+
+    public boolean hasFailures()
     {
         return any(QuorumShardTracker::hasFailed);
     }

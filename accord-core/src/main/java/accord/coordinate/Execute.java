@@ -22,140 +22,117 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 
 import accord.api.Data;
-import accord.api.Key;
-import accord.coordinate.tracking.ReadTracker;
 import accord.api.Result;
-import accord.messages.Callback;
 import accord.local.Node;
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
+import accord.messages.ReadData;
+import accord.messages.ReadData.ReadNack;
+import accord.messages.ReadData.ReadOk;
+import accord.primitives.*;
 import accord.topology.Topologies;
-import accord.txn.*;
 import accord.messages.ReadData.ReadReply;
-import accord.primitives.Deps;
 import accord.local.Node.Id;
 import accord.messages.Commit;
-import accord.messages.ReadData;
-import accord.messages.ReadData.ReadOk;
-import com.google.common.base.Preconditions;
+import accord.topology.Topology;
 
-class Execute implements Callback<ReadReply>
+import static accord.coordinate.AnyReadCoordinator.Action.Accept;
+import static accord.messages.Commit.Kind.Maximal;
+
+class Execute extends AnyReadCoordinator<ReadReply>
 {
-    final Node node;
-    final TxnId txnId;
     final Txn txn;
-    final Key homeKey;
+    final Keys readScope;
+    final Route route;
     final Timestamp executeAt;
     final Deps deps;
-    final Topologies topologies;
-    final ReadTracker readTracker;
+    final Topologies applyTo;
     final BiConsumer<Result, Throwable> callback;
     private Data data;
-    private boolean isDone;
 
-    private Execute(Node node, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
+    private Execute(Node node, TxnId txnId, Txn txn, Route route, Keys readScope, Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
     {
-        this.node = node;
-        this.txnId = txnId;
+        super(node, node.topology().forEpoch(readScope, executeAt.epoch), txnId);
         this.txn = txn;
-        this.homeKey = homeKey;
+        this.route = route;
+        this.readScope = readScope;
         this.executeAt = executeAt;
         this.deps = deps;
-        this.topologies = node.topology().forEpoch(txn, executeAt.epoch);
-        Topologies readTopologies = node.topology().forEpoch(txn.read().keys(), executeAt.epoch);
-        this.readTracker = new ReadTracker(readTopologies);
+        this.applyTo = node.topology().forEpoch(route, executeAt.epoch);
         this.callback = callback;
     }
 
-    private void start()
+    public static void execute(Node node, TxnId txnId, Txn txn, Route route, Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
     {
-        Set<Id> readSet = readTracker.computeMinimalReadSetAndMarkInflight();
-        Commit.commitAndRead(node, topologies, txnId, txn, homeKey, executeAt, deps, readSet, this);
-        // skip straight to persistence if there's no read
         if (txn.read().keys().isEmpty())
         {
-            Preconditions.checkState(readTracker.hasCompletedRead());
-            persist();
+            Topologies sendTo = node.topology().forEpoch(route, txnId.epoch);
+            Topologies applyTo = node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
+            Result result = txn.result(txnId, null);
+            Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, null), result);
+            callback.accept(result, null);
+        }
+        else
+        {
+            Execute execute = new Execute(node, txnId, txn, route, txn.keys(), executeAt, deps, callback);
+            execute.start();
         }
     }
 
-    public static void execute(Node node, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
+    @Override
+    void start(Set<Id> readSet)
     {
-        Execute execute = new Execute(node, txnId, txn, homeKey, executeAt, deps, callback);
-        execute.start();
+        Commit.commitMinimalAndRead(node, applyTo, txnId, txn, route, readScope, executeAt, deps, readSet, this);
     }
 
-    private void persist()
+    @Override
+    void contact(Set<Id> nodes)
     {
-        isDone = true;
-        Result result = txn.result(data);
+        node.send(nodes, to -> new ReadData(to, tracker.topologies(), txnId, readScope, executeAt), this);
+    }
+
+    @Override
+    Action process(Id from, ReadReply reply)
+    {
+        if (reply.isOk())
+        {
+            Data next = ((ReadOk) reply).data;
+            if (next != null)
+                data = data == null ? next : data.merge(next);
+            return Accept;
+        }
+
+        ReadNack nack = (ReadNack) reply;
+        switch (nack)
+        {
+            default: throw new IllegalStateException();
+            case Redundant:
+                callback.accept(null, new Preempted(txnId, route.homeKey));
+                return Action.Abort;
+            case NotCommitted:
+                // the replica may be missing the original commit, or the additional commit, so send everything
+                Topologies topology = node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
+                Topology coordinateTopology = topology.forEpoch(txnId.epoch);
+                node.send(from, new Commit(Maximal, from, coordinateTopology, topology, txnId, txn, route, readScope, executeAt, deps, false));
+                // also try sending a read command to another replica, in case they're ready to serve a response
+                return Action.TryAlternative;
+            case Invalid:
+                onFailure(from, new IllegalStateException("Submitted a read command to a replica that did not own the range"));
+                return Action.Abort;
+        }
+    }
+
+    @Override
+    void onSuccess()
+    {
+        Result result = txn.result(txnId, data);
         callback.accept(result, null);
-        Persist.persist(node, topologies, txnId, homeKey, txn, executeAt, deps, txn.execute(executeAt, data), result);
+        // avoid re-calculating topologies if it is unchanged
+        Topologies sendTo = txnId.epoch == executeAt.epoch ? applyTo : node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
+        Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, data), result);
     }
 
     @Override
-    public void onSuccess(Id from, ReadReply reply)
+    public void onFailure(Throwable failure)
     {
-        if (isDone)
-            return;
-
-        if (!reply.isOK())
-        {
-            isDone = true;
-            callback.accept(null, new Preempted(txnId, homeKey));
-            return;
-        }
-
-        data = data == null ? ((ReadOk) reply).data
-                            : data.merge(((ReadOk) reply).data);
-
-        readTracker.recordReadSuccess(from);
-
-        if (readTracker.hasCompletedRead())
-            persist();
-    }
-
-    @Override
-    public void onSlowResponse(Id from)
-    {
-        Set<Id> readFrom = readTracker.computeMinimalReadSetAndMarkInflight();
-        if (readFrom != null)
-            node.send(readFrom, to -> new ReadData(to, readTracker.topologies(), txnId, txn, deps, homeKey, executeAt), this);
-    }
-
-    @Override
-    public void onFailure(Id from, Throwable failure)
-    {
-        if (isDone)
-            return;
-
-        // try again with another random node
-        // TODO: API hooks
-        if (!(failure instanceof Timeout))
-            failure.printStackTrace();
-
-        // TODO: introduce two tiers of timeout, one to trigger a retry, and another to mark the original as failed
-        // TODO: if we fail, nominate another coordinator from the homeKey shard to try
-        readTracker.recordReadFailure(from);
-        Set<Id> readFrom = readTracker.computeMinimalReadSetAndMarkInflight();
-        if (readFrom != null)
-        {
-            node.send(readFrom, to -> new ReadData(to, readTracker.topologies(), txnId, txn, deps, homeKey, executeAt), this);
-        }
-        else if (readTracker.hasFailed())
-        {
-            if (failure instanceof Timeout)
-                failure = ((Timeout) failure).with(txnId, homeKey);
-
-            isDone = true;
-            callback.accept(null, failure);
-        }
-    }
-
-    @Override
-    public void onCallbackFailure(Id from, Throwable failure)
-    {
-        isDone = true;
         callback.accept(null, failure);
     }
 }

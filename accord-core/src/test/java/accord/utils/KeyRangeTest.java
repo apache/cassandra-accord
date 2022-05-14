@@ -21,6 +21,8 @@ package accord.utils;
 import accord.api.Key;
 import accord.primitives.KeyRange;
 import accord.impl.IntKey;
+import accord.primitives.KeyRange.EndInclusive;
+import accord.primitives.KeyRange.StartInclusive;
 import accord.primitives.Keys;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -37,42 +39,14 @@ public class KeyRangeTest
         return IntKey.range(start, end);
     }
 
-    private static class EndInclusiveIntRange extends KeyRange.EndInclusive
-    {
-        public EndInclusiveIntRange(IntKey start, IntKey end)
-        {
-            super(start, end);
-        }
-
-        @Override
-        public KeyRange subRange(Key start, Key end)
-        {
-            return new EndInclusiveIntRange((IntKey)start, (IntKey)end);
-        }
-    }
-
-    private static class StartInclusiveIntRange extends KeyRange.StartInclusive
-    {
-        public StartInclusiveIntRange(IntKey start, IntKey end)
-        {
-            super(start, end);
-        }
-
-        @Override
-        public KeyRange subRange(Key start, Key end)
-        {
-            return new StartInclusiveIntRange((IntKey)start, (IntKey)end);
-        }
-    }
-
     static KeyRange rangeEndIncl(int start, int end)
     {
-        return new EndInclusiveIntRange(k(start), k(end));
+        return new EndInclusive(k(start), k(end));
     }
 
     static KeyRange rangeStartIncl(int start, int end)
     {
-        return new StartInclusiveIntRange(k(start), k(end));
+        return new StartInclusive(k(start), k(end));
     }
 
     static Keys keys(int... values)
@@ -273,21 +247,5 @@ public class KeyRangeTest
         Assertions.assertFalse(range.intersects(keys(50, 75)));
         Assertions.assertFalse(range.intersects(keys(50, 75, 250, 300)));
         Assertions.assertFalse(range.intersects(keys(250, 300)));
-    }
-
-    @Test
-    void tryMergeTest()
-    {
-        // touching
-        Assertions.assertEquals(r(0, 100), r(0, 50).tryMerge(r(50, 100)));
-        Assertions.assertEquals(r(0, 100), r(50, 100).tryMerge(r(0, 50)));
-
-        // intersecting
-        Assertions.assertEquals(r(0, 100), r(0, 75).tryMerge(r(25, 100)));
-        Assertions.assertEquals(r(0, 100), r(25, 100).tryMerge(r(0, 75)));
-
-        // can't merge
-        Assertions.assertNull(r(0, 40).tryMerge(r(60, 100)));
-        Assertions.assertNull(r(60, 100).tryMerge(r(0, 40)));
     }
 }

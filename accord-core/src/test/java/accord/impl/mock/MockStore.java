@@ -26,9 +26,11 @@ import accord.api.Result;
 import accord.api.DataStore;
 import accord.api.Update;
 import accord.api.Write;
+import accord.local.SafeCommandStore;
+import accord.primitives.KeyRanges;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
-import accord.local.CommandStore;
+import accord.primitives.Txn;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
@@ -43,7 +45,7 @@ public class MockStore implements DataStore
     };
 
     public static final Result RESULT = new Result() {};
-    public static final Query QUERY = (data, read, update) -> RESULT;
+    public static final Query QUERY = (txnId, data, read, update) -> RESULT;
     public static final Write WRITE = (key, commandStore, executeAt, store) -> ImmediateFuture.success(null);
 
     public static Read read(Keys keys)
@@ -57,9 +59,27 @@ public class MockStore implements DataStore
             }
 
             @Override
-            public Future<Data> read(Key key, boolean forWriteTxn, CommandStore commandStore, Timestamp executeAt, DataStore store)
+            public Future<Data> read(Key key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
             {
                 return ImmediateFuture.success(DATA);
+            }
+
+            @Override
+            public Read slice(KeyRanges ranges)
+            {
+                return MockStore.read(keys.slice(ranges));
+            }
+
+            @Override
+            public Read merge(Read other)
+            {
+                return MockStore.read(keys.union(other.keys()));
+            }
+
+            @Override
+            public String toString()
+            {
+                return keys.toString();
             }
         };
     }
@@ -78,6 +98,24 @@ public class MockStore implements DataStore
             public Write apply(Data data)
             {
                 return WRITE;
+            }
+
+            @Override
+            public Update slice(KeyRanges ranges)
+            {
+                return MockStore.update(keys.slice(ranges));
+            }
+
+            @Override
+            public Update merge(Update other)
+            {
+                return MockStore.update(keys.union(other.keys()));
+            }
+
+            @Override
+            public String toString()
+            {
+                return keys.toString();
             }
         };
     }

@@ -18,6 +18,8 @@
 
 package accord.api;
 
+import accord.primitives.TxnId;
+
 import javax.annotation.Nullable;
 
 /**
@@ -29,5 +31,5 @@ public interface Query
      * Perform some transformation on the complete {@link Data} result of a {@link Read}
      * from some {@link DataStore}, to produce a {@link Result} to return to the client.
      */
-    Result compute(Data data, @Nullable Read read, @Nullable Update update);
+    Result compute(TxnId txnId, @Nullable Data data, @Nullable Read read, @Nullable Update update);
 }

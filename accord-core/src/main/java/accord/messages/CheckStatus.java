@@ -18,50 +18,65 @@
 
 package accord.messages;
 
+import javax.annotation.Nullable;
+
 import accord.api.Key;
 import accord.api.Result;
-import accord.local.Command;
-import accord.local.Node;
+import accord.api.RoutingKey;
+import accord.local.*;
 import accord.local.Node.Id;
-import accord.local.Status;
 import accord.primitives.Ballot;
-import accord.primitives.Deps;
 import accord.primitives.Timestamp;
-import accord.local.PreLoadContext;
-import accord.txn.Txn;
 import accord.primitives.TxnId;
-import accord.txn.Writes;
 
 import java.util.Collections;
+import accord.primitives.*;
+import accord.topology.Topologies;
+import accord.utils.MapReduceConsume;
 
-public class CheckStatus implements Request, PreLoadContext
+import static accord.local.SaveStatus.NotWitnessed;
+import static accord.local.Status.*;
+import static accord.local.Status.Durability.NotDurable;
+import static accord.messages.TxnRequest.computeScope;
+
+public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
+        implements EpochRequest, PreLoadContext, MapReduceConsume<SafeCommandStore, CheckStatus.CheckStatusOk>
 {
-    // order is important
-    public enum IncludeInfo
+    public static class SerializationSupport
     {
-        No, OnlyIfExecuted, Always;
-        boolean include(Status status)
+        public static CheckStatusOk createOk(SaveStatus status, Ballot promised, Ballot accepted, @Nullable Timestamp executeAt,
+                                             boolean isCoordinating, Durability durability,
+                                             @Nullable AbstractRoute route, @Nullable RoutingKey homeKey)
         {
-            switch (this)
-            {
-                default: throw new IllegalStateException();
-                case No: return false;
-                case Always: return true;
-                case OnlyIfExecuted: return status.hasBeen(Status.Executed);
-            }
+            return new CheckStatusOk(status, promised, accepted, executeAt, isCoordinating, durability, route, homeKey);
+        }
+        public static CheckStatusOk createOk(SaveStatus status, Ballot promised, Ballot accepted, @Nullable Timestamp executeAt,
+                                             boolean isCoordinating, Durability durability,
+                                             @Nullable AbstractRoute route, @Nullable RoutingKey homeKey,
+                                             PartialTxn partialTxn, PartialDeps committedDeps, Writes writes, Result result)
+        {
+            return new CheckStatusOkFull(status, promised, accepted, executeAt, isCoordinating, durability, route, homeKey,
+                                         partialTxn, committedDeps, writes, result);
         }
     }
 
-    public final TxnId txnId;
-    public final Key key; // the key's commandStore to consult - not necessarily the homeKey
-    public final long epoch;
+    // order is important
+    public enum IncludeInfo
+    {
+        No, Route, All
+    }
+
+    public final RoutingKeys someKeys;
+    public final long startEpoch;
+    public final long endEpoch;
     public final IncludeInfo includeInfo;
 
-    public CheckStatus(TxnId txnId, Key key, long epoch, IncludeInfo includeInfo)
+    public CheckStatus(TxnId txnId, RoutingKeys someKeys, long startEpoch, long endEpoch, IncludeInfo includeInfo)
     {
-        this.txnId = txnId;
-        this.key = key;
-        this.epoch = epoch;
+        super(txnId);
+        this.someKeys = someKeys;
+        this.startEpoch = startEpoch;
+        this.endEpoch = endEpoch;
         this.includeInfo = includeInfo;
     }
 
@@ -77,36 +92,51 @@ public class CheckStatus implements Request, PreLoadContext
         return Collections.emptyList();
     }
 
-    public void process(Node node, Id replyToNode, ReplyContext replyContext)
+    public CheckStatus(Id to, Topologies topologies, TxnId txnId, RoutingKeys someKeys, IncludeInfo includeInfo)
     {
+        super(txnId);
+        // TODO (now): cleanup use of instanceof to avoid hotspot cache thrashing
+        if (someKeys instanceof AbstractRoute)
+            this.someKeys = computeScope(to, topologies, (AbstractRoute) someKeys, 0, AbstractRoute::sliceStrict, PartialRoute::union);
+        else
+            this.someKeys = computeScope(to, topologies, someKeys, 0, RoutingKeys::slice, RoutingKeys::union);
+        this.startEpoch = topologies.oldestEpoch();
+        this.endEpoch = topologies.currentEpoch();
+        this.includeInfo = includeInfo;
+    }
 
-        Reply reply = node.ifLocal(this, key, epoch, instance -> {
-            Command command = instance.command(txnId);
-            boolean includeInfo = this.includeInfo.include(command.status());
-            if (includeInfo)
-            {
-                return (CheckStatusReply) new CheckStatusOkFull(command.status(),
-                                                                command.promised(),
-                                                                command.accepted(),
-                                                                node.isCoordinating(txnId, command.promised()),
-                                                                command.isGloballyPersistent(),
-                                                                command.txn(),
-                                                                command.homeKey(),
-                                                                command.executeAt(),
-                                                                command.savedDeps(),
-                                                                command.writes(),
-                                                                command.result());
-            }
+    public void process()
+    {
+        node.mapReduceConsumeLocal(this, someKeys, startEpoch, endEpoch, this);
+    }
 
-            return new CheckStatusOk(command.status(), command.promised(), command.accepted(),
-                                     node.isCoordinating(txnId, command.promised()),
-                                     command.isGloballyPersistent());
-        });
+    @Override
+    public CheckStatusOk apply(SafeCommandStore instance)
+    {
+        Command command = instance.command(txnId);
+        switch (includeInfo)
+        {
+            default: throw new IllegalStateException();
+            case No:
+            case Route:
+                return new CheckStatusOk(command.saveStatus(), command.promised(), command.accepted(), command.executeAt(),
+                        node.isCoordinating(txnId, command.promised()),
+                        command.durability(), includeInfo == IncludeInfo.No ? null : command.route(), command.homeKey());
+            case All:
+                return new CheckStatusOkFull(node, command);
+        }    }
 
-        if (reply == null)
-            reply = CheckStatusNack.nack();
+    @Override
+    public CheckStatusOk reduce(CheckStatusOk r1, CheckStatusOk r2)
+    {
+        return r1.merge(r2);
+    }
 
-        node.reply(replyToNode, replyContext, reply);
+    @Override
+    public void accept(CheckStatusOk ok, Throwable failure)
+    {
+        if (ok == null) node.reply(replyTo, replyContext, CheckStatusNack.nack());
+        else node.reply(replyTo, replyContext, ok);
     }
 
     public interface CheckStatusReply extends Reply
@@ -114,21 +144,40 @@ public class CheckStatus implements Request, PreLoadContext
         boolean isOk();
     }
 
-    public static class CheckStatusOk implements CheckStatusReply, Comparable<CheckStatusOk>
+    public static class CheckStatusOk implements CheckStatusReply
     {
-        public final Status status;
+        public final SaveStatus saveStatus;
         public final Ballot promised;
         public final Ballot accepted;
+        public final @Nullable Timestamp executeAt; // not set if invalidating or invalidated
         public final boolean isCoordinating;
-        public final boolean hasExecutedOnAllShards;
+        public final Durability durability; // i.e. on all shards
+        public final @Nullable AbstractRoute route;
+        public final @Nullable RoutingKey homeKey;
 
-        public CheckStatusOk(Status status, Ballot promised, Ballot accepted, boolean isCoordinating, boolean hasExecutedOnAllShards)
+        public CheckStatusOk(Node node, Command command)
         {
-            this.status = status;
+            this(command.saveStatus(), command.promised(), command.accepted(), command.executeAt(),
+                 node.isCoordinating(command.txnId(), command.promised()), command.durability(), command.route(), command.homeKey());
+        }
+
+        private CheckStatusOk(SaveStatus saveStatus, Ballot promised, Ballot accepted, @Nullable Timestamp executeAt,
+                              boolean isCoordinating, Durability durability,
+                              @Nullable AbstractRoute route, @Nullable RoutingKey homeKey)
+        {
+            this.saveStatus = saveStatus;
             this.promised = promised;
             this.accepted = accepted;
+            this.executeAt = executeAt;
             this.isCoordinating = isCoordinating;
-            this.hasExecutedOnAllShards = hasExecutedOnAllShards;
+            this.durability = durability;
+            this.route = route;
+            this.homeKey = homeKey;
+        }
+
+        public ProgressToken toProgressToken()
+        {
+            return new ProgressToken(durability, saveStatus.status, promised, accepted);
         }
 
         @Override
@@ -141,28 +190,20 @@ public class CheckStatus implements Request, PreLoadContext
         public String toString()
         {
             return "CheckStatusOk{" +
-                   "status:" + status +
+                   "status:" + saveStatus +
                    ", promised:" + promised +
                    ", accepted:" + accepted +
-                   ", hasExecutedOnAllShards:" + hasExecutedOnAllShards +
+                   ", executeAt:" + executeAt +
+                   ", durability:" + durability +
                    ", isCoordinating:" + isCoordinating +
+                   ", route:" + route +
+                   ", homeKey:" + homeKey +
                    '}';
-        }
-
-        @Override
-        public int compareTo(CheckStatusOk that)
-        {
-            int c = this.promised.compareTo(that.promised);
-            if (c == 0) c = this.status.compareTo(that.status);
-            if (c == 0) c = this.accepted.compareTo(that.accepted);
-            if (c == 0 && this.hasExecutedOnAllShards != that.hasExecutedOnAllShards)
-                return this.hasExecutedOnAllShards ? 1 : -1;
-            return c;
         }
 
         public CheckStatusOk merge(CheckStatusOk that)
         {
-            if (that.status.compareTo(this.status) > 0)
+            if (that.saveStatus.compareTo(this.saveStatus) > 0)
                 return that.merge(this);
 
             // preferentially select the one that is coordinating, if any
@@ -170,20 +211,29 @@ public class CheckStatus implements Request, PreLoadContext
             CheckStatusOk defer = prefer == this ? that : this;
 
             // then select the max along each criteria, preferring the coordinator
-            CheckStatusOk maxStatus = prefer.status.compareTo(defer.status) >= 0 ? prefer : defer;
-            CheckStatusOk maxPromised = prefer.promised.compareTo(defer.promised) >= 0 ? prefer : defer;
             CheckStatusOk maxAccepted = prefer.accepted.compareTo(defer.accepted) >= 0 ? prefer : defer;
-            CheckStatusOk maxHasExecuted = !defer.hasExecutedOnAllShards || prefer.hasExecutedOnAllShards ? prefer : defer;
+            CheckStatusOk maxStatus; {
+                int c = prefer.saveStatus.compareTo(defer.saveStatus);
+                if (c > 0) maxStatus = prefer;
+                else if (c < 0) maxStatus = defer;
+                else maxStatus = maxAccepted;
+            }
+            CheckStatusOk maxPromised = prefer.promised.compareTo(defer.promised) >= 0 ? prefer : defer;
+            CheckStatusOk maxDurability = prefer.durability.compareTo(defer.durability) >= 0 ? prefer : defer;
+            CheckStatusOk maxHomeKey = prefer.homeKey != null || defer.homeKey == null ? prefer : defer;
+            AbstractRoute mergedRoute = AbstractRoute.merge(prefer.route, defer.route);
 
             // if the maximum (or preferred equal) is the same on all dimensions, return it
-            if (maxStatus == maxPromised && maxStatus == maxAccepted && maxStatus == maxHasExecuted)
+            if (maxStatus == maxPromised && maxStatus == maxAccepted && maxStatus == maxDurability
+                && maxStatus.route == mergedRoute && maxStatus == maxHomeKey)
+            {
                 return maxStatus;
+            }
 
             // otherwise assemble the maximum of each, and propagate isCoordinating from the origin we selected the promise from
-
             boolean isCoordinating = maxPromised == prefer ? prefer.isCoordinating : defer.isCoordinating;
-            return new CheckStatusOk(maxStatus.status, maxPromised.promised, maxAccepted.accepted,
-                                     isCoordinating, maxHasExecuted.hasExecutedOnAllShards);
+            return new CheckStatusOk(maxStatus.saveStatus, maxPromised.promised, maxAccepted.accepted, maxStatus.executeAt,
+                                     isCoordinating, maxDurability.durability, mergedRoute, maxHomeKey.homeKey);
         }
 
         @Override
@@ -195,45 +245,36 @@ public class CheckStatus implements Request, PreLoadContext
 
     public static class CheckStatusOkFull extends CheckStatusOk
     {
-        public final Txn txn;
-        public final Key homeKey;
-        public final Timestamp executeAt;
-        public final Deps deps;
+        public static final CheckStatusOkFull NOT_WITNESSED = new CheckStatusOkFull(NotWitnessed, Ballot.ZERO, Ballot.ZERO, Timestamp.NONE, false, NotDurable, null, null, null, null, null, null);
+
+        public final PartialTxn partialTxn;
+        public final PartialDeps committedDeps; // only set if status >= Committed, so safe to merge
         public final Writes writes;
         public final Result result;
 
-        public CheckStatusOkFull(Status status, Ballot promised, Ballot accepted, boolean isCoordinating, boolean hasExecutedOnAllShards,
-                          Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
+        public CheckStatusOkFull(Node node, Command command)
         {
-            super(status, promised, accepted, isCoordinating, hasExecutedOnAllShards);
-            this.txn = txn;
-            this.homeKey = homeKey;
-            this.executeAt = executeAt;
-            this.deps = deps;
+            super(node, command);
+            this.partialTxn = command.partialTxn();
+            this.committedDeps = command.status().compareTo(Committed) >= 0 ? command.partialDeps() : null;
+            this.writes = command.writes();
+            this.result = command.result();
+        }
+
+        protected CheckStatusOkFull(SaveStatus status, Ballot promised, Ballot accepted, Timestamp executeAt,
+                                  boolean isCoordinating, Durability durability, AbstractRoute route,
+                                  RoutingKey homeKey, PartialTxn partialTxn, PartialDeps committedDeps, Writes writes, Result result)
+        {
+            super(status, promised, accepted, executeAt, isCoordinating, durability, route, homeKey);
+            this.partialTxn = partialTxn;
+            this.committedDeps = committedDeps;
             this.writes = writes;
             this.result = result;
         }
 
-        @Override
-        public String toString()
-        {
-            return "CheckStatusOk{" +
-                   "status:" + status +
-                   ", promised:" + promised +
-                   ", accepted:" + accepted +
-                   ", executeAt:" + executeAt +
-                   ", hasExecutedOnAllShards:" + hasExecutedOnAllShards +
-                   ", isCoordinating:" + isCoordinating +
-                   ", deps:" + deps +
-                   ", writes:" + writes +
-                   ", result:" + result +
-                   '}';
-        }
-
         /**
-         * This method assumes parameter is of the same type and has the same additional info.
-         * If parameters have different info, it is undefined which properties will be returned - no effort
-         * is made to merge different info.
+         * This method assumes parameter is of the same type and has the same additional info (modulo partial replication).
+         * If parameters have different info, it is undefined which properties will be returned.
          *
          * This method is NOT guaranteed to return CheckStatusOkFull unless the parameter is also CheckStatusOkFull.
          * This method is NOT guaranteed to return either parameter: it may merge the two to represent the maximum
@@ -244,15 +285,78 @@ public class CheckStatus implements Request, PreLoadContext
         public CheckStatusOk merge(CheckStatusOk that)
         {
             CheckStatusOk max = super.merge(that);
-            if (this == max || that == max) return max;
-
-            CheckStatusOk maxSrc = this.status.compareTo(that.status) >= 0 ? this : that;
+            CheckStatusOk maxSrc = this.saveStatus.compareTo(that.saveStatus) >= 0 ? this : that;
             if (!(maxSrc instanceof CheckStatusOkFull))
                 return max;
 
-            CheckStatusOkFull src = (CheckStatusOkFull) maxSrc;
-            return new CheckStatusOkFull(max.status, max.promised, max.accepted, max.isCoordinating,
-                                         max.hasExecutedOnAllShards, src.txn, src.homeKey, src.executeAt, src.deps, src.writes, src.result);
+            CheckStatusOkFull fullMax = (CheckStatusOkFull) maxSrc;
+            CheckStatusOk minSrc = maxSrc == this ? that : this;
+            if (!(minSrc instanceof CheckStatusOkFull))
+            {
+                return new CheckStatusOkFull(max.saveStatus, max.promised, max.accepted, fullMax.executeAt, max.isCoordinating, max.durability, max.route,
+                                             max.homeKey, fullMax.partialTxn, fullMax.committedDeps, fullMax.writes, fullMax.result);
+            }
+
+            CheckStatusOkFull fullMin = (CheckStatusOkFull) minSrc;
+
+            PartialTxn partialTxn = PartialTxn.merge(fullMax.partialTxn, fullMin.partialTxn);
+            PartialDeps committedDeps;
+            if (fullMax.committedDeps == null) committedDeps = fullMin.committedDeps;
+            else if (fullMin.committedDeps == null) committedDeps = fullMax.committedDeps;
+            else committedDeps = fullMax.committedDeps.with(fullMin.committedDeps);
+
+            return new CheckStatusOkFull(max.saveStatus, max.promised, max.accepted, fullMax.executeAt, max.isCoordinating, max.durability, max.route,
+                                         max.homeKey, partialTxn, committedDeps, fullMax.writes, fullMax.result);
+        }
+
+        public Known sufficientFor(AbstractKeys<?, ?> forKeys)
+        {
+            return sufficientFor(forKeys, saveStatus, partialTxn, committedDeps, writes, result);
+        }
+
+        private static Known sufficientFor(AbstractKeys<?, ?> forKeys, SaveStatus maxStatus, PartialTxn partialTxn, PartialDeps committedDeps, Writes writes, Result result)
+        {
+            Known learn = maxStatus.known;
+            switch (maxStatus.known)
+            {
+                default: throw new AssertionError();
+                case Invalidation:
+                    break;
+                case Outcome:
+                    if (writes != null && result != null
+                        && committedDeps != null && committedDeps.covers(forKeys)
+                        && partialTxn != null && partialTxn.covers(forKeys))
+                        break;
+                    learn = Known.ExecutionOrder;
+                case ExecutionOrder:
+                    if (committedDeps != null && committedDeps.covers(forKeys)
+                        && partialTxn != null && partialTxn.covers(forKeys))
+                        break;
+                    learn = Known.Definition;
+                case Definition:
+                    if (partialTxn != null && partialTxn.covers(forKeys))
+                        break;
+                    learn = Known.Nothing;
+                    // TODO (now): we should test Route presence here
+                case Nothing:
+            }
+            return learn;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "CheckStatusOk{" +
+                   "status:" + saveStatus +
+                   ", promised:" + promised +
+                   ", accepted:" + accepted +
+                   ", executeAt:" + executeAt +
+                   ", durability:" + durability +
+                   ", isCoordinating:" + isCoordinating +
+                   ", deps:" + committedDeps +
+                   ", writes:" + writes +
+                   ", result:" + result +
+                   '}';
         }
     }
 
@@ -298,5 +402,11 @@ public class CheckStatus implements Request, PreLoadContext
     public MessageType type()
     {
         return MessageType.CHECK_STATUS_REQ;
+    }
+
+    @Override
+    public long waitForEpoch()
+    {
+        return endEpoch;
     }
 }

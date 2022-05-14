@@ -157,7 +157,7 @@ public class MaelstromResult implements Result
             for (Key key : update.keySet())
                 reads.putIfAbsent(key, null);
 
-            Keys keys = new Keys(reads.keySet());
+            Keys keys = new Keys(reads.navigableKeySet());
             Value[] values = reads.values().toArray(new Value[0]);
             return new MaelstromResult(client, requestId, keys, values, update);
         }

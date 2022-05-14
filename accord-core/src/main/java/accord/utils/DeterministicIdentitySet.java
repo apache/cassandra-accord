@@ -21,6 +21,7 @@ package accord.utils;
 import com.google.common.collect.Iterables;
 
 import java.util.*;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 public class DeterministicIdentitySet<T> extends AbstractSet<T>
@@ -134,6 +135,18 @@ public class DeterministicIdentitySet<T> extends AbstractSet<T>
         while (cur != head)
         {
             consumer.accept(cur.item);
+            while (cur.next == null)
+                cur = cur.prev;
+            cur = cur.next;
+        }
+    }
+
+    public <P> void forEach(BiConsumer<? super P, ? super T> consumer, P parameter)
+    {
+        Entry<T> cur = head.next;
+        while (cur != head)
+        {
+            consumer.accept(parameter, cur.item);
             while (cur.next == null)
                 cur = cur.prev;
             cur = cur.next;

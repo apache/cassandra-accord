@@ -19,79 +19,97 @@
 package accord.messages;
 
 import accord.api.Key;
-import accord.primitives.Keys;
-import accord.utils.ReducingFuture;
-import accord.local.Node;
+import accord.local.CommandStore;
+import accord.local.PreLoadContext;
+import accord.local.SafeCommandStore;
+import accord.primitives.*;
+import accord.local.Command;
 import accord.local.Node.Id;
 import accord.api.Result;
 import accord.topology.Topologies;
-import accord.primitives.Deps;
-import accord.primitives.Timestamp;
-import accord.txn.Writes;
-import accord.txn.Txn;
-import accord.primitives.TxnId;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
-import org.apache.cassandra.utils.concurrent.Future;
 
 import java.util.Collections;
-import java.util.List;
+import accord.messages.Apply.ApplyReply;
 
 import static accord.messages.MessageType.APPLY_REQ;
 import static accord.messages.MessageType.APPLY_RSP;
 
-public class Apply extends TxnRequest
+public class Apply extends TxnRequest<ApplyReply>
 {
     public static class SerializationSupport
     {
-        public static Apply create(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
+        public static Apply create(TxnId txnId, PartialRoute scope, long waitForEpoch, long untilEpoch, Timestamp executeAt, PartialDeps deps, Writes writes, Result result)
         {
-            return new Apply(scope, waitForEpoch, txnId, txn, homeKey, executeAt, deps, writes, result);
+            return new Apply(txnId, scope, waitForEpoch, untilEpoch, executeAt, deps, writes, result);
         }
     }
 
-    public final TxnId txnId;
-    public final Txn txn;
-    public final Key homeKey;
+    public final long untilEpoch;
     public final Timestamp executeAt;
-    public final Deps deps;
+    public final PartialDeps deps;
     public final Writes writes;
     public final Result result;
 
-    public Apply(Node.Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    public Apply(Id to, Topologies sendTo, Topologies applyTo, long untilEpoch, TxnId txnId, AbstractRoute route, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
-        super(to, topologies, txn.keys());
-        this.txnId = txnId;
-        this.txn = txn;
-        this.homeKey = homeKey;
-        this.deps = deps;
+        super(to, sendTo, route, txnId);
+        this.untilEpoch = untilEpoch;
+        // TODO: we shouldn't send deps unless we need to (but need to implement fetching them if they're not present)
+        KeyRanges slice = applyTo == sendTo ? scope.covering : applyTo.computeRangesForNode(to);
+        this.deps = deps.slice(slice);
         this.executeAt = executeAt;
         this.writes = writes;
         this.result = result;
     }
 
-    protected Apply(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    private Apply(TxnId txnId, PartialRoute route, long waitForEpoch, long untilEpoch, Timestamp executeAt, PartialDeps deps, Writes writes, Result result)
     {
-        super(scope, waitForEpoch);
-        this.txnId = txnId;
-        this.txn = txn;
-        this.homeKey = homeKey;
+        super(txnId, route, waitForEpoch);
+        this.untilEpoch = untilEpoch;
         this.executeAt = executeAt;
         this.deps = deps;
         this.writes = writes;
         this.result = result;
     }
 
-    public void process(Node node, Id replyToNode, ReplyContext replyContext)
+    public void process()
     {
-        Key progressKey = node.trySelectProgressKey(txnId, txn.keys(), homeKey);
-        List<Future<Void>> futures = node.mapLocalSince(this, scope(), executeAt, instance -> instance.command(txnId).apply(txn, homeKey, progressKey, executeAt, deps, writes, result));
+        // note, we do not also commit here if txnId.epoch != executeAt.epoch, as the scope() for a commit would be different
+        node.mapReduceConsumeLocal(this, txnId.epoch, untilEpoch, this);
+    }
 
-        ReducingFuture.reduce(futures, (l, r) -> null).addCallback((unused, failure) -> {
-            if (failure == null)
-                // TODO: notify coordinator of failures
-                // note, we do not also commit here if txnId.epoch != executeAt.epoch, as the scope() for a commit would be different
-                node.reply(replyToNode, replyContext, ApplyOk.INSTANCE);
-        });
+    public ApplyReply apply(SafeCommandStore safeStore)
+    {
+        Command command = safeStore.command(txnId);
+        switch (command.apply(safeStore, untilEpoch, scope, executeAt, deps, writes, result))
+        {
+            default:
+            case Insufficient:
+                return ApplyReply.Insufficient;
+            case Redundant:
+                return ApplyReply.Redundant;
+            case Success:
+                return ApplyReply.Applied;
+        }
+    }
+
+    public ApplyReply reduce(ApplyReply a, ApplyReply b)
+    {
+        return a.compareTo(b) >= 0 ? a : b;
+    }
+
+    @Override
+    public void accept(ApplyReply reply, Throwable failure)
+    {
+        if (reply == ApplyReply.Applied)
+        {
+            node.ifLocal(PreLoadContext.empty(), scope.homeKey, txnId.epoch, instance -> {
+                node.withEpoch(executeAt.epoch, () -> instance.progressLog().durableLocal(txnId));
+            }).addCallback(node.agent());
+        }
+        node.reply(replyTo, replyContext, reply);
     }
 
     @Override
@@ -103,7 +121,7 @@ public class Apply extends TxnRequest
     @Override
     public Iterable<Key> keys()
     {
-        return txn.keys();
+        return Collections.emptyList();
     }
 
     @Override
@@ -112,21 +130,26 @@ public class Apply extends TxnRequest
         return APPLY_REQ;
     }
 
-    public static class ApplyOk implements Reply
+    public enum ApplyReply implements Reply
     {
-        public static final ApplyOk INSTANCE = new ApplyOk();
-        public ApplyOk() {}
-
-        @Override
-        public String toString()
-        {
-            return "ApplyOk";
-        }
+        Applied, Redundant, Insufficient;
 
         @Override
         public MessageType type()
         {
             return APPLY_RSP;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "Apply" + name();
+        }
+
+        @Override
+        public boolean isFinal()
+        {
+            return this != Insufficient;
         }
     }
 
@@ -135,7 +158,6 @@ public class Apply extends TxnRequest
     {
         return "Apply{" +
                "txnId:" + txnId +
-               ", txn:" + txn +
                ", deps:" + deps +
                ", executeAt:" + executeAt +
                ", writes:" + writes +

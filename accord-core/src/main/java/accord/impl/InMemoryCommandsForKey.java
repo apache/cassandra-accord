@@ -22,22 +22,34 @@ import accord.api.Key;
 import accord.local.Command;
 import accord.local.CommandsForKey;
 import accord.local.PartialCommand;
+import accord.local.Status;
 import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import java.util.NavigableMap;
 import java.util.TreeMap;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Stream;
+
+import static accord.local.CommandsForKey.CommandTimeseries.TestDep.*;
+import static accord.local.CommandsForKey.CommandTimeseries.TestKind.RorWs;
+import static accord.local.Status.PreAccepted;
+import static accord.primitives.Txn.Kind.WRITE;
 
 public class InMemoryCommandsForKey extends CommandsForKey
 {
-    static class InMemoryCommandTimeseries implements CommandTimeseries
+    public static class InMemoryCommandTimeseries<T> implements CommandTimeseries<T>
     {
         private final NavigableMap<Timestamp, Command> commands = new TreeMap<>();
 
-        @Override
-        public PartialCommand.WithDeps get(Timestamp timestamp)
+        final Function<Command, T> map;
+
+        InMemoryCommandTimeseries(Function<Command, T> map)
         {
-            return commands.get(timestamp);
+            this.map = map;
         }
 
         @Override
@@ -63,34 +75,40 @@ public class InMemoryCommandsForKey extends CommandsForKey
         }
 
         @Override
-        public Stream<PartialCommand.WithDeps> before(Timestamp timestamp)
+        public Stream<T> before(@Nonnull Timestamp timestamp, @Nonnull TestKind testKind, @Nonnull TestDep testDep, @Nullable TxnId depId, @Nonnull TestStatus testStatus, @Nullable Status status)
         {
-            return commands.headMap(timestamp, false).values().stream().map(cmd -> cmd);
+            return commands.headMap(timestamp, false).values().stream()
+                    .filter(cmd -> testKind == RorWs || cmd.kind() == WRITE)
+                    .filter(cmd -> testDep == ANY_DEPS || (cmd.partialDeps().contains(depId) ^ (testDep == WITHOUT)))
+                    .filter(cmd -> TestStatus.test(cmd.status(), testStatus, status))
+                    .map(map);
         }
 
         @Override
-        public Stream<PartialCommand.WithDeps> after(Timestamp timestamp)
+        public Stream<T> after(@Nonnull Timestamp timestamp, @Nonnull TestKind testKind, @Nonnull TestDep testDep, @Nullable TxnId depId, @Nonnull TestStatus testStatus, @Nullable Status status)
         {
-            return commands.tailMap(timestamp, false).values().stream().map(cmd -> cmd);
+            return commands.tailMap(timestamp, false).values().stream()
+                    .filter(cmd -> testKind == RorWs || cmd.kind() == WRITE)
+                    .filter(cmd -> testDep == ANY_DEPS || (cmd.partialDeps().contains(depId) ^ (testDep == WITHOUT)))
+                    .filter(cmd -> TestStatus.test(cmd.status(), testStatus, status))
+                    .map(map);
         }
 
-        @Override
-        public Stream<PartialCommand.WithDeps> between(Timestamp min, Timestamp max)
+        public Stream<Command> between(Timestamp min, Timestamp max)
         {
-            return commands.subMap(min, true, max, true).values().stream().map(cmd -> cmd);
+            return commands.subMap(min, true, max, true).values().stream();
         }
 
-        @Override
-        public Stream<PartialCommand.WithDeps> all()
+        public Stream<Command> all()
         {
-            return commands.values().stream().map(cmd -> cmd);
+            return commands.values().stream();
         }
     }
 
     private final Key key;
-    private final InMemoryCommandTimeseries uncommitted = new InMemoryCommandTimeseries();
-    private final InMemoryCommandTimeseries committedById = new InMemoryCommandTimeseries();
-    private final InMemoryCommandTimeseries committedByExecuteAt = new InMemoryCommandTimeseries();
+    private final InMemoryCommandTimeseries<TxnIdWithExecuteAt> uncommitted = new InMemoryCommandTimeseries<>(cmd -> new TxnIdWithExecuteAt(cmd.txnId(), cmd.executeAt()));
+    private final InMemoryCommandTimeseries<TxnId> committedById = new InMemoryCommandTimeseries<>(Command::txnId);
+    private final InMemoryCommandTimeseries<TxnId> committedByExecuteAt = new InMemoryCommandTimeseries<>(Command::txnId);
 
     private Timestamp max = Timestamp.NONE;
 
@@ -118,20 +136,29 @@ public class InMemoryCommandsForKey extends CommandsForKey
     }
 
     @Override
-    public CommandTimeseries uncommitted()
+    public InMemoryCommandTimeseries<TxnIdWithExecuteAt> uncommitted()
     {
         return uncommitted;
     }
 
     @Override
-    public CommandTimeseries committedById()
+    public InMemoryCommandTimeseries<TxnId> committedById()
     {
         return committedById;
     }
 
     @Override
-    public CommandTimeseries committedByExecuteAt()
+    public InMemoryCommandTimeseries<TxnId> committedByExecuteAt()
     {
         return committedByExecuteAt;
+    }
+
+    public void forWitnessed(Timestamp minTs, Timestamp maxTs, Consumer<Command> consumer)
+    {
+        uncommitted().between(minTs, maxTs)
+                .filter(cmd -> cmd.hasBeen(PreAccepted)).forEach(consumer);
+        committedById().between(minTs, maxTs).forEach(consumer);
+        committedByExecuteAt().between(minTs, maxTs)
+                .filter(cmd -> cmd.txnId().compareTo(minTs) < 0 || cmd.txnId().compareTo(maxTs) > 0).forEach(consumer);
     }
 }

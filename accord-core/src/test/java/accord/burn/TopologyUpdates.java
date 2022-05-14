@@ -18,21 +18,22 @@
 
 package accord.burn;
 
-import accord.api.Key;
-import accord.api.Result;
 import accord.api.TestableConfigurationService;
 import accord.impl.InMemoryCommandStore;
+import accord.coordinate.FetchData;
+import accord.impl.InMemoryCommandStores;
 import accord.local.Command;
 import accord.local.Node;
 import accord.local.Status;
-import accord.primitives.Deps;
+import accord.messages.CheckStatus.CheckStatusOk;
+import accord.primitives.AbstractRoute;
 import accord.primitives.Timestamp;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.primitives.KeyRange;
 import accord.primitives.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topology;
-import accord.txn.*;
 import accord.utils.MessageTask;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Sets;
@@ -48,78 +49,88 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
-import static accord.impl.InMemoryCommandStores.inMemory;
+import static accord.coordinate.Invalidate.invalidate;
+import static accord.local.PreLoadContext.contextFor;
+import static accord.local.Status.Known.*;
 
-public class TopologyUpdate
+public class TopologyUpdates
 {
-    private static final Logger logger = LoggerFactory.getLogger(TopologyUpdate.class);
-
-    private static final Set<Long> pendingTopologies = Sets.newConcurrentHashSet();
+    private static final Logger logger = LoggerFactory.getLogger(TopologyUpdates.class);
 
     private static class CommandSync
     {
-        private final Status status;
-        private final TxnId txnId;
-        private final Txn txn;
-        private final Key homeKey;
-        private final Timestamp executeAt;
-        private final long epoch;
+        final TxnId txnId;
+        final Status status;
+        final AbstractRoute route;
+        final Timestamp executeAt;
+        final long fromEpoch;
+        final long toEpoch;
 
-        private final Deps deps;
-        private final Writes writes;
-        private final Result result;
-
-        public CommandSync(Command command, long epoch)
+        public CommandSync(TxnId txnId, CheckStatusOk status, long srcEpoch, long trgEpoch)
         {
-            Preconditions.checkArgument(command.hasBeen(Status.PreAccepted));
-            this.txnId = command.txnId();
-            this.txn = command.txn();
-            this.homeKey = command.homeKey();
-            this.status = command.status();
-            this.executeAt = command.executeAt();
-            this.deps = command.savedDeps();
-            this.writes = command.writes();
-            this.result = command.result();
-            this.epoch = epoch;
+            Preconditions.checkArgument(status.saveStatus.hasBeen(Status.PreAccepted));
+            Preconditions.checkState(status.route != null);
+            this.txnId = txnId;
+            this.status = status.saveStatus.status;
+            this.route = status.route;
+            this.executeAt = status.executeAt;
+            this.fromEpoch = srcEpoch;
+            this.toEpoch = trgEpoch;
         }
 
-        public void process(Node node)
+        public void process(Node node, Consumer<Boolean> onDone)
         {
-            if (!node.topology().hasEpoch(txnId.epoch))
+            if (!node.topology().hasEpoch(toEpoch))
             {
-                node.configService().fetchTopologyForEpoch(txnId.epoch);
-                node.topology().awaitEpoch(txnId.epoch).addListener(() -> process(node));
+                node.configService().fetchTopologyForEpoch(toEpoch);
+                node.topology().awaitEpoch(toEpoch).addListener(() -> process(node, onDone));
                 return;
             }
 
-            Key progressKey = node.trySelectProgressKey(txnId, txn.keys(), homeKey); // likely to be null, unless flip-flop of ownership
-            // TODO: can skip the homeKey if it's not a participating key in the transaction
-            inMemory(node).forEachLocalSince(txn.keys(), epoch, commandStore -> {
-                switch (status)
-                {
-                    case AcceptedInvalidate:
-                        if (txn == null)
-                            break;
-                    case PreAccepted:
-                    case Accepted:
-                        commandStore.command(txnId).preaccept(txn, homeKey, progressKey);
-                        break;
-                    case Committed:
-                    case ReadyToExecute:
-                        commandStore.command(txnId).commit(txn, homeKey, progressKey, executeAt, deps);
-                        break;
-                    case Executed:
-                    case Applied:
-                        commandStore.command(txnId).apply(txn, homeKey, progressKey, executeAt, deps, writes, result);
-                        break;
-                    case Invalidated:
-                        commandStore.command(txnId).commitInvalidate();
-                    default:
-                        throw new IllegalStateException();
-                }
-            });
+            // first check if already applied locally, and respond immediately
+            Status minStatus = ((InMemoryCommandStores.Synchronized)node.commandStores()).mapReduce(contextFor(txnId), route, toEpoch, toEpoch,
+                    instance -> instance.command(txnId).status(), (a, b) -> a.compareTo(b) <= 0 ? a : b);
+
+            if (minStatus == null || minStatus.phase.compareTo(status.phase) >= 0)
+            {
+                // TODO: minStatus == null means we're sending redundant messages
+                onDone.accept(true);
+                return;
+            }
+
+            BiConsumer<Status.Known, Throwable> callback = (outcome, fail) -> {
+                if (fail != null)
+                    process(node, onDone);
+                else if (outcome == Nothing)
+                    invalidate(node, txnId, route.with(route.homeKey), route.homeKey, (i1, i2) -> process(node, onDone));
+                else
+                    onDone.accept(true);
+            };
+            switch (status)
+            {
+                case NotWitnessed:
+                    onDone.accept(true);
+                    break;
+                case PreAccepted:
+                case Accepted:
+                case AcceptedInvalidate:
+                    FetchData.fetch(Definition, node, txnId, route, toEpoch, callback);
+                    break;
+                case Committed:
+                case ReadyToExecute:
+                    FetchData.fetch(ExecutionOrder, node, txnId, route, toEpoch, callback);
+                    break;
+                case PreApplied:
+                case Applied:
+                case Invalidated:
+                    node.withEpoch(Math.max(executeAt.epoch, toEpoch), () -> {
+                        FetchData.fetch(Outcome, node, txnId, route, executeAt, toEpoch, callback);
+                    });
+            }
         }
     }
+
+    private final Set<Long> pendingTopologies = Sets.newConcurrentHashSet();
 
     public static <T> BiConsumer<T, Throwable> dieOnException()
     {
@@ -137,15 +148,15 @@ public class TopologyUpdate
         return stage.addCallback(dieOnException());
     }
 
-    public static MessageTask notify(Node originator, Collection<Node.Id> cluster, Topology update)
+    public MessageTask notify(Node originator, Collection<Node.Id> cluster, Topology update)
     {
         pendingTopologies.add(update.epoch());
-        return MessageTask.begin(originator, cluster, "TopologyNotify:" + update.epoch(), (node, from) -> {
+        return MessageTask.begin(originator, cluster, "TopologyNotify:" + update.epoch(), (node, from, onDone) -> {
             long nodeEpoch = node.topology().epoch();
             if (nodeEpoch + 1 < update.epoch())
-                return false;
+                onDone.accept(false);
             ((TestableConfigurationService) node.configService()).reportTopology(update);
-            return true;
+            onDone.accept(true);
         });
     }
 
@@ -157,15 +168,19 @@ public class TopologyUpdate
         return result;
     }
 
-    private static Stream<MessageTask> syncEpochCommands(Node node, long epoch, KeyRanges ranges, Function<CommandSync, Collection<Node.Id>> recipients, long forEpoch, boolean committedOnly)
+    private static Stream<MessageTask> syncEpochCommands(Node node, long srcEpoch, KeyRanges ranges, Function<CommandSync, Collection<Node.Id>> recipients, long trgEpoch, boolean committedOnly)
     {
-        Map<TxnId, CommandSync> syncMessages = new ConcurrentHashMap<>();
-        Consumer<Command> commandConsumer = command -> syncMessages.put(command.txnId(), new CommandSync(command, epoch));
+        Map<TxnId, CheckStatusOk> syncMessages = new ConcurrentHashMap<>();
+        Consumer<Command> commandConsumer = command -> syncMessages.merge(command.txnId(), new CheckStatusOk(node, command), CheckStatusOk::merge);
         if (committedOnly)
-            inMemory(node).forEachLocal(commandStore -> InMemoryCommandStore.inMemory(commandStore).forCommittedInEpoch(ranges, epoch, commandConsumer));
+            node.commandStores().forEach(commandStore -> InMemoryCommandStore.inMemory(commandStore).forCommittedInEpoch(ranges, srcEpoch, commandConsumer));
         else
-            inMemory(node).forEachLocal(commandStore -> InMemoryCommandStore.inMemory(commandStore).forEpochCommands(ranges, epoch, commandConsumer));
-        return syncMessages.values().stream().map(cmd -> MessageTask.of(node, recipients.apply(cmd), "Sync:" + cmd.txnId + ':' + epoch + ':' + forEpoch, cmd::process));
+            node.commandStores().forEach(commandStore -> InMemoryCommandStore.inMemory(commandStore).forEpochCommands(ranges, srcEpoch, commandConsumer));
+
+        return syncMessages.entrySet().stream().map(e -> {
+            CommandSync sync = new CommandSync(e.getKey(), e.getValue(), srcEpoch, trgEpoch);
+            return MessageTask.of(node, recipients.apply(sync), "Sync:" + e.getKey() + ':' + srcEpoch + ':' + trgEpoch, sync::process);
+        });
     }
 
     private static final boolean COMMITTED_ONLY = true;
@@ -177,7 +192,7 @@ public class TopologyUpdate
     {
         Topology syncTopology = node.configService().getTopologyForEpoch(syncEpoch);
         Topology localTopology = syncTopology.forNode(node.id());
-        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().withUnsyncEpochs(cmd.txn, syncEpoch).nodes();
+        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().withUnsyncedEpochs(cmd.route, syncEpoch).nodes();
 
         KeyRanges ranges = localTopology.ranges();
         Stream<MessageTask> messageStream = Stream.empty();
@@ -191,20 +206,19 @@ public class TopologyUpdate
     /**
      * Syncs all newly replicated commands when nodes are gaining ranges and the current epoch
      */
-    private static Stream<MessageTask> optimizedSync(Node node, long syncEpoch)
+    private static Stream<MessageTask> optimizedSync(Node node, long srcEpoch)
     {
-        long nextEpoch = syncEpoch + 1;
-        Topology syncTopology = node.configService().getTopologyForEpoch(syncEpoch);
+        long trgEpoch = srcEpoch + 1;
+        Topology syncTopology = node.configService().getTopologyForEpoch(srcEpoch);
         Topology localTopology = syncTopology.forNode(node.id());
-        Topology nextTopology = node.configService().getTopologyForEpoch(nextEpoch);
-        Function<CommandSync, Collection<Node.Id>> nextNodes = cmd -> allNodesFor(cmd.txn, nextTopology);
-        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().withUnsyncEpochs(cmd.txn, syncEpoch).nodes();
+        Topology nextTopology = node.configService().getTopologyForEpoch(trgEpoch);
+        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().preciseEpochs(cmd.route, trgEpoch, trgEpoch).nodes();
 
         // backfill new replicas with operations from prior epochs
         Stream<MessageTask> messageStream = Stream.empty();
-        for (Shard syncShard : localTopology)
+        for (Shard syncShard : localTopology.shards())
         {
-            for (Shard nextShard : nextTopology)
+            for (Shard nextShard : nextTopology.shards())
             {
                 // do nothing if there's no change
                 if (syncShard.range.equals(nextShard.range) && syncShard.nodeSet.equals(nextShard.nodeSet))
@@ -221,22 +235,21 @@ public class TopologyUpdate
                     continue;
 
                 KeyRanges ranges = KeyRanges.single(intersection);
-                for (long epoch=1; epoch<syncEpoch; epoch++)
+                for (long epoch=1; epoch<srcEpoch; epoch++)
                     messageStream = Stream.concat(messageStream, syncEpochCommands(node,
                                                                                    epoch,
                                                                                    ranges,
                                                                                    cmd -> newNodes,
-                                                                                   syncEpoch, COMMITTED_ONLY));
+                                                                                   trgEpoch, COMMITTED_ONLY));
             }
         }
 
-
         // update all current and future replicas with the contents of the sync epoch
         messageStream = Stream.concat(messageStream, syncEpochCommands(node,
-                                                                       syncEpoch,
+                                                                       srcEpoch,
                                                                        localTopology.ranges(),
                                                                        allNodes,
-                                                                       syncEpoch, COMMITTED_ONLY));
+                                                                       trgEpoch, COMMITTED_ONLY));
         return messageStream;
     }
 
@@ -263,15 +276,18 @@ public class TopologyUpdate
         return dieExceptionally(last);
     }
 
-    public static Future<Void> syncEpoch(Node originator, long epoch, Collection<Node.Id> cluster)
+    public Future<Void> syncEpoch(Node originator, long epoch, Collection<Node.Id> cluster)
     {
         Future<Void> future = dieExceptionally(sync(originator, epoch)
-                .flatMap(v -> MessageTask.apply(originator, cluster, "SyncComplete:" + epoch, (node, from) -> node.onEpochSyncComplete(originator.id(), epoch))));
+                .flatMap(v -> MessageTask.apply(originator, cluster, "SyncComplete:" + epoch, (node, from, onDone) -> {
+                    node.onEpochSyncComplete(originator.id(), epoch);
+                    onDone.accept(true);
+                })));
         future.addCallback((unused, throwable) -> pendingTopologies.remove(epoch));
         return future;
     }
 
-    public static int pendingTopologies()
+    public int pendingTopologies()
     {
         return pendingTopologies.size();
     }

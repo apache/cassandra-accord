@@ -27,6 +27,7 @@ import accord.api.Data;
 import accord.api.Key;
 import accord.api.Query;
 import accord.api.Result;
+import accord.primitives.TxnId;
 
 public class ListQuery implements Query
 {
@@ -40,7 +41,7 @@ public class ListQuery implements Query
     }
 
     @Override
-    public Result compute(Data data, Read untypedRead, Update update)
+    public Result compute(TxnId txnId, Data data, Read untypedRead, Update update)
     {
         ListRead read = (ListRead) untypedRead;
         int[][] values = new int[read.readKeys.size()][];
@@ -50,6 +51,6 @@ public class ListQuery implements Query
             if (i >= 0)
                 values[i] = e.getValue();
         }
-        return new ListResult(client, requestId, read.readKeys, values, (ListUpdate) update);
+        return new ListResult(client, requestId, txnId, read.readKeys, values, (ListUpdate) update);
     }
 }

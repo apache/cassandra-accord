@@ -19,6 +19,7 @@
 package accord.local;
 
 import accord.api.ProgressLog;
+import accord.api.RoutingKey;
 import accord.api.TestableConfigurationService;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.IntKey;
@@ -29,15 +30,21 @@ import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
 import accord.impl.mock.MockStore;
 import accord.local.Node.Id;
+import accord.local.Status.Known;
+import accord.primitives.KeyRange;
+import accord.primitives.KeyRanges;
+import accord.primitives.Route;
+import accord.primitives.RoutingKeys;
 import accord.topology.Topology;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
-import accord.txn.Txn;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nullable;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
@@ -46,16 +53,20 @@ import java.util.function.Consumer;
 
 import static accord.Utils.id;
 import static accord.Utils.writeTxn;
-import static accord.utils.Utils.listOf;
+import static accord.impl.InMemoryCommandStore.inMemory;
 
 public class CommandTest
 {
     private static final Node.Id ID1 = id(1);
     private static final Node.Id ID2 = id(2);
     private static final Node.Id ID3 = id(3);
-    private static final List<Node.Id> IDS = listOf(ID1, ID2, ID3);
-    private static final Topology TOPOLOGY = TopologyFactory.toTopology(IDS, 3, IntKey.range(0, 100));
+    private static final List<Node.Id> IDS = Arrays.asList(ID1, ID2, ID3);
+    private static final KeyRange FULL_RANGE = IntKey.range(0, 100);
+    private static final KeyRanges FULL_RANGES = KeyRanges.single(FULL_RANGE);
+    private static final Topology TOPOLOGY = TopologyFactory.toTopology(IDS, 3, FULL_RANGE);
     private static final IntKey KEY = IntKey.key(10);
+    private static final RoutingKey HOME_KEY = KEY.toRoutingKey();
+    private static final Route ROUTE = new Route(KEY, new RoutingKey[] { KEY });
 
     private static class CommandStoreSupport
     {
@@ -76,42 +87,57 @@ public class CommandTest
     private static class NoOpProgressLog implements ProgressLog
     {
         @Override
-        public void preaccept(Command command, boolean isProgressShard, boolean isHomeShard)
+        public void unwitnessed(TxnId txnId, RoutingKey homeKey, ProgressShard shard)
         {
         }
 
         @Override
-        public void accept(Command command, boolean isProgressShard, boolean isHomeShard)
+        public void preaccepted(Command command, ProgressShard shard)
         {
         }
 
         @Override
-        public void commit(Command command, boolean isProgressShard, boolean isHomeShard)
+        public void accepted(Command command, ProgressShard shard)
         {
         }
 
         @Override
-        public void readyToExecute(Command command, boolean isProgressShard, boolean isHomeShard)
+        public void committed(Command command, ProgressShard shard)
         {
         }
 
         @Override
-        public void execute(Command command, boolean isProgressShard, boolean isHomeShard)
+        public void readyToExecute(Command command, ProgressShard shard)
         {
         }
 
         @Override
-        public void invalidate(Command command, boolean isProgressShard, boolean isHomeShard)
+        public void executed(Command command, ProgressShard shard)
         {
         }
 
         @Override
-        public void executedOnAllShards(Command command, Set<Id> persistedOn)
+        public void invalidated(Command command, ProgressShard shard)
         {
         }
 
         @Override
-        public void waiting(PartialCommand blockedBy, @Nullable Keys someKeys)
+        public void durableLocal(TxnId txnId)
+        {
+        }
+
+        @Override
+        public void durable(Command command, @Nullable Set<Id> persistedOn)
+        {
+        }
+
+        @Override
+        public void durable(TxnId txnId, @Nullable RoutingKeys someKeys, ProgressShard shard)
+        {
+        }
+
+        @Override
+        public void waiting(TxnId blockedBy, Known blockedUntil, RoutingKeys blockedOnKeys)
         {
         }
     }
@@ -136,7 +162,7 @@ public class CommandTest
         Assertions.assertEquals(Status.NotWitnessed, command.status());
         Assertions.assertNull(command.executeAt());
 
-        command.preaccept(txn, KEY, KEY);
+        command.preaccept(inMemory(commands), txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY);
         Assertions.assertEquals(Status.PreAccepted, command.status());
         Assertions.assertEquals(txnId, command.executeAt());
     }
@@ -158,7 +184,7 @@ public class CommandTest
         setTopologyEpoch(support.local, 2);
         ((TestableConfigurationService)node.configService()).reportTopology(support.local.get().withEpoch(2));
         Timestamp expectedTimestamp = new Timestamp(2, 110, 0, ID1);
-        commands.process(null, (Consumer<? super CommandStore>) cstore -> command.preaccept(txn, KEY, KEY));
+        commands.execute(null, (Consumer<? super SafeCommandStore>) store -> command.preaccept(store, txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY)).syncUninterruptibly();
         Assertions.assertEquals(Status.PreAccepted, command.status());
         Assertions.assertEquals(expectedTimestamp, command.executeAt());
     }

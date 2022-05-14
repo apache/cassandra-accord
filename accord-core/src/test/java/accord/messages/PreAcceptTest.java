@@ -18,26 +18,20 @@
 
 package accord.messages;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.impl.*;
+import accord.impl.InMemoryCommandsForKey.InMemoryCommandTimeseries;
 import accord.impl.mock.*;
-import accord.impl.SimpleProgressLog;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.impl.mock.MockCluster.Clock;
+import accord.primitives.*;
 import accord.topology.Topology;
-import accord.primitives.Deps;
-import accord.txn.Txn;
-import accord.primitives.TxnId;
 import accord.utils.EpochFunction;
 import accord.utils.ThreadPoolScheduler;
 import accord.local.*;
-import accord.primitives.Keys;
-import accord.impl.IntKey;
-import accord.impl.TestAgent;
-import accord.impl.TopologyFactory;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -58,6 +52,7 @@ public class PreAcceptTest
     private static final Id ID3 = id(3);
     private static final List<Id> IDS = listOf(ID1, ID2, ID3);
     private static final Topology TOPOLOGY = TopologyFactory.toTopology(IDS, 3, IntKey.range(0, 100));
+    private static final KeyRanges FULL_RANGE = KeyRanges.single(IntKey.range(new IntKey(Integer.MIN_VALUE), new IntKey(Integer.MAX_VALUE)));
 
     private static final ReplyContext REPLY_CONTEXT = Network.replyCtxFor(0);
 
@@ -74,12 +69,13 @@ public class PreAcceptTest
                         new Random(),
                         scheduler,
                         SimpleProgressLog::new,
-                        InMemoryCommandStores.SingleThread::new);
+                        InMemoryCommandStores.Synchronized::new);
     }
 
-    private static PreAccept preAccept(TxnId txnId, Txn txn, Key homeKey)
+    private static PreAccept preAccept(TxnId txnId, Txn txn, RoutingKey homeKey)
     {
-        return new PreAccept(txn.keys(), txnId.epoch, txnId, txn, homeKey);
+        Route route = txn.keys().toRoute(homeKey);
+        return PreAccept.SerializerSupport.create(txnId, route.slice(FULL_RANGE), txnId.epoch, txnId.epoch, false, txnId.epoch, txn.slice(FULL_RANGE, true), route);
     }
 
     @Test
@@ -103,12 +99,12 @@ public class PreAcceptTest
             clock.increment(10);
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
-            PartialCommand command = commandStore.commandsForKey(key).uncommitted().get(txnId);
+            Command command = ((InMemoryCommandTimeseries<?>)inMemory(commandStore).commandsForKey(key).uncommitted()).all().findFirst().get();
             Assertions.assertEquals(Status.PreAccepted, command.status());
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, Deps.NONE),
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, PartialDeps.NONE),
                                     messageSink.responses.get(0).payload);
         }
         finally
@@ -167,7 +163,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID3, messageSink.responses.get(0).to);
-            Deps expectedDeps = Deps.NONE;
+            PartialDeps expectedDeps = PartialDeps.NONE;
             Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId2, new TxnId(1, 110, 0, ID1), expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
@@ -198,7 +194,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            Deps expectedDeps = Deps.NONE;
+            PartialDeps expectedDeps = PartialDeps.NONE;
             Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
@@ -231,12 +227,12 @@ public class PreAcceptTest
             clock.increment(10);
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
-            PartialCommand command = commandStore.commandsForKey(key).uncommitted().get(txnId);
+            Command command = ((InMemoryCommandTimeseries<?>)inMemory(commandStore).commandsForKey(key).uncommitted()).all().findFirst().get();
             Assertions.assertEquals(Status.PreAccepted, command.status());
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, new TxnId(2, 110, 0, ID1), Deps.NONE),
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, new TxnId(2, 110, 0, ID1), PartialDeps.NONE),
                                     messageSink.responses.get(0).payload);
         }
         finally

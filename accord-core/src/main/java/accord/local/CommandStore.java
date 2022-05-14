@@ -18,120 +18,66 @@
 
 package accord.local;
 
-import accord.api.Agent;
-import accord.api.Key;
+import accord.api.*;
 import accord.local.CommandStores.ShardedRanges;
-import accord.api.ProgressLog;
-import accord.api.DataStore;
+import accord.primitives.AbstractKeys;
 import accord.primitives.KeyRanges;
 import accord.primitives.Keys;
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
 import org.apache.cassandra.utils.concurrent.Future;
 
 import com.google.common.base.Preconditions;
 
-import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.LongSupplier;
 
 /**
  * Single threaded internal shard of accord transaction metadata
  */
 public abstract class CommandStore
 {
+    public interface Factory
+    {
+        CommandStore create(int id,
+                            int generation,
+                            int shardIndex,
+                            int numShards,
+                            NodeTimeService time,
+                            Agent agent,
+                            DataStore store,
+                            ProgressLog.Factory progressLogFactory,
+                            RangesForEpoch rangesForEpoch);
+    }
+
     public interface RangesForEpoch
     {
         KeyRanges at(long epoch);
+        KeyRanges between(long fromInclusive, long toInclusive);
         KeyRanges since(long epoch);
-        boolean intersects(long epoch, Keys keys);
+        boolean owns(long epoch, RoutingKey key);
+        boolean intersects(long epoch, AbstractKeys<?, ?> keys);
     }
 
+    private final int id; // unique id
     private final int generation;
     private final int shardIndex;
     private final int numShards;
-    private final Function<Timestamp, Timestamp> uniqueNow;
-    private final LongSupplier currentEpoch;
-    private final Agent agent;
-    private final DataStore store;
-    private final ProgressLog progressLog;
-    private final RangesForEpoch rangesForEpoch;
 
-
-    public CommandStore(int generation,
+    public CommandStore(int id,
+                        int generation,
                         int shardIndex,
-                        int numShards,
-                        Function<Timestamp, Timestamp> uniqueNow,
-                        LongSupplier currentEpoch,
-                        Agent agent,
-                        DataStore store,
-                        ProgressLog.Factory progressLogFactory,
-                        RangesForEpoch rangesForEpoch)
+                        int numShards)
     {
         Preconditions.checkArgument(shardIndex < numShards);
+        this.id = id;
         this.generation = generation;
         this.shardIndex = shardIndex;
         this.numShards = numShards;
-        this.uniqueNow = uniqueNow;
-        this.currentEpoch = currentEpoch;
-        this.agent = agent;
-        this.store = store;
-        this.progressLog = progressLogFactory.create(this);
-        this.rangesForEpoch = rangesForEpoch;
     }
 
-    public abstract Command ifPresent(TxnId txnId);
-
-    public abstract Command command(TxnId txnId);
-
-    public abstract CommandsForKey commandsForKey(Key key);
-
-
-    // TODO (now): is this needed?
-    public abstract CommandsForKey maybeCommandsForKey(Key key);
-
-    public DataStore store()
+    public int id()
     {
-        return store;
+        return id;
     }
-
-    public Timestamp uniqueNow(Timestamp atLeast)
-    {
-        return uniqueNow.apply(atLeast);
-    }
-
-    public Agent agent()
-    {
-        return agent;
-    }
-
-    public ProgressLog progressLog()
-    {
-        return progressLog;
-    }
-
-    public RangesForEpoch ranges()
-    {
-        return rangesForEpoch;
-    }
-
-    public long latestEpoch()
-    {
-        // TODO: why not inject the epoch to each command store?
-        return currentEpoch.getAsLong();
-    }
-
-    protected Timestamp maxConflict(Keys keys)
-    {
-        return keys.stream()
-                   .map(this::maybeCommandsForKey)
-                   .filter(Objects::nonNull)
-                   .map(CommandsForKey::max)
-                   .max(Comparator.naturalOrder())
-                   .orElse(Timestamp.NONE);
-    }
-
 
     // TODO (now): rename to shardIndex
     public int index()
@@ -145,7 +91,7 @@ public abstract class CommandStore
         return generation;
     }
 
-    public boolean hashIntersects(Key key)
+    public boolean hashIntersects(RoutingKey key)
     {
         return ShardedRanges.keyIndex(key, numShards) == shardIndex;
     }
@@ -155,23 +101,8 @@ public abstract class CommandStore
         return keys.any(ranges, this::hashIntersects);
     }
 
-    public static void onEach(PreLoadContext scope, Collection<CommandStore> stores, Consumer<? super CommandStore> consumer)
-    {
-        for (CommandStore store : stores)
-            store.process(scope, consumer);
-    }
-
-    /**
-     * for interacting with the command store in a threadsafe way, without needing any txns loaded. For configuration
-     */
-    public abstract Future<Void> processSetup(Consumer<? super CommandStore> function);
-
-    public abstract <T> Future<T> processSetup(Function<? super CommandStore, T> function);
-
-    public abstract Future<Void> process(PreLoadContext context, Consumer<? super CommandStore> consumer);
-
-    public abstract <T> Future<T> process(PreLoadContext context, Function<? super CommandStore, T> function);
-
+    public abstract Agent agent();
+    public abstract Future<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer);
+    public abstract <T> Future<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);
     public abstract void shutdown();
-
 }

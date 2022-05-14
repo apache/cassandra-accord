@@ -19,151 +19,134 @@
 package accord.messages;
 
 import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import accord.api.Key;
 import accord.local.*;
 import accord.local.Node.Id;
-import accord.topology.Topologies;
+import accord.local.Status.Known;
+import accord.primitives.RoutingKeys;
 import accord.primitives.TxnId;
-import accord.primitives.Keys;
+import accord.utils.MapReduceConsume;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static accord.utils.Utils.listOf;
+import accord.topology.Topology;
 
-public class WaitOnCommit extends TxnRequest
+public class WaitOnCommit implements EpochRequest, MapReduceConsume<SafeCommandStore, Void>, PreLoadContext, CommandListener
 {
     private static final Logger logger = LoggerFactory.getLogger(WaitOnCommit.class);
 
     public static class SerializerSupport
     {
-        public static WaitOnCommit create(Keys scope, long waitForEpoch, TxnId txnId)
+        public static WaitOnCommit create(TxnId txnId, RoutingKeys scope)
         {
-            return new WaitOnCommit(scope, waitForEpoch, txnId);
-        }
-    }
-
-    static class LocalWait implements Listener, PreLoadContext
-    {
-        final Node node;
-        final Id replyToNode;
-        final TxnId txnId;
-        final ReplyContext replyContext;
-
-        final AtomicInteger waitingOn = new AtomicInteger();
-
-        LocalWait(Node node, Id replyToNode, TxnId txnId, ReplyContext replyContext)
-        {
-            this.node = node;
-            this.replyToNode = replyToNode;
-            this.txnId = txnId;
-            this.replyContext = replyContext;
-        }
-
-        @Override
-        public Iterable<TxnId> txnIds()
-        {
-            return Collections.singleton(txnId);
-        }
-
-        @Override
-        public Iterable<Key> keys()
-        {
-            return Collections.emptyList();
-        }
-
-        @Override
-        public PreLoadContext listenerPreLoadContext(TxnId caller)
-        {
-            return PreLoadContext.contextFor(listOf(txnId, caller), keys());
-        }
-
-        @Override
-        public String toString()
-        {
-            return "WaitOnCommit$LocalWait{" + txnId + '}';
-        }
-
-        @Override
-        public synchronized void onChange(Command command)
-        {
-            logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
-                         this, command.txnId(), command.status(), command);
-            switch (command.status())
-            {
-                default: throw new IllegalStateException();
-                case NotWitnessed:
-                case PreAccepted:
-                case Accepted:
-                case AcceptedInvalidate:
-                    return;
-
-                case Committed:
-                case Executed:
-                case Applied:
-                case Invalidated:
-                case ReadyToExecute:
-            }
-
-            command.removeListener(this);
-            ack();
-        }
-
-        @Override
-        public boolean isTransient()
-        {
-            return true;
-        }
-
-        private void ack()
-        {
-            if (waitingOn.decrementAndGet() == 0)
-                node.reply(replyToNode, replyContext, WaitOnCommitOk.INSTANCE);
-        }
-
-        void setup(Keys keys, CommandStore instance)
-        {
-            Command command = instance.command(txnId);
-            switch (command.status())
-            {
-                case NotWitnessed:
-                case PreAccepted:
-                case Accepted:
-                case AcceptedInvalidate:
-                    command.addListener(this);
-                    instance.progressLog().waiting(command, keys);
-                    break;
-
-                case Committed:
-                case Executed:
-                case Applied:
-                case Invalidated:
-                case ReadyToExecute:
-                    ack();
-            }
-        }
-
-        synchronized void setup(Keys keys)
-        {
-            List<CommandStore> instances = node.collectLocal(keys, txnId, ArrayList::new);
-            waitingOn.set(instances.size());
-            CommandStore.onEach(this, instances, instance -> setup(keys, instance));
+            return new WaitOnCommit(txnId, scope);
         }
     }
 
     public final TxnId txnId;
+    public final RoutingKeys scope;
 
-    public WaitOnCommit(Id to, Topologies topologies, TxnId txnId, Keys keys)
+    private transient Node node;
+    private transient Id replyTo;
+    private transient ReplyContext replyContext;
+    private transient volatile int waitingOn;
+    private static final AtomicIntegerFieldUpdater<WaitOnCommit> waitingOnUpdater = AtomicIntegerFieldUpdater.newUpdater(WaitOnCommit.class, "waitingOn");
+
+    public WaitOnCommit(Id to, Topology topologies, TxnId txnId, RoutingKeys someKeys)
     {
-        super(to, topologies, keys);
         this.txnId = txnId;
+        this.scope = someKeys.slice(topologies.rangesForNode(to));
     }
 
-    protected WaitOnCommit(Keys scope, long waitForEpoch, TxnId txnId)
+    public WaitOnCommit(TxnId txnId, RoutingKeys scope)
     {
-        super(scope, waitForEpoch);
         this.txnId = txnId;
+        this.scope = scope;
+    }
+
+    public void process(Node node, Id replyToNode, ReplyContext replyContext)
+    {
+        this.node = node;
+        this.replyTo = replyToNode;
+        this.replyContext = replyContext;
+        node.mapReduceConsumeLocal(this, scope, txnId.epoch, txnId.epoch, this);
+    }
+
+    @Override
+    public Void apply(SafeCommandStore instance)
+    {
+        Command command = instance.command(txnId);
+        switch (command.status())
+        {
+            default: throw new AssertionError();
+            case NotWitnessed:
+            case PreAccepted:
+            case Accepted:
+            case AcceptedInvalidate:
+                waitingOnUpdater.incrementAndGet(this);
+                command.addListener(this);
+                instance.progressLog().waiting(txnId, Known.ExecutionOrder, scope);
+                break;
+
+            case Committed:
+            case PreApplied:
+            case Applied:
+            case Invalidated:
+            case ReadyToExecute:
+        }
+        return null;
+    }
+
+    @Override
+    public void onChange(SafeCommandStore safeStore, Command command)
+    {
+        logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
+                this, command.txnId(), command.status(), command);
+        switch (command.status())
+        {
+            default: throw new AssertionError();
+            case NotWitnessed:
+            case PreAccepted:
+            case Accepted:
+            case AcceptedInvalidate:
+                return;
+
+            case Committed:
+            case ReadyToExecute:
+            case PreApplied:
+            case Applied:
+            case Invalidated:
+        }
+
+        command.removeListener(this);
+        ack();
+    }
+
+    @Override
+    public Void reduce(Void o1, Void o2)
+    {
+        return null;
+    }
+
+    @Override
+    public void accept(Void result, Throwable failure)
+    {
+        ack();
+    }
+
+    private void ack()
+    {
+        if (waitingOnUpdater.decrementAndGet(this) == -1)
+            node.reply(replyTo, replyContext, WaitOnCommitOk.INSTANCE);
+    }
+
+    @Override
+    public boolean isTransient()
+    {
+        return true;
     }
 
     @Override
@@ -175,12 +158,13 @@ public class WaitOnCommit extends TxnRequest
     @Override
     public Iterable<Key> keys()
     {
-        return scope();
+        return Collections.emptyList();
     }
 
-    public void process(Node node, Id replyToNode, ReplyContext replyContext)
+    @Override
+    public PreLoadContext listenerPreLoadContext(TxnId caller)
     {
-        new LocalWait(node, replyToNode, txnId, replyContext).setup(scope());
+        return PreLoadContext.contextFor(listOf(txnId, caller), keys());
     }
 
     @Override
@@ -200,5 +184,11 @@ public class WaitOnCommit extends TxnRequest
         {
             return MessageType.WAIT_ON_COMMIT_RSP;
         }
+    }
+
+    @Override
+    public long waitForEpoch()
+    {
+        return txnId.epoch;
     }
 }

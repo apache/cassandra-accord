@@ -29,7 +29,7 @@ import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 import accord.local.Node.Id;
-import accord.txn.Txn;
+import accord.primitives.Txn;
 import accord.maelstrom.Packet.Type;
 
 import static accord.utils.Utils.toArray;

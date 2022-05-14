@@ -25,9 +25,9 @@ import java.util.stream.Collectors;
 import accord.api.Key;
 import accord.api.DataStore;
 import accord.api.Write;
+import accord.local.SafeCommandStore;
 import accord.primitives.Timestamp;
-import accord.local.CommandStore;
-import accord.txn.Writes;
+import accord.primitives.Writes;
 import accord.utils.Timestamped;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.slf4j.Logger;
@@ -38,7 +38,7 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
     private static final Logger logger = LoggerFactory.getLogger(ListWrite.class);
 
     @Override
-    public Future<Void> apply(Key key, CommandStore commandStore, Timestamp executeAt, DataStore store)
+    public Future<Void> apply(Key key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
     {
         ListStore s = (ListStore) store;
         if (!containsKey(key))

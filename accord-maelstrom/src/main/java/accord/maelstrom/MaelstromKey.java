@@ -21,6 +21,7 @@ package accord.maelstrom;
 import java.io.IOException;
 
 import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.maelstrom.Datum.Kind;
 import accord.primitives.KeyRange;
 
@@ -28,17 +29,19 @@ import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
+import javax.annotation.Nonnull;
+
 public class MaelstromKey implements Key
 {
     public static class Range extends KeyRange.EndInclusive
     {
-        public Range(Key start, Key end)
+        public Range(RoutingKey start, RoutingKey end)
         {
             super(start, end);
         }
 
         @Override
-        public KeyRange subRange(Key start, Key end)
+        public KeyRange subRange(RoutingKey start, RoutingKey end)
         {
             return new Range((MaelstromKey) start, (MaelstromKey) end);
         }
@@ -57,8 +60,10 @@ public class MaelstromKey implements Key
     }
 
     @Override
-    public int compareTo(Key that)
+    public int compareTo(@Nonnull RoutingKey that)
     {
+        if (that instanceof InfiniteRoutingKey)
+            return -that.compareTo(this);
         return datum.compareTo(((MaelstromKey) that).datum);
     }
 
@@ -86,5 +91,11 @@ public class MaelstromKey implements Key
     public int routingHash()
     {
         return datum.hashCode();
+    }
+
+    @Override
+    public Key toRoutingKey()
+    {
+        return this;
     }
 }

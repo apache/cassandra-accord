@@ -20,106 +20,95 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
-import accord.api.Key;
-import accord.local.Node;
-import accord.local.Status;
-import accord.messages.CheckStatus.CheckStatusOk;
-import accord.messages.CheckStatus.CheckStatusOkFull;
-import accord.messages.CheckStatus.IncludeInfo;
-import accord.messages.Commit;
-import accord.topology.Shard;
-import accord.primitives.Ballot;
-import accord.txn.Txn;
-import accord.primitives.TxnId;
-import org.apache.cassandra.utils.concurrent.Future;
+import javax.annotation.Nullable;
 
-import static accord.local.Status.Accepted;
+import accord.primitives.*;
+import com.google.common.base.Preconditions;
+
+import accord.api.RoutingKey;
+import accord.local.Node;
+import accord.local.Node.Id;
+import accord.messages.CheckStatus.CheckStatusOk;
+import accord.messages.CheckStatus.IncludeInfo;
+
+import static accord.utils.Functions.reduceNonNull;
 
 /**
  * A result of null indicates the transaction is globally persistent
  * A result of CheckStatusOk indicates the maximum status found for the transaction, which may be used to assess progress
  */
-public class MaybeRecover extends CheckShardStatus<CheckStatusOk> implements BiConsumer<Object, Throwable>
+public class MaybeRecover extends CheckShards
 {
-    final Txn txn;
-    final Status knownStatus;
-    final Ballot knownPromised;
-    final boolean knownPromisedHasBeenAccepted;
+    @Nullable final AbstractRoute route;
+    final RoutingKey homeKey;
+    final ProgressToken prevProgress;
+    final BiConsumer<Outcome, Throwable> callback;
 
-    MaybeRecover(Node node, TxnId txnId, Txn txn, Key homeKey, Shard homeShard, long homeEpoch, Status knownStatus, Ballot knownPromised, boolean knownPromiseHasBeenAccepted)
+    MaybeRecover(Node node, TxnId txnId, RoutingKey homeKey, @Nullable AbstractRoute route, ProgressToken prevProgress, BiConsumer<Outcome, Throwable> callback)
     {
-        super(node, txnId, homeKey, homeShard, homeEpoch, IncludeInfo.OnlyIfExecuted);
-        this.txn = txn;
-        this.knownStatus = knownStatus;
-        this.knownPromised = knownPromised;
-        this.knownPromisedHasBeenAccepted = knownPromiseHasBeenAccepted;
+        // we only want to enquire with the home shard, but we prefer maximal route information for running Invalidation against, if necessary
+        super(node, txnId, RoutingKeys.of(homeKey), txnId.epoch, IncludeInfo.Route);
+        this.homeKey = homeKey;
+        this.route = route;
+        this.prevProgress = prevProgress;
+        this.callback = callback;
     }
 
-    @Override
-    public void accept(Object unused, Throwable fail)
+    public static void maybeRecover(Node node, TxnId txnId, RoutingKey homeKey, @Nullable AbstractRoute route,
+                                    ProgressToken prevProgress, BiConsumer<Outcome, Throwable> callback)
     {
-        if (fail != null) tryFailure(fail);
-        else trySuccess(null);
-    }
-
-    @Override
-    boolean hasMetSuccessCriteria()
-    {
-        return tracker.hasReachedQuorum() || hasMadeProgress();
-    }
-
-    public boolean hasMadeProgress()
-    {
-        return max != null && (max.isCoordinating
-                               || max.status.compareTo(knownStatus) > 0
-                               || max.promised.compareTo(knownPromised) > 0
-                               || (!knownPromisedHasBeenAccepted && knownStatus == Accepted && max.accepted.equals(knownPromised)));
-    }
-
-    public static Future<CheckStatusOk> maybeRecover(Node node, TxnId txnId, Txn txn, Key homeKey, Shard homeShard, long homeEpoch,
-                                                               Status knownStatus, Ballot knownPromised, boolean knownPromiseHasBeenAccepted)
-    {
-        MaybeRecover maybeRecover = new MaybeRecover(node, txnId, txn, homeKey, homeShard, homeEpoch, knownStatus, knownPromised, knownPromiseHasBeenAccepted);
+        MaybeRecover maybeRecover = new MaybeRecover(node, txnId, homeKey, route, prevProgress, callback);
         maybeRecover.start();
-        return maybeRecover;
     }
 
-    void onSuccessCriteriaOrExhaustion()
+    @Override
+    protected boolean isSufficient(Id from, CheckStatusOk ok)
     {
-        switch (max.status)
+        return hasMadeProgress(ok);
+    }
+
+    public boolean hasMadeProgress(CheckStatusOk ok)
+    {
+        return ok != null && (ok.isCoordinating // TODO (now): make this coordinatingSince so can be pre-empted by others if stuck
+                              || ok.toProgressToken().compareTo(prevProgress) > 0);
+    }
+
+    @Override
+    protected void onDone(Done done, Throwable fail)
+    {
+        if (fail != null)
         {
-            default: throw new IllegalStateException();
-            case NotWitnessed:
-            case PreAccepted:
-            case Accepted:
-            case AcceptedInvalidate:
-            case Committed:
-            case ReadyToExecute:
-                if (hasMadeProgress())
-                {
-                    trySuccess(max);
-                }
-                else
-                {
-                    node.recover(txnId, txn, someKey)
-                        .addCallback(this);
-                }
-                break;
+            callback.accept(null, fail);
+        }
+        else if (merged == null)
+        {
+            callback.accept(null, new Timeout(txnId, homeKey));
+        }
+        else
+        {
+            switch (merged.saveStatus.known)
+            {
+                default: throw new AssertionError();
+                case Nothing:
+                    if (!(merged.route instanceof Route))
+                    {
+                        // order important, as route could be a Route which does not implement RoutingKeys.union
+                        RoutingKeys someKeys = reduceNonNull(RoutingKeys::union, this.contactKeys, merged.route, route);
+                        Invalidate.invalidateIfNotWitnessed(node, txnId, someKeys, homeKey, callback);
+                        break;
+                    }
+                case ExecutionOrder:
+                case Definition:
+                case Outcome:
+                    Preconditions.checkState(merged.route instanceof Route);
+                    if (hasMadeProgress(merged)) callback.accept(merged.toProgressToken(), null);
+                    else node.recover(txnId, (Route) merged.route).addCallback(callback);
+                    break;
 
-            case Executed:
-            case Applied:
-                CheckStatusOkFull full = (CheckStatusOkFull) max;
-                node.withEpoch(full.executeAt.epoch, () -> {
-                    if (!max.hasExecutedOnAllShards)
-                        Persist.persistAndCommit(node, txnId, someKey, txn, full.executeAt, full.deps, full.writes, full.result);
-                    else // TODO: we shouldn't need to do this?
-                        Commit.commit(node, txnId, txn, full.homeKey, full.executeAt, full.deps);
-                });
-                trySuccess(full);
-                break;
-
-            case Invalidated:
-                trySuccess(max);
+                case Invalidation:
+                    RoutingKeys someKeys = reduceNonNull(RoutingKeys::union, this.contactKeys, merged.route, route);
+                    Invalidate.invalidate(node, txnId, someKeys, homeKey, callback);
+            }
         }
     }
 }

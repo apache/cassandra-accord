@@ -28,6 +28,7 @@ class RecurringPendingRunnable implements PendingRunnable, Scheduled
     final long delay;
     final TimeUnit units;
     Runnable run;
+    Runnable onCancellation;
 
     RecurringPendingRunnable(PendingQueue requeue, Runnable run, long delay, TimeUnit units)
     {
@@ -52,6 +53,16 @@ class RecurringPendingRunnable implements PendingRunnable, Scheduled
     public void cancel()
     {
         run = null;
+        if (onCancellation != null)
+        {
+            onCancellation.run();
+            onCancellation = null;
+        }
+    }
+
+    public void onCancellation(Runnable run)
+    {
+        this.onCancellation = run;
     }
 
     @Override
