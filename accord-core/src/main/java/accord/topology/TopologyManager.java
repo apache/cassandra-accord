@@ -293,6 +293,7 @@ public class TopologyManager implements ConfigurationService.Listener
         return topologies;
     }
 
+    // TODO (review): can we name this `withUnsyncedEpochs`?
     public Topologies withUnsyncEpochs(Keys keys, long epoch)
     {
         return withUnsyncEpochs(keys, epoch, epoch);

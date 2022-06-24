@@ -140,6 +140,7 @@ public class Command implements Listener, Consumer<Listener>
         this.executeAt = witnessed;
         this.status = PreAccepted;
 
+        // TODO (review): need to check for command store range intersection as well
         txn.keys().forEach(key -> {
             if (commandStore.hashIntersects(key))
                 commandStore.commandsForKey(key).register(this);

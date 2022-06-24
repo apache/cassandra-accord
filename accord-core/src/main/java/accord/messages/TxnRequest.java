@@ -16,6 +16,7 @@ import static java.lang.Long.min;
 
 public abstract class TxnRequest implements EpochRequest
 {
+    // TODO (review): can we name this WithSynced?
     public static abstract class WithUnsync extends TxnRequest
     {
         public final TxnId txnId;
@@ -34,6 +35,7 @@ public abstract class TxnRequest implements EpochRequest
             this.txnId = txnId;
             this.homeKey = homeKey;
             this.minEpoch = topologies.oldestEpoch();
+            // TODO (review): a brief comment explaining this check would be nice
             this.doNotComputeProgressKey = waitForEpoch() < txnId.epoch && startIndex > 0
                                            && topologies.get(startIndex).epoch() < txnId.epoch;
 
