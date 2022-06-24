@@ -254,7 +254,9 @@ public class KeyRanges implements Iterable<KeyRange>
         KeyRange[] as = this.ranges, bs = that.ranges;
         if (as.length < bs.length)
         {
-            KeyRange[] tmp = as; as = bs; bs = tmp;
+            KeyRange[] tmp = as;
+            as = bs;
+            bs = tmp;
         }
 
         // TODO: this doesn't correctly handle as.length == bs.length if bs > as

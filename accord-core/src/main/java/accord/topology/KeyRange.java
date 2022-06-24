@@ -138,12 +138,6 @@ public abstract class KeyRange<K extends Key<K>>
 
     public abstract KeyRange<K> subRange(K start, K end);
 
-    public KeyRange<K> mergeIntersecting(KeyRange<K> that)
-    {
-        return subRange(this.start.compareTo(that.start) <= 0 ? this.start : that.start,
-                        that.end.compareTo(that.end) >= 0 ? this.end : that.end);
-    }
-
     @Override
     public boolean equals(Object o)
     {
@@ -189,24 +183,6 @@ public abstract class KeyRange<K extends Key<K>>
             return -1;
         return 0;
     }
-
-//    /**
-//     * return 0 if intersecting, -1 if strictly before, and 1 if strictly greater
-//     */
-//    public int compare(KeyRange<K> that)
-//    {
-//        int c = this.end.compareTo(that.start);
-//        if (c > 0)
-//        {
-//            c = that.end.compareTo(this.start);
-//            if (c > 0) return 0;
-//            return c < 0 || !that.endInclusive() || !this.startInclusive() ? 1 : 0;
-//        }
-//        else
-//        {
-//            return c < 0 || !this.endInclusive() || !that.startInclusive() ? -1 : 0;
-//        }
-//    }
 
     public boolean intersects(KeyRange<K> that)
     {

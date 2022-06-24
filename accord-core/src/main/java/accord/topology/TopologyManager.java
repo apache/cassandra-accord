@@ -195,10 +195,8 @@ public class TopologyManager implements ConfigurationService.Listener
         boolean requiresHistoricalTopologiesFor(Keys keys, long epoch)
         {
             Preconditions.checkState(epoch <= currentEpoch);
-            if (1 + currentEpoch - epoch >= epochs.length)
-                return false;
-            int i = (int)(1 + currentEpoch - epoch);
-            return !epochs[i].syncCompleteFor(keys);
+            EpochState state = get(epoch);
+            return state != null && !state.syncCompleteFor(keys);
         }
     }
 
@@ -356,11 +354,6 @@ public class TopologyManager implements ConfigurationService.Listener
     public Topologies unsyncForTxn(Txn txn, long epoch)
     {
         return preciseEpochs(txn.keys(), epoch, epoch);
-    }
-
-    public Topologies unsyncForTxn(Txn txn, long minEpoch, long maxEpoch)
-    {
-        return withUnsyncEpochs(txn.keys(), minEpoch, maxEpoch);
     }
 
     public Topology localForEpoch(long epoch)
