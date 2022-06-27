@@ -16,26 +16,35 @@ import static java.lang.Long.min;
 
 public abstract class TxnRequest implements EpochRequest
 {
-    // TODO (review): can we name this WithSynced?
-    public static abstract class WithUnsync extends TxnRequest
+    public static abstract class WithUnsynced extends TxnRequest
     {
         public final TxnId txnId;
         public final Key homeKey;
         public final long minEpoch;
         protected final boolean doNotComputeProgressKey;
 
-        public WithUnsync(Id to, Topologies topologies, Keys keys, TxnId txnId, Key homeKey)
+        public WithUnsynced(Id to, Topologies topologies, Keys keys, TxnId txnId, Key homeKey)
         {
             this(to, topologies, keys, txnId, homeKey, latestRelevantEpochIndex(to, topologies, keys));
         }
 
-        private WithUnsync(Id to, Topologies topologies, Keys keys, TxnId txnId, Key homeKey, int startIndex)
+        private WithUnsynced(Id to, Topologies topologies, Keys keys, TxnId txnId, Key homeKey, int startIndex)
         {
             super(to, topologies, keys, startIndex);
             this.txnId = txnId;
             this.homeKey = homeKey;
             this.minEpoch = topologies.oldestEpoch();
-            // TODO (review): a brief comment explaining this check would be nice
+            // to understand this calculation we must bear in mind the following:
+            //  - startIndex is the "latest relevant" which means we skip over recent epochs where we are not owners at all,
+            //    i.e. if this node does not participate in the most recent epoch, startIndex > 0
+            //  - waitForEpoch gives us the most recent epoch with differing ownership information, starting from startIndex
+            // So, we can have some surprising situations arise where a *prior* owner must be contacted for its vote,
+            // and does not need to wait for the latest ring information because from the point of view of its contribution
+            // the stale ring information is sufficient, however we do not want it to compute a progress key with this stale
+            // ring information and mistakenly believe that it is a home shard for the transaction, as it will not receive
+            // updates for the transaction going forward.
+            // So in these cases we send a special flag indicating that the progress key should not be computed
+            // (as it might be done so with stale ring information)
             this.doNotComputeProgressKey = waitForEpoch() < txnId.epoch && startIndex > 0
                                            && topologies.get(startIndex).epoch() < txnId.epoch;
 
@@ -63,7 +72,7 @@ public abstract class TxnRequest implements EpochRequest
         }
 
         @VisibleForTesting
-        public WithUnsync(Keys scope, long epoch, TxnId txnId, Key homeKey)
+        public WithUnsynced(Keys scope, long epoch, TxnId txnId, Key homeKey)
         {
             super(scope, epoch);
             this.txnId = txnId;
@@ -102,8 +111,6 @@ public abstract class TxnRequest implements EpochRequest
     {
         return waitForEpoch;
     }
-
-
 
     protected static int latestRelevantEpochIndex(Node.Id node, Topologies topologies, Keys keys)
     {

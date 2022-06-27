@@ -512,6 +512,9 @@ public abstract class CommandStores
         private <S, F, T> T mapReduce(Select<S> select, S scope, long minEpoch, long maxEpoch, F f, Fold<F, ?, List<Future<T>>> fold, BiFunction<T, T, T> reduce)
         {
             List<Future<T>> futures = foldl(select, scope, minEpoch, maxEpoch, fold, f, null, ArrayList::new);
+            if (futures == null)
+                return null;
+
             T result = null;
             for (Future<T> future : futures)
             {

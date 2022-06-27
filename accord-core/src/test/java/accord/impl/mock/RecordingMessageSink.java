@@ -9,6 +9,7 @@ import accord.messages.Request;
 import org.junit.jupiter.api.Assertions;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class RecordingMessageSink extends SimpleMessageSink
@@ -27,8 +28,8 @@ public class RecordingMessageSink extends SimpleMessageSink
         }
     }
 
-    public final List<Envelope<Request>> requests = new ArrayList<>();
-    public final List<Envelope<Reply>> responses = new ArrayList<>();
+    public final List<Envelope<Request>> requests = Collections.synchronizedList(new ArrayList<>());
+    public final List<Envelope<Reply>> responses = Collections.synchronizedList(new ArrayList<>());
 
     public RecordingMessageSink(Node.Id node, Network network)
     {

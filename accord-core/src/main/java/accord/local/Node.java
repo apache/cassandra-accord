@@ -490,4 +490,13 @@ public class Node implements ConfigurationService.Listener
         return commandStores.unsafeForKey(key);
     }
 
+    public CommandStore unsafeByIndex(int index)
+    {
+        return commandStores.current.ranges[0].shards[index];
+    }
+
+    public LongSupplier unsafeGetNowSupplier()
+    {
+        return nowSupplier;
+    }
 }

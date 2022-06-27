@@ -17,6 +17,7 @@ import accord.utils.EpochFunction;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -79,7 +80,7 @@ public class TopologyChangeTest
             cluster.nodes(1, 2, 3).forEach(node -> {
                 node.forEachLocal(keys, 1, commands -> {
                     Command command = commands.command(txnId2);
-                    Assertions.assertTrue(command.hasBeen(Status.Committed));
+                    Assertions.assertTrue(command.hasBeen(Status.Accepted));
                 });
             });
         }
@@ -106,15 +107,14 @@ public class TopologyChangeTest
             });
 
             // check there was no accept phase
-            Assertions.assertFalse(messageSink.requests.stream().anyMatch(env -> env.payload instanceof Accept));
-
+            Assertions.assertFalse(new ArrayList<>(messageSink.requests).stream().anyMatch(env -> env.payload instanceof Accept));
 
             cluster.configServices(1, 2, 3).forEach(config -> config.reportTopology(topology2));
             messageSink.clearHistory();
 
             // post epoch change, there _should_ be accepts, but with the original timestamp
             TxnId txnId2 = coordinate(node1, keys);
-            Set<Node.Id> accepts = messageSink.requests.stream()
+            Set<Node.Id> accepts = new ArrayList<>(messageSink.requests).stream()
                     .filter(env -> env.payload instanceof Accept).map(env -> {
                         Accept accept = (Accept) env.payload;
                         Assertions.assertEquals(txnId2, accept.txnId);
@@ -134,7 +134,7 @@ public class TopologyChangeTest
             // post sync, fast path should be working again, and there should be no accept phase
             messageSink.clearHistory();
             TxnId txnId3 = coordinate(node1, keys);
-            Assertions.assertFalse(messageSink.requests.stream().anyMatch(env -> env.payload instanceof Accept));
+            Assertions.assertFalse(new ArrayList<>(messageSink.requests).stream().anyMatch(env -> env.payload instanceof Accept));
             node1.forEachLocal(keys, 2, commands -> {
                 Command command = commands.command(txnId3);
                 Assertions.assertTrue(command.hasBeen(Status.Committed));

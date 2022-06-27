@@ -83,7 +83,7 @@ public interface Topologies
         StringBuilder sb = new StringBuilder("[");
         for (int i=0, mi=t.size(); i<mi; i++)
         {
-            if (i < 0)
+            if (i > 0)
                 sb.append(", ");
 
             sb.append(t.get(i).toString());

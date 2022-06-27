@@ -138,12 +138,12 @@ public class TopologyManagerTest
 
         Keys keys = keys(150);
         Assertions.assertEquals(topologies(topology2.forKeys(keys), topology1.forKeys(keys)),
-                                service.withUnsyncEpochs(keys, 0, Long.MAX_VALUE));
+                                service.withUnsyncedEpochs(keys, 2, 2));
 
         service.onEpochSyncComplete(id(1), 1);
         service.onEpochSyncComplete(id(2), 1);
         Assertions.assertEquals(topologies(topology2.forKeys(keys)),
-                                service.withUnsyncEpochs(keys, 0, Long.MAX_VALUE));
+                                service.withUnsyncedEpochs(keys, 2, 2));
     }
 
     /**
@@ -166,12 +166,12 @@ public class TopologyManagerTest
 
         // no acks, so all epoch 1 shards should be included
         Assertions.assertEquals(topologies(topology2, topology1),
-                                service.withUnsyncEpochs(keys(150, 250), 0, Long.MAX_VALUE));
+                                service.withUnsyncedEpochs(keys(150, 250), 2, 2));
 
         // first topology acked, so only the second shard should be included
         service.onEpochSyncComplete(id(1), 1);
         service.onEpochSyncComplete(id(2), 1);
-        Topologies actual = service.withUnsyncEpochs(keys(150, 250), 0, Long.MAX_VALUE);
+        Topologies actual = service.withUnsyncedEpochs(keys(150, 250), 2, 2);
         Assertions.assertEquals(topologies(topology2, topology(1, shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)))),
                                 actual);
         Assertions.assertFalse(actual.fastPathPermitted());

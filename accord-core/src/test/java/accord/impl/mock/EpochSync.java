@@ -100,7 +100,7 @@ public class EpochSync implements Runnable
         {
             tracker.success(from);
             if (tracker.hasReachedQuorum())
-                setSuccess(null);
+                trySuccess(null);
         }
 
         @Override

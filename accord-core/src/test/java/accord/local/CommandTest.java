@@ -1,10 +1,18 @@
 package accord.local;
 
+import accord.api.Key;
+import accord.api.ProgressLog;
+import accord.api.TestableConfigurationService;
 import accord.impl.IntKey;
 import accord.impl.TestAgent;
 import accord.impl.TopologyFactory;
 import accord.impl.mock.MockCluster;
+import accord.impl.mock.MockConfigurationService;
 import accord.impl.mock.MockStore;
+import accord.local.CommandStore.RangesForEpoch;
+import accord.local.CommandStores.Synchronized;
+import accord.local.Node.Id;
+import accord.topology.KeyRanges;
 import accord.topology.Topology;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
@@ -14,9 +22,10 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.function.Function;
 
 import static accord.Utils.id;
 import static accord.Utils.writeTxn;
@@ -34,12 +43,6 @@ public class CommandTest
     {
         final AtomicReference<Topology> local = new AtomicReference<>(TOPOLOGY);
         final MockStore data = new MockStore();
-        final AtomicReference<Timestamp> nextTimestamp = new AtomicReference<>(Timestamp.NONE);
-        final Function<Timestamp, Timestamp> uniqueNow = atleast -> {
-            Timestamp next = nextTimestamp.get();
-            Assertions.assertTrue(next.compareTo(atleast) >= 0);
-            return next;
-        };
     }
 
     private static void setTopologyEpoch(AtomicReference<Topology> topology, long epoch)
@@ -49,17 +52,52 @@ public class CommandTest
 
     private static CommandStore createStore(CommandStoreSupport storeSupport)
     {
-        return null;
-        // TODO (now)!
-//        return new CommandStore.Synchronized(0,
-//                                             0,
-//                                             1,
-//                                             ID1,
-//                                             storeSupport.uniqueNow,
-//                                             new TestAgent(),
-//                                             storeSupport.data,
-//                                             storeSupport.local.get().ranges(),
-//                                             storeSupport.local::get);
+        return createNode(ID1, storeSupport).unsafeByIndex(0);
+    }
+
+    private static class NoOpProgressLog implements ProgressLog
+    {
+        @Override
+        public void preaccept(TxnId txnId, boolean isProgressShard, boolean isHomeShard)
+        {
+        }
+
+        @Override
+        public void accept(TxnId txnId, boolean isProgressShard, boolean isHomeShard)
+        {
+        }
+
+        @Override
+        public void commit(TxnId txnId, boolean isProgressShard, boolean isHomeShard)
+        {
+        }
+
+        @Override
+        public void readyToExecute(TxnId txnId, boolean isProgressShard, boolean isHomeShard)
+        {
+        }
+
+        @Override
+        public void execute(TxnId txnId, boolean isProgressShard, boolean isHomeShard)
+        {
+        }
+
+        @Override
+        public void executedOnAllShards(TxnId txnId, Set<Id> persistedOn)
+        {
+        }
+
+        @Override
+        public void waiting(TxnId blockedBy, Key homeKey)
+        {
+        }
+    }
+
+    private static Node createNode(Id id, CommandStoreSupport storeSupport)
+    {
+        return new Node(id, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
+                        new MockCluster.Clock(100), () -> storeSupport.data, new TestAgent(), new Random(), null,
+                        ignore -> ignore2 -> new NoOpProgressLog(), Synchronized::new);
     }
 
     @Test
@@ -85,18 +123,17 @@ public class CommandTest
     {
         CommandStoreSupport support = new CommandStoreSupport();
         CommandStore commands = createStore(support);
-        MockCluster.Clock clock = new MockCluster.Clock(100);
-        TxnId txnId = clock.idForNode(1, 1);
+        TxnId txnId = commands.node().nextTxnId();
+        ((MockCluster.Clock)commands.node().unsafeGetNowSupplier()).increment(10);
         Txn txn = writeTxn(Keys.of(KEY));
-
 
         Command command = new Command(commands, txnId);
         Assertions.assertEquals(Status.NotWitnessed, command.status());
         Assertions.assertNull(command.executeAt());
 
         setTopologyEpoch(support.local, 2);
+        ((TestableConfigurationService)commands.node().configService()).reportTopology(support.local.get().withEpoch(2));
         Timestamp expectedTimestamp = new Timestamp(2, 110, 0, ID1);
-        support.nextTimestamp.set(expectedTimestamp);
         commands.process((Consumer<? super CommandStore>) cstore -> command.preaccept(txn, KEY, KEY));
         Assertions.assertEquals(Status.PreAccepted, command.status());
         Assertions.assertEquals(expectedTimestamp, command.executeAt());

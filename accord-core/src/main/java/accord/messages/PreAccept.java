@@ -10,6 +10,7 @@ import accord.local.CommandStore;
 import accord.local.CommandsForKey;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.messages.TxnRequest.WithUnsynced;
 import accord.topology.Topologies;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
@@ -18,7 +19,7 @@ import accord.txn.Dependencies;
 import accord.txn.Txn;
 import accord.txn.TxnId;
 
-public class PreAccept extends TxnRequest.WithUnsync
+public class PreAccept extends WithUnsynced
 {
     public final Txn txn;
     public final long maxEpoch;

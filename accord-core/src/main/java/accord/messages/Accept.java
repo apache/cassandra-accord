@@ -1,5 +1,6 @@
 package accord.messages;
 
+import accord.messages.TxnRequest.WithUnsynced;
 import accord.topology.Topologies;
 import accord.api.Key;
 import accord.txn.Ballot;
@@ -12,7 +13,7 @@ import accord.txn.TxnId;
 
 import static accord.messages.PreAccept.calculateDeps;
 
-public class Accept extends TxnRequest.WithUnsync
+public class Accept extends WithUnsynced
 {
     public final Ballot ballot;
     public final Txn txn;

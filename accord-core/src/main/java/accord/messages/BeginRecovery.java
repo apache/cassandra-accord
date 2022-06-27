@@ -169,7 +169,7 @@ public class BeginRecovery extends TxnRequest
             node.topology().awaitEpoch(ok.executeAt.epoch).addListener(() -> disseminateApply(node, ok));
             return;
         }
-        Topologies topologies = node.topology().withUnsyncEpochs(txn.keys, ok.executeAt.epoch);
+        Topologies topologies = node.topology().withUnsyncedEpochs(txn.keys, ok.executeAt.epoch);
         node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, homeKey, ok.executeAt, ok.deps, ok.writes, ok.result));
     }
     

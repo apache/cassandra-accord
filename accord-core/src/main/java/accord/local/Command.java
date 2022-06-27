@@ -10,6 +10,7 @@ import accord.local.Node.Id;
 import accord.topology.KeyRanges;
 import accord.txn.Ballot;
 import accord.txn.Dependencies;
+import accord.txn.Keys.KeyFold;
 import accord.txn.Timestamp;
 import accord.txn.Txn;
 import accord.txn.TxnId;
@@ -140,11 +141,11 @@ public class Command implements Listener, Consumer<Listener>
         this.executeAt = witnessed;
         this.status = PreAccepted;
 
-        // TODO (review): need to check for command store range intersection as well
-        txn.keys().forEach(key -> {
+        txn.keys().foldl(commandStore.ranges().since(txnId.epoch), (key, param) -> {
             if (commandStore.hashIntersects(key))
                 commandStore.commandsForKey(key).register(this);
-        });
+            return null;
+        }, null);
     }
 
     public boolean preaccept(Txn txn, Key homeKey, Key progressKey)
