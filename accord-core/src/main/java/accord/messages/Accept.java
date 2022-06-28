@@ -1,6 +1,8 @@
 package accord.messages;
 
+import accord.messages.TxnRequest.WithUnsynced;
 import accord.topology.Topologies;
+import accord.api.Key;
 import accord.txn.Ballot;
 import accord.local.Node;
 import accord.txn.Timestamp;
@@ -11,34 +13,33 @@ import accord.txn.TxnId;
 
 import static accord.messages.PreAccept.calculateDeps;
 
-public class Accept extends TxnRequest
+public class Accept extends WithUnsynced
 {
     public final Ballot ballot;
-    public final TxnId txnId;
     public final Txn txn;
+    public final long minEpoch;
     public final Timestamp executeAt;
     public final Dependencies deps;
 
-    public Accept(Scope scope, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps)
+    public Accept(Node.Id to, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Dependencies deps)
     {
-        super(scope);
+        super(to, topologies, txn.keys, txnId, homeKey);
         this.ballot = ballot;
-        this.txnId = txnId;
         this.txn = txn;
+        this.minEpoch = topologies.oldestEpoch();
         this.executeAt = executeAt;
         this.deps = deps;
     }
 
-    public Accept(Node.Id dst, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps)
+    public void process(Node node, Node.Id replyToNode, ReplyContext replyContext)
     {
-        this(Scope.forTopologies(dst, topologies, txn), ballot, txnId, txn, executeAt, deps);
-    }
-
-    public void process(Node on, Node.Id replyToNode, ReplyContext replyContext)
-    {
-        on.reply(replyToNode, replyContext, on.mapReduceLocal(scope(), instance -> {
+        Key progressKey = progressKey(node);
+        // TODO: when we begin expunging old epochs we need to ensure we handle the case where we do not fully handle the keys;
+        //       since this will likely imply the transaction has been applied or aborted we can indicate the coordinator
+        //       should enquire as to the result
+        node.reply(replyToNode, replyContext, node.mapReduceLocal(scope(), minEpoch, executeAt.epoch, instance -> {
             Command command = instance.command(txnId);
-            if (!command.accept(ballot, txn, executeAt, deps))
+            if (!command.accept(ballot, txn, homeKey, progressKey, executeAt, deps))
                 return new AcceptNack(txnId, command.promised());
             return new AcceptOk(txnId, calculateDeps(instance, txnId, txn, executeAt));
         }, (r1, r2) -> {

@@ -1,6 +1,5 @@
 package accord.coordinate;
 
-import accord.api.KeyRange;
 import accord.impl.mock.EpochSync;
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
@@ -9,6 +8,7 @@ import accord.local.Command;
 import accord.local.Node;
 import accord.local.Status;
 import accord.messages.Accept;
+import accord.topology.KeyRange;
 import accord.topology.Topology;
 import accord.txn.Keys;
 import accord.txn.Txn;
@@ -17,6 +17,7 @@ import accord.utils.EpochFunction;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -55,7 +56,7 @@ public class TopologyChangeTest
             TxnId txnId1 = node1.nextTxnId();
             Txn txn1 = writeTxn(keys);
             node1.coordinate(txnId1, txn1).get();
-            node1.forEachLocal(keys, commands -> {
+            node1.forEachLocal(keys, 1, commands -> {
                 Command command = commands.command(txnId1);
                 Assertions.assertTrue(command.savedDeps().isEmpty());
             });
@@ -69,7 +70,7 @@ public class TopologyChangeTest
 
             // new nodes should have the previous epochs operation as a dependency
             cluster.nodes(4, 5, 6).forEach(node -> {
-                node.forEachLocal(keys, commands -> {
+                node.forEachLocal(keys, 2, commands -> {
                     Command command = commands.command(txnId2);
                     Assertions.assertTrue(command.savedDeps().contains(txnId1));
                 });
@@ -77,9 +78,9 @@ public class TopologyChangeTest
 
             // ...and participated in consensus
             cluster.nodes(1, 2, 3).forEach(node -> {
-                node.forEachLocal(keys, commands -> {
+                node.forEachLocal(keys, 1, commands -> {
                     Command command = commands.command(txnId2);
-                    Assertions.assertTrue(command.hasBeen(Status.Committed));
+                    Assertions.assertTrue(command.hasBeen(Status.Accepted));
                 });
             });
         }
@@ -100,21 +101,20 @@ public class TopologyChangeTest
             RecordingMessageSink messageSink = (RecordingMessageSink) node1.messageSink();
             messageSink.clearHistory();
             TxnId txnId1 = coordinate(node1, keys);
-            node1.forEachLocal(keys, commands -> {
+            node1.forEachLocal(keys, 1, commands -> {
                 Command command = commands.command(txnId1);
                 Assertions.assertTrue(command.savedDeps().isEmpty());
             });
 
             // check there was no accept phase
-            Assertions.assertFalse(messageSink.requests.stream().anyMatch(env -> env.payload instanceof Accept));
-
+            Assertions.assertFalse(new ArrayList<>(messageSink.requests).stream().anyMatch(env -> env.payload instanceof Accept));
 
             cluster.configServices(1, 2, 3).forEach(config -> config.reportTopology(topology2));
             messageSink.clearHistory();
 
             // post epoch change, there _should_ be accepts, but with the original timestamp
             TxnId txnId2 = coordinate(node1, keys);
-            Set<Node.Id> accepts = messageSink.requests.stream()
+            Set<Node.Id> accepts = new ArrayList<>(messageSink.requests).stream()
                     .filter(env -> env.payload instanceof Accept).map(env -> {
                         Accept accept = (Accept) env.payload;
                         Assertions.assertEquals(txnId2, accept.txnId);
@@ -122,7 +122,7 @@ public class TopologyChangeTest
             }).collect(Collectors.toSet());
             Assertions.assertEquals(idSet(1, 2, 3), accepts);
 
-            node1.forEachLocal(keys, commands -> {
+            node1.forEachLocal(keys, 2, commands -> {
                 Command command = commands.command(txnId2);
                 Assertions.assertTrue(command.hasBeen(Status.Committed));
                 Assertions.assertTrue(command.savedDeps().contains(txnId1));
@@ -134,8 +134,8 @@ public class TopologyChangeTest
             // post sync, fast path should be working again, and there should be no accept phase
             messageSink.clearHistory();
             TxnId txnId3 = coordinate(node1, keys);
-            Assertions.assertFalse(messageSink.requests.stream().anyMatch(env -> env.payload instanceof Accept));
-            node1.forEachLocal(keys, commands -> {
+            Assertions.assertFalse(new ArrayList<>(messageSink.requests).stream().anyMatch(env -> env.payload instanceof Accept));
+            node1.forEachLocal(keys, 2, commands -> {
                 Command command = commands.command(txnId3);
                 Assertions.assertTrue(command.hasBeen(Status.Committed));
                 Assertions.assertTrue(command.savedDeps().contains(txnId1));

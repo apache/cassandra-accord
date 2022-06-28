@@ -14,7 +14,7 @@ compileJava {
 }
 
 dependencies {
-    compile project(':accord-core')
+    implementation project(':accord-core')
     implementation 'com.google.code.gson:gson:2.8.7'
     implementation 'com.google.guava:guava:30.1.1-jre'
     implementation 'ch.qos.logback:logback-classic:1.2.3'

@@ -14,7 +14,13 @@ public class MaelstromRead implements Read
     }
 
     @Override
-    public Data read(Key key, Timestamp executeAt, Store store)
+    public Keys keys()
+    {
+        return keys;
+    }
+
+    @Override
+    public Data read(Key key, Timestamp executeAt, DataStore store)
     {
         MaelstromStore s = (MaelstromStore)store;
         MaelstromData result = new MaelstromData();

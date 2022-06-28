@@ -1,6 +1,6 @@
 package accord;
 
-import accord.api.KeyRange;
+import accord.topology.KeyRange;
 import accord.local.Node;
 import accord.impl.mock.MockStore;
 import accord.topology.KeyRanges;
@@ -66,12 +66,12 @@ public class Utils
 
     public static Txn writeTxn(Keys keys)
     {
-        return new Txn(keys, MockStore.READ, MockStore.QUERY, MockStore.UPDATE);
+        return new Txn(keys, MockStore.read(keys), MockStore.QUERY, MockStore.UPDATE);
     }
 
     public static Txn readTxn(Keys keys)
     {
-        return new Txn(keys, MockStore.READ, MockStore.QUERY);
+        return new Txn(keys, MockStore.read(keys), MockStore.QUERY);
     }
 
     public static Shard shard(KeyRange range, List<Node.Id> nodes, Set<Node.Id> fastPath)

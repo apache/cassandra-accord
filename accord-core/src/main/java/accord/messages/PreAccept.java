@@ -1,44 +1,54 @@
 package accord.messages;
 
-import java.util.NavigableMap;
 import java.util.Objects;
-import java.util.TreeMap;
+import java.util.stream.Stream;
 
+import com.google.common.annotations.VisibleForTesting;
+
+import accord.api.Key;
 import accord.local.CommandStore;
+import accord.local.CommandsForKey;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.messages.TxnRequest.WithUnsynced;
 import accord.topology.Topologies;
+import accord.txn.Keys;
 import accord.txn.Timestamp;
 import accord.local.Command;
 import accord.txn.Dependencies;
 import accord.txn.Txn;
 import accord.txn.TxnId;
 
-public class PreAccept extends TxnRequest
+public class PreAccept extends WithUnsynced
 {
-    public final TxnId txnId;
     public final Txn txn;
+    public final long maxEpoch;
 
-    public PreAccept(Scope scope, TxnId txnId, Txn txn)
+    public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey)
     {
-        super(scope);
-        this.txnId = txnId;
+        super(to, topologies, txn.keys, txnId, homeKey);
         this.txn = txn;
+        this.maxEpoch = topologies.currentEpoch();
     }
 
-    public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn)
+    @VisibleForTesting
+    public PreAccept(Keys scope, long epoch, TxnId txnId, Txn txn, Key homeKey)
     {
-        this(Scope.forTopologies(to, topologies, txn), txnId, txn);
+        super(scope, epoch, txnId, homeKey);
+        this.txn = txn;
+        this.maxEpoch = epoch;
     }
 
     public void process(Node node, Id from, ReplyContext replyContext)
     {
-        node.reply(from, replyContext, node.mapReduceLocal(scope(), instance -> {
+        // TODO: verify we handle all of the scope() keys
+        Key progressKey = doNotComputeProgressKey ? null : node.trySelectProgressKey(waitForEpoch(), txn.keys, homeKey);
+        node.reply(from, replyContext, node.mapReduceLocal(scope(), minEpoch, maxEpoch, instance -> {
             // note: this diverges from the paper, in that instead of waiting for JoinShard,
             //       we PreAccept to both old and new topologies and require quorums in both.
             //       This necessitates sending to ALL replicas of old topology, not only electorate (as fast path may be unreachable).
             Command command = instance.command(txnId);
-            if (!command.witness(txn))
+            if (!command.preaccept(txn, homeKey, progressKey))
                 return PreAcceptNack.INSTANCE;
             return new PreAcceptOk(txnId, command.executeAt(), calculateDeps(instance, txnId, txn, txnId));
         }, (r1, r2) -> {
@@ -108,9 +118,9 @@ public class PreAccept extends TxnRequest
         public String toString()
         {
             return "PreAcceptOk{" +
-                    "txnId=" + txnId +
-                    ", witnessedAt=" + witnessedAt +
-                    ", deps=" + deps +
+                    "txnId:" + txnId +
+                    ", witnessedAt:" + witnessedAt +
+                    ", deps:" + deps +
                     '}';
         }
     }
@@ -136,23 +146,40 @@ public class PreAccept extends TxnRequest
 
     static Dependencies calculateDeps(CommandStore commandStore, TxnId txnId, Txn txn, Timestamp executeAt)
     {
-        NavigableMap<TxnId, Txn> deps = new TreeMap<>();
-        txn.conflictsMayExecuteBefore(commandStore, executeAt).forEach(conflict -> {
+        Dependencies deps = new Dependencies();
+        conflictsMayExecuteBefore(commandStore, executeAt, txn.keys).forEach(conflict -> {
             if (conflict.txnId().equals(txnId))
                 return;
 
             if (txn.isWrite() || conflict.txn().isWrite())
-                deps.put(conflict.txnId(), conflict.txn());
+                deps.add(conflict);
         });
-        return new Dependencies(deps);
+        return deps;
     }
 
     @Override
     public String toString()
     {
         return "PreAccept{" +
-               "txnId: " + txnId +
-               ", txn: " + txn +
+               "txnId:" + txnId +
+               ", txn:" + txn +
+               ", homeKey:" + homeKey +
                '}';
     }
+
+    private static Stream<Command> conflictsMayExecuteBefore(CommandStore commandStore, Timestamp mayExecuteBefore, Keys keys)
+    {
+        return keys.stream().flatMap(key -> {
+            CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
+            if (forKey == null)
+                return Stream.of();
+
+            return Stream.concat(
+                forKey.uncommitted.headMap(mayExecuteBefore, false).values().stream(),
+                // TODO: only return latest of Committed?
+                forKey.committedByExecuteAt.headMap(mayExecuteBefore, false).values().stream()
+            );
+        });
+    }
+
 }

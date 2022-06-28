@@ -1,20 +1,17 @@
 package accord.coordinate;
 
 import accord.Utils;
-import accord.api.KeyRange;
 import accord.coordinate.tracking.FastPathTracker;
 import accord.impl.TopologyUtils;
 import accord.local.Node;
 import accord.topology.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topology;
-import accord.txn.Keys;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import static accord.Utils.*;
-import static accord.impl.IntKey.keys;
-import static accord.impl.IntKey.range;
 
 public class PreacceptTrackerTest
 {
@@ -99,10 +96,10 @@ public class PreacceptTrackerTest
         responses.recordSuccess(ids[0], true);
         assertResponseState(responses, false, false, false, true);
 
-        responses.recordFailure(ids[1]);
+        responses.failure(ids[1]);
         assertResponseState(responses, false, false, false, true);
 
-        responses.recordFailure(ids[2]);
+        responses.failure(ids[2]);
         assertResponseState(responses, false, false, true, false);
     }
 

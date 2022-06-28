@@ -1,5 +1,6 @@
 package accord.api;
 
+import accord.txn.Keys;
 import accord.txn.Timestamp;
 
 /**
@@ -9,5 +10,6 @@ import accord.txn.Timestamp;
  */
 public interface Read
 {
-    Data read(Key key, Timestamp executeAt, Store store);
+    Keys keys();
+    Data read(Key key, Timestamp executeAt, DataStore store);
 }

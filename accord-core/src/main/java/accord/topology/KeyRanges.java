@@ -1,7 +1,6 @@
 package accord.topology;
 
 import accord.api.Key;
-import accord.api.KeyRange;
 import accord.txn.Keys;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterators;
@@ -161,6 +160,17 @@ public class KeyRanges implements Iterable<KeyRange>
         return false;
     }
 
+    public int findFirstIntersecting(Keys keys)
+    {
+        for (int i=0; i<ranges.length; i++)
+        {
+            int lowKeyIndex = ranges[i].lowKeyIndex(keys);
+            if (lowKeyIndex >= 0)
+                return lowKeyIndex;
+        }
+        return -1;
+    }
+
     /**
      * Subtracts the given set of key ranges from this
      * @param that
@@ -212,7 +222,7 @@ public class KeyRanges implements Iterable<KeyRange>
     /**
      * Adds a set of non-overlapping ranges
      */
-    public KeyRanges union(KeyRanges that)
+    public KeyRanges combine(KeyRanges that)
     {
         KeyRange[] combined = new KeyRange[this.ranges.length + that.ranges.length];
         System.arraycopy(this.ranges, 0, combined, 0, this.ranges.length);
@@ -225,9 +235,9 @@ public class KeyRanges implements Iterable<KeyRange>
         return new KeyRanges(combined);
     }
 
-    public KeyRanges union(KeyRange range)
+    public KeyRanges combine(KeyRange range)
     {
-        return union(new KeyRanges(new KeyRange[]{range}));
+        return combine(new KeyRanges(new KeyRange[]{ range}));
     }
 
     private static KeyRange tryMerge(KeyRange range1, KeyRange range2)
@@ -237,71 +247,84 @@ public class KeyRanges implements Iterable<KeyRange>
         return range1.tryMerge(range2);
     }
 
-    public KeyRanges merge(KeyRanges that)
+    // optimised for case where one contains the other
+    public KeyRanges union(KeyRanges that)
     {
-        List<KeyRange> result = new ArrayList<>(this.size() + that.size());
-        int thisIdx = 0, thisSize = this.size();
-        int thatIdx = 0, thatSize = that.size();
-
-        KeyRange merging = null;
-        while (thisIdx < thisSize || thatIdx < thatSize)
+        int ai = 0, bi = 0;
+        KeyRange[] as = this.ranges, bs = that.ranges;
+        if (as.length < bs.length)
         {
-            KeyRange merged;
-            KeyRange thisRange = thisIdx < thisSize ? this.get(thisIdx) : null;
-            KeyRange thatRange = thatIdx < thatSize ? that.get(thatIdx) : null;
-            if ((merged = tryMerge(merging, thisRange)) != null)
+            KeyRange[] tmp = as;
+            as = bs;
+            bs = tmp;
+        }
+
+        // TODO: this doesn't correctly handle as.length == bs.length if bs > as
+        while (ai < as.length && bi < bs.length)
+        {
+            KeyRange a = as[ai];
+            KeyRange b = bs[bi];
+            int c = a.compareIntersecting(b);
+            if (c < 0) ai++;
+            else if (c > 0 || !a.fullyContains(b)) break;
+            else bi++;
+        }
+
+        if (bi == bs.length)
+            return as == this.ranges ? this : that;
+
+        KeyRange[] result = new KeyRange[as.length + (bs.length - bi)];
+        System.arraycopy(as, 0, result, 0, ai);
+        int count = ai;
+
+        while (ai < as.length && bi < bs.length)
+        {
+            KeyRange a = as[ai];
+            KeyRange b = bs[bi];
+
+            int c = a.compareIntersecting(b);
+            if (c < 0)
             {
-                merging = merged;
-                thisIdx++;
+                result[count++] = a;
+                ai++;
             }
-            else if ((merged = tryMerge(merging, thatRange)) != null)
+            else if (c > 0)
             {
-                merging = merged;
-                thatIdx++;
-            }
-            else if (merging != null)
-            {
-                result.add(merging);
-                merging = null;
-            }
-            else if (thisRange == null)
-            {
-                result.add(thatRange);
-                thatIdx++;
-            }
-            else if (thatRange == null)
-            {
-                result.add(thisRange);
-                thisIdx++;
+                result[count++] = b;
+                bi++;
             }
             else
             {
-                int cmp = thisRange.compareIntersecting(thatRange);
-                if (cmp > 0)
+                KeyRange merged = a.subRange(c < 0 ? a.start() : b.start(), a.end().compareTo(b.end()) > 0 ? a.end() : b.end());
+                ai++;
+                bi++;
+                while (ai < as.length || bi < bs.length)
                 {
-                    result.add(thatRange);
-                    thatIdx++;
+                    KeyRange min;
+                    if (ai == as.length) min = bs[bi];
+                    else if (bi == bs.length) min = a = as[ai];
+                    else min = as[ai].start().compareTo(bs[bi].start()) < 0 ? a = as[ai] : bs[bi];
+                    if (min.start().compareTo(merged.end()) > 0)
+                        break;
+                    if (min.end().compareTo(merged.end()) > 0)
+                        merged = merged.subRange(merged.start(), min.end());
+                    if (a == min) ai++;
+                    else bi++;
                 }
-                else if (cmp < 0)
-                {
-                    result.add(thisRange);
-                    thisIdx++;
-                }
-                else
-                {
-                    merging = thisRange.tryMerge(thatRange);
-                    thisIdx++;
-                    thatIdx++;
-                    Preconditions.checkState(merging != null);
-                }
+                result[count++] = merged;
             }
         }
 
-        if (merging != null)
-            result.add(merging);
+        while (ai < as.length)
+            result[count++] = as[ai++];
 
+        while (bi < bs.length)
+            result[count++] = bs[bi++];
 
-        return new KeyRanges(result.toArray(KeyRange[]::new));
+        if (count < result.length)
+            result = Arrays.copyOf(result, count);
+
+        return new KeyRanges(result);
     }
 
     public KeyRanges mergeTouching()

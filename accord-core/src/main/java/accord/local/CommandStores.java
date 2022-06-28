@@ -2,15 +2,13 @@ package accord.local;
 
 import accord.api.Agent;
 import accord.api.Key;
-import accord.api.Store;
-import accord.local.CommandStore.SingleThread;
-import accord.local.CommandStores.StoreGroups.Fold;
-import accord.local.Node.Id;
+import accord.api.DataStore;
+import accord.local.CommandStore.RangesForEpoch;
 import accord.messages.TxnRequest;
+import accord.api.ProgressLog;
 import accord.topology.KeyRanges;
 import accord.topology.Topology;
 import accord.txn.Keys;
-import accord.txn.Timestamp;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
@@ -30,34 +28,182 @@ public abstract class CommandStores
 {
     public interface Factory
     {
-        CommandStores create(int num, Node.Id node, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store);
+        CommandStores create(int num,
+                             Node node,
+                             Agent agent,
+                             DataStore store,
+                             ProgressLog.Factory progressLogFactory);
     }
 
-    static class StoreGroup
+    interface Fold<I1, I2, O>
     {
-        final CommandStore[] stores;
-        final KeyRanges ranges;
+        O fold(CommandStore store, I1 i1, I2 i2, O accumulator);
+    }
 
-        public StoreGroup(CommandStore[] stores, KeyRanges ranges)
+    interface Select<Scope>
+    {
+        long select(ShardedRanges ranges, Scope scope, long minEpoch, long maxEpoch);
+    }
+
+    static class KeysAndEpoch
+    {
+        final Keys keys;
+        final long epoch;
+
+        KeysAndEpoch(Keys keys, long epoch)
         {
-            Preconditions.checkArgument(stores.length <= 64);
-            this.stores = stores;
+            this.keys = keys;
+            this.epoch = epoch;
+        }
+    }
+
+    static class KeysAndEpochRange
+    {
+        final Keys keys;
+        final long minEpoch;
+        final long maxEpoch;
+
+        KeysAndEpochRange(Keys keys, long minEpoch, long maxEpoch)
+        {
+            this.keys = keys;
+            this.minEpoch = minEpoch;
+            this.maxEpoch = maxEpoch;
+        }
+    }
+
+    static class KeyAndEpoch
+    {
+        final Key key;
+        final long epoch;
+
+        KeyAndEpoch(Key key, long epoch)
+        {
+            this.key = key;
+            this.epoch = epoch;
+        }
+    }
+
+    private static class Supplier
+    {
+        private final Node node;
+        private final Agent agent;
+        private final DataStore store;
+        private final ProgressLog.Factory progressLogFactory;
+        private final CommandStore.Factory shardFactory;
+        private final int numShards;
+
+        Supplier(Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory, int numShards)
+        {
+            this.node = node;
+            this.agent = agent;
+            this.store = store;
+            this.progressLogFactory = progressLogFactory;
+            this.shardFactory = shardFactory;
+            this.numShards = numShards;
+        }
+
+        CommandStore create(int generation, int shardIndex, RangesForEpoch rangesForEpoch)
+        {
+            return shardFactory.create(generation, shardIndex, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
+        }
+
+        ShardedRanges createShardedRanges(int generation, long epoch, KeyRanges ranges, RangesForEpoch rangesForEpoch)
+        {
+            CommandStore[] newStores = new CommandStore[numShards];
+            for (int i=0; i<numShards; i++)
+                newStores[i] = create(generation, i, rangesForEpoch);
+
+            return new ShardedRanges(newStores, epoch, ranges);
+        }
+    }
+
+    static class ShardedRanges
+    {
+        final CommandStore[] shards;
+        final long[] epochs;
+        final KeyRanges[] ranges;
+
+        public ShardedRanges(CommandStore[] shards, long epoch, KeyRanges ranges)
+        {
+            Preconditions.checkArgument(shards.length <= 64);
+            this.shards = shards;
+            this.epochs = new long[] { epoch };
+            this.ranges = new KeyRanges[] { ranges };
+        }
+
+        private ShardedRanges(CommandStore[] shards, long[] epochs, KeyRanges[] ranges)
+        {
+            Preconditions.checkArgument(shards.length <= 64);
+            this.shards = shards;
+            this.epochs = epochs;
             this.ranges = ranges;
+        }
+
+        ShardedRanges withRanges(long epoch, KeyRanges ranges)
+        {
+            long[] newEpochs = Arrays.copyOf(this.epochs, this.epochs.length + 1);
+            KeyRanges[] newRanges = Arrays.copyOf(this.ranges, this.ranges.length + 1);
+            newEpochs[this.epochs.length] = epoch;
+            newRanges[this.ranges.length] = ranges;
+            return new ShardedRanges(shards, newEpochs, newRanges);
+        }
+
+        KeyRanges rangesForEpoch(long epoch)
+        {
+            int i = Arrays.binarySearch(epochs, epoch);
+            if (i < 0) i = -2 -i;
+            if (i < 0) return null;
+            return ranges[i];
+        }
+
+        KeyRanges rangesSinceEpoch(long epoch)
+        {
+            int i = Arrays.binarySearch(epochs, epoch);
+            if (i < 0) i = Math.max(0, -2 -i);
+            KeyRanges result = ranges[i++];
+            while (i < ranges.length)
+                result = ranges[i++].union(result);
+            return result;
+        }
+
+        int indexForEpoch(long epoch)
+        {
+            int i = Arrays.binarySearch(epochs, epoch);
+            if (i < 0) i = -2 -i;
+            return i;
         }
 
         long all()
         {
-            return -1L >>> (64 - stores.length);
+            return -1L >>> (64 - shards.length);
         }
 
-        long matches(Keys keys)
+        long shards(Keys keys, long minEpoch, long maxEpoch)
         {
-            return keys.foldl(ranges, StoreGroup::addKeyIndex, stores.length, 0L, -1L);
+            long accumulate = 0L;
+            for (int i = Math.max(0, indexForEpoch(minEpoch)), maxi = indexForEpoch(maxEpoch); i <= maxi ; ++i)
+            {
+                accumulate = keys.foldl(ranges[i], ShardedRanges::addKeyIndex, shards.length, accumulate, -1L);
+            }
+            return accumulate;
         }
 
-        long matches(TxnRequest.Scope scope)
+        long shard(Key scope, long minEpoch, long maxEpoch)
         {
-            return matches(scope.keys());
+            long result = 0L;
+            for (int i = Math.max(0, indexForEpoch(minEpoch)), maxi = indexForEpoch(maxEpoch); i <= maxi ; ++i)
+            {
+                int index = ranges[i].rangeIndexForKey(scope);
+                if (index < 0)
+                    continue;
+                result = addKeyIndex(scope, shards.length, result);
+            }
+            return result;
+        }
+
+        KeyRanges currentRanges()
+        {
+            return ranges[ranges.length - 1];
         }
 
         static long keyIndex(Key key, long numShards)
@@ -71,171 +217,168 @@ public abstract class CommandStores
         }
     }
 
-    static class StoreGroups
+    static class Snapshot
     {
-        final StoreGroup[] groups;
+        final ShardedRanges[] ranges;
         final Topology global;
         final Topology local;
         final int size;
 
-        public StoreGroups(StoreGroup[] groups, Topology global, Topology local)
+        Snapshot(ShardedRanges[] ranges, Topology global, Topology local)
         {
-            this.groups = groups;
+            this.ranges = ranges;
             this.global = global;
             this.local = local;
             int size = 0;
-            for (StoreGroup group : groups)
-                size += group.stores.length;
+            for (ShardedRanges group : ranges)
+                size += group.shards.length;
             this.size = size;
         }
+    }
 
-        StoreGroups withNewTopology(Topology global, Topology local)
+    final Supplier supplier;
+    volatile Snapshot current;
+
+    private CommandStores(Supplier supplier)
+    {
+        this.supplier = supplier;
+        this.current = new Snapshot(new ShardedRanges[0], Topology.EMPTY, Topology.EMPTY);
+    }
+
+    public CommandStores(int num, Node node, Agent agent, DataStore store,
+                         ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
+    {
+        this(new Supplier(node, agent, store, progressLogFactory, shardFactory, num));
+    }
+
+    public Topology local()
+    {
+        return current.local;
+    }
+
+    public Topology global()
+    {
+        return current.global;
+    }
+
+    private Snapshot updateTopology(Snapshot prev, Topology newTopology)
+    {
+        Preconditions.checkArgument(!newTopology.isSubset(), "Use full topology for CommandStores.updateTopology");
+
+        long epoch = newTopology.epoch();
+        if (epoch <= prev.global.epoch())
+            return prev;
+
+        Topology newLocalTopology = newTopology.forNode(supplier.node.id());
+        KeyRanges added = newLocalTopology.ranges().difference(prev.local.ranges());
+        KeyRanges subtracted = prev.local.ranges().difference(newLocalTopology.ranges());
+//            for (ShardedRanges range : stores.ranges)
+//            {
+//                // FIXME: remove this (and the corresponding check in TopologyRandomizer) once lower bounds are implemented.
+//                //  In the meantime, the logic needed to support acquiring ranges that we previously replicated is pretty
+//                //  convoluted without the ability to jettison epochs.
+//                Preconditions.checkState(!range.ranges.intersects(added));
+//            }
+
+        if (added.isEmpty() && subtracted.isEmpty())
+            return new Snapshot(prev.ranges, newTopology, newLocalTopology);
+
+        ShardedRanges[] result = new ShardedRanges[prev.ranges.length + (added.isEmpty() ? 0 : 1)];
+        if (subtracted.isEmpty())
         {
-            return new StoreGroups(groups, global, local);
+            int newGeneration = prev.ranges.length;
+            System.arraycopy(prev.ranges, 0, result, 0, newGeneration);
+            result[newGeneration] = supplier.createShardedRanges(newGeneration, epoch, added, rangesForEpochFunction(newGeneration));
         }
-
-        public int size()
+        else
         {
-            return size;
-        }
-
-        private <I1, I2, O> O foldl(int startGroup, long bitset, Fold<? super I1, ? super I2, O> fold, I1 param1, I2 param2, O accumulator)
-        {
-            int groupIndex = startGroup;
-            StoreGroup group = groups[groupIndex];
-            int offset = 0;
-            while (true)
+            int i = 0;
+            while (i < prev.ranges.length)
             {
-                int i = Long.numberOfTrailingZeros(bitset) - offset;
-                while (i < group.stores.length)
-                {
-                    accumulator = fold.fold(group.stores[i], param1, param2, accumulator);
-                    bitset ^= Long.lowestOneBit(bitset);
-                    i = Long.numberOfTrailingZeros(bitset) - offset;
-                }
-
-                if (++groupIndex == groups.length)
-                    break;
-
-                if (bitset == 0)
-                    break;
-
-                offset += group.stores.length;
-                group = groups[groupIndex];
-                if (offset + group.stores.length > 64)
-                    break;
+                ShardedRanges ranges = prev.ranges[i];
+                if (ranges.currentRanges().intersects(subtracted))
+                    ranges = ranges.withRanges(newTopology.epoch(), ranges.currentRanges().difference(subtracted));
+                result[i++] = ranges;
             }
-            return accumulator;
+            if (i < result.length)
+                result[i] = supplier.createShardedRanges(i, epoch, added, rangesForEpochFunction(i));
         }
 
-        interface Fold<I1, I2, O>
-        {
-            O fold(CommandStore store, I1 i1, I2 i2, O accumulator);
-        }
+        return new Snapshot(result, newTopology, newLocalTopology);
+    }
 
-        <S, I1, I2, O> O foldl(ToLongBiFunction<StoreGroup, S> select, S scope, Fold<? super I1, ? super I2, O> fold, I1 param1, I2 param2, IntFunction<? extends O> factory)
+    private RangesForEpoch rangesForEpochFunction(int generation)
+    {
+        return new RangesForEpoch()
         {
-            O accumulator = null;
-            int startGroup = 0;
-            while (startGroup < groups.length)
+
+            @Override
+            public KeyRanges at(long epoch)
             {
-                long bits = select.applyAsLong(groups[startGroup], scope);
-                if (bits == 0)
-                {
-                    ++startGroup;
-                    continue;
-                }
-
-                int offset = groups[startGroup].stores.length;
-                int endGroup = startGroup + 1;
-                while (endGroup < groups.length)
-                {
-                    StoreGroup group = groups[endGroup];
-                    if (offset + group.stores.length > 64)
-                        break;
-
-                    bits += select.applyAsLong(group, scope) << offset;
-                    offset += group.stores.length;
-                    ++endGroup;
-                }
-
-                if (accumulator == null)
-                    accumulator = factory.apply(Long.bitCount(bits));
-
-                accumulator = foldl(startGroup, bits, fold, param1, param2, accumulator);
-                startGroup = endGroup;
+                return current.ranges[generation].rangesForEpoch(epoch);
             }
 
-            return accumulator;
-        }
-    }
-
-    private final Node.Id node;
-    private final Function<Timestamp, Timestamp> uniqueNow;
-    private final Agent agent;
-    private final Store store;
-    private final CommandStore.Factory shardFactory;
-    private final int numShards;
-    protected volatile StoreGroups groups = new StoreGroups(new StoreGroup[0], Topology.EMPTY, Topology.EMPTY);
-
-    public CommandStores(int num, Node.Id node, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store, CommandStore.Factory shardFactory)
-    {
-        this.node = node;
-        this.numShards = num;
-        this.uniqueNow = uniqueNow;
-        this.agent = agent;
-        this.store = store;
-        this.shardFactory = shardFactory;
-    }
-
-    private CommandStore createCommandStore(int generation, int index, KeyRanges ranges)
-    {
-        return shardFactory.create(generation, index, numShards, node, uniqueNow, agent, store, ranges, this::getLocalTopology);
-    }
-
-    private Topology getLocalTopology()
-    {
-        return groups.local;
+            @Override
+            public KeyRanges since(long epoch)
+            {
+                return current.ranges[generation].rangesSinceEpoch(epoch);
+            }
+        };
     }
 
     public synchronized void shutdown()
     {
-        for (StoreGroup group : groups.groups)
-            for (CommandStore commandStore : group.stores)
+        for (ShardedRanges group : current.ranges)
+            for (CommandStore commandStore : group.shards)
                 commandStore.shutdown();
     }
 
-    protected abstract <S> void forEach(ToLongBiFunction<StoreGroup, S> select, S scope, Consumer<? super CommandStore> forEach);
-    protected abstract <S, T> T mapReduce(ToLongBiFunction<StoreGroup, S> select, S scope, Function<? super CommandStore, T> map, BiFunction<T, T, T> reduce);
+    protected abstract <S> void forEach(Select<S> select, S scope, long minEpoch, long maxEpoch, Consumer<? super CommandStore> forEach);
+    protected abstract <S, T> T mapReduce(Select<S> select, S scope, long minEpoch, long maxEpoch, Function<? super CommandStore, T> map, BiFunction<T, T, T> reduce);
 
     public void forEach(Consumer<CommandStore> forEach)
     {
-        forEach((s, i) -> s.all(), null, forEach);
+        forEach((s, i, min, max) -> s.all(), null, 0, 0, forEach);
     }
 
-    public void forEach(Keys keys, Consumer<CommandStore> forEach)
+    public void forEach(Keys keys, long epoch, Consumer<CommandStore> forEach)
     {
-        forEach(StoreGroup::matches, keys, forEach);
+        forEach(keys, epoch, epoch, forEach);
     }
 
-    public void forEach(TxnRequest.Scope scope, Consumer<CommandStore> forEach)
+    public void forEach(Keys keys, long minEpoch, long maxEpoch, Consumer<CommandStore> forEach)
     {
-        forEach(StoreGroup::matches, scope, forEach);
+        forEach(ShardedRanges::shards, keys, minEpoch, maxEpoch, forEach);
     }
 
-    public <T> T mapReduce(TxnRequest.Scope scope, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T mapReduce(Keys keys, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
-        return mapReduce(StoreGroup::matches, scope, map, reduce);
+        return mapReduce(keys, epoch, epoch, map, reduce);
     }
 
-    public <T extends Collection<CommandStore>> T collect(Keys keys, IntFunction<T> factory)
+    public <T> T mapReduce(Keys keys, long minEpoch, long maxEpoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
-        return groups.foldl(StoreGroup::matches, keys, CommandStores::append, null, null, factory);
+        return mapReduce(ShardedRanges::shards, keys, minEpoch, maxEpoch, map, reduce);
     }
 
-    public <T extends Collection<CommandStore>> T collect(TxnRequest.Scope scope, IntFunction<T> factory)
+    public <T> T mapReduce(Key key, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
-        return groups.foldl(StoreGroup::matches, scope, CommandStores::append, null, null, factory);
+        return mapReduce(ShardedRanges::shard, key, epoch, epoch, map, reduce);
+    }
+
+    public <T extends Collection<CommandStore>> T collect(Keys keys, long epoch, IntFunction<T> factory)
+    {
+        return foldl(ShardedRanges::shards, keys, epoch, epoch, CommandStores::append, null, null, factory);
+    }
+
+    public <T extends Collection<CommandStore>> T collect(Keys keys, long minEpoch, long maxEpoch, IntFunction<T> factory)
+    {
+        return foldl(ShardedRanges::shards, keys, minEpoch, maxEpoch, CommandStores::append, null, null, factory);
+    }
+
+    public synchronized void updateTopology(Topology newTopology)
+    {
+        current = updateTopology(current, newTopology);
     }
 
     private static <T extends Collection<CommandStore>> T append(CommandStore store, Object ignore1, Object ignore2, T to)
@@ -244,52 +387,82 @@ public abstract class CommandStores
         return to;
     }
 
-    public synchronized void updateTopology(Topology cluster)
+    private <I1, I2, O> O foldl(int startGroup, long bitset, Fold<? super I1, ? super I2, O> fold, I1 param1, I2 param2, O accumulator)
     {
-        Preconditions.checkArgument(!cluster.isSubset(), "Use full topology for CommandStores.updateTopology");
-
-        StoreGroups current = groups;
-        if (cluster.epoch() <= current.global.epoch())
-            return;
-
-        Topology local = cluster.forNode(node);
-        KeyRanges added = local.ranges().difference(current.local.ranges());
-
-        for (StoreGroup group : groups.groups)
+        ShardedRanges[] ranges = current.ranges;
+        int groupIndex = startGroup;
+        ShardedRanges group = ranges[groupIndex];
+        int offset = 0;
+        while (true)
         {
-            // FIXME: remove this (and the corresponding check in TopologyRandomizer) once lower bounds are implemented.
-            //  In the meantime, the logic needed to support acquiring ranges that we previously replicated is pretty
-            //  convoluted without the ability to jettison epochs.
-            Preconditions.checkState(!group.ranges.intersects(added));
+            int i = Long.numberOfTrailingZeros(bitset) - offset;
+            while (i < group.shards.length)
+            {
+                accumulator = fold.fold(group.shards[i], param1, param2, accumulator);
+                bitset ^= Long.lowestOneBit(bitset);
+                i = Long.numberOfTrailingZeros(bitset) - offset;
+            }
+
+            if (++groupIndex == ranges.length)
+                break;
+
+            if (bitset == 0)
+                break;
+
+            offset += group.shards.length;
+            group = ranges[groupIndex];
+            if (offset + group.shards.length > 64)
+                break;
+        }
+        return accumulator;
+    }
+
+    <S, I1, I2, O> O foldl(Select<S> select, S scope, long minEpoch, long maxEpoch, Fold<? super I1, ? super I2, O> fold, I1 param1, I2 param2, IntFunction<? extends O> factory)
+    {
+        ShardedRanges[] ranges = current.ranges;
+        O accumulator = null;
+        int startGroup = 0;
+        while (startGroup < ranges.length)
+        {
+            long bits = select.select(ranges[startGroup], scope, minEpoch, maxEpoch);
+            if (bits == 0)
+            {
+                ++startGroup;
+                continue;
+            }
+
+            int offset = ranges[startGroup].shards.length;
+            int endGroup = startGroup + 1;
+            while (endGroup < ranges.length)
+            {
+                ShardedRanges group = ranges[endGroup];
+                if (offset + group.shards.length > 64)
+                    break;
+
+                bits += select.select(group, scope, minEpoch, maxEpoch) << offset;
+                offset += group.shards.length;
+                ++endGroup;
+            }
+
+            if (accumulator == null)
+                accumulator = factory.apply(Long.bitCount(bits));
+
+            accumulator = foldl(startGroup, bits, fold, param1, param2, accumulator);
+            startGroup = endGroup;
         }
 
-        if (added.isEmpty())
-        {
-            groups = groups.withNewTopology(cluster, local);
-            return;
-        }
-
-        int newGeneration = current.groups.length;
-        StoreGroup[] newGroups = new StoreGroup[current.groups.length + 1];
-        CommandStore[] newStores = new CommandStore[numShards];
-        System.arraycopy(current.groups, 0, newGroups, 0, current.groups.length);
-
-        for (int i=0; i<numShards; i++)
-            newStores[i] = createCommandStore(newGeneration, i, added);
-
-        newGroups[current.groups.length] = new StoreGroup(newStores, added);
-
-        groups = new StoreGroups(newGroups, cluster, local);
+        return accumulator;
     }
 
     @VisibleForTesting
     public CommandStore unsafeForKey(Key key)
     {
-        for (StoreGroup group : groups.groups)
+        ShardedRanges[] ranges = current.ranges;
+        for (ShardedRanges group : ranges)
         {
-            if (group.ranges.contains(key))
+            if (group.currentRanges().contains(key))
             {
-                for (CommandStore store : group.stores)
+                for (CommandStore store : group.shards)
                 {
                     if (store.hashIntersects(key))
                         return store;
@@ -301,39 +474,47 @@ public abstract class CommandStores
 
     public static class Synchronized extends CommandStores
     {
-        public Synchronized(int num, Id node, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store)
+        public Synchronized(int num, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory)
         {
-            super(num, node, uniqueNow, agent, store, CommandStore.Synchronized::new);
+            super(num, node, agent, store, progressLogFactory, CommandStore.Synchronized::new);
+        }
+
+        public Synchronized(Supplier supplier)
+        {
+            super(supplier);
         }
 
         @Override
-        protected <S, T> T mapReduce(ToLongBiFunction<StoreGroup, S> select, S scope, Function<? super CommandStore, T> map, BiFunction<T, T, T> reduce)
+        protected <S, T> T mapReduce(Select<S> select, S scope, long minEpoch, long maxEpoch, Function<? super CommandStore, T> map, BiFunction<T, T, T> reduce)
         {
-            return groups.foldl(select, scope, (store, f, r, t) -> t == null ? f.apply(store) : r.apply(t, f.apply(store)), map, reduce, ignore -> null);
+            return foldl(select, scope, minEpoch, maxEpoch, (store, f, r, t) -> t == null ? f.apply(store) : r.apply(t, f.apply(store)), map, reduce, ignore -> null);
         }
 
         @Override
-        protected <S> void forEach(ToLongBiFunction<StoreGroup, S> select, S scope, Consumer<? super CommandStore> forEach)
+        protected <S> void forEach(Select<S> select, S scope, long minEpoch, long maxEpoch, Consumer<? super CommandStore> forEach)
         {
-            groups.foldl(select, scope, (store, f, r, t) -> { f.accept(store); return null; }, forEach, null, ignore -> FALSE);
+            foldl(select, scope, minEpoch, maxEpoch, (store, f, r, t) -> { f.accept(store); return null; }, forEach, null, ignore -> FALSE);
         }
     }
 
     public static class SingleThread extends CommandStores
     {
-        public SingleThread(int num, Id node, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store)
+        public SingleThread(int num, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory)
         {
-            this(num, node, uniqueNow, agent, store, CommandStore.SingleThread::new);
+            this(num, node, agent, store, progressLogFactory, CommandStore.SingleThread::new);
         }
 
-        public SingleThread(int num, Node.Id node, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store, CommandStore.Factory shardFactory)
+        public SingleThread(int num, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
         {
-            super(num, node, uniqueNow, agent, store, shardFactory);
+            super(num, node, agent, store, progressLogFactory, shardFactory);
         }
 
-        private <S, F, T> T mapReduce(ToLongBiFunction<StoreGroup, S> select, S scope, F f, Fold<F, ?, List<Future<T>>> fold, BiFunction<T, T, T> reduce)
+        private <S, F, T> T mapReduce(Select<S> select, S scope, long minEpoch, long maxEpoch, F f, Fold<F, ?, List<Future<T>>> fold, BiFunction<T, T, T> reduce)
         {
-            List<Future<T>> futures = groups.foldl(select, scope, fold, f, null, ArrayList::new);
+            List<Future<T>> futures = foldl(select, scope, minEpoch, maxEpoch, fold, f, null, ArrayList::new);
+            if (futures == null)
+                return null;
+
             T result = null;
             for (Future<T> future : futures)
             {
@@ -356,22 +537,22 @@ public abstract class CommandStores
         }
 
         @Override
-        protected <S, T> T mapReduce(ToLongBiFunction<StoreGroup, S> select, S scope, Function<? super CommandStore, T> map, BiFunction<T, T, T> reduce)
+        protected <S, T> T mapReduce(Select<S> select, S scope, long minEpoch, long maxEpoch, Function<? super CommandStore, T> map, BiFunction<T, T, T> reduce)
         {
-            return mapReduce(select, scope, map, (store, f, i, t) -> { t.add(store.process(f)); return t; }, reduce);
+            return mapReduce(select, scope, minEpoch, maxEpoch, map, (store, f, i, t) -> { t.add(store.process(f)); return t; }, reduce);
         }
 
-        protected <S> void forEach(ToLongBiFunction<StoreGroup, S> select, S scope, Consumer<? super CommandStore> forEach)
+        protected <S> void forEach(Select<S> select, S scope, long minEpoch, long maxEpoch, Consumer<? super CommandStore> forEach)
         {
-            mapReduce(select, scope, forEach, (store, f, i, t) -> { t.add(store.process(f)); return t; }, (Void i1, Void i2) -> null);
+            mapReduce(select, scope, minEpoch, maxEpoch, forEach, (store, f, i, t) -> { t.add(store.process(f)); return t; }, (Void i1, Void i2) -> null);
         }
     }
 
     public static class Debug extends SingleThread
     {
-        public Debug(int num, Id node, Function<Timestamp, Timestamp> uniqueNow, Agent agent, Store store)
+        public Debug(int num, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory)
         {
-            super(num, node, uniqueNow, agent, store, CommandStore.Debug::new);
+            super(num, node, agent, store, progressLogFactory, CommandStore.Debug::new);
         }
     }
 

@@ -2,6 +2,7 @@ package accord.txn;
 
 import accord.api.Write;
 import accord.local.CommandStore;
+import accord.topology.KeyRanges;
 
 public class Writes
 {
@@ -21,7 +22,11 @@ public class Writes
         if (write == null)
             return;
 
-        keys.foldl(commandStore.ranges(), (key, accumulate) -> {
+        KeyRanges ranges = commandStore.ranges().since(executeAt.epoch);
+        if (ranges == null)
+            return;
+
+        keys.foldl(ranges, (key, accumulate) -> {
             if (commandStore.hashIntersects(key))
                 write.apply(key, executeAt, commandStore.store());
             return accumulate;

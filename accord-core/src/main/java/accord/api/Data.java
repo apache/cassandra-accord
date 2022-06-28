@@ -1,7 +1,7 @@
 package accord.api;
 
 /**
- * The result of some (potentially partial) {@link Read} from some {@link Store}
+ * The result of some (potentially partial) {@link Read} from some {@link DataStore}
  */
 public interface Data
 {

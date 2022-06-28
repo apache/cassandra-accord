@@ -33,7 +33,6 @@ public class Packet implements ReplyContext
         Apply(Apply.class, Json.DEFAULT_ADAPTER),
         Read(ReadData.class, Json.DEFAULT_ADAPTER),
         ReadOk(ReadData.ReadOk.class, Json.DEFAULT_ADAPTER),
-        ReadWaiting(ReadData.ReadWaiting.class, Json.DEFAULT_ADAPTER),
         ReadNack(ReadData.ReadNack.class, Json.DEFAULT_ADAPTER),
         WaitOnCommit(accord.messages.WaitOnCommit.class, Json.DEFAULT_ADAPTER),
         WaitOnCommitOk(accord.messages.WaitOnCommit.WaitOnCommitOk.class, Json.DEFAULT_ADAPTER),

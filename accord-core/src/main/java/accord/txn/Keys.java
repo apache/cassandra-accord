@@ -6,7 +6,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import accord.api.Key;
-import accord.api.KeyRange;
+import accord.topology.KeyRange;
 import accord.topology.KeyRanges;
 
 @SuppressWarnings("rawtypes")
@@ -51,6 +51,11 @@ public class Keys implements Iterable<Key>
     public int indexOf(Key key)
     {
         return Arrays.binarySearch(keys, key);
+    }
+
+    public boolean contains(Key key)
+    {
+        return indexOf(key) >= 0;
     }
 
     public Key get(int indexOf)
@@ -102,11 +107,12 @@ public class Keys implements Iterable<Key>
         return true;
     }
 
-    public Keys merge(Keys that)
+    public Keys union(Keys that)
     {
         int thisIdx = 0;
         int thatIdx = 0;
-        Key[] result = new Key[this.size() + that.size()];
+        Key[] noOp = keys.length >= that.keys.length ? this.keys : that.keys;
+        Key[] result = noOp;
         int resultSize = 0;
 
         while (thisIdx < this.size() && thatIdx < that.size())
@@ -117,21 +123,51 @@ public class Keys implements Iterable<Key>
             Key minKey;
             if (cmp == 0)
             {
-                minKey = thisKey;
                 thisIdx++;
                 thatIdx++;
+                if (result == noOp)
+                    continue;
+                minKey = thisKey;
             }
             else if (cmp < 0)
             {
-                minKey = thisKey;
                 thisIdx++;
+                if (result == keys)
+                    continue;
+                minKey = thisKey;
+                if (result == noOp)
+                {
+                    resultSize = thatIdx;
+                    result = new Key[resultSize + (keys.length - (thisIdx - 1)) + (that.keys.length - thatIdx)];
+                    System.arraycopy(that.keys, 0, result, 0, resultSize);
+                }
             }
             else
             {
-                minKey = thatKey;
                 thatIdx++;
+                if (result == that.keys)
+                    continue;
+                minKey = thatKey;
+                if (result == noOp)
+                {
+                    resultSize = thisIdx;
+                    result = new Key[resultSize + (keys.length - thisIdx) + (that.keys.length - (thatIdx - 1))];
+                    System.arraycopy(this.keys, 0, result, 0, resultSize);
+                }
             }
             result[resultSize++] = minKey;
+        }
+
+        if (result == noOp)
+        {
+            if (noOp == keys && thatIdx == that.keys.length)
+                return this;
+            if (noOp == that.keys && thisIdx == keys.length)
+                return that;
+
+            resultSize = noOp == keys ? thisIdx : thatIdx;
+            result = new Key[resultSize + (keys.length - thisIdx) + (that.keys.length - thatIdx)];
+            System.arraycopy(noOp, 0, result, 0, resultSize);
         }
 
         while (thisIdx < this.size())
@@ -139,6 +175,48 @@ public class Keys implements Iterable<Key>
 
         while (thatIdx < that.size())
             result[resultSize++] = that.keys[thatIdx++];
+
+        if (resultSize < result.length)
+            result = Arrays.copyOf(result, resultSize);
+
+        return new Keys(result);
+    }
+
+    public Keys intersect(Keys that)
+    {
+        int thisIdx = 0;
+        int thatIdx = 0;
+        Key[] noOp = keys.length <= that.keys.length ? this.keys : that.keys;
+        Key[] result = noOp;
+        int resultSize = 0;
+
+        while (thisIdx < this.size() && thatIdx < that.size())
+        {
+            Key thisKey = this.keys[thisIdx];
+            Key thatKey = that.keys[thatIdx];
+            int cmp = thisKey.compareTo(thatKey);
+            if (cmp == 0)
+            {
+                thisIdx++;
+                thatIdx++;
+                if (result != noOp)
+                    result[resultSize] = thisKey;
+                resultSize++;
+            }
+            else
+            {
+                if (cmp < 0) thisIdx++;
+                else thatIdx++;
+                if (result == noOp)
+                {
+                    result = new Key[resultSize + Math.min(keys.length - thisIdx, that.keys.length - thatIdx)];
+                    System.arraycopy(noOp, 0, result, 0, resultSize);
+                }
+            }
+        }
+
+        if (result == noOp && resultSize == noOp.length)
+            return noOp == keys ? this : that;
 
         if (resultSize < result.length)
             result = Arrays.copyOf(result, resultSize);
@@ -171,6 +249,21 @@ public class Keys implements Iterable<Key>
     public int ceilIndex(Key key)
     {
         return ceilIndex(0, keys.length, key);
+    }
+
+    public Keys with(Key key)
+    {
+        int insertPos = Arrays.binarySearch(keys, key);
+        if (insertPos >= 0)
+            return this;
+        insertPos = -1 - insertPos;
+
+        Key[] src = keys;
+        Key[] trg = new Key[src.length + 1];
+        System.arraycopy(src, 0, trg, 0, insertPos);
+        trg[insertPos] = key;
+        System.arraycopy(src, insertPos, trg, insertPos + 1, src.length - insertPos);
+        return new Keys(trg);
     }
 
     public Stream<Key> stream()
@@ -214,7 +307,7 @@ public class Keys implements Iterable<Key>
         return new Keys(keys);
     }
 
-    public Keys intersection(KeyRanges ranges)
+    public Keys intersect(KeyRanges ranges)
     {
         Key[] result = null;
         int resultSize = 0;

@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import accord.api.Key;
 import accord.coordinate.tracking.FastPathTracker;
 import accord.topology.Shard;
 import accord.topology.Topologies;
@@ -27,7 +28,7 @@ import org.apache.cassandra.utils.concurrent.Future;
  * Perform initial rounds of PreAccept and Accept until we have reached agreement about when we should execute.
  * If we are preempted by a recovery coordinator, we abort and let them complete (and notify us about the execution result)
  */
-class Agree extends AcceptPhase implements Callback<PreAcceptReply>
+class Agree extends Propose implements Callback<PreAcceptReply>
 {
     static class ShardTracker extends FastPathTracker.FastPathShardTracker
     {
@@ -68,12 +69,12 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
         }
 
         @Override
-        public void recordFailure(Id node)
+        public boolean failure(Id node)
         {
             if (failures == null)
                 failures = new HashSet<>();
             failures.add(node);
-            super.recordFailure(node);
+            return super.failure(node);
         }
 
         @Override
@@ -106,7 +107,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
             PreacceptTracker tracker = new PreacceptTracker(topologies, false);
             successes.forEach(tracker::recordSuccess);
             if (failures != null)
-                failures.forEach(tracker::recordFailure);
+                failures.forEach(tracker::failure);
             return tracker;
         }
 
@@ -134,14 +135,14 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
     // TODO: hybrid fast path? or at least short-circuit accept if we gain a fast-path quorum _and_ proposed one by accept
     boolean permitHybridFastPath;
 
-    private Agree(Node node, TxnId txnId, Txn txn)
+    private Agree(Node node, TxnId txnId, Txn txn, Key homeKey)
     {
-        super(node, Ballot.ZERO, txnId, txn);
+        super(node, Ballot.ZERO, txnId, txn, homeKey);
         this.keys = txn.keys();
-        tracker = new PreacceptTracker(node.topology().forKeys(txn.keys(), txnId.epoch));
+        tracker = new PreacceptTracker(node.topology().withUnsyncedEpochs(txn.keys(), txnId.epoch, txnId.epoch));
         // TODO: consider sending only to electorate of most recent topology (as only these PreAccept votes matter)
         // note that we must send to all replicas of old topology, as electorate may not be reachable
-        node.send(tracker.nodes(), to -> new PreAccept(to, tracker.topologies(), txnId, txn), this);
+        node.send(tracker.nodes(), to -> new PreAccept(to, tracker.topologies(), txnId, txn, homeKey), this);
     }
 
     @Override
@@ -156,8 +157,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
         if (isDone() || isPreAccepted())
             return;
 
-        tracker.recordFailure(from);
-        if (tracker.hasFailed())
+        if (tracker.failure(from))
             tryFailure(new Timeout());
 
         // if no other responses are expected and the slow quorum has been satisfied, proceed
@@ -169,7 +169,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
     {
         if (!tracker.hasSupersedingEpoch())
             return;
-        Topologies newTopologies = node.topology().forKeys(txn.keys(), txnId.epoch);
+        Topologies newTopologies = node.topology().withUnsyncedEpochs(txn.keys(), txnId.epoch, tracker.supersedingEpoch);
         if (newTopologies.currentEpoch() < tracker.supersedingEpoch)
             return;
         Set<Id> previousNodes = tracker.nodes();
@@ -178,7 +178,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
         // send messages to new nodes
         Set<Id> needMessages = Sets.difference(tracker.nodes(), previousNodes);
         if (!needMessages.isEmpty())
-            node.send(needMessages, to -> new PreAccept(to, newTopologies, txnId, txn), this);
+            node.send(needMessages, to -> new PreAccept(to, newTopologies, txnId, txn, homeKey), this);
 
         if (tracker.shouldSlowPathAccept())
             onPreAccepted();
@@ -202,13 +202,11 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
         boolean fastPath = ok.witnessedAt.compareTo(txnId) == 0;
         tracker.recordSuccess(from, fastPath);
 
-        if (!fastPath && ok.witnessedAt.epoch > txnId.epoch)
+        // TODO: we should only update epoch if we need to in order to reach quorum
+        if (!fastPath && ok.witnessedAt.epoch > txnId.epoch && tracker.recordSupersedingEpoch(ok.witnessedAt.epoch))
         {
-            if (tracker.recordSupersedingEpoch(ok.witnessedAt.epoch))
-            {
-                node.configService().fetchTopologyForEpoch(ok.witnessedAt.epoch);
-                node.topology().awaitEpoch(ok.witnessedAt.epoch).addListener(this::onEpochUpdate);
-            }
+            node.configService().fetchTopologyForEpoch(ok.witnessedAt.epoch);
+            node.topology().awaitEpoch(ok.witnessedAt.epoch).addListener(this::onEpochUpdate);
         }
 
         if (!tracker.hasSupersedingEpoch() && (tracker.hasMetFastPathCriteria() || tracker.shouldSlowPathAccept()))
@@ -226,7 +224,7 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
                 if (preAcceptOk.witnessedAt.equals(txnId))
                     deps.addAll(preAcceptOk.deps);
             }
-            agreed(txnId, deps, tracker.topologies());
+            agreed(txnId, deps);
         }
         else
         {
@@ -252,8 +250,8 @@ class Agree extends AcceptPhase implements Callback<PreAcceptReply>
         return preacceptOutcome != null;
     }
 
-    static Future<Agreed> agree(Node node, TxnId txnId, Txn txn)
+    static Future<Agreed> agree(Node node, TxnId txnId, Txn txn, Key homeKey)
     {
-        return new Agree(node, txnId, txn);
+        return new Agree(node, txnId, txn, homeKey);
     }
 }

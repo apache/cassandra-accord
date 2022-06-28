@@ -3,6 +3,7 @@ package accord.coordinate;
 import java.util.ArrayList;
 import java.util.List;
 
+import accord.api.Key;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.topology.Topologies;
 import accord.txn.Ballot;
@@ -18,23 +19,25 @@ import accord.messages.Accept.AcceptOk;
 import accord.messages.Accept.AcceptReply;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 
-class AcceptPhase extends AsyncPromise<Agreed>
+class Propose extends AsyncPromise<Agreed>
 {
     final Node node;
     final Ballot ballot;
     final TxnId txnId;
     final Txn txn;
+    final Key homeKey;
 
     private List<AcceptOk> acceptOks;
     private Timestamp proposed;
     private QuorumTracker acceptTracker;
 
-    AcceptPhase(Node node, Ballot ballot, TxnId txnId, Txn txn)
+    Propose(Node node, Ballot ballot, TxnId txnId, Txn txn, Key homeKey)
     {
         this.node = node;
         this.ballot = ballot;
         this.txnId = txnId;
         this.txn = txn;
+        this.homeKey = homeKey;
     }
 
     protected void startAccept(Timestamp executeAt, Dependencies deps, Topologies topologies)
@@ -42,7 +45,8 @@ class AcceptPhase extends AsyncPromise<Agreed>
         this.proposed = executeAt;
         this.acceptOks = new ArrayList<>();
         this.acceptTracker = new QuorumTracker(topologies);
-        node.send(acceptTracker.nodes(), to -> new Accept(to, topologies, ballot, txnId, txn, executeAt, deps), new Callback<AcceptReply>()
+        // TODO: acceptTracker should be a callback itself, with a reference to us for propagating failure
+        node.send(acceptTracker.nodes(), to -> new Accept(to, topologies, ballot, txnId, txn, homeKey, executeAt, deps), new Callback<AcceptReply>()
         {
             @Override
             public void onSuccess(Id from, AcceptReply response)
@@ -53,8 +57,7 @@ class AcceptPhase extends AsyncPromise<Agreed>
             @Override
             public void onFailure(Id from, Throwable throwable)
             {
-                acceptTracker.recordFailure(from);
-                if (acceptTracker.hasFailed())
+                if (acceptTracker.failure(from))
                     tryFailure(new Timeout());
             }
         });
@@ -73,9 +76,7 @@ class AcceptPhase extends AsyncPromise<Agreed>
 
         AcceptOk ok = (AcceptOk) reply;
         acceptOks.add(ok);
-        acceptTracker.recordSuccess(from);
-
-        if (acceptTracker.hasReachedQuorum())
+        if (acceptTracker.success(from))
             onAccepted();
     }
 
@@ -84,11 +85,11 @@ class AcceptPhase extends AsyncPromise<Agreed>
         Dependencies deps = new Dependencies();
         for (AcceptOk acceptOk : acceptOks)
             deps.addAll(acceptOk.deps);
-        agreed(proposed, deps, acceptTracker.topologies());
+        agreed(proposed, deps);
     }
 
-    protected void agreed(Timestamp executeAt, Dependencies deps, Topologies topologies)
+    protected void agreed(Timestamp executeAt, Dependencies deps)
     {
-        setSuccess(new Agreed(txnId, txn, executeAt, deps, topologies, null, null));
+        setSuccess(new Agreed(txnId, txn, homeKey, executeAt, deps, null, null));
     }
 }

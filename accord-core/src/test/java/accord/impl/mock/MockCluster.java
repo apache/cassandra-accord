@@ -5,6 +5,8 @@ import accord.api.MessageSink;
 import accord.coordinate.Timeout;
 import accord.impl.TopologyUtils;
 import accord.local.CommandStores;
+import accord.impl.SimpleProgressLog;
+import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.topology.KeyRanges;
@@ -88,7 +90,9 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                         nowSupplier,
                         () -> store,
                         new TestAgent(),
+                        new Random(),
                         new ThreadPoolScheduler(),
+                        SimpleProgressLog::new,
                         CommandStores.SingleThread::new);
     }
 

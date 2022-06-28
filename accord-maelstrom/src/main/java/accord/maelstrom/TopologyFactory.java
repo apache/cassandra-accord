@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import accord.api.KeyRange;
+import accord.topology.KeyRange;
 import accord.local.Node.Id;
 import accord.maelstrom.Datum.Kind;
 import accord.topology.Shard;

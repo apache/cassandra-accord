@@ -2,12 +2,11 @@ package accord.local;
 
 import accord.api.Agent;
 import accord.api.Key;
-import accord.api.KeyRange;
-import accord.api.Store;
-import accord.local.CommandStores.StoreGroup;
-import accord.local.Node.Id;
+import accord.local.CommandStores.ShardedRanges;
+import accord.api.ProgressLog;
+import accord.topology.KeyRange;
+import accord.api.DataStore;
 import accord.topology.KeyRanges;
-import accord.topology.Topology;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
 import accord.txn.TxnId;
@@ -15,14 +14,15 @@ import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.Promise;
 
+import com.google.common.base.Preconditions;
+
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.Supplier;
+import java.util.function.LongFunction;
 
-import com.google.common.base.Preconditions;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
 /**
@@ -33,48 +33,56 @@ public abstract class CommandStore
     public interface Factory
     {
         CommandStore create(int generation,
-                            int index,
+                            int shardIndex,
                             int numShards,
-                            Node.Id nodeId,
-                            Function<Timestamp, Timestamp> uniqueNow,
+                            Node node,
                             Agent agent,
-                            Store store,
-                            KeyRanges ranges,
-                            Supplier<Topology> localTopologySupplier);
+                            DataStore store,
+                            ProgressLog.Factory progressLogFactory,
+                            RangesForEpoch rangesForEpoch);
+    }
+
+    public interface RangesForEpoch
+    {
+        KeyRanges at(long epoch);
+        KeyRanges since(long epoch);
     }
 
     private final int generation;
-    private final int index;
+    private final int shardIndex;
     private final int numShards;
-    private final Node.Id nodeId;
-    private final Function<Timestamp, Timestamp> uniqueNow;
+    private final Node node;
     private final Agent agent;
-    private final Store store;
-    private final KeyRanges ranges;
-    private final Supplier<Topology> localTopologySupplier;
+    private final DataStore store;
+    private final ProgressLog progressLog;
+    private final RangesForEpoch rangesForEpoch;
 
     private final NavigableMap<TxnId, Command> commands = new TreeMap<>();
     private final NavigableMap<Key, CommandsForKey> commandsForKey = new TreeMap<>();
 
     public CommandStore(int generation,
-                        int index,
+                        int shardIndex,
                         int numShards,
-                        Node.Id nodeId,
-                        Function<Timestamp, Timestamp> uniqueNow,
+                        Node node,
                         Agent agent,
-                        Store store,
-                        KeyRanges ranges,
-                        Supplier<Topology> localTopologySupplier)
+                        DataStore store,
+                        ProgressLog.Factory progressLogFactory,
+                        RangesForEpoch rangesForEpoch)
     {
+        Preconditions.checkArgument(shardIndex < numShards);
         this.generation = generation;
-        this.index = index;
+        this.shardIndex = shardIndex;
         this.numShards = numShards;
-        this.nodeId = nodeId;
-        this.uniqueNow = uniqueNow;
+        this.node = node;
         this.agent = agent;
         this.store = store;
-        this.ranges = ranges;
-        this.localTopologySupplier = localTopologySupplier;
+        this.progressLog = progressLogFactory.create(this);
+        this.rangesForEpoch = rangesForEpoch;
+    }
+
+    public Command ifPresent(TxnId txnId)
+    {
+        return commands.get(txnId);
     }
 
     public Command command(TxnId txnId)
@@ -92,19 +100,24 @@ public abstract class CommandStore
         return commandsForKey.computeIfAbsent(key, ignore -> new CommandsForKey());
     }
 
+    public CommandsForKey maybeCommandsForKey(Key key)
+    {
+        return commandsForKey.get(key);
+    }
+
     public boolean hasCommandsForKey(Key key)
     {
         return commandsForKey.containsKey(key);
     }
 
-    public Store store()
+    public DataStore store()
     {
         return store;
     }
 
     public Timestamp uniqueNow(Timestamp atLeast)
     {
-        return uniqueNow.apply(atLeast);
+        return node.uniqueNow(atLeast);
     }
 
     public Agent agent()
@@ -112,19 +125,35 @@ public abstract class CommandStore
         return agent;
     }
 
-    public Node.Id nodeId()
+    public ProgressLog progressLog()
     {
-        return nodeId;
+        return progressLog;
     }
 
-    public long epoch()
+    public Node node()
     {
-        return localTopologySupplier.get().epoch();
+        return node;
     }
 
-    public KeyRanges ranges()
+    public RangesForEpoch ranges()
     {
-        return ranges;
+        return rangesForEpoch;
+    }
+
+    public long latestEpoch()
+    {
+        // TODO: why not inject the epoch to each command store?
+        return node.epoch();
+    }
+
+    protected Timestamp maxConflict(Keys keys)
+    {
+        return keys.stream()
+                   .map(this::maybeCommandsForKey)
+                   .filter(Objects::nonNull)
+                   .map(CommandsForKey::max)
+                   .max(Comparator.naturalOrder())
+                   .orElse(Timestamp.NONE);
     }
 
     public void forEpochCommands(KeyRanges ranges, long epoch, Consumer<Command> consumer)
@@ -166,24 +195,14 @@ public abstract class CommandStore
         }
     }
 
-    public int index()
-    {
-        return index;
-    }
-
     public boolean hashIntersects(Key key)
     {
-        return StoreGroup.keyIndex(key, numShards) == index;
+        return ShardedRanges.keyIndex(key, numShards) == shardIndex;
     }
 
-    public boolean intersects(Keys keys)
+    public boolean intersects(Keys keys, KeyRanges ranges)
     {
         return keys.any(ranges, this::hashIntersects);
-    }
-
-    public boolean contains(Key key)
-    {
-        return ranges.contains(key);
     }
 
     public static void onEach(Collection<CommandStore> stores, Consumer<? super CommandStore> consumer)
@@ -241,12 +260,12 @@ public abstract class CommandStore
 
     public static class Synchronized extends CommandStore
     {
-        public Synchronized(int generation, int index, int numShards, Node.Id nodeId,
-                                        Function<Timestamp, Timestamp> uniqueNow,
-                                        Agent agent, Store store,
-                                        KeyRanges ranges, Supplier<Topology> localTopologySupplier)
+        public Synchronized(int generation, int index, int numShards, Node node,
+                            Agent agent, DataStore store,
+                            ProgressLog.Factory progressLogFactory,
+                            RangesForEpoch rangesForEpoch)
         {
-            super(generation, index, numShards, nodeId, uniqueNow, agent, store, ranges, localTopologySupplier);
+            super(generation, index, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
         }
 
         @Override
@@ -305,15 +324,14 @@ public abstract class CommandStore
             }
         }
 
-        public SingleThread(int generation, int index, int numShards, Node.Id nodeId,
-                                        Function<Timestamp, Timestamp> uniqueNow,
-                                        Agent agent, Store store,
-                                        KeyRanges ranges, Supplier<Topology> localTopologySupplier)
+        public SingleThread(int generation, int index, int numShards, Node node,
+                            Agent agent, DataStore store, ProgressLog.Factory progressLogFactory,
+                            RangesForEpoch rangesForEpoch)
         {
-            super(generation, index, numShards, nodeId, uniqueNow, agent, store, ranges, localTopologySupplier);
+            super(generation, index, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
             executor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
-                thread.setName(CommandStore.class.getSimpleName() + '[' + nodeId + ':' + index + ']');
+                thread.setName(CommandStore.class.getSimpleName() + '[' + node.id() + ':' + index + ']');
                 return thread;
             });
         }
@@ -345,12 +363,11 @@ public abstract class CommandStore
     {
         private final AtomicReference<Thread> expectedThread = new AtomicReference<>();
 
-        public Debug(int generation, int index, int numShards, Node.Id nodeId,
-                     Function<Timestamp, Timestamp> uniqueNow,
-                     Agent agent, Store store,
-                     KeyRanges ranges, Supplier<Topology> localTopologySupplier)
+        public Debug(int generation, int index, int numShards, Node node,
+                     Agent agent, DataStore store, ProgressLog.Factory progressLogFactory,
+                     RangesForEpoch rangesForEpoch)
         {
-            super(generation, index, numShards, nodeId, uniqueNow, agent, store, ranges, localTopologySupplier);
+            super(generation, index, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
         }
 
         private void assertThread()

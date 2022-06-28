@@ -1,9 +1,10 @@
 package accord.impl.mock;
 
+import accord.api.Key;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.*;
 import accord.messages.*;
-import accord.topology.Topologies;
+import accord.topology.Topologies.Single;
 import accord.topology.Topology;
 import accord.txn.*;
 import com.google.common.base.Preconditions;
@@ -33,18 +34,22 @@ public class EpochSync implements Runnable
         this.nextEpoch = syncEpoch + 1;
     }
 
-    private static class SyncMessage implements Request
+    private static class SyncCommitted implements Request
     {
         private final TxnId txnId;
         private final Txn txn;
+        private final Key homeKey;
         private final Timestamp executeAt;
         private final Dependencies deps;
+        private final long epoch;
 
-        public SyncMessage(Command command)
+        public SyncCommitted(Command command, long epoch)
         {
+            this.epoch = epoch;
             Preconditions.checkArgument(command.hasBeen(Status.Committed));
             this.txnId = command.txnId();
             this.txn = command.txn();
+            this.homeKey = command.homeKey();
             this.executeAt = command.executeAt();
             this.deps = command.savedDeps();
         }
@@ -52,9 +57,10 @@ public class EpochSync implements Runnable
         @Override
         public void process(Node node, Node.Id from, ReplyContext replyContext)
         {
-            node.forEachLocal(commandStore -> {
+            Key progressKey = node.trySelectProgressKey(txnId, txn.keys, homeKey);
+            node.forEachLocalSince(txn.keys, epoch, commandStore -> {
                 Command command = commandStore.command(txnId);
-                command.commit(txn, deps, executeAt);
+                command.commit(txn, homeKey, progressKey, executeAt, deps);
             });
             node.reply(from, replyContext, SyncAck.INSTANCE);
         }
@@ -82,30 +88,30 @@ public class EpochSync implements Runnable
     {
         private final QuorumTracker tracker;
 
-        public CommandSync(Node node, SyncMessage message, Topology topology)
+        public CommandSync(Node node, SyncCommitted message, Topology topology)
         {
             Keys keys = message.txn.keys();
-            this.tracker = new QuorumTracker(new Topologies.Singleton(topology.forKeys(keys), false));
+            this.tracker = new QuorumTracker(new Single(topology.forKeys(keys), false));
             node.send(tracker.nodes(), message, this);
         }
 
         @Override
         public synchronized void onSuccess(Node.Id from, SyncAck response)
         {
-            tracker.recordSuccess(from);
+            tracker.success(from);
             if (tracker.hasReachedQuorum())
-                setSuccess(null);
+                trySuccess(null);
         }
 
         @Override
         public synchronized void onFailure(Node.Id from, Throwable throwable)
         {
-            tracker.recordFailure(from);
+            tracker.failure(from);
             if (tracker.hasFailed())
                 tryFailure(throwable);
         }
 
-        public static void sync(Node node, SyncMessage message, Topology topology)
+        public static void sync(Node node, SyncCommitted message, Topology topology)
         {
             try
             {
@@ -156,11 +162,11 @@ public class EpochSync implements Runnable
         @Override
         public void run()
         {
-            Map<TxnId, SyncMessage> syncMessages = new ConcurrentHashMap<>();
-            Consumer<Command> commandConsumer = command -> syncMessages.put(command.txnId(), new SyncMessage(command));
+            Map<TxnId, SyncCommitted> syncMessages = new ConcurrentHashMap<>();
+            Consumer<Command> commandConsumer = command -> syncMessages.put(command.txnId(), new SyncCommitted(command, syncEpoch));
             node.forEachLocal(commandStore -> commandStore.forCommittedInEpoch(syncTopology.ranges(), syncEpoch, commandConsumer));
 
-            for (SyncMessage message : syncMessages.values())
+            for (SyncCommitted message : syncMessages.values())
                 CommandSync.sync(node, message, nextTopology);
 
             SyncComplete syncComplete = new SyncComplete(syncEpoch);

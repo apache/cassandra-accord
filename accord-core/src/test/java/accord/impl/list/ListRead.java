@@ -18,7 +18,13 @@ public class ListRead implements Read
     }
 
     @Override
-    public Data read(Key key, Timestamp executeAt, Store store)
+    public Keys keys()
+    {
+        return keys;
+    }
+
+    @Override
+    public Data read(Key key, Timestamp executeAt, DataStore store)
     {
         ListStore s = (ListStore)store;
         ListData result = new ListData();

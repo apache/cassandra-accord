@@ -1,5 +1,6 @@
 package accord.messages;
 
+import accord.api.Key;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.topology.Topologies;
@@ -14,22 +15,21 @@ public class Commit extends ReadData
     public final Dependencies deps;
     public final boolean read;
 
-    public Commit(Scope scope, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, boolean read)
+    public Commit(Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Dependencies deps, boolean read)
     {
-        super(scope, txnId, txn, executeAt);
+        super(to, topologies, txnId, txn, homeKey, executeAt);
         this.deps = deps;
         this.read = read;
     }
 
-    public Commit(Id to, Topologies topologies, TxnId txnId, Txn txn, Timestamp executeAt, Dependencies deps, boolean read)
-    {
-        this(Scope.forTopologies(to, topologies, txn), txnId, txn, executeAt, deps, read);
-    }
-
     public void process(Node node, Id from, ReplyContext replyContext)
     {
-        node.forEachLocal(scope(), instance -> instance.command(txnId).commit(txn, deps, executeAt));
-        if (read) super.process(node, from, replyContext);
+        Key progressKey = node.trySelectProgressKey(txnId, txn.keys, homeKey);
+        node.forEachLocal(scope(), txnId.epoch,
+                          instance -> instance.command(txnId).commit(txn, homeKey, progressKey, executeAt, deps));
+
+        if (read)
+            super.process(node, from, replyContext);
     }
 
     @Override

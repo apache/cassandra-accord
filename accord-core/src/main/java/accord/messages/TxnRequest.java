@@ -1,104 +1,197 @@
 package accord.messages;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+
+import accord.api.Key;
 import accord.local.Node;
+import accord.local.Node.Id;
 import accord.topology.KeyRanges;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.txn.Keys;
-import accord.txn.Txn;
+import accord.txn.TxnId;
 
-import java.util.Objects;
+import static java.lang.Long.min;
 
-public abstract class TxnRequest implements Request
+public abstract class TxnRequest implements EpochRequest
 {
-    private final Scope scope;
-
-    public TxnRequest(Scope scope)
+    public static abstract class WithUnsynced extends TxnRequest
     {
-        this.scope = scope;
+        public final TxnId txnId;
+        public final Key homeKey;
+        public final long minEpoch;
+        protected final boolean doNotComputeProgressKey;
+
+        public WithUnsynced(Id to, Topologies topologies, Keys keys, TxnId txnId, Key homeKey)
+        {
+            this(to, topologies, keys, txnId, homeKey, latestRelevantEpochIndex(to, topologies, keys));
+        }
+
+        private WithUnsynced(Id to, Topologies topologies, Keys keys, TxnId txnId, Key homeKey, int startIndex)
+        {
+            super(to, topologies, keys, startIndex);
+            this.txnId = txnId;
+            this.homeKey = homeKey;
+            this.minEpoch = topologies.oldestEpoch();
+            // to understand this calculation we must bear in mind the following:
+            //  - startIndex is the "latest relevant" which means we skip over recent epochs where we are not owners at all,
+            //    i.e. if this node does not participate in the most recent epoch, startIndex > 0
+            //  - waitForEpoch gives us the most recent epoch with differing ownership information, starting from startIndex
+            // So, we can have some surprising situations arise where a *prior* owner must be contacted for its vote,
+            // and does not need to wait for the latest ring information because from the point of view of its contribution
+            // the stale ring information is sufficient, however we do not want it to compute a progress key with this stale
+            // ring information and mistakenly believe that it is a home shard for the transaction, as it will not receive
+            // updates for the transaction going forward.
+            // So in these cases we send a special flag indicating that the progress key should not be computed
+            // (as it might be done so with stale ring information)
+            this.doNotComputeProgressKey = waitForEpoch() < txnId.epoch && startIndex > 0
+                                           && topologies.get(startIndex).epoch() < txnId.epoch;
+
+            KeyRanges ranges = topologies.forEpoch(txnId.epoch).rangesForNode(to);
+            if (doNotComputeProgressKey)
+            {
+                Preconditions.checkState(ranges == null || !ranges.intersects(keys)); // confirm dest is not a replica on txnId.epoch
+            }
+            else
+            {
+                boolean intersects = ranges != null && ranges.intersects(keys);
+                long progressEpoch = Math.min(waitForEpoch(), txnId.epoch);
+                KeyRanges computesRangesOn = topologies.forEpoch(progressEpoch).rangesForNode(to);
+                boolean check = computesRangesOn != null && computesRangesOn.intersects(keys);
+                if (check != intersects)
+                    throw new IllegalStateException();
+            }
+        }
+
+        Key progressKey(Node node)
+        {
+            // if waitForEpoch < txnId.epoch, then this replica's ownership is unchanged
+            long progressEpoch = min(waitForEpoch(), txnId.epoch);
+            return doNotComputeProgressKey ? null : node.trySelectProgressKey(progressEpoch, scope(), homeKey);
+        }
+
+        @VisibleForTesting
+        public WithUnsynced(Keys scope, long epoch, TxnId txnId, Key homeKey)
+        {
+            super(scope, epoch);
+            this.txnId = txnId;
+            this.homeKey = homeKey;
+            this.minEpoch = epoch;
+            this.doNotComputeProgressKey = false;
+        }
     }
 
-    public Scope scope()
+    private final Keys scope;
+    private final long waitForEpoch;
+
+    public TxnRequest(Node.Id to, Topologies topologies, Keys keys)
+    {
+        this(to, topologies, keys, 0);
+    }
+
+    public TxnRequest(Node.Id to, Topologies topologies, Keys keys, int startIndex)
+    {
+        this(computeScope(to, topologies, keys, startIndex),
+             computeWaitForEpoch(to, topologies, startIndex));
+    }
+
+    public TxnRequest(Keys scope, long waitForEpoch)
+    {
+        this.scope = scope;
+        this.waitForEpoch = waitForEpoch;
+    }
+
+    public Keys scope()
     {
         return scope;
     }
 
-    /**
-     * Indicates the keys the coordinator expects the recipient to service for a request, and
-     * the minimum epochs the recipient will need to be aware of for each set of keys
-     */
-    public static class Scope
+    public long waitForEpoch()
     {
-        private final long minRequiredEpoch;
-        private final Keys keys;
+        return waitForEpoch;
+    }
 
-        public Scope(long minRequiredEpoch, Keys keys)
+    protected static int latestRelevantEpochIndex(Node.Id node, Topologies topologies, Keys keys)
+    {
+        KeyRanges latest = topologies.get(0).rangesForNode(node);
+
+        if (latest != null && latest.intersects(keys))
+            return 0;
+
+        int i = 0;
+        int mi = topologies.size();
+
+        // find first non-null for node
+        while (latest == null)
         {
-            this.minRequiredEpoch = minRequiredEpoch;
-            this.keys = keys;
+            if (++i == mi)
+                return mi;
+
+            latest = topologies.get(i).rangesForNode(node);
         }
 
-        public static Scope forTopologies(Node.Id node, Topologies topologies, Keys txnKeys)
+        if (latest.intersects(keys))
+            return i;
+
+        // find first non-empty intersection for node
+        while (++i < mi)
         {
-            long minEpoch = 0;
-            Keys scopeKeys = Keys.EMPTY;
-            Keys lastKeys = null;
-            for (int i=topologies.size() - 1; i>=0; i--)
+            KeyRanges next = topologies.get(i).rangesForNode(node);
+            if (!next.equals(latest))
             {
-                Topology topology = topologies.get(i);
-                KeyRanges topologyRanges = topology.rangesForNode(node);
-                if (topologyRanges == null)
-                    continue;
-                topologyRanges = topologyRanges.intersection(txnKeys);
-                Keys epochKeys = txnKeys.intersection(topologyRanges);
-                if (lastKeys == null || !lastKeys.containsAll(epochKeys))
-                {
-                    minEpoch = topology.epoch();
-                    scopeKeys = scopeKeys.merge(epochKeys);
-                }
-                lastKeys = epochKeys;
+                if (next.intersects(keys))
+                    return i;
+                latest = next;
             }
-
-            return new Scope(minEpoch, scopeKeys);
         }
+        return mi;
+    }
 
-        public static Scope forTopologies(Node.Id node, Topologies topologies, Txn txn)
+    // for now use a simple heuristic of whether the node's ownership ranges have changed,
+    // on the assumption that this might also mean some local shard rearrangement
+    // except if the latest epoch is empty for the keys
+    public static long computeWaitForEpoch(Node.Id node, Topologies topologies, Keys keys)
+    {
+        return computeWaitForEpoch(node, topologies, latestRelevantEpochIndex(node, topologies, keys));
+    }
+
+    public static long computeWaitForEpoch(Node.Id node, Topologies topologies, int startIndex)
+    {
+        int i = startIndex;
+        int mi = topologies.size();
+        if (i == mi)
+            return topologies.oldestEpoch();
+
+        KeyRanges latest = topologies.get(i).rangesForNode(node);
+        while (++i < mi)
         {
-            return forTopologies(node, topologies, txn.keys());
+            Topology topology = topologies.get(i);
+            KeyRanges ranges = topology.rangesForNode(node);
+            if (ranges == null || !ranges.equals(latest))
+                break;
         }
+        return topologies.get(i - 1).epoch();
+    }
 
-        public long minRequiredEpoch()
-        {
-            return minRequiredEpoch;
-        }
+    public static Keys computeScope(Node.Id node, Topologies topologies, Keys keys)
+    {
+        return computeScope(node, topologies, keys, latestRelevantEpochIndex(node, topologies, keys));
+    }
 
-        public Keys keys()
+    public static Keys computeScope(Node.Id node, Topologies topologies, Keys keys, int startIndex)
+    {
+        KeyRanges last = null;
+        Keys scopeKeys = Keys.EMPTY;
+        for (int i = startIndex, mi = topologies.size() ; i < mi ; ++i)
         {
-            return keys;
-        }
+            Topology topology = topologies.get(i);
+            KeyRanges ranges = topology.rangesForNode(node);
+            if (ranges != last && ranges != null && !ranges.equals(last))
+                scopeKeys = scopeKeys.union(keys.intersect(ranges));
 
-        @Override
-        public boolean equals(Object o)
-        {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            Scope scope = (Scope) o;
-            return minRequiredEpoch == scope.minRequiredEpoch && keys.equals(scope.keys);
+            last = ranges;
         }
-
-        @Override
-        public int hashCode()
-        {
-            return Objects.hash(minRequiredEpoch, keys);
-        }
-
-        @Override
-        public String toString()
-        {
-            return "Scope{" +
-                    "maxEpoch=" + minRequiredEpoch +
-                    ", keys=" + keys +
-                    '}';
-        }
+        return scopeKeys;
     }
 }

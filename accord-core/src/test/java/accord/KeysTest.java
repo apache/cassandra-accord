@@ -4,8 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import accord.api.Key;
-import accord.api.KeyRange;
 import accord.impl.IntKey;
+import accord.topology.KeyRange;
 import accord.topology.KeyRanges;
 import accord.txn.Keys;
 
@@ -32,24 +32,24 @@ public class KeysTest
     {
         assertEquals(keys(150, 250),
                      keys(100, 150, 200, 250, 300)
-                             .intersection(ranges(r(125, 175), r(225, 275))));
+                             .intersect(ranges(r(125, 175), r(225, 275))));
         assertEquals(keys(101, 199, 200),
                      keys(99, 100, 101, 199, 200, 201)
-                             .intersection(ranges(r(100, 200))));
+                             .intersect(ranges(r(100, 200))));
         assertEquals(keys(101, 199, 200, 201, 299, 300),
                      keys(99, 100, 101, 199, 200, 201, 299, 300, 301)
-                             .intersection(ranges(r(100, 200), r(200, 300))));
+                             .intersect(ranges(r(100, 200), r(200, 300))));
     }
 
     @Test
     void mergeTest()
     {
         assertEquals(keys(0, 1, 2, 3, 4),
-                     keys(0, 1, 2, 3, 4).merge(keys(0, 1, 2, 3, 4)));
+                     keys(0, 1, 2, 3, 4).union(keys(0, 1, 2, 3, 4)));
         assertEquals(keys(0, 1, 2, 3, 4),
-                     keys(0, 1).merge(keys(2, 3, 4)));
+                     keys(0, 1).union(keys(2, 3, 4)));
         assertEquals(keys(0, 1, 2, 3, 4),
-                     keys(0, 2, 4).merge(keys(1, 3)));
+                     keys(0, 2, 4).union(keys(1, 3)));
     }
 
     @Test

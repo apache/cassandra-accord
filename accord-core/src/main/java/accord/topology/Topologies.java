@@ -11,6 +11,10 @@ public interface Topologies
 {
     Topology current();
 
+    Topology forEpoch(long epoch);
+
+    long oldestEpoch();
+
     default long currentEpoch()
     {
         return current().epoch;
@@ -26,8 +30,6 @@ public interface Topologies
     int totalShards();
 
     Set<Node.Id> nodes();
-
-    Topologies removeEpochsBefore(long epoch);
 
     default void forEach(IndexedConsumer<Topology> consumer)
     {
@@ -81,7 +83,7 @@ public interface Topologies
         StringBuilder sb = new StringBuilder("[");
         for (int i=0, mi=t.size(); i<mi; i++)
         {
-            if (i < 0)
+            if (i > 0)
                 sb.append(", ");
 
             sb.append(t.get(i).toString());
@@ -90,12 +92,12 @@ public interface Topologies
         return sb.toString();
     }
 
-    class Singleton implements Topologies
+    class Single implements Topologies
     {
         private final Topology topology;
         private final boolean fastPathPermitted;
 
-        public Singleton(Topology topology, boolean fastPathPermitted)
+        public Single(Topology topology, boolean fastPathPermitted)
         {
             this.topology = topology;
             this.fastPathPermitted = fastPathPermitted;
@@ -105,6 +107,20 @@ public interface Topologies
         public Topology current()
         {
             return topology;
+        }
+
+        @Override
+        public Topology forEpoch(long epoch)
+        {
+            if (topology.epoch != epoch)
+                throw new IndexOutOfBoundsException();
+            return topology;
+        }
+
+        @Override
+        public long oldestEpoch()
+        {
+            return currentEpoch();
         }
 
         @Override
@@ -137,14 +153,6 @@ public interface Topologies
         public Set<Node.Id> nodes()
         {
             return topology.nodes();
-        }
-
-        @Override
-        public Topologies removeEpochsBefore(long epoch)
-        {
-            if (epoch > topology.epoch())
-                throw new IndexOutOfBoundsException(epoch + " is greater than current epoch " + topology.epoch());
-            return this;
         }
 
         @Override
@@ -189,6 +197,21 @@ public interface Topologies
         }
 
         @Override
+        public Topology forEpoch(long epoch)
+        {
+            long index = get(0).epoch - epoch;
+            if (index < 0 || index > size())
+                throw new IndexOutOfBoundsException();
+            return get((int)index);
+        }
+
+        @Override
+        public long oldestEpoch()
+        {
+            return get(size() - 1).epoch;
+        }
+
+        @Override
         public boolean fastPathPermitted()
         {
             return false;
@@ -222,27 +245,6 @@ public interface Topologies
             for (int i=0,mi=size(); i<mi; i++)
                 result.addAll(get(i).nodes());
             return result;
-        }
-
-        @Override
-        public Topologies removeEpochsBefore(long epoch)
-        {
-            long current = currentEpoch();
-            if (epoch > current)
-                throw new IndexOutOfBoundsException(epoch + " is greater than current epoch " + current);
-            if (epoch <= topologies.get(0).epoch())
-                return this;
-            if (epoch == current)
-                return new Singleton(current(), fastPathPermitted());
-
-            int numEpochs = (int) (current - epoch + 1);
-            Topology[] result = new Topology[numEpochs];
-            int startIdx = topologies.size() - numEpochs;
-            for (int i=0; i<result.length; i++)
-                result[i] = topologies.get(startIdx + 1);
-            Preconditions.checkState(result[0].epoch() >= epoch);
-            Preconditions.checkState(current == result[result.length - 1].epoch());
-            return new Multi(result);
         }
 
         public void add(Topology topology)

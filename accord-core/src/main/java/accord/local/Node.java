@@ -2,7 +2,6 @@ package accord.local;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -16,13 +15,26 @@ import com.google.common.annotations.VisibleForTesting;
 import accord.api.*;
 import accord.coordinate.Coordinate;
 import accord.messages.*;
+
+import javax.annotation.Nullable;
+
+import accord.api.Agent;
+import accord.api.Key;
+import accord.api.MessageSink;
+import accord.api.Result;
+import accord.api.ProgressLog;
+import accord.api.Scheduler;
+import accord.api.DataStore;
 import accord.messages.Callback;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
 import accord.messages.Reply;
+import accord.topology.KeyRange;
+import accord.topology.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.topology.TopologyManager;
+import accord.txn.Ballot;
 import accord.txn.Keys;
 import accord.txn.Timestamp;
 import accord.txn.Txn;
@@ -72,40 +84,47 @@ public class Node implements ConfigurationService.Listener
         }
     }
 
+    public boolean isCoordinating(TxnId txnId, Ballot promised)
+    {
+        return promised.node.equals(id) && coordinating.containsKey(txnId);
+    }
+
     public static int numCommandShards()
     {
         return 8; // TODO: make configurable
     }
 
-    private final CommandStores commandStores;
     private final Id id;
     private final MessageSink messageSink;
     private final ConfigurationService configService;
     private final TopologyManager topology;
+    private final CommandStores commandStores;
 
     private final LongSupplier nowSupplier;
     private final AtomicReference<Timestamp> now;
     private final Agent agent;
+    private final Random random;
 
     // TODO: this really needs to be thought through some more, as it needs to be per-instance in some cases, and per-node in others
     private final Scheduler scheduler;
 
     private final Map<TxnId, Future<Result>> coordinating = new ConcurrentHashMap<>();
-    private final Set<TxnId> pendingRecovery = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier,
-                Supplier<Store> dataSupplier, Agent agent, Scheduler scheduler, CommandStores.Factory factory)
+                Supplier<DataStore> dataSupplier, Agent agent, Random random, Scheduler scheduler,
+                Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory)
     {
         this.id = id;
-        this.agent = agent;
         this.messageSink = messageSink;
         this.configService = configService;
         this.topology = new TopologyManager(id, configService::reportEpoch);
+        this.nowSupplier = nowSupplier;
         Topology topology = configService.currentTopology();
         this.now = new AtomicReference<>(new Timestamp(topology.epoch(), nowSupplier.getAsLong(), 0, id));
-        this.nowSupplier = nowSupplier;
+        this.agent = agent;
+        this.random = random;
         this.scheduler = scheduler;
-        this.commandStores = factory.create(numCommandShards(), id, this::uniqueNow, agent, dataSupplier.get());
+        this.commandStores = factory.create(numCommandShards(), this, agent, dataSupplier.get(), progressLogFactory.apply(this));
 
         configService.registerListener(this);
         onTopologyUpdate(topology, false);
@@ -192,34 +211,49 @@ public class Node implements ConfigurationService.Listener
         commandStores.forEach(forEach);
     }
 
-    public void forEachLocal(Keys keys, Consumer<CommandStore> forEach)
+    public void forEachLocal(Keys keys, long epoch, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(keys, forEach);
+        commandStores.forEach(keys, epoch, forEach);
     }
 
-    public void forEachLocal(Txn txn, Consumer<CommandStore> forEach)
+    public void forEachLocal(Keys keys, long minEpoch, long maxEpoch, Consumer<CommandStore> forEach)
     {
-        forEachLocal(txn.keys, forEach);
+        commandStores.forEach(keys, minEpoch, maxEpoch, forEach);
     }
 
-    public void forEachLocal(TxnRequest.Scope scope, Consumer<CommandStore> forEach)
+    public void forEachLocalSince(Keys keys, Timestamp since, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(scope, forEach);
+        commandStores.forEach(keys, since.epoch, Long.MAX_VALUE, forEach);
     }
 
-    public <T> T mapReduceLocal(TxnRequest.Scope scope, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public void forEachLocalSince(Keys keys, long sinceEpoch, Consumer<CommandStore> forEach)
     {
-        return commandStores.mapReduce(scope, map, reduce);
+        commandStores.forEach(keys, sinceEpoch, Long.MAX_VALUE, forEach);
     }
 
-    public <T extends Collection<CommandStore>> T collectLocal(Keys keys, IntFunction<T> factory)
+    public <T> T mapReduceLocal(Keys keys, long minEpoch, long maxEpoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
-        return commandStores.collect(keys, factory);
+        return commandStores.mapReduce(keys, minEpoch, maxEpoch, map, reduce);
     }
 
-    public <T extends Collection<CommandStore>> T collectLocal(TxnRequest.Scope scope, IntFunction<T> factory)
+    public <T> T mapReduceLocalSince(Keys keys, Timestamp since, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
-        return commandStores.collect(scope, factory);
+        return commandStores.mapReduce(keys, since.epoch, Long.MAX_VALUE, map, reduce);
+    }
+
+    public <T> T ifLocal(Key key, Timestamp at, Function<CommandStore, T> ifLocal)
+    {
+        return ifLocal(key, at.epoch, ifLocal);
+    }
+
+    public <T> T ifLocal(Key key, long epoch, Function<CommandStore, T> ifLocal)
+    {
+        return commandStores.mapReduce(key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
+    }
+
+    public <T extends Collection<CommandStore>> T collectLocal(Keys keys, Timestamp at, IntFunction<T> factory)
+    {
+        return commandStores.collect(keys, at.epoch, factory);
     }
 
     // send to every node besides ourselves
@@ -232,6 +266,11 @@ public class Node implements ConfigurationService.Listener
     public void send(Shard shard, Request send)
     {
         shard.nodes.forEach(node -> messageSink.send(node, send));
+    }
+
+    public void send(Shard shard, Request send, Callback callback)
+    {
+        shard.nodes.forEach(node -> messageSink.send(node, send, callback));
     }
 
     private <T> void send(Shard shard, Request send, Set<Id> alreadyContacted)
@@ -278,6 +317,8 @@ public class Node implements ConfigurationService.Listener
 
     public void reply(Id replyingToNode, ReplyContext replyContext, Reply send)
     {
+        if (send == null)
+            throw new NullPointerException();
         messageSink.reply(replyingToNode, replyContext, send);
     }
 
@@ -286,61 +327,118 @@ public class Node implements ConfigurationService.Listener
         return new TxnId(uniqueNow());
     }
 
-    public Future<Result> coordinate(TxnId txnId, Txn txn)
-    {
-        // TODO: The combination of updating the epoch of the next timestamp with epochs we don’t have topologies for,
-        //  and requiring preaccept to talk to its topology epoch means that learning of a new epoch via timestamp
-        //  (ie not via config service) will halt any new txns from a node until it receives this topology
-        if (txnId.epoch > topology().epoch())
-        {
-            configService.fetchTopologyForEpoch(txnId.epoch);
-            return topology().awaitEpoch(txnId.epoch).flatMap(v -> coordinate(txnId, txn));
-        }
-
-        Future<Result> result = Coordinate.execute(this, txnId, txn);
-        coordinating.put(txnId, result);
-        // TODO (now): error handling
-        result.addCallback((success, fail) ->
-            {
-            coordinating.remove(txnId);
-            // if we don't succeed, try again in 30s to make sure somebody finishes it
-            // TODO: this is an ugly liveness mechanism
-            if (fail != null && pendingRecovery.add(txnId))
-            scheduler.once(() -> { pendingRecovery.remove(txnId); recover(txnId, txn); } , 30L, TimeUnit.SECONDS);
-            });
-        return result;
-    }
-
     public Future<Result> coordinate(Txn txn)
     {
         return coordinate(nextTxnId(), txn);
     }
 
-    // TODO: encapsulate in Coordinate, so we can request that e.g. commits be re-sent?
-    public void recover(TxnId txnId, Txn txn)
+    public Future<Result> coordinate(TxnId txnId, Txn txn)
     {
+        // TODO: The combination of updating the epoch of the next timestamp with epochs we don’t have topologies for,
+        //  and requiring preaccept to talk to its topology epoch means that learning of a new epoch via timestamp
+        //  (ie not via config service) will halt any new txns from a node until it receives this topology
+        Future<Result> result;
+        if (txnId.epoch > topology().epoch())
+        {
+            configService.fetchTopologyForEpoch(txnId.epoch);
+            result = topology().awaitEpoch(txnId.epoch)
+                               .flatMap(ignore -> initiateCoordination(txnId, txn));
+        }
+        else
+        {
+            result = initiateCoordination(txnId, txn);
+        }
+
+        coordinating.putIfAbsent(txnId, result);
+        // TODO: if we fail, nominate another node to try instead
+        result.addCallback((success, fail) -> coordinating.remove(txnId, result));
+        return result;
+    }
+
+    private Future<Result> initiateCoordination(TxnId txnId, Txn txn)
+    {
+        Key homeKey = trySelectHomeKey(txnId, txn.keys);
+        if (homeKey == null)
+        {
+            homeKey = selectRandomHomeKey(txnId);
+            txn = new Txn(txn.keys.with(homeKey), txn.read, txn.query, txn.update);
+        }
+        return Coordinate.execute(this, txnId, txn, homeKey);
+    }
+
+    @VisibleForTesting
+    public @Nullable Key trySelectHomeKey(TxnId txnId, Keys keys)
+    {
+        int i = topology().localForEpoch(txnId.epoch).ranges().findFirstIntersecting(keys);
+        return i >= 0 ? keys.get(i) : null;
+    }
+
+    public Key selectHomeKey(TxnId txnId, Keys keys)
+    {
+        Key key = trySelectHomeKey(txnId, keys);
+        return key != null ? key : selectRandomHomeKey(txnId);
+    }
+
+    public Key selectProgressKey(TxnId txnId, Keys keys, Key homeKey)
+    {
+        Key progressKey = trySelectProgressKey(txnId, keys, homeKey);
+        if (progressKey == null)
+            throw new IllegalStateException();
+        return progressKey;
+    }
+
+    public Key trySelectProgressKey(TxnId txnId, Keys keys, Key homeKey)
+    {
+        return trySelectProgressKey(txnId.epoch, keys, homeKey);
+    }
+
+    public Key trySelectProgressKey(long epoch, Keys keys, Key homeKey)
+    {
+        Topology topology = this.topology.localForEpoch(epoch);
+        if (topology.ranges().contains(homeKey))
+            return homeKey;
+
+        int i = topology.ranges().findFirstIntersecting(keys);
+        if (i < 0)
+            return null;
+        return keys.get(i);
+    }
+
+    public Key selectRandomHomeKey(TxnId txnId)
+    {
+        KeyRanges ranges = topology().localForEpoch(txnId.epoch).ranges();
+        KeyRange range = ranges.get(ranges.size() == 1 ? 0 : random.nextInt(ranges.size()));
+        return range.endInclusive() ? range.end() : range.start();
+    }
+
+    // TODO: encapsulate in Coordinate, so we can request that e.g. commits be re-sent?
+    public Future<Result> recover(TxnId txnId, Txn txn, Key homeKey)
+    {
+        {
+            Future<Result> result = coordinating.get(txnId);
+            if (result != null)
+                return result;
+        }
+
+        Future<Result> result;
         if (txnId.epoch > topology.epoch())
         {
             configService.fetchTopologyForEpoch(txnId.epoch);
-            topology().awaitEpoch(txnId.epoch).addListener(() -> recover(txnId, txn));
-            return;
+            result = topology().awaitEpoch(txnId.epoch)
+                               .flatMap(ignore -> Coordinate.recover(this, txnId, txn, homeKey));
+        }
+        else
+        {
+            result = Coordinate.recover(this, txnId, txn, homeKey);
         }
 
-        Future<Result> result = coordinating.get(txnId);
-        if (result != null)
-            return;
-
-        result = Coordinate.recover(this, txnId, txn);
         coordinating.putIfAbsent(txnId, result);
-        // TODO (now): error handling
         result.addCallback((success, fail) -> {
-                coordinating.remove(txnId);
-                agent.onRecover(this, success, fail);
-                // if we don't succeed, try again in 30s to make sure somebody finishes it
-                // TODO: this is an ugly liveness mechanism
-                if (fail != null && pendingRecovery.add(txnId))
-                    scheduler.once(() -> { pendingRecovery.remove(txnId); recover(txnId, txn); } , 30L, TimeUnit.SECONDS);
+            coordinating.remove(txnId, result);
+            agent.onRecover(this, success, fail);
+            // TODO: if we fail, nominate another node to try instead
         });
+        return result;
     }
 
     public void receive(Request request, Id from, ReplyContext replyContext)
@@ -353,6 +451,16 @@ public class Node implements ConfigurationService.Listener
             return;
         }
         scheduler.now(() -> request.process(this, from, replyContext));
+    }
+
+    public boolean isReplicaOf(Timestamp at, Key key)
+    {
+        return topology().localForEpoch(at.epoch).ranges().contains(key);
+    }
+
+    public boolean isReplicaOf(long epoch, Key key)
+    {
+        return topology().localForEpoch(epoch).ranges().contains(key);
     }
 
     public Scheduler scheduler()
@@ -382,4 +490,13 @@ public class Node implements ConfigurationService.Listener
         return commandStores.unsafeForKey(key);
     }
 
+    public CommandStore unsafeByIndex(int index)
+    {
+        return commandStores.current.ranges[0].shards[index];
+    }
+
+    public LongSupplier unsafeGetNowSupplier()
+    {
+        return nowSupplier;
+    }
 }

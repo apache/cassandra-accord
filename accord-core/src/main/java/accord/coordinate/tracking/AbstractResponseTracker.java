@@ -4,12 +4,15 @@ import accord.local.Node;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.topology.Topology;
+import accord.utils.IndexedIntFunction;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.function.Predicate;
@@ -84,16 +87,38 @@ public abstract class AbstractResponseTracker<T extends AbstractResponseTracker.
         });
     }
 
+    protected boolean anyForNode(Node.Id node, BiPredicate<T, Node.Id> consumer)
+    {
+        return matchingTrackersForNode(node, consumer, 1) == 1;
+    }
+
+    protected boolean allForNode(Node.Id node, BiPredicate<T, Node.Id> consumer)
+    {
+        return nonMatchingTrackersForNode(node, consumer, Integer.MAX_VALUE) == 0;
+    }
+
+    protected int nonMatchingTrackersForNode(Node.Id node, BiPredicate<T, Node.Id> consumer, int limit)
+    {
+        return foldlForNode(node, (shardIndex, shard, v) -> consumer.test(trackers[shardIndex], node) ? v : v + 1, 0, limit);
+    }
+
+    protected int matchingTrackersForNode(Node.Id node, BiPredicate<T, Node.Id> consumer, int limit)
+    {
+        return foldlForNode(node, (shardIndex, shard, v) -> consumer.test(trackers[shardIndex], node) ? v + 1 : v, 0, limit);
+    }
+
     protected int matchingTrackersForNode(Node.Id node, Predicate<T> consumer)
     {
-        int matches = 0;
-        for (int i=0, mi=topologies.size(); i<mi; i++)
+        return foldlForNode(node, (shardIndex, shard, v) -> consumer.test(trackers[shardIndex]) ? v + 1 : v, 0, Integer.MAX_VALUE);
+    }
+
+    protected int foldlForNode(Node.Id node, IndexedIntFunction<Shard> function, int initialValue, int terminalValue)
+    {
+        for (int i = 0 ; i < topologies.size() && initialValue != terminalValue ; ++i)
         {
-            Topology topology = topologies.get(i);
-            int offset = topologyOffset(i);
-            matches += topology.matchesOn(node, (j, shard) -> consumer.test(trackers[offset + j]));
+            initialValue = topologies.get(i).foldlIntOn(node, function, topologyOffset(i), initialValue, terminalValue);
         }
-        return matches;
+        return initialValue;
     }
 
     protected boolean all(Predicate<T> predicate)

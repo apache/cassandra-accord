@@ -1,6 +1,5 @@
 package accord.topology;
 
-import accord.api.KeyRange;
 import accord.burn.TopologyUpdate;
 import accord.impl.IntHashKey;
 import accord.local.Node;
@@ -218,7 +217,7 @@ public class TopologyRandomizer
         {
             KeyRanges previous = previouslyReplicated.getOrDefault(entry.getKey(), KeyRanges.EMPTY);
             KeyRanges added = entry.getValue();
-            KeyRanges merged = previous.merge(added).mergeTouching();
+            KeyRanges merged = previous.union(added).mergeTouching();
             previouslyReplicated.put(entry.getKey(), merged);
         }
 

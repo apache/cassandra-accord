@@ -3,7 +3,7 @@ package accord.impl;
 
 import accord.local.Node;
 import accord.api.Key;
-import accord.api.KeyRange;
+import accord.topology.KeyRange;
 import accord.topology.KeyRanges;
 import accord.topology.Topology;
 

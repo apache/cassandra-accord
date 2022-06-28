@@ -1,6 +1,6 @@
 package accord.utils;
 
-import accord.api.KeyRange;
+import accord.topology.KeyRange;
 import accord.impl.IntKey;
 import accord.topology.KeyRanges;
 import org.junit.jupiter.api.Assertions;
@@ -61,15 +61,15 @@ public class KeyRangesTest
     void addTest()
     {
         Assertions.assertEquals(ranges(r(0, 50), r(50, 100), r(100, 150), r(150, 200)),
-                                ranges(r(0, 50), r(100, 150)).union(ranges(r(50, 100), r(150, 200))));
+                                ranges(r(0, 50), r(100, 150)).combine(ranges(r(50, 100), r(150, 200))));
 
-        Assertions.assertThrows(IllegalArgumentException.class, () -> ranges(r(0, 50)).union(ranges(r(25, 75))));
+        Assertions.assertThrows(IllegalArgumentException.class, () -> ranges(r(0, 50)).combine(ranges(r(25, 75))));
     }
 
     private static void assertMergeResult(KeyRanges expected, KeyRanges input1, KeyRanges input2)
     {
-        Assertions.assertEquals(expected, input1.merge(input2));
-        Assertions.assertEquals(expected, input2.merge(input1));
+        Assertions.assertEquals(expected, input1.union(input2));
+        Assertions.assertEquals(expected, input2.union(input1));
     }
 
     @Test

@@ -11,6 +11,7 @@ import java.util.TreeSet;
 
 import accord.local.Node;
 import accord.api.Result;
+import accord.txn.Dependencies.TxnAndHomeKey;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.TypeAdapter;
@@ -300,11 +301,14 @@ public class Json
         public void write(JsonWriter out, Dependencies value) throws IOException
         {
             out.beginArray();
-            for (Map.Entry<TxnId, Txn> e : value.deps.entrySet())
+            for (Map.Entry<TxnId, TxnAndHomeKey> e : value.deps.entrySet())
             {
                 out.beginArray();
                 GSON.toJson(e.getKey(), TxnId.class, out);
-                TXN_ADAPTER.write(out, e.getValue());
+                out.beginArray();
+                ((MaelstromKey)e.getValue().homeKey).write(out);
+                TXN_ADAPTER.write(out, e.getValue().txn);
+                out.endArray();
                 out.endArray();
             }
             out.endArray();
@@ -313,7 +317,7 @@ public class Json
         @Override
         public Dependencies read(JsonReader in) throws IOException
         {
-            NavigableMap<TxnId, Txn> deps = new TreeMap<>();
+            Dependencies deps = new Dependencies();
             in.beginArray();
             if (!in.hasNext())
             {
@@ -325,12 +329,15 @@ public class Json
             {
                 in.beginArray();
                 TxnId txnId = GSON.fromJson(in, TxnId.class);
+                in.beginArray();
+                Key homeKey = MaelstromKey.read(in);
                 Txn txn = TXN_ADAPTER.read(in);
-                deps.put(txnId, txn);
+                in.endArray();
+                deps.add(txnId, txn, homeKey);
                 in.endArray();
             }
             in.endArray();
-            return new Dependencies(deps);
+            return deps;
         }
     };
 
