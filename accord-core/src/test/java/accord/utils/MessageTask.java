@@ -113,9 +113,15 @@ public class MessageTask extends AsyncPromise<Void> implements Runnable
         }
 
         @Override
-        public void onFailure(Node.Id from, Throwable throwable)
+        public void onFailure(Node.Id from, Throwable failure)
         {
             originator.send(from, request, this);
+        }
+
+        @Override
+        public void onCallbackFailure(Throwable failure)
+        {
+            tryFailure(failure);
         }
     }
 

@@ -86,16 +86,19 @@ public class DeterministicIdentitySet<T> extends AbstractSet<T>
         Entry<T> prev = entry.prev, next = entry.next;
         prev.next = next;
         next.prev = prev;
+        entry.next = null; // so deletes can be detected during enumeration
         return true;
     }
 
     public void forEach(Consumer<? super T> consumer)
     {
-        Entry<T> next = head.next;
-        while (next != head)
+        Entry<T> cur = head.next;
+        while (cur != head)
         {
-            consumer.accept(next.item);
-            next = next.next;
+            consumer.accept(cur.item);
+            while (cur.next == null)
+                cur = cur.prev;
+            cur = cur.next;
         }
     }
 

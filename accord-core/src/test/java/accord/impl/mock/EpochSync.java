@@ -4,6 +4,10 @@ import accord.api.Key;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.*;
 import accord.messages.*;
+import accord.primitives.Deps;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import accord.topology.Topologies.Single;
 import accord.topology.Topology;
 import accord.txn.*;
@@ -40,7 +44,7 @@ public class EpochSync implements Runnable
         private final Txn txn;
         private final Key homeKey;
         private final Timestamp executeAt;
-        private final Dependencies deps;
+        private final Deps deps;
         private final long epoch;
 
         public SyncCommitted(Command command, long epoch)
@@ -104,11 +108,17 @@ public class EpochSync implements Runnable
         }
 
         @Override
-        public synchronized void onFailure(Node.Id from, Throwable throwable)
+        public synchronized void onFailure(Node.Id from, Throwable failure)
         {
             tracker.failure(from);
             if (tracker.hasFailed())
-                tryFailure(throwable);
+                tryFailure(failure);
+        }
+
+        @Override
+        public void onCallbackFailure(Throwable failure)
+        {
+            tryFailure(failure);
         }
 
         public static void sync(Node node, SyncCommitted message, Topology topology)

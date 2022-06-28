@@ -7,8 +7,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import accord.local.*;
 import accord.local.Node.Id;
 import accord.topology.Topologies;
-import accord.txn.TxnId;
-import accord.txn.Keys;
+import accord.primitives.TxnId;
+import accord.primitives.Keys;
 
 public class WaitOnCommit extends TxnRequest
 {
@@ -34,16 +34,17 @@ public class WaitOnCommit extends TxnRequest
         {
             switch (command.status())
             {
-                default:
-                    throw new IllegalStateException();
+                default: throw new IllegalStateException();
                 case NotWitnessed:
                 case PreAccepted:
                 case Accepted:
+                case AcceptedInvalidate:
                     return;
 
                 case Committed:
                 case Executed:
                 case Applied:
+                case Invalidated:
                 case ReadyToExecute:
             }
 
@@ -57,7 +58,7 @@ public class WaitOnCommit extends TxnRequest
                 node.reply(replyToNode, replyContext, WaitOnCommitOk.INSTANCE);
         }
 
-        void setup(CommandStore instance)
+        void setup(Keys keys, CommandStore instance)
         {
             Command command = instance.command(txnId);
             switch (command.status())
@@ -65,12 +66,15 @@ public class WaitOnCommit extends TxnRequest
                 case NotWitnessed:
                 case PreAccepted:
                 case Accepted:
+                case AcceptedInvalidate:
                     command.addListener(this);
+                    instance.progressLog().waiting(txnId, keys);
                     break;
 
                 case Committed:
                 case Executed:
                 case Applied:
+                case Invalidated:
                 case ReadyToExecute:
                     ack();
             }
@@ -80,7 +84,7 @@ public class WaitOnCommit extends TxnRequest
         {
             List<CommandStore> instances = node.collectLocal(keys, txnId, ArrayList::new);
             waitingOn.set(instances.size());
-            instances.forEach(instance -> instance.processBlocking(this::setup));
+            instances.forEach(instance -> instance.processBlocking(ignore -> setup(keys, instance)));
         }
     }
 

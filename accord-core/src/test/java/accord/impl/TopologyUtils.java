@@ -1,9 +1,9 @@
 package accord.impl;
 
 import accord.api.Key;
-import accord.topology.KeyRange;
+import accord.primitives.KeyRange;
 import accord.local.Node;
-import accord.topology.KeyRanges;
+import accord.primitives.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.utils.WrapAroundList;

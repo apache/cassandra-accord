@@ -12,7 +12,7 @@ import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
 import accord.api.Key;
 import accord.api.Result;
-import accord.txn.Keys;
+import accord.primitives.Keys;
 
 public class MaelstromResult implements Result
 {

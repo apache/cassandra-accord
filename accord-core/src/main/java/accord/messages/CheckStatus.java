@@ -6,10 +6,11 @@ import accord.local.Command;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.Status;
-import accord.txn.Ballot;
-import accord.txn.Dependencies;
-import accord.txn.Timestamp;
-import accord.txn.TxnId;
+import accord.primitives.Ballot;
+import accord.primitives.Deps;
+import accord.primitives.Timestamp;
+import accord.txn.Txn;
+import accord.primitives.TxnId;
 import accord.txn.Writes;
 
 public class CheckStatus implements Request
@@ -51,9 +52,12 @@ public class CheckStatus implements Request
             boolean includeInfo = this.includeInfo.include(command.status());
             if (includeInfo)
             {
-                return (CheckStatusReply) new CheckStatusOkFull(command.status(), command.promised(), command.accepted(),
+                return (CheckStatusReply) new CheckStatusOkFull(command.status(),
+                                                                command.promised(),
+                                                                command.accepted(),
                                                                 node.isCoordinating(txnId, command.promised()),
                                                                 command.isGloballyPersistent(),
+                                                                command.txn(),
                                                                 command.homeKey(),
                                                                 command.executeAt(),
                                                                 command.savedDeps(),
@@ -158,16 +162,18 @@ public class CheckStatus implements Request
 
     public static class CheckStatusOkFull extends CheckStatusOk
     {
+        public final Txn txn;
         public final Key homeKey;
         public final Timestamp executeAt;
-        public final Dependencies deps;
+        public final Deps deps;
         public final Writes writes;
         public final Result result;
 
         CheckStatusOkFull(Status status, Ballot promised, Ballot accepted, boolean isCoordinating, boolean hasExecutedOnAllShards,
-                          Key homeKey, Timestamp executeAt, Dependencies deps, Writes writes, Result result)
+                          Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
         {
             super(status, promised, accepted, isCoordinating, hasExecutedOnAllShards);
+            this.txn = txn;
             this.homeKey = homeKey;
             this.executeAt = executeAt;
             this.deps = deps;
@@ -213,7 +219,7 @@ public class CheckStatus implements Request
 
             CheckStatusOkFull src = (CheckStatusOkFull) maxSrc;
             return new CheckStatusOkFull(max.status, max.promised, max.accepted, max.isCoordinating,
-                                         max.hasExecutedOnAllShards, src.homeKey, src.executeAt, src.deps, src.writes, src.result);
+                                         max.hasExecutedOnAllShards, src.txn, src.homeKey, src.executeAt, src.deps, src.writes, src.result);
         }
     }
 

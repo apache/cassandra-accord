@@ -7,6 +7,8 @@ import java.util.Set;
 
 import accord.local.Node.Id;
 import accord.api.Key;
+import accord.primitives.KeyRange;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;

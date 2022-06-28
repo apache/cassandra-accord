@@ -5,7 +5,7 @@ import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.function.Consumer;
 
-import accord.txn.Timestamp;
+import accord.primitives.Timestamp;
 import com.google.common.collect.Iterators;
 
 public class CommandsForKey implements Listener, Iterable<Command>
@@ -31,9 +31,10 @@ public class CommandsForKey implements Listener, Iterable<Command>
             case Applied:
             case Executed:
             case Committed:
-                uncommitted.remove(command.txnId());
                 committedById.put(command.txnId(), command);
                 committedByExecuteAt.put(command.executeAt(), command);
+            case Invalidated:
+                uncommitted.remove(command.txnId());
                 command.removeListener(this);
                 break;
         }

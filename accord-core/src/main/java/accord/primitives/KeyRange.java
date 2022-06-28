@@ -1,7 +1,7 @@
-package accord.topology;
+package accord.primitives;
 
 import accord.api.Key;
-import accord.txn.Keys;
+
 import com.google.common.base.Preconditions;
 
 import java.util.Objects;
@@ -10,7 +10,7 @@ import java.util.Objects;
  * A range of keys
  * @param <K>
  */
-public abstract class KeyRange<K extends Key<K>>
+public abstract class KeyRange<K extends Key<K>> implements Comparable<K>
 {
     public static abstract class EndInclusive<K extends Key<K>> extends KeyRange<K>
     {
@@ -20,12 +20,12 @@ public abstract class KeyRange<K extends Key<K>>
         }
 
         @Override
-        public int compareKey(K key)
+        public int compareTo(K key)
         {
             if (key.compareTo(start()) <= 0)
-                return -1;
-            if (key.compareTo(end()) > 0)
                 return 1;
+            if (key.compareTo(end()) > 0)
+                return -1;
             return 0;
         }
 
@@ -56,12 +56,12 @@ public abstract class KeyRange<K extends Key<K>>
         }
 
         @Override
-        public int compareKey(K key)
+        public int compareTo(K key)
         {
             if (key.compareTo(start()) < 0)
-                return -1;
-            if (key.compareTo(end()) >= 0)
                 return 1;
+            if (key.compareTo(end()) >= 0)
+                return -1;
             return 0;
         }
 
@@ -163,13 +163,21 @@ public abstract class KeyRange<K extends Key<K>>
      * Returns a negative integer, zero, or a positive integer as the provided key is less than, contained by,
      * or greater than this range.
      */
-    public abstract int compareKey(K key);
+    public int compareKey(K key)
+    {
+        return -compareTo(key);
+    }
+
+    /**
+     * Returns a negative integer, zero, or a positive integer as the provided key is greater than, contained by,
+     * or less than this range.
+     */
+    public abstract int compareTo(K key);
 
     public boolean containsKey(K key)
     {
         return compareKey(key) == 0;
     }
-
 
     /**
      * Returns a negative integer, zero, or a positive integer if both points of the provided range are less than, the

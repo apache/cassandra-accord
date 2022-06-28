@@ -4,10 +4,11 @@ import java.util.*;
 import java.util.function.IntFunction;
 import java.util.stream.IntStream;
 
-import accord.local.CommandStores;
 import accord.local.Node.Id;
 import accord.api.Key;
-import accord.txn.Keys;
+import accord.primitives.KeyRange;
+import accord.primitives.KeyRanges;
+import accord.primitives.Keys;
 import accord.utils.IndexedConsumer;
 import accord.utils.IndexedBiFunction;
 import accord.utils.IndexedIntFunction;

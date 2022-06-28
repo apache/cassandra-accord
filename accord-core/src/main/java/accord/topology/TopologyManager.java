@@ -7,8 +7,8 @@ import accord.local.Node;
 import accord.messages.EpochRequest;
 import accord.messages.Request;
 import accord.topology.Topologies.Single;
-import accord.txn.Keys;
-import accord.txn.Timestamp;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
 import accord.txn.Txn;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -313,8 +313,8 @@ public class TopologyManager implements ConfigurationService.Listener
 
         int count = (int)(1 + maxEpoch - minEpoch);
         Topologies.Multi topologies = new Topologies.Multi(count);
-        for (int i = 0 ; i < count ; ++i)
-            topologies.add(snapshot.get(minEpoch + count).global.forKeys(keys));
+        for (int i = count - 1 ; i >= 0 ; --i)
+            topologies.add(snapshot.get(minEpoch + i).global().forKeys(keys));
 
         return topologies;
     }
@@ -337,29 +337,42 @@ public class TopologyManager implements ConfigurationService.Listener
         return epochState.global().forKey(key);
     }
 
+    public Shard forEpoch(Key key, long epoch)
+    {
+        Shard ifKnown = forEpochIfKnown(key, epoch);
+        if (ifKnown == null)
+            throw new IndexOutOfBoundsException();
+        return ifKnown;
+    }
+
     public boolean hasEpoch(long epoch)
     {
         return epochs.get(epoch) != null;
     }
 
-    public Topologies forTxn(Txn txn, long epoch)
+    public Topologies withUnsyncEpochs(Txn txn, long epoch)
     {
         return withUnsyncedEpochs(txn.keys(), epoch, epoch);
     }
 
-    public Topologies forTxn(Txn txn, long minEpoch, long maxEpoch)
+    public Topologies withUnsyncEpochs(Txn txn, long minEpoch, long maxEpoch)
     {
         return withUnsyncedEpochs(txn.keys(), minEpoch, maxEpoch);
     }
 
-    public Topologies forTxn(Txn txn, Timestamp min, Timestamp max)
+    public Topologies withUnsyncEpochs(Txn txn, Timestamp min, Timestamp max)
     {
         return withUnsyncedEpochs(txn.keys(), min.epoch, max.epoch);
     }
 
-    public Topologies unsyncForTxn(Txn txn, long epoch)
+    public Topologies preciseEpochs(Txn txn, long epoch)
     {
         return preciseEpochs(txn.keys(), epoch, epoch);
+    }
+
+    public Topologies preciseEpochs(Txn txn, long minEpoch, long maxEpoch)
+    {
+        return preciseEpochs(txn.keys(), minEpoch, maxEpoch);
     }
 
     public Topology localForEpoch(long epoch)

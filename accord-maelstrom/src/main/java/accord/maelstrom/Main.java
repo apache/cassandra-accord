@@ -15,7 +15,6 @@ import java.util.function.Supplier;
 
 import accord.coordinate.Timeout;
 import accord.impl.SimpleProgressLog;
-import accord.local.CommandStore;
 import accord.local.CommandStores;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -68,7 +67,7 @@ public class Main
                 long now = nowSupplier.getAsLong();
                 callbacks.forEach((messageId, info) -> {
                     if (info.timeout < now && callbacks.remove(messageId, info))
-                        info.callback.onFailure(info.to, new Timeout());
+                        info.callback.onFailure(info.to, new Timeout(null, null));
                 });
             }, 1L, TimeUnit.SECONDS);
         }

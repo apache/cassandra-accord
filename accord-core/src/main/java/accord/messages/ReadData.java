@@ -9,10 +9,10 @@ import accord.local.*;
 import accord.local.Node.Id;
 import accord.api.Data;
 import accord.topology.Topologies;
-import accord.txn.Keys;
-import accord.txn.Timestamp;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 import accord.utils.DeterministicIdentitySet;
 
 public class ReadData extends TxnRequest
@@ -44,14 +44,17 @@ public class ReadData extends TxnRequest
         {
             switch (command.status())
             {
+                default: throw new IllegalStateException();
                 case NotWitnessed:
                 case PreAccepted:
                 case Accepted:
+                case AcceptedInvalidate:
                 case Committed:
                     return;
 
                 case Executed:
                 case Applied:
+                case Invalidated:
                     obsolete();
                 case ReadyToExecute:
             }
@@ -91,16 +94,20 @@ public class ReadData extends TxnRequest
                 command.preaccept(txn, homeKey, progressKey); // ensure pre-accepted
                 switch (command.status())
                 {
+                    default:
                     case NotWitnessed:
                         throw new IllegalStateException();
+
                     case PreAccepted:
                     case Accepted:
+                    case AcceptedInvalidate:
                     case Committed:
                         command.addListener(this);
                         break;
 
                     case Executed:
                     case Applied:
+                    case Invalidated:
                         obsolete();
                         break;
 
@@ -158,6 +165,12 @@ public class ReadData extends TxnRequest
         public boolean isOK()
         {
             return false;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "ReadNack";
         }
     }
 

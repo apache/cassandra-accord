@@ -3,12 +3,10 @@ package accord.impl;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.function.BiFunction;
 
 import accord.api.Key;
-import accord.topology.KeyRange;
-import accord.topology.KeyRanges;
-import accord.txn.Keys;
+import accord.primitives.KeyRange;
+import accord.primitives.Keys;
 
 public class IntKey implements Key<IntKey>
 {
@@ -111,8 +109,14 @@ public class IntKey implements Key<IntKey>
     }
 
     @Override
-    public int keyHash()
+    public int routingHash()
     {
         return hashCode();
+    }
+
+    @Override
+    public Key toRoutingKey()
+    {
+        return this;
     }
 }

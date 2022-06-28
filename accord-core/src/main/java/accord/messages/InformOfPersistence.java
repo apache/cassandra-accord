@@ -5,8 +5,8 @@ import java.util.Set;
 import accord.api.Key;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.txn.Timestamp;
-import accord.txn.TxnId;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 
 import static accord.messages.InformOfTxn.InformOfTxnNack.nack;
 import static accord.messages.InformOfTxn.InformOfTxnOk.ok;

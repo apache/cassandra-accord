@@ -7,7 +7,7 @@ import java.util.stream.IntStream;
 import accord.local.Node.Id;
 import accord.api.Result;
 import accord.messages.MessageType;
-import accord.txn.Keys;
+import accord.primitives.Keys;
 import accord.messages.Reply;
 
 public class ListResult implements Result, Reply
@@ -38,10 +38,12 @@ public class ListResult implements Result, Reply
     {
         return "{client:" + client + ", "
                + "requestId:" + requestId + ", "
-               + "reads:" + IntStream.range(0, keys.size())
+               + (keys == null
+                  ? "invalidated!}"
+                  : "reads:" + IntStream.range(0, keys.size())
                                       .filter(i -> read[i] != null)
                                       .mapToObj(i -> keys.get(i) + ":" + Arrays.toString(read[i]))
                                       .collect(Collectors.joining(", ", "{", "}")) + ", "
-               + "writes:" + update + "}";
+                    + "writes:" + update + "}");
     }
 }

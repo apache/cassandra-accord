@@ -1,6 +1,5 @@
 package accord.local;
 
-import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.api.TestableConfigurationService;
 import accord.impl.IntKey;
@@ -9,15 +8,13 @@ import accord.impl.TopologyFactory;
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
 import accord.impl.mock.MockStore;
-import accord.local.CommandStore.RangesForEpoch;
 import accord.local.CommandStores.Synchronized;
 import accord.local.Node.Id;
-import accord.topology.KeyRanges;
 import accord.topology.Topology;
-import accord.txn.Keys;
-import accord.txn.Timestamp;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -26,6 +23,8 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+
+import javax.annotation.Nullable;
 
 import static accord.Utils.id;
 import static accord.Utils.writeTxn;
@@ -83,12 +82,17 @@ public class CommandTest
         }
 
         @Override
+        public void invalidate(TxnId txnId, boolean isProgressShard, boolean isHomeShard)
+        {
+        }
+
+        @Override
         public void executedOnAllShards(TxnId txnId, Set<Id> persistedOn)
         {
         }
 
         @Override
-        public void waiting(TxnId blockedBy, Key homeKey)
+        public void waiting(TxnId blockedBy, @Nullable Keys someKeys)
         {
         }
     }

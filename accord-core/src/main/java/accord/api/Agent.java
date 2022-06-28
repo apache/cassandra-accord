@@ -2,14 +2,14 @@ package accord.api;
 
 import accord.local.Node;
 import accord.local.Command;
-import accord.txn.Timestamp;
+import accord.primitives.Timestamp;
+import accord.txn.Txn;
 
 /**
  * Facility for augmenting node behaviour at specific points
  */
 public interface Agent
 {
-
     /**
      * For use by implementations to decide what to do about successfully recovered transactions.
      * Specifically intended to define if and how they should inform clients of the result.
@@ -26,5 +26,7 @@ public interface Agent
      * reporting the violation, as it is no more correct at this point to refuse the operation than it is to complete it.
      */
     void onInconsistentTimestamp(Command command, Timestamp prev, Timestamp next);
+
+    void onUncaughtException(Throwable t);
 
 }

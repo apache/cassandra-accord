@@ -1,14 +1,14 @@
 package accord;
 
-import accord.topology.KeyRange;
+import accord.primitives.KeyRange;
 import accord.local.Node;
 import accord.impl.mock.MockStore;
-import accord.topology.KeyRanges;
+import accord.primitives.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.txn.Txn;
-import accord.txn.Keys;
+import accord.primitives.Keys;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Sets;
 
@@ -66,7 +66,7 @@ public class Utils
 
     public static Txn writeTxn(Keys keys)
     {
-        return new Txn(keys, MockStore.read(keys), MockStore.QUERY, MockStore.UPDATE);
+        return new Txn(keys, MockStore.read(keys), MockStore.QUERY, MockStore.update(keys));
     }
 
     public static Txn readTxn(Keys keys)

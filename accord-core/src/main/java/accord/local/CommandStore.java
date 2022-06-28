@@ -4,12 +4,12 @@ import accord.api.Agent;
 import accord.api.Key;
 import accord.local.CommandStores.ShardedRanges;
 import accord.api.ProgressLog;
-import accord.topology.KeyRange;
+import accord.primitives.KeyRange;
 import accord.api.DataStore;
-import accord.topology.KeyRanges;
-import accord.txn.Keys;
-import accord.txn.Timestamp;
-import accord.txn.TxnId;
+import accord.primitives.KeyRanges;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.Promise;
@@ -21,7 +21,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.LongFunction;
 
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
@@ -46,6 +45,7 @@ public abstract class CommandStore
     {
         KeyRanges at(long epoch);
         KeyRanges since(long epoch);
+        boolean intersects(long epoch, Keys keys);
     }
 
     private final int generation;

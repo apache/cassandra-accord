@@ -1,0 +1,45 @@
+<configuration debug="false" scan="true">
+    <timestamp key="bySecond" datePattern="yyyy-MM-dd-HH:mm:ss"/>
+    <property name="startTime" value="${bySecond}"/>
+    <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+        <file>./build/burn-test/logs/burn-${startTime}.log</file>
+        <encoder>
+            <pattern>%-5level ${bySecond} %F:%L - %msg%n</pattern>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>INFO</level>
+        </filter>
+    </appender>
+
+    <appender name="TRACE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>./build/burn-test/logs/burn.trace</file>
+        <encoder>
+            <pattern>%msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <!-- rollover daily -->
+            <fileNamePattern>./build/burn-test/logs/burn.trace.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>7</maxHistory>
+            <totalSizeCap>1GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%-5level ${bySecond} %F:%L - %msg%n</pattern>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>INFO</level>
+        </filter>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="FILE"/>
+        <appender-ref ref="STDOUT"/>
+    </root>
+
+    <logger name="accord.impl.basic.Trace" level="TRACE">
+        <appender-ref ref="TRACE" />
+    </logger>
+</configuration>

@@ -7,7 +7,7 @@ import java.util.TreeSet;
 import accord.api.Key;
 import accord.messages.MessageType;
 import accord.messages.ReplyContext;
-import accord.txn.Keys;
+import accord.primitives.Keys;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
@@ -60,12 +60,12 @@ public class MaelstromRequest extends Body implements Request
 
         out.beginArray();
         Keys keys = txn.keys;
-        MaelstromQuery query = (MaelstromQuery) txn.query;
+        MaelstromRead read = (MaelstromRead) txn.read;
         MaelstromUpdate update = (MaelstromUpdate) txn.update;
         for (int i = 0 ; i < keys.size() ; ++i)
         {
             MaelstromKey key = (MaelstromKey) keys.get(i);
-            if (query.read.indexOf(key) >= 0)
+            if (read.readKeys.indexOf(key) >= 0)
             {
                 out.beginArray();
                 out.value("r");
@@ -118,8 +118,8 @@ public class MaelstromRequest extends Body implements Request
         buildKeys.addAll(buildReadKeys);
         Keys readKeys = new Keys(buildReadKeys);
         Keys keys = new Keys(buildKeys);
-        MaelstromRead read = new MaelstromRead(keys);
-        MaelstromQuery query = new MaelstromQuery(client, requestId, readKeys, update);
+        MaelstromRead read = new MaelstromRead(keys, readKeys);
+        MaelstromQuery query = new MaelstromQuery(client, requestId);
 
         return new Txn(keys, read, query, update);
     }

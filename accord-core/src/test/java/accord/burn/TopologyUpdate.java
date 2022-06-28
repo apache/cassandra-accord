@@ -6,8 +6,11 @@ import accord.api.TestableConfigurationService;
 import accord.local.Command;
 import accord.local.Node;
 import accord.local.Status;
-import accord.topology.KeyRange;
-import accord.topology.KeyRanges;
+import accord.primitives.Deps;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.primitives.KeyRange;
+import accord.primitives.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.txn.*;
@@ -41,12 +44,13 @@ public class TopologyUpdate
         private final Timestamp executeAt;
         private final long epoch;
 
-        private final Dependencies deps;
+        private final Deps deps;
         private final Writes writes;
         private final Result result;
 
         public CommandSync(Command command, long epoch)
         {
+            // TODO (now): AcceptInvalidate and CommitInvalidate can leave these fields null
             Preconditions.checkArgument(command.hasBeen(Status.PreAccepted));
             this.txnId = command.txnId();
             this.txn = command.txn();
@@ -73,11 +77,12 @@ public class TopologyUpdate
             node.forEachLocalSince(txn.keys, epoch, commandStore -> {
                 switch (status)
                 {
+                    case AcceptedInvalidate:
+                        if (txn == null)
+                            break;
                     case PreAccepted:
-                        commandStore.command(txnId).preaccept(txn, homeKey, progressKey);
-                        break;
                     case Accepted:
-                        commandStore.command(txnId).accept(Ballot.ZERO, txn, homeKey, progressKey, executeAt, deps);
+                        commandStore.command(txnId).preaccept(txn, homeKey, progressKey);
                         break;
                     case Committed:
                     case ReadyToExecute:
@@ -87,6 +92,8 @@ public class TopologyUpdate
                     case Applied:
                         commandStore.command(txnId).apply(txn, homeKey, progressKey, executeAt, deps, writes, result);
                         break;
+                    case Invalidated:
+                        commandStore.command(txnId).commitInvalidate();
                     default:
                         throw new IllegalStateException();
                 }
@@ -150,7 +157,7 @@ public class TopologyUpdate
     {
         Topology syncTopology = node.configService().getTopologyForEpoch(syncEpoch);
         Topology localTopology = syncTopology.forNode(node.id());
-        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().forTxn(cmd.txn, syncEpoch).nodes();
+        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().withUnsyncEpochs(cmd.txn, syncEpoch).nodes();
 
         KeyRanges ranges = localTopology.ranges();
         Stream<MessageTask> messageStream = Stream.empty();
@@ -171,7 +178,7 @@ public class TopologyUpdate
         Topology localTopology = syncTopology.forNode(node.id());
         Topology nextTopology = node.configService().getTopologyForEpoch(nextEpoch);
         Function<CommandSync, Collection<Node.Id>> nextNodes = cmd -> allNodesFor(cmd.txn, nextTopology);
-        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().forTxn(cmd.txn, syncEpoch).nodes();
+        Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().withUnsyncEpochs(cmd.txn, syncEpoch).nodes();
 
         // backfill new replicas with operations from prior epochs
         Stream<MessageTask> messageStream = Stream.empty();
@@ -193,7 +200,7 @@ public class TopologyUpdate
                 if (newNodes.isEmpty())
                     continue;
 
-                KeyRanges ranges = KeyRanges.singleton(intersection);
+                KeyRanges ranges = KeyRanges.single(intersection);
                 for (long epoch=1; epoch<syncEpoch; epoch++)
                     messageStream = Stream.concat(messageStream, syncEpochCommands(node,
                                                                                    epoch,

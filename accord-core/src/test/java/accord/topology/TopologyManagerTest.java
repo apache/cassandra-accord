@@ -1,7 +1,8 @@
 package accord.topology;
 
 import accord.local.Node;
-import accord.txn.Keys;
+import accord.primitives.KeyRange;
+import accord.primitives.Keys;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 

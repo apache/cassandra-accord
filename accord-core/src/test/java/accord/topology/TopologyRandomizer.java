@@ -3,6 +3,8 @@ package accord.topology;
 import accord.burn.TopologyUpdate;
 import accord.impl.IntHashKey;
 import accord.local.Node;
+import accord.primitives.KeyRanges;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,14 +16,14 @@ import java.util.function.Supplier;
 public class TopologyRandomizer
 {
     private static final Logger logger = LoggerFactory.getLogger(TopologyRandomizer.class);
-    private final Supplier<Random> randomSupplier;
+    private final Random random;
     private final Function<Node.Id, Node> lookup;
     private final List<Topology> epochs = new ArrayList<>();
     private final Map<Node.Id, KeyRanges> previouslyReplicated = new HashMap<>();
 
     public TopologyRandomizer(Supplier<Random> randomSupplier, Topology initialTopology, Function<Node.Id, Node> lookup)
     {
-        this.randomSupplier = randomSupplier;
+        this.random = randomSupplier.get();
         this.lookup = lookup;
         this.epochs.add(Topology.EMPTY);
         this.epochs.add(initialTopology);
@@ -191,13 +193,12 @@ public class TopologyRandomizer
     {
         // if we don't limit the number of pending topology changes in flight,
         // the topology randomizer will keep the burn test busy indefinitely
-        if (TopologyUpdate.pendingTopologies() > 5 || randomSupplier.get().nextInt(200) != 0)
+        if (TopologyUpdate.pendingTopologies() > 5 || random.nextInt(200) != 0)
             return;
 
-        Random random = randomSupplier.get();
         Topology current = epochs.get(epochs.size() - 1);
         Shard[] shards = current.shards();
-        int mutations = randomSupplier.get().nextInt(current.size());
+        int mutations = random.nextInt(current.size());
         logger.debug("Updating topology with {} mutations", mutations);
         for (int i=0; i<mutations; i++)
         {
@@ -226,7 +227,7 @@ public class TopologyRandomizer
 
         List<Node.Id> nodes = new ArrayList<>(nextTopology.nodes());
 
-        int originatorIdx = randomSupplier.get().nextInt(nodes.size());
+        int originatorIdx = random.nextInt(nodes.size());
         Node originator = lookup.apply(nodes.remove(originatorIdx));
         TopologyUpdate.notify(originator, nextTopology.nodes(), nextTopology);
     }
