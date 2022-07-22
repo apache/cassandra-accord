@@ -236,7 +236,7 @@ public class BurnTest
     public static void main(String[] args) throws Exception
     {
 //        Long overrideSeed = null;
-        Long overrideSeed = 1831971312887754997L;
+        Long overrideSeed = 6481838959431094981L;
         do
         {
             run(overrideSeed != null ? overrideSeed : ThreadLocalRandom.current().nextLong());

@@ -162,18 +162,19 @@ public abstract class TxnRequest implements EpochRequest
 
     public static long computeWaitForEpoch(Node.Id node, Topologies topologies, int startIndex)
     {
-        int i = startIndex;
+        int i = Math.max(1, startIndex);
         int mi = topologies.size();
         if (i == mi)
             return topologies.oldestEpoch();
 
-        KeyRanges latest = topologies.get(i).rangesForNode(node);
-        while (++i < mi)
+        KeyRanges latest = topologies.get(i - 1).rangesForNode(node);
+        while (i < mi)
         {
             Topology topology = topologies.get(i);
             KeyRanges ranges = topology.rangesForNode(node);
             if (!ranges.equals(latest))
                 break;
+            ++i;
         }
         return topologies.get(i - 1).epoch();
     }
