@@ -11,6 +11,8 @@ import accord.primitives.KeyRange;
 import accord.primitives.KeyRanges;
 import accord.primitives.Keys;
 
+import javax.annotation.Nonnull;
+
 public class IntHashKey implements Key
 {
     public static class Range extends KeyRange.EndInclusive
@@ -66,8 +68,11 @@ public class IntHashKey implements Key
     }
 
     @Override
-    public int compareTo(RoutingKey that)
+    public int compareTo(@Nonnull RoutingKey that)
     {
+        if (that instanceof InfiniteRoutingKey)
+            return -that.compareTo(this);
+
         return Integer.compare(this.hash, ((IntHashKey)that).hash);
     }
 

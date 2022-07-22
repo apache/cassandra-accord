@@ -1,6 +1,7 @@
 package accord.primitives;
 
 import java.util.Arrays;
+import java.util.function.BiFunction;
 import java.util.function.IntFunction;
 
 import javax.annotation.Nullable;
@@ -9,6 +10,9 @@ import com.google.common.base.Preconditions;
 
 import accord.api.RoutingKey;
 import accord.utils.SortedArrays;
+
+import static accord.api.RoutingKey.InfiniteRoutingKey.NEGATIVE_INFINITY;
+import static accord.api.RoutingKey.InfiniteRoutingKey.POSITIVE_INFINITY;
 
 @SuppressWarnings("rawtypes")
 public class RoutingKeys extends AbstractKeys<RoutingKey, RoutingKeys>

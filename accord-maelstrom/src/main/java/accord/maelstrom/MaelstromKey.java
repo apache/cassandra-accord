@@ -11,6 +11,8 @@ import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
+import javax.annotation.Nonnull;
+
 public class MaelstromKey implements Key
 {
     public static class Range extends KeyRange.EndInclusive
@@ -50,8 +52,10 @@ public class MaelstromKey implements Key
     }
 
     @Override
-    public int compareTo(RoutingKey that)
+    public int compareTo(@Nonnull RoutingKey that)
     {
+        if (that instanceof InfiniteRoutingKey)
+            return -that.compareTo(this);
         return datum.compareTo(((MaelstromKey) that).datum);
     }
 

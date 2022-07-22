@@ -345,8 +345,7 @@ public class Node implements ConfigurationService.Listener
 
     public <T> void send(Collection<Id> to, Request send)
     {
-        for (Id dst: to)
-            send(dst, send);
+        to.forEach(dst -> send(dst, send));
     }
 
     public <T> void send(Collection<Id> to, Function<Id, Request> requestFactory)
@@ -356,8 +355,7 @@ public class Node implements ConfigurationService.Listener
 
     public <T> void send(Collection<Id> to, Request send, Callback<T> callback)
     {
-        for (Id dst: to)
-            send(dst, send, callback);
+        to.forEach(dst -> send(dst, send, callback));
     }
 
     public <T> void send(Collection<Id> to, Function<Id, Request> requestFactory, Callback<T> callback)

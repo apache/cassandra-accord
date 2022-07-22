@@ -3,7 +3,7 @@ package accord.topology;
 import accord.api.ConfigurationService;
 import accord.api.RoutingKey;
 import accord.coordinate.tracking.QuorumTracker;
-import accord.local.Node;
+import accord.local.Node.Id;
 import accord.messages.EpochRequest;
 import accord.messages.Request;
 import accord.primitives.AbstractKeys;
@@ -45,10 +45,10 @@ public class TopologyManager implements ConfigurationService.Listener
         private boolean syncComplete = false;
         private boolean prevSynced;
 
-        EpochState(Node.Id node, Topology global, boolean prevSynced)
+        EpochState(Id node, Topology global, boolean prevSynced)
         {
             this.global = global;
-            this.local = global.forNode(node);
+            this.local = global.forNode(node).trim();
             Preconditions.checkArgument(!global().isSubset());
             this.syncTracker = new QuorumTracker(new Single(global(), false));
             this.prevSynced = prevSynced;
@@ -59,7 +59,7 @@ public class TopologyManager implements ConfigurationService.Listener
             prevSynced = true;
         }
 
-        public void recordSyncComplete(Node.Id node)
+        public void recordSyncComplete(Id node)
         {
             syncComplete = syncTracker.success(node);
         }
@@ -115,14 +115,14 @@ public class TopologyManager implements ConfigurationService.Listener
         // Pending sync notifications are indexed by epoch, with the current epoch as index[0], and future epochs
         // as index[epoch - currentEpoch]. Sync complete notifications for the current epoch are marked pending
         // until the superseding epoch has been applied
-        private final List<Set<Node.Id>> pendingSyncComplete;
+        private final List<Set<Id>> pendingSyncComplete;
 
         // list of promises to be completed as newer epochs become active. This is to support processes that
         // are waiting on future epochs to begin (ie: txn requests from futures epochs). Index 0 is for
         // currentEpoch + 1
         private final List<AsyncPromise<Void>> futureEpochFutures;
 
-        private Epochs(EpochState[] epochs, List<Set<Node.Id>> pendingSyncComplete, List<AsyncPromise<Void>> futureEpochFutures)
+        private Epochs(EpochState[] epochs, List<Set<Id>> pendingSyncComplete, List<AsyncPromise<Void>> futureEpochFutures)
         {
             this.currentEpoch = epochs.length > 0 ? epochs[0].epoch() : 0;
             this.pendingSyncComplete = pendingSyncComplete;
@@ -163,7 +163,7 @@ public class TopologyManager implements ConfigurationService.Listener
          * Mark sync complete for the given node/epoch, and if this epoch
          * is now synced, update the prevSynced flag on superseding epochs
          */
-        public void syncComplete(Node.Id node, long epoch)
+        public void syncComplete(Id node, long epoch)
         {
             Preconditions.checkArgument(epoch > 0);
             if (epoch > currentEpoch - 1)
@@ -202,12 +202,12 @@ public class TopologyManager implements ConfigurationService.Listener
         }
     }
 
-    private final Node.Id node;
+    private final Id node;
     // TODO: this is unused!?
     private final LongConsumer epochReporter;
     private volatile Epochs epochs;
 
-    public TopologyManager(Node.Id node, LongConsumer epochReporter)
+    public TopologyManager(Id node, LongConsumer epochReporter)
     {
         this.node = node;
         this.epochReporter = epochReporter;
@@ -221,7 +221,7 @@ public class TopologyManager implements ConfigurationService.Listener
 
         Preconditions.checkArgument(topology.epoch == current.nextEpoch());
         EpochState[] nextEpochs = new EpochState[current.epochs.length + 1];
-        List<Set<Node.Id>> pendingSync = new ArrayList<>(current.pendingSyncComplete);
+        List<Set<Id>> pendingSync = new ArrayList<>(current.pendingSyncComplete);
         if (!pendingSync.isEmpty())
         {
             EpochState currentEpoch = current.epochs[0];
@@ -247,7 +247,7 @@ public class TopologyManager implements ConfigurationService.Listener
     }
 
     @Override
-    public void onEpochSyncComplete(Node.Id node, long epoch)
+    public void onEpochSyncComplete(Id node, long epoch)
     {
         epochs.syncComplete(node, epoch);
     }
@@ -279,23 +279,35 @@ public class TopologyManager implements ConfigurationService.Listener
         if (minEpoch == maxEpoch && !snapshot.requiresHistoricalTopologiesFor(keys, maxEpoch))
             return new Single(maxEpochState.global.forKeys(keys), true);
 
-        int i = (int)(snapshot.currentEpoch - maxEpoch);
+        int start = (int)(snapshot.currentEpoch - maxEpoch);
         int limit = (int)(Math.min(1 + snapshot.currentEpoch - minEpoch, snapshot.epochs.length));
-        int count = limit - i;
+        int count = limit - start;
         while (limit < snapshot.epochs.length && !snapshot.epochs[limit].syncCompleteFor(keys))
         {
             ++count;
             ++limit;
         }
 
-        Topologies.Multi topologies = new Topologies.Multi(count);
-        while (i < limit)
+        // We need to ensure we include ownership information in every epoch for all nodes we contact in any epoch
+        // So we first collect the set of nodes we will contact, before selecting the affected shards and nodes in each epoch
+        Set<Id> nodes = new LinkedHashSet<>();
+        for (int i = start; i < limit ; ++i)
         {
-            EpochState epochState = snapshot.epochs[i++];
+            EpochState epochState = snapshot.epochs[i];
             if (epochState.epoch() < minEpoch)
-                topologies.add(epochState.global.forKeys(keys, epochState::shardIsUnsynced));
+                epochState.global.visitNodeForKeysOnceOrMore(keys, epochState::shardIsUnsynced, nodes::add);
             else
-                topologies.add(epochState.global.forKeys(keys));
+                epochState.global.visitNodeForKeysOnceOrMore(keys, (i1, i2) -> true, nodes::add);
+        }
+
+        Topologies.Multi topologies = new Topologies.Multi(count);
+        for (int i = start; i < limit ; ++i)
+        {
+            EpochState epochState = snapshot.epochs[i];
+            if (epochState.epoch() < minEpoch)
+                topologies.add(epochState.global.forKeys(keys, nodes, epochState::shardIsUnsynced));
+            else
+                topologies.add(epochState.global.forKeys(keys, nodes, (i1, i2) -> true));
         }
 
         return topologies;
@@ -311,19 +323,24 @@ public class TopologyManager implements ConfigurationService.Listener
         Epochs snapshot = epochs;
 
         if (minEpoch == maxEpoch)
-            return new Single(snapshot.get(minEpoch).global().forKeys(keys), true);
+            return new Single(snapshot.get(minEpoch).global.forKeys(keys), true);
 
+        Set<Id> nodes = new LinkedHashSet<>();
         int count = (int)(1 + maxEpoch - minEpoch);
+        for (int i = count - 1 ; i >= 0 ; --i)
+            snapshot.get(minEpoch + i).global().visitNodeForKeysOnceOrMore(keys, (i1, i2) -> true, nodes::add);
+
         Topologies.Multi topologies = new Topologies.Multi(count);
         for (int i = count - 1 ; i >= 0 ; --i)
-            topologies.add(snapshot.get(minEpoch + i).global().forKeys(keys));
+            topologies.add(snapshot.get(minEpoch + i).global.forKeys(keys, nodes));
 
         return topologies;
     }
 
     public Topologies forEpoch(AbstractKeys<?, ?> keys, long epoch)
     {
-        return new Single(epochs.get(epoch).global().forKeys(keys), true);
+        EpochState state = epochs.get(epoch);
+        return new Single(state.global.forKeys(keys), true);
     }
 
     public Shard forEpochIfKnown(RoutingKey key, long epoch)

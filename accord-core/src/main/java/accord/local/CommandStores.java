@@ -254,7 +254,7 @@ public abstract class CommandStores
         if (epoch <= prev.global.epoch())
             return prev;
 
-        Topology newLocalTopology = newTopology.forNode(supplier.node.id());
+        Topology newLocalTopology = newTopology.forNode(supplier.node.id()).trim();
         KeyRanges added = newLocalTopology.ranges().difference(prev.local.ranges());
         KeyRanges subtracted = prev.local.ranges().difference(newLocalTopology.ranges());
 //            for (ShardedRanges range : stores.ranges)

@@ -191,9 +191,9 @@ public class TopologyUpdate
 
         // backfill new replicas with operations from prior epochs
         Stream<MessageTask> messageStream = Stream.empty();
-        for (Shard syncShard : localTopology)
+        for (Shard syncShard : localTopology.shards())
         {
-            for (Shard nextShard : nextTopology)
+            for (Shard nextShard : nextTopology.shards())
             {
                 // do nothing if there's no change
                 if (syncShard.range.equals(nextShard.range) && syncShard.nodeSet.equals(nextShard.nodeSet))

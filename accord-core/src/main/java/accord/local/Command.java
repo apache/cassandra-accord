@@ -4,6 +4,7 @@ import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.function.Consumer;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
@@ -994,7 +995,7 @@ public class Command implements Listener, Consumer<Listener>
         }
 
         @Override
-        public int compareTo(RoutingKey ignore)
+        public int compareTo(@Nonnull RoutingKey ignore)
         {
             throw new UnsupportedOperationException();
         }

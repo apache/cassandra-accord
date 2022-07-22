@@ -88,7 +88,7 @@ public class Commit extends ReadData
         {
             for (Node.Id to : allTopologies.nodes())
             {
-                if (!executeTopology.nodes().contains(to))
+                if (!executeTopology.contains(to))
                     node.send(to, new Commit(Kind.Minimal, to, coordinateTopology, allTopologies, txnId, txn, route, executeAt, deps, false));
             }
         }

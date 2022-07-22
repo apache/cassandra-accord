@@ -197,7 +197,7 @@ public class TopologyRandomizer
             return;
 
         Topology current = epochs.get(epochs.size() - 1);
-        Shard[] shards = current.shards();
+        Shard[] shards = current.unsafeGetShards().clone();
         int mutations = random.nextInt(current.size());
         logger.debug("Updating topology with {} mutations", mutations);
         for (int i=0; i<mutations; i++)

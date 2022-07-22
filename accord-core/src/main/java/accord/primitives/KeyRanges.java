@@ -13,7 +13,6 @@ public class KeyRanges implements Iterable<KeyRange>
 {
     public static final KeyRanges EMPTY = new KeyRanges(new KeyRange[0]);
 
-    // TODO: fix raw parameterized use
     final KeyRange[] ranges;
 
     public KeyRanges(KeyRange[] ranges)

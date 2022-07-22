@@ -36,6 +36,7 @@ import accord.primitives.Txn;
 import accord.primitives.Keys;
 import accord.verify.StrictSerializabilityVerifier;
 
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -234,31 +235,43 @@ public class BurnTest
 
     public static void main(String[] args) throws Exception
     {
-//        Long overrideSeed = null;
-        Long overrideSeed = 7194894828747428666L;
+        Long overrideSeed = null;
+//        Long overrideSeed = 5616606041491072325L;
         do
         {
-            long seed = overrideSeed != null ? overrideSeed : ThreadLocalRandom.current().nextLong();
-            logger.info("Seed: {}", seed);
-            Cluster.trace.trace("Seed: {}", seed);
-            Random random = new Random(seed);
-            try
-            {
-                List<Id> clients = generateIds(true, 1 + random.nextInt(4));
-                List<Id> nodes = generateIds(false, 5 + random.nextInt(5));
-                burn(random, new TopologyFactory(nodes.size() == 5 ? 3 : (2 + random.nextInt(3)), IntHashKey.ranges(4 + random.nextInt(12))),
-                     clients,
-                     nodes,
-                     5 + random.nextInt(15),
-                     200,
-                     10 + random.nextInt(30));
-            }
-            catch (Throwable t)
-            {
-                logger.error("Exception running burn test for seed {}:", seed, t);
-                throw t;
-            }
-        } while (overrideSeed == null);
+            run(overrideSeed != null ? overrideSeed : ThreadLocalRandom.current().nextLong());
+        }
+        while (overrideSeed == null);
+    }
+
+    @Test
+    public void testOne() throws Exception
+    {
+        run(ThreadLocalRandom.current().nextLong());
+    }
+
+    private static void run(long seed) throws Exception
+    {
+        logger.info("Seed: {}", seed);
+        Cluster.trace.trace("Seed: {}", seed);
+        Random random = new Random(seed);
+        try
+        {
+            List<Id> clients = generateIds(true, 1 + random.nextInt(4));
+            List<Id> nodes = generateIds(false, 5 + random.nextInt(5));
+            burn(random, new TopologyFactory(nodes.size() == 5 ? 3 : (2 + random.nextInt(3)), IntHashKey.ranges(4 + random.nextInt(12))),
+                    clients,
+                    nodes,
+                    5 + random.nextInt(15),
+                    200,
+                    10 + random.nextInt(30));
+        }
+        catch (Throwable t)
+        {
+            logger.error("Exception running burn test for seed {}:", seed, t);
+            throw t;
+        }
+
     }
 
     private static List<Id> generateIds(boolean clients, int count)

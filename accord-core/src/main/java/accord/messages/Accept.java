@@ -43,7 +43,7 @@ public class Accept extends TxnRequest.WithUnsynced
         this.keys = txn.keys.slice(scope.covering);
         this.executeAt = executeAt;
         // TODO (now): send minimal
-        this.partialTxn = txn.slice(scope.covering, topologies.oldest().nodes().contains(to));
+        this.partialTxn = txn.slice(scope.covering, topologies.oldest().contains(to));
         this.partialDeps = deps.slice(scope.covering);
         this.kindOfTxn = kindOfTxn;
     }

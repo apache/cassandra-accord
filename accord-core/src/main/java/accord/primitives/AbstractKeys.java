@@ -3,6 +3,7 @@ package accord.primitives;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.function.BiFunction;
 import java.util.function.IntFunction;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -17,6 +18,9 @@ import accord.utils.IndexedPredicate;
 import accord.utils.IndexedRangeFoldToLong;
 import accord.utils.SortedArrays;
 import org.apache.cassandra.utils.concurrent.Inline;
+
+import static accord.api.RoutingKey.InfiniteRoutingKey.NEGATIVE_INFINITY;
+import static accord.api.RoutingKey.InfiniteRoutingKey.POSITIVE_INFINITY;
 
 @SuppressWarnings("rawtypes")
 // TODO: check that foldl call-sites are inlined and optimised by HotSpot
@@ -453,4 +457,5 @@ public abstract class AbstractKeys<K extends RoutingKey, KS extends AbstractKeys
     {
         return SortedArrays.remapper(keys, target.keys, isTargetKnownSuperset);
     }
+
 }

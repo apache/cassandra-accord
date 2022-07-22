@@ -9,6 +9,8 @@ import com.google.common.base.Preconditions;
 import java.util.*;
 import java.util.function.Consumer;
 
+// TODO: we can probably most efficiently create a new synthetic Topology that applies for a range of epochs
+//       and permit Topology to implement it, so that
 public interface Topologies
 {
     Topology current();
@@ -172,7 +174,7 @@ public interface Topologies
         @Override
         public boolean contains(Id to)
         {
-            return topology.nodes().contains(to);
+            return topology.contains(to);
         }
 
         @Override
@@ -302,7 +304,7 @@ public interface Topologies
         {
             for (Topology topology : topologies)
             {
-                if (topology.nodes().contains(to))
+                if (topology.contains(to))
                     return true;
             }
             return false;
