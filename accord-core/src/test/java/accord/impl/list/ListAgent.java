@@ -1,15 +1,22 @@
 package accord.impl.list;
 
+import java.util.function.Consumer;
+
 import accord.impl.mock.Network;
 import accord.local.Node;
 import accord.api.Agent;
 import accord.api.Result;
 import accord.local.Command;
-import accord.txn.Timestamp;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
 
 public class ListAgent implements Agent
 {
-    public static final ListAgent INSTANCE = new ListAgent();
+    final Consumer<Throwable> onFailure;
+    public ListAgent(Consumer<Throwable> onFailure)
+    {
+        this.onFailure = onFailure;
+    }
 
     @Override
     public void onRecover(Node node, Result success, Throwable fail)
@@ -25,5 +32,16 @@ public class ListAgent implements Agent
     public void onInconsistentTimestamp(Command command, Timestamp prev, Timestamp next)
     {
         throw new AssertionError("Inconsistent execution timestamp detected for txnId " + command.txnId() + ": " + prev + " != " + next);
+    }
+
+    @Override
+    public void onUncaughtException(Throwable t)
+    {
+        onFailure.accept(t);
+    }
+
+    @Override
+    public void onHandledException(Throwable t)
+    {
     }
 }

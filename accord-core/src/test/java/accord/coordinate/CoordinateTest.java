@@ -4,9 +4,10 @@ import accord.local.Node;
 import accord.impl.mock.MockCluster;
 import accord.api.Result;
 import accord.impl.mock.MockStore;
-import accord.txn.Keys;
-import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.Keys;
+import accord.primitives.Route;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -26,8 +27,10 @@ public class CoordinateTest
             Assertions.assertNotNull(node);
 
             TxnId txnId = new TxnId(1, 100, 0, node.id());
-            Txn txn = writeTxn(keys(10));
-            Result result = Coordinate.execute(node, txnId, txn, txn.keys().get(0)).get();
+            Keys keys = keys(10);
+            Txn txn = writeTxn(keys);
+            Route route = keys.toRoute(keys.get(0).toRoutingKey());
+            Result result = Coordinate.coordinate(node, txnId, txn, route).get();
             Assertions.assertEquals(MockStore.RESULT, result);
         }
     }
@@ -52,7 +55,7 @@ public class CoordinateTest
     {
         TxnId txnId = new TxnId(1, clock, 0, node.id());
         Txn txn = writeTxn(keys);
-        Result result = Coordinate.execute(node, txnId, txn, node.selectHomeKey(txnId, txn.keys)).get();
+        Result result = Coordinate.coordinate(node, txnId, txn, node.computeRoute(txnId, txn.keys)).get();
         Assertions.assertEquals(MockStore.RESULT, result);
         return txnId;
     }

@@ -4,7 +4,7 @@ import accord.local.Node;
 import accord.api.Agent;
 import accord.api.Result;
 import accord.local.Command;
-import accord.txn.Timestamp;
+import accord.primitives.Timestamp;
 
 public class TestAgent implements Agent
 {
@@ -20,5 +20,15 @@ public class TestAgent implements Agent
     public void onInconsistentTimestamp(Command command, Timestamp prev, Timestamp next)
     {
         throw new AssertionError();
+    }
+
+    @Override
+    public void onUncaughtException(Throwable t)
+    {
+    }
+
+    @Override
+    public void onHandledException(Throwable t)
+    {
     }
 }

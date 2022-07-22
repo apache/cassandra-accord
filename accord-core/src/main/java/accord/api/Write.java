@@ -1,6 +1,6 @@
 package accord.api;
 
-import accord.txn.Timestamp;
+import accord.primitives.Timestamp;
 
 /**
  * A collection of data to write to one or more stores

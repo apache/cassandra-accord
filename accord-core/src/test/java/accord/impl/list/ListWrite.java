@@ -7,7 +7,7 @@ import java.util.stream.Collectors;
 import accord.api.Key;
 import accord.api.DataStore;
 import accord.api.Write;
-import accord.txn.Timestamp;
+import accord.primitives.Timestamp;
 import accord.utils.Timestamped;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

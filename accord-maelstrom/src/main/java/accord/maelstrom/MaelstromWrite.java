@@ -3,7 +3,7 @@ package accord.maelstrom;
 import accord.api.Key;
 import accord.api.DataStore;
 import accord.api.Write;
-import accord.txn.Timestamp;
+import accord.primitives.Timestamp;
 import accord.utils.Timestamped;
 
 import java.util.TreeMap;

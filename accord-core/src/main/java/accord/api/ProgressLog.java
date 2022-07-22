@@ -2,11 +2,16 @@ package accord.api;
 
 import java.util.Set;
 
+import javax.annotation.Nullable;
+
 import accord.coordinate.CheckOnUncommitted;
 import accord.coordinate.InformHomeOfTxn;
 import accord.local.CommandStore;
 import accord.local.Node.Id;
-import accord.txn.TxnId;
+import accord.local.Status;
+import accord.primitives.AbstractRoute;
+import accord.primitives.RoutingKeys;
+import accord.primitives.TxnId;
 
 /**
  * This interface is responsible for managing incomplete transactions *and retrying them*.
@@ -42,6 +47,37 @@ public interface ProgressLog
         ProgressLog create(CommandStore store);
     }
 
+    enum ProgressShard
+    {
+        /* We do not have enough information to say whether the shard is a progress shard or not */
+        Unsure,
+
+        /**
+         * This shard is not a progress shard
+         */
+        No,
+
+        /* Adhoc Local Progress Shard, i.e. where the local node is not a replica for the coordination epoch */
+        Adhoc,
+
+        /* Designated Local Progress Shard (selected from keys replicated locally at coordination epoch) */
+        Local,
+
+        /* Designated Home (Global Progress) Shard (if local node is a replica of home key on coordination epoch) */
+        Home;
+
+        public boolean isHome() { return this == Home; }
+        public boolean isProgress() { return this.compareTo(Local) >= 0; }
+    }
+
+    /**
+     * Has not been pre-accepted, but has been witnessed by ourselves (only partially) or another node that has informed us
+     *
+     * A home shard should monitor this transaction for global progress.
+     * A non-home shard should not receive this message.
+     */
+    void unwitnessed(TxnId txnId, ProgressShard shard);
+
     /**
      * Has been pre-accepted.
      *
@@ -49,7 +85,7 @@ public interface ProgressLog
      * A non-home shard should begin monitoring this transaction only to ensure it reaches the Accept phase, or is
      * witnessed by a majority of the home shard.
      */
-    void preaccept(TxnId txnId, boolean isProgressShard, boolean isHomeShard);
+    void preaccept(TxnId txnId, ProgressShard shard);
 
     /**
      * Has been accepted
@@ -57,7 +93,7 @@ public interface ProgressLog
      * A home shard should monitor this transaction for global progress.
      * A non-home shard can safely ignore this transaction, as it has been witnessed by a majority of the home shard.
      */
-    void accept(TxnId txnId, boolean isProgressShard, boolean isHomeShard);
+    void accept(TxnId txnId, ProgressShard shard);
 
     /**
      * Has committed
@@ -65,7 +101,7 @@ public interface ProgressLog
      * A home shard should monitor this transaction for global progress.
      * A non-home shard can safely ignore this transaction, as it has been witnessed by a majority of the home shard.
      */
-    void commit(TxnId txnId, boolean isProgressShard, boolean isHomeShard);
+    void commit(TxnId txnId, ProgressShard shard);
 
     /**
      * The transaction is waiting to make progress, as all local dependencies have applied.
@@ -73,7 +109,7 @@ public interface ProgressLog
      * A home shard should monitor this transaction for global progress.
      * A non-home shard can safely ignore this transaction, as it has been witnessed by a majority of the home shard.
      */
-    void readyToExecute(TxnId txnId, boolean isProgressShard, boolean isHomeShard);
+    void readyToExecute(TxnId txnId, ProgressShard shard);
 
     /**
      * The transaction's outcome has been durably recorded (but not necessarily applied) locally.
@@ -84,17 +120,39 @@ public interface ProgressLog
      *
      * May also permit aborting a pending waitingOn-triggered event.
      */
-    void execute(TxnId txnId, boolean isProgressShard, boolean isHomeShard);
+    void execute(TxnId txnId, ProgressShard shard);
+
+    /**
+     * The transaction has been durably invalidated
+     */
+    void invalidate(TxnId txnId, ProgressShard shard);
+
+    /**
+     * The transaction's outcome has been durably recorded (but not necessarily applied) locally at all shards.
+     *
+     * This is only invoked on the home shard, once all local shards have successfully applied.
+     */
+    void durableLocal(TxnId txnId);
+
+    /**
+     * The transaction's outcome has been durably recorded (but not necessarily applied) at a quorum of all shards,
+     * including at least those node's ids that are provided.
+     *
+     * If this replica has not witnessed the outcome of the transaction, it should poll a majority of each shard
+     * for its outcome.
+     *
+     * Otherwise, this transaction no longer needs to be monitored, but implementations may wish to ensure that
+     * the result is propagated to every live replica.
+     */
+    void durable(TxnId txnId, RoutingKey homeKey, @Nullable Set<Id> persistedOn);
 
     /**
      * The transaction's outcome has been durably recorded (but not necessarily applied) at a quorum of all shards.
      *
-     * If this replica has not witnessed the outcome of the transaction, it should poll a majority of the home shard
-     * for its outcome.
-     *
-     * Otherwise, this transaction no longer needs to be monitored by either home or non-home shards.
+     * If this replica has not witnessed the outcome of the transaction, it should poll a majority of each shard
+     * for its outcome, using the provided route (if any).
      */
-    void executedOnAllShards(TxnId txnId, Set<Id> persistedOn);
+    void durable(TxnId txnId, @Nullable AbstractRoute route, ProgressShard shard);
 
     /**
      * The parameter is a command that some other command's execution is most proximally blocked by.
@@ -112,5 +170,5 @@ public interface ProgressLog
      *
      * In all other scenarios, the implementation is free to choose its course of action.
      */
-    void waiting(TxnId blockedBy, Key homeKey);
+    void waiting(TxnId blockedBy, Status blockedUntil, RoutingKeys someKeys);
 }

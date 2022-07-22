@@ -7,7 +7,7 @@ import java.util.TreeMap;
 import accord.local.Node;
 import accord.api.Key;
 import accord.messages.MessageType;
-import accord.txn.Keys;
+import accord.primitives.Keys;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
@@ -46,7 +46,7 @@ public class MaelstromReply extends Body implements Reply
             {
                 out.beginArray();
                 out.value("r");
-                key.write(out);
+                key.datum.write(out);
                 reads[i].writeVerbose(out);
                 out.endArray();
             }
@@ -56,7 +56,7 @@ public class MaelstromReply extends Body implements Reply
                 {
                     out.beginArray();
                     out.value("append");
-                    key.write(out);
+                    key.datum.write(out);
                     append.write(out);
                     out.endArray();
                 }

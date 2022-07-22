@@ -1,65 +1,86 @@
 package accord.messages;
 
 import java.util.Objects;
-import java.util.stream.Stream;
+import java.util.function.Consumer;
+
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.local.CommandStore;
 import accord.local.CommandsForKey;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.TxnRequest.WithUnsynced;
+import accord.primitives.PartialDeps;
+import accord.primitives.PartialRoute;
+import accord.primitives.PartialTxn;
+import accord.primitives.Route;
 import accord.topology.Topologies;
-import accord.txn.Keys;
-import accord.txn.Timestamp;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
 import accord.local.Command;
-import accord.txn.Dependencies;
-import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.Deps;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
 
 public class PreAccept extends WithUnsynced
 {
-    public final Txn txn;
+    public final PartialTxn txn;
+    public final @Nullable Route route; // ordinarily only set on home shard
     public final long maxEpoch;
 
-    public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey)
+    public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn, Route route)
     {
-        super(to, topologies, txn.keys, txnId, homeKey);
-        this.txn = txn;
+        super(to, topologies, txnId, route);
+        this.txn = txn.slice(scope.covering, route.contains(route.homeKey));
         this.maxEpoch = topologies.currentEpoch();
+        this.route = scope.contains(scope.homeKey) ? route : null;
     }
 
     @VisibleForTesting
-    public PreAccept(Keys scope, long epoch, TxnId txnId, Txn txn, Key homeKey)
+    public PreAccept(PartialRoute scope, long epoch, TxnId txnId, PartialTxn txn, @Nullable Route route)
     {
-        super(scope, epoch, txnId, homeKey);
+        super(scope, epoch, txnId);
         this.txn = txn;
         this.maxEpoch = epoch;
+        this.route = route;
     }
 
     public void process(Node node, Id from, ReplyContext replyContext)
     {
         // TODO: verify we handle all of the scope() keys
-        Key progressKey = doNotComputeProgressKey ? null : node.trySelectProgressKey(waitForEpoch(), txn.keys, homeKey);
+        RoutingKey progressKey = progressKey(node, scope.homeKey);
         node.reply(from, replyContext, node.mapReduceLocal(scope(), minEpoch, maxEpoch, instance -> {
             // note: this diverges from the paper, in that instead of waiting for JoinShard,
             //       we PreAccept to both old and new topologies and require quorums in both.
             //       This necessitates sending to ALL replicas of old topology, not only electorate (as fast path may be unreachable).
             Command command = instance.command(txnId);
-            if (!command.preaccept(txn, homeKey, progressKey))
-                return PreAcceptNack.INSTANCE;
-            return new PreAcceptOk(txnId, command.executeAt(), calculateDeps(instance, txnId, txn, txnId));
+            switch (command.preaccept(txn, route != null ? route : scope, progressKey))
+            {
+                default:
+                case Insufficient:
+                    throw new IllegalStateException();
+
+                case Success:
+                case Redundant:
+                     return new PreAcceptOk(txnId, command.executeAt(), calculateDeps(instance, txnId, txn.keys, txn.kind, txnId,
+                                                                                     PartialDeps.builder(instance.ranges().at(txnId.epoch), txn.keys)));
+
+                case RejectedBallot:
+                    return PreAcceptNack.INSTANCE;
+            }
         }, (r1, r2) -> {
-            if (!r1.isOK()) return r1;
-            if (!r2.isOK()) return r2;
+            if (!r1.isOk()) return r1;
+            if (!r2.isOk()) return r2;
             PreAcceptOk ok1 = (PreAcceptOk) r1;
             PreAcceptOk ok2 = (PreAcceptOk) r2;
             PreAcceptOk okMax = ok1.witnessedAt.compareTo(ok2.witnessedAt) >= 0 ? ok1 : ok2;
-            if (ok1 != okMax && !ok1.deps.isEmpty()) okMax.deps.addAll(ok1.deps);
-            if (ok2 != okMax && !ok2.deps.isEmpty()) okMax.deps.addAll(ok2.deps);
-            return okMax;
+            Deps deps = ok1.deps.with(ok2.deps);
+            if (deps == okMax.deps)
+                return okMax;
+            return new PreAcceptOk(txnId, okMax.witnessedAt, deps);
         }));
     }
 
@@ -77,16 +98,16 @@ public class PreAccept extends WithUnsynced
             return MessageType.PREACCEPT_RSP;
         }
 
-        boolean isOK();
+        boolean isOk();
     }
 
     public static class PreAcceptOk implements PreAcceptReply
     {
         public final TxnId txnId;
         public final Timestamp witnessedAt;
-        public final Dependencies deps;
+        public final Deps deps;
 
-        public PreAcceptOk(TxnId txnId, Timestamp witnessedAt, Dependencies deps)
+        public PreAcceptOk(TxnId txnId, Timestamp witnessedAt, Deps deps)
         {
             this.txnId = txnId;
             this.witnessedAt = witnessedAt;
@@ -94,7 +115,7 @@ public class PreAccept extends WithUnsynced
         }
 
         @Override
-        public boolean isOK()
+        public boolean isOk()
         {
             return true;
         }
@@ -132,7 +153,7 @@ public class PreAccept extends WithUnsynced
         private PreAcceptNack() {}
 
         @Override
-        public boolean isOK()
+        public boolean isOk()
         {
             return false;
         }
@@ -144,17 +165,17 @@ public class PreAccept extends WithUnsynced
         }
     }
 
-    static Dependencies calculateDeps(CommandStore commandStore, TxnId txnId, Txn txn, Timestamp executeAt)
+    static <T extends Deps> T calculateDeps(CommandStore commandStore, TxnId txnId, Keys keys, Txn.Kind kindOfTxn, Timestamp executeAt, Deps.AbstractBuilder<T> builder)
     {
-        Dependencies deps = new Dependencies();
-        conflictsMayExecuteBefore(commandStore, executeAt, txn.keys).forEach(conflict -> {
+        // TODO (now): we should only adopt dependency edges where one or the other modifies *a given key*
+        forEachConflictThatMayExecuteBefore(commandStore, executeAt, keys, conflict -> {
             if (conflict.txnId().equals(txnId))
                 return;
 
-            if (txn.isWrite() || conflict.txn().isWrite())
-                deps.add(conflict);
+            if (kindOfTxn.isWrite() || conflict.partialTxn().isWrite())
+                builder.add(conflict);
         });
-        return deps;
+        return builder.build();
     }
 
     @Override
@@ -163,22 +184,20 @@ public class PreAccept extends WithUnsynced
         return "PreAccept{" +
                "txnId:" + txnId +
                ", txn:" + txn +
-               ", homeKey:" + homeKey +
+               ", scope:" + scope +
                '}';
     }
 
-    private static Stream<Command> conflictsMayExecuteBefore(CommandStore commandStore, Timestamp mayExecuteBefore, Keys keys)
+    private static void forEachConflictThatMayExecuteBefore(CommandStore commandStore, Timestamp mayExecuteBefore, Keys keys, Consumer<Command> forEach)
     {
-        return keys.stream().flatMap(key -> {
+        keys.forEach(key -> {
             CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
             if (forKey == null)
-                return Stream.of();
+                return;
 
-            return Stream.concat(
-                forKey.uncommitted.headMap(mayExecuteBefore, false).values().stream(),
-                // TODO: only return latest of Committed?
-                forKey.committedByExecuteAt.headMap(mayExecuteBefore, false).values().stream()
-            );
+            forKey.uncommitted.headMap(mayExecuteBefore, false).values().forEach(forEach);
+            // TODO: only return latest of Committed?
+            forKey.committedByExecuteAt.headMap(mayExecuteBefore, false).values().forEach(forEach);
         });
     }
 

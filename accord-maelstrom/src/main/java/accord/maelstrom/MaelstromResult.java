@@ -12,7 +12,7 @@ import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
 import accord.api.Key;
 import accord.api.Result;
-import accord.txn.Keys;
+import accord.primitives.Keys;
 
 public class MaelstromResult implements Result
 {
@@ -55,7 +55,7 @@ public class MaelstromResult implements Result
                 if (reads[i] != null)
                 {
                     out.beginArray();
-                    key.write(out);
+                    key.datum.write(out);
                     reads[i].write(out);
                     out.endArray();
                 }
@@ -69,7 +69,7 @@ public class MaelstromResult implements Result
                 if (update != null && update.containsKey(key))
                 {
                     out.beginArray();
-                    key.write(out);
+                    key.datum.write(out);
                     update.get(key).write(out);
                     out.endArray();
                 }

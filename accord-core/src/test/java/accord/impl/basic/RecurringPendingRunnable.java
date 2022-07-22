@@ -10,8 +10,9 @@ class RecurringPendingRunnable implements PendingRunnable, Scheduled
     final long delay;
     final TimeUnit units;
     Runnable run;
+    Runnable onCancellation;
 
-    RecurringPendingRunnable(PendingQueue requeue, Runnable run, boolean recurring, long delay, TimeUnit units)
+    RecurringPendingRunnable(PendingQueue requeue, Runnable run, long delay, TimeUnit units)
     {
         this.requeue = requeue;
         this.run = run;
@@ -34,5 +35,21 @@ class RecurringPendingRunnable implements PendingRunnable, Scheduled
     public void cancel()
     {
         run = null;
+        if (onCancellation != null)
+        {
+            onCancellation.run();
+            onCancellation = null;
+        }
+    }
+
+    public void onCancellation(Runnable run)
+    {
+        this.onCancellation = run;
+    }
+
+    @Override
+    public String toString()
+    {
+        return run + " with " + delay + " " + units + " delay";
     }
 }

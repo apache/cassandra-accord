@@ -2,14 +2,16 @@ package accord.local;
 
 import accord.api.Agent;
 import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.local.CommandStores.ShardedRanges;
 import accord.api.ProgressLog;
-import accord.topology.KeyRange;
+import accord.primitives.AbstractKeys;
+import accord.primitives.KeyRange;
 import accord.api.DataStore;
-import accord.topology.KeyRanges;
-import accord.txn.Keys;
-import accord.txn.Timestamp;
-import accord.txn.TxnId;
+import accord.primitives.KeyRanges;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.Promise;
@@ -19,9 +21,9 @@ import com.google.common.base.Preconditions;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.LongFunction;
 
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
@@ -45,7 +47,10 @@ public abstract class CommandStore
     public interface RangesForEpoch
     {
         KeyRanges at(long epoch);
+        KeyRanges between(long fromInclusive, long toInclusive);
         KeyRanges since(long epoch);
+        boolean owns(long epoch, RoutingKey key);
+        boolean intersects(long epoch, AbstractKeys<?, ?> keys);
     }
 
     private final int generation;
@@ -58,7 +63,8 @@ public abstract class CommandStore
     private final RangesForEpoch rangesForEpoch;
 
     private final NavigableMap<TxnId, Command> commands = new TreeMap<>();
-    private final NavigableMap<Key, CommandsForKey> commandsForKey = new TreeMap<>();
+    // note: we actually *store* Key (for now), but we must permit slicing by RoutingKey so use this as the type parameter
+    private final NavigableMap<RoutingKey, CommandsForKey> commandsForKey = new TreeMap<>();
 
     public CommandStore(int generation,
                         int shardIndex,
@@ -195,7 +201,7 @@ public abstract class CommandStore
         }
     }
 
-    public boolean hashIntersects(Key key)
+    public boolean hashIntersects(RoutingKey key)
     {
         return ShardedRanges.keyIndex(key, numShards) == shardIndex;
     }
@@ -209,6 +215,18 @@ public abstract class CommandStore
     {
         for (CommandStore store : stores)
             store.process(consumer);
+    }
+
+    public static <T> T mapReduce(Collection<CommandStore> stores, Function<? super CommandStore, T> map, BiFunction<T, T, T> reduce)
+    {
+        T prev = null;
+        for (CommandStore store : stores)
+        {
+            T next = map.apply(store);
+            if (prev == null) prev = next;
+            else prev = reduce.apply(prev, next);
+        }
+        return prev;
     }
 
     <R> void processInternal(Function<? super CommandStore, R> function, Promise<R> promise)

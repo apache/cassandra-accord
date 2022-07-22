@@ -6,13 +6,12 @@ import accord.coordinate.Timeout;
 import accord.impl.TopologyUtils;
 import accord.local.CommandStores;
 import accord.impl.SimpleProgressLog;
-import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.topology.KeyRanges;
+import accord.primitives.KeyRanges;
 import accord.utils.EpochFunction;
 import accord.utils.ThreadPoolScheduler;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
@@ -24,6 +23,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
 import java.util.function.LongSupplier;
@@ -90,7 +90,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                         nowSupplier,
                         () -> store,
                         new TestAgent(),
-                        new Random(),
+                        new Random(random.nextLong()),
                         new ThreadPoolScheduler(),
                         SimpleProgressLog::new,
                         CommandStores.SingleThread::new);
@@ -131,7 +131,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         {
             // TODO: more flexible timeouts
             if (callback != null)
-                callback.onFailure(to, new Timeout());
+                callback.onFailure(to, new Timeout(null, null));
             logger.info("discarding filtered message from {} to {}: {}", from, to, request);
             return;
         }
@@ -140,6 +140,10 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         if (callback != null)
         {
             callbacks.put(messageId, callback);
+            node.scheduler().once(() -> {
+                if (callbacks.remove(messageId, callback))
+                    callback.onFailure(to, new Timeout(null, null));
+                }, 2L, TimeUnit.SECONDS);
         }
 
         logger.info("processing message[{}] from {} to {}: {}", messageId, from, to, request);
@@ -163,7 +167,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         {
             logger.info("discarding filtered reply from {} to {}: {}", from, reply, reply);
             if (callback != null)
-                callback.onFailure(from, new Timeout());
+                callback.onFailure(from, new Timeout(null, null));
             return;
         }
 

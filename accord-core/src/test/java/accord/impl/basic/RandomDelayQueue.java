@@ -43,6 +43,12 @@ public class RandomDelayQueue<T> implements PendingQueue
             if (c == 0) c = Integer.compare(this.seq, that.seq);
             return c;
         }
+
+        @Override
+        public String toString()
+        {
+            return "@" + time + "/" + seq + ":" + item;
+        }
     }
 
     final PriorityQueue<Item> queue = new PriorityQueue<>();

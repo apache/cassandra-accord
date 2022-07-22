@@ -1,8 +1,9 @@
 package accord.impl.list;
 
 import accord.api.*;
-import accord.txn.Keys;
-import accord.txn.Timestamp;
+import accord.primitives.KeyRanges;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -10,10 +11,12 @@ public class ListRead implements Read
 {
     private static final Logger logger = LoggerFactory.getLogger(ListRead.class);
 
+    public final Keys readKeys;
     public final Keys keys;
 
-    public ListRead(Keys keys)
+    public ListRead(Keys readKeys, Keys keys)
     {
+        this.readKeys = readKeys;
         this.keys = keys;
     }
 
@@ -32,6 +35,18 @@ public class ListRead implements Read
         logger.trace("READ on {} at {} key:{} -> {}", s.node, executeAt, key, data);
         result.put(key, data);
         return result;
+    }
+
+    @Override
+    public Read slice(KeyRanges ranges)
+    {
+        return new ListRead(readKeys, keys.slice(ranges));
+    }
+
+    @Override
+    public Read merge(Read other)
+    {
+        return new ListRead(readKeys, keys.union(((ListRead)other).keys));
     }
 
     @Override

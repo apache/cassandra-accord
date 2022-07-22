@@ -1,8 +1,7 @@
-package accord.txn;
+package accord.primitives;
 
 import accord.local.Node.Id;
 
-// TODO: consider moving homeKey concept here? might make later optimisations of its storage trickier
 public class TxnId extends Timestamp
 {
     public TxnId(Timestamp timestamp)

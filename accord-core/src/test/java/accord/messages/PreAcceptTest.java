@@ -1,6 +1,6 @@
 package accord.messages;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.impl.mock.*;
 import accord.impl.SimpleProgressLog;
 import accord.local.Node;
@@ -8,14 +8,18 @@ import accord.local.Node.Id;
 import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.impl.mock.MockCluster.Clock;
+import accord.primitives.KeyRange.StartInclusive;
+import accord.primitives.KeyRanges;
+import accord.primitives.PartialRoute;
+import accord.primitives.Route;
 import accord.topology.Topology;
-import accord.txn.Dependencies;
-import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.Deps;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
 import accord.utils.EpochFunction;
 import accord.utils.ThreadPoolScheduler;
 import accord.local.*;
-import accord.txn.Keys;
+import accord.primitives.Keys;
 import accord.impl.IntKey;
 import accord.impl.TestAgent;
 import accord.impl.TopologyFactory;
@@ -37,6 +41,7 @@ public class PreAcceptTest
     private static final Id ID3 = id(3);
     private static final List<Id> IDS = List.of(ID1, ID2, ID3);
     private static final Topology TOPOLOGY = TopologyFactory.toTopology(IDS, 3, IntKey.range(0, 100));
+    private static final KeyRanges FULL_RANGE = KeyRanges.single(new StartInclusive(new IntKey(Integer.MIN_VALUE), new IntKey(Integer.MAX_VALUE)));
 
     private static final ReplyContext REPLY_CONTEXT = Network.replyCtxFor(0);
 
@@ -56,9 +61,12 @@ public class PreAcceptTest
                         CommandStores.SingleThread::new);
     }
 
-    private static PreAccept preAccept(TxnId txnId, Txn txn, Key homeKey)
+    private static PreAccept preAccept(TxnId txnId, Txn txn, RoutingKey homeKey)
     {
-        return new PreAccept(txn.keys, txnId.epoch, txnId, txn, homeKey);
+        RoutingKey[] routingKeys = new RoutingKey[txn.keys.size()];
+        for (int i = 0 ; i < routingKeys.length ; ++i)
+            routingKeys[i] = txn.keys.get(i).toRoutingKey();
+        return new PreAccept(new PartialRoute(FULL_RANGE, homeKey, routingKeys), txnId.epoch, txnId, txn.slice(FULL_RANGE, true), new Route(homeKey, routingKeys));
     }
 
     @Test
@@ -86,7 +94,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, new Dependencies()),
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, Deps.NONE),
                                     messageSink.responses.get(0).payload);
         }
         finally
@@ -145,7 +153,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID3, messageSink.responses.get(0).to);
-            Dependencies expectedDeps = new Dependencies();
+            Deps expectedDeps = Deps.NONE;
             Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId2, new TxnId(1, 110, 0, ID1), expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
@@ -175,7 +183,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            Dependencies expectedDeps = new Dependencies();
+            Deps expectedDeps = Deps.NONE;
             Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
@@ -212,7 +220,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, new TxnId(2, 110, 0, ID1), new Dependencies()),
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, new TxnId(2, 110, 0, ID1), Deps.NONE),
                                     messageSink.responses.get(0).payload);
         }
         finally

@@ -1,13 +1,9 @@
 package accord.burn;
 
 import java.io.IOException;
-import java.io.OutputStream;
-import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Map;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
@@ -26,7 +22,6 @@ import accord.impl.IntHashKey;
 import accord.impl.basic.Cluster;
 import accord.impl.basic.PropagatingPendingQueue;
 import accord.impl.basic.RandomDelayQueue.Factory;
-import accord.impl.IntKey;
 import accord.impl.TopologyFactory;
 import accord.impl.basic.Packet;
 import accord.impl.basic.PendingQueue;
@@ -35,15 +30,13 @@ import accord.impl.list.ListRead;
 import accord.impl.list.ListRequest;
 import accord.impl.list.ListResult;
 import accord.impl.list.ListUpdate;
-import accord.verify.SerializabilityVerifier;
-import accord.verify.LinearizabilityVerifier;
-import accord.verify.LinearizabilityVerifier.Observation;
 import accord.local.Node.Id;
 import accord.api.Key;
-import accord.txn.Txn;
-import accord.txn.Keys;
+import accord.primitives.Txn;
+import accord.primitives.Keys;
 import accord.verify.StrictSerializabilityVerifier;
-import ch.qos.logback.classic.Level;
+
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,9 +72,10 @@ public class BurnTest
                 update.put(keys.get(i), ++next[i]);
             }
 
+            Keys readKeys = new Keys(requestKeys);
             requestKeys.addAll(update.keySet());
-            ListRead read = new ListRead(new Keys(requestKeys));
-            ListQuery query = new ListQuery(client, count, read.keys, update);
+            ListRead read = new ListRead(readKeys, new Keys(requestKeys));
+            ListQuery query = new ListQuery(client, count);
             ListRequest request = new ListRequest(new Txn(new Keys(requestKeys), read, query, update));
             packets.add(new Packet(client, node, count, request));
         }
@@ -155,6 +149,9 @@ public class BurnTest
         int[] starts = new int[requests.length];
         Packet[] replies = new Packet[requests.length];
 
+        AtomicInteger acks = new AtomicInteger();
+        AtomicInteger nacks = new AtomicInteger();
+        AtomicInteger lost = new AtomicInteger();
         AtomicInteger clock = new AtomicInteger();
         AtomicInteger requestIndex = new AtomicInteger();
         for (int max = Math.min(concurrency, requests.length) ; requestIndex.get() < max ; )
@@ -186,11 +183,19 @@ public class BurnTest
                 logger.debug("{} at [{}, {}]", reply, start, end);
 
                 replies[(int)packet.replyId] = packet;
+                if (reply.readKeys == null)
+                {
+                    if (reply.read == null) nacks.incrementAndGet();
+                    else lost.incrementAndGet();
+                    return;
+                }
+
+                acks.incrementAndGet();
                 strictSerializable.begin();
 
                 for (int i = 0 ; i < reply.read.length ; ++i)
                 {
-                    Key key = reply.keys.get(i);
+                    Key key = reply.readKeys.get(i);
                     int k = key(key);
 
                     int[] read = reply.read[i];
@@ -211,10 +216,12 @@ public class BurnTest
         };
 
         Cluster.run(nodes.toArray(Id[]::new), () -> queue,
-                    responseSink, () -> new Random(random.nextLong()), () -> new AtomicLong()::incrementAndGet,
+                    responseSink, failures::add,
+                    () -> new Random(random.nextLong()),
+                    () -> new AtomicLong()::incrementAndGet,
                     topologyFactory, () -> null);
 
-        logger.info("Received {} acks to {} operations\n", clock.get() - operations, operations);
+        logger.info("Received {} acks, {} nacks and {} lost ({} total) to {} operations\n", acks.get(), nacks.get(), lost.get(), acks.get() + nacks.get() + lost.get(), operations);
         if (clock.get() != operations * 2)
         {
             for (int i = 0 ; i < requests.length ; ++i)
@@ -228,29 +235,43 @@ public class BurnTest
 
     public static void main(String[] args) throws Exception
     {
-        Long overrideSeed = null;
+//        Long overrideSeed = null;
+        Long overrideSeed = 6481838959431094981L;
         do
         {
-            long seed = overrideSeed != null ? overrideSeed : ThreadLocalRandom.current().nextLong();
-            logger.info("Seed: {}", seed);
-            Random random = new Random(seed);
-            try
-            {
-                List<Id> clients =  generateIds(true, 1 + random.nextInt(4));
-                List<Id> nodes =  generateIds(false, 5 + random.nextInt(5));
-                burn(random, new TopologyFactory<>(nodes.size() == 5 ? 3 : (2 + random.nextInt(3)), IntHashKey.ranges(4 + random.nextInt(12))),
-                     clients,
-                     nodes,
-                     5 + random.nextInt(15),
-                     200,
-                     10 + random.nextInt(30));
-            }
-            catch (Throwable t)
-            {
-                logger.error("Exception running burn test for seed {}:", seed, t);
-                throw t;
-            }
-        } while (overrideSeed == null);
+            run(overrideSeed != null ? overrideSeed : ThreadLocalRandom.current().nextLong());
+        }
+        while (overrideSeed == null);
+    }
+
+    @Test
+    public void testOne() throws Exception
+    {
+        run(ThreadLocalRandom.current().nextLong());
+    }
+
+    private static void run(long seed) throws Exception
+    {
+        logger.info("Seed: {}", seed);
+        Cluster.trace.trace("Seed: {}", seed);
+        Random random = new Random(seed);
+        try
+        {
+            List<Id> clients = generateIds(true, 1 + random.nextInt(4));
+            List<Id> nodes = generateIds(false, 5 + random.nextInt(5));
+            burn(random, new TopologyFactory(nodes.size() == 5 ? 3 : (2 + random.nextInt(3)), IntHashKey.ranges(4 + random.nextInt(12))),
+                    clients,
+                    nodes,
+                    5 + random.nextInt(15),
+                    200,
+                    10 + random.nextInt(30));
+        }
+        catch (Throwable t)
+        {
+            logger.error("Exception running burn test for seed {}:", seed, t);
+            throw t;
+        }
+
     }
 
     private static List<Id> generateIds(boolean clients, int count)

@@ -211,18 +211,24 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         }
 
         @Override
-        public void onSuccess(Node.Id from, FetchTopologyReply response)
+        public void onSuccess(Node.Id from, FetchTopologyReply reply)
         {
-            if (response.topology != null)
-                reportTopology(response.topology);
+            if (reply.topology != null)
+                reportTopology(reply.topology);
             else
                 sendNext();
         }
 
         @Override
-        public synchronized void onFailure(Node.Id from, Throwable throwable)
+        public synchronized void onFailure(Node.Id from, Throwable failure)
         {
             sendNext();
+        }
+
+        @Override
+        public void onCallbackFailure(Throwable failure)
+        {
+            tryFailure(failure);
         }
     }
 

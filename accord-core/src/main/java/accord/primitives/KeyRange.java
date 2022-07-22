@@ -1,31 +1,32 @@
-package accord.topology;
+package accord.primitives;
 
-import accord.api.Key;
-import accord.txn.Keys;
+import accord.api.RoutingKey;
+import accord.utils.SortedArrays;
+import accord.utils.SortedArrays.Search;
+
 import com.google.common.base.Preconditions;
 
 import java.util.Objects;
 
 /**
  * A range of keys
- * @param <K>
  */
-public abstract class KeyRange<K extends Key<K>>
+public abstract class KeyRange implements Comparable<RoutingKey>
 {
-    public static abstract class EndInclusive<K extends Key<K>> extends KeyRange<K>
+    public static class EndInclusive extends KeyRange
     {
-        public EndInclusive(K start, K end)
+        public EndInclusive(RoutingKey start, RoutingKey end)
         {
             super(start, end);
         }
 
         @Override
-        public int compareKey(K key)
+        public int compareTo(RoutingKey key)
         {
             if (key.compareTo(start()) <= 0)
-                return -1;
-            if (key.compareTo(end()) > 0)
                 return 1;
+            if (key.compareTo(end()) > 0)
+                return -1;
             return 0;
         }
 
@@ -42,26 +43,26 @@ public abstract class KeyRange<K extends Key<K>>
         }
 
         @Override
-        public KeyRange<K> tryMerge(KeyRange<K> that)
+        public KeyRange subRange(RoutingKey start, RoutingKey end)
         {
-            return KeyRange.tryMergeExclusiveInclusive(this, that);
+            return new EndInclusive(start, end);
         }
     }
 
-    public static abstract class StartInclusive<K extends Key<K>> extends KeyRange<K>
+    public static class StartInclusive extends KeyRange
     {
-        public StartInclusive(K start, K end)
+        public StartInclusive(RoutingKey start, RoutingKey end)
         {
             super(start, end);
         }
 
         @Override
-        public int compareKey(K key)
+        public int compareTo(RoutingKey key)
         {
             if (key.compareTo(start()) < 0)
-                return -1;
-            if (key.compareTo(end()) >= 0)
                 return 1;
+            if (key.compareTo(end()) >= 0)
+                return -1;
             return 0;
         }
 
@@ -78,79 +79,50 @@ public abstract class KeyRange<K extends Key<K>>
         }
 
         @Override
-        public KeyRange<K> tryMerge(KeyRange<K> that)
+        public KeyRange subRange(RoutingKey start, RoutingKey end)
         {
-            return KeyRange.tryMergeExclusiveInclusive(this, that);
+            return new StartInclusive(start, end);
         }
     }
 
-    private static <K extends Key<K>> KeyRange<K> tryMergeExclusiveInclusive(KeyRange<K> left, KeyRange<K> right)
-    {
-        if (left.getClass() != right.getClass())
-            return null;
+    private final RoutingKey start;
+    private final RoutingKey end;
 
-        Preconditions.checkArgument(left instanceof EndInclusive || left instanceof StartInclusive);
-
-        int cmp = left.compareIntersecting(right);
-
-        if (cmp == 0)
-            return left.subRange(left.start.compareTo(right.start) < 0 ? left.start : right.start,
-                                 left.end.compareTo(right.end) > 0 ? left.end : right.end);
-
-        if (cmp > 0 && right.end.equals(left.start))
-            return left.subRange(right.start, left.end);
-
-        if (cmp < 0 && left.end.equals(right.start))
-            return left.subRange(left.start, right.end);
-
-        return null;
-    }
-
-    private final K start;
-    private final K end;
-
-    private KeyRange(K start, K end)
+    private KeyRange(RoutingKey start, RoutingKey end)
     {
         Preconditions.checkArgument(start.compareTo(end) < 0);
+        Preconditions.checkState(startInclusive() != endInclusive()); // TODO: relax this restriction
         this.start = start;
         this.end = end;
     }
 
-    public final K start()
+    public final RoutingKey start()
     {
         return start;
     }
-
-    public final K end()
+    public final RoutingKey end()
     {
         return end;
     }
 
     public abstract boolean startInclusive();
-
     public abstract boolean endInclusive();
 
-    /**
-     * Return a new range covering this and the given range if the ranges are intersecting or touching. That is,
-     * no keys can exist between the touching ends of the range.
-     */
-    public abstract KeyRange<K> tryMerge(KeyRange<K> that);
-
-    public abstract KeyRange<K> subRange(K start, K end);
+    public abstract KeyRange subRange(RoutingKey start, RoutingKey end);
 
     @Override
     public boolean equals(Object o)
     {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        KeyRange<?> that = (KeyRange<?>) o;
+        KeyRange that = (KeyRange) o;
         return Objects.equals(start, that.start) && Objects.equals(end, that.end);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(start, end);
+        return start.hashCode() * 31 + end.hashCode();
     }
 
     @Override
@@ -163,19 +135,27 @@ public abstract class KeyRange<K extends Key<K>>
      * Returns a negative integer, zero, or a positive integer as the provided key is less than, contained by,
      * or greater than this range.
      */
-    public abstract int compareKey(K key);
+    public int compareKey(RoutingKey key)
+    {
+        return -compareTo(key);
+    }
 
-    public boolean containsKey(K key)
+    /**
+     * Returns a negative integer, zero, or a positive integer as the provided key is greater than, contained by,
+     * or less than this range.
+     */
+    public abstract int compareTo(RoutingKey key);
+
+    public boolean containsKey(RoutingKey key)
     {
         return compareKey(key) == 0;
     }
-
 
     /**
      * Returns a negative integer, zero, or a positive integer if both points of the provided range are less than, the
      * range intersects this range, or both points are greater than this range
      */
-    public int compareIntersecting(KeyRange<K> that)
+    public int compareIntersecting(KeyRange that)
     {
         if (this.start.compareTo(that.end) >= 0)
             return 1;
@@ -184,12 +164,12 @@ public abstract class KeyRange<K extends Key<K>>
         return 0;
     }
 
-    public boolean intersects(KeyRange<K> that)
+    public boolean intersects(KeyRange that)
     {
         return compareIntersecting(that) == 0;
     }
 
-    public boolean fullyContains(KeyRange<K> that)
+    public boolean fullyContains(KeyRange that)
     {
         return that.start.compareTo(this.start) >= 0 && that.end.compareTo(this.end) <= 0;
     }
@@ -203,24 +183,24 @@ public abstract class KeyRange<K extends Key<K>>
      * Returns a range covering the overlapping parts of this and the provided range, returns
      * null if the ranges do not overlap
      */
-    public KeyRange<K> intersection(KeyRange<K> that)
+    public KeyRange intersection(KeyRange that)
     {
         if (this.compareIntersecting(that) != 0)
             return null;
 
-        K start = this.start.compareTo(that.start) > 0 ? this.start : that.start;
-        K end = this.end.compareTo(that.end) < 0 ? this.end : that.end;
+        RoutingKey start = this.start.compareTo(that.start) > 0 ? this.start : that.start;
+        RoutingKey end = this.end.compareTo(that.end) < 0 ? this.end : that.end;
         return subRange(start, end);
     }
 
     /**
      * returns the index of the first key larger than what's covered by this range
      */
-    public int higherKeyIndex(Keys keys, int lowerBound, int upperBound)
+    public int higherKeyIndex(AbstractKeys<?, ?> keys, int from, int to)
     {
-        int i = keys.search(lowerBound, upperBound, this,
-                            (k, r) -> ((KeyRange) r).compareKey((Key) k) <= 0 ? -1 : 1);
+        int i = SortedArrays.exponentialSearch(keys.keys, from, to, this, KeyRange::compareTo, Search.FLOOR);
         if (i < 0) i = -1 - i;
+        else i += 1;
         return i;
     }
 
@@ -235,16 +215,16 @@ public abstract class KeyRange<K extends Key<K>>
      * intersecting key would be inserted into the keys array
      * @param keys
      */
-    public int lowKeyIndex(Keys keys, int lowerBound, int upperBound)
+    public int lowKeyIndex(AbstractKeys<?, ?> keys, int lowerBound, int upperBound)
     {
         if (keys.isEmpty()) return -1;
 
         int i = keys.search(lowerBound, upperBound, this,
-                            (k, r) -> ((KeyRange) r).compareKey((Key) k) < 0 ? -1 : 1);
+                            (k, r) -> ((KeyRange) r).compareKey((RoutingKey) k) < 0 ? -1 : 1);
 
         int minIdx = -1 - i;
 
-        return (minIdx < keys.size() && containsKey((K) keys.get(minIdx))) ? minIdx : i;
+        return (minIdx < keys.size() && containsKey(keys.get(minIdx))) ? minIdx : i;
     }
 
     public int lowKeyIndex(Keys keys)

@@ -1,15 +1,25 @@
-package accord.txn;
+package accord.primitives;
 
 import java.util.Objects;
+
+import com.google.common.base.Preconditions;
 
 import accord.api.*;
 import accord.local.*;
 
 public class Txn
 {
-    enum Kind { READ, WRITE, RECONFIGURE }
+    public enum Kind
+    {
+        READ, WRITE;
 
-    final Kind kind;
+        public boolean isWrite()
+        {
+            return this == WRITE;
+        }
+    }
+
+    public final Kind kind;
     public final Keys keys;
     public final Read read;
     public final Query query;
@@ -17,6 +27,7 @@ public class Txn
 
     public Txn(Keys keys, Read read, Query query)
     {
+        Preconditions.checkArgument(getClass() != Txn.class || query != null);
         this.kind = Kind.READ;
         this.keys = keys;
         this.read = read;
@@ -26,6 +37,7 @@ public class Txn
 
     public Txn(Keys keys, Read read, Query query, Update update)
     {
+        Preconditions.checkArgument(getClass() != Txn.class || query != null);
         this.kind = Kind.WRITE;
         this.keys = keys;
         this.read = read;
@@ -50,29 +62,20 @@ public class Txn
 
     public boolean isWrite()
     {
-        switch (kind)
-        {
-            default:
-                throw new IllegalStateException();
-            case READ:
-                return false;
-            case WRITE:
-            case RECONFIGURE:
-                return true;
-        }
+        return kind.isWrite();
     }
 
     public Result result(Data data)
     {
-        return query.compute(data);
+        return query.compute(data, read, update);
     }
 
     public Writes execute(Timestamp executeAt, Data data)
     {
         if (update == null)
-            return new Writes(executeAt, keys, null);
+            return new Writes(executeAt, Keys.EMPTY, null);
 
-        return new Writes(executeAt, keys, update.apply(data));
+        return new Writes(executeAt, update.keys(), update.apply(data));
     }
 
     public Keys keys()
@@ -80,14 +83,20 @@ public class Txn
         return keys;
     }
 
+    public PartialTxn slice(KeyRanges ranges, boolean includeQuery)
+    {
+        return new PartialTxn(ranges, kind, keys.slice(ranges), read.slice(ranges), includeQuery ? query : null,
+                              update == null ? null : update.slice(ranges));
+    }
+
     public String toString()
     {
         return "{read:" + read.toString() + (update != null ? ", update:" + update : "") + '}';
     }
 
-    public Data read(Command command, Keys keys)
+    public Data read(Command command)
     {
-        return keys.foldl(command.commandStore.ranges().at(command.executeAt().epoch), (key, accumulate) -> {
+        return keys.foldl(command.commandStore.ranges().at(command.executeAt().epoch), (index, key, accumulate) -> {
             CommandStore commandStore = command.commandStore;
             if (!commandStore.hashIntersects(key))
                 return accumulate;

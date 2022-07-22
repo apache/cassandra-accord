@@ -1,10 +1,11 @@
 package accord.utils;
 
 import accord.api.Key;
-import accord.topology.KeyRange;
+import accord.primitives.KeyRange;
 import accord.impl.IntKey;
-import accord.topology.KeyRanges;
-import accord.txn.Keys;
+import accord.primitives.KeyRange.EndInclusive;
+import accord.primitives.KeyRange.StartInclusive;
+import accord.primitives.Keys;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -15,47 +16,19 @@ public class KeyRangeTest
         return new IntKey(v);
     }
 
-    private static KeyRange<IntKey> r(int start, int end)
+    private static KeyRange r(int start, int end)
     {
         return IntKey.range(start, end);
     }
 
-    private static class EndInclusiveIntRange extends KeyRange.EndInclusive<IntKey>
+    static KeyRange rangeEndIncl(int start, int end)
     {
-        public EndInclusiveIntRange(IntKey start, IntKey end)
-        {
-            super(start, end);
-        }
-
-        @Override
-        public KeyRange<IntKey> subRange(IntKey start, IntKey end)
-        {
-            return new EndInclusiveIntRange(start, end);
-        }
+        return new EndInclusive(k(start), k(end));
     }
 
-    private static class StartInclusiveIntRange extends KeyRange.StartInclusive<IntKey>
+    static KeyRange rangeStartIncl(int start, int end)
     {
-        public StartInclusiveIntRange(IntKey start, IntKey end)
-        {
-            super(start, end);
-        }
-
-        @Override
-        public KeyRange<IntKey> subRange(IntKey start, IntKey end)
-        {
-            return new StartInclusiveIntRange(start, end);
-        }
-    }
-
-    static KeyRange<IntKey> rangeEndIncl(int start, int end)
-    {
-        return new EndInclusiveIntRange(k(start), k(end));
-    }
-
-    static KeyRange<IntKey> rangeStartIncl(int start, int end)
-    {
-        return new StartInclusiveIntRange(k(start), k(end));
+        return new StartInclusive(k(start), k(end));
     }
 
     static Keys keys(int... values)
@@ -99,13 +72,13 @@ public class KeyRangeTest
     @Test
     void containsTest()
     {
-        KeyRange<IntKey> endInclRange = rangeEndIncl(10, 20);
+        KeyRange endInclRange = rangeEndIncl(10, 20);
         Assertions.assertFalse(endInclRange.containsKey(k(10)));
         Assertions.assertFalse(endInclRange.startInclusive());
         Assertions.assertTrue(endInclRange.containsKey(k(20)));
         Assertions.assertTrue(endInclRange.endInclusive());
 
-        KeyRange<IntKey> startInclRange = rangeStartIncl(10, 20);
+        KeyRange startInclRange = rangeStartIncl(10, 20);
         Assertions.assertTrue(startInclRange.containsKey(k(10)));
         Assertions.assertTrue(startInclRange.startInclusive());
         Assertions.assertFalse(startInclRange.containsKey(k(20)));
@@ -231,7 +204,7 @@ public class KeyRangeTest
         Assertions.assertEquals(-1, r(100, 200).compareIntersecting(r(201, 300)));
     }
 
-    private static void assertIntersection(KeyRange<IntKey> expected, KeyRange<IntKey> a, KeyRange<IntKey> b)
+    private static void assertIntersection(KeyRange expected, KeyRange a, KeyRange b)
     {
         Assertions.assertEquals(expected, a.intersection(b));
         Assertions.assertEquals(expected, b.intersection(a));
@@ -259,21 +232,5 @@ public class KeyRangeTest
         Assertions.assertFalse(range.intersects(keys(50, 75)));
         Assertions.assertFalse(range.intersects(keys(50, 75, 250, 300)));
         Assertions.assertFalse(range.intersects(keys(250, 300)));
-    }
-
-    @Test
-    void tryMergeTest()
-    {
-        // touching
-        Assertions.assertEquals(r(0, 100), r(0, 50).tryMerge(r(50, 100)));
-        Assertions.assertEquals(r(0, 100), r(50, 100).tryMerge(r(0, 50)));
-
-        // intersecting
-        Assertions.assertEquals(r(0, 100), r(0, 75).tryMerge(r(25, 100)));
-        Assertions.assertEquals(r(0, 100), r(25, 100).tryMerge(r(0, 75)));
-
-        // can't merge
-        Assertions.assertNull(r(0, 40).tryMerge(r(60, 100)));
-        Assertions.assertNull(r(60, 100).tryMerge(r(0, 40)));
     }
 }

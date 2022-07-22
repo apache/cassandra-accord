@@ -1,7 +1,8 @@
 package accord.api;
 
-import accord.txn.Keys;
-import accord.txn.Timestamp;
+import accord.primitives.KeyRanges;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
 
 /**
  * A read to be performed on potentially multiple shards, the inputs of which may be fed to a {@link Query}
@@ -12,4 +13,6 @@ public interface Read
 {
     Keys keys();
     Data read(Key key, Timestamp executeAt, DataStore store);
+    Read slice(KeyRanges ranges);
+    Read merge(Read other);
 }

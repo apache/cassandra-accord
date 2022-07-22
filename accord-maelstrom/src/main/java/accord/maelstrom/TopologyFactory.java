@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import accord.topology.KeyRange;
+import accord.primitives.KeyRange;
 import accord.local.Node.Id;
 import accord.maelstrom.Datum.Kind;
 import accord.topology.Shard;
@@ -19,7 +19,7 @@ public class TopologyFactory
     final int shards;
     final int rf;
     final Kind[] kinds;
-    final KeyRange<MaelstromKey>[][] ranges;
+    final KeyRange[][] ranges;
 
     public TopologyFactory(int shards, int rf)
     {
