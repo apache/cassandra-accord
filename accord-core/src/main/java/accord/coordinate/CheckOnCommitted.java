@@ -126,7 +126,7 @@ public class CheckOnCommitted extends CheckShards
         RoutingKey progressKey = node.trySelectProgressKey(txnId, maxRoute);
 
         boolean canCommit = requestedRoute.covers(commitRanges);
-        boolean canExecute = requestedRoute.covers(executeRanges);
+        boolean canExecute = requestedRoute.covers(executeRanges) && untilLocalEpoch >= executeAt.epoch;
 
         Preconditions.checkState(canCommit);
         Preconditions.checkState(untilRemoteEpoch < full.executeAt.epoch || canExecute);
