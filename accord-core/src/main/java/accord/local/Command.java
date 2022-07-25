@@ -4,22 +4,26 @@ import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.function.Consumer;
 
+import com.google.common.base.Preconditions;
+
 import accord.api.Key;
 import accord.api.Result;
 import accord.local.Node.Id;
 import accord.topology.KeyRanges;
 import accord.txn.Ballot;
 import accord.txn.Dependencies;
-import accord.txn.Keys.KeyFold;
+import accord.txn.Keys;
 import accord.txn.Timestamp;
 import accord.txn.Txn;
 import accord.txn.TxnId;
 import accord.txn.Writes;
 
 import static accord.local.Status.Accepted;
+import static accord.local.Status.AcceptedInvalidate;
 import static accord.local.Status.Applied;
 import static accord.local.Status.Committed;
 import static accord.local.Status.Executed;
+import static accord.local.Status.Invalidated;
 import static accord.local.Status.NotWitnessed;
 import static accord.local.Status.PreAccepted;
 import static accord.local.Status.ReadyToExecute;
@@ -126,26 +130,28 @@ public class Command implements Listener, Consumer<Listener>
     // note: we do not set status = newStatus, we only use it to decide how we register with the retryLog
     private void witness(Txn txn, Key homeKey, Key progressKey)
     {
-        if (hasBeen(PreAccepted))
-            return;
-
-        Timestamp max = commandStore.maxConflict(txn.keys);
-        // unlike in the Accord paper, we partition shards within a node, so that to ensure a total order we must either:
-        //  - use a global logical clock to issue new timestamps; or
-        //  - assign each shard _and_ process a unique id, and use both as components of the timestamp
-        Timestamp witnessed = txnId.compareTo(max) > 0 && txnId.epoch >= commandStore.latestEpoch() ? txnId : commandStore.uniqueNow(max);
-
         txn(txn);
         homeKey(homeKey);
         progressKey(progressKey);
-        this.executeAt = witnessed;
-        this.status = PreAccepted;
 
-        txn.keys().foldl(commandStore.ranges().since(txnId.epoch), (key, param) -> {
-            if (commandStore.hashIntersects(key))
-                commandStore.commandsForKey(key).register(this);
-            return null;
-        }, null);
+        if (status == NotWitnessed)
+            status = PreAccepted;
+
+        if (executeAt == null)
+        {
+            Timestamp max = commandStore.maxConflict(txn.keys);
+            // unlike in the Accord paper, we partition shards within a node, so that to ensure a total order we must either:
+            //  - use a global logical clock to issue new timestamps; or
+            //  - assign each shard _and_ process a unique id, and use both as components of the timestamp
+            executeAt = txnId.compareTo(max) > 0 && txnId.epoch >= commandStore.latestEpoch()
+                        ? txnId : commandStore.uniqueNow(max);
+
+            txn.keys().foldl(commandStore.ranges().since(txnId.epoch), (key, param) -> {
+                if (commandStore.hashIntersects(key))
+                    commandStore.commandsForKey(key).register(this);
+                return null;
+            }, null);
+        }
     }
 
     public boolean preaccept(Txn txn, Key homeKey, Key progressKey)
@@ -185,15 +191,30 @@ public class Command implements Listener, Consumer<Listener>
         return true;
     }
 
+    public boolean acceptInvalidate(Ballot ballot)
+    {
+        if (this.promised.compareTo(ballot) > 0)
+            return false;
+
+        if (hasBeen(Committed))
+            return false;
+
+        promised = accepted = ballot;
+        status = AcceptedInvalidate;
+
+        listeners.forEach(this);
+        return true;
+    }
+
     // relies on mutual exclusion for each key
     public boolean commit(Txn txn, Key homeKey, Key progressKey, Timestamp executeAt, Dependencies deps)
     {
         if (hasBeen(Committed))
         {
-            if (executeAt.equals(this.executeAt))
+            if (executeAt.equals(this.executeAt) && status != Invalidated)
                 return false;
 
-            commandStore.agent().onInconsistentTimestamp(this, this.executeAt, executeAt);
+            commandStore.agent().onInconsistentTimestamp(this, (status == Invalidated ? Timestamp.NONE : this.executeAt), executeAt);
         }
 
         witness(txn, homeKey, progressKey);
@@ -215,6 +236,7 @@ public class Command implements Listener, Consumer<Listener>
                     command.txn(depTxn);
                 case PreAccepted:
                 case Accepted:
+                case AcceptedInvalidate:
                     // we don't know when these dependencies will execute, and cannot execute until we do
                     waitingOnCommit.put(id, command);
                     command.addListener(this);
@@ -228,6 +250,7 @@ public class Command implements Listener, Consumer<Listener>
                 case Applied:
                     command.addListener(this);
                     updatePredecessor(command);
+                case Invalidated:
                     break;
             }
         }
@@ -244,6 +267,25 @@ public class Command implements Listener, Consumer<Listener>
         commandStore.progressLog().commit(txnId, isProgressShard, isProgressShard && progressKey.equals(homeKey));
 
         maybeExecute(false);
+        listeners.forEach(this);
+        return true;
+    }
+
+    public boolean commitInvalidate()
+    {
+        if (hasBeen(Committed))
+        {
+            if (!hasBeen(Invalidated))
+                commandStore.agent().onInconsistentTimestamp(this, Timestamp.NONE, executeAt);
+
+            return false;
+        }
+
+        status = Invalidated;
+
+        boolean isProgressShard = progressKey != null && handles(txnId.epoch, progressKey);
+        commandStore.progressLog().invalidate(txnId, isProgressShard, isProgressShard && progressKey.equals(homeKey));
+
         listeners.forEach(this);
         return true;
     }
@@ -275,10 +317,21 @@ public class Command implements Listener, Consumer<Listener>
         if (this.promised.compareTo(ballot) > 0)
             return false;
 
+        Status status = this.status;
         witness(txn, homeKey, progressKey);
-        this.promised = ballot;
         boolean isProgressShard = progressKey != null && handles(txnId.epoch, progressKey);
-        commandStore.progressLog().preaccept(txnId, isProgressShard, isProgressShard && progressKey.equals(homeKey));
+        if (status == NotWitnessed)
+            commandStore.progressLog().preaccept(txnId, isProgressShard, isProgressShard && progressKey.equals(homeKey));
+        this.promised = ballot;
+        return true;
+    }
+
+    public boolean preAcceptInvalidate(Ballot ballot)
+    {
+        if (this.promised.compareTo(ballot) > 0)
+            return false;
+
+        this.promised = ballot;
         return true;
     }
 
@@ -302,12 +355,14 @@ public class Command implements Listener, Consumer<Listener>
             case NotWitnessed:
             case PreAccepted:
             case Accepted:
+            case AcceptedInvalidate:
                 break;
 
             case Committed:
             case ReadyToExecute:
             case Executed:
             case Applied:
+            case Invalidated:
                 if (waitingOnApply != null)
                 {
                     updatePredecessor(command);
@@ -338,10 +393,7 @@ public class Command implements Listener, Consumer<Listener>
             BlockedBy blockedBy = blockedBy();
             if (blockedBy != null)
             {
-                Key homeKey = blockedBy.directlyBlockedBy.homeKey();
-                if (homeKey == null)
-                    homeKey = blockedBy.directlyBlocked.deps.homeKey(blockedBy.directlyBlockedBy.txnId());
-                commandStore.progressLog().waiting(blockedBy.directlyBlockedBy.txnId, homeKey);
+                commandStore.progressLog().waiting(blockedBy.txnId, blockedBy.someKeys);
                 return;
             }
             assert waitingOnApply == null;
@@ -366,13 +418,16 @@ public class Command implements Listener, Consumer<Listener>
     }
 
     /**
-     * @param dependency is either committed or has an executeAtExclusiveLowerBound >= our executeAt
+     * @param dependency is either committed or invalidated
      */
     private void updatePredecessor(Command dependency)
     {
-        if (!dependency.hasBeen(Committed))
+        Preconditions.checkState(dependency.hasBeen(Committed));
+        if (dependency.hasBeen(Invalidated))
         {
             dependency.removeListener(this);
+            if (waitingOnCommit.remove(dependency.txnId) != null && waitingOnCommit.isEmpty())
+                waitingOnCommit = null;
         }
         else if (dependency.executeAt.compareTo(executeAt) > 0)
         {
@@ -393,13 +448,13 @@ public class Command implements Listener, Consumer<Listener>
     // TEMPORARY: once we can invalidate commands that have not been witnessed on any shard, we do not need to know the home shard
     static class BlockedBy
     {
-        final Command directlyBlocked;
-        final Command directlyBlockedBy;
+        final TxnId txnId;
+        final Keys someKeys;
 
-        BlockedBy(Command directlyBlocked, Command directlyBlockedBy)
+        BlockedBy(TxnId txnId, Keys someKeys)
         {
-            this.directlyBlocked = directlyBlocked;
-            this.directlyBlockedBy = directlyBlockedBy;
+            this.txnId = txnId;
+            this.someKeys = someKeys;
         }
     }
 
@@ -417,7 +472,10 @@ public class Command implements Listener, Consumer<Listener>
             cur = next;
         }
 
-        return new BlockedBy(prev, cur);
+        Keys someKeys = cur.someKeys();
+        if (someKeys == null)
+            someKeys = prev.deps.get(cur.txnId).keys;
+        return new BlockedBy(cur.txnId, someKeys);
     }
 
     /**
@@ -442,12 +500,23 @@ public class Command implements Listener, Consumer<Listener>
         else if (!this.homeKey.equals(homeKey)) throw new AssertionError();
     }
 
+    public Keys someKeys()
+    {
+        if (txn != null)
+            return txn.keys;
+
+        return null;
+    }
+
     public Key someKey()
     {
         if (homeKey != null)
             return homeKey;
 
-        return txn.keys.get(0);
+        if (txn.keys != null)
+            return txn.keys.get(0);
+
+        return null;
     }
 
     /**

@@ -1,6 +1,7 @@
 package accord.topology;
 
 import accord.local.Node;
+import accord.local.Node.Id;
 import accord.utils.IndexedConsumer;
 import com.google.common.base.Preconditions;
 
@@ -30,6 +31,8 @@ public interface Topologies
     int totalShards();
 
     Set<Node.Id> nodes();
+
+    Set<Node.Id> copyOfNodes();
 
     default void forEach(IndexedConsumer<Topology> consumer)
     {
@@ -156,6 +159,12 @@ public interface Topologies
         }
 
         @Override
+        public Set<Id> copyOfNodes()
+        {
+            return new HashSet<>(nodes());
+        }
+
+        @Override
         public boolean equals(Object obj)
         {
             return Topologies.equals(this, obj);
@@ -214,6 +223,9 @@ public interface Topologies
         @Override
         public boolean fastPathPermitted()
         {
+            // TODO (soon): this is overly restrictive: we can still take the fast-path during topology movements,
+            //              just not for transactions started across the initiation of a topology movement (i.e.
+            //              where the epoch changes while the transaction is being pre-accepted)
             return false;
         }
 
@@ -245,6 +257,12 @@ public interface Topologies
             for (int i=0,mi=size(); i<mi; i++)
                 result.addAll(get(i).nodes());
             return result;
+        }
+
+        @Override
+        public Set<Id> copyOfNodes()
+        {
+            return nodes();
         }
 
         public void add(Topology topology)

@@ -104,11 +104,17 @@ public class EpochSync implements Runnable
         }
 
         @Override
-        public synchronized void onFailure(Node.Id from, Throwable throwable)
+        public synchronized void onFailure(Node.Id from, Throwable failure)
         {
             tracker.failure(from);
             if (tracker.hasFailed())
-                tryFailure(throwable);
+                tryFailure(failure);
+        }
+
+        @Override
+        public void onCallbackFailure(Throwable failure)
+        {
+            tryFailure(failure);
         }
 
         public static void sync(Node node, SyncCommitted message, Topology topology)

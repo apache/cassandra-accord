@@ -2,10 +2,13 @@ package accord.api;
 
 import java.util.Set;
 
+import javax.annotation.Nullable;
+
 import accord.coordinate.CheckOnUncommitted;
 import accord.coordinate.InformHomeOfTxn;
 import accord.local.CommandStore;
 import accord.local.Node.Id;
+import accord.txn.Keys;
 import accord.txn.TxnId;
 
 /**
@@ -87,6 +90,11 @@ public interface ProgressLog
     void execute(TxnId txnId, boolean isProgressShard, boolean isHomeShard);
 
     /**
+     * The transaction has been durably invalidated
+     */
+    void invalidate(TxnId txnId, boolean isProgressShard, boolean isHomeShard);
+
+    /**
      * The transaction's outcome has been durably recorded (but not necessarily applied) at a quorum of all shards.
      *
      * If this replica has not witnessed the outcome of the transaction, it should poll a majority of the home shard
@@ -112,5 +120,5 @@ public interface ProgressLog
      *
      * In all other scenarios, the implementation is free to choose its course of action.
      */
-    void waiting(TxnId blockedBy, Key homeKey);
+    void waiting(TxnId blockedBy, @Nullable Keys someKeys);
 }

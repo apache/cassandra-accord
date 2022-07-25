@@ -1,46 +1,50 @@
 package accord.coordinate;
 
-import accord.api.ConfigurationService;
-
-import com.google.common.base.Preconditions;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.function.BiConsumer;
 
 import accord.api.Key;
-import accord.local.Node;
 import accord.api.Result;
-import accord.local.Node;
+import accord.coordinate.tracking.FastPathTracker;
+import accord.topology.Shard;
+import accord.topology.Topologies;
 import accord.txn.Ballot;
+import accord.messages.Callback;
+import accord.local.Node;
+import accord.txn.Dependencies;
+import accord.local.Node.Id;
+import accord.txn.Timestamp;
+import accord.messages.PreAccept;
+import accord.messages.PreAccept.PreAcceptOk;
 import accord.txn.Txn;
 import accord.txn.TxnId;
+import accord.messages.PreAccept.PreAcceptReply;
+import com.google.common.collect.Sets;
+
+import org.apache.cassandra.utils.concurrent.AsyncFuture;
 import org.apache.cassandra.utils.concurrent.Future;
 
-public class Coordinate
+/**
+ * Perform initial rounds of PreAccept and Accept until we have reached agreement about when we should execute.
+ * If we are preempted by a recovery coordinator, we abort and let them complete (and notify us about the execution result)
+ */
+public class Coordinate extends AsyncFuture<Result> implements BiConsumer<Result, Throwable>
 {
-    private static Future<Result> fetchEpochOrExecute(Node node, Agreed agreed)
+    public static Future<Result> coordinate(Node node, TxnId txnId, Txn txn, Key homeKey)
     {
-        long executeEpoch = agreed.executeAt.epoch;
-        ConfigurationService configService = node.configService();
-        if (executeEpoch > node.topology().epoch())
-        {
-            configService.fetchTopologyForEpoch(executeEpoch);
-            return node.topology().awaitEpoch(executeEpoch).flatMap(v -> fetchEpochOrExecute(node, agreed));
-        }
-
-        return Execute.execute(node, agreed);
+        Coordinate coordinate = new Coordinate();
+        Initiate initiate = new Initiate(node, txnId, txn, homeKey, coordinate);
+        initiate.start();
+        return coordinate;
     }
 
-    private static Future<Result> andThenExecute(Node node, Future<Agreed> agree)
+    @Override
+    public void accept(Result success, Throwable failure)
     {
-        return agree.flatMap(agreed -> fetchEpochOrExecute(node, agreed));
-    }
-
-    public static Future<Result> execute(Node node, TxnId txnId, Txn txn, Key homeKey)
-    {
-        Preconditions.checkArgument(node.isReplicaOf(txnId, homeKey));
-        return andThenExecute(node, Agree.agree(node, txnId, txn, homeKey));
-    }
-
-    public static Future<Result> recover(Node node, TxnId txnId, Txn txn, Key homeKey)
-    {
-        return andThenExecute(node, new Recover(node, new Ballot(node.uniqueNow()), txnId, txn, homeKey));
+        if (success != null) trySuccess(success);
+        else tryFailure(failure);
     }
 }

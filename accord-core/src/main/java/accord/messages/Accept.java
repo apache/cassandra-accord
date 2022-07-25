@@ -1,6 +1,7 @@
 package accord.messages;
 
 import accord.messages.TxnRequest.WithUnsynced;
+import accord.local.Node.Id;
 import accord.topology.Topologies;
 import accord.api.Key;
 import accord.txn.Ballot;
@@ -16,24 +17,24 @@ import static accord.messages.PreAccept.calculateDeps;
 public class Accept extends WithUnsynced
 {
     public final Ballot ballot;
+    public final Key homeKey;
     public final Txn txn;
-    public final long minEpoch;
     public final Timestamp executeAt;
     public final Dependencies deps;
 
-    public Accept(Node.Id to, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Dependencies deps)
+    public Accept(Id to, Topologies topologies, Ballot ballot, TxnId txnId, Key homeKey, Txn txn, Timestamp executeAt, Dependencies deps)
     {
-        super(to, topologies, txn.keys, txnId, homeKey);
+        super(to, topologies, txn.keys, txnId);
         this.ballot = ballot;
+        this.homeKey = homeKey;
         this.txn = txn;
-        this.minEpoch = topologies.oldestEpoch();
         this.executeAt = executeAt;
         this.deps = deps;
     }
 
     public void process(Node node, Node.Id replyToNode, ReplyContext replyContext)
     {
-        Key progressKey = progressKey(node);
+        Key progressKey = progressKey(node, homeKey);
         // TODO: when we begin expunging old epochs we need to ensure we handle the case where we do not fully handle the keys;
         //       since this will likely imply the transaction has been applied or aborted we can indicate the coordinator
         //       should enquire as to the result
@@ -58,6 +59,48 @@ public class Accept extends WithUnsynced
     public MessageType type()
     {
         return MessageType.ACCEPT_REQ;
+    }
+
+    public static class Invalidate implements EpochRequest
+    {
+        public final Ballot ballot;
+        public final TxnId txnId;
+        public final Key someKey;
+
+        public Invalidate(Ballot ballot, TxnId txnId, Key someKey)
+        {
+            this.ballot = ballot;
+            this.txnId = txnId;
+            this.someKey = someKey;
+        }
+
+        public void process(Node node, Node.Id replyToNode, ReplyContext replyContext)
+        {
+            node.reply(replyToNode, replyContext, node.ifLocal(someKey, txnId.epoch, instance -> {
+                Command command = instance.command(txnId);
+                if (!command.acceptInvalidate(ballot))
+                    return new AcceptNack(txnId, command.promised());
+                return new AcceptOk(txnId, null);
+            }));
+        }
+
+        @Override
+        public MessageType type()
+        {
+            return MessageType.ACCEPT_INVALIDATE_REQ;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "AcceptInvalidate{" + ballot + '}';
+        }
+
+        @Override
+        public long waitForEpoch()
+        {
+            return txnId.epoch;
+        }
     }
 
     public interface AcceptReply extends Reply

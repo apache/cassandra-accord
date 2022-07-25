@@ -311,7 +311,6 @@ public abstract class CommandStores
     {
         return new RangesForEpoch()
         {
-
             @Override
             public KeyRanges at(long epoch)
             {
@@ -322,6 +321,13 @@ public abstract class CommandStores
             public KeyRanges since(long epoch)
             {
                 return current.ranges[generation].rangesSinceEpoch(epoch);
+            }
+
+            @Override
+            public boolean intersects(long epoch, Keys keys)
+            {
+                KeyRanges ranges = at(epoch);
+                return ranges != null && ranges.intersects(keys);
             }
         };
     }
@@ -364,6 +370,11 @@ public abstract class CommandStores
     public <T> T mapReduce(Key key, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
         return mapReduce(ShardedRanges::shard, key, epoch, epoch, map, reduce);
+    }
+
+    public <T> T mapReduceSince(Key key, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    {
+        return mapReduce(ShardedRanges::shard, key, epoch, Long.MAX_VALUE, map, reduce);
     }
 
     public <T extends Collection<CommandStore>> T collect(Keys keys, long epoch, IntFunction<T> factory)

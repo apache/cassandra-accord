@@ -1,8 +1,10 @@
 package accord.messages;
 
-import accord.api.ConfigurationService;
 import accord.api.Result;
+import accord.coordinate.Persist;
 import accord.topology.Topologies;
+
+import java.util.List;
 import java.util.stream.Stream;
 
 import accord.api.Key;
@@ -105,15 +107,17 @@ public class BeginRecovery extends TxnRequest
                     break;
 
                 case Accepted:
+                case AcceptedInvalidate:
                     // we currently replicate all deps to every shard, so all Accepted should have the same information
                     // but we must pick the one with the newest ballot
-                    if (ok2.status == Accepted)
+                    if (ok2.status.logicalCompareTo(ok1.status) == 0)
                         return ok1.accepted.compareTo(ok2.accepted) >= 0 ? ok1 : ok2;
 
                 case Committed:
                 case ReadyToExecute:
                 case Executed:
                 case Applied:
+                case Invalidated:
                     // we currently replicate all deps to every shard, so all Committed should have the same information
                     return ok1;
             }
@@ -147,36 +151,30 @@ public class BeginRecovery extends TxnRequest
         node.reply(replyToNode, replyContext, reply);
         if (reply instanceof RecoverOk && ((RecoverOk) reply).status == Applied)
         {
-            // disseminate directly
+            // TODO: this should be a call to the node's agent for the implementation to decide what to do;
+            //       probably at most want to disseminate to local replicas, or notify the progress log
             RecoverOk ok = (RecoverOk) reply;
-            ConfigurationService configService = node.configService();
-            if (ok.executeAt.epoch > node.topology().epoch())
-            {
-                configService.fetchTopologyForEpoch(ok.executeAt.epoch);
-                node.topology().awaitEpoch(ok.executeAt.epoch).addListener(() -> disseminateApply(node, ok));
-                return;
-            }
-            disseminateApply(node, ok);
+            Preconditions.checkArgument(ok.status == Applied);
+            node.withEpoch(ok.executeAt.epoch, () -> {
+                Persist.persistAndCommit(node, txnId, homeKey, txn, ok.executeAt, ok.deps, ok.writes, ok.result);
+            });
         }
     }
 
-    private void disseminateApply(Node node, RecoverOk ok)
-    {
-        Preconditions.checkArgument(ok.status == Applied);
-        if (ok.executeAt.epoch > node.epoch())
-        {
-            node.configService().fetchTopologyForEpoch(ok.executeAt.epoch);
-            node.topology().awaitEpoch(ok.executeAt.epoch).addListener(() -> disseminateApply(node, ok));
-            return;
-        }
-        Topologies topologies = node.topology().withUnsyncedEpochs(txn.keys, ok.executeAt.epoch);
-        node.send(topologies.nodes(), to -> new Apply(to, topologies, txnId, txn, homeKey, ok.executeAt, ok.deps, ok.writes, ok.result));
-    }
-    
     @Override
     public MessageType type()
     {
-        return MessageType.RECOVER_REQ;
+        return MessageType.BEGIN_RECOVER_REQ;
+    }
+
+    @Override
+    public String toString()
+    {
+        return "BeginRecovery{" +
+               "txnId:" + txnId +
+               ", txn:" + txn +
+               ", ballot:" + ballot +
+               '}';
     }
 
     public interface RecoverReply extends Reply
@@ -184,7 +182,7 @@ public class BeginRecovery extends TxnRequest
         @Override
         default MessageType type()
         {
-            return MessageType.RECOVER_RSP;
+            return MessageType.BEGIN_RECOVER_RSP;
         }
 
         boolean isOK();
@@ -226,7 +224,12 @@ public class BeginRecovery extends TxnRequest
         @Override
         public String toString()
         {
-            return "RecoverOk{" +
+            return toString("RecoverOk");
+        }
+
+        String toString(String kind)
+        {
+            return kind + "{" +
                    "txnId:" + txnId +
                    ", status:" + status +
                    ", accepted:" + accepted +
@@ -238,6 +241,28 @@ public class BeginRecovery extends TxnRequest
                    ", writes:" + writes +
                    ", result:" + result +
                    '}';
+        }
+
+        public static <T extends RecoverOk> T maxAcceptedOrLater(List<T> recoverOks)
+        {
+            T max = null;
+            for (T ok : recoverOks)
+            {
+                if (ok.status.hasBeen(Accepted))
+                {
+                    if (max == null)
+                    {
+                        max = ok;
+                    }
+                    else
+                    {
+                        int c = max.status.logicalCompareTo(ok.status);
+                        if (c < 0) max = ok;
+                        else if (c == 0 && max.accepted.compareTo(ok.accepted) < 0) max = ok;
+                    }
+                }
+            }
+            return max;
         }
     }
 
@@ -262,16 +287,6 @@ public class BeginRecovery extends TxnRequest
                    "supersededBy:" + supersededBy +
                    '}';
         }
-    }
-
-    @Override
-    public String toString()
-    {
-        return "BeginRecovery{" +
-               "txnId:" + txnId +
-               ", txn:" + txn +
-               ", ballot:" + ballot +
-               '}';
     }
 
     private static Stream<Command> uncommittedStartedBefore(CommandStore commandStore, TxnId startedBefore, Keys keys)

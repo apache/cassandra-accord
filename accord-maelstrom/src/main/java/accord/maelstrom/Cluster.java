@@ -74,7 +74,7 @@ public class Cluster implements Scheduler
             parent.add(self, to, messageId, send);
             parent.pending.add((Runnable)() -> {
                 if (callback == callbacks.remove(messageId))
-                    callback.onFailure(to, new Timeout());
+                    callback.onFailure(to, new Timeout(null, null));
             }, 1000 + random.nextInt(10000), TimeUnit.MILLISECONDS);
         }
 

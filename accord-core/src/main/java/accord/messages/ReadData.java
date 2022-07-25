@@ -44,14 +44,17 @@ public class ReadData extends TxnRequest
         {
             switch (command.status())
             {
+                default: throw new IllegalStateException();
                 case NotWitnessed:
                 case PreAccepted:
                 case Accepted:
+                case AcceptedInvalidate:
                 case Committed:
                     return;
 
                 case Executed:
                 case Applied:
+                case Invalidated:
                     obsolete();
                 case ReadyToExecute:
             }
@@ -91,16 +94,20 @@ public class ReadData extends TxnRequest
                 command.preaccept(txn, homeKey, progressKey); // ensure pre-accepted
                 switch (command.status())
                 {
+                    default:
                     case NotWitnessed:
                         throw new IllegalStateException();
+
                     case PreAccepted:
                     case Accepted:
+                    case AcceptedInvalidate:
                     case Committed:
                         command.addListener(this);
                         break;
 
                     case Executed:
                     case Applied:
+                    case Invalidated:
                         obsolete();
                         break;
 

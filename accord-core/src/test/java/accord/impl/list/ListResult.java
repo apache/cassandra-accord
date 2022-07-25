@@ -38,10 +38,12 @@ public class ListResult implements Result, Reply
     {
         return "{client:" + client + ", "
                + "requestId:" + requestId + ", "
-               + "reads:" + IntStream.range(0, keys.size())
+               + (keys == null
+                  ? "invalidated!}"
+                  : "reads:" + IntStream.range(0, keys.size())
                                       .filter(i -> read[i] != null)
                                       .mapToObj(i -> keys.get(i) + ":" + Arrays.toString(read[i]))
                                       .collect(Collectors.joining(", ", "{", "}")) + ", "
-               + "writes:" + update + "}";
+                    + "writes:" + update + "}");
     }
 }

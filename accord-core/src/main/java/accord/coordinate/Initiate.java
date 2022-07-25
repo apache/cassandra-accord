@@ -1,44 +1,40 @@
 package accord.coordinate;
 
+import accord.api.Key;
+import accord.api.Result;
+import accord.coordinate.tracking.FastPathTracker;
+import accord.local.Node;
+import accord.local.Node.Id;
+import accord.messages.Callback;
+import accord.messages.PreAccept;
+import accord.messages.PreAccept.PreAcceptOk;
+import accord.messages.PreAccept.PreAcceptReply;
+import accord.topology.Shard;
+import accord.topology.Topologies;
+import accord.txn.*;
+import com.google.common.collect.Sets;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-
-import accord.api.Key;
-import accord.coordinate.tracking.FastPathTracker;
-import accord.topology.Shard;
-import accord.topology.Topologies;
-import accord.txn.Ballot;
-import accord.messages.Callback;
-import accord.local.Node;
-import accord.txn.Dependencies;
-import accord.txn.Keys;
-import accord.local.Node.Id;
-import accord.txn.Timestamp;
-import accord.messages.PreAccept;
-import accord.messages.PreAccept.PreAcceptOk;
-import accord.txn.Txn;
-import accord.txn.TxnId;
-import accord.messages.PreAccept.PreAcceptReply;
-import com.google.common.collect.Sets;
-import org.apache.cassandra.utils.concurrent.Future;
+import java.util.function.BiConsumer;
 
 /**
  * Perform initial rounds of PreAccept and Accept until we have reached agreement about when we should execute.
  * If we are preempted by a recovery coordinator, we abort and let them complete (and notify us about the execution result)
  */
-class Agree extends Propose implements Callback<PreAcceptReply>
+public class Initiate implements Callback<PreAcceptReply>
 {
-    static class ShardTracker extends FastPathTracker.FastPathShardTracker
+    static class PreAcceptShardTracker extends FastPathTracker.FastPathShardTracker
     {
-        public ShardTracker(Shard shard)
+        public PreAcceptShardTracker(Shard shard)
         {
             super(shard);
         }
 
         @Override
-        public boolean includeInFastPath(Node.Id node, boolean withFastPathTimestamp)
+        public boolean includeInFastPath(Id node, boolean withFastPathTimestamp)
         {
             return withFastPathTimestamp && shard.fastPathElectorate.contains(node);
         }
@@ -50,20 +46,20 @@ class Agree extends Propose implements Callback<PreAcceptReply>
         }
     }
 
-    static class PreacceptTracker extends FastPathTracker<ShardTracker>
+    static class PreAcceptTracker extends FastPathTracker<PreAcceptShardTracker>
     {
         volatile long supersedingEpoch = -1;
         private final boolean fastPathPermitted;
         private final Set<Id> successes = new HashSet<>();
         private Set<Id> failures;
 
-        public PreacceptTracker(Topologies topologies, boolean fastPathPermitted)
+        public PreAcceptTracker(Topologies topologies, boolean fastPathPermitted)
         {
-            super(topologies, Agree.ShardTracker[]::new, Agree.ShardTracker::new);
+            super(topologies, PreAcceptShardTracker[]::new, PreAcceptShardTracker::new);
             this.fastPathPermitted = fastPathPermitted;
         }
 
-        public PreacceptTracker(Topologies topologies)
+        public PreAcceptTracker(Topologies topologies)
         {
             this(topologies, topologies.fastPathPermitted());
         }
@@ -102,9 +98,9 @@ class Agree extends Propose implements Callback<PreAcceptReply>
             return supersedingEpoch > 0;
         }
 
-        public PreacceptTracker withUpdatedTopologies(Topologies topologies)
+        public PreAcceptTracker withUpdatedTopologies(Topologies topologies)
         {
-            PreacceptTracker tracker = new PreacceptTracker(topologies, false);
+            PreAcceptTracker tracker = new PreAcceptTracker(topologies, false);
             successes.forEach(tracker::recordSuccess);
             if (failures != null)
                 failures.forEach(tracker::failure);
@@ -123,48 +119,64 @@ class Agree extends Propose implements Callback<PreAcceptReply>
         }
     }
 
-    final Keys keys;
+    final Node node;
+    final TxnId txnId;
+    final Txn txn;
+    final Key homeKey;
+    final BiConsumer<Result, Throwable> callback;
 
-    public enum PreacceptOutcome { COMMIT, ACCEPT }
-
-    private PreacceptTracker tracker;
-
-    private PreacceptOutcome preacceptOutcome;
+    private PreAcceptTracker tracker;
     private final List<PreAcceptOk> preAcceptOks = new ArrayList<>();
+    private boolean isDone;
 
     // TODO: hybrid fast path? or at least short-circuit accept if we gain a fast-path quorum _and_ proposed one by accept
     boolean permitHybridFastPath;
 
-    private Agree(Node node, TxnId txnId, Txn txn, Key homeKey)
+    Initiate(Node node, TxnId txnId, Txn txn, Key homeKey, BiConsumer<Result, Throwable> callback)
     {
-        super(node, Ballot.ZERO, txnId, txn, homeKey);
-        this.keys = txn.keys();
-        tracker = new PreacceptTracker(node.topology().withUnsyncedEpochs(txn.keys(), txnId.epoch, txnId.epoch));
+        this.node = node;
+        this.txnId = txnId;
+        this.txn = txn;
+        this.homeKey = homeKey;
+        this.callback = callback;
+        Topologies topologies = node.topology().withUnsyncedEpochs(txn.keys(), txnId.epoch, txnId.epoch);
+        this.tracker = new PreAcceptTracker(topologies);
+    }
+
+    void start()
+    {
         // TODO: consider sending only to electorate of most recent topology (as only these PreAccept votes matter)
         // note that we must send to all replicas of old topology, as electorate may not be reachable
         node.send(tracker.nodes(), to -> new PreAccept(to, tracker.topologies(), txnId, txn, homeKey), this);
     }
 
     @Override
-    public void onSuccess(Id from, PreAcceptReply response)
+    public synchronized void onFailure(Id from, Throwable failure)
     {
-        onPreAccept(from, response);
-    }
-
-    @Override
-    public synchronized void onFailure(Id from, Throwable throwable)
-    {
-        if (isDone() || isPreAccepted())
+        if (isDone)
             return;
 
         if (tracker.failure(from))
-            tryFailure(new Timeout());
+        {
+            isDone = true;
+            callback.accept(null, new Timeout(txnId, homeKey));
+        }
 
         // if no other responses are expected and the slow quorum has been satisfied, proceed
         if (tracker.shouldSlowPathAccept())
             onPreAccepted();
     }
 
+    @Override
+    public synchronized void onCallbackFailure(Throwable failure)
+    {
+        isDone = true;
+        callback.accept(null, failure);
+    }
+
+    // TODO (soon): do we need to preaccept in later epochs? the sync logic should take care of it for us, since
+    //              either we haven't synced between a majority and the earlier epochs are still involved for
+    //              later preaccepts, or they have been sync'd and the earlier transactions are known to the later epochs
     private synchronized void onEpochUpdate()
     {
         if (!tracker.hasSupersedingEpoch())
@@ -184,15 +196,16 @@ class Agree extends Propose implements Callback<PreAcceptReply>
             onPreAccepted();
     }
 
-    private synchronized void onPreAccept(Id from, PreAcceptReply receive)
+    public synchronized void onSuccess(Id from, PreAcceptReply receive)
     {
-        if (isDone() || isPreAccepted())
+        if (isDone)
             return;
 
         if (!receive.isOK())
         {
             // we've been preempted by a recovery coordinator; defer to it, and wait to hear any result
-            tryFailure(new Preempted());
+            isDone = true;
+            callback.accept(null, new Preempted(txnId, homeKey));
             return;
         }
 
@@ -210,48 +223,44 @@ class Agree extends Propose implements Callback<PreAcceptReply>
         }
 
         if (!tracker.hasSupersedingEpoch() && (tracker.hasMetFastPathCriteria() || tracker.shouldSlowPathAccept()))
-            onPreAccepted();
+            onPreAccepted(); // note, can already have invoked onPreAccepted in onEpochUpdate
     }
 
     private void onPreAccepted()
     {
+        if (isDone)
+            return;
+
+        isDone = true;
         if (tracker.hasMetFastPathCriteria())
         {
-            preacceptOutcome = PreacceptOutcome.COMMIT;
+            isDone = true;
             Dependencies deps = new Dependencies();
             for (PreAcceptOk preAcceptOk : preAcceptOks)
             {
                 if (preAcceptOk.witnessedAt.equals(txnId))
                     deps.addAll(preAcceptOk.deps);
             }
-            agreed(txnId, deps);
+
+            Execute.execute(node, txnId, txn, homeKey, txnId, deps, callback);
         }
         else
         {
-            preacceptOutcome = PreacceptOutcome.ACCEPT;
-            Timestamp executeAt = Timestamp.NONE;
             Dependencies deps = new Dependencies();
-            for (PreAcceptOk preAcceptOk : preAcceptOks)
-            {
-                deps.addAll(preAcceptOk.deps);
-                executeAt = Timestamp.max(executeAt, preAcceptOk.witnessedAt);
+            Timestamp executeAt; {
+                Timestamp tmp = Timestamp.NONE;
+                for (PreAcceptOk preAcceptOk : preAcceptOks)
+                {
+                    deps.addAll(preAcceptOk.deps);
+                    tmp = Timestamp.max(tmp, preAcceptOk.witnessedAt);
+                }
+                executeAt = tmp;
             }
 
             // TODO: perhaps don't submit Accept immediately if we almost have enough for fast-path,
             //       but by sending accept we rule out hybrid fast-path
             permitHybridFastPath = executeAt.compareTo(txnId) == 0;
-
-            startAccept(executeAt, deps, tracker.topologies());
+            node.withEpoch(executeAt.epoch, () -> Propose.propose(node, tracker.topologies(), Ballot.ZERO, txnId, txn, homeKey, executeAt, deps, callback));
         }
-    }
-
-    private boolean isPreAccepted()
-    {
-        return preacceptOutcome != null;
-    }
-
-    static Future<Agreed> agree(Node node, TxnId txnId, Txn txn, Key homeKey)
-    {
-        return new Agree(node, txnId, txn, homeKey);
     }
 }

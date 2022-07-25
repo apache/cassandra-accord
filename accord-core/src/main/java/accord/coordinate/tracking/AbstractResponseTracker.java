@@ -3,7 +3,6 @@ package accord.coordinate.tracking;
 import accord.local.Node;
 import accord.topology.Shard;
 import accord.topology.Topologies;
-import accord.topology.Topology;
 import accord.utils.IndexedIntFunction;
 
 import com.google.common.annotations.VisibleForTesting;

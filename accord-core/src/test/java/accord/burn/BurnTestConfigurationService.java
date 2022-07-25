@@ -220,9 +220,15 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         }
 
         @Override
-        public synchronized void onFailure(Node.Id from, Throwable throwable)
+        public synchronized void onFailure(Node.Id from, Throwable failure)
         {
             sendNext();
+        }
+
+        @Override
+        public void onCallbackFailure(Throwable failure)
+        {
+            tryFailure(failure);
         }
     }
 
