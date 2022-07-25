@@ -219,7 +219,7 @@ public class Recover extends AsyncFuture<Result> implements Callback<RecoverRepl
                 case PreAccepted:
                     throw new IllegalStateException("Should only be possible to have Accepted or later commands");
                 case Accepted:
-                    // TODO (now): do we need to do a preaccept round for the later epoch?
+                    // no need to preaccept the later round, as future operations always include every old epoch (until it is fully migrated)
                     node.withEpoch(acceptOrCommit.executeAt.epoch, () -> {
                         Propose.propose(node, ballot, txnId, txn, homeKey, acceptOrCommit.executeAt, acceptOrCommit.deps, this);
                     });

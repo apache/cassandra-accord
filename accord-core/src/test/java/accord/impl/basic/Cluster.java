@@ -94,7 +94,7 @@ public class Cluster implements Scheduler
             Packet deliver = (Packet) next;
             Node on = lookup.apply(deliver.dst);
 
-            // TODO (now): random drop chance independent of partition; also port flaky connections etc. from simulator
+            // TODO (soon): random drop chance independent of partition; also port flaky connections etc. from simulator
             // Drop the message if it goes across the partition
             boolean drop = ((Packet) next).src.id >= 0 &&
                     !(partitionSet.contains(deliver.src) && partitionSet.contains(deliver.dst)

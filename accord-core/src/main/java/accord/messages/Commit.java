@@ -28,7 +28,7 @@ public class Commit extends ReadData
         this.read = read;
     }
 
-    // TODO (now): accept Topology not Topologies
+    // TODO: accept Topology not Topologies
     public static void commitAndRead(Node node, Topologies executeTopologies, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Dependencies deps, Set<Id> readSet, Callback<ReadReply> callback)
     {
         for (Node.Id to : executeTopologies.nodes())
@@ -69,7 +69,7 @@ public class Commit extends ReadData
 
     public static void commit(Node node, Topologies commitTo, Topologies appliedTo, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Dependencies deps)
     {
-        // TODO (now): if we switch to Topology rather than Topologies we can avoid sending commits to nodes that Apply the same
+        // TODO: if we switch to Topology rather than Topologies we can avoid sending commits to nodes that Apply the same
         commit(node, commitTo, Collections.emptySet(), txnId, txn, homeKey, executeAt, deps);
     }
 

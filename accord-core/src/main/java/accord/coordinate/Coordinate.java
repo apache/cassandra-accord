@@ -185,9 +185,9 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
         tryFailure(failure);
     }
 
-    // TODO (now): do we need to preaccept in later epochs? the Sync logic may take care of it for us, since
-    //             either we haven't synced between a majority and the earlier epochs are still involved for
-    //             later preaccepts, or they have been sync'd and the earlier transactions are known to the later epochs
+    // TODO (soon): do we need to preaccept in later epochs? the sync logic should take care of it for us, since
+    //              either we haven't synced between a majority and the earlier epochs are still involved for
+    //              later preaccepts, or they have been sync'd and the earlier transactions are known to the later epochs
     private synchronized void onEpochUpdate()
     {
         if (!tracker.hasSupersedingEpoch())

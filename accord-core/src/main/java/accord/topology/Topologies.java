@@ -223,9 +223,9 @@ public interface Topologies
         @Override
         public boolean fastPathPermitted()
         {
-            // TODO (now): this is overly restrictive: we can still take the fast-path during topology movements,
-            //             just not for transactions started across the initiation of a topology movement (i.e.
-            //             where the epoch changes while the transaction is being pre-accepted)
+            // TODO (soon): this is overly restrictive: we can still take the fast-path during topology movements,
+            //              just not for transactions started across the initiation of a topology movement (i.e.
+            //              where the epoch changes while the transaction is being pre-accepted)
             return false;
         }
 

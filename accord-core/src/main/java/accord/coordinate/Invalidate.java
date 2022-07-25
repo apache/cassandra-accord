@@ -72,7 +72,7 @@ public class Invalidate extends AsyncFuture<Outcome> implements Callback<Recover
             if (nack.homeKey != null && nack.txn != null)
             {
                 Key progressKey = node.trySelectProgressKey(txnId.epoch, nack.txn.keys, nack.homeKey);
-                // TODO (now): this shouldn't be ifLocalSince - should be range up to the blocked txn only (but consider more)
+                // TODO: consider limiting epoch upper bound we process this status for
                 node.ifLocalSince(someKey, txnId, instance -> {
                     instance.command(txnId).preaccept(nack.txn, nack.homeKey, progressKey);
                     return null;
@@ -80,7 +80,7 @@ public class Invalidate extends AsyncFuture<Outcome> implements Callback<Recover
             }
             else if (nack.homeKey != null)
             {
-                // TODO (now): this shouldn't be ifLocalSince - should be range up to the blocked txn only (but consider more)
+                // TODO: consider limiting epoch upper bound we process this status for
                 node.ifLocalSince(someKey, txnId, instance -> {
                     instance.command(txnId).homeKey(nack.homeKey);
                     return null;
@@ -158,7 +158,6 @@ public class Invalidate extends AsyncFuture<Outcome> implements Callback<Recover
                 return;
             }
 
-            // TODO (now): error handling in other callbacks
             try
             {
                 Commit.commitInvalidate(node, txnId, someKeys, txnId);

@@ -93,7 +93,7 @@ public class MaybeRecover extends CheckShardStatus<CheckStatusOk> implements BiC
                 CheckStatusOkFull full = (CheckStatusOkFull) max;
                 if (!max.hasExecutedOnAllShards)
                     Persist.persistAndCommit(node, txnId, someKey, txn, full.executeAt, full.deps, full.writes, full.result);
-                else // TODO (now): we shouldn't need to do this?
+                else // TODO: we shouldn't need to do this? Should be handled by progress log once hasExecutedOnAllShards
                     Commit.commit(node, txnId, txn, full.homeKey, full.executeAt, full.deps);
                 trySuccess(full);
                 break;
