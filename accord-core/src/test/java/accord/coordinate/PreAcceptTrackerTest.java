@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import static accord.Utils.*;
 
-public class PreacceptTrackerTest
+public class PreAcceptTrackerTest
 {
     private static final Node.Id[] ids = Utils.ids(5).toArray(Node.Id[]::new);
     private static final KeyRanges ranges = TopologyUtils.initialRanges(5, 500);
