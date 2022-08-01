@@ -133,7 +133,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
 
     private PreacceptTracker tracker;
     private final List<PreAcceptOk> preAcceptOks = new ArrayList<>();
-    private boolean isPreAccepted;
+    private boolean preAcceptIsDone;
 
     // TODO: hybrid fast path? or at least short-circuit accept if we gain a fast-path quorum _and_ proposed one by accept
     boolean permitHybridFastPath;
@@ -165,12 +165,12 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
     @Override
     public synchronized void onFailure(Id from, Throwable failure)
     {
-        if (isPreAccepted)
+        if (preAcceptIsDone)
             return;
 
         if (tracker.failure(from))
         {
-            isPreAccepted = true;
+            preAcceptIsDone = true;
             tryFailure(new Timeout(txnId, homeKey));
         }
 
@@ -209,7 +209,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
 
     public synchronized void onSuccess(Id from, PreAcceptReply receive)
     {
-        if (isPreAccepted)
+        if (preAcceptIsDone)
             return;
 
         if (!receive.isOK())
@@ -238,13 +238,13 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
 
     private void onPreAccepted()
     {
-        if (isPreAccepted)
+        if (preAcceptIsDone)
             return;
 
-        isPreAccepted = true;
+        preAcceptIsDone = true;
         if (tracker.hasMetFastPathCriteria())
         {
-            isPreAccepted = true;
+            preAcceptIsDone = true;
             Dependencies deps = new Dependencies();
             for (PreAcceptOk preAcceptOk : preAcceptOks)
             {
