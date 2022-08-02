@@ -51,11 +51,11 @@ public class Packet implements ReplyContext
         SimpleProgressLog_ApplyAndCheck(SimpleProgressLog.ApplyAndCheck.class),
         SimpleProgressLog_ApplyAndCheckOk(SimpleProgressLog.ApplyAndCheckOk.class);
 
-        private static final Map<Class<?>, Type> LOOKUP = Arrays.stream(Type.values())
+        private static final Map<Class<?>, Type> LOOKUP_MAP = Arrays.stream(Type.values())
                 .filter(t -> t.type != null)
                 .<Map<Class<?>, Type>>collect(HashMap::new, (m, t) -> m.put(t.type, t), Map::putAll);
-        public static final Function<Class<?>, Type> LOOKUP_FN = klass -> {
-            Type value = LOOKUP.get(klass);
+        public static final Function<Class<?>, Type> LOOKUP = klass -> {
+            Type value = LOOKUP_MAP.get(klass);
             if (value == null)
                 throw new NullPointerException("Unable to lookup for class " + klass);
             return value;
@@ -90,14 +90,14 @@ public class Packet implements ReplyContext
     {
         this.src = src;
         this.dest = dest;
-        this.body = new Wrapper(Type.LOOKUP_FN.apply(body.getClass()), messageId, Body.SENTINEL_MSG_ID, body);
+        this.body = new Wrapper(Type.LOOKUP.apply(body.getClass()), messageId, Body.SENTINEL_MSG_ID, body);
     }
 
     public Packet(Id src, Id dest, long replyId, Reply body)
     {
         this.src = src;
         this.dest = dest;
-        this.body = body instanceof Body ? (Body) body : new Wrapper(Type.LOOKUP_FN.apply(body.getClass()), Body.SENTINEL_MSG_ID, replyId, body);
+        this.body = body instanceof Body ? (Body) body : new Wrapper(Type.LOOKUP.apply(body.getClass()), Body.SENTINEL_MSG_ID, replyId, body);
     }
 
     public static Packet parse(String str)
