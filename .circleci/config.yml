@@ -26,7 +26,7 @@ jobs:
       # Download and cache dependencies
       - restore_cache:
           keys:
-            - v1-dependencies-{{ checksum "build.gradle" }}-{{ checksum "accord-core/build.gradle" }}-{{ checksum "accord-maelstrom/build.gradle" }}
+            - v1-dependencies-{{ checksum "build.gradle" }}-{{ checksum "accord-core/build.gradle" }}-{{ checksum "accord-maelstrom/build.gradle" }}-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}
             # fallback to using the latest cache if no exact match is found
             - v1-dependencies-
 
@@ -60,7 +60,7 @@ jobs:
       - save_cache:
           paths:
             - ~/.gradle
-          key: v1-dependencies-{{ checksum "build.gradle" }}-{{ checksum "accord-core/build.gradle" }}-{{ checksum "accord-maelstrom/build.gradle" }}
+          key: v1-dependencies-{{ checksum "build.gradle" }}-{{ checksum "accord-core/build.gradle" }}-{{ checksum "accord-maelstrom/build.gradle" }}-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}
 
       # run tests!
       - run: ./gradlew test
