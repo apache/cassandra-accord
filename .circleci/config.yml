@@ -11,7 +11,7 @@ jobs:
     docker:
       # specify the version you desire here
       - image: cimg/openjdk:11.0
-
+    resource_class: medium
     working_directory: ~/repo
 
     environment:
