@@ -45,5 +45,5 @@ jobs:
             mkdir test-results
             find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} test-results \;
           when: always
-      - store_test_results
+      - store_test_results:
           path: test-results
