@@ -1,13 +1,9 @@
 package accord.burn;
 
 import java.io.IOException;
-import java.io.OutputStream;
-import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Map;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
@@ -26,7 +22,6 @@ import accord.impl.IntHashKey;
 import accord.impl.basic.Cluster;
 import accord.impl.basic.PropagatingPendingQueue;
 import accord.impl.basic.RandomDelayQueue.Factory;
-import accord.impl.IntKey;
 import accord.impl.TopologyFactory;
 import accord.impl.basic.Packet;
 import accord.impl.basic.PendingQueue;
@@ -155,6 +150,8 @@ public class BurnTest
         int[] starts = new int[requests.length];
         Packet[] replies = new Packet[requests.length];
 
+        AtomicInteger acks = new AtomicInteger();
+        AtomicInteger nacks = new AtomicInteger();
         AtomicInteger clock = new AtomicInteger();
         AtomicInteger requestIndex = new AtomicInteger();
         for (int max = Math.min(concurrency, requests.length) ; requestIndex.get() < max ; )
@@ -186,6 +183,13 @@ public class BurnTest
                 logger.debug("{} at [{}, {}]", reply, start, end);
 
                 replies[(int)packet.replyId] = packet;
+                if (reply.keys == null)
+                {
+                    nacks.incrementAndGet();
+                    return;
+                }
+
+                acks.incrementAndGet();
                 strictSerializable.begin();
 
                 for (int i = 0 ; i < reply.read.length ; ++i)
@@ -214,7 +218,7 @@ public class BurnTest
                     responseSink, () -> new Random(random.nextLong()), () -> new AtomicLong()::incrementAndGet,
                     topologyFactory, () -> null);
 
-        logger.info("Received {} acks to {} operations\n", clock.get() - operations, operations);
+        logger.info("Received {} acks and {} nacks ({} total) to {} operations\n", acks.get(), nacks.get(), acks.get() + nacks.get(), operations);
         if (clock.get() != operations * 2)
         {
             for (int i = 0 ; i < requests.length ; ++i)
@@ -229,6 +233,7 @@ public class BurnTest
     public static void main(String[] args) throws Exception
     {
         Long overrideSeed = null;
+//        Long overrideSeed = -7320078316311161123L;
         do
         {
             long seed = overrideSeed != null ? overrideSeed : ThreadLocalRandom.current().nextLong();

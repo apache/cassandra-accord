@@ -8,6 +8,7 @@ import accord.local.Status;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.messages.CheckStatus.IncludeInfo;
+import accord.messages.Commit;
 import accord.topology.Shard;
 import accord.txn.Ballot;
 import accord.txn.Txn;
@@ -20,15 +21,17 @@ import static accord.local.Status.Accepted;
  * A result of null indicates the transaction is globally persistent
  * A result of CheckStatusOk indicates the maximum status found for the transaction, which may be used to assess progress
  */
-public class MaybeRecover extends CheckShardStatus implements BiConsumer<Object, Throwable>
+public class MaybeRecover extends CheckShardStatus<CheckStatusOk> implements BiConsumer<Object, Throwable>
 {
+    final Txn txn;
     final Status knownStatus;
     final Ballot knownPromised;
     final boolean knownPromisedHasBeenAccepted;
 
     MaybeRecover(Node node, TxnId txnId, Txn txn, Key homeKey, Shard homeShard, long homeEpoch, Status knownStatus, Ballot knownPromised, boolean knownPromiseHasBeenAccepted)
     {
-        super(node, txnId, txn, homeKey, homeShard, homeEpoch, IncludeInfo.OnlyIfExecuted);
+        super(node, txnId, homeKey, homeShard, homeEpoch, IncludeInfo.OnlyIfExecuted);
+        this.txn = txn;
         this.knownStatus = knownStatus;
         this.knownPromised = knownPromised;
         this.knownPromisedHasBeenAccepted = knownPromiseHasBeenAccepted;
@@ -55,7 +58,6 @@ public class MaybeRecover extends CheckShardStatus implements BiConsumer<Object,
                                || (!knownPromisedHasBeenAccepted && knownStatus == Accepted && max.accepted.equals(knownPromised)));
     }
 
-    // TODO: invoke from {node} so we may have mutual exclusion with other attempts to recover or coordinate
     public static Future<CheckStatusOk> maybeRecover(Node node, TxnId txnId, Txn txn, Key homeKey, Shard homeShard, long homeEpoch,
                                                                Status knownStatus, Ballot knownPromised, boolean knownPromiseHasBeenAccepted)
     {
@@ -72,6 +74,7 @@ public class MaybeRecover extends CheckShardStatus implements BiConsumer<Object,
             case NotWitnessed:
             case PreAccepted:
             case Accepted:
+            case AcceptedInvalidate:
             case Committed:
             case ReadyToExecute:
                 if (hasMadeProgress())
@@ -80,7 +83,7 @@ public class MaybeRecover extends CheckShardStatus implements BiConsumer<Object,
                 }
                 else
                 {
-                    node.recover(txnId, txn, key)
+                    node.recover(txnId, txn, someKey)
                         .addCallback(this);
                 }
                 break;
@@ -89,12 +92,14 @@ public class MaybeRecover extends CheckShardStatus implements BiConsumer<Object,
             case Applied:
                 CheckStatusOkFull full = (CheckStatusOkFull) max;
                 if (!max.hasExecutedOnAllShards)
-                {
-                    Persist.persist(node, node.topology().preciseEpochs(txn.keys, full.executeAt.epoch), txnId, key, txn, full.executeAt, full.deps, full.writes, full.result)
-                           .addCallback(this);
-                }
-                // TODO: apply locally too, in case missing?
+                    Persist.persistAndCommit(node, txnId, someKey, txn, full.executeAt, full.deps, full.writes, full.result);
+                else // TODO: we shouldn't need to do this? Should be handled by progress log once hasExecutedOnAllShards
+                    Commit.commit(node, txnId, txn, full.homeKey, full.executeAt, full.deps);
                 trySuccess(full);
+                break;
+
+            case Invalidated:
+                trySuccess(max);
         }
     }
 }

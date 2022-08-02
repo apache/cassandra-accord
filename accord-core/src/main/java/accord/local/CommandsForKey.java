@@ -31,9 +31,10 @@ public class CommandsForKey implements Listener, Iterable<Command>
             case Applied:
             case Executed:
             case Committed:
-                uncommitted.remove(command.txnId());
                 committedById.put(command.txnId(), command);
                 committedByExecuteAt.put(command.executeAt(), command);
+            case Invalidated:
+                uncommitted.remove(command.txnId());
                 command.removeListener(this);
                 break;
         }

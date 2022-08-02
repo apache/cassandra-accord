@@ -14,7 +14,7 @@ import com.google.common.annotations.VisibleForTesting;
 
 import accord.api.*;
 import accord.coordinate.Coordinate;
-import accord.messages.*;
+import accord.coordinate.MaybeRecover;
 
 import javax.annotation.Nullable;
 
@@ -25,7 +25,9 @@ import accord.api.Result;
 import accord.api.ProgressLog;
 import accord.api.Scheduler;
 import accord.api.DataStore;
+import accord.coordinate.Recover;
 import accord.messages.Callback;
+import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
 import accord.messages.Reply;
@@ -167,6 +169,32 @@ public class Node implements ConfigurationService.Listener
         topology.onEpochSyncComplete(node, epoch);
     }
 
+    public void withEpoch(long epoch, Runnable runnable)
+    {
+        if (topology.hasEpoch(epoch))
+        {
+            runnable.run();
+        }
+        else
+        {
+            configService.fetchTopologyForEpoch(epoch);
+            topology.awaitEpoch(epoch).addListener(runnable);
+        }
+    }
+
+    public <T> Future<T> withEpoch(long epoch, Supplier<Future<T>> supplier)
+    {
+        if (topology.hasEpoch(epoch))
+        {
+            return supplier.get();
+        }
+        else
+        {
+            configService.fetchTopologyForEpoch(epoch);
+            return topology.awaitEpoch(epoch).flatMap(ignore -> supplier.get());
+        }
+    }
+
     public TopologyManager topology()
     {
         return topology;
@@ -221,6 +249,11 @@ public class Node implements ConfigurationService.Listener
         commandStores.forEach(keys, minEpoch, maxEpoch, forEach);
     }
 
+    public void forEachLocal(Keys keys, Timestamp minAt, Timestamp maxAt, Consumer<CommandStore> forEach)
+    {
+        commandStores.forEach(keys, minAt.epoch, maxAt.epoch, forEach);
+    }
+
     public void forEachLocalSince(Keys keys, Timestamp since, Consumer<CommandStore> forEach)
     {
         commandStores.forEach(keys, since.epoch, Long.MAX_VALUE, forEach);
@@ -229,6 +262,16 @@ public class Node implements ConfigurationService.Listener
     public void forEachLocalSince(Keys keys, long sinceEpoch, Consumer<CommandStore> forEach)
     {
         commandStores.forEach(keys, sinceEpoch, Long.MAX_VALUE, forEach);
+    }
+
+    public <T> T mapReduceLocal(Keys keys, Timestamp at, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    {
+        return commandStores.mapReduce(keys, at.epoch, at.epoch, map, reduce);
+    }
+
+    public <T> T mapReduceLocal(Keys keys, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    {
+        return commandStores.mapReduce(keys, epoch, epoch, map, reduce);
     }
 
     public <T> T mapReduceLocal(Keys keys, long minEpoch, long maxEpoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
@@ -249,6 +292,16 @@ public class Node implements ConfigurationService.Listener
     public <T> T ifLocal(Key key, long epoch, Function<CommandStore, T> ifLocal)
     {
         return commandStores.mapReduce(key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
+    }
+
+    public <T> T ifLocalSince(Key key, Timestamp since, Function<CommandStore, T> ifLocal)
+    {
+        return ifLocalSince(key, since.epoch, ifLocal);
+    }
+
+    public <T> T ifLocalSince(Key key, long epoch, Function<CommandStore, T> ifLocal)
+    {
+        return commandStores.mapReduceSince(key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
     }
 
     public <T extends Collection<CommandStore>> T collectLocal(Keys keys, Timestamp at, IntFunction<T> factory)
@@ -337,18 +390,7 @@ public class Node implements ConfigurationService.Listener
         // TODO: The combination of updating the epoch of the next timestamp with epochs we don’t have topologies for,
         //  and requiring preaccept to talk to its topology epoch means that learning of a new epoch via timestamp
         //  (ie not via config service) will halt any new txns from a node until it receives this topology
-        Future<Result> result;
-        if (txnId.epoch > topology().epoch())
-        {
-            configService.fetchTopologyForEpoch(txnId.epoch);
-            result = topology().awaitEpoch(txnId.epoch)
-                               .flatMap(ignore -> initiateCoordination(txnId, txn));
-        }
-        else
-        {
-            result = initiateCoordination(txnId, txn);
-        }
-
+        Future<Result> result = withEpoch(txnId.epoch, () -> initiateCoordination(txnId, txn));
         coordinating.putIfAbsent(txnId, result);
         // TODO: if we fail, nominate another node to try instead
         result.addCallback((success, fail) -> coordinating.remove(txnId, result));
@@ -363,7 +405,7 @@ public class Node implements ConfigurationService.Listener
             homeKey = selectRandomHomeKey(txnId);
             txn = new Txn(txn.keys.with(homeKey), txn.read, txn.query, txn.update);
         }
-        return Coordinate.execute(this, txnId, txn, homeKey);
+        return Coordinate.coordinate(this, txnId, txn, homeKey);
     }
 
     @VisibleForTesting
@@ -420,18 +462,7 @@ public class Node implements ConfigurationService.Listener
                 return result;
         }
 
-        Future<Result> result;
-        if (txnId.epoch > topology.epoch())
-        {
-            configService.fetchTopologyForEpoch(txnId.epoch);
-            result = topology().awaitEpoch(txnId.epoch)
-                               .flatMap(ignore -> Coordinate.recover(this, txnId, txn, homeKey));
-        }
-        else
-        {
-            result = Coordinate.recover(this, txnId, txn, homeKey);
-        }
-
+        Future<Result> result = withEpoch(txnId.epoch, () -> Recover.recover(this, txnId, txn, homeKey));
         coordinating.putIfAbsent(txnId, result);
         result.addCallback((success, fail) -> {
             coordinating.remove(txnId, result);
@@ -439,6 +470,17 @@ public class Node implements ConfigurationService.Listener
             // TODO: if we fail, nominate another node to try instead
         });
         return result;
+    }
+
+    // TODO: coalesce other maybeRecover calls also? perhaps have mutable knownStatuses so we can inject newer ones?
+    public Future<CheckStatusOk> maybeRecover(TxnId txnId, Txn txn, Key homeKey, Shard homeShard, long homeEpoch,
+                                              Status knownStatus, Ballot knownPromised, boolean knownPromiseHasBeenAccepted)
+    {
+        Future<Result> result = coordinating.get(txnId);
+        if (result != null)
+            return result.map(r -> null);
+
+        return MaybeRecover.maybeRecover(this, txnId, txn, homeKey, homeShard, homeEpoch, knownStatus, knownPromised, knownPromiseHasBeenAccepted);
     }
 
     public void receive(Request request, Id from, ReplyContext replyContext)

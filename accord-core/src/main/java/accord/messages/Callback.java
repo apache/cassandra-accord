@@ -9,5 +9,7 @@ import accord.local.Node.Id;
 public interface Callback<T>
 {
     void onSuccess(Id from, T response);
-    void onFailure(Id from, Throwable throwable);
+    default void onSlowResponse(Id from) {}
+    void onFailure(Id from, Throwable failure);
+    void onCallbackFailure(Throwable failure);
 }

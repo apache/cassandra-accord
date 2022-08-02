@@ -5,6 +5,7 @@ import accord.api.Agent;
 import accord.api.Result;
 import accord.local.Command;
 import accord.txn.Timestamp;
+import accord.txn.Txn;
 
 public class MaelstromAgent implements Agent
 {
@@ -24,5 +25,11 @@ public class MaelstromAgent implements Agent
     public void onInconsistentTimestamp(Command command, Timestamp prev, Timestamp next)
     {
         throw new AssertionError();
+    }
+
+    @Override
+    public void onUncaughtException(Throwable t)
+    {
+
     }
 }

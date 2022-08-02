@@ -19,20 +19,18 @@ public abstract class TxnRequest implements EpochRequest
     public static abstract class WithUnsynced extends TxnRequest
     {
         public final TxnId txnId;
-        public final Key homeKey;
         public final long minEpoch;
         protected final boolean doNotComputeProgressKey;
 
-        public WithUnsynced(Id to, Topologies topologies, Keys keys, TxnId txnId, Key homeKey)
+        public WithUnsynced(Id to, Topologies topologies, Keys keys, TxnId txnId)
         {
-            this(to, topologies, keys, txnId, homeKey, latestRelevantEpochIndex(to, topologies, keys));
+            this(to, topologies, keys, txnId, latestRelevantEpochIndex(to, topologies, keys));
         }
 
-        private WithUnsynced(Id to, Topologies topologies, Keys keys, TxnId txnId, Key homeKey, int startIndex)
+        private WithUnsynced(Id to, Topologies topologies, Keys keys, TxnId txnId, int startIndex)
         {
             super(to, topologies, keys, startIndex);
             this.txnId = txnId;
-            this.homeKey = homeKey;
             this.minEpoch = topologies.oldestEpoch();
             // to understand this calculation we must bear in mind the following:
             //  - startIndex is the "latest relevant" which means we skip over recent epochs where we are not owners at all,
@@ -64,7 +62,7 @@ public abstract class TxnRequest implements EpochRequest
             }
         }
 
-        Key progressKey(Node node)
+        Key progressKey(Node node, Key homeKey)
         {
             // if waitForEpoch < txnId.epoch, then this replica's ownership is unchanged
             long progressEpoch = min(waitForEpoch(), txnId.epoch);
@@ -72,11 +70,10 @@ public abstract class TxnRequest implements EpochRequest
         }
 
         @VisibleForTesting
-        public WithUnsynced(Keys scope, long epoch, TxnId txnId, Key homeKey)
+        public WithUnsynced(Keys scope, long epoch, TxnId txnId)
         {
             super(scope, epoch);
             this.txnId = txnId;
-            this.homeKey = homeKey;
             this.minEpoch = epoch;
             this.doNotComputeProgressKey = false;
         }
@@ -98,6 +95,7 @@ public abstract class TxnRequest implements EpochRequest
 
     public TxnRequest(Keys scope, long waitForEpoch)
     {
+        Preconditions.checkState(!scope.isEmpty());
         this.scope = scope;
         this.waitForEpoch = waitForEpoch;
     }

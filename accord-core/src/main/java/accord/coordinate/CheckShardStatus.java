@@ -3,8 +3,6 @@ package accord.coordinate;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.google.common.base.Preconditions;
-
 import accord.api.Key;
 import accord.coordinate.tracking.ReadTracker.ReadShardTracker;
 import accord.local.Node;
@@ -15,7 +13,6 @@ import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.CheckStatusReply;
 import accord.messages.CheckStatus.IncludeInfo;
 import accord.topology.Shard;
-import accord.txn.Txn;
 import accord.txn.TxnId;
 import org.apache.cassandra.utils.concurrent.AsyncFuture;
 
@@ -23,7 +20,7 @@ import org.apache.cassandra.utils.concurrent.AsyncFuture;
  * A result of null indicates the transaction is globally persistent
  * A result of CheckStatusOk indicates the maximum status found for the transaction, which may be used to assess progress
  */
-public abstract class CheckShardStatus extends AsyncFuture<CheckStatusOk> implements Callback<CheckStatusReply>
+public abstract class CheckShardStatus<T extends CheckStatusOk> extends AsyncFuture<T> implements Callback<CheckStatusReply>
 {
     static class Tracker extends ReadShardTracker
     {
@@ -56,8 +53,7 @@ public abstract class CheckShardStatus extends AsyncFuture<CheckStatusOk> implem
 
     final Node node;
     final TxnId txnId;
-    final Txn txn;
-    final Key key; // not necessarily homeKey
+    final Key someKey; // not necessarily homeKey
     final Tracker tracker;
     final List<Id> candidates;
     final long epoch;
@@ -66,14 +62,11 @@ public abstract class CheckShardStatus extends AsyncFuture<CheckStatusOk> implem
     CheckStatusOk max;
     Throwable failure;
 
-    CheckShardStatus(Node node, TxnId txnId, Txn txn, Key key, Shard shard, long epoch, IncludeInfo includeInfo)
+    CheckShardStatus(Node node, TxnId txnId, Key someKey, Shard shard, long epoch, IncludeInfo includeInfo)
     {
         this.epoch = epoch;
-        Preconditions.checkNotNull(txn);
-        Preconditions.checkState(txn.keys.contains(key));
         this.txnId = txnId;
-        this.txn = txn;
-        this.key = key;
+        this.someKey = someKey;
         this.tracker = new Tracker(shard);
         this.candidates = new ArrayList<>(shard.nodes);
         this.node = node;
@@ -89,11 +82,16 @@ public abstract class CheckShardStatus extends AsyncFuture<CheckStatusOk> implem
             if (tracker.recordReadSuccess(from))
             {
                 if (hasMetSuccessCriteria())
+                {
                     onSuccessCriteriaOrExhaustion();
-                else if (!tracker.hasInFlight() && hasMoreCandidates())
-                    sendMore();
-                else
-                    onSuccessCriteriaOrExhaustion();
+                }
+                else if (!tracker.hasInFlight())
+                {
+                    if (hasMoreCandidates())
+                        sendMore();
+                    else
+                        onSuccessCriteriaOrExhaustion();
+                }
             }
         }
         else
@@ -103,21 +101,39 @@ public abstract class CheckShardStatus extends AsyncFuture<CheckStatusOk> implem
     }
 
     @Override
-    public void onFailure(Id from, Throwable throwable)
+    public void onFailure(Id from, Throwable failure)
     {
-        if (failure == null) failure = throwable;
-        else failure.addSuppressed(throwable);
+        if (this.failure == null) this.failure = failure;
+        else this.failure.addSuppressed(failure);
 
         // TODO: if we fail and have an incorrect topology, trigger refresh
         if (tracker.recordReadFailure(from))
         {
             if (tracker.hasFailed())
-                tryFailure(failure);
-            else if (!tracker.hasInFlight() && hasMoreCandidates())
-                sendMore();
-            else
-                onSuccessCriteriaOrExhaustion();
+            {
+                tryFailure(this.failure);
+            }
+            else if (!tracker.hasInFlight())
+            {
+                if (hasMoreCandidates())
+                    sendMore();
+                else
+                    onSuccessCriteriaOrExhaustion();
+            }
         }
+    }
+
+    @Override
+    public void onSlowResponse(Id from)
+    {
+        if (!tracker.hasFailed() && hasMoreCandidates())
+            sendMore();
+    }
+
+    @Override
+    public void onCallbackFailure(Throwable failure)
+    {
+        tryFailure(failure);
     }
 
     private void onOk(CheckStatusOk ok)
@@ -137,7 +153,7 @@ public abstract class CheckShardStatus extends AsyncFuture<CheckStatusOk> implem
         Id next = candidates.get(candidates.size() - 1);
         candidates.remove(candidates.size() - 1);
         tracker.recordInflightRead(next);
-        node.send(next, new CheckStatus(txnId, key, epoch, includeInfo), this);
+        node.send(next, new CheckStatus(txnId, someKey, epoch, includeInfo), this);
     }
 
     private boolean hasMoreCandidates()

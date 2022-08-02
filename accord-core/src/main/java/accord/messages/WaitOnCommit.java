@@ -34,16 +34,17 @@ public class WaitOnCommit extends TxnRequest
         {
             switch (command.status())
             {
-                default:
-                    throw new IllegalStateException();
+                default: throw new IllegalStateException();
                 case NotWitnessed:
                 case PreAccepted:
                 case Accepted:
+                case AcceptedInvalidate:
                     return;
 
                 case Committed:
                 case Executed:
                 case Applied:
+                case Invalidated:
                 case ReadyToExecute:
             }
 
@@ -65,12 +66,14 @@ public class WaitOnCommit extends TxnRequest
                 case NotWitnessed:
                 case PreAccepted:
                 case Accepted:
+                case AcceptedInvalidate:
                     command.addListener(this);
                     break;
 
                 case Committed:
                 case Executed:
                 case Applied:
+                case Invalidated:
                 case ReadyToExecute:
                     ack();
             }

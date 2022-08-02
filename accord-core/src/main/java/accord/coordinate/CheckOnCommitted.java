@@ -6,6 +6,7 @@ import accord.local.Node;
 import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.messages.CheckStatus.IncludeInfo;
 import accord.topology.Shard;
+import accord.txn.Keys;
 import accord.txn.Txn;
 import accord.txn.TxnId;
 
@@ -17,16 +18,16 @@ import static accord.local.Status.Executed;
  *
  * Updates local command stores based on the obtained information.
  */
-public class CheckOnCommitted extends CheckShardStatus
+public class CheckOnCommitted extends CheckShardStatus<CheckStatusOkFull>
 {
-    CheckOnCommitted(Node node, TxnId txnId, Txn txn, Key homeKey, Shard homeShard, long homeEpoch)
+    CheckOnCommitted(Node node, TxnId txnId, Key someKey, Shard someShard, long someEpoch)
     {
-        super(node, txnId, txn, homeKey, homeShard, homeEpoch, IncludeInfo.Always);
+        super(node, txnId, someKey, someShard, someEpoch, IncludeInfo.Always);
     }
 
-    public static CheckOnCommitted checkOnCommitted(Node node, TxnId txnId, Txn txn, Key someKey, Shard someShard, long shardEpoch)
+    public static CheckOnCommitted checkOnCommitted(Node node, TxnId txnId, Key someKey, Shard someShard, long shardEpoch)
     {
-        CheckOnCommitted checkOnCommitted = new CheckOnCommitted(node, txnId, txn, someKey, someShard, shardEpoch);
+        CheckOnCommitted checkOnCommitted = new CheckOnCommitted(node, txnId, someKey, someShard, shardEpoch);
         checkOnCommitted.start();
         return checkOnCommitted;
     }
@@ -49,29 +50,31 @@ public class CheckOnCommitted extends CheckShardStatus
             case NotWitnessed:
             case PreAccepted:
             case Accepted:
+            case AcceptedInvalidate:
+            case Invalidated:
                 return;
         }
 
-        Key progressKey = node.trySelectProgressKey(txnId, txn.keys, max.homeKey);
+        Key progressKey = node.trySelectProgressKey(txnId, max.txn.keys, max.homeKey);
         switch (max.status)
         {
             default: throw new IllegalStateException();
             case Executed:
             case Applied:
-                node.forEachLocalSince(txn.keys, max.executeAt.epoch, commandStore -> {
+                node.forEachLocalSince(max.txn.keys, max.executeAt.epoch, commandStore -> {
                     Command command = commandStore.command(txnId);
-                    command.apply(txn, max.homeKey, progressKey, max.executeAt, max.deps, max.writes, max.result);
+                    command.apply(max.txn, max.homeKey, progressKey, max.executeAt, max.deps, max.writes, max.result);
                 });
-                node.forEachLocal(txn.keys, txnId.epoch, max.executeAt.epoch - 1, commandStore -> {
+                node.forEachLocal(max.txn.keys, txnId.epoch, max.executeAt.epoch - 1, commandStore -> {
                     Command command = commandStore.command(txnId);
-                    command.commit(txn, max.homeKey, progressKey, max.executeAt, max.deps);
+                    command.commit(max.txn, max.homeKey, progressKey, max.executeAt, max.deps);
                 });
                 break;
             case Committed:
             case ReadyToExecute:
-                node.forEachLocalSince(txn.keys, txnId.epoch, commandStore -> {
+                node.forEachLocalSince(max.txn.keys, txnId.epoch, commandStore -> {
                     Command command = commandStore.command(txnId);
-                    command.commit(txn, max.homeKey, progressKey, max.executeAt, max.deps);
+                    command.commit(max.txn, max.homeKey, progressKey, max.executeAt, max.deps);
                 });
         }
     }
@@ -79,15 +82,16 @@ public class CheckOnCommitted extends CheckShardStatus
     @Override
     void onSuccessCriteriaOrExhaustion()
     {
+        CheckStatusOkFull full = (CheckStatusOkFull)max;
         try
         {
-            onSuccessCriteriaOrExhaustion((CheckStatusOkFull) max);
+            onSuccessCriteriaOrExhaustion(full);
         }
         catch (Throwable t)
         {
-            trySuccess(max);
+            trySuccess(full);
             throw t;
         }
-        trySuccess(max);
+        trySuccess(full);
     }
 }
