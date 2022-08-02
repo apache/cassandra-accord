@@ -22,6 +22,14 @@ jobs:
     # See: https://circleci.com/docs/2.0/configuration-reference/#steps
     steps:
       - checkout
+
+      # Download and cache dependencies
+      - restore_cache:
+          keys:
+            - v1-dependencies-{{ checksum "build.gradle" }}-{{ checksum "accord-core/build.gradle" }}-{{ checksum "accord-maelstrom/build.gradle" }}
+            # fallback to using the latest cache if no exact match is found
+            - v1-dependencies-
+
       - run:
           name: Log Environment Information
           command: |
@@ -46,13 +54,6 @@ jobs:
             java -version 2>&1
             echo '*** gradle ***'
             ./gradlew --version
-
-      # Download and cache dependencies
-      - restore_cache:
-          keys:
-            - v1-dependencies-{{ checksum "build.gradle" }}-{{ checksum "accord-core/build.gradle" }}-{{ checksum "accord-maelstrom/build.gradle" }}
-            # fallback to using the latest cache if no exact match is found
-            - v1-dependencies-
 
       - run: ./gradlew dependencies
 
