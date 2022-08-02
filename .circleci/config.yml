@@ -42,8 +42,8 @@ jobs:
       - run:
           name: Save Test Results
           command: |
-            mkdir -p ~/test_results
-            find . -type -f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test_results \;
+            mkdir test-results
+            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} test-results \;
           when: always
       - run: store_test_results
-          path: ~/test_results
+          path: test-results
