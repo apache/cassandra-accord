@@ -39,4 +39,11 @@ jobs:
 
       # run tests!
       - run: gradle test
+      - run:
+          name: Save Test Results
+          command: |
+            mkdir -p ~/test_results
+            find . -type -f -regex ".*/build/test-results/.*xml" -exec cp {} ~/test_results \;
+          when: always
       - run: store_test_results
+          path: ~/test_results
