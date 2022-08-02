@@ -37,6 +37,30 @@ jobs:
             - ~/.gradle
           key: v1-dependencies-{{ checksum "build.gradle" }}-{{ checksum "accord-core/build.gradle" }}-{{ checksum "accord-maelstrom/build.gradle" }}
 
+      - run:
+          name: Log Environment Information
+          command: |
+            echo '*** id ***'
+            id
+            echo '*** cat /proc/cpuinfo ***'
+            cat /proc/cpuinfo
+            echo '*** free -m ***'
+            free -m
+            echo '*** df -m ***'
+            df -m
+            echo '*** ifconfig -a ***'
+            ifconfig -a
+            echo '*** uname -a ***'
+            uname -a
+            echo '*** mount ***'
+            mount
+            echo '*** env ***'
+            env
+            echo '*** java ***'
+            which java
+            java -version 2>&1
+            echo '*** gradle ***'
+            ./gradlew --version
       # run tests!
       - run: gradle test
       - run:
