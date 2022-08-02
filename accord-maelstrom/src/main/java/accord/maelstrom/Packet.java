@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
 
+import accord.impl.SimpleProgressLog;
 import accord.messages.*;
 import com.google.gson.JsonObject;
 import com.google.gson.TypeAdapter;
@@ -16,6 +17,7 @@ import accord.local.Node.Id;
 
 public class Packet implements ReplyContext
 {
+
     public enum Type
     {
         init(MaelstromInit.class, MaelstromInit.GSON_ADAPTER),
@@ -23,26 +25,41 @@ public class Packet implements ReplyContext
         txn(MaelstromRequest.class, MaelstromRequest.GSON_ADAPTER),
         txn_ok(MaelstromReply.class, MaelstromReply.GSON_ADAPTER),
         error(Error.class, Error.GSON_ADAPTER),
-        PreAccept(accord.messages.PreAccept.class, Json.DEFAULT_ADAPTER),
-        PreAcceptOk(accord.messages.PreAccept.PreAcceptOk.class, Json.DEFAULT_ADAPTER),
-        PreAcceptNack(accord.messages.PreAccept.PreAcceptNack.class, Json.DEFAULT_ADAPTER),
-        Accept(accord.messages.Accept.class, Json.DEFAULT_ADAPTER),
-        AcceptOk(accord.messages.Accept.AcceptOk.class, Json.DEFAULT_ADAPTER),
-        AcceptNack(accord.messages.Accept.AcceptNack.class, Json.DEFAULT_ADAPTER),
-        Commit(accord.messages.Commit.class, Json.DEFAULT_ADAPTER),
-        Apply(Apply.class, Json.DEFAULT_ADAPTER),
-        Read(ReadData.class, Json.DEFAULT_ADAPTER),
-        ReadOk(ReadData.ReadOk.class, Json.DEFAULT_ADAPTER),
-        ReadNack(ReadData.ReadNack.class, Json.DEFAULT_ADAPTER),
-        WaitOnCommit(accord.messages.WaitOnCommit.class, Json.DEFAULT_ADAPTER),
-        WaitOnCommitOk(accord.messages.WaitOnCommit.WaitOnCommitOk.class, Json.DEFAULT_ADAPTER),
-        Recover(BeginRecovery.class, Json.DEFAULT_ADAPTER),
-        RecoverOk(BeginRecovery.RecoverOk.class, Json.DEFAULT_ADAPTER),
-        RecoverNack(BeginRecovery.RecoverNack.class, Json.DEFAULT_ADAPTER);
+        PreAccept(accord.messages.PreAccept.class),
+        PreAcceptOk(accord.messages.PreAccept.PreAcceptOk.class),
+        PreAcceptNack(accord.messages.PreAccept.PreAcceptNack.class),
+        Accept(accord.messages.Accept.class),
+        AcceptOk(accord.messages.Accept.AcceptOk.class),
+        AcceptNack(accord.messages.Accept.AcceptNack.class),
+        Commit(accord.messages.Commit.class),
+        Apply(Apply.class),
+        ApplyOk(Apply.ApplyOk.class),
+        Read(ReadData.class),
+        ReadOk(ReadData.ReadOk.class),
+        ReadNack(ReadData.ReadNack.class),
+        WaitOnCommit(accord.messages.WaitOnCommit.class),
+        WaitOnCommitOk(accord.messages.WaitOnCommit.WaitOnCommitOk.class),
+        Recover(BeginRecovery.class),
+        RecoverOk(BeginRecovery.RecoverOk.class),
+        RecoverNack(BeginRecovery.RecoverNack.class),
+        CheckStatus(CheckStatus.class),
+        CheckStatusOk(CheckStatus.CheckStatusOk.class),
+        CheckStatusOkFull(CheckStatus.CheckStatusOkFull.class),
+        InformOfTxn(InformOfTxn.class),
+        InformOfTxnOk(InformOfTxn.InformOfTxnOk.class),
+        InformOfPersistence(InformOfPersistence.class),
+        SimpleProgressLog_ApplyAndCheck(SimpleProgressLog.ApplyAndCheck.class),
+        SimpleProgressLog_ApplyAndCheckOk(SimpleProgressLog.ApplyAndCheckOk.class);
 
-        public static final Function<Class<?>, Type> LOOKUP = Arrays.stream(Type.values())
-                                                                    .filter(t -> t.type != null)
-                                                                    .<Map<Class<?>, Type>>collect(HashMap::new, (m, t) -> m.put(t.type, t), Map::putAll)::get;
+        private static final Map<Class<?>, Type> LOOKUP = Arrays.stream(Type.values())
+                .filter(t -> t.type != null)
+                .<Map<Class<?>, Type>>collect(HashMap::new, (m, t) -> m.put(t.type, t), Map::putAll);
+        public static final Function<Class<?>, Type> LOOKUP_FN = klass -> {
+            Type value = LOOKUP.get(klass);
+            if (value == null)
+                throw new NullPointerException("Unable to lookup for class " + klass);
+            return value;
+        };
         public final Class<?> type;
         public final TypeAdapter<?> adapter;
 
@@ -50,6 +67,11 @@ public class Packet implements ReplyContext
         {
             this.type = type;
             this.adapter = adapter;
+        }
+
+        Type(Class<?> type)
+        {
+            this(type, Json.DEFAULT_ADAPTER);
         }
     }
 
@@ -68,14 +90,14 @@ public class Packet implements ReplyContext
     {
         this.src = src;
         this.dest = dest;
-        this.body = new Wrapper(Type.LOOKUP.apply(body.getClass()), messageId, Body.SENTINEL_MSG_ID, body);
+        this.body = new Wrapper(Type.LOOKUP_FN.apply(body.getClass()), messageId, Body.SENTINEL_MSG_ID, body);
     }
 
     public Packet(Id src, Id dest, long replyId, Reply body)
     {
         this.src = src;
         this.dest = dest;
-        this.body = body instanceof Body ? (Body) body : new Wrapper(Type.LOOKUP.apply(body.getClass()), Body.SENTINEL_MSG_ID, replyId, body);
+        this.body = body instanceof Body ? (Body) body : new Wrapper(Type.LOOKUP_FN.apply(body.getClass()), Body.SENTINEL_MSG_ID, replyId, body);
     }
 
     public static Packet parse(String str)

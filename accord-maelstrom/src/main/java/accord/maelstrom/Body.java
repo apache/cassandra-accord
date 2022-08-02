@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import com.google.gson.JsonArray;
 import com.google.gson.TypeAdapter;
@@ -23,7 +24,7 @@ public class Body
 
     public Body(Type type, long msg_id, long in_reply_to)
     {
-        this.type = type;
+        this.type = Objects.requireNonNull(type);
         this.msg_id = msg_id;
         this.in_reply_to = in_reply_to;
     }
