@@ -164,7 +164,8 @@ public class Cluster implements Scheduler
                     err.println(clock++ + " RECV " + deliver);
                     err.flush();
                     Object body = ((Wrapper)deliver.body).body;
-                    //TODO : REVIEW : Don't know the point of deliver.body.in_reply_to > Body.SENTINEL_MSG_ID, but without it InformOfTxnReply fails
+                    // for some reason InformOfTxnReply has deliver.body.in_reply_to == Body.SENTINEL_MSG_ID, so is unique
+                    // for all reply types
                     if (deliver.body.in_reply_to > Body.SENTINEL_MSG_ID || body instanceof Reply)
                     {
                         Reply reply = (Reply) body;
