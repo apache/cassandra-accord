@@ -776,7 +776,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
         }
     }
 
-    static class ApplyAndCheck extends Apply
+    public static class ApplyAndCheck extends Apply
     {
         final Set<Id> notPersisted;
         ApplyAndCheck(Id id, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Dependencies deps, Timestamp executeAt, Writes writes, Result result, Set<Id> notPersisted)
@@ -833,7 +833,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
         }
     }
 
-    static class ApplyAndCheckOk implements Reply
+    public static class ApplyAndCheckOk implements Reply
     {
         final Set<Id> notPersisted;
 

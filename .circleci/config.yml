@@ -1,0 +1,74 @@
+# Java Gradle CircleCI 2.0 configuration file
+# See: https://circleci.com/docs/2.0/language-java/
+version: 2
+
+# Define a job to be invoked later in a workflow.
+# See: https://circleci.com/docs/2.0/configuration-reference/#jobs
+jobs:
+  build:
+    # Specify the execution environment. You can specify an image from Dockerhub or use one of our Convenience Images from CircleCI's Developer Hub.
+    # See: https://circleci.com/docs/2.0/configuration-reference/#docker-machine-macos-windows-executor
+    docker:
+      # specify the version you desire here
+      - image: cimg/openjdk:11.0
+    resource_class: medium
+    working_directory: ~/repo
+
+    environment:
+      # Customize the JVM maximum heap limit
+      JVM_OPTS: -Xmx3200m
+      TERM: dumb
+    # Add steps to the job
+    # See: https://circleci.com/docs/2.0/configuration-reference/#steps
+    steps:
+      - checkout
+
+      # Download and cache dependencies
+      - restore_cache:
+          keys:
+            - v1-dependencies-{{ checksum "build.gradle" }}-{{ checksum "accord-core/build.gradle" }}-{{ checksum "accord-maelstrom/build.gradle" }}-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}
+            # fallback to using the latest cache if no exact match is found
+            - v1-dependencies-
+
+      - run:
+          name: Log Environment Information
+          command: |
+            echo '*** id ***'
+            id
+            echo '*** cat /proc/cpuinfo ***'
+            cat /proc/cpuinfo
+            echo '*** free -m ***'
+            free -m
+            echo '*** df -m ***'
+            df -m
+            echo '*** ifconfig -a ***'
+            ifconfig -a
+            echo '*** uname -a ***'
+            uname -a
+            echo '*** mount ***'
+            mount
+            echo '*** env ***'
+            env
+            echo '*** java ***'
+            which java
+            java -version 2>&1
+            echo '*** gradle ***'
+            ./gradlew --version
+
+      - run: ./gradlew dependencies
+
+      - save_cache:
+          paths:
+            - ~/.gradle
+          key: v1-dependencies-{{ checksum "build.gradle" }}-{{ checksum "accord-core/build.gradle" }}-{{ checksum "accord-maelstrom/build.gradle" }}-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}
+
+      # run tests!
+      - run: ./gradlew test
+      - run:
+          name: Save Test Results
+          command: |
+            mkdir test-results
+            find . -type f -regex ".*/build/test-results/.*xml" -exec cp {} test-results \;
+          when: always
+      - store_test_results:
+          path: test-results

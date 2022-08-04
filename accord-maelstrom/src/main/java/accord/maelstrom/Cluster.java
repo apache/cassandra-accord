@@ -163,15 +163,18 @@ public class Cluster implements Scheduler
                     }
                     err.println(clock++ + " RECV " + deliver);
                     err.flush();
-                    if (deliver.body.in_reply_to > Body.SENTINEL_MSG_ID)
+                    Object body = ((Wrapper)deliver.body).body;
+                    // for some reason InformOfTxnReply has deliver.body.in_reply_to == Body.SENTINEL_MSG_ID, so is unique
+                    // for all reply types
+                    if (deliver.body.in_reply_to > Body.SENTINEL_MSG_ID || body instanceof Reply)
                     {
-                        Reply reply = (Reply)((Wrapper)deliver.body).body;
+                        Reply reply = (Reply) body;
                         Callback callback = reply.isFinal() ? sinks.get(deliver.dest).callbacks.remove(deliver.body.in_reply_to)
                                                             : sinks.get(deliver.dest).callbacks.get(deliver.body.in_reply_to);
                         if (callback != null)
                             on.scheduler().now(() -> callback.onSuccess(deliver.src, reply));
                     }
-                    else on.receive((Request)((Wrapper)deliver.body).body, deliver.src, deliver);
+                    else on.receive((Request) body, deliver.src, deliver);
             }
         }
         else
