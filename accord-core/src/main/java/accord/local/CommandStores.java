@@ -67,78 +67,6 @@ public abstract class CommandStores
         long select(ShardedRanges ranges, Scope scope, long minEpoch, long maxEpoch);
     }
 
-    static class KeysAndEpoch
-    {
-        final Keys keys;
-        final long epoch;
-
-        KeysAndEpoch(Keys keys, long epoch)
-        {
-            this.keys = keys;
-            this.epoch = epoch;
-        }
-    }
-
-    static class KeysAndEpochRange
-    {
-        final Keys keys;
-        final long minEpoch;
-        final long maxEpoch;
-
-        KeysAndEpochRange(Keys keys, long minEpoch, long maxEpoch)
-        {
-            this.keys = keys;
-            this.minEpoch = minEpoch;
-            this.maxEpoch = maxEpoch;
-        }
-    }
-
-    static class KeyAndEpoch
-    {
-        final Key key;
-        final long epoch;
-
-        KeyAndEpoch(Key key, long epoch)
-        {
-            this.key = key;
-            this.epoch = epoch;
-        }
-    }
-
-    protected static class Supplier
-    {
-        private final Node node;
-        private final Agent agent;
-        private final DataStore store;
-        private final ProgressLog.Factory progressLogFactory;
-        private final CommandStore.Factory shardFactory;
-        private final int numShards;
-
-        Supplier(Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory, int numShards)
-        {
-            this.node = node;
-            this.agent = agent;
-            this.store = store;
-            this.progressLogFactory = progressLogFactory;
-            this.shardFactory = shardFactory;
-            this.numShards = numShards;
-        }
-
-        CommandStore create(int generation, int shardIndex, RangesForEpoch rangesForEpoch)
-        {
-            return shardFactory.create(generation, shardIndex, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
-        }
-
-        ShardedRanges createShardedRanges(int generation, long epoch, KeyRanges ranges, RangesForEpoch rangesForEpoch)
-        {
-            CommandStore[] newStores = new CommandStore[numShards];
-            for (int i=0; i<numShards; i++)
-                newStores[i] = create(generation, i, rangesForEpoch);
-
-            return new ShardedRanges(newStores, epoch, ranges);
-        }
-    }
-
     protected static class ShardedRanges
     {
         final CommandStore[] shards;
@@ -263,19 +191,22 @@ public abstract class CommandStores
         }
     }
 
-    final Supplier supplier;
+    private final Node node;
+    private final Agent agent;
+    private final DataStore store;
+    private final ProgressLog.Factory progressLogFactory;
+    private final int numShards;
     volatile Snapshot current;
 
-    protected CommandStores(Supplier supplier)
-    {
-        this.supplier = supplier;
-        this.current = new Snapshot(new ShardedRanges[0], Topology.EMPTY, Topology.EMPTY);
-    }
-
     public CommandStores(int num, Node node, Agent agent, DataStore store,
-                         ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
+                         ProgressLog.Factory progressLogFactory)
     {
-        this(new Supplier(node, agent, store, progressLogFactory, shardFactory, num));
+        this.node = node;
+        this.agent = agent;
+        this.store = store;
+        this.progressLogFactory = progressLogFactory;
+        this.numShards = num;
+        this.current = new Snapshot(new ShardedRanges[0], Topology.EMPTY, Topology.EMPTY);
     }
 
     public Topology local()
@@ -288,6 +219,24 @@ public abstract class CommandStores
         return current.global;
     }
 
+    protected abstract CommandStore createCommandStore(int generation,
+                                                       int index,
+                                                       int numShards,
+                                                       Node node,
+                                                       Agent agent,
+                                                       DataStore store,
+                                                       ProgressLog.Factory progressLogFactory,
+                                                       RangesForEpoch rangesForEpoch);
+
+    private ShardedRanges createShardedRanges(int generation, long epoch, KeyRanges ranges, RangesForEpoch rangesForEpoch)
+    {
+        CommandStore[] newStores = new CommandStore[numShards];
+        for (int i=0; i<numShards; i++)
+            newStores[i] = createCommandStore(generation, i, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
+
+        return new ShardedRanges(newStores, epoch, ranges);
+    }
+
     private Snapshot updateTopology(Snapshot prev, Topology newTopology)
     {
         Preconditions.checkArgument(!newTopology.isSubset(), "Use full topology for CommandStores.updateTopology");
@@ -296,7 +245,7 @@ public abstract class CommandStores
         if (epoch <= prev.global.epoch())
             return prev;
 
-        Topology newLocalTopology = newTopology.forNode(supplier.node.id());
+        Topology newLocalTopology = newTopology.forNode(node.id());
         KeyRanges added = newLocalTopology.ranges().difference(prev.local.ranges());
         KeyRanges subtracted = prev.local.ranges().difference(newLocalTopology.ranges());
 //            for (ShardedRanges range : stores.ranges)
@@ -315,7 +264,7 @@ public abstract class CommandStores
         {
             int newGeneration = prev.ranges.length;
             System.arraycopy(prev.ranges, 0, result, 0, newGeneration);
-            result[newGeneration] = supplier.createShardedRanges(newGeneration, epoch, added, rangesForEpochFunction(newGeneration));
+            result[newGeneration] = createShardedRanges(newGeneration, epoch, added, rangesForEpochFunction(newGeneration));
         }
         else
         {
@@ -328,7 +277,7 @@ public abstract class CommandStores
                 result[i++] = ranges;
             }
             if (i < result.length)
-                result[i] = supplier.createShardedRanges(i, epoch, added, rangesForEpochFunction(i));
+                result[i] = createShardedRanges(i, epoch, added, rangesForEpochFunction(i));
         }
 
         return new Snapshot(result, newTopology, newLocalTopology);

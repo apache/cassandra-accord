@@ -20,11 +20,6 @@ public abstract class InMemoryCommandStores extends CommandStores
         super(num, node, agent, store, progressLogFactory, shardFactory);
     }
 
-    public InMemoryCommandStores(Supplier supplier)
-    {
-        super(supplier);
-    }
-
     public static InMemoryCommandStores inMemory(Node node)
     {
         return (InMemoryCommandStores) node.commandStores();
@@ -59,9 +54,10 @@ public abstract class InMemoryCommandStores extends CommandStores
             super(num, node, agent, store, progressLogFactory, InMemoryCommandStore.Synchronized::new);
         }
 
-        public Synchronized(Supplier supplier)
+        @Override
+        protected CommandStore createCommandStore(int generation, int index, int numShards, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.RangesForEpoch rangesForEpoch)
         {
-            super(supplier);
+            return new InMemoryCommandStore.Synchronized(generation, index, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
         }
     }
 
@@ -76,6 +72,12 @@ public abstract class InMemoryCommandStores extends CommandStores
         {
             super(num, node, agent, store, progressLogFactory, shardFactory);
         }
+
+        @Override
+        protected CommandStore createCommandStore(int generation, int index, int numShards, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.RangesForEpoch rangesForEpoch)
+        {
+            return new InMemoryCommandStore.SingleThread(generation, index, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
+        }
     }
 
     public static class Debug extends InMemoryCommandStores.SingleThread
@@ -83,6 +85,12 @@ public abstract class InMemoryCommandStores extends CommandStores
         public Debug(int num, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory)
         {
             super(num, node, agent, store, progressLogFactory, InMemoryCommandStore.SingleThreadDebug::new);
+        }
+
+        @Override
+        protected CommandStore createCommandStore(int generation, int index, int numShards, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.RangesForEpoch rangesForEpoch)
+        {
+            return new InMemoryCommandStore.SingleThreadDebug(generation, index, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
         }
     }
 
