@@ -56,7 +56,7 @@ public class NodeSink implements MessageSink
                 }
                 catch (Throwable t)
                 {
-                    callback.onCallbackFailure(t);
+                    callback.onCallbackFailure(to, t);
                     lookup.apply(self).agent().onUncaughtException(t);
                 }
 
@@ -71,7 +71,7 @@ public class NodeSink implements MessageSink
                 }
                 catch (Throwable t)
                 {
-                    callback.onCallbackFailure(t);
+                    callback.onCallbackFailure(to, t);
                     lookup.apply(self).agent().onUncaughtException(t);
                 }
             }

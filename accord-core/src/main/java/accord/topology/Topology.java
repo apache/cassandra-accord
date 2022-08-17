@@ -4,10 +4,11 @@ import java.util.*;
 import java.util.function.IntFunction;
 import java.util.stream.IntStream;
 
-import accord.local.CommandStores;
 import accord.local.Node.Id;
 import accord.api.Key;
-import accord.txn.Keys;
+import accord.primitives.KeyRange;
+import accord.primitives.KeyRanges;
+import accord.primitives.Keys;
 import accord.utils.IndexedConsumer;
 import accord.utils.IndexedBiFunction;
 import accord.utils.IndexedIntFunction;
@@ -44,7 +45,7 @@ public class Topology extends AbstractCollection<Shard>
     public Topology(long epoch, Shard... shards)
     {
         this.epoch = epoch;
-        this.ranges = new KeyRanges(Arrays.stream(shards).map(shard -> shard.range).toArray(KeyRange[]::new));
+        this.ranges = KeyRanges.ofSortedAndDeoverlapped(Arrays.stream(shards).map(shard -> shard.range).toArray(KeyRange[]::new));
         this.shards = shards;
         this.subsetOfRanges = ranges;
         this.supersetRangeIndexes = IntStream.range(0, shards.length).toArray();
@@ -168,7 +169,7 @@ public class Topology extends AbstractCollection<Shard>
             if (predicate.test(subsetIndex, shard))
                 newSubset[count++] = supersetIndex;
             // find the first key outside this range
-            i = shard.range.higherKeyIndex(select, i, select.size());
+            i = shard.range.nextHigherKeyIndex(select, i);
         }
         if (count != newSubset.length)
             newSubset = Arrays.copyOf(newSubset, count);
@@ -202,7 +203,7 @@ public class Topology extends AbstractCollection<Shard>
             Shard shard = shards[supersetIndex];
             accumulator = function.apply(subsetIndex, shard, accumulator);
             // find the first key outside this range
-            i = shard.range.higherKeyIndex(select, i, select.size());
+            i = shard.range.nextHigherKeyIndex(select, i);
         }
         return accumulator;
     }

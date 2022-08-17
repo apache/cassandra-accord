@@ -9,13 +9,13 @@ import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.impl.mock.MockCluster.Clock;
 import accord.topology.Topology;
-import accord.txn.Dependencies;
+import accord.primitives.Deps;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 import accord.utils.EpochFunction;
 import accord.utils.ThreadPoolScheduler;
 import accord.local.*;
-import accord.txn.Keys;
+import accord.primitives.Keys;
 import accord.impl.IntKey;
 import accord.impl.TestAgent;
 import accord.impl.TopologyFactory;
@@ -72,6 +72,7 @@ public class PreAcceptTest
         try
         {
             IntKey key = IntKey.key(10);
+            Keys keys = Keys.of(key);
             CommandStore commandStore = node.unsafeForKey(key);
             Assertions.assertFalse(commandStore.hasCommandsForKey(key));
 
@@ -86,7 +87,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, new Dependencies()),
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, Deps.NONE),
                                     messageSink.responses.get(0).payload);
         }
         finally
@@ -131,21 +132,21 @@ public class PreAcceptTest
         Node node = createNode(ID1, messageSink, clock);
         try
         {
-
             IntKey key1 = IntKey.key(10);
             PreAccept preAccept1 = preAccept(clock.idForNode(1, ID2), writeTxn(Keys.of(key1)), key1);
             preAccept1.process(node, ID2, REPLY_CONTEXT);
 
             messageSink.clearHistory();
             IntKey key2 = IntKey.key(11);
+            Keys keys = Keys.of(key1, key2);
             TxnId txnId2 = new TxnId(1, 50, 0, ID3);
-            PreAccept preAccept2 = preAccept(txnId2, writeTxn(Keys.of(key1, key2)), key2);
+            PreAccept preAccept2 = preAccept(txnId2, writeTxn(keys), key2);
             clock.increment(10);
             preAccept2.process(node, ID3, REPLY_CONTEXT);
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID3, messageSink.responses.get(0).to);
-            Dependencies expectedDeps = new Dependencies();
+            Deps expectedDeps = Deps.NONE;
             Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId2, new TxnId(1, 110, 0, ID1), expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
@@ -169,13 +170,14 @@ public class PreAcceptTest
         IntKey key = IntKey.key(10);
         try
         {
+            Keys keys = Keys.of(key);
             TxnId txnId = new TxnId(1, 110, 0, ID2);
-            PreAccept preAccept = preAccept(txnId, writeTxn(Keys.of(key)), key);
+            PreAccept preAccept = preAccept(txnId, writeTxn(keys), key);
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            Dependencies expectedDeps = new Dependencies();
+            Deps expectedDeps = Deps.NONE;
             Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
@@ -195,13 +197,14 @@ public class PreAcceptTest
         try
         {
             IntKey key = IntKey.key(10);
+            Keys keys = Keys.of(key);
             CommandStore commandStore = node.unsafeForKey(key);
 
             configService(node).reportTopology(node.topology().current().withEpoch(2));
             messageSink.clearHistory();
 
             TxnId txnId = clock.idForNode(1, ID2);
-            Txn txn = writeTxn(Keys.of(key));
+            Txn txn = writeTxn(keys);
             PreAccept preAccept = preAccept(txnId, txn, key);
 
             clock.increment(10);
@@ -212,7 +215,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, new TxnId(2, 110, 0, ID1), new Dependencies()),
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, new TxnId(2, 110, 0, ID1), Deps.NONE),
                                     messageSink.responses.get(0).payload);
         }
         finally

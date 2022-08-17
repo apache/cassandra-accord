@@ -2,7 +2,7 @@ package accord.local;
 
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
-import accord.txn.Timestamp;
+import accord.primitives.Timestamp;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 

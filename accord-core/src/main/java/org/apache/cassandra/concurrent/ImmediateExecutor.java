@@ -39,6 +39,6 @@ public class ImmediateExecutor implements Executor
     @Override
     public void execute(Runnable command)
     {
-        command.run();;
+        command.run();
     }
 }

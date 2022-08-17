@@ -8,9 +8,16 @@ import java.util.stream.Collectors;
 import accord.api.Key;
 import accord.api.Data;
 import accord.api.Update;
+import accord.primitives.Keys;
 
 public class ListUpdate extends TreeMap<Key, Integer> implements Update
 {
+    @Override
+    public Keys keys()
+    {
+        return new Keys(keySet());
+    }
+
     @Override
     public ListWrite apply(Data read)
     {

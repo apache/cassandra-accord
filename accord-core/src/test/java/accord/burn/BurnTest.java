@@ -30,15 +30,12 @@ import accord.impl.list.ListRead;
 import accord.impl.list.ListRequest;
 import accord.impl.list.ListResult;
 import accord.impl.list.ListUpdate;
-import accord.verify.SerializabilityVerifier;
-import accord.verify.LinearizabilityVerifier;
-import accord.verify.LinearizabilityVerifier.Observation;
 import accord.local.Node.Id;
 import accord.api.Key;
 import accord.txn.Txn;
-import accord.txn.Keys;
+import accord.primitives.Keys;
 import accord.verify.StrictSerializabilityVerifier;
-import ch.qos.logback.classic.Level;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,9 +71,10 @@ public class BurnTest
                 update.put(keys.get(i), ++next[i]);
             }
 
+            Keys readKeys = new Keys(requestKeys);
             requestKeys.addAll(update.keySet());
-            ListRead read = new ListRead(new Keys(requestKeys));
-            ListQuery query = new ListQuery(client, count, read.keys, update);
+            ListRead read = new ListRead(readKeys, new Keys(requestKeys));
+            ListQuery query = new ListQuery(client, count);
             ListRequest request = new ListRequest(new Txn(new Keys(requestKeys), read, query, update));
             packets.add(new Packet(client, node, count, request));
         }
@@ -214,9 +212,23 @@ public class BurnTest
             }
         };
 
-        Cluster.run(nodes.toArray(Id[]::new), () -> queue,
-                    responseSink, () -> new Random(random.nextLong()), () -> new AtomicLong()::incrementAndGet,
-                    topologyFactory, () -> null);
+        try
+        {
+            Cluster.run(nodes.toArray(Id[]::new), () -> queue,
+                        responseSink, failures::add,
+                        () -> new Random(random.nextLong()),
+                        () -> new AtomicLong()::incrementAndGet,
+                        topologyFactory, () -> null);
+        }
+        catch (Throwable t)
+        {
+            for (int i = 0 ; i < requests.length ; ++i)
+            {
+                logger.info("{}", requests[i]);
+                logger.info("\t\t" + replies[i]);
+            }
+            throw t;
+        }
 
         logger.info("Received {} acks and {} nacks ({} total) to {} operations\n", acks.get(), nacks.get(), acks.get() + nacks.get(), operations);
         if (clock.get() != operations * 2)
@@ -233,17 +245,18 @@ public class BurnTest
     public static void main(String[] args) throws Exception
     {
         Long overrideSeed = null;
-//        Long overrideSeed = -7320078316311161123L;
+//        Long overrideSeed = -7569077303416028948L;
         do
         {
             long seed = overrideSeed != null ? overrideSeed : ThreadLocalRandom.current().nextLong();
             logger.info("Seed: {}", seed);
+            Cluster.trace.trace("Seed: {}", seed);
             Random random = new Random(seed);
             try
             {
-                List<Id> clients =  generateIds(true, 1 + random.nextInt(4));
-                List<Id> nodes =  generateIds(false, 5 + random.nextInt(5));
-                burn(random, new TopologyFactory<>(nodes.size() == 5 ? 3 : (2 + random.nextInt(3)), IntHashKey.ranges(4 + random.nextInt(12))),
+                List<Id> clients = generateIds(true, 1 + random.nextInt(4));
+                List<Id> nodes = generateIds(false, 5 + random.nextInt(5));
+                burn(random, new TopologyFactory(nodes.size() == 5 ? 3 : (2 + random.nextInt(3)), IntHashKey.ranges(4 + random.nextInt(12))),
                      clients,
                      nodes,
                      5 + random.nextInt(15),

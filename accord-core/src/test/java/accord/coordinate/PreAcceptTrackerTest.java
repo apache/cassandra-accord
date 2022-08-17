@@ -4,7 +4,7 @@ import accord.Utils;
 import accord.coordinate.tracking.FastPathTracker;
 import accord.impl.TopologyUtils;
 import accord.local.Node;
-import accord.topology.KeyRanges;
+import accord.primitives.KeyRanges;
 import accord.topology.Shard;
 import accord.topology.Topology;
 

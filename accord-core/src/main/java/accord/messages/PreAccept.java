@@ -1,7 +1,7 @@
 package accord.messages;
 
-import java.util.Objects;
-import java.util.stream.Stream;
+import java.util.*;
+import java.util.function.BiConsumer;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -12,12 +12,12 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.TxnRequest.WithUnsynced;
 import accord.topology.Topologies;
-import accord.txn.Keys;
-import accord.txn.Timestamp;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
 import accord.local.Command;
-import accord.txn.Dependencies;
+import accord.primitives.Deps;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 
 public class PreAccept extends WithUnsynced
 {
@@ -60,9 +60,10 @@ public class PreAccept extends WithUnsynced
             PreAcceptOk ok1 = (PreAcceptOk) r1;
             PreAcceptOk ok2 = (PreAcceptOk) r2;
             PreAcceptOk okMax = ok1.witnessedAt.compareTo(ok2.witnessedAt) >= 0 ? ok1 : ok2;
-            if (ok1 != okMax && !ok1.deps.isEmpty()) okMax.deps.addAll(ok1.deps);
-            if (ok2 != okMax && !ok2.deps.isEmpty()) okMax.deps.addAll(ok2.deps);
-            return okMax;
+            Deps deps = ok1.deps.with(ok2.deps);
+            if (deps == okMax.deps)
+                return okMax;
+            return new PreAcceptOk(txnId, okMax.witnessedAt, deps);
         }));
     }
 
@@ -87,9 +88,9 @@ public class PreAccept extends WithUnsynced
     {
         public final TxnId txnId;
         public final Timestamp witnessedAt;
-        public final Dependencies deps;
+        public final Deps deps;
 
-        public PreAcceptOk(TxnId txnId, Timestamp witnessedAt, Dependencies deps)
+        public PreAcceptOk(TxnId txnId, Timestamp witnessedAt, Deps deps)
         {
             this.txnId = txnId;
             this.witnessedAt = witnessedAt;
@@ -147,17 +148,22 @@ public class PreAccept extends WithUnsynced
         }
     }
 
-    static Dependencies calculateDeps(CommandStore commandStore, TxnId txnId, Txn txn, Timestamp executeAt)
+    static Deps calculateDeps(CommandStore commandStore, TxnId txnId, Txn txn, Timestamp executeAt)
     {
-        Dependencies deps = new Dependencies();
-        conflictsMayExecuteBefore(commandStore, executeAt, txn.keys).forEach(conflict -> {
-            if (conflict.txnId().equals(txnId))
-                return;
+        try (Deps.OrderedBuilder builder = Deps.orderedBuilder(false);)
+        {
+            txn.keys.forEach(key -> {
+                CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
+                if (forKey == null)
+                    return;
 
-            if (txn.isWrite() || conflict.txn().isWrite())
-                deps.add(conflict);
-        });
-        return deps;
+                builder.nextKey(key);
+                forKey.uncommitted.headMap(executeAt, false).forEach(conflicts(txnId, txn.isWrite(), builder));
+                forKey.committedByExecuteAt.headMap(executeAt, false).forEach(conflicts(txnId, txn.isWrite(), builder));
+            });
+
+            return builder.build();
+        }
     }
 
     @Override
@@ -170,19 +176,11 @@ public class PreAccept extends WithUnsynced
                '}';
     }
 
-    private static Stream<Command> conflictsMayExecuteBefore(CommandStore commandStore, Timestamp mayExecuteBefore, Keys keys)
+    private static BiConsumer<Timestamp, Command> conflicts(TxnId txnId, boolean isWrite, Deps.OrderedBuilder builder)
     {
-        return keys.stream().flatMap(key -> {
-            CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
-            if (forKey == null)
-                return Stream.of();
-
-            return Stream.concat(
-                forKey.uncommitted.headMap(mayExecuteBefore, false).values().stream(),
-                // TODO: only return latest of Committed?
-                forKey.committedByExecuteAt.headMap(mayExecuteBefore, false).values().stream()
-            );
-        });
+        return (ts, command) -> {
+            if (!txnId.equals(command.txnId()) && (isWrite || command.txn().isWrite()))
+                builder.add(command.txnId());
+        };
     }
-
 }

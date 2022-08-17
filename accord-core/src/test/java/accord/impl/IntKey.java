@@ -3,16 +3,14 @@ package accord.impl;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.function.BiFunction;
 
 import accord.api.Key;
-import accord.topology.KeyRange;
-import accord.topology.KeyRanges;
-import accord.txn.Keys;
+import accord.primitives.KeyRange;
+import accord.primitives.Keys;
 
-public class IntKey implements Key<IntKey>
+public class IntKey implements Key
 {
-    private static class Range extends KeyRange.EndInclusive<IntKey>
+    private static class Range extends KeyRange.EndInclusive
     {
         public Range(IntKey start, IntKey end)
         {
@@ -20,9 +18,9 @@ public class IntKey implements Key<IntKey>
         }
 
         @Override
-        public KeyRange<IntKey> subRange(IntKey start, IntKey end)
+        public KeyRange subRange(Key start, Key end)
         {
-            return new Range(start, end);
+            return new Range((IntKey)start, (IntKey)end);
         }
     }
 
@@ -34,9 +32,9 @@ public class IntKey implements Key<IntKey>
     }
 
     @Override
-    public int compareTo(IntKey that)
+    public int compareTo(Key that)
     {
-        return Integer.compare(this.key, that.key);
+        return Integer.compare(this.key, ((IntKey)that).key);
     }
 
     public static IntKey key(int k)
@@ -51,7 +49,7 @@ public class IntKey implements Key<IntKey>
         for (int i=0; i<kn.length; i++)
             keys[i + 1] = new IntKey(kn[i]);
 
-        return new Keys(keys);
+        return Keys.of(keys);
     }
 
     public static Keys keys(int[] keyArray)
@@ -60,22 +58,22 @@ public class IntKey implements Key<IntKey>
         for (int i=0; i<keyArray.length; i++)
             keys[i] = new IntKey(keyArray[i]);
 
-        return new Keys(keys);
+        return Keys.of(keys);
     }
 
-    public static KeyRange<IntKey> range(IntKey start, IntKey end)
+    public static KeyRange range(IntKey start, IntKey end)
     {
         return new Range(start, end);
     }
 
-    public static KeyRange<IntKey> range(int start, int end)
+    public static KeyRange range(int start, int end)
     {
         return range(key(start), key(end));
     }
 
-    public static KeyRange<IntKey>[] ranges(int count)
+    public static KeyRange[] ranges(int count)
     {
-        List<KeyRange<IntKey>> result = new ArrayList<>();
+        List<KeyRange> result = new ArrayList<>();
         long delta = (Integer.MAX_VALUE - (long)Integer.MIN_VALUE) / count;
         long start = Integer.MIN_VALUE;
         IntKey prev = new IntKey((int)start);
@@ -111,7 +109,7 @@ public class IntKey implements Key<IntKey>
     }
 
     @Override
-    public int keyHash()
+    public int routingHash()
     {
         return hashCode();
     }

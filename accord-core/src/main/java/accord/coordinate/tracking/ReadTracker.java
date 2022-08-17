@@ -116,7 +116,7 @@ public class ReadTracker extends AbstractResponseTracker<ReadTracker.ReadShardTr
                 return accumulate;
 
             if (accumulate == null)
-                accumulate = new HashSet<>();
+                accumulate = new LinkedHashSet<>(); // determinism
 
             accumulate.add(tracker);
             return accumulate;

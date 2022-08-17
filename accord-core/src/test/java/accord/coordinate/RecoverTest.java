@@ -5,10 +5,10 @@ import accord.impl.mock.MockCluster;
 import accord.impl.IntKey;
 import accord.api.Key;
 import accord.local.*;
-import accord.txn.Keys;
+import accord.primitives.Keys;
 import accord.messages.PreAccept;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 
 import org.junit.jupiter.api.Assertions;
 

@@ -1,7 +1,7 @@
 package accord.api;
 
-import accord.txn.Keys;
-import accord.txn.Timestamp;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
 
 /**
  * A read to be performed on potentially multiple shards, the inputs of which may be fed to a {@link Query}

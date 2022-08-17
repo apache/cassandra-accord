@@ -9,7 +9,7 @@ import accord.messages.InformOfTxn;
 import accord.messages.InformOfTxn.InformOfTxnReply;
 import accord.topology.Shard;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 import org.apache.cassandra.utils.concurrent.AsyncFuture;
 import org.apache.cassandra.utils.concurrent.Future;
 
@@ -64,7 +64,7 @@ public class InformHomeOfTxn extends AsyncFuture<Void> implements Callback<Infor
     }
 
     @Override
-    public void onCallbackFailure(Throwable failure)
+    public void onCallbackFailure(Id from, Throwable failure)
     {
         tryFailure(failure);
     }

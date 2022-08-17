@@ -6,11 +6,11 @@ import com.google.common.base.Preconditions;
 import accord.api.Key;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.topology.KeyRanges;
+import accord.primitives.KeyRanges;
 import accord.topology.Topologies;
 import accord.topology.Topology;
-import accord.txn.Keys;
-import accord.txn.TxnId;
+import accord.primitives.Keys;
+import accord.primitives.TxnId;
 
 import static java.lang.Long.min;
 
@@ -186,7 +186,7 @@ public abstract class TxnRequest implements EpochRequest
             Topology topology = topologies.get(i);
             KeyRanges ranges = topology.rangesForNode(node);
             if (ranges != last && ranges != null && !ranges.equals(last))
-                scopeKeys = scopeKeys.union(keys.intersect(ranges));
+                scopeKeys = scopeKeys.union(keys.slice(ranges));
 
             last = ranges;
         }

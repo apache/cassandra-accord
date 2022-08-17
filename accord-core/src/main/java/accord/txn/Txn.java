@@ -4,10 +4,12 @@ import java.util.Objects;
 
 import accord.api.*;
 import accord.local.*;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
 
 public class Txn
 {
-    enum Kind { READ, WRITE, RECONFIGURE }
+    enum Kind { READ, WRITE }
 
     final Kind kind;
     public final Keys keys;
@@ -50,21 +52,12 @@ public class Txn
 
     public boolean isWrite()
     {
-        switch (kind)
-        {
-            default:
-                throw new IllegalStateException();
-            case READ:
-                return false;
-            case WRITE:
-            case RECONFIGURE:
-                return true;
-        }
+        return kind == Kind.WRITE;
     }
 
     public Result result(Data data)
     {
-        return query.compute(data);
+        return query.compute(data, read, update);
     }
 
     public Writes execute(Timestamp executeAt, Data data)
@@ -87,7 +80,7 @@ public class Txn
 
     public Data read(Command command, Keys keys)
     {
-        return keys.foldl(command.commandStore.ranges().at(command.executeAt().epoch), (key, accumulate) -> {
+        return keys.foldl(command.commandStore.ranges().at(command.executeAt().epoch), (index, key, accumulate) -> {
             CommandStore commandStore = command.commandStore;
             if (!commandStore.hashIntersects(key))
                 return accumulate;

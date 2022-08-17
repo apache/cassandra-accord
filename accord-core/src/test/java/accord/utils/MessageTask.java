@@ -119,7 +119,7 @@ public class MessageTask extends AsyncPromise<Void> implements Runnable
         }
 
         @Override
-        public void onCallbackFailure(Throwable failure)
+        public void onCallbackFailure(Node.Id from, Throwable failure)
         {
             tryFailure(failure);
         }

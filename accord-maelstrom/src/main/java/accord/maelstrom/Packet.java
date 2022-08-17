@@ -5,7 +5,6 @@ import java.io.StringReader;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.function.Function;
 
 import accord.impl.SimpleProgressLog;
 import accord.messages.*;
@@ -48,6 +47,7 @@ public class Packet implements ReplyContext
         InformOfTxn(InformOfTxn.class),
         InformOfTxnOk(InformOfTxn.InformOfTxnOk.class),
         InformOfPersistence(InformOfPersistence.class),
+        InformHomeOfTxn(accord.coordinate.InformHomeOfTxn.class, Json.DEFAULT_ADAPTER),
         SimpleProgressLog_ApplyAndCheck(SimpleProgressLog.ApplyAndCheck.class),
         SimpleProgressLog_ApplyAndCheckOk(SimpleProgressLog.ApplyAndCheckOk.class);
 

@@ -8,8 +8,8 @@ import accord.coordinate.CheckOnUncommitted;
 import accord.coordinate.InformHomeOfTxn;
 import accord.local.CommandStore;
 import accord.local.Node.Id;
-import accord.txn.Keys;
-import accord.txn.TxnId;
+import accord.primitives.Keys;
+import accord.primitives.TxnId;
 
 /**
  * This interface is responsible for managing incomplete transactions *and retrying them*.

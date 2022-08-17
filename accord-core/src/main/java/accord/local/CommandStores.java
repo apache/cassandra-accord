@@ -4,11 +4,10 @@ import accord.api.Agent;
 import accord.api.Key;
 import accord.api.DataStore;
 import accord.local.CommandStore.RangesForEpoch;
-import accord.messages.TxnRequest;
 import accord.api.ProgressLog;
-import accord.topology.KeyRanges;
+import accord.primitives.KeyRanges;
 import accord.topology.Topology;
-import accord.txn.Keys;
+import accord.primitives.Keys;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
@@ -196,7 +195,7 @@ public abstract class CommandStores
                 int index = ranges[i].rangeIndexForKey(scope);
                 if (index < 0)
                     continue;
-                result = addKeyIndex(scope, shards.length, result);
+                result = addKeyIndex(0, scope, shards.length, result);
             }
             return result;
         }
@@ -208,10 +207,10 @@ public abstract class CommandStores
 
         static long keyIndex(Key key, long numShards)
         {
-            return Integer.toUnsignedLong(key.keyHash()) % numShards;
+            return Integer.toUnsignedLong(key.routingHash()) % numShards;
         }
 
-        private static long addKeyIndex(Key key, long numShards, long accumulate)
+        private static long addKeyIndex(int i, Key key, long numShards, long accumulate)
         {
             return accumulate | (1L << keyIndex(key, numShards));
         }
