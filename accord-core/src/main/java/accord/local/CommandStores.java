@@ -402,6 +402,8 @@ public abstract class CommandStores
     private  <S, T> T mapReduce(TxnOperation operation, Select<S> select, S scope, long minEpoch, long maxEpoch, Fold<TxnOperation, Void, List<Future<T>>> fold, BiFunction<T, T, T> reduce)
     {
         List<Future<T>> futures = foldl(select, scope, minEpoch, maxEpoch, fold, operation, null, ArrayList::new);
+        if (futures == null)
+            return null;
         return reduce(futures, reduce);
     }
 

@@ -318,8 +318,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         boolean isProgressShard = progressKey != null && handles(txnId().epoch, progressKey);
         commandStore().progressLog().execute(txnId(), isProgressShard, isProgressShard && progressKey.equals(homeKey));
 
-        notifyListeners();
-        return maybeExecute(false);
+        return maybeExecute(true);
     }
 
     public boolean recover(Txn txn, Key homeKey, Key progressKey, Ballot ballot)
