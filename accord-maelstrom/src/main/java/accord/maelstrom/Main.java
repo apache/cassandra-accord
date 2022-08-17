@@ -176,7 +176,16 @@ public class Main
                             CallbackInfo callback = reply.isFinal() ? sink.callbacks.remove(next.body.in_reply_to)
                                     : sink.callbacks.get(next.body.in_reply_to);
                             if (callback != null)
-                                scheduler.now(() -> callback.callback.onSuccess(next.src, reply));
+                                scheduler.now(() -> {
+                                    try
+                                    {
+                                        callback.callback.onSuccess(next.src, reply);
+                                    }
+                                    catch (Throwable t)
+                                    {
+                                        callback.callback.onCallbackFailure(next.src, t);
+                                    }
+                                });
                         }
                         else on.receive((Request)((Wrapper)next.body).body, next.src, MaelstromReplyContext.contextFor(next.body.msg_id));
                 }

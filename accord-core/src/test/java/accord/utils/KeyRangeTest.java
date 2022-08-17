@@ -1,10 +1,9 @@
 package accord.utils;
 
 import accord.api.Key;
-import accord.topology.KeyRange;
+import accord.primitives.KeyRange;
 import accord.impl.IntKey;
-import accord.topology.KeyRanges;
-import accord.txn.Keys;
+import accord.primitives.Keys;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -15,12 +14,12 @@ public class KeyRangeTest
         return new IntKey(v);
     }
 
-    private static KeyRange<IntKey> r(int start, int end)
+    private static KeyRange r(int start, int end)
     {
         return IntKey.range(start, end);
     }
 
-    private static class EndInclusiveIntRange extends KeyRange.EndInclusive<IntKey>
+    private static class EndInclusiveIntRange extends KeyRange.EndInclusive
     {
         public EndInclusiveIntRange(IntKey start, IntKey end)
         {
@@ -28,13 +27,13 @@ public class KeyRangeTest
         }
 
         @Override
-        public KeyRange<IntKey> subRange(IntKey start, IntKey end)
+        public KeyRange subRange(Key start, Key end)
         {
-            return new EndInclusiveIntRange(start, end);
+            return new EndInclusiveIntRange((IntKey)start, (IntKey)end);
         }
     }
 
-    private static class StartInclusiveIntRange extends KeyRange.StartInclusive<IntKey>
+    private static class StartInclusiveIntRange extends KeyRange.StartInclusive
     {
         public StartInclusiveIntRange(IntKey start, IntKey end)
         {
@@ -42,18 +41,18 @@ public class KeyRangeTest
         }
 
         @Override
-        public KeyRange<IntKey> subRange(IntKey start, IntKey end)
+        public KeyRange subRange(Key start, Key end)
         {
-            return new StartInclusiveIntRange(start, end);
+            return new StartInclusiveIntRange((IntKey)start, (IntKey)end);
         }
     }
 
-    static KeyRange<IntKey> rangeEndIncl(int start, int end)
+    static KeyRange rangeEndIncl(int start, int end)
     {
         return new EndInclusiveIntRange(k(start), k(end));
     }
 
-    static KeyRange<IntKey> rangeStartIncl(int start, int end)
+    static KeyRange rangeStartIncl(int start, int end)
     {
         return new StartInclusiveIntRange(k(start), k(end));
     }
@@ -63,7 +62,7 @@ public class KeyRangeTest
         Key[] keys = new Key[values.length];
         for (int i=0; i<values.length; i++)
             keys[i] = IntKey.key(values[i]);
-        return new Keys(keys);
+        return Keys.of(keys);
     }
 
     private static void assertInvalidKeyRange(int start, int end)
@@ -99,13 +98,13 @@ public class KeyRangeTest
     @Test
     void containsTest()
     {
-        KeyRange<IntKey> endInclRange = rangeEndIncl(10, 20);
+        KeyRange endInclRange = rangeEndIncl(10, 20);
         Assertions.assertFalse(endInclRange.containsKey(k(10)));
         Assertions.assertFalse(endInclRange.startInclusive());
         Assertions.assertTrue(endInclRange.containsKey(k(20)));
         Assertions.assertTrue(endInclRange.endInclusive());
 
-        KeyRange<IntKey> startInclRange = rangeStartIncl(10, 20);
+        KeyRange startInclRange = rangeStartIncl(10, 20);
         Assertions.assertTrue(startInclRange.containsKey(k(10)));
         Assertions.assertTrue(startInclRange.startInclusive());
         Assertions.assertFalse(startInclRange.containsKey(k(20)));
@@ -116,7 +115,7 @@ public class KeyRangeTest
     {
         if (expectedIdx > 0 && expectedIdx < keys.size())
             Assertions.assertTrue(range.containsKey(keys.get(expectedIdx - 1)));
-        int actualIdx = range.higherKeyIndex(keys);
+        int actualIdx = range.nextHigherKeyIndex(keys, 0);
         Assertions.assertEquals(expectedIdx, actualIdx);
     }
 
@@ -142,7 +141,7 @@ public class KeyRangeTest
         assertHigherKeyIndex(7, rangeStartIncl(20, 25), keys);
     }
 
-    private static void assertLowKeyIndex(int expectedIdx, KeyRange range, Keys keys, int lowerBound, int upperBound)
+    private static void assertLowKeyIndex(int expectedIdx, KeyRange range, Keys keys, int lowerBound)
     {
         if (expectedIdx >= 0 && expectedIdx < keys.size())
         {
@@ -151,17 +150,16 @@ public class KeyRangeTest
         else
         {
             Assertions.assertFalse(range.containsKey(keys.get(lowerBound)));
-            Assertions.assertFalse(range.containsKey(keys.get(upperBound - 1)));
+            Assertions.assertFalse(range.containsKey(keys.get(keys.size() - 1)));
         }
 
-        int actualIdx = range.lowKeyIndex(keys, lowerBound, upperBound);
+        int actualIdx = range.nextCeilKeyIndex(keys, lowerBound);
         Assertions.assertEquals(expectedIdx, actualIdx);
     }
 
     private static void assertLowKeyIndex(int expectedIdx, KeyRange range, Keys keys)
     {
-
-        assertLowKeyIndex(expectedIdx, range, keys, 0, keys.size());
+        assertLowKeyIndex(expectedIdx, range, keys, 0);
     }
 
     @Test
@@ -189,8 +187,6 @@ public class KeyRangeTest
 
         // non-intersecting
         assertLowKeyIndex(-2, rangeStartIncl(12, 14), keys(10, 16));
-        assertLowKeyIndex(-2, rangeStartIncl(12, 14), keys(10, 16, 18), 1, 3);
-        assertLowKeyIndex(-3, rangeStartIncl(12, 14), keys(10, 16, 18), 2, 3);
     }
 
     @Test
@@ -231,7 +227,7 @@ public class KeyRangeTest
         Assertions.assertEquals(-1, r(100, 200).compareIntersecting(r(201, 300)));
     }
 
-    private static void assertIntersection(KeyRange<IntKey> expected, KeyRange<IntKey> a, KeyRange<IntKey> b)
+    private static void assertIntersection(KeyRange expected, KeyRange a, KeyRange b)
     {
         Assertions.assertEquals(expected, a.intersection(b));
         Assertions.assertEquals(expected, b.intersection(a));

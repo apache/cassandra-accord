@@ -5,7 +5,8 @@ import accord.api.Key;
 import accord.impl.IntKey;
 import accord.impl.TopologyFactory;
 import accord.local.Node;
-import accord.txn.Keys;
+import accord.primitives.KeyRange;
+import accord.primitives.Keys;
 import com.google.common.collect.Iterables;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -34,7 +35,7 @@ public class TopologyTest
 
     private static Topology topology(List<Node.Id> ids, int rf, KeyRange... ranges)
     {
-        TopologyFactory<IntKey> topologyFactory = new TopologyFactory<>(rf, ranges);
+        TopologyFactory topologyFactory = new TopologyFactory(rf, ranges);
         return topologyFactory.toTopology(ids);
     }
 
@@ -48,7 +49,7 @@ public class TopologyTest
         return topology(1, 1, ranges);
     }
 
-    private static KeyRange<IntKey> r(int start, int end)
+    private static KeyRange r(int start, int end)
     {
         return IntKey.range(start, end);
     }

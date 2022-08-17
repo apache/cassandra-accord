@@ -8,10 +8,10 @@ import accord.local.CommandStores;
 import accord.impl.SimpleProgressLog;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.topology.KeyRanges;
+import accord.primitives.KeyRanges;
 import accord.utils.EpochFunction;
 import accord.utils.ThreadPoolScheduler;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
@@ -173,7 +173,16 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         }
 
         logger.info("processing reply[{}] from {} to {}: {}", replyingToMessage, from, replyingToNode, reply);
-        node.scheduler().now(() -> callback.onSuccess(from, reply));
+        node.scheduler().now(() -> {
+            try
+            {
+                callback.onSuccess(from, reply);
+            }
+            catch (Throwable t)
+            {
+                callback.onCallbackFailure(from, t);
+            }
+        });
     }
 
     public Node get(Id id)

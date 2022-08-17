@@ -6,13 +6,13 @@ import java.util.Objects;
 import java.util.zip.CRC32C;
 
 import accord.api.Key;
-import accord.topology.KeyRange;
-import accord.topology.KeyRanges;
-import accord.txn.Keys;
+import accord.primitives.KeyRange;
+import accord.primitives.KeyRanges;
+import accord.primitives.Keys;
 
-public class IntHashKey implements Key<IntHashKey>
+public class IntHashKey implements Key
 {
-    public static class Range extends KeyRange.EndInclusive<IntHashKey>
+    public static class Range extends KeyRange.EndInclusive
     {
         public Range(IntHashKey start, IntHashKey end)
         {
@@ -20,18 +20,18 @@ public class IntHashKey implements Key<IntHashKey>
         }
 
         @Override
-        public KeyRange<IntHashKey> subRange(IntHashKey start, IntHashKey end)
+        public KeyRange subRange(Key start, Key end)
         {
-            return new Range(start, end);
+            return new Range((IntHashKey) start, (IntHashKey) end);
         }
 
         public KeyRanges split(int count)
         {
-            int startHash = start().hash;
-            int endHash = end().hash;
+            int startHash = ((IntHashKey)start()).hash;
+            int endHash = ((IntHashKey)end()).hash;
             int currentSize = endHash - startHash;
             if (currentSize < count)
-                return new KeyRanges(new KeyRange[]{this});
+                return KeyRanges.of(new KeyRange[]{this});
             int interval =  currentSize / count;
 
             int last = 0;
@@ -44,7 +44,7 @@ public class IntHashKey implements Key<IntHashKey>
                                       new IntHashKey(Integer.MIN_VALUE, subEnd));
                 last = subEnd;
             }
-            return new KeyRanges(ranges);
+            return KeyRanges.ofSortedAndDeoverlapped(ranges);
         }
     }
 
@@ -65,9 +65,9 @@ public class IntHashKey implements Key<IntHashKey>
     }
 
     @Override
-    public int compareTo(IntHashKey that)
+    public int compareTo(Key that)
     {
-        return Integer.compare(this.hash, that.hash);
+        return Integer.compare(this.hash, ((IntHashKey)that).hash);
     }
 
     public static IntHashKey key(int k)
@@ -87,12 +87,12 @@ public class IntHashKey implements Key<IntHashKey>
         for (int i=0; i<kn.length; i++)
             keys[i + 1] = key(kn[i]);
 
-        return new Keys(keys);
+        return Keys.of(keys);
     }
 
-    public static KeyRange<IntHashKey>[] ranges(int count)
+    public static KeyRange[] ranges(int count)
     {
-        List<KeyRange<IntHashKey>> result = new ArrayList<>();
+        List<KeyRange> result = new ArrayList<>();
         long delta = (Integer.MAX_VALUE - (long)Integer.MIN_VALUE) / count;
         long start = Integer.MIN_VALUE;
         IntHashKey prev = new IntHashKey(Integer.MIN_VALUE, (int)start);
@@ -106,7 +106,7 @@ public class IntHashKey implements Key<IntHashKey>
         return result.toArray(KeyRange[]::new);
     }
 
-    public static KeyRange<IntHashKey> range(IntHashKey start, IntHashKey end)
+    public static KeyRange range(IntHashKey start, IntHashKey end)
     {
         return new Range(start, end);
     }
@@ -144,7 +144,7 @@ public class IntHashKey implements Key<IntHashKey>
     }
 
     @Override
-    public int keyHash()
+    public int routingHash()
     {
         return hash;
     }

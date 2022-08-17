@@ -172,7 +172,16 @@ public class Cluster implements Scheduler
                         Callback callback = reply.isFinal() ? sinks.get(deliver.dest).callbacks.remove(deliver.body.in_reply_to)
                                                             : sinks.get(deliver.dest).callbacks.get(deliver.body.in_reply_to);
                         if (callback != null)
-                            on.scheduler().now(() -> callback.onSuccess(deliver.src, reply));
+                            on.scheduler().now(() -> {
+                                try
+                                {
+                                    callback.onSuccess(deliver.src, reply);
+                                }
+                                catch (Throwable t)
+                                {
+                                    callback.onCallbackFailure(deliver.src, t);
+                                }
+                            });
                     }
                     else on.receive((Request) body, deliver.src, deliver);
             }

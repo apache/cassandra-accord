@@ -10,17 +10,17 @@ import java.util.stream.Stream;
 import accord.api.Key;
 import accord.local.CommandStore;
 import accord.local.CommandsForKey;
-import accord.txn.Keys;
+import accord.primitives.Keys;
 import accord.txn.Writes;
-import accord.txn.Ballot;
+import accord.primitives.Ballot;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.txn.Timestamp;
+import accord.primitives.Timestamp;
 import accord.local.Command;
-import accord.txn.Dependencies;
+import accord.primitives.Deps;
 import accord.local.Status;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 import com.google.common.base.Preconditions;
 
 import static accord.local.Status.Accepted;
@@ -55,16 +55,16 @@ public class BeginRecovery extends TxnRequest
             if (!command.recover(txn, homeKey, progressKey, ballot))
                 return new RecoverNack(command.promised());
 
-            Dependencies deps = command.status() == PreAccepted ? calculateDeps(instance, txnId, txn, txnId)
-                                                                : command.savedDeps();
+            Deps deps = command.status() == PreAccepted ? calculateDeps(instance, txnId, txn, txnId)
+                                                        : command.savedDeps();
 
             boolean rejectsFastPath;
-            Dependencies earlierCommittedWitness, earlierAcceptedNoWitness;
+            Deps earlierCommittedWitness, earlierAcceptedNoWitness;
 
             if (command.hasBeen(Committed))
             {
                 rejectsFastPath = false;
-                earlierCommittedWitness = earlierAcceptedNoWitness = new Dependencies();
+                earlierCommittedWitness = earlierAcceptedNoWitness = Deps.NONE;
             }
             else
             {
@@ -75,20 +75,15 @@ public class BeginRecovery extends TxnRequest
                     rejectsFastPath = committedExecutesAfter(instance, txnId, txn.keys)
                                          .anyMatch(c -> !c.savedDeps().contains(txnId));
 
+                // TODO: introduce some good unit tests for verifying these two functions in a real repair scenario
                 // committed txns with an earlier txnid and have our txnid as a dependency
-                earlierCommittedWitness = committedStartedBefore(instance, txnId, txn.keys)
-                                          .filter(c -> c.savedDeps().contains(txnId))
-                                          .collect(Dependencies::new, Dependencies::add, Dependencies::addAll);
+                earlierCommittedWitness = committedStartedBeforeAndDidWitness(instance, txnId, txn.keys);
 
                 // accepted txns with an earlier txnid that don't have our txnid as a dependency
-                earlierAcceptedNoWitness = uncommittedStartedBefore(instance, txnId, txn.keys)
-                                              .filter(c -> c.is(Accepted)
-                                                           && !c.savedDeps().contains(txnId)
-                                                           && c.executeAt().compareTo(txnId) > 0)
-                                              .collect(Dependencies::new, Dependencies::add, Dependencies::addAll);
+                earlierAcceptedNoWitness = acceptedStartedBeforeAndDidNotWitness(instance, txnId, txn.keys);
             }
             return new RecoverOk(txnId, command.status(), command.accepted(), command.executeAt(), deps, earlierCommittedWitness, earlierAcceptedNoWitness, rejectsFastPath, command.writes(), command.result());
-        }, (r1, r2) -> {
+        }, (r1, r2) -> { // TODO: reduce function that constructs a list to reduce at the end
             if (!r1.isOK()) return r1;
             if (!r2.isOK()) return r2;
             RecoverOk ok1 = (RecoverOk) r1;
@@ -123,27 +118,17 @@ public class BeginRecovery extends TxnRequest
             }
 
             // ok1 and ok2 both PreAccepted
-            Dependencies deps;
-            if (ok1.deps.equals(ok2.deps))
-            {
-                deps = ok1.deps;
-            }
-            else
-            {
-                deps = new Dependencies();
-                deps.addAll(ok1.deps);
-                deps.addAll(ok2.deps);
-            }
-            ok1.earlierCommittedWitness.addAll(ok2.earlierCommittedWitness);
-            ok1.earlierAcceptedNoWitness.addAll(ok2.earlierAcceptedNoWitness);
-            ok1.earlierAcceptedNoWitness.removeAll(ok1.earlierCommittedWitness);
+            Deps deps = ok1.deps.with(ok2.deps);
+            Deps earlierCommittedWitness = ok1.earlierCommittedWitness.with(ok2.earlierCommittedWitness);
+            Deps earlierAcceptedNoWitness = ok1.earlierAcceptedNoWitness.with(ok2.earlierAcceptedNoWitness)
+                                                                        .without(earlierCommittedWitness::contains);
             return new RecoverOk(
                     txnId, ok1.status,
                     Ballot.max(ok1.accepted, ok2.accepted),
                     Timestamp.max(ok1.executeAt, ok2.executeAt),
                     deps,
-                    ok1.earlierCommittedWitness,
-                    ok1.earlierAcceptedNoWitness,
+                    earlierCommittedWitness,
+                    earlierAcceptedNoWitness,
                     ok1.rejectsFastPath | ok2.rejectsFastPath,
                     ok1.writes, ok1.result);
         });
@@ -194,14 +179,14 @@ public class BeginRecovery extends TxnRequest
         public final Status status;
         public final Ballot accepted;
         public final Timestamp executeAt;
-        public final Dependencies deps;
-        public final Dependencies earlierCommittedWitness;  // counter-point to earlierAcceptedNoWitness
-        public final Dependencies earlierAcceptedNoWitness; // wait for these to commit
+        public final Deps deps;
+        public final Deps earlierCommittedWitness;  // counter-point to earlierAcceptedNoWitness
+        public final Deps earlierAcceptedNoWitness; // wait for these to commit
         public final boolean rejectsFastPath;
         public final Writes writes;
         public final Result result;
 
-        public RecoverOk(TxnId txnId, Status status, Ballot accepted, Timestamp executeAt, Dependencies deps, Dependencies earlierCommittedWitness, Dependencies earlierAcceptedNoWitness, boolean rejectsFastPath, Writes writes, Result result)
+        public RecoverOk(TxnId txnId, Status status, Ballot accepted, Timestamp executeAt, Deps deps, Deps earlierCommittedWitness, Deps earlierAcceptedNoWitness, boolean rejectsFastPath, Writes writes, Result result)
         {
             this.txnId = txnId;
             this.accepted = accepted;
@@ -289,24 +274,44 @@ public class BeginRecovery extends TxnRequest
         }
     }
 
-    private static Stream<Command> uncommittedStartedBefore(CommandStore commandStore, TxnId startedBefore, Keys keys)
+    private static Deps acceptedStartedBeforeAndDidNotWitness(CommandStore commandStore, TxnId txnId, Keys keys)
     {
-        return keys.stream().flatMap(key -> {
-            CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
-            if (forKey == null)
-                return Stream.of();
-            return forKey.uncommitted.headMap(startedBefore, false).values().stream();
-        });
+        try (Deps.OrderedBuilder builder = Deps.orderedBuilder(true);)
+        {
+            keys.forEach(key -> {
+                CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
+                if (forKey == null)
+                    return;
+
+                // committed txns with an earlier txnid and have our txnid as a dependency
+                builder.nextKey(key);
+                forKey.uncommitted.headMap(txnId, false).forEach((ts, command) -> {
+                    if (command.is(Accepted) && !command.savedDeps().contains(txnId) && command.executeAt().compareTo(txnId) > 0)
+                        builder.add(command.txnId());
+                });
+            });
+            return builder.build();
+        }
     }
 
-    private static Stream<Command> committedStartedBefore(CommandStore commandStore, TxnId startedBefore, Keys keys)
+    private static Deps committedStartedBeforeAndDidWitness(CommandStore commandStore, TxnId txnId, Keys keys)
     {
-        return keys.stream().flatMap(key -> {
-            CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
-            if (forKey == null)
-                return Stream.of();
-            return forKey.committedById.headMap(startedBefore, false).values().stream();
-        });
+        try (Deps.OrderedBuilder builder = Deps.orderedBuilder(true);)
+        {
+            keys.forEach(key -> {
+                CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
+                if (forKey == null)
+                    return;
+
+                // committed txns with an earlier txnid and have our txnid as a dependency
+                builder.nextKey(key);
+                forKey.committedById.headMap(txnId, false).forEach((ts, command) -> {
+                    if (command.savedDeps().contains(txnId))
+                        builder.add(command.txnId());
+                });
+            });
+            return builder.build();
+        }
     }
 
     private static Stream<Command> uncommittedStartedAfter(CommandStore commandStore, TxnId startedAfter, Keys keys)

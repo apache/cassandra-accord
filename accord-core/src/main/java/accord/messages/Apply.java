@@ -5,11 +5,11 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Result;
 import accord.topology.Topologies;
-import accord.txn.Dependencies;
-import accord.txn.Timestamp;
+import accord.primitives.Deps;
+import accord.primitives.Timestamp;
 import accord.txn.Writes;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 
 import static accord.messages.MessageType.APPLY_REQ;
 import static accord.messages.MessageType.APPLY_RSP;
@@ -20,11 +20,11 @@ public class Apply extends TxnRequest
     public final Txn txn;
     protected final Key homeKey;
     public final Timestamp executeAt;
-    public final Dependencies deps;
+    public final Deps deps;
     public final Writes writes;
     public final Result result;
 
-    public Apply(Node.Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Dependencies deps, Writes writes, Result result)
+    public Apply(Node.Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         super(to, topologies, txn.keys);
         this.txnId = txnId;

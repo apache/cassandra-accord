@@ -3,25 +3,23 @@ package accord.messages;
 import java.util.Collections;
 import java.util.Set;
 
-import com.google.common.base.Preconditions;
-
 import accord.api.Key;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.topology.Topologies;
-import accord.txn.Keys;
-import accord.txn.Timestamp;
-import accord.txn.Dependencies;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
+import accord.primitives.Deps;
 import accord.txn.Txn;
-import accord.txn.TxnId;
+import accord.primitives.TxnId;
 
 // TODO: CommitOk responses, so we can send again if no reply received? Or leave to recovery?
 public class Commit extends ReadData
 {
-    public final Dependencies deps;
+    public final Deps deps;
     public final boolean read;
 
-    public Commit(Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Dependencies deps, boolean read)
+    public Commit(Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, boolean read)
     {
         super(to, topologies, txnId, txn, homeKey, executeAt);
         this.deps = deps;
@@ -29,7 +27,7 @@ public class Commit extends ReadData
     }
 
     // TODO: accept Topology not Topologies
-    public static void commitAndRead(Node node, Topologies executeTopologies, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Dependencies deps, Set<Id> readSet, Callback<ReadReply> callback)
+    public static void commitAndRead(Node node, Topologies executeTopologies, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Set<Id> readSet, Callback<ReadReply> callback)
     {
         for (Node.Id to : executeTopologies.nodes())
         {
@@ -45,7 +43,7 @@ public class Commit extends ReadData
         }
     }
 
-    public static void commit(Node node, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Dependencies deps)
+    public static void commit(Node node, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps)
     {
         Topologies commitTo = node.topology().preciseEpochs(txn, txnId.epoch, executeAt.epoch);
         for (Node.Id to : commitTo.nodes())
@@ -55,7 +53,7 @@ public class Commit extends ReadData
         }
     }
 
-    public static void commit(Node node, Topologies commitTo, Set<Id> doNotCommitTo, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Dependencies deps)
+    public static void commit(Node node, Topologies commitTo, Set<Id> doNotCommitTo, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps)
     {
         for (Node.Id to : commitTo.nodes())
         {
@@ -67,7 +65,7 @@ public class Commit extends ReadData
         }
     }
 
-    public static void commit(Node node, Topologies commitTo, Topologies appliedTo, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Dependencies deps)
+    public static void commit(Node node, Topologies commitTo, Topologies appliedTo, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps)
     {
         // TODO: if we switch to Topology rather than Topologies we can avoid sending commits to nodes that Apply the same
         commit(node, commitTo, Collections.emptySet(), txnId, txn, homeKey, executeAt, deps);

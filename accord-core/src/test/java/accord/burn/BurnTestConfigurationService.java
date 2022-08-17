@@ -226,7 +226,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         }
 
         @Override
-        public void onCallbackFailure(Throwable failure)
+        public void onCallbackFailure(Node.Id from, Throwable failure)
         {
             tryFailure(failure);
         }
