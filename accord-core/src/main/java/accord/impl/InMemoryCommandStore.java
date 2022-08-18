@@ -26,6 +26,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 import java.util.stream.Collectors;
 
 public abstract class InMemoryCommandStore extends CommandStore
@@ -38,9 +39,9 @@ public abstract class InMemoryCommandStore extends CommandStore
         return (InMemoryCommandStore) commandStore;
     }
 
-    public InMemoryCommandStore(int generation, int index, int numShards, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpoch rangesForEpoch)
+    public InMemoryCommandStore(int generation, int index, int numShards, Function<Timestamp, Timestamp> uniqueNow, LongSupplier currentEpoch, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpoch rangesForEpoch)
     {
-        super(generation, index, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
+        super(generation, index, numShards, uniqueNow, currentEpoch, agent, store, progressLogFactory, rangesForEpoch);
     }
 
     @Override
@@ -144,18 +145,17 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     public static class Synchronized extends InMemoryCommandStore
     {
-        public static final Factory FACTORY = Synchronized::new;
-
         public Synchronized(int generation,
                             int index,
                             int numShards,
-                            Node node,
+                            Function<Timestamp, Timestamp> uniqueNow,
+                            LongSupplier currentEpoch,
                             Agent agent,
                             DataStore store,
                             ProgressLog.Factory progressLogFactory,
                             RangesForEpoch rangesForEpoch)
         {
-            super(generation, index, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
+            super(generation, index, numShards, uniqueNow, currentEpoch, agent, store, progressLogFactory, rangesForEpoch);
         }
 
         @Override
@@ -196,8 +196,6 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     public static class SingleThread extends InMemoryCommandStore
     {
-        public static final Factory FACTORY = SingleThread::new;
-
         private final ExecutorService executor;
 
         private class ConsumerWrapper extends AsyncPromise<Void> implements Runnable
@@ -235,16 +233,18 @@ public abstract class InMemoryCommandStore extends CommandStore
         public SingleThread(int generation,
                             int index,
                             int numShards,
-                            Node node,
+                            Node.Id nodeId,
+                            Function<Timestamp, Timestamp> uniqueNow,
+                            LongSupplier currentEpoch,
                             Agent agent,
                             DataStore store,
                             ProgressLog.Factory progressLogFactory,
                             RangesForEpoch rangesForEpoch)
         {
-            super(generation, index, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
+            super(generation, index, numShards, uniqueNow, currentEpoch, agent, store, progressLogFactory, rangesForEpoch);
             executor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
-                thread.setName(CommandStore.class.getSimpleName() + '[' + node.id() + ':' + index + ']');
+                thread.setName(CommandStore.class.getSimpleName() + '[' + nodeId + ':' + index + ']');
                 return thread;
             });
         }
@@ -290,20 +290,20 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     public static class SingleThreadDebug extends SingleThread
     {
-        public static final Factory FACTORY = SingleThreadDebug::new;
-
         private final AtomicReference<Thread> expectedThread = new AtomicReference<>();
 
         public SingleThreadDebug(int generation,
                                  int index,
                                  int numShards,
-                                 Node node,
+                                 Node.Id nodeId,
+                                 Function<Timestamp, Timestamp> uniqueNow,
+                                 LongSupplier currentEpoch,
                                  Agent agent,
                                  DataStore store,
                                  ProgressLog.Factory progressLogFactory,
                                  RangesForEpoch rangesForEpoch)
         {
-            super(generation, index, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
+            super(generation, index, numShards, nodeId, uniqueNow, currentEpoch, agent, store, progressLogFactory, rangesForEpoch);
         }
 
         private void assertThread()

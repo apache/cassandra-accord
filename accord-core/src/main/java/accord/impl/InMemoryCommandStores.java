@@ -57,7 +57,7 @@ public abstract class InMemoryCommandStores extends CommandStores
         @Override
         protected CommandStore createCommandStore(int generation, int index, int numShards, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.RangesForEpoch rangesForEpoch)
         {
-            return new InMemoryCommandStore.Synchronized(generation, index, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
+            return new InMemoryCommandStore.Synchronized(generation, index, numShards, node::uniqueNow, node.topology()::epoch, agent, store, progressLogFactory, rangesForEpoch);
         }
     }
 
@@ -71,7 +71,7 @@ public abstract class InMemoryCommandStores extends CommandStores
         @Override
         protected CommandStore createCommandStore(int generation, int index, int numShards, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.RangesForEpoch rangesForEpoch)
         {
-            return new InMemoryCommandStore.SingleThread(generation, index, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
+            return new InMemoryCommandStore.SingleThread(generation, index, numShards, node.id(), node::uniqueNow, node.topology()::epoch, agent, store, progressLogFactory, rangesForEpoch);
         }
     }
 
@@ -85,7 +85,7 @@ public abstract class InMemoryCommandStores extends CommandStores
         @Override
         protected CommandStore createCommandStore(int generation, int index, int numShards, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.RangesForEpoch rangesForEpoch)
         {
-            return new InMemoryCommandStore.SingleThreadDebug(generation, index, numShards, node, agent, store, progressLogFactory, rangesForEpoch);
+            return new InMemoryCommandStore.SingleThreadDebug(generation, index, numShards, node.id(), node::uniqueNow, node.topology()::epoch, agent, store, progressLogFactory, rangesForEpoch);
         }
     }
 
