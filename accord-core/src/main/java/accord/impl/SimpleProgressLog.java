@@ -29,6 +29,7 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
 
 import accord.local.*;
+import accord.utils.ProvidedForImplementation;
 import com.google.common.base.Preconditions;
 
 import accord.api.Key;
@@ -392,8 +393,8 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
         void recordBlocking(Command blocking, Keys someKeys)
         {
             this.blocking = blocking;
-            if (blocking.txn() != null && !blocking.txn().keys.containsAll(someKeys))
-                throw new IllegalStateException(String.format("The transaction does not involve some of the keys on which another transaction has taken a dependency upon it (%s vs %s)", blocking.txn().keys, someKeys));
+            if (blocking.txn() != null && !blocking.txn().keys().containsAll(someKeys))
+                throw new IllegalStateException(String.format("The transaction does not involve some of the keys on which another transaction has taken a dependency upon it (%s vs %s)", blocking.txn().keys(), someKeys));
 
             switch (blocking.status())
             {
@@ -809,10 +810,17 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
 
     public static class ApplyAndCheck extends Apply
     {
-        final Set<Id> notPersisted;
+        public final Set<Id> notPersisted;
         ApplyAndCheck(Id id, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Deps deps, Timestamp executeAt, Writes writes, Result result, Set<Id> notPersisted)
         {
             super(id, topologies, txnId, txn, homeKey, executeAt, deps, writes, result);
+            this.notPersisted = notPersisted;
+        }
+
+        @ProvidedForImplementation
+        public ApplyAndCheck(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result, Set<Id> notPersisted)
+        {
+            super(scope, waitForEpoch, txnId, txn, homeKey, executeAt, deps, writes, result);
             this.notPersisted = notPersisted;
         }
 
@@ -867,9 +875,9 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
 
     public static class ApplyAndCheckOk implements Reply
     {
-        final Set<Id> notPersisted;
+        public final Set<Id> notPersisted;
 
-        ApplyAndCheckOk(Set<Id> notPersisted)
+        public ApplyAndCheckOk(Set<Id> notPersisted)
         {
             this.notPersisted = notPersisted;
         }

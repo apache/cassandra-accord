@@ -39,9 +39,9 @@ import java.util.Collections;
 
 public class BeginInvalidate implements EpochRequest, TxnOperation
 {
-    final Ballot ballot;
-    final TxnId txnId;
-    final Key someKey;
+    public final Ballot ballot;
+    public final TxnId txnId;
+    public final Key someKey;
 
     public BeginInvalidate(TxnId txnId, Key someKey, Ballot ballot)
     {

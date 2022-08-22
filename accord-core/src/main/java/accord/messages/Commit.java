@@ -152,12 +152,20 @@ public class Commit extends ReadData
 
     public static class Invalidate extends TxnRequest
     {
-        final TxnId txnId;
-        final Keys txnKeys;
+        public final TxnId txnId;
+        public final Keys txnKeys;
 
         public Invalidate(Id to, Topologies topologies, TxnId txnId, Keys txnKeys, Keys someKeys)
         {
             super(to, topologies, someKeys);
+            this.txnId = txnId;
+            this.txnKeys = txnKeys;
+        }
+
+        @ProvidedForImplementation
+        public Invalidate(Keys scope, long waitForEpoch, TxnId txnId, Keys txnKeys)
+        {
+            super(scope, waitForEpoch);
             this.txnId = txnId;
             this.txnKeys = txnKeys;
         }

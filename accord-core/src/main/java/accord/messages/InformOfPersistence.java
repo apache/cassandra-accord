@@ -33,10 +33,10 @@ import static accord.messages.InformOfTxn.InformOfTxnOk.ok;
 
 public class InformOfPersistence implements Request, TxnOperation
 {
-    final TxnId txnId;
-    final Key homeKey;
-    final Timestamp executeAt;
-    final Set<Id> persistedOn;
+    public final TxnId txnId;
+    public final Key homeKey;
+    public final Timestamp executeAt;
+    public final Set<Id> persistedOn;
 
     public InformOfPersistence(TxnId txnId, Key homeKey, Timestamp executeAt, Set<Id> persistedOn)
     {
