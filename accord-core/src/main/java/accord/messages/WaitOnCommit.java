@@ -29,6 +29,7 @@ import accord.local.Node.Id;
 import accord.topology.Topologies;
 import accord.primitives.TxnId;
 import accord.primitives.Keys;
+import accord.utils.ProvidedForImplementation;
 
 public class WaitOnCommit extends TxnRequest
 {
@@ -131,6 +132,13 @@ public class WaitOnCommit extends TxnRequest
     public WaitOnCommit(Id to, Topologies topologies, TxnId txnId, Keys keys)
     {
         super(to, topologies, keys);
+        this.txnId = txnId;
+    }
+
+    @ProvidedForImplementation
+    public WaitOnCommit(Keys scope, long waitForEpoch, TxnId txnId)
+    {
+        super(scope, waitForEpoch);
         this.txnId = txnId;
     }
 

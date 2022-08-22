@@ -15,9 +15,9 @@ import static java.lang.Boolean.FALSE;
 public abstract class InMemoryCommandStores extends CommandStores
 {
     public InMemoryCommandStores(int num, Node node, Agent agent, DataStore store,
-                                 ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
+                                 ProgressLog.Factory progressLogFactory)
     {
-        super(num, node, agent, store, progressLogFactory, shardFactory);
+        super(num, node, agent, store, progressLogFactory);
     }
 
     public static InMemoryCommandStores inMemory(Node node)
@@ -51,7 +51,7 @@ public abstract class InMemoryCommandStores extends CommandStores
     {
         public Synchronized(int num, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory)
         {
-            super(num, node, agent, store, progressLogFactory, InMemoryCommandStore.Synchronized::new);
+            super(num, node, agent, store, progressLogFactory);
         }
 
         @Override
@@ -65,12 +65,7 @@ public abstract class InMemoryCommandStores extends CommandStores
     {
         public SingleThread(int num, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory)
         {
-            this(num, node, agent, store, progressLogFactory, InMemoryCommandStore.SingleThread::new);
-        }
-
-        public SingleThread(int num, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
-        {
-            super(num, node, agent, store, progressLogFactory, shardFactory);
+            super(num, node, agent, store, progressLogFactory);
         }
 
         @Override
@@ -84,7 +79,7 @@ public abstract class InMemoryCommandStores extends CommandStores
     {
         public Debug(int num, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory)
         {
-            super(num, node, agent, store, progressLogFactory, InMemoryCommandStore.SingleThreadDebug::new);
+            super(num, node, agent, store, progressLogFactory);
         }
 
         @Override

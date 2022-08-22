@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.Objects;
 import java.util.function.Consumer;
 
+import accord.utils.ProvidedForImplementation;
 import com.google.common.annotations.VisibleForTesting;
 
 import accord.api.Key;
@@ -53,6 +54,7 @@ public class PreAccept extends WithUnsynced
     }
 
     @VisibleForTesting
+    @ProvidedForImplementation
     public PreAccept(Keys scope, long epoch, TxnId txnId, Txn txn, Key homeKey)
     {
         super(scope, epoch, txnId);

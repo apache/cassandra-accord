@@ -19,6 +19,7 @@
 package accord.messages;
 
 import accord.api.Key;
+import accord.utils.ProvidedForImplementation;
 import accord.api.Result;
 import accord.coordinate.Persist;
 import accord.topology.Topologies;
@@ -52,14 +53,24 @@ import static accord.messages.PreAccept.calculateDeps;
 
 public class BeginRecovery extends TxnRequest
 {
-    final TxnId txnId;
-    final Txn txn;
-    final Key homeKey;
-    final Ballot ballot;
+    public final TxnId txnId;
+    public final Txn txn;
+    public final Key homeKey;
+    public final Ballot ballot;
 
     public BeginRecovery(Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Ballot ballot)
     {
         super(to, topologies, txn.keys());
+        this.txnId = txnId;
+        this.txn = txn;
+        this.homeKey = homeKey;
+        this.ballot = ballot;
+    }
+
+    @ProvidedForImplementation
+    public BeginRecovery(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Key homeKey, Ballot ballot)
+    {
+        super(scope, waitForEpoch);
         this.txnId = txnId;
         this.txn = txn;
         this.homeKey = homeKey;
