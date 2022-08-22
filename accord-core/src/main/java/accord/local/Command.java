@@ -32,7 +32,6 @@ import accord.primitives.Deps;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 import accord.api.Write;
-import accord.txn.Dependencies;
 import accord.txn.Txn;
 import accord.primitives.TxnId;
 import accord.txn.Writes;

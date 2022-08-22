@@ -2,7 +2,7 @@ package accord.impl;
 
 import accord.local.Command;
 import accord.local.CommandsForKey;
-import accord.txn.Timestamp;
+import accord.primitives.Timestamp;
 
 import java.util.NavigableMap;
 import java.util.TreeMap;

@@ -113,7 +113,7 @@ class Execute implements Callback<ReadReply>
     {
         Set<Id> readFrom = readTracker.computeMinimalReadSetAndMarkInflight();
         if (readFrom != null)
-            node.send(readFrom, to -> new ReadData(to, readTracker.topologies(), txnId, txn, dependencies, homeKey, executeAt), this);
+            node.send(readFrom, to -> new ReadData(to, readTracker.topologies(), txnId, txn, deps, homeKey, executeAt), this);
     }
 
     @Override
@@ -133,7 +133,7 @@ class Execute implements Callback<ReadReply>
         Set<Id> readFrom = readTracker.computeMinimalReadSetAndMarkInflight();
         if (readFrom != null)
         {
-            node.send(readFrom, to -> new ReadData(to, readTracker.topologies(), txnId, txn, dependencies, homeKey, executeAt), this);
+            node.send(readFrom, to -> new ReadData(to, readTracker.topologies(), txnId, txn, deps, homeKey, executeAt), this);
         }
         else if (readTracker.hasFailed())
         {

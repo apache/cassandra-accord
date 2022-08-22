@@ -155,13 +155,13 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public Dependencies savedDeps()
+    public Deps savedDeps()
     {
         return deps;
     }
 
     @Override
-    public void savedDeps(Dependencies deps)
+    public void savedDeps(Deps deps)
     {
         this.deps = deps;
     }

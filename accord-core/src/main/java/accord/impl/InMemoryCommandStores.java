@@ -6,7 +6,7 @@ import accord.api.ProgressLog;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
 import accord.local.Node;
-import accord.txn.Keys;
+import accord.primitives.Keys;
 
 import java.util.function.Consumer;
 

@@ -144,9 +144,10 @@ public class CommandTest
     void supersedingEpochWitnessTest()
     {
         CommandStoreSupport support = new CommandStoreSupport();
-        CommandStore commands = createStore(support);
-        TxnId txnId = commands.node().nextTxnId();
-        ((MockCluster.Clock)commands.node().unsafeGetNowSupplier()).increment(10);
+        Node node = createNode(ID1, support);
+        CommandStore commands = node.unsafeByIndex(0);
+        TxnId txnId = node.nextTxnId();
+        ((MockCluster.Clock)node.unsafeGetNowSupplier()).increment(10);
         Txn txn = writeTxn(Keys.of(KEY));
 
         Command command = new InMemoryCommand(commands, txnId);
@@ -154,7 +155,7 @@ public class CommandTest
         Assertions.assertNull(command.executeAt());
 
         setTopologyEpoch(support.local, 2);
-        ((TestableConfigurationService)commands.node().configService()).reportTopology(support.local.get().withEpoch(2));
+        ((TestableConfigurationService)node.configService()).reportTopology(support.local.get().withEpoch(2));
         Timestamp expectedTimestamp = new Timestamp(2, 110, 0, ID1);
         commands.process(null, (Consumer<? super CommandStore>) cstore -> command.preaccept(txn, KEY, KEY));
         Assertions.assertEquals(Status.PreAccepted, command.status());
