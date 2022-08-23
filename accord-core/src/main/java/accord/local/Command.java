@@ -223,12 +223,12 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
     }
 
     // relies on mutual exclusion for each key
-    public Future<?> commit(Txn txn, Key homeKey, Key progressKey, Timestamp executeAt, Deps deps)
+    public boolean commit(Txn txn, Key homeKey, Key progressKey, Timestamp executeAt, Deps deps)
     {
         if (hasBeen(Committed))
         {
             if (executeAt.equals(executeAt()) && status() != Invalidated)
-                return Write.SUCCESS;
+                return false;
 
             commandStore().agent().onInconsistentTimestamp(this, (status() == Invalidated ? Timestamp.NONE : this.executeAt()), executeAt);
         }
@@ -276,7 +276,14 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         boolean isProgressShard = progressKey != null && handles(txnId().epoch, progressKey);
         commandStore().progressLog().commit(txnId(), isProgressShard, isProgressShard && progressKey.equals(homeKey));
 
-        notifyListeners();
+        return true;
+    }
+
+    public Future<?> commitAndBeginExecution(Txn txn, Key homeKey, Key progressKey, Timestamp executeAt, Deps deps)
+    {
+        if (!commit(txn, homeKey, progressKey, executeAt, deps))
+            return Write.SUCCESS;
+
         return maybeExecute(false);
     }
 
@@ -372,23 +379,22 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
                 {
                     command.removeListener(this);
                 }
-                maybeExecute(true);
+                maybeExecute(false);
                 break;
         }
     }
 
-    protected void postApply(boolean notifyListeners)
+    protected void postApply()
     {
         status(Applied);
-        if (notifyListeners)
-            notifyListeners();
+        notifyListeners();
     }
 
-    protected Future<?> apply(boolean notifyListeners)
+    protected Future<?> apply()
     {
         return writes().apply(commandStore()).flatMap(unused ->
             commandStore().process(this, commandStore -> {
-                postApply(notifyListeners);
+                postApply();
             })
         );
     }
@@ -398,10 +404,13 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         return txn().read(this, readKeys);
     }
 
-    private Future<?> maybeExecute(boolean notifyListeners)
+    private Future<?> maybeExecute(boolean notifyListenersOnNoop)
     {
         if (status() != Committed && status() != Executed)
+        {
+            if (notifyListenersOnNoop) notifyListeners();
             return Write.SUCCESS;
+        }
 
         if (isUnableToApply())
         {
@@ -409,6 +418,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
             if (blockedBy != null)
             {
                 commandStore().progressLog().waiting(blockedBy.txnId, blockedBy.someKeys);
+                if (notifyListenersOnNoop) notifyListeners();
                 return Write.SUCCESS;
             }
             assert !isWaitingOnApply();
@@ -421,11 +431,11 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
                 status(ReadyToExecute);
                 boolean isProgressShard = progressKey() != null && handles(txnId().epoch, progressKey());
                 commandStore().progressLog().readyToExecute(txnId(), isProgressShard, isProgressShard && progressKey().equals(homeKey()));
-                if (notifyListeners)
-                    notifyListeners();
+                notifyListeners();
                 break;
             case Executed:
-                return apply(notifyListeners);
+                if (notifyListenersOnNoop) notifyListeners();
+                return apply();
         }
         return Write.SUCCESS;
     }

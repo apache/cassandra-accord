@@ -128,7 +128,7 @@ public class Commit extends ReadData
     {
         Key progressKey = node.trySelectProgressKey(txnId, txn.keys(), homeKey);
         node.mapReduceLocal(this, txnId.epoch, executeAt.epoch,
-                            instance -> instance.command(txnId).commit(txn, homeKey, progressKey, executeAt, deps), Apply::waitAndReduce);
+                            instance -> instance.command(txnId).commitAndBeginExecution(txn, homeKey, progressKey, executeAt, deps), Apply::waitAndReduce);
 
         if (read)
             super.process(node, from, replyContext);
