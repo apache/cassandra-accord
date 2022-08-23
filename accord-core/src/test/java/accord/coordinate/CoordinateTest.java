@@ -88,4 +88,21 @@ public class CoordinateTest
             TxnId txnId3 = coordinate(node, 125, keys(50, 60, 70, 80, 350, 550));
         }
     }
+
+    @Test
+    void writeOnlyTest() throws Throwable
+    {
+        try (MockCluster cluster = MockCluster.builder().nodes(3).replication(3).build())
+        {
+            cluster.networkFilter.isolate(ids(5, 7));
+
+            Node node = cluster.get(1);
+            Assertions.assertNotNull(node);
+
+            Keys keys = keys(10);
+            Txn txn = new Txn.InMemory(keys, MockStore.read(Keys.EMPTY), MockStore.QUERY, MockStore.update(keys));
+            Result result = cluster.get(id(1)).coordinate(txn).get();
+            Assertions.assertEquals(MockStore.RESULT, result);
+        }
+    }
 }

@@ -37,6 +37,7 @@ import accord.local.Node.Id;
 import accord.messages.Commit;
 import accord.messages.ReadData;
 import accord.messages.ReadData.ReadOk;
+import com.google.common.base.Preconditions;
 
 class Execute implements Callback<ReadReply>
 {
@@ -70,12 +71,26 @@ class Execute implements Callback<ReadReply>
     {
         Set<Id> readSet = readTracker.computeMinimalReadSetAndMarkInflight();
         Commit.commitAndRead(node, topologies, txnId, txn, homeKey, executeAt, deps, readSet, this);
+        // skip straight to persistence if there's no read
+        if (txn.read().keys().isEmpty())
+        {
+            Preconditions.checkState(readTracker.hasCompletedRead());
+            persist();
+        }
     }
 
     public static void execute(Node node, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
     {
         Execute execute = new Execute(node, txnId, txn, homeKey, executeAt, deps, callback);
         execute.start();
+    }
+
+    private void persist()
+    {
+        isDone = true;
+        Result result = txn.result(data);
+        callback.accept(result, null);
+        Persist.persist(node, topologies, txnId, homeKey, txn, executeAt, deps, txn.execute(executeAt, data), result);
     }
 
     @Override
@@ -100,12 +115,7 @@ class Execute implements Callback<ReadReply>
         readTracker.recordReadSuccess(from);
 
         if (readTracker.hasCompletedRead())
-        {
-            isDone = true;
-            Result result = txn.result(data);
-            callback.accept(result, null);
-            Persist.persist(node, topologies, txnId, homeKey, txn, executeAt, deps, txn.execute(executeAt, data), result);
-        }
+            persist();
     }
 
     @Override

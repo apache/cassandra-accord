@@ -253,6 +253,7 @@ public class ReadData extends TxnRequest
     public static class ReadOk extends ReadReply
     {
         public final Data data;
+
         public ReadOk(Data data)
         {
             this.data = data;
