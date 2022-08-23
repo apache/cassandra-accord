@@ -27,6 +27,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import accord.api.Key;
+import accord.utils.VisibleForImplementation;
 import accord.utils.SortedArrays;
 import com.google.common.base.Preconditions;
 
@@ -388,7 +389,8 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
     // Lazy loaded in ensureTxnIdToKey()
     int[] txnIdToKey; // TxnId -> [Key]
 
-    Deps(Keys keys, TxnId[] txnIds, int[] keyToTxnId)
+    @VisibleForImplementation
+    public Deps(Keys keys, TxnId[] txnIds, int[] keyToTxnId)
     {
         this.keys = keys;
         this.txnIds = txnIds;
@@ -1020,6 +1022,18 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
     public TxnId txnId(int i)
     {
         return txnIds[i];
+    }
+
+    @VisibleForImplementation
+    public int keyToTxnIdCount()
+    {
+        return keyToTxnId.length;
+    }
+
+    @VisibleForImplementation
+    public int keyToTxnId(int idx)
+    {
+        return keyToTxnId[idx];
     }
 
     public Collection<TxnId> txnIds()

@@ -22,7 +22,7 @@ import java.util.Collections;
 import java.util.Set;
 
 import accord.api.Key;
-import accord.utils.ProvidedForImplementation;
+import accord.utils.VisibleForImplementation;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.topology.Topologies;
@@ -44,7 +44,7 @@ public class Commit extends ReadData
         this.read = read;
     }
 
-    @ProvidedForImplementation
+    @VisibleForImplementation
     public Commit(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Deps deps, Key homeKey, Timestamp executeAt, boolean read)
     {
         super(scope, waitForEpoch, txnId, txn, deps, homeKey, executeAt);
@@ -162,7 +162,7 @@ public class Commit extends ReadData
             this.txnKeys = txnKeys;
         }
 
-        @ProvidedForImplementation
+        @VisibleForImplementation
         public Invalidate(Keys scope, long waitForEpoch, TxnId txnId, Keys txnKeys)
         {
             super(scope, waitForEpoch);

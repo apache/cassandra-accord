@@ -19,7 +19,7 @@
 package accord.messages;
 
 import accord.primitives.*;
-import accord.utils.ProvidedForImplementation;
+import accord.utils.VisibleForImplementation;
 import accord.local.TxnOperation;
 import accord.messages.TxnRequest.WithUnsynced;
 import accord.local.Node.Id;
@@ -29,7 +29,6 @@ import accord.topology.Topologies;
 import accord.local.Node;
 import accord.local.Command;
 import accord.txn.Txn;
-import accord.txn.*;
 import com.google.common.annotations.VisibleForTesting;
 
 import java.util.Collections;
@@ -54,7 +53,7 @@ public class Accept extends WithUnsynced
         this.deps = deps;
     }
 
-    @ProvidedForImplementation
+    @VisibleForImplementation
     public Accept(Keys scope, long epoch, TxnId txnId, Ballot ballot, Key homeKey, Txn txn, Timestamp executeAt, Deps deps)
     {
         super(scope, epoch, txnId);

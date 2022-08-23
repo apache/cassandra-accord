@@ -29,7 +29,7 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
 
 import accord.local.*;
-import accord.utils.ProvidedForImplementation;
+import accord.utils.VisibleForImplementation;
 import com.google.common.base.Preconditions;
 
 import accord.api.Key;
@@ -817,7 +817,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
             this.notPersisted = notPersisted;
         }
 
-        @ProvidedForImplementation
+        @VisibleForImplementation
         public ApplyAndCheck(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result, Set<Id> notPersisted)
         {
             super(scope, waitForEpoch, txnId, txn, homeKey, executeAt, deps, writes, result);

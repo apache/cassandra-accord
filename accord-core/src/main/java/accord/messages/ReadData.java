@@ -22,7 +22,7 @@ import java.util.Collections;
 import java.util.Set;
 
 import accord.primitives.Deps;
-import accord.utils.ProvidedForImplementation;
+import accord.utils.VisibleForImplementation;
 import com.google.common.base.Preconditions;
 
 import accord.api.Key;
@@ -186,7 +186,7 @@ public class ReadData extends TxnRequest
         this.executeAt = executeAt;
     }
 
-    @ProvidedForImplementation
+    @VisibleForImplementation
     public ReadData(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Deps deps, Key homeKey, Timestamp executeAt)
     {
         super(scope, waitForEpoch);
