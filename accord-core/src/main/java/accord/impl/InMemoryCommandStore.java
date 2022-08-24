@@ -64,7 +64,7 @@ public abstract class InMemoryCommandStore extends CommandStore
     @Override
     public CommandsForKey commandsForKey(Key key)
     {
-        return commandsForKey.computeIfAbsent(key, ignore -> new InMemoryCommandsForKey());
+        return commandsForKey.computeIfAbsent(key, InMemoryCommandsForKey::new);
     }
 
     public boolean hasCommandsForKey(Key key)

@@ -19,6 +19,7 @@
 package accord.local;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.function.Consumer;
 
 import com.google.common.base.Preconditions;
@@ -348,6 +349,12 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
 
         promised(ballot);
         return true;
+    }
+
+    @Override
+    public TxnOperation listenerScope(TxnId caller)
+    {
+        return TxnOperation.scopeFor(List.of(txnId(), caller), Collections.emptyList());
     }
 
     @Override

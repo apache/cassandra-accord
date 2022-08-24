@@ -19,6 +19,7 @@
 package accord.messages;
 
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
 
 import accord.primitives.Deps;
@@ -75,6 +76,15 @@ public class ReadData extends TxnRequest
         public Iterable<Key> keys()
         {
             return txnKeys;
+        }
+
+        @Override
+        public TxnOperation listenerScope(TxnId caller)
+        {
+            Set<TxnId> ids = new HashSet<>(deps.txnIds());
+            ids.add(txnId);
+            ids.add(caller);
+            return TxnOperation.scopeFor(ids, keys());
         }
 
         @Override

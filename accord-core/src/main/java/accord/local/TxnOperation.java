@@ -35,4 +35,9 @@ public interface TxnOperation
     {
         return scopeFor(Collections.singleton(txnId), Collections.emptyList());
     }
+
+    static TxnOperation scopeFor(Key key)
+    {
+        return scopeFor(Collections.emptyList(), Collections.singleton(key));
+    }
 }

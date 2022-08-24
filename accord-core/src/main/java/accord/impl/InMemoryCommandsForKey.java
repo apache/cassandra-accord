@@ -1,5 +1,6 @@
 package accord.impl;
 
+import accord.api.Key;
 import accord.local.Command;
 import accord.local.CommandsForKey;
 import accord.primitives.Timestamp;
@@ -63,12 +64,23 @@ public class InMemoryCommandsForKey extends CommandsForKey
         }
     }
 
+    private final Key key;
     private final InMemoryCommandTimeseries uncommitted = new InMemoryCommandTimeseries();
     private final InMemoryCommandTimeseries committedById = new InMemoryCommandTimeseries();
     private final InMemoryCommandTimeseries committedByExecuteAt = new InMemoryCommandTimeseries();
 
     private Timestamp max = Timestamp.NONE;
 
+    public InMemoryCommandsForKey(Key key)
+    {
+        this.key = key;
+    }
+
+    @Override
+    public Key key()
+    {
+        return key;
+    }
 
     @Override
     public Timestamp max()

@@ -19,10 +19,13 @@
 package accord.local;
 
 import java.util.Iterator;
+import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
+import accord.api.Key;
 import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import com.google.common.collect.Iterators;
 
 public abstract class CommandsForKey implements Listener, Iterable<Command>
@@ -53,12 +56,19 @@ public abstract class CommandsForKey implements Listener, Iterable<Command>
         Stream<Command> all();
     }
 
+    public abstract Key key();
     public abstract CommandTimeseries uncommitted();
     public abstract CommandTimeseries committedById();
     public abstract CommandTimeseries committedByExecuteAt();
 
     public abstract Timestamp max();
     public abstract void updateMax(Timestamp timestamp);
+
+    @Override
+    public TxnOperation listenerScope(TxnId caller)
+    {
+        return TxnOperation.scopeFor(caller, List.of(key()));
+    }
 
     @Override
     public void onChange(Command command)
