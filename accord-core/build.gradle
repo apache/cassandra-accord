@@ -1,9 +1,9 @@
 plugins {
     id 'accord.java-conventions'
     // export test classes for subprojects
+    id 'java-library'
     id 'java-test-fixtures'
     id 'maven-publish'
-    id 'java-library'
 }
 
 java {
