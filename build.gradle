@@ -1,13 +1,7 @@
 plugins {
-    id 'java'
-    id 'java-test-fixtures'
     // https://github.com/eskatos/creadur-rat-gradle
     id("org.nosphere.apache.rat") version "0.7.1"
 }
 
-group 'accord'
-version '1.0-SNAPSHOT'
+// See buildSrc/src/main/groovy/accord.java-conventions.gradle for java standards
 
-repositories {
-    mavenCentral()
-}
