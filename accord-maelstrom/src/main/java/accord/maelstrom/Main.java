@@ -191,8 +191,7 @@ public class Main
                         if (next.body.in_reply_to > Body.SENTINEL_MSG_ID)
                         {
                             Reply reply = (Reply)((Wrapper)next.body).body;
-                            CallbackInfo callback = reply.isFinal() ? sink.callbacks.remove(next.body.in_reply_to)
-                                    : sink.callbacks.get(next.body.in_reply_to);
+                            CallbackInfo callback = sink.callbacks.remove(next.body.in_reply_to);
                             if (callback != null)
                                 scheduler.now(() -> {
                                     try

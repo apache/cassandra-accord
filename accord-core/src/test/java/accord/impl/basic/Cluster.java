@@ -129,8 +129,7 @@ public class Cluster implements Scheduler
             if (deliver.message instanceof Reply)
             {
                 Reply reply = (Reply) deliver.message;
-                Callback callback = reply.isFinal() ? sinks.get(deliver.dst).callbacks.remove(deliver.replyId)
-                                                    : sinks.get(deliver.dst).callbacks.get(deliver.replyId);
+                Callback callback = sinks.get(deliver.dst).callbacks.remove(deliver.replyId);
 
                 if (callback != null)
                 {

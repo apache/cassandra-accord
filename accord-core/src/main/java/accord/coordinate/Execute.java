@@ -99,9 +99,6 @@ class Execute implements Callback<ReadReply>
         if (isDone)
             return;
 
-        if (!reply.isFinal())
-            return;
-
         if (!reply.isOK())
         {
             isDone = true;
