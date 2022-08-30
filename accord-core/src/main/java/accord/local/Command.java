@@ -18,36 +18,22 @@
 
 package accord.local;
 
-import java.util.Collections;
-import java.util.function.Consumer;
-
-import com.google.common.base.Preconditions;
-
 import accord.api.Key;
+import accord.api.Read;
 import accord.api.Result;
-import accord.local.Node.Id;
-import accord.primitives.KeyRanges;
-import accord.primitives.Ballot;
-import accord.primitives.Deps;
-import accord.primitives.Keys;
-import accord.primitives.Timestamp;
 import accord.api.Write;
+import accord.local.Node.Id;
+import accord.primitives.*;
 import accord.txn.Txn;
-import accord.primitives.TxnId;
 import accord.txn.Writes;
-import accord.api.*;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import org.apache.cassandra.utils.concurrent.Future;
 
-import static accord.local.Status.Accepted;
-import static accord.local.Status.AcceptedInvalidate;
-import static accord.local.Status.Applied;
-import static accord.local.Status.Committed;
-import static accord.local.Status.Executed;
-import static accord.local.Status.Invalidated;
-import static accord.local.Status.NotWitnessed;
-import static accord.local.Status.PreAccepted;
-import static accord.local.Status.ReadyToExecute;
+import java.util.Collections;
+import java.util.function.Consumer;
+
+import static accord.local.Status.*;
 import static accord.utils.Utils.listOf;
 
 public abstract class Command implements Listener, Consumer<Listener>, TxnOperation
@@ -285,7 +271,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         if (!commit(txn, homeKey, progressKey, executeAt, deps))
             return Write.SUCCESS;
 
-        return maybeExecute(false);
+        return maybeExecute(true);
     }
 
     // TODO (now): commitInvalidate may need to update cfks _if_ possible
