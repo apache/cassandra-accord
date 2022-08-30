@@ -1,4 +1,4 @@
-package accord.maelstrom/*
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -16,7 +16,7 @@ package accord.maelstrom/*
  * limitations under the License.
  */
 
-        ;
+package accord.maelstrom;
 
 import java.io.IOException;
 
