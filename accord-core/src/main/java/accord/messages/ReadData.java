@@ -37,9 +37,13 @@ import accord.txn.Txn;
 import accord.primitives.TxnId;
 import accord.utils.DeterministicIdentitySet;
 import com.google.common.collect.Iterables;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ReadData extends TxnRequest
 {
+    private static final Logger logger = LoggerFactory.getLogger(ReadData.class);
+
     static class LocalRead implements Listener, TxnOperation
     {
         final TxnId txnId;
@@ -88,8 +92,16 @@ public class ReadData extends TxnRequest
         }
 
         @Override
+        public String toString()
+        {
+            return "ReadData$LocalRead{" + txnId + '}';
+        }
+
+        @Override
         public synchronized void onChange(Command command)
         {
+            logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
+                         this, command.txnId(), command.status(), command);
             switch (command.status())
             {
                 default: throw new IllegalStateException();
@@ -120,6 +132,7 @@ public class ReadData extends TxnRequest
 
         private synchronized void readComplete(CommandStore commandStore, Data result)
         {
+            logger.trace("{}: read completed on {}", txnId, commandStore);
             data = data == null ? result : data.merge(result);
 
             waitingOn.remove(commandStore);
@@ -129,9 +142,13 @@ public class ReadData extends TxnRequest
 
         private void read(Command command)
         {
+            logger.trace("{}: executing read", command.txnId());
             command.read(readKeys).addCallback((next, throwable) -> {
                 if (throwable != null)
+                {
+                    logger.trace("{}: read failed for {}: {}", txnId, command.commandStore(), throwable);
                     node.reply(replyToNode, replyContext, new ReadNack());
+                }
                 else
                     readComplete(command.commandStore(), next);
             });
@@ -153,6 +170,8 @@ public class ReadData extends TxnRequest
             CommandStores.forEachNonBlocking(waitingOn, this, instance -> {
                 Command command = instance.command(txnId);
                 command.preaccept(txn, homeKey, progressKey); // ensure pre-accepted
+                logger.trace("{}: setting up read with status {} on {}", command.txnId(), command.status(), instance);
+
                 switch (command.status())
                 {
                     default:

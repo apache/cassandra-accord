@@ -28,11 +28,15 @@ import accord.topology.Topologies;
 import accord.primitives.TxnId;
 import accord.primitives.Keys;
 import accord.utils.VisibleForImplementation;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static accord.utils.Utils.listOf;
 
 public class WaitOnCommit extends TxnRequest
 {
+    private static final Logger logger = LoggerFactory.getLogger(WaitOnCommit.class);
+
     static class LocalWait implements Listener, TxnOperation
     {
         final Node node;
@@ -69,8 +73,16 @@ public class WaitOnCommit extends TxnRequest
         }
 
         @Override
+        public String toString()
+        {
+            return "WaitOnCommit$LocalWait{" + txnId + '}';
+        }
+
+        @Override
         public synchronized void onChange(Command command)
         {
+            logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
+                         this, command.txnId(), command.status(), command);
             switch (command.status())
             {
                 default: throw new IllegalStateException();
