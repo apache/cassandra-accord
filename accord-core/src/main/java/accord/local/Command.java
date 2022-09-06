@@ -27,6 +27,7 @@ import accord.primitives.*;
 import accord.txn.Txn;
 import accord.txn.Writes;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Verify;
 import com.google.common.collect.Iterables;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.slf4j.Logger;
@@ -34,6 +35,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import static accord.local.Status.*;
 import static accord.utils.Utils.listOf;
@@ -430,12 +432,20 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         notifyListeners();
     }
 
+    private static Function<CommandStore, Void> callPostApply(TxnId txnId)
+    {
+        return commandStore -> {
+            commandStore.command(txnId).postApply();
+            return null;
+        };
+    }
+
     protected Future<?> apply()
     {
+        // important: we can't include a reference to *this* in the lambda, since the C* implementation may evict
+        // the command instance from memory between now and the write completing (and post apply being called)
         return writes().apply(commandStore()).flatMap(unused ->
-            commandStore().process(this, commandStore -> {
-                postApply();
-            })
+            commandStore().process(this, callPostApply(txnId()))
         );
     }
 
