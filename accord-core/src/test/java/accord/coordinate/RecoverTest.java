@@ -38,6 +38,7 @@ import static accord.NetworkFilter.*;
 import static accord.Utils.id;
 import static accord.Utils.ids;
 import static accord.Utils.writeTxn;
+import static accord.impl.InMemoryCommandStore.inMemory;
 
 public class RecoverTest
 {
@@ -49,7 +50,7 @@ public class RecoverTest
     private static Command getCommand(Node node, Key key, TxnId txnId)
     {
         CommandStore commandStore = getCommandShard(node, key);
-        Assertions.assertTrue(commandStore.hasCommand(txnId));
+        Assertions.assertTrue(inMemory(commandStore).hasCommand(txnId));
         return commandStore.command(txnId);
     }
 
@@ -64,7 +65,7 @@ public class RecoverTest
     private static void assertMissing(Node node, Key key, TxnId txnId)
     {
         CommandStore commandStore = getCommandShard(node, key);
-        Assertions.assertFalse(commandStore.hasCommand(txnId));
+        Assertions.assertFalse(inMemory(commandStore).hasCommand(txnId));
     }
 
     private static void assertTimeout(Future<?> f)

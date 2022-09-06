@@ -93,7 +93,7 @@ public class BurnTest
             requestKeys.addAll(update.keySet());
             ListRead read = new ListRead(readKeys, new Keys(requestKeys));
             ListQuery query = new ListQuery(client, count);
-            ListRequest request = new ListRequest(new Txn(new Keys(requestKeys), read, query, update));
+            ListRequest request = new ListRequest(new Txn.InMemory(new Keys(requestKeys), read, query, update));
             packets.add(new Packet(client, node, count, request));
         }
 

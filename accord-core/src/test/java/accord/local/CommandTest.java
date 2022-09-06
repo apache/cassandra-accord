@@ -20,13 +20,14 @@ package accord.local;
 
 import accord.api.ProgressLog;
 import accord.api.TestableConfigurationService;
+import accord.impl.InMemoryCommandStores;
 import accord.impl.IntKey;
 import accord.impl.TestAgent;
 import accord.impl.TopologyFactory;
+import accord.impl.*;
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
 import accord.impl.mock.MockStore;
-import accord.local.CommandStores.Synchronized;
 import accord.local.Node.Id;
 import accord.topology.Topology;
 import accord.primitives.Keys;
@@ -36,13 +37,12 @@ import accord.primitives.TxnId;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-
-import javax.annotation.Nullable;
 
 import static accord.Utils.id;
 import static accord.Utils.writeTxn;
@@ -119,7 +119,7 @@ public class CommandTest
     {
         return new Node(id, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
                         new MockCluster.Clock(100), () -> storeSupport.data, new TestAgent(), new Random(), null,
-                        ignore -> ignore2 -> new NoOpProgressLog(), Synchronized::new);
+                        ignore -> ignore2 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new);
     }
 
     @Test
@@ -131,7 +131,7 @@ public class CommandTest
         TxnId txnId = clock.idForNode(1, 1);
         Txn txn = writeTxn(Keys.of(KEY));
 
-        Command command = new Command(commands, txnId);
+        Command command = new InMemoryCommand(commands, txnId);
         Assertions.assertEquals(Status.NotWitnessed, command.status());
         Assertions.assertNull(command.executeAt());
 
@@ -149,14 +149,14 @@ public class CommandTest
         ((MockCluster.Clock)commands.node().unsafeGetNowSupplier()).increment(10);
         Txn txn = writeTxn(Keys.of(KEY));
 
-        Command command = new Command(commands, txnId);
+        Command command = new InMemoryCommand(commands, txnId);
         Assertions.assertEquals(Status.NotWitnessed, command.status());
         Assertions.assertNull(command.executeAt());
 
         setTopologyEpoch(support.local, 2);
         ((TestableConfigurationService)commands.node().configService()).reportTopology(support.local.get().withEpoch(2));
         Timestamp expectedTimestamp = new Timestamp(2, 110, 0, ID1);
-        commands.process((Consumer<? super CommandStore>) cstore -> command.preaccept(txn, KEY, KEY));
+        commands.process(null, (Consumer<? super CommandStore>) cstore -> command.preaccept(txn, KEY, KEY));
         Assertions.assertEquals(Status.PreAccepted, command.status());
         Assertions.assertEquals(expectedTimestamp, command.executeAt());
     }

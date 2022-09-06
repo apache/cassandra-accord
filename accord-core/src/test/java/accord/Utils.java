@@ -84,12 +84,12 @@ public class Utils
 
     public static Txn writeTxn(Keys keys)
     {
-        return new Txn(keys, MockStore.read(keys), MockStore.QUERY, MockStore.update(keys));
+        return new Txn.InMemory(keys, MockStore.read(keys), MockStore.QUERY, MockStore.update(keys));
     }
 
     public static Txn readTxn(Keys keys)
     {
-        return new Txn(keys, MockStore.read(keys), MockStore.QUERY);
+        return new Txn.InMemory(keys, MockStore.read(keys), MockStore.QUERY);
     }
 
     public static Shard shard(KeyRange range, List<Node.Id> nodes, Set<Node.Id> fastPath)

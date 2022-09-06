@@ -27,11 +27,14 @@ import accord.local.Status;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.Timestamp;
+import accord.local.TxnOperation;
 import accord.txn.Txn;
 import accord.primitives.TxnId;
 import accord.txn.Writes;
 
-public class CheckStatus implements Request
+import java.util.Collections;
+
+public class CheckStatus implements Request, TxnOperation
 {
     // order is important
     public enum IncludeInfo
@@ -62,10 +65,22 @@ public class CheckStatus implements Request
         this.includeInfo = includeInfo;
     }
 
+    @Override
+    public Iterable<TxnId> txnIds()
+    {
+        return Collections.singleton(txnId);
+    }
+
+    @Override
+    public Iterable<Key> keys()
+    {
+        return Collections.emptyList();
+    }
+
     public void process(Node node, Id replyToNode, ReplyContext replyContext)
     {
 
-        Reply reply = node.ifLocal(key, epoch, instance -> {
+        Reply reply = node.ifLocal(this, key, epoch, instance -> {
             Command command = instance.command(txnId);
             boolean includeInfo = this.includeInfo.include(command.status());
             if (includeInfo)

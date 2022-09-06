@@ -30,6 +30,7 @@ import accord.coordinate.Invalidate.Outcome;
 import accord.coordinate.tracking.AbstractQuorumTracker.QuorumShardTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.local.TxnOperation;
 import accord.messages.BeginInvalidate;
 import accord.messages.BeginInvalidate.InvalidateNack;
 import accord.messages.BeginInvalidate.InvalidateOk;
@@ -90,9 +91,9 @@ public class Invalidate extends AsyncFuture<Outcome> implements Callback<Recover
             InvalidateNack nack = (InvalidateNack) response;
             if (nack.homeKey != null && nack.txn != null)
             {
-                Key progressKey = node.trySelectProgressKey(txnId.epoch, nack.txn.keys, nack.homeKey);
+                Key progressKey = node.trySelectProgressKey(txnId.epoch, nack.txn.keys(), nack.homeKey);
                 // TODO: consider limiting epoch upper bound we process this status for
-                node.ifLocalSince(someKey, txnId, instance -> {
+                node.ifLocalSince(TxnOperation.scopeFor(txnId, nack.txn.keys()), someKey, txnId, instance -> {
                     instance.command(txnId).preaccept(nack.txn, nack.homeKey, progressKey);
                     return null;
                 });
@@ -100,7 +101,7 @@ public class Invalidate extends AsyncFuture<Outcome> implements Callback<Recover
             else if (nack.homeKey != null)
             {
                 // TODO: consider limiting epoch upper bound we process this status for
-                node.ifLocalSince(someKey, txnId, instance -> {
+                node.ifLocalSince(TxnOperation.scopeFor(txnId), someKey, txnId, instance -> {
                     instance.command(txnId).homeKey(nack.homeKey);
                     return null;
                 });
@@ -172,7 +173,7 @@ public class Invalidate extends AsyncFuture<Outcome> implements Callback<Recover
             try
             {
                 Commit.commitInvalidate(node, txnId, someKeys, txnId);
-                node.forEachLocalSince(someKeys, txnId, instance -> {
+                node.forEachLocalSince(TxnOperation.scopeFor(txnId, someKeys), someKeys, txnId, instance -> {
                     instance.command(txnId).commitInvalidate();
                 });
             }

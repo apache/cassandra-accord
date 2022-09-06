@@ -18,10 +18,9 @@
 
 package accord.utils;
 
-import java.util.AbstractSet;
-import java.util.IdentityHashMap;
-import java.util.Iterator;
-import java.util.NoSuchElementException;
+import com.google.common.collect.Iterables;
+
+import java.util.*;
 import java.util.function.Consumer;
 
 public class DeterministicIdentitySet<T> extends AbstractSet<T>
@@ -75,6 +74,27 @@ public class DeterministicIdentitySet<T> extends AbstractSet<T>
                 return result;
             }
         };
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (!(o instanceof Iterable))
+            return false;
+
+        return Iterables.elementsEqual(this, (Iterable<?>) o);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        int result = 1;
+
+        for (T element : this)
+            result = 31 * result + (element == null ? 0 : element.hashCode());
+
+        return result;
     }
 
     @Override

@@ -18,8 +18,9 @@
 
 package accord.messages;
 
-import java.util.*;
-import java.util.function.BiConsumer;
+import java.util.Collections;
+import java.util.Objects;
+import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -45,7 +46,7 @@ public class PreAccept extends WithUnsynced
 
     public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey)
     {
-        super(to, topologies, txn.keys, txnId);
+        super(to, topologies, txn.keys(), txnId);
         this.homeKey = homeKey;
         this.txn = txn;
         this.maxEpoch = topologies.currentEpoch();
@@ -60,19 +61,36 @@ public class PreAccept extends WithUnsynced
         this.maxEpoch = epoch;
     }
 
+    @Override
+    public Iterable<TxnId> txnIds()
+    {
+        return Collections.singleton(txnId);
+    }
+
+    @Override
+    public Iterable<Key> keys()
+    {
+        return txn.keys();
+    }
+
+    @VisibleForTesting
+    public PreAcceptReply process(CommandStore instance, Key progressKey)
+    {
+        // note: this diverges from the paper, in that instead of waiting for JoinShard,
+        //       we PreAccept to both old and new topologies and require quorums in both.
+        //       This necessitates sending to ALL replicas of old topology, not only electorate (as fast path may be unreachable).
+        Command command = instance.command(txnId);
+        if (!command.preaccept(txn, homeKey, progressKey))
+            return PreAcceptNack.INSTANCE;
+        return new PreAcceptOk(txnId, command.executeAt(), calculateDeps(instance, txnId, txn, txnId));
+    }
+
     public void process(Node node, Id from, ReplyContext replyContext)
     {
         // TODO: verify we handle all of the scope() keys
         Key progressKey = progressKey(node, homeKey);
-        node.reply(from, replyContext, node.mapReduceLocal(scope(), minEpoch, maxEpoch, instance -> {
-            // note: this diverges from the paper, in that instead of waiting for JoinShard,
-            //       we PreAccept to both old and new topologies and require quorums in both.
-            //       This necessitates sending to ALL replicas of old topology, not only electorate (as fast path may be unreachable).
-            Command command = instance.command(txnId);
-            if (!command.preaccept(txn, homeKey, progressKey))
-                return PreAcceptNack.INSTANCE;
-            return new PreAcceptOk(txnId, command.executeAt(), calculateDeps(instance, txnId, txn, txnId));
-        }, (r1, r2) -> {
+        node.reply(from, replyContext, node.mapReduceLocal(this, minEpoch, maxEpoch, cs -> process(cs, progressKey),
+        (r1, r2) -> {
             if (!r1.isOK()) return r1;
             if (!r2.isOK()) return r2;
             PreAcceptOk ok1 = (PreAcceptOk) r1;
@@ -170,14 +188,14 @@ public class PreAccept extends WithUnsynced
     {
         try (Deps.OrderedBuilder builder = Deps.orderedBuilder(false);)
         {
-            txn.keys.forEach(key -> {
+            txn.keys().forEach(key -> {
                 CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
                 if (forKey == null)
                     return;
 
                 builder.nextKey(key);
-                forKey.uncommitted.headMap(executeAt, false).forEach(conflicts(txnId, txn.isWrite(), builder));
-                forKey.committedByExecuteAt.headMap(executeAt, false).forEach(conflicts(txnId, txn.isWrite(), builder));
+                forKey.uncommitted().before(executeAt).forEach(conflicts(txnId, txn.isWrite(), builder));
+                forKey.committedByExecuteAt().before(executeAt).forEach(conflicts(txnId, txn.isWrite(), builder));
             });
 
             return builder.build();
@@ -194,9 +212,9 @@ public class PreAccept extends WithUnsynced
                '}';
     }
 
-    private static BiConsumer<Timestamp, Command> conflicts(TxnId txnId, boolean isWrite, Deps.OrderedBuilder builder)
+    private static Consumer<Command> conflicts(TxnId txnId, boolean isWrite, Deps.OrderedBuilder builder)
     {
-        return (ts, command) -> {
+        return command -> {
             if (!txnId.equals(command.txnId()) && (isWrite || command.txn().isWrite()))
                 builder.add(command.txnId());
         };

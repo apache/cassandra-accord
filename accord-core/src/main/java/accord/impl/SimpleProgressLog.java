@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 
 import javax.annotation.Nullable;
 
+import accord.local.*;
 import com.google.common.base.Preconditions;
 
 import accord.api.Key;
@@ -36,11 +37,7 @@ import accord.api.Result;
 import accord.coordinate.CheckOnCommitted;
 import accord.coordinate.Invalidate;
 import accord.impl.SimpleProgressLog.HomeState.LocalStatus;
-import accord.local.Command;
-import accord.local.CommandStore;
-import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.Status;
 import accord.messages.Apply;
 import accord.messages.Callback;
 import accord.messages.CheckStatus.CheckStatusOk;
@@ -501,7 +498,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
                             break;
                         case Committed:
                         case ReadyToExecute:
-                            Preconditions.checkState(command.hasBeen(Status.Committed) || !command.commandStore.ranges().intersects(txnId.epoch, someKeys));
+                            Preconditions.checkState(command.hasBeen(Status.Committed) || !command.commandStore().ranges().intersects(txnId.epoch, someKeys));
                             if (blockedOn == Status.Committed)
                                 progress = NoneExpected;
                             break;
@@ -822,8 +819,9 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
         @Override
         public void process(Node node, Id from, ReplyContext replyContext)
         {
-            Key progressKey = node.trySelectProgressKey(txnId, txn.keys, homeKey);
-            node.reply(from, replyContext, node.mapReduceLocalSince(scope(), executeAt, instance -> {
+            Key progressKey = node.trySelectProgressKey(txnId, txn.keys(), homeKey);
+            TxnOperation scope = TxnOperation.scopeFor(txnId, txn.keys());
+            node.reply(from, replyContext, node.mapReduceLocalSince(scope, scope(), executeAt, instance -> {
                 Command command = instance.command(txnId);
                 command.apply(txn, homeKey, progressKey, executeAt, deps, writes, result);
                 if (homeKey.equals(progressKey) && command.handles(txnId.epoch, progressKey))

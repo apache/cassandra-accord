@@ -30,17 +30,17 @@ import accord.primitives.Timestamp;
 import accord.primitives.Deps;
 import accord.txn.Txn;
 import accord.primitives.TxnId;
+import com.google.common.collect.Iterables;
+
 
 // TODO: CommitOk responses, so we can send again if no reply received? Or leave to recovery?
 public class Commit extends ReadData
 {
-    public final Deps deps;
     public final boolean read;
 
     public Commit(Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, boolean read)
     {
-        super(to, topologies, txnId, txn, homeKey, executeAt);
-        this.deps = deps;
+        super(to, topologies, txnId, txn, deps, homeKey, executeAt);
         this.read = read;
     }
 
@@ -99,16 +99,29 @@ public class Commit extends ReadData
     {
         for (Node.Id to : commitTo.nodes())
         {
-            Invalidate send = new Invalidate(to, commitTo, txnId, someKeys);
+            // TODO (now) confirm somekeys == txnkeys
+            Invalidate send = new Invalidate(to, commitTo, txnId, someKeys, someKeys);
             node.send(to, send);
         }
     }
 
+    @Override
+    public Iterable<TxnId> txnIds()
+    {
+        return Iterables.concat(Collections.singleton(txnId), deps.txnIds());
+    }
+
+    @Override
+    public Iterable<Key> keys()
+    {
+        return txn.keys();
+    }
+
     public void process(Node node, Id from, ReplyContext replyContext)
     {
-        Key progressKey = node.trySelectProgressKey(txnId, txn.keys, homeKey);
-        node.forEachLocal(scope(), txnId.epoch, executeAt.epoch,
-                          instance -> instance.command(txnId).commit(txn, homeKey, progressKey, executeAt, deps));
+        Key progressKey = node.trySelectProgressKey(txnId, txn.keys(), homeKey);
+        node.mapReduceLocal(this, txnId.epoch, executeAt.epoch,
+                            instance -> instance.command(txnId).commit(txn, homeKey, progressKey, executeAt, deps), Apply::waitAndReduce);
 
         if (read)
             super.process(node, from, replyContext);
@@ -133,16 +146,30 @@ public class Commit extends ReadData
     public static class Invalidate extends TxnRequest
     {
         final TxnId txnId;
+        final Keys txnKeys;
 
-        public Invalidate(Id to, Topologies topologies, TxnId txnId, Keys someKeys)
+        public Invalidate(Id to, Topologies topologies, TxnId txnId, Keys txnKeys, Keys someKeys)
         {
             super(to, topologies, someKeys);
             this.txnId = txnId;
+            this.txnKeys = txnKeys;
+        }
+
+        @Override
+        public Iterable<TxnId> txnIds()
+        {
+            return Collections.singleton(txnId);
+        }
+
+        @Override
+        public Iterable<Key> keys()
+        {
+            return Collections.emptyList();
         }
 
         public void process(Node node, Id from, ReplyContext replyContext)
         {
-            node.forEachLocal(scope(), txnId.epoch, instance -> instance.command(txnId).commitInvalidate());
+            node.forEachLocal(this, txnId.epoch, instance -> instance.command(txnId).commitInvalidate());
         }
 
         @Override

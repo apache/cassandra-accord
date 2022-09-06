@@ -28,6 +28,7 @@ import java.util.function.IntFunction;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import accord.messages.*;
 import com.google.common.annotations.VisibleForTesting;
 
 import accord.api.*;
@@ -44,7 +45,6 @@ import accord.api.ProgressLog;
 import accord.api.Scheduler;
 import accord.api.DataStore;
 import accord.coordinate.Recover;
-import accord.messages.Callback;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
@@ -150,6 +150,11 @@ public class Node implements ConfigurationService.Listener
         onTopologyUpdate(topology, false);
     }
 
+    public CommandStores commandStores()
+    {
+        return commandStores;
+    }
+
     public ConfigurationService configService()
     {
         return configService;
@@ -252,74 +257,64 @@ public class Node implements ConfigurationService.Listener
         return nowSupplier.getAsLong();
     }
 
-    public void forEachLocal(Consumer<CommandStore> forEach)
+    public void forEachLocal(TxnRequest request, long epoch, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(forEach);
+        commandStores.forEach(request, epoch, forEach);
     }
 
-    public void forEachLocal(Keys keys, long epoch, Consumer<CommandStore> forEach)
+    public void forEachLocal(TxnRequest request, long minEpoch, long maxEpoch, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(keys, epoch, forEach);
+        commandStores.forEach(request, minEpoch, maxEpoch, forEach);
     }
 
-    public void forEachLocal(Keys keys, long minEpoch, long maxEpoch, Consumer<CommandStore> forEach)
+    public void forEachLocal(TxnOperation operation, Keys keys, long minEpoch, long maxEpoch, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(keys, minEpoch, maxEpoch, forEach);
+        commandStores.forEach(operation, keys, minEpoch, maxEpoch, forEach);
     }
 
-    public void forEachLocal(Keys keys, Timestamp minAt, Timestamp maxAt, Consumer<CommandStore> forEach)
+    public void forEachLocalSince(TxnOperation operation, Keys keys, Timestamp since, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(keys, minAt.epoch, maxAt.epoch, forEach);
+        commandStores.forEach(operation, keys, since.epoch, Long.MAX_VALUE, forEach);
     }
 
-    public void forEachLocalSince(Keys keys, Timestamp since, Consumer<CommandStore> forEach)
+    public void forEachLocalSince(TxnRequest request, Timestamp since, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(keys, since.epoch, Long.MAX_VALUE, forEach);
+        commandStores.forEach(request, since.epoch, Long.MAX_VALUE, forEach);
     }
 
-    public void forEachLocalSince(Keys keys, long sinceEpoch, Consumer<CommandStore> forEach)
+    public void forEachLocalSince(TxnOperation operation, Keys keys, long sinceEpoch, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(keys, sinceEpoch, Long.MAX_VALUE, forEach);
+        commandStores.forEachSince(operation, keys, sinceEpoch, forEach);
     }
 
-    public <T> T mapReduceLocal(Keys keys, Timestamp at, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T mapReduceLocal(TxnRequest request, long minEpoch, long maxEpoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
-        return commandStores.mapReduce(keys, at.epoch, at.epoch, map, reduce);
+        return commandStores.mapReduce(request, request.scope(), minEpoch, maxEpoch, map, reduce);
     }
 
-    public <T> T mapReduceLocal(Keys keys, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T mapReduceLocalSince(TxnOperation operation, Keys keys, Timestamp since, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
-        return commandStores.mapReduce(keys, epoch, epoch, map, reduce);
+        return commandStores.mapReduce(operation, keys, since.epoch, Long.MAX_VALUE, map, reduce);
     }
 
-    public <T> T mapReduceLocal(Keys keys, long minEpoch, long maxEpoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T ifLocal(TxnOperation operation, Key key, Timestamp at, Function<CommandStore, T> ifLocal)
     {
-        return commandStores.mapReduce(keys, minEpoch, maxEpoch, map, reduce);
+        return ifLocal(operation, key, at.epoch, ifLocal);
     }
 
-    public <T> T mapReduceLocalSince(Keys keys, Timestamp since, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T ifLocal(TxnOperation operation, Key key, long epoch, Function<CommandStore, T> ifLocal)
     {
-        return commandStores.mapReduce(keys, since.epoch, Long.MAX_VALUE, map, reduce);
+        return commandStores.mapReduce(operation, key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
     }
 
-    public <T> T ifLocal(Key key, Timestamp at, Function<CommandStore, T> ifLocal)
+    public <T> T ifLocalSince(TxnOperation operation, Key key, Timestamp since, Function<CommandStore, T> ifLocal)
     {
-        return ifLocal(key, at.epoch, ifLocal);
+        return ifLocalSince(operation, key, since.epoch, ifLocal);
     }
 
-    public <T> T ifLocal(Key key, long epoch, Function<CommandStore, T> ifLocal)
+    public <T> T ifLocalSince(TxnOperation operation, Key key, long epoch, Function<CommandStore, T> ifLocal)
     {
-        return commandStores.mapReduce(key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
-    }
-
-    public <T> T ifLocalSince(Key key, Timestamp since, Function<CommandStore, T> ifLocal)
-    {
-        return ifLocalSince(key, since.epoch, ifLocal);
-    }
-
-    public <T> T ifLocalSince(Key key, long epoch, Function<CommandStore, T> ifLocal)
-    {
-        return commandStores.mapReduceSince(key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
+        return commandStores.mapReduceSince(operation, key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
     }
 
     public <T extends Collection<CommandStore>> T collectLocal(Keys keys, Timestamp at, IntFunction<T> factory)
@@ -417,11 +412,11 @@ public class Node implements ConfigurationService.Listener
 
     private Future<Result> initiateCoordination(TxnId txnId, Txn txn)
     {
-        Key homeKey = trySelectHomeKey(txnId, txn.keys);
+        Key homeKey = trySelectHomeKey(txnId, txn.keys());
         if (homeKey == null)
         {
             homeKey = selectRandomHomeKey(txnId);
-            txn = new Txn(txn.keys.with(homeKey), txn.read, txn.query, txn.update);
+            txn = new Txn.InMemory(txn.keys().with(homeKey), txn.read(), txn.query(), txn.update());
         }
         return Coordinate.coordinate(this, txnId, txn, homeKey);
     }
