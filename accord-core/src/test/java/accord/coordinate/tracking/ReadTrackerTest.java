@@ -18,7 +18,6 @@
 
 package accord.coordinate.tracking;
 
-import accord.Utils;
 import accord.impl.TopologyUtils;
 import accord.local.Node;
 import accord.primitives.KeyRanges;
@@ -30,12 +29,12 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 
-import static accord.Utils.topologies;
-import static accord.Utils.topology;
+import static accord.Utils.*;
+import static accord.utils.Utils.toArray;
 
 public class ReadTrackerTest
 {
-    private static final Node.Id[] ids = Utils.ids(5).toArray(Node.Id[]::new);
+    private static final Node.Id[] ids = toArray(ids(5), Node.Id[]::new);
     private static final KeyRanges ranges = TopologyUtils.initialRanges(5, 500);
     private static final Topology topology = TopologyUtils.initialTopology(ids, ranges, 3);
         /*

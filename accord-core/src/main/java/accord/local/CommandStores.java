@@ -342,7 +342,7 @@ public abstract class CommandStores
         return result;
     }
 
-    private <F, T> T setup(F f, Fold<F, ?, List<Future<T>>> fold, BiFunction<T, T, T> reduce)
+    private <F, T> T setup(F f, Fold<F, Void, List<Future<T>>> fold, BiFunction<T, T, T> reduce)
     {
         List<Future<T>> futures = foldl((s, i, mn, mx) -> s.all(), null, Long.MIN_VALUE, Long.MAX_VALUE, fold, f, null, ArrayList::new);
         return reduce(futures, reduce);

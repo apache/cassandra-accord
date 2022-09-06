@@ -32,6 +32,8 @@ import accord.topology.Topology;
 import accord.utils.WrapAroundList;
 import accord.utils.WrapAroundSet;
 
+import static accord.utils.Utils.toArray;
+
 public class TopologyFactory
 {
     final int shards;
@@ -82,6 +84,6 @@ public class TopologyFactory
             for (int i = 0 ; i < this.shards ; ++i)
                 shards.add(new Shard(ranges[j][i], electorates.get(i % electorates.size()), fastPathElectorates.get(i % fastPathElectorates.size())));
         }
-        return new Topology(1, shards.toArray(Shard[]::new));
+        return new Topology(1, toArray(shards, Shard[]::new));
     }
 }

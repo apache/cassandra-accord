@@ -19,7 +19,6 @@
 package accord.local;
 
 import java.util.Iterator;
-import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -27,6 +26,8 @@ import accord.api.Key;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import com.google.common.collect.Iterators;
+
+import static accord.utils.Utils.*;
 
 public abstract class CommandsForKey implements Listener, Iterable<Command>
 {
@@ -67,7 +68,7 @@ public abstract class CommandsForKey implements Listener, Iterable<Command>
     @Override
     public TxnOperation listenerScope(TxnId caller)
     {
-        return TxnOperation.scopeFor(caller, List.of(key()));
+        return TxnOperation.scopeFor(caller, listOf(key()));
     }
 
     @Override

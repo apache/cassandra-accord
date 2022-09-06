@@ -20,6 +20,10 @@ plugins {
     id 'accord.java-conventions'
 }
 
+compileJava {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+}
+
 dependencies {
     implementation project(':accord-core')
     implementation 'com.google.code.gson:gson:2.8.7'

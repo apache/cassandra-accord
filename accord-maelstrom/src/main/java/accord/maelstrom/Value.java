@@ -29,6 +29,8 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
 
+import static accord.utils.Utils.toArray;
+
 // TODO: abstract
 public class Value
 {
@@ -109,13 +111,13 @@ public class Value
             while (in.hasNext())
                 buffer.add(Datum.read(in));
             in.endArray();
-            return constructor.apply(buffer.toArray(Datum[]::new));
+            return constructor.apply(toArray(buffer, Datum[]::new));
         }
 
         return constructor.apply(new Datum[] { Datum.read(in) });
     }
 
-    public static final TypeAdapter<Value> GSON_ADAPTER = new TypeAdapter<>()
+    public static final TypeAdapter<Value> GSON_ADAPTER = new TypeAdapter<Value>()
     {
         @Override
         public void write(JsonWriter out, Value value) throws IOException

@@ -49,7 +49,7 @@ public class MaelstromResult implements Result
         this.update = update;
     }
 
-    public static final TypeAdapter<Result> GSON_ADAPTER = new TypeAdapter<>()
+    public static final TypeAdapter<Result> GSON_ADAPTER = new TypeAdapter<Result>()
     {
         @Override
         public void write(JsonWriter out, Result value) throws IOException

@@ -346,23 +346,6 @@ public class Topology extends AbstractCollection<Shard>
             consumer.accept(i, shards[supersetRangeIndexes[i]]);
     }
 
-    public <T> T[] select(Keys select, T[] indexedByShard, IntFunction<T[]> constructor)
-    {
-        List<T> selection = new ArrayList<>();
-        for (int i = 0, j = 0 ; i < select.size() && j < supersetRangeIndexes.length ;)
-        {
-            Key k = select.get(i);
-            Shard shard = shards[supersetRangeIndexes[j]];
-
-            int c = shard.range.compareKey(k);
-            if (c < 0) ++i;
-            else if (c == 0) { selection.add(indexedByShard[j++]); i++; }
-            else j++;
-        }
-
-        return selection.toArray(constructor);
-    }
-
     @Override
     public Iterator<Shard> iterator()
     {

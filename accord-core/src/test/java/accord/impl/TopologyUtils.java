@@ -18,7 +18,6 @@
 
 package accord.impl;
 
-import accord.api.Key;
 import accord.primitives.KeyRange;
 import accord.local.Node;
 import accord.primitives.KeyRanges;
@@ -28,6 +27,8 @@ import accord.utils.WrapAroundList;
 import accord.utils.WrapAroundSet;
 
 import java.util.*;
+
+import static accord.utils.Utils.toArray;
 
 public class TopologyUtils
 {
@@ -65,11 +66,11 @@ public class TopologyUtils
         final List<Shard> shards = new ArrayList<>();
         for (int i = 0 ; i < ranges.size() ; ++i)
             shards.add(new Shard(ranges.get(i), electorates.get(i % electorates.size()), fastPathElectorates.get(i % fastPathElectorates.size())));
-        return new Topology(1, shards.toArray(Shard[]::new));
+        return new Topology(1, toArray(shards, Shard[]::new));
     }
 
     public static Topology initialTopology(List<Node.Id> cluster, KeyRanges ranges, int rf)
     {
-        return initialTopology(cluster.toArray(Node.Id[]::new), ranges, rf);
+        return initialTopology(toArray(cluster, Node.Id[]::new), ranges, rf);
     }
 }

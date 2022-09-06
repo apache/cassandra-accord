@@ -29,6 +29,8 @@ import accord.primitives.TxnId;
 import accord.primitives.Keys;
 import accord.utils.VisibleForImplementation;
 
+import static accord.utils.Utils.listOf;
+
 public class WaitOnCommit extends TxnRequest
 {
     static class LocalWait implements Listener, TxnOperation
@@ -63,7 +65,7 @@ public class WaitOnCommit extends TxnRequest
         @Override
         public TxnOperation listenerScope(TxnId caller)
         {
-            return TxnOperation.scopeFor(List.of(txnId, caller), keys());
+            return TxnOperation.scopeFor(listOf(txnId, caller), keys());
         }
 
         @Override

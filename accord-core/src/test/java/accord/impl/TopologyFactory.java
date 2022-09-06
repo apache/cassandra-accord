@@ -20,12 +20,13 @@ package accord.impl;
 
 
 import accord.local.Node;
-import accord.api.Key;
 import accord.primitives.KeyRange;
 import accord.primitives.KeyRanges;
 import accord.topology.Topology;
 
 import java.util.*;
+
+import static accord.utils.Utils.toArray;
 
 public class TopologyFactory
 {
@@ -46,7 +47,7 @@ public class TopologyFactory
 
     public Topology toTopology(List<Node.Id> cluster)
     {
-        return toTopology(cluster.toArray(Node.Id[]::new));
+        return toTopology(toArray(cluster, Node.Id[]::new));
     }
 
     public static Topology toTopology(List<Node.Id> cluster, int rf, KeyRange... ranges)

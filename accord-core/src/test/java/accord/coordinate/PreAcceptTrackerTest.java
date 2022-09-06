@@ -18,7 +18,6 @@
 
 package accord.coordinate;
 
-import accord.Utils;
 import accord.coordinate.tracking.FastPathTracker;
 import accord.impl.TopologyUtils;
 import accord.local.Node;
@@ -30,10 +29,11 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import static accord.Utils.*;
+import static accord.utils.Utils.toArray;
 
 public class PreAcceptTrackerTest
 {
-    private static final Node.Id[] ids = Utils.ids(5).toArray(Node.Id[]::new);
+    private static final Node.Id[] ids = toArray(ids(5), Node.Id[]::new);
     private static final KeyRanges ranges = TopologyUtils.initialRanges(5, 500);
     private static final Topology topology = TopologyUtils.initialTopology(ids, ranges, 3);
         /*

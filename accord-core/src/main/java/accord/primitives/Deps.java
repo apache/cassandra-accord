@@ -33,6 +33,7 @@ import com.google.common.base.Preconditions;
 
 import static accord.utils.ArrayBuffers.*;
 import static accord.utils.SortedArrays.*;
+import static accord.utils.Utils.listOf;
 
 /**
  * A collection of dependencies for a transaction, organised by the key the dependency is adopted via.
@@ -522,6 +523,30 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         T construct(K[] keys, int keysLength, V[] values, int valuesLength, int[] out, int outLength);
     }
 
+    private static boolean arraysEqual(int[] left, int[] right, int length)
+    {
+        if (left.length < length || right.length < length)
+            return false;
+
+        for (int i=0; i<length; i++)
+            if (left[i] !=right[i])
+                return false;
+
+        return true;
+    }
+
+    private static <T> boolean arraysEqual(T[] left, T[] right, int length)
+    {
+        if (left.length < length || right.length < length)
+            return false;
+
+        for (int i=0; i<length; i++)
+            if (!Objects.equals(left[i], right[i]))
+                return false;
+
+        return true;
+    }
+
     // TODO: this method supports merging keyToTxnId OR txnIdToKey; we can perhaps save time and effort when constructing
     //       Deps on remote hosts by only producing txnIdToKey with OrderedCollector and serializing only this,
     //       and merging on the recipient before inverting, so that we only have to invert the final assembled deps
@@ -546,9 +571,9 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
             remapLeft = remapToSuperset(leftValues, leftValuesLength, outValues, outTxnIdsLength, intBuffers);
             remapRight = remapToSuperset(rightValues, rightValuesLength, outValues, outTxnIdsLength, intBuffers);
 
-            if (remapLeft == null && remapRight == null && leftKeysLength == rightKeysLength
-                    && Arrays.equals(left, 0, leftLength, right, 0, rightLength)
-                    && Arrays.equals(leftKeys, 0, leftKeysLength, rightKeys, 0, rightKeysLength)
+            if (remapLeft == null && remapRight == null && leftLength == rightLength && leftKeysLength == rightKeysLength
+                    && arraysEqual(left, right, rightLength)
+                    && arraysEqual(leftKeys, rightKeys, rightKeysLength)
                 )
             {
                 return constructor.construct(leftKeys, leftKeysLength, leftValues, leftValuesLength, left, leftLength);
@@ -1038,13 +1063,13 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
 
     public Collection<TxnId> txnIds()
     {
-        return List.of(txnIds);
+        return listOf(txnIds);
     }
 
     @Override
     public Iterator<Map.Entry<Key, TxnId>> iterator()
     {
-        return new Iterator<>()
+        return new Iterator<Map.Entry<Key, TxnId>>()
         {
             int i = keys.size(), k = 0;
 

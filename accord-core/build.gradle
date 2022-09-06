@@ -29,6 +29,10 @@ java {
   withSourcesJar()
 }
 
+compileJava {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+}
+
 dependencies {
     // Future is part of our API and depends on netty/guava; for this reason need to expose netty/guava
     // as part as our API (compile + runtime dependency for users)

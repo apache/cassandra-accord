@@ -38,14 +38,35 @@ public class Keys implements Iterable<Key>
 
     final Key[] keys;
 
+    private static Key[] toKeyArray(SortedSet<? extends Key> keys)
+    {
+        Key[] akeys = new Key[keys.size()];
+        int idx=0;
+        for (Key key : keys)
+            akeys[idx++] = key;
+
+        return akeys;
+    }
+
+    private static Key[] toKeyArray(Collection<? extends Key> keys)
+    {
+        Key[] akeys = new Key[keys.size()];
+        int idx=0;
+        for (Key key : keys)
+            akeys[idx++] = key;
+
+        Arrays.sort(akeys);
+        return akeys;
+    }
+
     public Keys(SortedSet<? extends Key> keys)
     {
-        this.keys = keys.toArray(Key[]::new);
+        this.keys = toKeyArray(keys);
     }
 
     public Keys(Collection<? extends Key> keys)
     {
-        this.keys = keys.toArray(Key[]::new);
+        this.keys = toKeyArray(keys);
         Arrays.sort(this.keys);
     }
 
@@ -153,7 +174,7 @@ public class Keys implements Iterable<Key>
     @Override
     public Iterator<Key> iterator()
     {
-        return new Iterator<>()
+        return new Iterator<Key>()
         {
             int i = 0;
             @Override
@@ -174,6 +195,15 @@ public class Keys implements Iterable<Key>
     {
         Arrays.sort(keys);
         return new Keys(keys);
+    }
+
+    public static Keys of(List<Key> keys)
+    {
+        Key[] akeys = new Key[keys.size()];
+        for (int i=0; i<akeys.length; i++)
+            akeys[i] = keys.get(i);
+
+        return of(akeys);
     }
 
     public static Keys ofSorted(Key ... keys)

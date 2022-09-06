@@ -54,6 +54,7 @@ import accord.primitives.Deps.Entry;
 import static accord.primitives.Deps.orderedBuilder;
 import static accord.utils.Gens.lists;
 import static accord.utils.Property.qt;
+import static accord.utils.Utils.toArray;
 
 // TODO (now): test Keys with no contents
 public class DepsTest
@@ -408,11 +409,11 @@ public class DepsTest
             }
 
             TreeMap<TxnId, List<Key>> canonicalInverted = invertCanonical();
-            Assertions.assertArrayEquals(canonicalInverted.keySet().toArray(TxnId[]::new),
+            Assertions.assertArrayEquals(toArray(canonicalInverted.keySet(), TxnId[]::new),
                                          IntStream.range(0, test.txnIdCount()).mapToObj(test::txnId).toArray(TxnId[]::new));
             for (Map.Entry<TxnId, List<Key>> e : canonicalInverted.entrySet())
             {
-                Assertions.assertArrayEquals(e.getValue().toArray(Key[]::new),
+                Assertions.assertArrayEquals(toArray(e.getValue(), Key[]::new),
                                              test.someKeys(e.getKey()).stream().toArray(Key[]::new));
             }
 
@@ -467,7 +468,7 @@ public class DepsTest
                                                            : IntHashKey.key(random.nextInt(valueRange));
                 tmp.add(key);
             }
-            keys = tmp.toArray(IntHashKey[]::new);
+            keys = toArray(tmp, IntHashKey[]::new);
         }
         KeyRange[] ranges = new KeyRange[count];
         for (int i = 0 ; i < count ; i++)

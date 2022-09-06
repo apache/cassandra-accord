@@ -18,7 +18,6 @@
 
 package accord.coordinate.tracking;
 
-import accord.Utils;
 import accord.impl.TopologyUtils;
 import accord.local.Node;
 import accord.primitives.KeyRange;
@@ -31,10 +30,11 @@ import org.junit.jupiter.api.Test;
 import static accord.Utils.*;
 import static accord.Utils.idSet;
 import static accord.impl.IntKey.range;
+import static accord.utils.Utils.toArray;
 
 public class QuorumTrackerTest
 {
-    private static final Node.Id[] ids = Utils.ids(5).toArray(Node.Id[]::new);
+    private static final Node.Id[] ids = toArray(ids(5), Node.Id[]::new);
     private static final KeyRanges ranges = TopologyUtils.initialRanges(5, 500);
     private static final Topology topology = TopologyUtils.initialTopology(ids, ranges, 3);
         /*

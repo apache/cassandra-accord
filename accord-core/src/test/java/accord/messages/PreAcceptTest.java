@@ -49,13 +49,14 @@ import static accord.Utils.id;
 import static accord.Utils.writeTxn;
 import static accord.impl.InMemoryCommandStore.inMemory;
 import static accord.impl.mock.MockCluster.configService;
+import static accord.utils.Utils.listOf;
 
 public class PreAcceptTest
 {
     private static final Id ID1 = id(1);
     private static final Id ID2 = id(2);
     private static final Id ID3 = id(3);
-    private static final List<Id> IDS = List.of(ID1, ID2, ID3);
+    private static final List<Id> IDS = listOf(ID1, ID2, ID3);
     private static final Topology TOPOLOGY = TopologyFactory.toTopology(IDS, 3, IntKey.range(0, 100));
 
     private static final ReplyContext REPLY_CONTEXT = Network.replyCtxFor(0);
