@@ -28,6 +28,9 @@ import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 import org.apache.cassandra.utils.concurrent.Future;
 
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+
 public abstract class Txn
 {
     public enum Kind { READ, WRITE }
@@ -40,7 +43,7 @@ public abstract class Txn
         private final Query query;
         private final Update update;
 
-        public InMemory(Keys keys, Read read, Query query)
+        public InMemory(@Nonnull Keys keys, @Nonnull Read read, @Nonnull Query query)
         {
             this.kind = Kind.READ;
             this.keys = keys;
@@ -49,7 +52,7 @@ public abstract class Txn
             this.update = null;
         }
 
-        public InMemory(Keys keys, Read read, Query query, Update update)
+        public InMemory(@Nonnull Keys keys, @Nonnull Read read, @Nonnull Query query, @Nullable Update update)
         {
             this.kind = Kind.WRITE;
             this.keys = keys;
@@ -89,11 +92,11 @@ public abstract class Txn
         }
     }
 
-    public abstract Kind kind();
-    public abstract Keys keys();
-    public abstract Read read();
-    public abstract Query query();
-    public abstract Update update();
+    public abstract @Nonnull Kind kind();
+    public abstract @Nonnull Keys keys();
+    public abstract @Nonnull Read read();
+    public abstract @Nonnull Query query();
+    public abstract @Nullable Update update();
 
     @Override
     public boolean equals(Object o)
