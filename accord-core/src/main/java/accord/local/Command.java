@@ -296,7 +296,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         return true;
     }
 
-    public Future<?> commitAndBeginExecution(Txn txn, Key homeKey, Key progressKey, Timestamp executeAt, Deps deps)
+    public Future<Void> commitAndBeginExecution(Txn txn, Key homeKey, Key progressKey, Timestamp executeAt, Deps deps)
     {
         if (!commit(txn, homeKey, progressKey, executeAt, deps))
             return Write.SUCCESS;
@@ -326,7 +326,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         return true;
     }
 
-    public Future<?> apply(Txn txn, Key homeKey, Key progressKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    public Future<Void> apply(Txn txn, Key homeKey, Key progressKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         if (hasBeen(Executed) && executeAt.equals(executeAt()))
         {
@@ -440,7 +440,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         };
     }
 
-    protected Future<?> apply()
+    protected Future<Void> apply()
     {
         // important: we can't include a reference to *this* in the lambda, since the C* implementation may evict
         // the command instance from memory between now and the write completing (and post apply being called)
@@ -454,7 +454,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         return txn().read(this, readKeys);
     }
 
-    private Future<?> maybeExecute(boolean notifyListenersOnNoop)
+    private Future<Void> maybeExecute(boolean notifyListenersOnNoop)
     {
         if (logger.isTraceEnabled())
             logger.trace("{}: Maybe executing with status {}. Will notify listeners on noop: {}", txnId(), status(), notifyListenersOnNoop);

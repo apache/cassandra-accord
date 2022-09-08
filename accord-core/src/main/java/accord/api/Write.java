@@ -30,6 +30,6 @@ import org.apache.cassandra.utils.concurrent.ImmediateFuture;
  */
 public interface Write
 {
-    Future<?> SUCCESS = ImmediateFuture.success(null);
-    Future<?> apply(Key key, CommandStore commandStore, Timestamp executeAt, DataStore store);
+    Future<Void> SUCCESS = ImmediateFuture.success(null);
+    Future<Void> apply(Key key, CommandStore commandStore, Timestamp executeAt, DataStore store);
 }

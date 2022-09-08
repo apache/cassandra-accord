@@ -37,7 +37,7 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
     private static final Logger logger = LoggerFactory.getLogger(ListWrite.class);
 
     @Override
-    public Future<?> apply(Key key, CommandStore commandStore, Timestamp executeAt, DataStore store)
+    public Future<Void> apply(Key key, CommandStore commandStore, Timestamp executeAt, DataStore store)
     {
         ListStore s = (ListStore) store;
         if (!containsKey(key))

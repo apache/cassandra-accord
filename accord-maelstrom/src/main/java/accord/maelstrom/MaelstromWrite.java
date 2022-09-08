@@ -31,7 +31,7 @@ import java.util.TreeMap;
 public class MaelstromWrite extends TreeMap<Key, Value> implements Write
 {
     @Override
-    public Future<?> apply(Key key, CommandStore commandStore, Timestamp executeAt, DataStore store)
+    public Future<Void> apply(Key key, CommandStore commandStore, Timestamp executeAt, DataStore store)
     {
         MaelstromStore s = (MaelstromStore) store;
         if (containsKey(key))

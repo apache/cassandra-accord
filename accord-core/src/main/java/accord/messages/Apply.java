@@ -76,7 +76,7 @@ public class Apply extends TxnRequest
         this.result = result;
     }
 
-    static Future<?> waitAndReduce(Future<?> left, Future<?> right)
+    static Future<Void> waitAndReduce(Future<Void> left, Future<Void> right)
     {
         try
         {
