@@ -34,10 +34,8 @@ compileJava {
 }
 
 dependencies {
-    // Future is part of our API and depends on netty/guava; for this reason need to expose netty/guava
-    // as part as our API (compile + runtime dependency for users)
-    api 'io.netty:netty-all:4.1.58.Final'
-    api 'com.google.guava:guava:30.1.1-jre'
+    implementation group: 'org.apache.cassandra', name: 'cassandra-all', version: '4.1-alpha1'
+    implementation group: "net.ju-n.compile-command-annotations", name: "compile-command-annotations", version: "1.2.0"
 
     // Dependencies we depend on that are not part of our API.
     // These act as runtimeOnly dependencies to users

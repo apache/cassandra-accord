@@ -23,7 +23,7 @@ import java.util.function.IntFunction;
 
 import accord.utils.ArrayBuffers.ObjectBuffers;
 import accord.utils.ArrayBuffers.IntBufferAllocator;
-import org.apache.cassandra.utils.concurrent.Inline;
+import net.nicoulaj.compilecommand.annotations.Inline;
 
 import javax.annotation.Nullable;
 

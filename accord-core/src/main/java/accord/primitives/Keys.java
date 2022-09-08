@@ -25,7 +25,7 @@ import java.util.stream.Stream;
 
 import accord.api.Key;
 import accord.utils.*;
-import org.apache.cassandra.utils.concurrent.Inline;
+import net.nicoulaj.compilecommand.annotations.Inline;
 
 import static accord.utils.ArrayBuffers.cachedKeys;
 
