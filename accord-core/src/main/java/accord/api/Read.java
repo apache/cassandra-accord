@@ -63,7 +63,10 @@ public interface Read
                 return;
 
             if (throwable != null)
+            {
                 tryFailure(throwable);
+                return;
+            }
 
             result = result != null ? result.merge(data) : data;
             if (--pending == 0)

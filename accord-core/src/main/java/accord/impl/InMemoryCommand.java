@@ -51,6 +51,8 @@ public class InMemoryCommand extends Command
         InMemoryCommand command = (InMemoryCommand) o;
         return commandStore == command.commandStore
                 && txnId.equals(command.txnId)
+                && Objects.equals(homeKey, command.homeKey)
+                && Objects.equals(progressKey, command.progressKey)
                 && Objects.equals(txn, command.txn)
                 && promised.equals(command.promised)
                 && accepted.equals(command.accepted)
@@ -59,6 +61,7 @@ public class InMemoryCommand extends Command
                 && Objects.equals(writes, command.writes)
                 && Objects.equals(result, command.result)
                 && status == command.status
+                && isGloballyPersistent == command.isGloballyPersistent
                 && Objects.equals(waitingOnCommit, command.waitingOnCommit)
                 && Objects.equals(waitingOnApply, command.waitingOnApply)
                 && Objects.equals(listeners, command.listeners);
