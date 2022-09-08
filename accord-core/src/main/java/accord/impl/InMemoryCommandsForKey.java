@@ -42,6 +42,10 @@ public class InMemoryCommandsForKey extends CommandsForKey
         @Override
         public void add(Timestamp timestamp, Command command)
         {
+            if (commands.containsKey(timestamp) && !commands.get(timestamp).equals(command))
+                throw new IllegalStateException(String.format("Attempting to overwrite command at timestamp %s %s with %s.",
+                                                              timestamp, commands.get(timestamp), command));
+
             commands.put(timestamp, command);
         }
 

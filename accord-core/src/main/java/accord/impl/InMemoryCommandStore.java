@@ -31,7 +31,6 @@ import accord.primitives.KeyRanges;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.local.*;
-import com.google.common.base.Preconditions;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.Promise;
@@ -137,15 +136,10 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     protected void processInternal(Consumer<? super CommandStore> consumer, Promise<Void> promise)
     {
-        try
-        {
-            consumer.accept(this);
-            promise.setSuccess(null);
-        }
-        catch (Throwable e)
-        {
-            promise.tryFailure(e);
-        }
+        processInternal(cs -> {
+            consumer.accept(cs);
+            return null;
+        }, promise);
     }
 
     protected <T> void processInternal(Function<? super CommandStore, T> function, Promise<T> promise)
@@ -177,7 +171,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        public Future<Void> processSetup(Consumer<? super CommandStore> function)
+        public synchronized Future<Void> processSetup(Consumer<? super CommandStore> function)
         {
             AsyncPromise<Void> promise = new AsyncPromise<>();
             processInternal(function, promise);
@@ -185,7 +179,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        public <T> Future<T> processSetup(Function<? super CommandStore, T> function)
+        public synchronized <T> Future<T> processSetup(Function<? super CommandStore, T> function)
         {
             AsyncPromise<T> promise = new AsyncPromise<>();
             processInternal(function, promise);
@@ -201,7 +195,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        public <T> Future<T> process(TxnOperation unused, Function<? super CommandStore, T> function)
+        public synchronized <T> Future<T> process(TxnOperation unused, Function<? super CommandStore, T> function)
         {
             AsyncPromise<T> promise = new AsyncPromise<>();
             processInternal(function, promise);
@@ -209,7 +203,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        public void shutdown() {}
+        public synchronized void shutdown() {}
     }
 
     public static class SingleThread extends InMemoryCommandStore
@@ -335,7 +329,8 @@ public abstract class InMemoryCommandStore extends CommandStore
                     break;
                 expectedThread.compareAndSet(null, Thread.currentThread());
             }
-            Preconditions.checkState(expected == current);
+            if (expected != current)
+                throw new IllegalStateException(String.format("Command store called from the wrong thread. Expected %s, got %s", expected, current));
         }
 
         @Override
