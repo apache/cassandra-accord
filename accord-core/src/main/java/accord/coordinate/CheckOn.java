@@ -22,6 +22,7 @@ import java.util.function.BiConsumer;
 
 import accord.local.*;
 import accord.primitives.*;
+import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
 import com.google.common.base.Preconditions;
 
@@ -54,18 +55,18 @@ public class CheckOn extends CheckShards
      */
     final Known sufficient;
     final long untilLocalEpoch;
-    final AbstractRoute route;
+    final Route<?> route;
 
-    CheckOn(Node node, Known sufficient, TxnId txnId, AbstractRoute route, long srcEpoch, long untilLocalEpoch, BiConsumer<? super CheckStatusOkFull, Throwable> callback)
+    CheckOn(Node node, Known sufficient, TxnId txnId, Route<?> route, long srcEpoch, long untilLocalEpoch, BiConsumer<? super CheckStatusOkFull, Throwable> callback)
     {
-        this(node, sufficient, txnId, route, route.with(route.homeKey), srcEpoch, untilLocalEpoch, callback);
+        this(node, sufficient, txnId, route, route.with(route.homeKey()), srcEpoch, untilLocalEpoch, callback);
     }
 
-    CheckOn(Node node, Known sufficient, TxnId txnId, AbstractRoute route, RoutingKeys routeWithHomeKey, long srcEpoch, long untilLocalEpoch, BiConsumer<? super CheckStatusOkFull, Throwable> callback)
+    CheckOn(Node node, Known sufficient, TxnId txnId, Route<?> route, Unseekables<?, ?> routeWithHomeKey, long srcEpoch, long untilLocalEpoch, BiConsumer<? super CheckStatusOkFull, Throwable> callback)
     {
         // TODO (soon): restore behaviour of only collecting info if e.g. Committed or Executed
         super(node, txnId, routeWithHomeKey, srcEpoch, IncludeInfo.All);
-        Preconditions.checkArgument(routeWithHomeKey.contains(route.homeKey));
+        Preconditions.checkArgument(routeWithHomeKey.contains(route.homeKey()));
         this.sufficient = sufficient;
         this.route = route;
         this.callback = callback;
@@ -73,14 +74,14 @@ public class CheckOn extends CheckShards
     }
 
     // TODO: many callers only need to consult precisely executeAt.epoch remotely
-    public static CheckOn checkOn(Known sufficientStatus, Node node, TxnId txnId, AbstractRoute route, long srcEpoch, long untilLocalEpoch, BiConsumer<? super CheckStatusOkFull, Throwable> callback)
+    public static CheckOn checkOn(Known sufficientStatus, Node node, TxnId txnId, Route<?> route, long srcEpoch, long untilLocalEpoch, BiConsumer<? super CheckStatusOkFull, Throwable> callback)
     {
         CheckOn checkOn = new CheckOn(node, sufficientStatus, txnId, route, srcEpoch, untilLocalEpoch, callback);
         checkOn.start();
         return checkOn;
     }
 
-    protected AbstractRoute route()
+    protected Route<?> route()
     {
         return route;
     }
@@ -88,8 +89,8 @@ public class CheckOn extends CheckShards
     @Override
     protected boolean isSufficient(Id from, CheckStatusOk ok)
     {
-        KeyRanges rangesForNode = topologies().computeRangesForNode(from);
-        PartialRoute scope = this.route.slice(rangesForNode);
+        Ranges rangesForNode = topologies().computeRangesForNode(from);
+        PartialRoute<?> scope = this.route.slice(rangesForNode);
         return isSufficient(scope, ok);
     }
 
@@ -99,7 +100,7 @@ public class CheckOn extends CheckShards
         return isSufficient(route, ok);
     }
 
-    protected boolean isSufficient(AbstractRoute scope, CheckStatusOk ok)
+    protected boolean isSufficient(Route<?> scope, CheckStatusOk ok)
     {
         return sufficient.isSatisfiedBy(((CheckStatusOkFull)ok).sufficientFor(scope));
     }
@@ -115,7 +116,7 @@ public class CheckOn extends CheckShards
         else
         {
             if (success == Success.Success)
-                Preconditions.checkState(isSufficient(merged));
+                Invariants.checkState(isSufficient(merged));
 
             if (merged.saveStatus == NotWitnessed)
                 callback.accept(CheckStatusOkFull.NOT_WITNESSED, null);
@@ -126,7 +127,7 @@ public class CheckOn extends CheckShards
 
     class OnDone implements MapReduceConsume<SafeCommandStore, Void>
     {
-        final AbstractRoute maxRoute;
+        final Route<?> maxRoute;
         final RoutingKey progressKey;
         final CheckStatusOkFull full;
         final Known sufficientFor;
@@ -135,11 +136,11 @@ public class CheckOn extends CheckShards
 
         public OnDone()
         {
-            KeyRanges localRanges = node.topology().localRangesForEpochs(txnId.epoch, untilLocalEpoch);
-            PartialRoute selfRoute = route().slice(localRanges);
+            Ranges localRanges = node.topology().localRangesForEpochs(txnId.epoch, untilLocalEpoch);
+            PartialRoute<?> selfRoute = route().slice(localRanges);
             full = (CheckStatusOkFull) merged;
             sufficientFor = full.sufficientFor(selfRoute);
-            maxRoute = Route.merge(route(), full.route);
+            maxRoute = Route.merge((Route)route(), full.route);
             progressKey = node.trySelectProgressKey(txnId, maxRoute);
 
             PartialTxn partialTxn = null;
@@ -155,7 +156,7 @@ public class CheckOn extends CheckShards
 
         void start()
         {
-            Keys keys = Keys.EMPTY;
+            Seekables<?, ?> keys = Keys.EMPTY;
             if (sufficientFor.definition.isKnown())
                 keys = partialTxn.keys();
 

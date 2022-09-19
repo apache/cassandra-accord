@@ -35,6 +35,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
+import accord.impl.IntHashKey.Hash;
 import accord.primitives.*;
 import accord.primitives.Deps.OrderedBuilder;
 import accord.utils.Gen;
@@ -173,14 +174,14 @@ public class DepsTest
     public void testForEachOnUniqueEndInclusive()
     {
         qt().forAll(Gen.of(Deps::generate).filter(d -> d.test.keys().size() >= 2)).check(deps -> {
-            Keys keys = deps.test.keys();
+            Keys keys = (Keys)deps.test.keys();
             Key start = keys.get(0);
             Key end = keys.get(keys.size() - 1);
             if (start.equals(end))
                 throw new AssertionError(start + " == " + end);
 
             TreeSet<TxnId> seen = new TreeSet<>();
-            deps.test.forEachOn(KeyRanges.of(KeyRange.range(start, end, false, true)), ignore -> true, txnId -> {
+            deps.test.forEachOn(Ranges.of(Range.range(start.toUnseekable(), end.toUnseekable(), false, true)), ignore -> true, txnId -> {
                 if (!seen.add(txnId))
                     throw new AssertionError("Seen " + txnId + " multiple times");
             });
@@ -199,12 +200,12 @@ public class DepsTest
     public void testForEachOnUniqueStartInclusive()
     {
         qt().forAll(Gen.of(Deps::generate).filter(d -> d.test.keys().size() >= 2)).check(deps -> {
-            Keys keys = deps.test.keys();
+            Keys keys = (Keys)deps.test.keys();
             Key start = keys.get(0);
             Key end = keys.get(keys.size() - 1);
 
             TreeSet<TxnId> seen = new TreeSet<>();
-            deps.test.forEachOn(KeyRanges.of(KeyRange.range(start, end, true, false)), ignore -> true, txnId -> {
+            deps.test.forEachOn(Ranges.of(Range.range(start.toUnseekable(), end.toUnseekable(), true, false)), ignore -> true, txnId -> {
                 if (!seen.add(txnId))
                     throw new AssertionError("Seen " + txnId + " multiple times");
             });
@@ -223,12 +224,12 @@ public class DepsTest
     public void testForEachOnUniqueNoMatch()
     {
         qt().forAll(Gen.of(Deps::generate).filter(d -> d.test.keys().size() >= 2)).check(deps -> {
-            Keys keys = deps.test.keys();
-            Key start = IntHashKey.forHash(Integer.MIN_VALUE);
+            Keys keys = (Keys)deps.test.keys();
+            Hash start = IntHashKey.forHash(Integer.MIN_VALUE);
             Key end = keys.get(0);
 
             TreeSet<TxnId> seen = new TreeSet<>();
-            deps.test.forEachOn(KeyRanges.of(KeyRange.range(start, end, true, false)), ignore -> true, txnId -> {
+            deps.test.forEachOn(Ranges.of(Range.range(start.toUnseekable(), end.toUnseekable(), true, false)), ignore -> true, txnId -> {
                 if (!seen.add(txnId))
                     throw new AssertionError("Seen " + txnId + " multiple times");
             });
@@ -273,7 +274,7 @@ public class DepsTest
 
     private static Keys keys(List<Deps> list)
     {
-        return list.stream().map(d -> d.test.keys()).reduce(Keys.EMPTY, Keys::union);
+        return list.stream().map(d -> (Keys)d.test.keys()).reduce(Keys.EMPTY, Keys::union);
     }
 
     private static void testMergedProperty(List<Deps> list)
@@ -374,7 +375,7 @@ public class DepsTest
             }
         }
 
-        Deps select(KeyRanges ranges)
+        Deps select(Ranges ranges)
         {
             Map<Key, Set<TxnId>> canonical = new TreeMap<>();
             for (Map.Entry<Key, Set<TxnId>> e : this.canonical.entrySet())
@@ -399,7 +400,7 @@ public class DepsTest
 
         void testSimpleEquality()
         {
-            Assertions.assertArrayEquals(canonical.keySet().toArray(new Key[0]), test.keys().stream().toArray(Key[]::new));
+            Assertions.assertArrayEquals(canonical.keySet().toArray(new Key[0]), ((Keys)test.keys()).stream().toArray(Key[]::new));
             for (Map.Entry<Key, Set<TxnId>> e : canonical.entrySet())
             {
                 List<TxnId> canonical = new ArrayList<>(e.getValue());
@@ -456,24 +457,23 @@ public class DepsTest
         }
     }
 
-    private static KeyRanges randomKeyRanges(Random random, int countRange, int valueRange)
+    private static Ranges randomKeyRanges(Random random, int countRange, int valueRange)
     {
         int count = countRange == 1 ? 1 : 1 + random.nextInt(countRange - 1);
-        IntHashKey[] keys;
+        Hash[] hashes;
         {
-            TreeSet<IntHashKey> tmp = new TreeSet<>();
+            TreeSet<Hash> tmp = new TreeSet<>();
             while (tmp.size() < count * 2)
             {
-                IntHashKey key = random.nextFloat() < 0.1f ? IntHashKey.forHash(random.nextInt())
-                                                           : IntHashKey.key(random.nextInt(valueRange));
+                Hash key = IntHashKey.forHash(random.nextInt());
                 tmp.add(key);
             }
-            keys = toArray(tmp, IntHashKey[]::new);
+            hashes = toArray(tmp, Hash[]::new);
         }
-        KeyRange[] ranges = new KeyRange[count];
+        Range[] ranges = new Range[count];
         for (int i = 0 ; i < count ; i++)
-            ranges[i] = IntHashKey.range(keys[i * 2], keys[i * 2 + 1]);
-        return KeyRanges.ofSortedAndDeoverlapped(ranges);
+            ranges[i] = IntHashKey.range(hashes[i * 2], hashes[i * 2 + 1]);
+        return Ranges.ofSortedAndDeoverlapped(ranges);
     }
 
     private static void testOneRandom(long seed, int uniqueTxnIds, int epochRange, int realRange, int logicalRange, int nodeRange,
@@ -511,7 +511,7 @@ public class DepsTest
             // generate some random KeyRanges, and slice using them
             for (int i = 0, count = 1 + random.nextInt(4); i < count ; ++i)
             {
-                KeyRanges ranges = randomKeyRanges(random, 1 + random.nextInt(5), keyRange);
+                Ranges ranges = randomKeyRanges(random, 1 + random.nextInt(5), keyRange);
 
                 {   // test forEach(key, txnId)
                     List<Entry> canonical = new ArrayList<>();

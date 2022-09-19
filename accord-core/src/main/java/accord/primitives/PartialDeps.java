@@ -4,13 +4,13 @@ import com.google.common.base.Preconditions;
 
 public class PartialDeps extends Deps
 {
-    public static final PartialDeps NONE = new PartialDeps(KeyRanges.EMPTY, Deps.NONE.keys, Deps.NONE.txnIds, Deps.NONE.keyToTxnId);
+    public static final PartialDeps NONE = new PartialDeps(Ranges.EMPTY, Deps.NONE.keys, Deps.NONE.txnIds, Deps.NONE.keyToTxnId);
 
     public static class SerializerSupport
     {
         private SerializerSupport() {}
 
-        public static PartialDeps create(KeyRanges covering, Keys keys, TxnId[] txnIds, int[] keyToTxnId)
+        public static PartialDeps create(Ranges covering, Keys keys, TxnId[] txnIds, int[] keyToTxnId)
         {
             return new PartialDeps(covering, keys, txnIds, keyToTxnId);
         }
@@ -18,8 +18,8 @@ public class PartialDeps extends Deps
 
     public static class OrderedBuilder extends AbstractOrderedBuilder<PartialDeps>
     {
-        final KeyRanges covering;
-        public OrderedBuilder(KeyRanges covering, boolean hasOrderedTxnId)
+        final Ranges covering;
+        public OrderedBuilder(Ranges covering, boolean hasOrderedTxnId)
         {
             super(hasOrderedTxnId);
             this.covering = covering;
@@ -32,28 +32,23 @@ public class PartialDeps extends Deps
         }
     }
 
-    public static OrderedBuilder orderedBuilder(KeyRanges ranges, boolean hasOrderedTxnId)
+    public static OrderedBuilder orderedBuilder(Ranges ranges, boolean hasOrderedTxnId)
     {
         return new OrderedBuilder(ranges, hasOrderedTxnId);
     }
 
-    public final KeyRanges covering;
+    public final Ranges covering;
 
-    PartialDeps(KeyRanges covering, Keys keys, TxnId[] txnIds, int[] keyToTxnId)
+    PartialDeps(Ranges covering, Keys keys, TxnId[] txnIds, int[] keyToTxnId)
     {
         super(keys, txnIds, keyToTxnId);
         this.covering = covering;
         Preconditions.checkState(covering.containsAll(keys));
     }
 
-    public boolean covers(KeyRanges ranges)
+    public boolean covers(Unseekables<?, ?> keysOrRanges)
     {
-        return covering.contains(ranges);
-    }
-
-    public boolean covers(AbstractKeys<?, ?> keys)
-    {
-        return covering.containsAll(keys);
+        return covering.containsAll(keysOrRanges);
     }
 
     public PartialDeps with(PartialDeps that)
@@ -62,23 +57,23 @@ public class PartialDeps extends Deps
         return new PartialDeps(covering.union(that.covering), merged.keys, merged.txnIds, merged.keyToTxnId);
     }
 
-    public Deps reconstitute(Route route)
+    public Deps reconstitute(FullRoute<?> route)
     {
         if (!covers(route))
             throw new IllegalArgumentException();
         return new Deps(keys, txnIds, keyToTxnId);
     }
 
-    // PartialRoute might cover a wider set of ranges, some of which may have no involved keys
-    public PartialDeps reconstitutePartial(PartialRoute route)
+    // PartialRoute<?>might cover a wider set of ranges, some of which may have no involved keys
+    public PartialDeps reconstitutePartial(PartialRoute<?> route)
     {
         if (!covers(route))
             throw new IllegalArgumentException();
 
-        if (covers(route.covering))
+        if (covers(route.covering()))
             return this;
 
-        return new PartialDeps(route.covering, keys, txnIds, keyToTxnId);
+        return new PartialDeps(route.covering(), keys, txnIds, keyToTxnId);
     }
 
     @Override

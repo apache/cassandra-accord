@@ -19,6 +19,7 @@
 package accord.utils;
 
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.function.IntFunction;
 
 import accord.utils.ArrayBuffers.ObjectBuffers;
@@ -204,6 +205,11 @@ public class SortedArrays
         return linearIntersection(left, left.length, right, right.length, buffers);
     }
 
+    public static <T extends Comparable<? super T>> T[] linearIntersection(T[] left, int leftLength, T[] right, int rightLength, ObjectBuffers<T> buffers)
+    {
+        return linearIntersection(left, leftLength, right, rightLength, Comparable::compareTo, buffers);
+    }
+
     /**
      * Given two sorted buffers where the contents within each array are unique, but may duplicate each other,
      * return a sorted sorted array containing the elements present in both input buffers.
@@ -214,7 +220,7 @@ public class SortedArrays
      *
      * TODO: introduce exponential search optimised version
      */
-    public static <T extends Comparable<? super T>> T[] linearIntersection(T[] left, int leftLength, T[] right, int rightLength, ObjectBuffers<T> buffers)
+    public static <T> T[] linearIntersection(T[] left, int leftLength, T[] right, int rightLength, Comparator<T> comparator, ObjectBuffers<T> buffers)
     {
         int leftIdx = 0;
         int rightIdx = 0;
@@ -230,7 +236,7 @@ public class SortedArrays
             {
                 T leftKey = left[leftIdx];
                 T rightKey = right[rightIdx];
-                int cmp = leftKey == rightKey ? 0 : leftKey.compareTo(rightKey);
+                int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
 
                 if (cmp >= 0)
                 {
@@ -258,7 +264,7 @@ public class SortedArrays
             {
                 T leftKey = left[leftIdx];
                 T rightKey = right[rightIdx];
-                int cmp = leftKey == rightKey ? 0 : leftKey.compareTo(rightKey);
+                int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
 
                 if (cmp <= 0)
                 {
@@ -287,6 +293,76 @@ public class SortedArrays
             {
                 T leftKey = left[leftIdx];
                 T rightKey = right[rightIdx];
+                int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
+
+                if (cmp == 0)
+                {
+                    leftIdx++;
+                    rightIdx++;
+                    result[resultSize++] = leftKey;
+                }
+                else if (cmp < 0) leftIdx++;
+                else rightIdx++;
+            }
+
+            return buffers.complete(result, resultSize);
+        }
+        finally
+        {
+            buffers.discard(result, resultSize);
+        }
+    }
+
+    /**
+     * Given two sorted buffers where the contents within each array are unique, but may duplicate each other,
+     * return a sorted sorted array containing the elements present in both input buffers.
+     *
+     * If one of the two input buffers represents a superset of the other, this buffer will be returned unmodified.
+     *
+     * Otherwise, depending on {@code buffers}, a result buffer may itself be returned or a new array.
+     *
+     * TODO: introduce exponential search optimised version
+     */
+    public static <T2, T1 extends Comparable<? super T2>> T1[] linearIntersection(T1[] left, int leftLength, T2[] right, int rightLength, ObjectBuffers<T1> buffers)
+    {
+        int leftIdx = 0;
+        int rightIdx = 0;
+
+        T1[] result = null;
+        int resultSize = 0;
+
+        boolean hasMatch = false;
+        while (leftIdx < leftLength && rightIdx < rightLength)
+        {
+            T1 leftKey = left[leftIdx];
+            T2 rightKey = right[rightIdx];
+            int cmp = leftKey == rightKey ? 0 : leftKey.compareTo(rightKey);
+
+            if (cmp >= 0)
+            {
+                rightIdx += 1;
+                leftIdx += cmp == 0 ? 1 : 0;
+                if (cmp == 0)
+                    hasMatch = true;
+            }
+            else
+            {
+                resultSize = leftIdx++;
+                result = buffers.get(resultSize + Math.min(leftLength - leftIdx, rightLength - rightIdx));
+                System.arraycopy(left, 0, result, 0, resultSize);
+                break;
+            }
+        }
+
+        if (result == null)
+            return hasMatch ? buffers.completeWithExisting(left, leftLength) : buffers.complete(buffers.get(0), 0);
+
+        try
+        {
+            while (leftIdx < leftLength && rightIdx < rightLength)
+            {
+                T1 leftKey = left[leftIdx];
+                T2 rightKey = right[rightIdx];
                 int cmp = leftKey == rightKey ? 0 : leftKey.compareTo(rightKey);
 
                 if (cmp == 0)
@@ -398,7 +474,7 @@ public class SortedArrays
                 return Arrays.copyOf(slice, ai);
             }
 
-            int nextai = (int)(ari >>> 32);
+            int nextai = (int)(ari);
             if (ai != nextai)
             {
                 // A gap is detected in slice!
@@ -409,11 +485,11 @@ public class SortedArrays
                 result = factory.apply(ai + (slice.length - nextai));
                 System.arraycopy(slice, 0, result, 0, resultCount);
                 ai = nextai;
-                ri = (int)ari;
+                ri = (int)(ari >>> 32);
                 break;
             }
 
-            ri = (int)ari;
+            ri = (int)(ari >>> 32);
             // In cases where duplicates are present in slice, find the last instance of slice[ai], and move past it.
             // slice[ai] is known to be present, so need to check the next element.
             ai = exponentialSearch(slice, nextai, slice.length, select[ri], cmp2, Search.FLOOR) + 1;
@@ -437,8 +513,8 @@ public class SortedArrays
                 return result;
             }
 
-            ai = (int)(ari >>> 32);
-            ri = (int)ari;
+            ai = (int)(ari);
+            ri = (int)(ari >>> 32);
         }
     }
 
@@ -712,7 +788,7 @@ public class SortedArrays
             if (ai == asLength)
                 return -1;
         }
-        return ((long)ai << 32) | bi;
+        return ai | ((long)bi << 32);
     }
 
     public static long swapHighLow32b(long v)
@@ -768,11 +844,6 @@ public class SortedArrays
      * items that are members of both sets (with their corresponding indices).
      */
     @Inline
-    public static <T extends Comparable<? super T>> long foldlIntersection(T[] as, T[] bs, IndexedFoldIntersectToLong<? super T> fold, long param, long initialValue, long terminalValue)
-    {
-        return foldlIntersection(as, 0, as.length, bs, 0, bs.length, fold, param, initialValue, terminalValue);
-    }
-
     public static <T extends Comparable<? super T>> long foldlIntersection(T[] as, int ai, int alim, T[] bs, int bi, int blim, IndexedFoldIntersectToLong<? super T> fold, long param, long initialValue, long terminalValue)
     {
         while (true)
@@ -781,8 +852,8 @@ public class SortedArrays
             if (abi < 0)
                 break;
 
-            ai = (int)(abi >>> 32);
-            bi = (int)abi;
+            ai = (int)(abi);
+            bi = (int)(abi >>> 32);
 
             initialValue = fold.apply(ai, bi, as[ai], param, initialValue);
             if (initialValue == terminalValue)
@@ -794,47 +865,4 @@ public class SortedArrays
 
         return initialValue;
     }
-
-    /**
-     * A fold variation that invokes the fold function only on those items that are members of {@code as} and NOT {@code bs}
-     */
-    @Inline
-    public static <T extends Comparable<? super T>> long foldlDifference(T[] as, T[] bs, IndexedFoldToLong<? super T> fold, long param, long initialValue, long terminalValue)
-    {
-        int ai = 0, bi = 0;
-        while (ai < as.length && bi < bs.length)
-        {
-            long abi = findNextIntersection(as, ai, bs, bi);
-            int next;
-            if (abi < 0)
-                break;
-
-            // TODO: perform fast search for next different
-
-            next = (int)(abi >>> 32);
-            bi = (int)abi;
-
-            while (ai < next)
-            {
-                initialValue = fold.apply(ai, as[ai], param, initialValue);
-                if (initialValue == terminalValue)
-                    return initialValue;
-
-                ++ai;
-            }
-
-            ++ai; ++bi;
-        }
-
-        while (ai < as.length)
-        {
-            initialValue = fold.apply(ai, as[ai], param, initialValue);
-            if (initialValue == terminalValue)
-                break;
-            ai++;
-        }
-
-        return initialValue;
-    }
-
 }

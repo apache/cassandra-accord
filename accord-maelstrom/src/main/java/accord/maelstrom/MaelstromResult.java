@@ -122,7 +122,7 @@ public class MaelstromResult implements Result
                         while (in.hasNext())
                         {
                             in.beginArray();
-                            Key key = MaelstromKey.read(in);
+                            Key key = MaelstromKey.readKey(in);
                             Value value = Value.read(in);
                             reads.put(key, value);
                             in.endArray();
@@ -134,7 +134,7 @@ public class MaelstromResult implements Result
                         while (in.hasNext())
                         {
                             in.beginArray();
-                            Key key = MaelstromKey.read(in);
+                            Key key = MaelstromKey.readKey(in);
                             Value append = Value.read(in);
                             update.put(key, append);
                             in.endArray();

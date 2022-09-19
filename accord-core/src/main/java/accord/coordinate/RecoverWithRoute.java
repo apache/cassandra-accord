@@ -5,7 +5,7 @@ import java.util.function.BiConsumer;
 import accord.local.Status;
 import accord.local.Status.Known;
 import accord.primitives.*;
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -20,21 +20,22 @@ import javax.annotation.Nullable;
 import static accord.messages.Commit.Invalidate.commitInvalidate;
 import static accord.primitives.ProgressToken.APPLIED;
 import static accord.primitives.ProgressToken.INVALIDATED;
+import static accord.primitives.Route.castToFullRoute;
 
 public class RecoverWithRoute extends CheckShards
 {
     final @Nullable Ballot promisedBallot; // if non-null, has already been promised by some shard
-    final Route route;
+    final FullRoute<?> route;
     final BiConsumer<Outcome, Throwable> callback;
     final Status witnessedByInvalidation;
 
-    private RecoverWithRoute(Node node, Topologies topologies, @Nullable Ballot promisedBallot, TxnId txnId, Route route, Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
+    private RecoverWithRoute(Node node, Topologies topologies, @Nullable Ballot promisedBallot, TxnId txnId, FullRoute<?> route, Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
         super(node, txnId, route, txnId.epoch, IncludeInfo.All);
         // if witnessedByInvalidation == AcceptedInvalidate then we cannot assume its definition was known, and our comparison with the status is invalid
-        Preconditions.checkState(witnessedByInvalidation != Status.AcceptedInvalidate);
+        Invariants.checkState(witnessedByInvalidation != Status.AcceptedInvalidate);
         // if witnessedByInvalidation == Invalidated we should anyway not be recovering
-        Preconditions.checkState(witnessedByInvalidation != Status.Invalidated);
+        Invariants.checkState(witnessedByInvalidation != Status.Invalidated);
         this.promisedBallot = promisedBallot;
         this.route = route;
         this.callback = callback;
@@ -42,26 +43,31 @@ public class RecoverWithRoute extends CheckShards
         assert topologies.oldestEpoch() == topologies.currentEpoch() && topologies.currentEpoch() == txnId.epoch;
     }
 
-    public static RecoverWithRoute recover(Node node, TxnId txnId, Route route, @Nullable Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
+    public static RecoverWithRoute recover(Node node, TxnId txnId, FullRoute<?> route, @Nullable Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
         return recover(node, node.topology().forEpoch(route, txnId.epoch), txnId, route, witnessedByInvalidation, callback);
     }
 
-    public static RecoverWithRoute recover(Node node, Topologies topologies, TxnId txnId, Route route, @Nullable Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
+    public static RecoverWithRoute recover(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, @Nullable Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
         return recover(node, topologies, null, txnId, route, witnessedByInvalidation, callback);
     }
 
-    public static RecoverWithRoute recover(Node node, @Nullable Ballot promisedBallot, TxnId txnId, Route route, @Nullable Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
+    public static RecoverWithRoute recover(Node node, @Nullable Ballot promisedBallot, TxnId txnId, FullRoute<?> route, @Nullable Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
         return recover(node, node.topology().forEpoch(route, txnId.epoch), promisedBallot, txnId, route, witnessedByInvalidation, callback);
     }
 
-    public static RecoverWithRoute recover(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Route route, Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
+    public static RecoverWithRoute recover(Node node, Topologies topologies, Ballot ballot, TxnId txnId, FullRoute<?> route, Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
         RecoverWithRoute recover = new RecoverWithRoute(node, topologies, ballot, txnId, route, witnessedByInvalidation, callback);
         recover.start();
         return recover;
+    }
+
+    private FullRoute<?> route()
+    {
+        return castToFullRoute(contact);
     }
 
     @Override
@@ -73,8 +79,8 @@ public class RecoverWithRoute extends CheckShards
     @Override
     protected boolean isSufficient(Id from, CheckStatusOk ok)
     {
-        KeyRanges rangesForNode = topologies().forEpoch(txnId.epoch).rangesForNode(from);
-        PartialRoute route = this.route.slice(rangesForNode);
+        Ranges rangesForNode = topologies().forEpoch(txnId.epoch).rangesForNode(from);
+        PartialRoute<?> route = this.route.slice(rangesForNode);
         return isSufficient(route, ok);
     }
 
@@ -84,7 +90,7 @@ public class RecoverWithRoute extends CheckShards
         return isSufficient(route, merged);
     }
 
-    protected boolean isSufficient(AbstractRoute route, CheckStatusOk ok)
+    protected boolean isSufficient(Route<?> route, CheckStatusOk ok)
     {
         CheckStatusOkFull full = (CheckStatusOkFull)ok;
         Known sufficientTo = full.sufficientFor(route);
@@ -94,7 +100,7 @@ public class RecoverWithRoute extends CheckShards
         if (sufficientTo.outcome.isInvalidated())
             return true;
 
-        Preconditions.checkState(full.partialTxn.covers(route));
+        Invariants.checkState(full.partialTxn.covers(route));
         return true;
     }
 
@@ -128,15 +134,15 @@ public class RecoverWithRoute extends CheckShards
 
             case OutcomeApplied:
             case OutcomeKnown:
-                Preconditions.checkState(known.definition.isKnown());
-                Preconditions.checkState(known.executeAt.isDecisionKnown());
+                Invariants.checkState(known.definition.isKnown());
+                Invariants.checkState(known.executeAt.isDecisionKnown());
                 // TODO: we might not be able to reconstitute Txn if we have GC'd on some shards
                 Txn txn = merged.partialTxn.reconstitute(route);
                 if (known.deps.isDecisionKnown())
                 {
-                    Deps deps = merged.committedDeps.reconstitute(route);
+                    Deps deps = merged.committedDeps.reconstitute(route());
                     node.withEpoch(merged.executeAt.epoch, () -> {
-                        Persist.persistAndCommit(node, txnId, route, txn, merged.executeAt, deps, merged.writes, merged.result);
+                        Persist.persistAndCommit(node, txnId, route(), txn, merged.executeAt, deps, merged.writes, merged.result);
                     });
                     callback.accept(APPLIED, null);
                 }

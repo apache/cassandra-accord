@@ -77,12 +77,12 @@ public class MaelstromRequest extends Body implements Request
         }
 
         out.beginArray();
-        Keys keys = txn.keys();
+        Keys keys = (Keys)txn.keys();
         MaelstromRead read = (MaelstromRead) txn.read();
         MaelstromUpdate update = (MaelstromUpdate) txn.update();
         for (int i = 0 ; i < keys.size() ; ++i)
         {
-            MaelstromKey key = (MaelstromKey) keys.get(i);
+            MaelstromKey.Key key = (MaelstromKey.Key) keys.get(i);
             if (read.readKeys.indexOf(key) >= 0)
             {
                 out.beginArray();
@@ -116,7 +116,7 @@ public class MaelstromRequest extends Body implements Request
         {
             in.beginArray();
             String op = in.nextString();
-            Key key = MaelstromKey.read(in);
+            Key key = MaelstromKey.readKey(in);
             switch (op)
             {
                 default: throw new IllegalStateException("Invalid op: " + op);

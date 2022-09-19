@@ -48,12 +48,12 @@ public interface Txn
     class InMemory implements Txn
     {
         private final Kind kind;
-        private final Keys keys;
+        private final Seekables<?, ?> keys;
         private final Read read;
         private final Query query;
         private final Update update;
 
-        public InMemory(@Nonnull Keys keys, @Nonnull Read read, @Nonnull Query query)
+        public InMemory(@Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nonnull Query query)
         {
             this.kind = Kind.READ;
             this.keys = keys;
@@ -71,7 +71,7 @@ public interface Txn
             this.query = query;
         }
 
-        protected InMemory(@Nonnull Kind kind, @Nonnull Keys keys, @Nonnull Read read, @Nullable Query query, @Nullable Update update)
+        protected InMemory(@Nonnull Kind kind, @Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nullable Query query, @Nullable Update update)
         {
             this.kind = kind;
             this.keys = keys;
@@ -81,7 +81,7 @@ public interface Txn
         }
 
         @Override
-        public PartialTxn slice(KeyRanges ranges, boolean includeQuery)
+        public PartialTxn slice(Ranges ranges, boolean includeQuery)
         {
             return new PartialTxn.InMemory(
                     ranges, kind(), keys().slice(ranges),
@@ -97,7 +97,7 @@ public interface Txn
         }
 
         @Override
-        public Keys keys()
+        public Seekables<?, ?> keys()
         {
             return keys;
         }
@@ -146,12 +146,12 @@ public interface Txn
     }
 
     @Nonnull Kind kind();
-    @Nonnull Keys keys();
+    @Nonnull Seekables<?, ?> keys();
     @Nonnull Read read();
     @Nullable Query query(); // may be null only in PartialTxn
     @Nullable Update update();
 
-    @Nonnull PartialTxn slice(KeyRanges ranges, boolean includeQuery);
+    @Nonnull PartialTxn slice(Ranges ranges, boolean includeQuery);
 
     default boolean isWrite()
     {
@@ -174,7 +174,7 @@ public interface Txn
 
     default Future<Data> read(SafeCommandStore safeStore, Command command)
     {
-        KeyRanges ranges = safeStore.ranges().at(command.executeAt().epoch);
+        Ranges ranges = safeStore.ranges().at(command.executeAt().epoch);
         List<Future<Data>> futures = read().keys().foldl(ranges, (index, key, accumulate) -> {
             if (!safeStore.commandStore().hashIntersects(key))
                 return accumulate;

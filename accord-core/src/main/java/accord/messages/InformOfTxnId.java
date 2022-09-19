@@ -2,6 +2,8 @@ package accord.messages;
 
 import accord.api.RoutingKey;
 import accord.local.*;
+import accord.primitives.Keys;
+import accord.primitives.Seekables;
 import accord.primitives.TxnId;
 
 import java.util.Collections;
@@ -10,7 +12,7 @@ import static accord.api.ProgressLog.ProgressShard.Home;
 import static accord.messages.SimpleReply.Nack;
 import static accord.messages.SimpleReply.Ok;
 
-public class InformOfTxnId extends AbstractEpochRequest<Reply> implements EpochRequest, PreLoadContext
+public class InformOfTxnId extends AbstractEpochRequest<Reply> implements Request, PreLoadContext
 {
     public final RoutingKey homeKey;
 

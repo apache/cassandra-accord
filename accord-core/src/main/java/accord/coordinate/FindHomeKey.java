@@ -4,10 +4,9 @@ import java.util.function.BiConsumer;
 
 import accord.api.RoutingKey;
 import accord.local.Node;
-import accord.local.Node.Id;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
-import accord.primitives.RoutingKeys;
+import accord.primitives.Unseekables;
 import accord.primitives.TxnId;
 
 /**
@@ -16,15 +15,15 @@ import accord.primitives.TxnId;
 public class FindHomeKey extends CheckShards
 {
     final BiConsumer<RoutingKey, Throwable> callback;
-    FindHomeKey(Node node, TxnId txnId, RoutingKeys someKeys, BiConsumer<RoutingKey, Throwable> callback)
+    FindHomeKey(Node node, TxnId txnId, Unseekables<?, ?> unseekables, BiConsumer<RoutingKey, Throwable> callback)
     {
-        super(node, txnId, someKeys, txnId.epoch, IncludeInfo.No);
+        super(node, txnId, unseekables, txnId.epoch, IncludeInfo.No);
         this.callback = callback;
     }
 
-    public static FindHomeKey findHomeKey(Node node, TxnId txnId, RoutingKeys someKeys, BiConsumer<RoutingKey, Throwable> callback)
+    public static FindHomeKey findHomeKey(Node node, TxnId txnId, Unseekables<?, ?> unseekables, BiConsumer<RoutingKey, Throwable> callback)
     {
-        FindHomeKey findHomeKey = new FindHomeKey(node, txnId, someKeys, callback);
+        FindHomeKey findHomeKey = new FindHomeKey(node, txnId, unseekables, callback);
         findHomeKey.start();
         return findHomeKey;
     }

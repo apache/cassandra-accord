@@ -26,7 +26,7 @@ import java.util.stream.Collectors;
 import accord.api.Key;
 import accord.api.Data;
 import accord.api.Update;
-import accord.primitives.KeyRanges;
+import accord.primitives.Ranges;
 import accord.primitives.Keys;
 
 public class ListUpdate extends TreeMap<Key, Integer> implements Update
@@ -48,7 +48,7 @@ public class ListUpdate extends TreeMap<Key, Integer> implements Update
     }
 
     @Override
-    public Update slice(KeyRanges ranges)
+    public Update slice(Ranges ranges)
     {
         ListUpdate result = new ListUpdate();
         for (Map.Entry<Key, Integer> e : entrySet())

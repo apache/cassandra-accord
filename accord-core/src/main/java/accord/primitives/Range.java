@@ -19,10 +19,9 @@
 package accord.primitives;
 
 import accord.api.RoutingKey;
+import accord.utils.Invariants;
 import accord.utils.SortedArrays;
 import accord.utils.SortedArrays.Search;
-
-import com.google.common.base.Preconditions;
 
 import java.util.Objects;
 
@@ -32,9 +31,9 @@ import static accord.utils.SortedArrays.Search.FAST;
 /**
  * A range of keys
  */
-public abstract class KeyRange implements Comparable<RoutingKey>
+public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seekable
 {
-    public static class EndInclusive extends KeyRange
+    public static class EndInclusive extends Range
     {
         public EndInclusive(RoutingKey start, RoutingKey end)
         {
@@ -42,7 +41,7 @@ public abstract class KeyRange implements Comparable<RoutingKey>
         }
 
         @Override
-        public int compareTo(RoutingKey key)
+        public int compareTo(RoutableKey key)
         {
             if (key.compareTo(start()) <= 0)
                 return 1;
@@ -64,13 +63,13 @@ public abstract class KeyRange implements Comparable<RoutingKey>
         }
 
         @Override
-        public KeyRange subRange(RoutingKey start, RoutingKey end)
+        public Range subRange(RoutingKey start, RoutingKey end)
         {
             return new EndInclusive(start, end);
         }
     }
 
-    public static class StartInclusive extends KeyRange
+    public static class StartInclusive extends Range
     {
         public StartInclusive(RoutingKey start, RoutingKey end)
         {
@@ -78,7 +77,7 @@ public abstract class KeyRange implements Comparable<RoutingKey>
         }
 
         @Override
-        public int compareTo(RoutingKey key)
+        public int compareTo(RoutableKey key)
         {
             if (key.compareTo(start()) < 0)
                 return 1;
@@ -100,15 +99,15 @@ public abstract class KeyRange implements Comparable<RoutingKey>
         }
 
         @Override
-        public KeyRange subRange(RoutingKey start, RoutingKey end)
+        public Range subRange(RoutingKey start, RoutingKey end)
         {
             return new StartInclusive(start, end);
         }
     }
 
-    public static KeyRange range(RoutingKey start, RoutingKey end, boolean startInclusive, boolean endInclusive)
+    public static Range range(RoutingKey start, RoutingKey end, boolean startInclusive, boolean endInclusive)
     {
-        return new KeyRange(start, end) {
+        return new Range(start, end) {
 
             @Override
             public boolean startInclusive()
@@ -123,13 +122,13 @@ public abstract class KeyRange implements Comparable<RoutingKey>
             }
 
             @Override
-            public KeyRange subRange(RoutingKey start, RoutingKey end)
+            public Range subRange(RoutingKey start, RoutingKey end)
             {
                 throw new UnsupportedOperationException("subRange");
             }
 
             @Override
-            public int compareTo(RoutingKey key)
+            public int compareTo(RoutableKey key)
             {
                 if (startInclusive)
                 {
@@ -156,32 +155,10 @@ public abstract class KeyRange implements Comparable<RoutingKey>
         };
     }
 
-    private static KeyRange tryMergeExclusiveInclusive(KeyRange left, KeyRange right)
-    {
-        if (left.getClass() != right.getClass())
-            return null;
-
-        Preconditions.checkArgument(left instanceof EndInclusive || left instanceof StartInclusive);
-
-        int cmp = left.compareIntersecting(right);
-
-        if (cmp == 0)
-            return left.subRange(left.start.compareTo(right.start) < 0 ? left.start : right.start,
-                                 left.end.compareTo(right.end) > 0 ? left.end : right.end);
-
-        if (cmp > 0 && right.end.equals(left.start))
-            return left.subRange(right.start, left.end);
-
-        if (cmp < 0 && left.end.equals(right.start))
-            return left.subRange(left.start, right.end);
-
-        return null;
-    }
-
     private final RoutingKey start;
     private final RoutingKey end;
 
-    private KeyRange(RoutingKey start, RoutingKey end)
+    private Range(RoutingKey start, RoutingKey end)
     {
         if (start.compareTo(end) >= 0)
             throw new IllegalArgumentException(start + " >= " + end);
@@ -195,22 +172,25 @@ public abstract class KeyRange implements Comparable<RoutingKey>
     {
         return start;
     }
+
     public final RoutingKey end()
     {
         return end;
     }
 
+    public final Kind kind() { return Kind.Range; }
+
     public abstract boolean startInclusive();
     public abstract boolean endInclusive();
 
-    public abstract KeyRange subRange(RoutingKey start, RoutingKey end);
+    public abstract Range subRange(RoutingKey start, RoutingKey end);
 
     @Override
     public boolean equals(Object o)
     {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        KeyRange that = (KeyRange) o;
+        Range that = (Range) o;
         return Objects.equals(start, that.start) && Objects.equals(end, that.end);
     }
 
@@ -227,30 +207,21 @@ public abstract class KeyRange implements Comparable<RoutingKey>
     }
 
     /**
-     * Returns a negative integer, zero, or a positive integer as the provided key is less than, contained by,
-     * or greater than this range.
-     */
-    public int compareKey(RoutingKey key)
-    {
-        return -compareTo(key);
-    }
-
-    /**
      * Returns a negative integer, zero, or a positive integer as the provided key is greater than, contained by,
      * or less than this range.
      */
-    public abstract int compareTo(RoutingKey key);
+    public abstract int compareTo(RoutableKey key);
 
-    public boolean containsKey(RoutingKey key)
+    public boolean containsKey(RoutableKey key)
     {
-        return compareKey(key) == 0;
+        return compareTo(key) == 0;
     }
 
     /**
      * Returns a negative integer, zero, or a positive integer if both points of the provided range are less than, the
      * range intersects this range, or both points are greater than this range
      */
-    public int compareIntersecting(KeyRange that)
+    public int compareIntersecting(Range that)
     {
         if (that.getClass() != this.getClass())
             throw new IllegalArgumentException("Cannot mix KeyRange of different types");
@@ -261,26 +232,21 @@ public abstract class KeyRange implements Comparable<RoutingKey>
         return 0;
     }
 
-    public boolean intersects(KeyRange that)
-    {
-        return compareIntersecting(that) == 0;
-    }
-
-    public boolean fullyContains(KeyRange that)
+    public boolean fullyContains(Range that)
     {
         return that.start.compareTo(this.start) >= 0 && that.end.compareTo(this.end) <= 0;
     }
 
     public boolean intersects(Keys keys)
     {
-        return SortedArrays.binarySearch(keys.keys, 0, keys.size(), this, KeyRange::compareTo, FAST) >= 0;
+        return SortedArrays.binarySearch(keys.keys, 0, keys.size(), this, Range::compareTo, FAST) >= 0;
     }
 
     /**
      * Returns a range covering the overlapping parts of this and the provided range, returns
      * null if the ranges do not overlap
      */
-    public KeyRange intersection(KeyRange that)
+    public Range intersection(Range that)
     {
         if (this.compareIntersecting(that) != 0)
             return null;
@@ -295,7 +261,7 @@ public abstract class KeyRange implements Comparable<RoutingKey>
      */
     public int nextHigherKeyIndex(AbstractKeys<?, ?> keys, int from)
     {
-        int i = SortedArrays.exponentialSearch(keys.keys, from, keys.size(), this, KeyRange::compareTo, Search.FLOOR);
+        int i = SortedArrays.exponentialSearch(keys.keys, from, keys.size(), this, Range::compareTo, Search.FLOOR);
         if (i < 0) i = -1 - i;
         else i += 1;
         return i;
@@ -309,6 +275,30 @@ public abstract class KeyRange implements Comparable<RoutingKey>
      */
     public int nextCeilKeyIndex(Keys keys, int from)
     {
-        return SortedArrays.exponentialSearch(keys.keys, from, keys.size(), this, KeyRange::compareTo, CEIL);
+        return SortedArrays.exponentialSearch(keys.keys, from, keys.size(), this, Range::compareTo, CEIL);
+    }
+
+    @Override
+    public RoutingKey someIntersectingRoutingKey()
+    {
+        return startInclusive() ? start.toUnseekable() : end.toUnseekable();
+    }
+
+    public static Range slice(Range bound, Range toSlice)
+    {
+        Invariants.checkArgument(bound.compareIntersecting(toSlice) == 0);
+        if (bound.fullyContains(toSlice))
+            return toSlice;
+
+        return toSlice.subRange(
+                toSlice.start().compareTo(bound.start()) >= 0 ? toSlice.start() : bound.start(),
+                toSlice.end().compareTo(bound.end()) <= 0 ? toSlice.end() : bound.end()
+        );
+    }
+
+    @Override
+    public Unseekable toUnseekable()
+    {
+        return this;
     }
 }

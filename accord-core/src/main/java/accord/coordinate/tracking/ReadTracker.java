@@ -25,7 +25,7 @@ import java.util.function.BiFunction;
 import accord.topology.Shard;
 import accord.topology.ShardSelection;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 
 import accord.local.Node.Id;
 import accord.topology.Topologies;
@@ -62,7 +62,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
 
         public ShardOutcome<? super ReadTracker> recordSlowResponse(boolean ignore)
         {
-            Preconditions.checkState(!hasFailed());
+            Invariants.checkState(!hasFailed());
             ++slow;
 
             if (shouldRead() && canRead())
@@ -76,7 +76,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
          */
         public ShardOutcome<? super ReadTracker> recordReadSuccess(boolean isSlow)
         {
-            Preconditions.checkState(inflight > 0);
+            Invariants.checkState(inflight > 0);
             boolean hadSucceeded = hasSucceeded();
             --inflight;
             if (isSlow) --slow;
@@ -86,7 +86,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
 
         public ShardOutcome<? super ReadTracker> recordQuorumReadSuccess(boolean isSlow)
         {
-            Preconditions.checkState(inflight > 0);
+            Invariants.checkState(inflight > 0);
             boolean hadSucceeded = hasSucceeded();
             --inflight;
             ++quorum;
@@ -103,7 +103,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
 
         public ShardOutcomes recordReadFailure(boolean isSlow)
         {
-            Preconditions.checkState(inflight > 0);
+            Invariants.checkState(inflight > 0);
             --inflight;
             if (isSlow) --slow;
 
@@ -255,7 +255,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
             toRead = tmp;
         }
 
-        Preconditions.checkState(toRead != null, "We were asked to read more, but found no shards in need of reading more");
+        Invariants.checkState(toRead != null, "We were asked to read more, but found no shards in need of reading more");
 
         // TODO: maybe for each additional candidate do one linear compare run to find better secondary match
         //       OR at least discount candidates that do not contribute additional knowledge beyond those additional

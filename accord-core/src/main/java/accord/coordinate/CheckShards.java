@@ -6,8 +6,7 @@ import accord.messages.CheckStatus;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.CheckStatusReply;
 import accord.messages.CheckStatus.IncludeInfo;
-import accord.primitives.RoutingKeys;
-import accord.primitives.TxnId;
+import accord.primitives.*;
 import accord.topology.Topologies;
 
 /**
@@ -16,7 +15,7 @@ import accord.topology.Topologies;
  */
 public abstract class CheckShards extends ReadCoordinator<CheckStatusReply>
 {
-    final RoutingKeys contactKeys;
+    final Unseekables<?, ?> contact;
 
     /**
      * The epoch until which we want to fetch data from remotely
@@ -27,24 +26,23 @@ public abstract class CheckShards extends ReadCoordinator<CheckStatusReply>
 
     protected CheckStatusOk merged;
 
-    protected CheckShards(Node node, TxnId txnId, RoutingKeys contactKeys, long srcEpoch, IncludeInfo includeInfo)
+    protected CheckShards(Node node, TxnId txnId, Unseekables<?, ?> contact, long srcEpoch, IncludeInfo includeInfo)
     {
-        super(node, topologyFor(node, contactKeys, srcEpoch), txnId);
+        super(node, topologyFor(node, txnId, contact, srcEpoch), txnId);
         this.untilRemoteEpoch = srcEpoch;
-        this.contactKeys = contactKeys;
+        this.contact = contact;
         this.includeInfo = includeInfo;
     }
 
-    private static Topologies topologyFor(Node node, RoutingKeys someKeys, long epoch)
+    private static Topologies topologyFor(Node node, TxnId txnId, Unseekables<?, ?> contact, long epoch)
     {
-        // TODO (now): why were we contacting txnId.epoch...epoch?
-        return node.topology().preciseEpochs(someKeys, epoch, epoch);
+        return node.topology().preciseEpochs(contact, txnId.epoch, epoch);
     }
 
     @Override
     protected void contact(Id id)
     {
-        node.send(id, new CheckStatus(txnId, contactKeys, txnId.epoch, untilRemoteEpoch, includeInfo), this);
+        node.send(id, new CheckStatus(txnId, contact.slice(topologies().computeRangesForNode(id)), txnId.epoch, untilRemoteEpoch, includeInfo), this);
     }
 
     protected boolean isSufficient(Id from, CheckStatusOk ok) { return isSufficient(ok); }

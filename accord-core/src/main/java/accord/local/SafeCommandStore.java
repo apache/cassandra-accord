@@ -22,11 +22,10 @@ import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.ProgressLog;
-import accord.primitives.Keys;
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
+import accord.primitives.*;
 import org.apache.cassandra.utils.concurrent.Future;
 
+import java.util.function.BinaryOperator;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -58,14 +57,19 @@ public interface SafeCommandStore
      */
     void addAndInvokeListener(TxnId txnId, CommandListener listener);
 
-    NodeTimeService time();
+    <T> T mapReduce(Routables<?, ?> keys, Ranges slice, Function<CommandsForKey, T> map, BinaryOperator<T> reduce, T initialValue);
+    void forEach(Routables<?, ?> keys, Ranges slice, Consumer<CommandsForKey> forEach);
+    void forEach(Routable keyOrRange, Ranges slice, Consumer<CommandsForKey> forEach);
+
+
     CommandStore commandStore();
     DataStore dataStore();
     Agent agent();
     ProgressLog progressLog();
+    NodeTimeService time();
     CommandStore.RangesForEpoch ranges();
     long latestEpoch();
-    Timestamp preaccept(TxnId txnId, Keys keys);
+    Timestamp preaccept(TxnId txnId, Seekables<?, ?> keys);
 
     Future<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer);
     <T> Future<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function);

@@ -31,20 +31,12 @@ import accord.impl.mock.MockConfigurationService;
 import accord.impl.mock.MockStore;
 import accord.local.Node.Id;
 import accord.local.Status.Known;
-import accord.primitives.KeyRange;
-import accord.primitives.KeyRanges;
-import accord.primitives.Route;
-import accord.primitives.RoutingKeys;
+import accord.primitives.*;
 import accord.topology.Topology;
-import accord.primitives.Keys;
-import accord.primitives.Timestamp;
-import accord.primitives.Txn;
-import accord.primitives.TxnId;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nullable;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
@@ -60,13 +52,13 @@ public class CommandTest
     private static final Node.Id ID1 = id(1);
     private static final Node.Id ID2 = id(2);
     private static final Node.Id ID3 = id(3);
-    private static final List<Node.Id> IDS = Arrays.asList(ID1, ID2, ID3);
-    private static final KeyRange FULL_RANGE = IntKey.range(0, 100);
-    private static final KeyRanges FULL_RANGES = KeyRanges.single(FULL_RANGE);
+    private static final List<Node.Id> IDS = List.of(ID1, ID2, ID3);
+    private static final Range FULL_RANGE = IntKey.range(0, 100);
+    private static final Ranges FULL_RANGES = Ranges.single(FULL_RANGE);
     private static final Topology TOPOLOGY = TopologyFactory.toTopology(IDS, 3, FULL_RANGE);
-    private static final IntKey KEY = IntKey.key(10);
-    private static final RoutingKey HOME_KEY = KEY.toRoutingKey();
-    private static final Route ROUTE = new Route(KEY, new RoutingKey[] { KEY });
+    private static final IntKey.Raw KEY = IntKey.key(10);
+    private static final RoutingKey HOME_KEY = KEY.toUnseekable();
+    private static final FullKeyRoute ROUTE = RoutingKeys.of(HOME_KEY).toRoute(HOME_KEY);
 
     private static class CommandStoreSupport
     {
@@ -132,12 +124,12 @@ public class CommandTest
         }
 
         @Override
-        public void durable(TxnId txnId, @Nullable RoutingKeys someKeys, ProgressShard shard)
+        public void durable(TxnId txnId, @Nullable Unseekables<?, ?> unseekables, ProgressShard shard)
         {
         }
 
         @Override
-        public void waiting(TxnId blockedBy, Known blockedUntil, RoutingKeys blockedOnKeys)
+        public void waiting(TxnId blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn)
         {
         }
     }

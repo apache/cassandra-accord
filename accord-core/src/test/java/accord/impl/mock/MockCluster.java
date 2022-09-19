@@ -24,7 +24,7 @@ import accord.coordinate.Timeout;
 import accord.impl.*;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.primitives.KeyRanges;
+import accord.primitives.Ranges;
 import accord.utils.EpochFunction;
 import accord.utils.ThreadPoolScheduler;
 import accord.primitives.TxnId;
@@ -32,7 +32,7 @@ import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.topology.Topology;
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -122,7 +122,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         }
         if (topology == null)
         {
-            KeyRanges ranges = TopologyUtils.initialRanges(config.initialNodes, config.maxKey);
+            Ranges ranges = TopologyUtils.initialRanges(config.initialNodes, config.maxKey);
             topology = TopologyUtils.initialTopology(ids, ranges, config.replication);
         }
         for (int i=0; i<config.initialNodes; i++)
@@ -336,9 +336,9 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
 
         public MockCluster build()
         {
-            Preconditions.checkArgument(initialNodes > 0);
-            Preconditions.checkArgument(replication > 0);
-            Preconditions.checkArgument(maxKey >= 0);
+            Invariants.checkArgument(initialNodes > 0);
+            Invariants.checkArgument(replication > 0);
+            Invariants.checkArgument(maxKey >= 0);
             return new MockCluster(this);
         }
     }

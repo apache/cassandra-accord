@@ -18,10 +18,9 @@
 
 package accord.messages;
 
-import accord.api.Key;
-import accord.local.*;
 import accord.api.Result;
 import accord.local.CommandsForKey.TxnIdWithExecuteAt;
+import accord.local.SafeCommandStore;
 import accord.local.Status.Phase;
 import accord.primitives.*;
 import accord.topology.Topologies;
@@ -29,11 +28,14 @@ import accord.topology.Topologies;
 import java.util.List;
 import java.util.stream.Stream;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 
 import accord.local.Node.Id;
+import accord.local.Command;
+import accord.local.Status;
 
 import java.util.Collections;
 
@@ -48,7 +50,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
 {
     public static class SerializationSupport
     {
-        public static BeginRecovery create(TxnId txnId, PartialRoute scope, long waitForEpoch, PartialTxn partialTxn, Ballot ballot, @Nullable Route route)
+        public static BeginRecovery create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, PartialTxn partialTxn, Ballot ballot, @Nullable FullRoute<?> route)
         {
             return new BeginRecovery(txnId, scope, waitForEpoch, partialTxn, ballot, route);
         }
@@ -56,17 +58,17 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
 
     public final PartialTxn partialTxn;
     public final Ballot ballot;
-    public final @Nullable Route route;
+    public final @Nullable FullRoute<?> route;
 
-    public BeginRecovery(Id to, Topologies topologies, TxnId txnId, Txn txn, Route route, Ballot ballot)
+    public BeginRecovery(Id to, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Ballot ballot)
     {
         super(to, topologies, route, txnId);
-        this.partialTxn = txn.slice(scope.covering, scope.contains(scope.homeKey));
+        this.partialTxn = txn.slice(scope.covering(), scope.contains(scope.homeKey()));
         this.ballot = ballot;
-        this.route = scope.contains(scope.homeKey) ? route : null;
+        this.route = scope.contains(scope.homeKey()) ? route : null;
     }
 
-    private BeginRecovery(TxnId txnId, PartialRoute scope, long waitForEpoch, PartialTxn partialTxn, Ballot ballot, @Nullable Route route)
+    private BeginRecovery(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, PartialTxn partialTxn, Ballot ballot, @Nullable FullRoute<?> route)
     {
         super(txnId, scope, waitForEpoch);
         this.partialTxn = partialTxn;
@@ -116,16 +118,17 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         }
         else
         {
-            rejectsFastPath = acceptedStartedAfterWithoutWitnessing(safeStore, txnId, partialTxn.keys()).anyMatch(ignore -> true);
+            Ranges ranges = safeStore.ranges().at(txnId.epoch);
+            rejectsFastPath = acceptedStartedAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys()).anyMatch(ignore -> true);
             if (!rejectsFastPath)
-                rejectsFastPath = committedExecutesAfterAndDidNotWitness(safeStore, txnId, partialTxn.keys()).anyMatch(ignore -> true);
+                rejectsFastPath = committedExecutesAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys()).anyMatch(ignore -> true);
 
             // TODO: introduce some good unit tests for verifying these two functions in a real repair scenario
             // committed txns with an earlier txnid and have our txnid as a dependency
-            earlierCommittedWitness = committedStartedBeforeAndDidWitness(safeStore, txnId, partialTxn.keys());
+            earlierCommittedWitness = committedStartedBeforeAndWitnessed(safeStore, txnId, ranges, partialTxn.keys());
 
             // accepted txns with an earlier txnid that don't have our txnid as a dependency
-            earlierAcceptedNoWitness = acceptedStartedBeforeAndDidNotWitness(safeStore, txnId, partialTxn.keys());
+            earlierAcceptedNoWitness = acceptedStartedBeforeWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
         }
         return new RecoverOk(txnId, command.status(), command.accepted(), command.executeAt(), deps, earlierCommittedWitness, earlierAcceptedNoWitness, rejectsFastPath, command.writes(), command.result());
     }
@@ -176,7 +179,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
     }
 
     @Override
-    public Iterable<Key> keys()
+    public Seekables<?, ?> keys()
     {
         return partialTxn.keys();
     }
@@ -197,18 +200,18 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
                '}';
     }
 
-    public interface RecoverReply extends Reply
+    public static abstract class RecoverReply implements Reply
     {
         @Override
-        default MessageType type()
+        public MessageType type()
         {
             return MessageType.BEGIN_RECOVER_RSP;
         }
 
-        boolean isOk();
+        public abstract boolean isOk();
     }
 
-    public static class RecoverOk implements RecoverReply
+    public static class RecoverOk extends RecoverReply
     {
         public final TxnId txnId; // TODO for debugging?
         public final Status status;
@@ -221,14 +224,13 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         public final Writes writes;
         public final Result result;
 
-        public RecoverOk(TxnId txnId, Status status, Ballot accepted, Timestamp executeAt, PartialDeps deps, Deps earlierCommittedWitness, Deps earlierAcceptedNoWitness, boolean rejectsFastPath, Writes writes, Result result)
+        public RecoverOk(TxnId txnId, Status status, Ballot accepted, Timestamp executeAt, @Nonnull PartialDeps deps, Deps earlierCommittedWitness, Deps earlierAcceptedNoWitness, boolean rejectsFastPath, Writes writes, Result result)
         {
-            Preconditions.checkNotNull(deps);
             this.txnId = txnId;
             this.accepted = accepted;
             this.executeAt = executeAt;
             this.status = status;
-            this.deps = deps;
+            this.deps = Invariants.nonNull(deps);
             this.earlierCommittedWitness = earlierCommittedWitness;
             this.earlierAcceptedNoWitness = earlierAcceptedNoWitness;
             this.rejectsFastPath = rejectsFastPath;
@@ -270,7 +272,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         }
     }
 
-    public static class RecoverNack implements RecoverReply
+    public static class RecoverNack extends RecoverReply
     {
         public final Ballot supersededBy;
         public RecoverNack(Ballot supersededBy)
@@ -293,17 +295,12 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         }
     }
 
-    private static Deps acceptedStartedBeforeAndDidNotWitness(SafeCommandStore commandStore, TxnId txnId, Keys keys)
+    private static Deps acceptedStartedBeforeWithoutWitnessing(SafeCommandStore commandStore, TxnId txnId, Ranges ranges, Seekables<?, ?> keys)
     {
-        try (Deps.OrderedBuilder builder = Deps.orderedBuilder(true);)
+        try (Deps.OrderedBuilder builder = Deps.orderedBuilder(true))
         {
-            keys.forEach(key -> {
-                CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
-                if (forKey == null)
-                    return;
-
+            commandStore.forEach(keys, ranges, forKey -> {
                 // accepted txns with an earlier txnid that do not have our txnid as a dependency
-                builder.nextKey(key);
                 /**
                  * The idea here is to discover those transactions that have been Accepted without witnessing us
                  * and whom may not have adopted us as dependencies as responses to the Accept. Once we have
@@ -315,6 +312,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
                  * Which is to say, we expect the previously proposed dependencies (if any) to be used to evaluate this
                  * condition.
                  */
+                builder.nextKey(forKey.key());
                 forKey.uncommitted().before(txnId, RorWs, WITHOUT, txnId, HAS_BEEN, Accepted).forEach((command) -> {
                     if (command.executeAt.compareTo(txnId) > 0)
                         builder.add(command.txnId);
@@ -324,20 +322,17 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         }
     }
 
-    private static Deps committedStartedBeforeAndDidWitness(SafeCommandStore commandStore, TxnId txnId, Keys keys)
+    private static Deps committedStartedBeforeAndWitnessed(SafeCommandStore commandStore, TxnId txnId, Ranges ranges, Seekables<?, ?> keys)
     {
-        try (Deps.OrderedBuilder builder = Deps.orderedBuilder(true);)
+        try (Deps.OrderedBuilder builder = Deps.orderedBuilder(true))
         {
-            keys.forEach(key -> {
-                CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
-                if (forKey == null)
-                    return;
+            commandStore.forEach(keys, ranges, forKey -> {
                 /**
                  * The idea here is to discover those transactions that have been Committed and DID witness us
                  * so that we can remove these from the set of acceptedStartedBeforeAndDidNotWitness
                  * on other nodes, to minimise the number of transactions we try to wait for on recovery
                  */
-                builder.nextKey(key);
+                builder.nextKey(forKey.key());
                 forKey.committedById().before(txnId, RorWs, WITH, txnId, ANY_STATUS, null)
                         .forEach(builder::add);
             });
@@ -345,47 +340,30 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         }
     }
 
-    private static Stream<TxnIdWithExecuteAt> acceptedStartedAfterWithoutWitnessing(SafeCommandStore commandStore, TxnId startedAfter, Keys keys)
+    private static Stream<? extends TxnIdWithExecuteAt> acceptedStartedAfterWithoutWitnessing(SafeCommandStore commandStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
     {
-        return keys.stream().flatMap(key -> {
-            CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
-            if (forKey == null)
-                return Stream.of();
-
-            /**
-             * The idea here is to discover those transactions that were started after us and have been Accepted
-             * and did not witness us as part of their pre-accept round, as this means that we CANNOT have taken
-             * the fast path. This is central to safe recovery, as if every transaction that executes later has
-             * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
-             * has not witnessed us we can safely invalidate it.
-             */
-
-            // AcceptedInvalidate, if successful, cannot take a dependency on us as it is a no-op; if another
-            // Accepted is successful then its status here is irrelevant, as it will either be informed by other
-            // replicas, or else will have to perform a new round that will adopt us as a dependency
-            return forKey.uncommitted().after(startedAfter, RorWs, WITHOUT, startedAfter, HAS_BEEN, Accepted);
-        });
+        /**
+         * The idea here is to discover those transactions that were started after us and have been Accepted
+         * and did not witness us as part of their pre-accept round, as this means that we CANNOT have taken
+         * the fast path. This is central to safe recovery, as if every transaction that executes later has
+         * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
+         * has not witnessed us we can safely invalidate it.
+         */
+        return commandStore.mapReduce(keys, ranges, forKey ->
+            forKey.uncommitted().after(startedAfter, RorWs, WITHOUT, startedAfter, HAS_BEEN, Accepted)
+        , Stream::concat, Stream.empty());
     }
 
-    private static Stream<TxnId> committedExecutesAfterAndDidNotWitness(SafeCommandStore commandStore, TxnId startedAfter, Keys keys)
+    private static Stream<TxnId> committedExecutesAfterWithoutWitnessing(SafeCommandStore commandStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
     {
-        return keys.stream().flatMap(key -> {
-            CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
-            if (forKey == null)
-                return Stream.of();
-
-            /**
-             * The idea here is to discover those transactions that have been decided to execute after us
-             * and did not witness us as part of their pre-accept or accept round, as this means that we CANNOT have
-             * taken the fast path. This is central to safe recovery, as if every transaction that executes later has
-             * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
-             * has not witnessed us we can safely invalidate it.
-             */
-
-            // We declare HAS_BEEN Committed here only for clarity, as it is currently redundant, but if in future
-            // we revisit the statuses we store it is worth making clear that we require the full decided dependencies
-            // here in order for this evaluation to be valid.
-            return forKey.committedByExecuteAt().after(startedAfter, RorWs, WITHOUT, startedAfter, HAS_BEEN, Committed);
-        });
+        /**
+         * The idea here is to discover those transactions that have been decided to execute after us
+         * and did not witness us as part of their pre-accept or accept round, as this means that we CANNOT have
+         * taken the fast path. This is central to safe recovery, as if every transaction that executes later has
+         * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
+         * has not witnessed us we can safely invalidate it.
+         */
+        return commandStore.mapReduce(keys, ranges, forKey -> forKey.committedByExecuteAt().after(startedAfter, RorWs, WITHOUT, startedAfter, ANY_STATUS, null),
+                Stream::concat, Stream.empty());
     }
 }

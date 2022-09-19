@@ -28,7 +28,7 @@ import java.util.function.BiConsumer;
 import accord.coordinate.tracking.*;
 import accord.primitives.*;
 import accord.messages.Commit;
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 
 import accord.api.Result;
 import accord.topology.Topologies;
@@ -61,11 +61,11 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         //       are given earlier timestamps we can retry without restarting.
         final QuorumTracker tracker;
 
-        AwaitCommit(Node node, TxnId txnId, RoutingKeys someKeys)
+        AwaitCommit(Node node, TxnId txnId, Unseekables<?, ?> unseekables)
         {
-            Topology topology = node.topology().globalForEpoch(txnId.epoch).forKeys(someKeys);
+            Topology topology = node.topology().globalForEpoch(txnId.epoch).forSelection(unseekables);
             this.tracker = new QuorumTracker(new Topologies.Single(node.topology().sorter(), topology));
-            node.send(topology.nodes(), to -> new WaitOnCommit(to, topology, txnId, someKeys), this);
+            node.send(topology.nodes(), to -> new WaitOnCommit(to, topology, txnId, unseekables), this);
         }
 
         @Override
@@ -83,7 +83,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             if (isDone()) return;
 
             if (tracker.recordFailure(from) == Failed)
-                tryFailure(new Timeout(txnId, route.homeKey));
+                tryFailure(new Timeout(txnId, route.homeKey()));
         }
 
         @Override
@@ -100,7 +100,8 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         for (int i = 0 ; i < waitOn.txnIdCount() ; ++i)
         {
             TxnId txnId = waitOn.txnId(i);
-            new AwaitCommit(node, txnId, waitOn.someRoutingKeys(txnId)).addCallback((success, failure) -> {
+            // TODO (now): this should perhaps use RouteFragment as we might need to handle txns that are range-only
+            new AwaitCommit(node, txnId, waitOn.someRoutables(txnId)).addCallback((success, failure) -> {
                 if (future.isDone())
                     return;
                 if (success != null && remaining.decrementAndGet() == 0)
@@ -116,7 +117,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
     private final Ballot ballot;
     private final TxnId txnId;
     private final Txn txn;
-    private final Route route;
+    private final FullRoute<?> route;
     private final BiConsumer<Outcome, Throwable> callback;
     private boolean isDone;
 
@@ -124,7 +125,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
     private final RecoveryTracker tracker;
     private boolean isBallotPromised;
 
-    private Recover(Node node, Ballot ballot, TxnId txnId, Txn txn, Route route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
+    private Recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
     {
         this.node = node;
         this.ballot = ballot;
@@ -145,23 +146,23 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         node.agent().onRecover(node, result, failure);
     }
 
-    public static Recover recover(Node node, TxnId txnId, Txn txn, Route route, BiConsumer<Outcome, Throwable> callback)
+    public static Recover recover(Node node, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback)
     {
         return recover(node, txnId, txn, route, callback, node.topology().forEpoch(route, txnId.epoch));
     }
 
-    public static Recover recover(Node node, TxnId txnId, Txn txn, Route route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
+    public static Recover recover(Node node, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
     {
         Ballot ballot = new Ballot(node.uniqueNow());
         return recover(node, ballot, txnId, txn, route, callback, topologies);
     }
 
-    public static Recover recover(Node node, Ballot ballot, TxnId txnId, Txn txn, Route route, BiConsumer<Outcome, Throwable> callback)
+    public static Recover recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback)
     {
         return recover(node, ballot, txnId, txn, route, callback, node.topology().forEpoch(route, txnId.epoch));
     }
 
-    public static Recover recover(Node node, Ballot ballot, TxnId txnId, Txn txn, Route route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
+    public static Recover recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
     {
         Recover recover = new Recover(node, ballot, txnId, txn, route, callback, topologies);
         recover.start(topologies.nodes());
@@ -181,7 +182,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
         if (!reply.isOk())
         {
-            accept(null, new Preempted(txnId, route.homeKey));
+            accept(null, new Preempted(txnId, route.homeKey()));
             return;
         }
 
@@ -194,7 +195,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     private void recover()
     {
-        Preconditions.checkState(!isBallotPromised);
+        Invariants.checkState(!isBallotPromised);
         isBallotPromised = true;
 
         // first look for the most recent Accept; if present, go straight to proposing it again
@@ -285,7 +286,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     private void invalidate()
     {
-        proposeInvalidate(node, ballot, txnId, route.homeKey, (success, fail) -> {
+        proposeInvalidate(node, ballot, txnId, route.homeKey(), (success, fail) -> {
             if (fail != null) accept(null, fail);
             else commitInvalidate();
         });
@@ -306,8 +307,8 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     private Deps mergeDeps()
     {
-        KeyRanges ranges = recoverOks.stream().map(r -> r.deps.covering).reduce(KeyRanges::union).orElseThrow(NoSuchElementException::new);
-        Preconditions.checkState(ranges.containsAll(txn.keys()));
+        Ranges ranges = recoverOks.stream().map(r -> r.deps.covering).reduce(Ranges::union).orElseThrow(NoSuchElementException::new);
+        Invariants.checkState(ranges.containsAll(txn.keys()));
         return Deps.merge(recoverOks, r -> r.deps);
     }
 
@@ -323,7 +324,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             return;
 
         if (tracker.recordFailure(from) == Failed)
-            accept(null, new Timeout(txnId, route.homeKey));
+            accept(null, new Timeout(txnId, route.homeKey()));
     }
 
     @Override

@@ -24,7 +24,7 @@ import accord.api.TestableConfigurationService;
 import accord.local.Node;
 import accord.messages.*;
 import accord.topology.Topology;
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.slf4j.Logger;
@@ -82,7 +82,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         EpochHistory receive(Topology topology)
         {
             long epoch = topology.epoch();
-            Preconditions.checkState(epoch == 0 || lastReceived == epoch - 1);
+            Invariants.checkState(epoch == 0 || lastReceived == epoch - 1);
             lastReceived = epoch;
             EpochState state = get(epoch);
             state.topology = topology;
@@ -102,7 +102,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
 
         EpochHistory acknowledge(long epoch)
         {
-            Preconditions.checkState(epoch == 0 || lastAcknowledged == epoch - 1);
+            Invariants.checkState(epoch == 0 || lastAcknowledged == epoch - 1);
             lastAcknowledged = epoch;
             get(epoch).acknowledged.setSuccess(null);
             return this;
@@ -115,10 +115,10 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
 
         EpochHistory syncComplete(long epoch)
         {
-            Preconditions.checkState(epoch == 0 || lastSyncd == epoch - 1);
+            Invariants.checkState(epoch == 0 || lastSyncd == epoch - 1);
             EpochState state = get(epoch);
-            Preconditions.checkState(state.received.isDone());
-            Preconditions.checkState(state.acknowledged.isDone());
+            Invariants.checkState(state.received.isDone());
+            Invariants.checkState(state.acknowledged.isDone());
             lastSyncd = epoch;
             get(epoch).synced.setSuccess(null);
             return this;

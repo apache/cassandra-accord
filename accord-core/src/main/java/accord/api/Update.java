@@ -18,7 +18,7 @@
 
 package accord.api;
 
-import accord.primitives.KeyRanges;
+import accord.primitives.Ranges;
 import accord.primitives.Keys;
 
 import javax.annotation.Nullable;
@@ -33,6 +33,6 @@ public interface Update
     Keys keys();
     // null is provided only if nothing was read
     Write apply(@Nullable Data data);
-    Update slice(KeyRanges ranges);
+    Update slice(Ranges ranges);
     Update merge(Update other);
 }

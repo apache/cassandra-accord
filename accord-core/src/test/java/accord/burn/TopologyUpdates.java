@@ -26,16 +26,11 @@ import accord.local.Command;
 import accord.local.Node;
 import accord.local.Status;
 import accord.messages.CheckStatus.CheckStatusOk;
-import accord.primitives.AbstractRoute;
-import accord.primitives.Timestamp;
-import accord.primitives.Txn;
-import accord.primitives.TxnId;
-import accord.primitives.KeyRange;
-import accord.primitives.KeyRanges;
+import accord.primitives.*;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.utils.MessageTask;
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 import com.google.common.collect.Sets;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
@@ -62,15 +57,15 @@ public class TopologyUpdates
     {
         final TxnId txnId;
         final Status status;
-        final AbstractRoute route;
+        final Route<?> route;
         final Timestamp executeAt;
         final long fromEpoch;
         final long toEpoch;
 
         public CommandSync(TxnId txnId, CheckStatusOk status, long srcEpoch, long trgEpoch)
         {
-            Preconditions.checkArgument(status.saveStatus.hasBeen(Status.PreAccepted));
-            Preconditions.checkState(status.route != null);
+            Invariants.checkArgument(status.saveStatus.hasBeen(Status.PreAccepted));
+            Invariants.checkState(status.route != null);
             this.txnId = txnId;
             this.status = status.saveStatus.status;
             this.route = status.route;
@@ -103,7 +98,7 @@ public class TopologyUpdates
                 if (fail != null)
                     process(node, onDone);
                 else if (outcome == Nothing)
-                    invalidate(node, txnId, route.with(route.homeKey), (i1, i2) -> process(node, onDone));
+                    invalidate(node, txnId, route.with(route.homeKey()), (i1, i2) -> process(node, onDone));
                 else
                     onDone.accept(true);
             };
@@ -169,11 +164,11 @@ public class TopologyUpdates
     {
         Set<Node.Id> result = new HashSet<>();
         for (Topology topology : topologies)
-            result.addAll(topology.forKeys(txn.keys()).nodes());
+            result.addAll(topology.forSelection(txn.keys().toUnseekables()).nodes());
         return result;
     }
 
-    private static Stream<MessageTask> syncEpochCommands(Node node, long srcEpoch, KeyRanges ranges, Function<CommandSync, Collection<Node.Id>> recipients, long trgEpoch, boolean committedOnly)
+    private static Stream<MessageTask> syncEpochCommands(Node node, long srcEpoch, Ranges ranges, Function<CommandSync, Collection<Node.Id>> recipients, long trgEpoch, boolean committedOnly)
     {
         Map<TxnId, CheckStatusOk> syncMessages = new ConcurrentHashMap<>();
         Consumer<Command> commandConsumer = command -> syncMessages.merge(command.txnId(), new CheckStatusOk(node, command), CheckStatusOk::merge);
@@ -200,7 +195,7 @@ public class TopologyUpdates
         Topology localTopology = syncTopology.forNode(node.id());
         Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().withUnsyncedEpochs(cmd.route, syncEpoch + 1).nodes();
 
-        KeyRanges ranges = localTopology.ranges();
+        Ranges ranges = localTopology.ranges();
         Stream<MessageTask> messageStream = Stream.empty();
         for (long epoch=1; epoch<=syncEpoch; epoch++)
         {
@@ -230,7 +225,7 @@ public class TopologyUpdates
                 if (syncShard.range.equals(nextShard.range) && syncShard.nodeSet.equals(nextShard.nodeSet))
                     continue;
 
-                KeyRange intersection = syncShard.range.intersection(nextShard.range);
+                Range intersection = syncShard.range.intersection(nextShard.range);
 
                 if (intersection == null)
                     continue;
@@ -240,7 +235,7 @@ public class TopologyUpdates
                 if (newNodes.isEmpty())
                     continue;
 
-                KeyRanges ranges = KeyRanges.single(intersection);
+                Ranges ranges = Ranges.single(intersection);
                 for (long epoch=1; epoch<srcEpoch; epoch++)
                     messageStream = Stream.concat(messageStream, syncEpochCommands(node,
                                                                                    epoch,

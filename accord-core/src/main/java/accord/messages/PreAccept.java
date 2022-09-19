@@ -21,14 +21,12 @@ package accord.messages;
 import java.util.Collections;
 import java.util.Objects;
 
-import accord.api.Key;
 import accord.local.*;
 import accord.local.CommandsForKey.CommandTimeseries.TestKind;
 
 import accord.local.Node.Id;
 import accord.messages.TxnRequest.WithUnsynced;
 import accord.topology.Topologies;
-import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 import javax.annotation.Nullable;
 
@@ -46,25 +44,25 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
 {
     public static class SerializerSupport
     {
-        public static PreAccept create(TxnId txnId, PartialRoute scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, long maxEpoch, PartialTxn partialTxn, @Nullable Route fullRoute)
+        public static PreAccept create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, long maxEpoch, PartialTxn partialTxn, @Nullable FullRoute<?> fullRoute)
         {
             return new PreAccept(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey, maxEpoch, partialTxn, fullRoute);
         }
     }
 
     public final PartialTxn partialTxn;
-    public final @Nullable Route route; // ordinarily only set on home shard
+    public final @Nullable FullRoute<?> route; // ordinarily only set on home shard
     public final long maxEpoch;
 
-    public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn partialTxn, Route route)
+    public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route)
     {
         super(to, topologies, txnId, route);
-        this.partialTxn = partialTxn.slice(scope.covering, route.contains(route.homeKey));
+        this.partialTxn = txn.slice(scope.covering(), route.contains(route.homeKey()));
         this.maxEpoch = topologies.currentEpoch();
-        this.route = scope.contains(scope.homeKey) ? route : null;
+        this.route = scope.contains(scope.homeKey()) ? route : null;
     }
 
-    private PreAccept(TxnId txnId, PartialRoute scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, long maxEpoch, PartialTxn partialTxn, @Nullable Route fullRoute)
+    private PreAccept(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, long maxEpoch, PartialTxn partialTxn, @Nullable FullRoute<?> fullRoute)
     {
         super(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey);
         this.partialTxn = partialTxn;
@@ -79,7 +77,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     }
 
     @Override
-    public Iterable<Key> keys()
+    public Seekables<?, ?> keys()
     {
         return partialTxn.keys();
     }
@@ -135,18 +133,18 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         return MessageType.PREACCEPT_REQ;
     }
 
-    public interface PreAcceptReply extends Reply
+    public static abstract class PreAcceptReply implements Reply
     {
         @Override
-        default MessageType type()
+        public MessageType type()
         {
             return MessageType.PREACCEPT_RSP;
         }
 
-        boolean isOk();
+        public abstract boolean isOk();
     }
 
-    public static class PreAcceptOk implements PreAcceptReply
+    public static class PreAcceptOk extends PreAcceptReply
     {
         public final TxnId txnId;
         public final Timestamp witnessedAt;
@@ -191,7 +189,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         }
     }
 
-    public static class PreAcceptNack implements PreAcceptReply
+    public static class PreAcceptNack extends PreAcceptReply
     {
         public static final PreAcceptNack INSTANCE = new PreAcceptNack();
 
@@ -210,7 +208,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         }
     }
 
-    static PartialDeps calculatePartialDeps(SafeCommandStore commandStore, TxnId txnId, Keys keys, Txn.Kind kindOfTxn, Timestamp executeAt, KeyRanges ranges)
+    static PartialDeps calculatePartialDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Txn.Kind kindOfTxn, Timestamp executeAt, Ranges ranges)
     {
         try (PartialDeps.OrderedBuilder builder = PartialDeps.orderedBuilder(ranges, false))
         {
@@ -218,15 +216,11 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         }
     }
 
-    private static <T extends Deps> T calculateDeps(SafeCommandStore commandStore, TxnId txnId, Keys keys, Txn.Kind kindOfTxn, Timestamp executeAt, KeyRanges ranges, Deps.AbstractOrderedBuilder<T> builder)
+    private static <T extends Deps> T calculateDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Txn.Kind kindOfTxn, Timestamp executeAt, Ranges ranges, Deps.AbstractOrderedBuilder<T> builder)
     {
-        keys.foldl(ranges, (i, key, ignore) -> {
-            CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
-            if (forKey == null)
-                return null;
-
-            builder.nextKey(key);
-            TestKind testKind = kindOfTxn.isWrite() ? RorWs : Ws;
+        TestKind testKind = kindOfTxn.isWrite() ? RorWs : Ws;
+        commandStore.forEach(keys, ranges, forKey -> {
+            builder.nextKey(forKey.key());
             forKey.uncommitted().before(executeAt, testKind, ANY_DEPS, null, ANY_STATUS, null)
                     .forEach(info -> {
                         if (!info.txnId.equals(txnId)) builder.add(info.txnId);
@@ -235,8 +229,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
                     .forEach(id -> {
                         if (!id.equals(txnId)) builder.add(id);
                     });
-            return null;
-        }, null);
+        });
 
         return builder.build();
     }

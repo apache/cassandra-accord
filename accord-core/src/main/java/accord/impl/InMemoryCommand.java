@@ -37,7 +37,7 @@ public class InMemoryCommand extends Command
     public final CommandStore commandStore;
     private final TxnId txnId;
 
-    private AbstractRoute route;
+    private Route<?> route;
     private RoutingKey homeKey, progressKey;
     private PartialTxn partialTxn;
     private Kind kind;
@@ -135,13 +135,13 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public AbstractRoute route()
+    public Route<?> route()
     {
         return route;
     }
 
     @Override
-    protected void setRoute(AbstractRoute route)
+    protected void setRoute(Route<?> route)
     {
         this.route = route;
     }

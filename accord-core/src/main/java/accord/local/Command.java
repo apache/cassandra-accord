@@ -24,7 +24,7 @@ import accord.local.Status.Known;
 import accord.primitives.*;
 import accord.primitives.Txn.Kind;
 import accord.primitives.Writes;
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,21 +37,24 @@ import java.util.function.Function;
 
 import static accord.local.Status.*;
 import static accord.local.Status.Known.*;
+import static accord.local.Status.Known.Done;
+import static accord.local.Status.Known.ExecuteAtOnly;
+import static accord.primitives.Route.isFullRoute;
 import static accord.utils.Utils.listOf;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import accord.api.ProgressLog.ProgressShard;
-import accord.primitives.AbstractRoute;
-import accord.primitives.KeyRanges;
+import accord.primitives.Ranges;
 import accord.primitives.Ballot;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Route;
-import accord.primitives.RoutingKeys;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.api.Result;
+import accord.api.RoutingKey;
 
 import static accord.api.ProgressLog.ProgressShard.Home;
 import static accord.api.ProgressLog.ProgressShard.Local;
@@ -121,8 +124,8 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
      * TODO: maybe set this for all local shards, but slice to only those participating keys
      * (would probably need to remove hashIntersects)
      */
-    public abstract AbstractRoute route();
-    protected abstract void setRoute(AbstractRoute route);
+    public abstract @Nullable Route<?> route();
+    protected abstract void setRoute(Route<?> route);
 
     public abstract PartialTxn partialTxn();
     protected abstract void setPartialTxn(PartialTxn txn);
@@ -188,7 +191,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     }
 
     @Override
-    public Iterable<Key> keys()
+    public Seekables<?, ?> keys()
     {
         // TODO (now): when do we need this, and will it always be sufficient?
         return partialTxn().keys();
@@ -207,17 +210,17 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         Success, Redundant, RejectedBallot
     }
 
-    public AcceptOutcome preaccept(SafeCommandStore safeStore, PartialTxn partialTxn, AbstractRoute route, @Nullable RoutingKey progressKey)
+    public AcceptOutcome preaccept(SafeCommandStore safeStore, PartialTxn partialTxn, Route<?> route, @Nullable RoutingKey progressKey)
     {
         return preacceptOrRecover(safeStore, partialTxn, route, progressKey, Ballot.ZERO);
     }
 
-    public AcceptOutcome recover(SafeCommandStore safeStore, PartialTxn partialTxn, AbstractRoute route, @Nullable RoutingKey progressKey, Ballot ballot)
+    public AcceptOutcome recover(SafeCommandStore safeStore, PartialTxn partialTxn, Route<?> route, @Nullable RoutingKey progressKey, Ballot ballot)
     {
         return preacceptOrRecover(safeStore, partialTxn, route, progressKey, ballot);
     }
 
-    private AcceptOutcome preacceptOrRecover(SafeCommandStore safeStore, PartialTxn partialTxn, AbstractRoute route, @Nullable RoutingKey progressKey, Ballot ballot)
+    private AcceptOutcome preacceptOrRecover(SafeCommandStore safeStore, PartialTxn partialTxn, Route<?> route, @Nullable RoutingKey progressKey, Ballot ballot)
     {
         int compareBallots = promised().compareTo(ballot);
         if (compareBallots > 0)
@@ -233,16 +236,16 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
         if (known().definition.isKnown())
         {
-            Preconditions.checkState(status() == Invalidated || executeAt() != null);
+            Invariants.checkState(status() == Invalidated || executeAt() != null);
             logger.trace("{}: skipping preaccept - already known ({})", txnId(), status());
             // in case of Ballot.ZERO, we must either have a competing recovery coordinator or have late delivery of the
             // preaccept; in the former case we should abandon coordination, and in the latter we have already completed
             return ballot.equals(Ballot.ZERO) ? AcceptOutcome.Redundant : AcceptOutcome.Success;
         }
 
-        KeyRanges coordinateRanges = coordinateRanges(safeStore);
+        Ranges coordinateRanges = coordinateRanges(safeStore);
         ProgressShard shard = progressShard(safeStore, route, progressKey, coordinateRanges);
-        if (!validate(KeyRanges.EMPTY, coordinateRanges, shard, route, Set, partialTxn, Set, null, Ignore))
+        if (!validate(Ranges.EMPTY, coordinateRanges, shard, route, Set, partialTxn, Set, null, Ignore))
             throw new IllegalStateException();
 
         if (executeAt() == null)
@@ -265,7 +268,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             // TODO: in the case that we are pre-committed but had not been preaccepted/accepted, should we inform progressLog?
             setSaveStatus(SaveStatus.enrich(saveStatus(), DefinitionOnly));
         }
-        set(safeStore, KeyRanges.EMPTY, coordinateRanges, shard, route, partialTxn, Set, null, Ignore);
+        set(safeStore, Ranges.EMPTY, coordinateRanges, shard, route, partialTxn, Set, null, Ignore);
 
         notifyListeners(safeStore);
         return AcceptOutcome.Success;
@@ -282,7 +285,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         return true;
     }
 
-    public AcceptOutcome accept(SafeCommandStore safeStore, Ballot ballot, Kind kind, PartialRoute route, Keys keys, @Nullable RoutingKey progressKey, Timestamp executeAt, PartialDeps partialDeps)
+    public AcceptOutcome accept(SafeCommandStore safeStore, Ballot ballot, Kind kind, PartialRoute<?> route, Seekables<?, ?> keys, @Nullable RoutingKey progressKey, Timestamp executeAt, PartialDeps partialDeps)
     {
         if (this.promised().compareTo(ballot) > 0)
         {
@@ -300,29 +303,27 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             throw new IllegalArgumentException("Transaction kind is different to the definition we have already received");
 
         TxnId txnId = txnId();
-        KeyRanges coordinateRanges = coordinateRanges(safeStore);
-        KeyRanges executeRanges = txnId.epoch == executeAt.epoch ? coordinateRanges : safeStore.ranges().at(executeAt.epoch);
-        KeyRanges acceptRanges = txnId.epoch == executeAt.epoch ? coordinateRanges : safeStore.ranges().between(txnId.epoch, executeAt.epoch);
+        Ranges coordinateRanges = coordinateRanges(safeStore);
+        Ranges acceptRanges = txnId.epoch == executeAt.epoch ? coordinateRanges : safeStore.ranges().between(txnId.epoch, executeAt.epoch);
         ProgressShard shard = progressShard(safeStore, route, progressKey, coordinateRanges);
 
-        if (!validate(coordinateRanges, executeRanges, shard, route, Ignore, null, Ignore, partialDeps, Set))
+        if (!validate(coordinateRanges, Ranges.EMPTY, shard, route, Ignore, null, Ignore, partialDeps, Set))
+        {
+            validate(coordinateRanges, Ranges.EMPTY, shard, route, Ignore, null, Ignore, partialDeps, Set);
             throw new AssertionError("Invalid response from validate function");
+        }
 
         setExecuteAt(executeAt);
         setPromised(ballot);
         setAccepted(ballot);
         setKind(kind);
-        set(safeStore, coordinateRanges, executeRanges, shard, route, null, Ignore, partialDeps, Set);
+        set(safeStore, coordinateRanges, Ranges.EMPTY, shard, route, null, Ignore, partialDeps, Set);
         switch (status())
         {
             // if we haven't already registered, do so, to correctly maintain max per-key timestamp
             case NotWitnessed:
             case AcceptedInvalidate:
-                keys.foldl(acceptRanges, (i, k, p, v) -> {
-                    if (safeStore.commandStore().hashIntersects(k))
-                        safeStore.commandsForKey(k).register(this);
-                    return 0L;
-                }, 0L, 0L, 1L);
+                safeStore.forEach(keys, acceptRanges, forKey -> forKey.register(this));
         }
         setStatus(Accepted);
 
@@ -359,7 +360,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     public enum CommitOutcome { Success, Redundant, Insufficient }
 
     // relies on mutual exclusion for each key
-    public CommitOutcome commit(SafeCommandStore safeStore, AbstractRoute route, @Nullable RoutingKey progressKey, @Nullable PartialTxn partialTxn, Timestamp executeAt, PartialDeps partialDeps)
+    public CommitOutcome commit(SafeCommandStore safeStore, Route<?> route, @Nullable RoutingKey progressKey, @Nullable PartialTxn partialTxn, Timestamp executeAt, PartialDeps partialDeps)
     {
         if (hasBeen(PreCommitted))
         {
@@ -371,9 +372,9 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                 return CommitOutcome.Redundant;
         }
 
-        KeyRanges coordinateRanges = coordinateRanges(safeStore);
+        Ranges coordinateRanges = coordinateRanges(safeStore);
         // TODO (now): consider ranges between coordinateRanges and executeRanges? Perhaps don't need them
-        KeyRanges executeRanges = executeRanges(safeStore, executeAt);
+        Ranges executeRanges = executeRanges(safeStore, executeAt);
         ProgressShard shard = progressShard(safeStore, route, progressKey, coordinateRanges);
 
         if (!validate(coordinateRanges, executeRanges, shard, route, Check, partialTxn, Add, partialDeps, Set))
@@ -413,7 +414,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
     protected void populateWaitingOn(SafeCommandStore safeStore)
     {
-        KeyRanges ranges = safeStore.ranges().since(executeAt().epoch);
+        Ranges ranges = safeStore.ranges().since(executeAt().epoch);
         if (ranges != null) {
             partialDeps().forEachOn(ranges, safeStore.commandStore()::hashIntersects, txnId -> {
                 Command command = safeStore.ifLoaded(txnId);
@@ -478,7 +479,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
     public enum ApplyOutcome { Success, Redundant, Insufficient }
 
-    public ApplyOutcome apply(SafeCommandStore safeStore, long untilEpoch, AbstractRoute route, Timestamp executeAt, @Nullable PartialDeps partialDeps, Writes writes, Result result)
+    public ApplyOutcome apply(SafeCommandStore safeStore, long untilEpoch, Route<?> route, Timestamp executeAt, @Nullable PartialDeps partialDeps, Writes writes, Result result)
     {
         if (hasBeen(PreApplied) && executeAt.equals(this.executeAt()))
         {
@@ -490,12 +491,12 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             safeStore.agent().onInconsistentTimestamp(this, this.executeAt(), executeAt);
         }
 
-        KeyRanges coordinateRanges = coordinateRanges(safeStore);
-        KeyRanges executeRanges = executeRanges(safeStore, executeAt);
+        Ranges coordinateRanges = coordinateRanges(safeStore);
+        Ranges executeRanges = executeRanges(safeStore, executeAt);
         if (untilEpoch < safeStore.latestEpoch())
         {
-            KeyRanges expectedRanges = safeStore.ranges().between(executeAt.epoch, untilEpoch);
-            Preconditions.checkState(expectedRanges.contains(executeRanges));
+            Ranges expectedRanges = safeStore.ranges().between(executeAt.epoch, untilEpoch);
+            Invariants.checkState(expectedRanges.containsAll(executeRanges));
         }
         ProgressShard shard = progressShard(safeStore, route, coordinateRanges);
 
@@ -521,7 +522,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     @Override
     public PreLoadContext listenerPreLoadContext(TxnId caller)
     {
-        return PreLoadContext.contextFor(listOf(txnId(), caller), Collections.emptyList());
+        return PreLoadContext.contextFor(listOf(txnId(), caller));
     }
 
     @Override
@@ -582,6 +583,8 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     }
 
     // TODO: maybe split into maybeExecute and maybeApply?
+    // TODO (performance): If we are a no-op on this shard, just immediately apply.
+    //      NOTE: if we ever do transitive dependency elision this could be dangerous
     private boolean maybeExecute(SafeCommandStore safeStore, ProgressShard shard, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
     {
         if (logger.isTraceEnabled())
@@ -636,7 +639,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
      */
     private boolean updatePredecessor(Command dependency)
     {
-        Preconditions.checkState(dependency.hasBeen(PreCommitted));
+        Invariants.checkState(dependency.hasBeen(PreCommitted));
         if (dependency.hasBeen(Invalidated))
         {
             logger.trace("{}: {} is invalidated. Stop listening and removing from waiting on commit set.", txnId(), dependency.txnId());
@@ -674,7 +677,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
     private void insertPredecessor(Command dependency)
     {
-        Preconditions.checkState(dependency.hasBeen(PreCommitted));
+        Invariants.checkState(dependency.hasBeen(PreCommitted));
         if (dependency.hasBeen(Invalidated))
         {
             logger.trace("{}: {} is invalidated. Do not insert.", txnId(), dependency.txnId());
@@ -744,7 +747,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                 else if (cur.has(until))
                 {
                     // we're done; have already applied
-                    Preconditions.checkState(depth == 0);
+                    Invariants.checkState(depth == 0);
                     break;
                 }
 
@@ -768,9 +771,9 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                         continue;
                     }
 
-                    RoutingKeys someKeys = cur.maxRoutingKeys();
-                    if (someKeys == null && prev != null) someKeys = prev.partialDeps().someRoutingKeys(cur.txnId());
-                    Preconditions.checkState(someKeys != null);
+                    Unseekables<?, ?> someKeys = cur.maxUnseekables();
+                    if (someKeys == null && prev != null) someKeys = prev.partialDeps().someRoutables(cur.txnId());
+                    Invariants.checkState(someKeys != null);
                     logger.trace("{} blocked on {} until {}", txnIds[0], cur.txnId(), until);
                     safeStore.progressLog().waiting(cur.txnId(), until, someKeys);
                     return;
@@ -802,9 +805,9 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         }
 
         @Override
-        public Iterable<Key> keys()
+        public Seekables<?, ?> keys()
         {
-            return Collections.emptyList();
+            return Keys.EMPTY;
         }
     }
 
@@ -841,9 +844,9 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         }
     }
 
-    private ProgressShard progressShard(SafeCommandStore safeStore, AbstractRoute route, @Nullable RoutingKey progressKey, KeyRanges coordinateRanges)
+    private ProgressShard progressShard(SafeCommandStore safeStore, Route<?> route, @Nullable RoutingKey progressKey, Ranges coordinateRanges)
     {
-        updateHomeKey(safeStore, route.homeKey);
+        updateHomeKey(safeStore, route.homeKey());
 
         if (progressKey == null || progressKey == NO_PROGRESS_KEY)
         {
@@ -880,7 +883,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         else if (!current.equals(progressKey)) throw new AssertionError();
     }
 
-    private ProgressShard progressShard(SafeCommandStore safeStore, AbstractRoute route, KeyRanges coordinateRanges)
+    private ProgressShard progressShard(SafeCommandStore safeStore, Route<?> route, Ranges coordinateRanges)
     {
         if (progressKey() == null)
             return Unsure;
@@ -897,7 +900,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         if (progressKey == NO_PROGRESS_KEY)
             return No;
 
-        KeyRanges coordinateRanges = safeStore.ranges().at(txnId().epoch);
+        Ranges coordinateRanges = safeStore.ranges().at(txnId().epoch);
         if (!coordinateRanges.contains(progressKey))
             return No;
 
@@ -907,12 +910,12 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         return progressKey.equals(homeKey()) ? Home : Local;
     }
 
-    private KeyRanges coordinateRanges(SafeCommandStore safeStore)
+    private Ranges coordinateRanges(SafeCommandStore safeStore)
     {
         return safeStore.ranges().at(txnId().epoch);
     }
 
-    private KeyRanges executeRanges(SafeCommandStore safeStore, Timestamp executeAt)
+    private Ranges executeRanges(SafeCommandStore safeStore, Timestamp executeAt)
     {
         return safeStore.ranges().since(executeAt.epoch);
     }
@@ -923,8 +926,8 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
      * Validate we have sufficient information for the route, partialTxn and partialDeps fields, and if so update them;
      * otherwise return false (or throw an exception if an illegal state is encountered)
      */
-    private boolean validate(KeyRanges existingRanges, KeyRanges additionalRanges, ProgressShard shard,
-                             AbstractRoute route, EnsureAction ensureRoute,
+    private boolean validate(Ranges existingRanges, Ranges additionalRanges, ProgressShard shard,
+                             Route<?> route, EnsureAction ensureRoute,
                              @Nullable PartialTxn partialTxn, EnsureAction ensurePartialTxn,
                              @Nullable PartialDeps partialDeps, EnsureAction ensurePartialDeps)
     {
@@ -941,17 +944,17 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                 {
                     default: throw new AssertionError();
                     case Check:
-                        if (!(route() instanceof Route) && !(route instanceof Route))
+                        if (!isFullRoute(route()) && !isFullRoute(route))
                             return false;
                     case Ignore:
                         break;
                     case Add:
                     case Set:
-                        if (!(route instanceof Route))
+                        if (!isFullRoute(route))
                             throw new IllegalArgumentException("Incomplete route (" + route + ") sent to home shard");
                         break;
                     case TrySet:
-                        if (!(route instanceof Route))
+                        if (!isFullRoute(route))
                             return false;
                 }
             }
@@ -979,7 +982,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         // invalid to Add deps to Accepted or AcceptedInvalidate statuses, as Committed deps are not equivalent
         // and we may erroneously believe we have covered a wider range than we have infact covered
         if (ensurePartialDeps == Add)
-            Preconditions.checkState(status() != Accepted && status() != AcceptedInvalidate);
+            Invariants.checkState(status() != Accepted && status() != AcceptedInvalidate);
 
         // validate new partial txn
         if (!validate(ensurePartialTxn, existingRanges, additionalRanges, covers(partialTxn()), covers(partialTxn), "txn", partialTxn))
@@ -998,15 +1001,15 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     }
 
     private void set(SafeCommandStore safeStore,
-                     KeyRanges existingRanges, KeyRanges additionalRanges, ProgressShard shard, AbstractRoute route,
+                     Ranges existingRanges, Ranges additionalRanges, ProgressShard shard, Route<?> route,
                      @Nullable PartialTxn partialTxn, EnsureAction ensurePartialTxn,
                      @Nullable PartialDeps partialDeps, EnsureAction ensurePartialDeps)
     {
-        Preconditions.checkState(progressKey() != null);
-        KeyRanges allRanges = existingRanges.union(additionalRanges);
+        Invariants.checkState(progressKey() != null);
+        Ranges allRanges = existingRanges.union(additionalRanges);
 
-        if (shard.isProgress()) setRoute(AbstractRoute.merge(route(), route));
-        else setRoute(AbstractRoute.merge(route(), route.slice(allRanges)));
+        if (shard.isProgress()) setRoute(Route.merge(route(), (Route)route));
+        else setRoute(Route.merge(route(), (Route)route.slice(allRanges)));
 
         // TODO (soon): stop round-robin hashing; partition only on ranges
         switch (ensurePartialTxn)
@@ -1018,9 +1021,9 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                 if (partialTxn() != null)
                 {
                     partialTxn = partialTxn.slice(allRanges, shard.isHome());
-                    partialTxn.keys().foldlDifference(partialTxn().keys(), (i, key, p, v) -> {
-                        if (safeStore.commandStore().hashIntersects(key))
-                            safeStore.commandsForKey(key).register(this);
+                    Routables.foldlMissing((Seekables)partialTxn.keys(), partialTxn().keys(), (i, keyOrRange, p, v) -> {
+                        // TODO: duplicate application of ranges
+                        safeStore.forEach(keyOrRange, allRanges, forKey -> forKey.register(this));
                         return v;
                     }, 0, 0, 1);
                     this.setPartialTxn(partialTxn().with(partialTxn));
@@ -1031,10 +1034,10 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             case TrySet:
                 setKind(partialTxn.kind());
                 setPartialTxn(partialTxn = partialTxn.slice(allRanges, shard.isHome()));
-                partialTxn.keys().forEach(key -> {
+                // TODO: duplicate application of ranges
+                safeStore.forEach(partialTxn.keys(), allRanges, forKey -> {
                     // TODO: no need to register on PreAccept if already Accepted
-                    if (safeStore.commandStore().hashIntersects(key))
-                        safeStore.commandsForKey(key).register(this);
+                    forKey.register(this);
                 });
                 break;
         }
@@ -1058,8 +1061,8 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         }
     }
 
-    private static boolean validate(EnsureAction action, KeyRanges existingRanges, KeyRanges additionalRanges,
-                                    KeyRanges existing, KeyRanges adding, String kind, Object obj)
+    private static boolean validate(EnsureAction action, Ranges existingRanges, Ranges additionalRanges,
+                                    Ranges existing, Ranges adding, String kind, Object obj)
     {
         switch (action)
         {
@@ -1070,21 +1073,21 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             case TrySet:
                 if (adding != null)
                 {
-                    if (!adding.contains(existingRanges))
+                    if (!adding.containsAll(existingRanges))
                         return false;
 
-                    if (additionalRanges != existingRanges && !adding.contains(additionalRanges))
+                    if (additionalRanges != existingRanges && !adding.containsAll(additionalRanges))
                         return false;
 
                     break;
                 }
             case Set:
                 // failing any of these tests is always an illegal state
-                Preconditions.checkState(adding != null);
-                if (!adding.contains(existingRanges))
+                Invariants.checkState(adding != null);
+                if (!adding.containsAll(existingRanges))
                     throw new IllegalArgumentException("Incomplete " + kind + " (" + obj + ") provided; does not cover " + existingRanges);
 
-                if (additionalRanges != existingRanges && !adding.contains(additionalRanges))
+                if (additionalRanges != existingRanges && !adding.containsAll(additionalRanges))
                     throw new IllegalArgumentException("Incomplete " + kind + " (" + obj + ") provided; does not cover " + additionalRanges);
                 break;
 
@@ -1095,8 +1098,8 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                     if (existing == null)
                         return false;
 
-                    Preconditions.checkState(existing.contains(existingRanges));
-                    if (existingRanges != additionalRanges && !existing.contains(additionalRanges))
+                    Invariants.checkState(existing.containsAll(existingRanges));
+                    if (existingRanges != additionalRanges && !existing.containsAll(additionalRanges))
                     {
                         if (action == Check)
                             return false;
@@ -1106,9 +1109,9 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                 }
                 else if (existing != null)
                 {
-                    KeyRanges covering = adding.union(existing);
-                    Preconditions.checkState(covering.contains(existingRanges));
-                    if (existingRanges != additionalRanges && !covering.contains(additionalRanges))
+                    Ranges covering = adding.union(existing);
+                    Invariants.checkState(covering.containsAll(existingRanges));
+                    if (existingRanges != additionalRanges && !covering.containsAll(additionalRanges))
                     {
                         if (action == Check)
                             return false;
@@ -1118,10 +1121,10 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                 }
                 else
                 {
-                    if (!adding.contains(existingRanges))
+                    if (!adding.containsAll(existingRanges))
                         return false;
 
-                    if (existingRanges != additionalRanges && !adding.contains(additionalRanges))
+                    if (existingRanges != additionalRanges && !adding.containsAll(additionalRanges))
                     {
                         if (action == Check)
                             return false;
@@ -1136,24 +1139,24 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     }
 
     // TODO: callers should try to consult the local progress shard (if any) to obtain the full set of keys owned locally
-    public AbstractRoute someRoute()
+    public Route<?> someRoute()
     {
         if (route() != null)
             return route();
 
         if (homeKey() != null)
-            return new PartialRoute(KeyRanges.EMPTY, homeKey(), new RoutingKey[0]);
+            return new PartialKeyRoute(Ranges.EMPTY, homeKey(), new RoutingKey[0]);
 
         return null;
     }
 
-    public RoutingKeys maxRoutingKeys()
+    public Unseekables<?, ?> maxUnseekables()
     {
-        AbstractRoute route = someRoute();
+        Route<?> route = someRoute();
         if (route == null)
             return null;
 
-        return route.with(route.homeKey);
+        return route.toMaximalUnseekables();
     }
 
     /**
@@ -1185,12 +1188,12 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                '}';
     }
 
-    private static KeyRanges covers(@Nullable PartialTxn txn)
+    private static Ranges covers(@Nullable PartialTxn txn)
     {
         return txn == null ? null : txn.covering();
     }
 
-    private static KeyRanges covers(@Nullable PartialDeps deps)
+    private static Ranges covers(@Nullable PartialDeps deps)
     {
         return deps == null ? null : deps.covering;
     }
@@ -1202,18 +1205,20 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
     // TODO: this is an ugly hack, need to encode progress/homeKey/Route state combinations much more clearly
     //  (perhaps introduce encapsulating class representing each possible arrangement)
-    private static final RoutingKey NO_PROGRESS_KEY = new RoutingKey()
+    static class NoProgressKey implements RoutingKey
     {
         @Override
-        public int routingHash()
+        public int compareTo(@Nonnull RoutableKey that)
         {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public int compareTo(@Nonnull RoutingKey ignore)
+        public int routingHash()
         {
             throw new UnsupportedOperationException();
         }
-    };
+    }
+
+    private static final NoProgressKey NO_PROGRESS_KEY = new NoProgressKey();
 }

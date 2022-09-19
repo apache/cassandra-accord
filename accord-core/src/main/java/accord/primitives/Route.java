@@ -1,52 +1,100 @@
 package accord.primitives;
 
 import accord.api.RoutingKey;
-import com.google.common.base.Preconditions;
 
-public class Route extends AbstractRoute
+import javax.annotation.Nullable;
+
+public interface Route<K extends Unseekable> extends Unseekables<K, Route<K>>
 {
-    public static class SerializationSupport
+    RoutingKey homeKey();
+
+    default boolean isRoute() { return true; }
+    boolean covers(Ranges ranges);
+    boolean intersects(AbstractRanges<?> ranges);
+    Route<K> union(Route<K> route);
+    PartialRoute<K> slice(Ranges ranges);
+    PartialRoute<K> sliceStrict(Ranges ranges);
+
+    /**
+     * @return a PureRoutables that includes every shard we know of, not just those we contact
+     * (i.e., includes the homeKey if not already included)
+     */
+    Unseekables<K, ?> toMaximalUnseekables();
+
+    // this method exists solely to circumvent JDK bug with testing and casting interfaces
+    static boolean isFullRoute(@Nullable Unseekables<?, ?> unseekables) { return unseekables != null && unseekables.kind().isFullRoute(); }
+
+    // this method exists solely to circumvent JDK bug with testing and casting interfaces
+    static boolean isRoute(@Nullable Unseekables<?, ?> unseekables) { return unseekables != null && unseekables.kind().isRoute(); }
+
+    // this method exists solely to circumvent JDK bug with testing and casting interfaces
+    static FullRoute<?> castToFullRoute(@Nullable Unseekables<?, ?> unseekables)
     {
-        public static Route create(RoutingKey homeKey, RoutingKey[] keys)
+        if (unseekables == null)
+            return null;
+
+        switch (unseekables.kindOfContents())
         {
-            return new Route(homeKey, keys);
+            default: throw new AssertionError();
+            case Key: return (FullKeyRoute) unseekables;
+            case Range: return (FullRangeRoute) unseekables;
         }
     }
 
-    public Route(RoutingKey homeKey, RoutingKey[] keys)
+    static Route<?> castToRoute(@Nullable Unseekables<?, ?> unseekables)
     {
-        super(keys, homeKey);
+        if (unseekables == null)
+            return null;
+
+        switch (unseekables.kindOfContents())
+        {
+            default: throw new AssertionError();
+            case Key: return (KeyRoute) unseekables;
+            case Range: return (RangeRoute) unseekables;
+        }
     }
 
-    @Override
-    public boolean covers(KeyRanges ranges)
+    // this method exists solely to circumvent JDK bug with testing and casting interfaces
+    static Route<?> tryCastToRoute(@Nullable Unseekables<?, ?> unseekables)
     {
-        Preconditions.checkNotNull(ranges);
-        return true;
+        if (unseekables == null)
+            return null;
+
+        switch (unseekables.kind())
+        {
+            default: throw new AssertionError();
+            case RoutingKeys:
+            case RoutingRanges:
+                return null;
+            case PartialKeyRoute:
+                return (PartialKeyRoute) unseekables;
+            case PartialRangeRoute:
+                return (PartialRangeRoute) unseekables;
+            case FullKeyRoute:
+                return (FullKeyRoute) unseekables;
+            case FullRangeRoute:
+                return (FullRangeRoute) unseekables;
+        }
     }
 
-    @Override
-    public AbstractRoute union(AbstractRoute that)
+    // this method exists solely to circumvent JDK bug with testing and casting interfaces
+    static PartialRoute<?> castToPartialRoute(@Nullable Unseekables<?, ?> unseekables)
     {
-        Preconditions.checkNotNull(that);
-        return this;
+        if (unseekables == null)
+            return null;
+
+        switch (unseekables.kindOfContents())
+        {
+            default: throw new AssertionError();
+            case Key: return (PartialKeyRoute) unseekables;
+            case Range: return (PartialRangeRoute) unseekables;
+        }
     }
 
-    @Override
-    public PartialRoute slice(KeyRanges ranges)
+    static <T extends Unseekable> Route<T> merge(@Nullable Route<T> prefer, @Nullable Route<T> defer)
     {
-        return new PartialRoute(ranges, homeKey, slice(ranges, RoutingKey[]::new));
-    }
-
-    @Override
-    public PartialRoute sliceStrict(KeyRanges ranges)
-    {
-        return slice(ranges);
-    }
-
-    @Override
-    public String toString()
-    {
-        return "{homeKey:" + homeKey + ',' + super.toString() + '}';
+        if (defer == null) return prefer;
+        if (prefer == null) return defer;
+        return prefer.union(defer);
     }
 }

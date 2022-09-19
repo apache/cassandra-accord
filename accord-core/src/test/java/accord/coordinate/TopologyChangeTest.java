@@ -26,7 +26,7 @@ import accord.local.Command;
 import accord.local.Node;
 import accord.local.Status;
 import accord.messages.Accept;
-import accord.primitives.KeyRange;
+import accord.primitives.Range;
 import accord.topology.Topology;
 import accord.primitives.Keys;
 import accord.primitives.Txn;
@@ -58,7 +58,7 @@ public class TopologyChangeTest
     void disjointElectorate() throws Throwable
     {
         Keys keys = keys(150);
-        KeyRange range = range(100, 200);
+        Range range = range(100, 200);
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(4, 5, 6), idSet(4, 5)));
         EpochFunction<MockConfigurationService> fetchTopology = (epoch, service) -> {

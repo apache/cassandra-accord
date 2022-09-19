@@ -18,9 +18,13 @@
 
 package accord.impl;
 
-import accord.api.*;
 import accord.local.*;
-import accord.primitives.AbstractKeys;
+import accord.api.Agent;
+import accord.api.DataStore;
+import accord.api.ProgressLog;
+import accord.local.CommandStore;
+import accord.local.Node;
+import accord.primitives.Routables;
 import accord.utils.MapReduce;
 
 import java.util.function.BiFunction;
@@ -35,12 +39,12 @@ public class InMemoryCommandStores
             super(num, node, agent, store, progressLogFactory, InMemoryCommandStore.Synchronized::new);
         }
 
-        public <T> T mapReduce(PreLoadContext context, AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch, MapReduce<? super SafeCommandStore, T> map)
+        public <T> T mapReduce(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduce<? super SafeCommandStore, T> map)
         {
             return super.mapReduce(context, keys, minEpoch, maxEpoch, map, SyncMapReduceAdapter.instance());
         }
 
-        public <T> T mapReduce(PreLoadContext context, AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch, Function<? super SafeCommandStore, T> map, BiFunction<T, T, T> reduce)
+        public <T> T mapReduce(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, Function<? super SafeCommandStore, T> map, BiFunction<T, T, T> reduce)
         {
             return mapReduce(context, keys, minEpoch, maxEpoch, new MapReduce<SafeCommandStore, T>() {
                 @Override

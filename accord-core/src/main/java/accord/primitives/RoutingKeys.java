@@ -1,14 +1,11 @@
 package accord.primitives;
 
-import java.util.Arrays;
-import java.util.function.IntFunction;
-
-import com.google.common.base.Preconditions;
-
 import accord.api.RoutingKey;
 import accord.utils.SortedArrays;
 
-public class RoutingKeys extends AbstractKeys<RoutingKey, RoutingKeys>
+import static accord.utils.ArrayBuffers.cachedRoutingKeys;
+
+public class RoutingKeys extends AbstractRoutableKeys<AbstractRoutableKeys<?>> implements Unseekables<RoutingKey, AbstractRoutableKeys<?>>
 {
     public static class SerializationSupport
     {
@@ -20,7 +17,7 @@ public class RoutingKeys extends AbstractKeys<RoutingKey, RoutingKeys>
 
     public static final RoutingKeys EMPTY = new RoutingKeys(new RoutingKey[0]);
 
-    public RoutingKeys(RoutingKey[] keys)
+    RoutingKeys(RoutingKey[] keys)
     {
         super(keys);
     }
@@ -30,24 +27,32 @@ public class RoutingKeys extends AbstractKeys<RoutingKey, RoutingKeys>
         return new RoutingKeys(sort(keys));
     }
 
-    public RoutingKeys union(RoutingKeys that)
+    public RoutingKeys union(AbstractRoutableKeys<?> that)
     {
-        return wrap(SortedArrays.linearUnion(keys, that.keys, factory()), that);
+        return wrap(SortedArrays.linearUnion(keys, that.keys, cachedRoutingKeys()), that);
     }
 
-    public RoutingKeys slice(KeyRanges ranges)
+    public RoutingKeys with(RoutingKey with)
     {
-        return wrap(slice(ranges, factory()));
+        if (contains(with))
+            return this;
+        return wrap(toRoutingKeysArray(with));
     }
 
-    public RoutingKeys with(RoutingKey addKey)
+    @Override
+    public UnseekablesKind kind()
     {
-        return wrap(SortedArrays.insert(keys, addKey, RoutingKey[]::new));
+        return UnseekablesKind.RoutingKeys;
     }
 
-    private RoutingKeys wrap(RoutingKey[] wrap, RoutingKeys that)
+    public RoutingKeys slice(Ranges ranges)
     {
-        return wrap == keys ? this : wrap == that.keys ? that : new RoutingKeys(wrap);
+        return wrap(SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, RoutingKey[]::new, (k, r) -> -r.compareTo(k), Range::compareTo));
+    }
+
+    private RoutingKeys wrap(RoutingKey[] wrap, AbstractKeys<RoutingKey, ?> that)
+    {
+        return wrap == keys ? this : wrap == that.keys && that instanceof RoutingKeys ? (RoutingKeys)that : new RoutingKeys(wrap);
     }
 
     private RoutingKeys wrap(RoutingKey[] wrap)
@@ -55,20 +60,4 @@ public class RoutingKeys extends AbstractKeys<RoutingKey, RoutingKeys>
         return wrap == keys ? this : new RoutingKeys(wrap);
     }
 
-    public Route toRoute(RoutingKey homeKey)
-    {
-        Preconditions.checkNotNull(homeKey);
-        return new Route(homeKey, keys);
-    }
-
-    private static IntFunction<RoutingKey[]> factory()
-    {
-        return RoutingKey[]::new;
-    }
-
-    private static RoutingKey[] sort(RoutingKey[] keys)
-    {
-        Arrays.sort(keys);
-        return keys;
-    }
 }

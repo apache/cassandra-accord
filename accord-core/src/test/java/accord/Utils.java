@@ -18,18 +18,17 @@
 
 package accord;
 
-import accord.api.TopologySorter;
 import accord.impl.SizeOfIntersectionSorter;
-import accord.primitives.KeyRange;
+import accord.primitives.Range;
 import accord.local.Node;
 import accord.impl.mock.MockStore;
-import accord.primitives.KeyRanges;
+import accord.primitives.Ranges;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.primitives.Txn;
 import accord.primitives.Keys;
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 import com.google.common.collect.Sets;
 
 import java.util.ArrayList;
@@ -55,7 +54,7 @@ public class Utils
 
     public static List<Node.Id> ids(int first, int last)
     {
-        Preconditions.checkArgument(last >= first);
+        Invariants.checkArgument(last >= first);
         List<Node.Id> rlist = new ArrayList<>(last - first + 1);
         for (int i=first; i<=last; i++)
             rlist.add(id(i));
@@ -79,9 +78,9 @@ public class Utils
         return set;
     }
 
-    public static KeyRanges ranges(KeyRange... ranges)
+    public static Ranges ranges(Range... ranges)
     {
-        return KeyRanges.of(ranges);
+        return Ranges.of(ranges);
     }
 
     public static Txn writeTxn(Keys keys)
@@ -94,7 +93,7 @@ public class Utils
         return new Txn.InMemory(keys, MockStore.read(keys), MockStore.QUERY);
     }
 
-    public static Shard shard(KeyRange range, List<Node.Id> nodes, Set<Node.Id> fastPath)
+    public static Shard shard(Range range, List<Node.Id> nodes, Set<Node.Id> fastPath)
     {
         return new Shard(range, nodes, fastPath);
     }

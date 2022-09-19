@@ -21,13 +21,14 @@ package accord;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import accord.api.Key;
 import accord.impl.IntKey;
-import accord.primitives.KeyRange;
-import accord.primitives.KeyRanges;
+import accord.impl.IntKey.Raw;
+import accord.impl.IntKey.Routing;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
 import accord.primitives.Keys;
 
 import accord.utils.Gen;
@@ -42,54 +43,53 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class KeysTest
 {
-    private static KeyRange r(int start, int end)
+    private static Range r(int start, int end)
     {
         return IntKey.range(start, end);
     }
 
-    private static KeyRanges ranges(KeyRange... ranges)
+    private static Ranges ranges(Range... ranges)
     {
-        return KeyRanges.of(ranges);
+        return Ranges.of(ranges);
     }
 
-    private static KeyRanges ranges(int a, int b)
+    private static Ranges ranges(int a, int b)
     {
         return ranges(range(a, b));
     }
 
-    private static KeyRanges ranges(int a, int b, int c, int d)
+    private static Ranges ranges(int a, int b, int c, int d)
     {
         return ranges(range(a, b), range(c, d));
     }
 
-    private static KeyRanges ranges(Keys keys)
+    private static Ranges ranges(Keys keys)
     {
         if (keys.isEmpty())
-            return KeyRanges.EMPTY;
+            return Ranges.EMPTY;
         if (keys.size() == 1)
             return ranges(Integer.MIN_VALUE, Integer.MAX_VALUE);
 
         int first = key(keys.get(0));
-        List<KeyRange> ranges = new ArrayList<>(keys.size());
+        List<Range> ranges = new ArrayList<>(keys.size());
         ranges.add(range(first - 1, first));
         for (int i = 1; i < keys.size(); i++)
             ranges.add(range(key(keys.get(i - 1)), key(keys.get(i))));
-        return new KeyRanges(ranges);
+        return Ranges.of(ranges.toArray(new Range[0]));
     }
 
-    private static KeyRanges ranges(Keys keys, Key... include)
+    private static Ranges ranges(Keys keys, Key... include)
     {
         if (keys.isEmpty())
-            return KeyRanges.EMPTY;
+            return Ranges.EMPTY;
 
-        return new KeyRanges(IntStream.range(0, include.length)
+        return Ranges.of(IntStream.range(0, include.length)
                 .mapToObj(i -> {
                     Key key = include[i];
                     int value = key(key);
                     int idx = keys.indexOf(key);
                     return idx == 0 ? range(value - 1, value) : range(key(keys.get(idx - 1)), value);
-                })
-                .collect(Collectors.toList()));
+                }).toArray(Range[]::new));
     }
 
     private static int key(Key key)
@@ -175,20 +175,20 @@ public class KeysTest
             int first = list.get(0).key;
             int last = list.get(list.size() - 1).key;
             // exclusive, inclusive
-            KeyRange before = IntKey.range(Integer.MIN_VALUE, first - 1);
-            KeyRange after = IntKey.range(last, Integer.MAX_VALUE);
+            Range before = IntKey.range(Integer.MIN_VALUE, first - 1);
+            Range after = IntKey.range(last, Integer.MAX_VALUE);
 
             Assertions.assertEquals(Keys.EMPTY, keys.slice(ranges(before, after)));
 
             // remove from the middle
             for (int i = 1; i < keys.size() - 1; i++)
             {
-                IntKey previous = list.get(i - 1);
-                IntKey exclude = list.get(i);
-                List<IntKey> expected = new ArrayList<>(list);
+                Raw previous = list.get(i - 1);
+                Raw exclude = list.get(i);
+                List<Raw> expected = new ArrayList<>(list);
                 expected.remove(exclude);
 
-                KeyRanges allButI = ranges(
+                Ranges allButI = ranges(
                         before,
                         // exclusive, inclusive
                         range(first - 2, previous.key), // use first - 2 to make sure we don't do range(first, first)
@@ -200,10 +200,10 @@ public class KeysTest
 
             // remove the first
             {
-                List<IntKey> expected = new ArrayList<>(list);
+                List<Raw> expected = new ArrayList<>(list);
                 expected.remove(IntKey.key(first));
 
-                KeyRanges allButI = ranges(
+                Ranges allButI = ranges(
                         before,
                         // exclusive, inclusive
                         range(first, last),
@@ -212,10 +212,10 @@ public class KeysTest
             }
             // remove the last
             {
-                List<IntKey> expected = new ArrayList<>(list);
+                List<Raw> expected = new ArrayList<>(list);
                 expected.remove(IntKey.key(last));
 
-                KeyRanges allButI = ranges(
+                Ranges allButI = ranges(
                         before,
                         // exclusive, inclusive
                         range(first - 1, last - 1),
@@ -253,7 +253,7 @@ public class KeysTest
 
     //TODO test foldlIntersect
 
-    private static Gen<List<IntKey>> keysGen() {
+    private static Gen<List<Raw>> keysGen() {
         return Gens.lists(Gens.ints().between(-1000, 1000).map(IntKey::key))
                 .unique()
                 .ofSizeBetween(2, 40)

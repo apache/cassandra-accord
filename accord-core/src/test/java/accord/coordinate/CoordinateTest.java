@@ -23,7 +23,7 @@ import accord.impl.mock.MockCluster;
 import accord.api.Result;
 import accord.impl.mock.MockStore;
 import accord.primitives.Keys;
-import accord.primitives.Route;
+import accord.primitives.FullKeyRoute;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import org.junit.jupiter.api.Assertions;
@@ -47,7 +47,7 @@ public class CoordinateTest
             TxnId txnId = node.nextTxnId();
             Keys keys = keys(10);
             Txn txn = writeTxn(keys);
-            Route route = keys.toRoute(keys.get(0).toRoutingKey());
+            FullKeyRoute route = keys.toRoute(keys.get(0).toUnseekable());
             Result result = Coordinate.coordinate(node, txnId, txn, route).get();
             Assertions.assertEquals(MockStore.RESULT, result);
         }
@@ -139,7 +139,7 @@ public class CoordinateTest
             Keys oneKey = keys(10);
             Keys twoKeys = keys(10, 20);
             Txn txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.QUERY, MockStore.update(twoKeys));
-            Result result = Coordinate.coordinate(node, txnId, txn, txn.keys().toRoute(txn.keys().get(0))).get();
+            Result result = Coordinate.coordinate(node, txnId, txn, txn.keys().toRoute(oneKey.get(0).toUnseekable())).get();
             Assertions.assertEquals(MockStore.RESULT, result);
 
             txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.QUERY, MockStore.update(Keys.EMPTY));

@@ -20,7 +20,8 @@ package accord.coordinate.tracking;
 
 import accord.impl.TopologyUtils;
 import accord.local.Node.Id;
-import accord.primitives.KeyRanges;
+import accord.local.Node;
+import accord.primitives.Ranges;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.topology.Topology;
@@ -37,7 +38,7 @@ import static accord.utils.Utils.toArray;
 public class ReadTrackerTest
 {
     private static final Id[] ids = toArray(ids(5), Id[]::new);
-    private static final KeyRanges ranges = TopologyUtils.initialRanges(5, 500);
+    private static final Ranges ranges = TopologyUtils.initialRanges(5, 500);
     private static final Topology topology = TopologyUtils.initialTopology(ids, ranges, 3);
         /*
         (000, 100](100, 200](200, 300](300, 400](400, 500]

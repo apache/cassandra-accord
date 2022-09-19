@@ -3,7 +3,7 @@ package accord.local;
 import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.ProgressLog;
-import accord.primitives.AbstractKeys;
+import accord.primitives.Routables;
 import accord.utils.MapReduce;
 import accord.utils.MapReduceConsume;
 
@@ -69,7 +69,7 @@ public class SyncCommandStores extends CommandStores<SyncCommandStores.SyncComma
     }
 
     @Override
-    public <O> void mapReduceConsume(PreLoadContext context, AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
+    public <O> void mapReduceConsume(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
     {
         try
         {

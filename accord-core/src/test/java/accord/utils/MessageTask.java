@@ -20,7 +20,7 @@ package accord.utils;
 
 import accord.local.Node;
 import accord.messages.*;
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 import com.google.common.collect.ImmutableList;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 
@@ -115,7 +115,7 @@ public class MessageTask extends AsyncPromise<Void> implements Runnable
         @Override
         public void onSuccess(Node.Id from, Reply reply)
         {
-            Preconditions.checkArgument(reply == SUCCESS || reply == FAILURE);
+            Invariants.checkArgument(reply == SUCCESS || reply == FAILURE);
             if (reply == FAILURE)
             {
                 originator.send(from, request, this);
@@ -147,7 +147,7 @@ public class MessageTask extends AsyncPromise<Void> implements Runnable
                         List<Node.Id> recipients,
                         String desc, NodeProcess process)
     {
-        Preconditions.checkArgument(!recipients.isEmpty());
+        Invariants.checkArgument(!recipients.isEmpty());
         this.originator = originator;
         this.recipients = ImmutableList.copyOf(recipients);
         this.desc = desc;

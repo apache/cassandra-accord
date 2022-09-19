@@ -8,31 +8,24 @@ import accord.api.Update;
 
 public interface PartialTxn extends Txn
 {
-    KeyRanges covering();
+    Ranges covering();
     // TODO: merge efficient merge when more than one input
     PartialTxn with(PartialTxn add);
-    Txn reconstitute(Route route);
-    PartialTxn reconstitutePartial(PartialRoute route);
+    Txn reconstitute(FullRoute<?> route);
+    PartialTxn reconstitutePartial(PartialRoute<?> route);
 
-    default boolean covers(KeyRanges ranges)
+    default boolean covers(Unseekables<?, ?> unseekables)
     {
-        return covering().contains(ranges);
-    }
-
-    default boolean covers(AbstractKeys<?, ?> keys)
-    {
-        // TODO: this distinction seems brittle
-        if (keys instanceof AbstractRoute)
-            return covers((AbstractRoute)keys);
-
-        return covering().containsAll(keys);
-    }
-
-    default boolean covers(AbstractRoute route)
-    {
-        if (query() == null && route.contains(route.homeKey))
-            return false;
-        return covering().containsAll(route);
+        if (query() == null)
+        {
+            // The home shard is expected to store the query contents
+            // So if the query is null, and we are being asked if we
+            // cover a range that includes a home shard, we should say no
+            Route<?> asRoute = Route.tryCastToRoute(unseekables);
+            if (asRoute != null && asRoute.contains(asRoute.homeKey()))
+                return false;
+        }
+        return covering().containsAll(unseekables);
     }
 
     // TODO: override toString
@@ -43,28 +36,28 @@ public interface PartialTxn extends Txn
 
     class InMemory extends Txn.InMemory implements PartialTxn
     {
-        public final KeyRanges covering;
+        public final Ranges covering;
 
-        public InMemory(KeyRanges covering, Kind kind, Keys keys, Read read, Query query, Update update)
+        public InMemory(Ranges covering, Kind kind, Seekables<?, ?> keys, Read read, Query query, Update update)
         {
             super(kind, keys, read, query, update);
             this.covering = covering;
         }
 
         @Override
-        public KeyRanges covering()
+        public Ranges covering()
         {
             return covering;
         }
 
         // TODO: merge efficient merge when more than one input
-        public accord.primitives.PartialTxn with(accord.primitives.PartialTxn add)
+        public PartialTxn with(PartialTxn add)
         {
             if (!add.kind().equals(kind()))
                 throw new IllegalArgumentException();
 
-            KeyRanges covering = this.covering.union(add.covering());
-            Keys keys = this.keys().union(add.keys());
+            Ranges covering = this.covering.union(add.covering());
+            Seekables<?, ?> keys = ((Seekables)this.keys()).union(add.keys());
             Read read = this.read().merge(add.read());
             Query query = this.query() == null ? add.query() : this.query();
             Update update = this.update() == null ? null : this.update().merge(add.update());
@@ -83,7 +76,12 @@ public interface PartialTxn extends Txn
 
         // TODO: override toString
 
-        public Txn reconstitute(Route route)
+        public boolean covers(Ranges ranges)
+        {
+            return covering.containsAll(ranges);
+        }
+
+        public Txn reconstitute(FullRoute<?> route)
         {
             if (!covers(route) || query() == null)
                 throw new IllegalStateException("Incomplete PartialTxn: " + this + ", route: " + route);
@@ -91,15 +89,15 @@ public interface PartialTxn extends Txn
             return new Txn.InMemory(kind(), keys(), read(), query(), update());
         }
 
-        public accord.primitives.PartialTxn reconstitutePartial(PartialRoute route)
+        public PartialTxn reconstitutePartial(PartialRoute<?> route)
         {
             if (!covers(route))
                 throw new IllegalStateException("Incomplete PartialTxn: " + this + ", route: " + route);
 
-            if (covering.contains(route.covering))
+            if (covering.containsAll(route.covering()))
                 return this;
 
-            return new PartialTxn.InMemory(route.covering, kind(), keys(), read(), query(), update());
+            return new PartialTxn.InMemory(route.covering(), kind(), keys(), read(), query(), update());
         }
     }
 

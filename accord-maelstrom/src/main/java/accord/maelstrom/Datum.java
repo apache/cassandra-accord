@@ -54,12 +54,12 @@ public class Datum implements Comparable<Datum>
     {
         STRING, LONG, DOUBLE, HASH;
 
-        public MaelstromKey[] split(int count)
+        public MaelstromKey.Routing[] split(int count)
         {
             if (count <= 1)
                 throw new IllegalArgumentException();
 
-            MaelstromKey[] result = new MaelstromKey[count];
+            MaelstromKey.Routing[] result = new MaelstromKey.Routing[count];
             switch (this)
             {
                 case STRING:
@@ -68,22 +68,22 @@ public class Datum implements Comparable<Datum>
                     long range = 63 * 63 * 63 * 63 + 1;
                     long delta = range / count;
                     for (int i = 0 ; i < count ; ++i)
-                        result[i] = new MaelstromKey(this, toString(i * delta));
+                        result[i] = new MaelstromKey.Routing(this, toString(i * delta));
                     break;
                 }
                 case DOUBLE:
                 {
-                    result[0] = new MaelstromKey(Double.NEGATIVE_INFINITY);
+                    result[0] = new MaelstromKey.Routing(Double.NEGATIVE_INFINITY);
                     if (count == 2)
                     {
-                        result[1] = new MaelstromKey(0d);
+                        result[1] = new MaelstromKey.Routing(0d);
                     }
                     else
                     {
                         double delta = Double.MAX_VALUE * (2d / count);
                         double cur = -Double.MAX_VALUE;
                         for (int i = 1 ; i < count ; ++i)
-                            result[i] = new MaelstromKey(cur += delta);
+                            result[i] = new MaelstromKey.Routing(cur += delta);
                     }
                     break;
                 }
@@ -92,7 +92,7 @@ public class Datum implements Comparable<Datum>
                     long delta = 2 * (Long.MAX_VALUE / count);
                     long start = Long.MIN_VALUE;
                     for (int i = 0 ; i < count ; ++i)
-                        result[i] = new MaelstromKey(this, start + i * delta);
+                        result[i] = new MaelstromKey.Routing(this, start + i * delta);
                     break;
                 }
                 case HASH:
@@ -100,7 +100,7 @@ public class Datum implements Comparable<Datum>
                     int delta = 2 * (Integer.MAX_VALUE / count);
                     int start = Integer.MIN_VALUE;
                     for (int i = 0 ; i < count ; ++i)
-                        result[i] = new MaelstromKey(this, new Hash(start + i * delta));
+                        result[i] = new MaelstromKey.Routing(this, new Hash(start + i * delta));
                     break;
                 }
             }

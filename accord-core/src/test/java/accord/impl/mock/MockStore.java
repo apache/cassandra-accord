@@ -27,7 +27,7 @@ import accord.api.DataStore;
 import accord.api.Update;
 import accord.api.Write;
 import accord.local.SafeCommandStore;
-import accord.primitives.KeyRanges;
+import accord.primitives.Ranges;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -65,7 +65,7 @@ public class MockStore implements DataStore
             }
 
             @Override
-            public Read slice(KeyRanges ranges)
+            public Read slice(Ranges ranges)
             {
                 return MockStore.read(keys.slice(ranges));
             }
@@ -101,7 +101,7 @@ public class MockStore implements DataStore
             }
 
             @Override
-            public Update slice(KeyRanges ranges)
+            public Update slice(Ranges ranges)
             {
                 return MockStore.update(keys.slice(ranges));
             }

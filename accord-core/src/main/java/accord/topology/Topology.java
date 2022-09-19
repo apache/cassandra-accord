@@ -25,35 +25,34 @@ import java.util.stream.IntStream;
 
 import accord.api.RoutingKey;
 import accord.local.Node.Id;
-import accord.primitives.AbstractKeys;
-import accord.primitives.KeyRange;
-import accord.primitives.KeyRanges;
+import accord.primitives.*;
 import accord.utils.*;
 
+import static accord.utils.SortedArrays.Search.FLOOR;
 import static accord.utils.SortedArrays.exponentialSearch;
 
 public class Topology
 {
-    public static final Topology EMPTY = new Topology(0, new Shard[0], KeyRanges.EMPTY, Collections.emptyMap(), KeyRanges.EMPTY, new int[0]);
+    public static final Topology EMPTY = new Topology(0, new Shard[0], Ranges.EMPTY, Collections.emptyMap(), Ranges.EMPTY, new int[0]);
     final long epoch;
     final Shard[] shards;
-    final KeyRanges ranges;
+    final Ranges ranges;
     final Map<Id, NodeInfo> nodeLookup;
-    final KeyRanges subsetOfRanges;
     /**
      * This array is used to permit cheaper sharing of Topology objects between requests, as we must only specify
      * the indexes within the parent Topology that we contain. This also permits us to perform efficient merges with
      * {@code NodeInfo.supersetIndexes} to find the shards that intersect a given node without recomputing the NodeInfo.
      * TODO: do not recompute nodeLookup
      */
+    final Ranges subsetOfRanges;
     final int[] supersetIndexes;
 
     static class NodeInfo
     {
-        final KeyRanges ranges;
+        final Ranges ranges;
         final int[] supersetIndexes;
 
-        NodeInfo(KeyRanges ranges, int[] supersetIndexes)
+        NodeInfo(Ranges ranges, int[] supersetIndexes)
         {
             this.ranges = ranges;
             this.supersetIndexes = supersetIndexes;
@@ -69,7 +68,7 @@ public class Topology
     public Topology(long epoch, Shard... shards)
     {
         this.epoch = epoch;
-        this.ranges = KeyRanges.ofSortedAndDeoverlapped(Arrays.stream(shards).map(shard -> shard.range).toArray(KeyRange[]::new));
+        this.ranges = Ranges.ofSortedAndDeoverlapped(Arrays.stream(shards).map(shard -> shard.range).toArray(Range[]::new));
         this.shards = shards;
         this.subsetOfRanges = ranges;
         this.supersetIndexes = IntStream.range(0, shards.length).toArray();
@@ -83,12 +82,12 @@ public class Topology
         for (Map.Entry<Id, List<Integer>> e : build.entrySet())
         {
             int[] supersetIndexes = e.getValue().stream().mapToInt(i -> i).toArray();
-            KeyRanges ranges = this.ranges.select(supersetIndexes);
+            Ranges ranges = this.ranges.select(supersetIndexes);
             nodeLookup.put(e.getKey(), new NodeInfo(ranges, supersetIndexes));
         }
     }
 
-    public Topology(long epoch, Shard[] shards, KeyRanges ranges, Map<Id, NodeInfo> nodeLookup, KeyRanges subsetOfRanges, int[] supersetIndexes)
+    public Topology(long epoch, Shard[] shards, Ranges ranges, Map<Id, NodeInfo> nodeLookup, Ranges subsetOfRanges, int[] supersetIndexes)
     {
         this.epoch = epoch;
         this.shards = shards;
@@ -169,16 +168,16 @@ public class Topology
         return select(epoch, shards, this.supersetIndexes);
     }
 
-    public KeyRanges rangesForNode(Id node)
+    public Ranges rangesForNode(Id node)
     {
         NodeInfo info = nodeLookup.get(node);
-        return info != null ? info.ranges : KeyRanges.EMPTY;
+        return info != null ? info.ranges : Ranges.EMPTY;
     }
 
     // TODO: optimised HomeKey concept containing the Key, Shard and Topology to avoid lookups when topology hasn't changed
     public Shard forKey(RoutingKey key)
     {
-        int i = ranges.rangeIndexForKey(key);
+        int i = ranges.indexOf(key);
         if (i < 0)
             throw new IllegalArgumentException("Range not found for " + key);
         return shards[i];
@@ -186,20 +185,34 @@ public class Topology
 
     public int indexForKey(RoutingKey key)
     {
-        int i = ranges.rangeIndexForKey(key);
+        int i = ranges.indexOf(key);
         if (i < 0) return -1;
         return Arrays.binarySearch(supersetIndexes, i);
     }
 
-    public Topology forKeys(AbstractKeys<?, ?> select)
+    public Topology forSelection(Unseekables<?, ?> select)
     {
-        return forKeys(select, (i, shard) -> true);
+        return forSelection(select, (i, shard) -> true);
     }
 
-    public Topology forKeys(AbstractKeys<?, ?> select, IndexedPredicate<Shard> predicate)
+    public Topology forSelection(Unseekables<?, ?> select, IndexedPredicate<Shard> predicate)
     {
-        int[] newSubset = subsetForKeys(select, predicate);
-        KeyRanges rangeSubset = ranges.select(newSubset);
+        return forSubset(subsetFor(select, predicate));
+    }
+
+    public Topology forSelection(Unseekables<?, ?> select, Collection<Id> nodes)
+    {
+        return forSelection(select, nodes, (i, shard) -> true);
+    }
+
+    public Topology forSelection(Unseekables<?, ?> select, Collection<Id> nodes, IndexedPredicate<Shard> predicate)
+    {
+        return forSubset(subsetFor(select, predicate), nodes);
+    }
+
+    private Topology forSubset(int[] newSubset)
+    {
+        Ranges rangeSubset = ranges.select(newSubset);
 
         // TODO: more efficient sharing of nodeLookup state
         Map<Id, NodeInfo> nodeLookup = new HashMap<>();
@@ -212,15 +225,9 @@ public class Topology
         return new Topology(epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
     }
 
-    public Topology forKeys(AbstractKeys<?, ?> select, Collection<Id> nodes)
+    private Topology forSubset(int[] newSubset, Collection<Id> nodes)
     {
-        return forKeys(select, nodes, (i, shard) -> true);
-    }
-
-    public Topology forKeys(AbstractKeys<?, ?> select, Collection<Id> nodes, IndexedPredicate<Shard> predicate)
-    {
-        int[] newSubset = subsetForKeys(select, predicate);
-        KeyRanges rangeSubset = ranges.select(newSubset);
+        Ranges rangeSubset = ranges.select(newSubset);
 
         // TODO: more efficient sharing of nodeLookup state
         Map<Id, NodeInfo> nodeLookup = new HashMap<>();
@@ -229,33 +236,66 @@ public class Topology
         return new Topology(epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
     }
 
-    private int[] subsetForKeys(AbstractKeys<?, ?> select, IndexedPredicate<Shard> predicate)
+    private int[] subsetFor(Unseekables<?, ?> select, IndexedPredicate<Shard> predicate)
     {
-        int subsetIndex = 0;
         int count = 0;
         int[] newSubset = new int[Math.min(select.size(), subsetOfRanges.size())];
-        for (int i = 0 ; i < select.size() ; )
+        Unseekables<?, ?> as = select;
+        Ranges bs = subsetOfRanges;
+        int ai = 0, bi = 0;
+        // ailim tracks which ai have been included; since there may be multiple matches
+        // we cannot increment ai to avoid missing a match with a second bi
+        int ailim = 0;
+
+        if (subsetOfRanges == ranges)
         {
-            // TODO: use SortedArrays.findNextIntersection
-            // find the range containing the key at i
-            subsetIndex = subsetOfRanges.rangeIndexForKey(subsetIndex, subsetOfRanges.size(), select.get(i));
-            if (subsetIndex < 0 || subsetIndex >= subsetOfRanges.size())
-                throw new IllegalArgumentException("Range not found for " + select.get(i));
-            int supersetIndex = supersetIndexes[subsetIndex];
-            Shard shard = shards[supersetIndex];
-            if (predicate.test(subsetIndex, shard))
-                newSubset[count++] = supersetIndex;
-            // find the first key outside this range
-            i = shard.range.nextHigherKeyIndex(select, i);
+            while (true)
+            {
+                long abi = as.findNextIntersection(ai, bs, bi);
+                if (abi < 0)
+                {
+                    if (ailim < select.size())
+                        throw new IllegalArgumentException("Range not found for " + select.get(ailim));
+                    break;
+                }
+
+                bi = (int)(abi >>> 32);
+                if (ailim < (int)abi)
+                    throw new IllegalArgumentException("Range not found for " + select.get(ailim));
+
+                if (predicate.test(bi, shards[bi]))
+                    newSubset[count++] = bi;
+
+                ai = (int)abi;
+                ailim = as.findNext(ai + 1, bs.get(bi), FLOOR);
+                if (ailim < 0) ailim = -1 - ailim;
+                else ailim++;
+                ++bi;
+            }
+        }
+        else
+        {
+            while (true)
+            {
+                long abi = as.findNextIntersection(ai, bs, bi);
+                if (abi < 0)
+                    break;
+
+                bi = (int)(abi >>> 32);
+                if (predicate.test(bi, shards[bi]))
+                    newSubset[count++] = bi;
+
+                ++bi;
+            }
         }
         if (count != newSubset.length)
             newSubset = Arrays.copyOf(newSubset, count);
         return newSubset;
     }
 
-    public void visitNodeForKeysOnceOrMore(AbstractKeys<?, ?> select, IndexedPredicate<Shard> predicate, Consumer<Id> nodes)
+    public void visitNodeForKeysOnceOrMore(Unseekables<?, ?> select, IndexedPredicate<Shard> predicate, Consumer<Id> nodes)
     {
-        for (int shardIndex : subsetForKeys(select, predicate))
+        for (int shardIndex : subsetFor(select, predicate))
         {
             Shard shard = shards[shardIndex];
             for (Id id : shard.nodes)
@@ -263,22 +303,25 @@ public class Topology
         }
     }
 
-    public <T> T foldl(AbstractKeys<?, ?> select, IndexedBiFunction<Shard, T, T> function, T accumulator)
+    public <T> T foldl(Unseekables<?, ?> select, IndexedBiFunction<Shard, T, T> function, T accumulator)
     {
-        int subsetIndex = 0;
-        // TODO: use SortedArrays.findNextIntersection
-        for (int i = 0 ; i < select.size() ; )
+        Unseekables<?, ?> as = select;
+        Ranges bs = ranges;
+        int ai = 0, bi = 0;
+
+        while (true)
         {
-            // find the range containing the key at i
-            subsetIndex = subsetOfRanges.rangeIndexForKey(subsetIndex, subsetOfRanges.size(), select.get(i));
-            if (subsetIndex < 0 || subsetIndex >= subsetOfRanges.size())
-                throw new IllegalArgumentException("Range not found for " + select.get(i));
-            int supersetIndex = supersetIndexes[subsetIndex];
-            Shard shard = shards[supersetIndex];
-            accumulator = function.apply(subsetIndex, shard, accumulator);
-            // find the first key outside this range
-            i = shard.range.nextHigherKeyIndex(select, i);
+            long abi = as.findNextIntersection(ai, bs, bi);
+            if (abi < 0)
+                break;
+
+            ai = (int)(abi);
+            bi = (int)(abi >>> 32);
+
+            accumulator = function.apply(bi, shards[bi], accumulator);
+            ++bi;
         }
+
         return accumulator;
     }
 
@@ -458,7 +501,7 @@ public class Topology
         return nodeLookup.keySet();
     }
 
-    public KeyRanges ranges()
+    public Ranges ranges()
     {
         return ranges;
     }

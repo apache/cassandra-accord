@@ -20,7 +20,6 @@ package accord.messages;
 
 import javax.annotation.Nullable;
 
-import accord.api.Key;
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.local.*;
@@ -40,19 +39,19 @@ import static accord.local.Status.Durability.NotDurable;
 import static accord.messages.TxnRequest.computeScope;
 
 public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
-        implements EpochRequest, PreLoadContext, MapReduceConsume<SafeCommandStore, CheckStatus.CheckStatusOk>
+        implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, CheckStatus.CheckStatusOk>
 {
     public static class SerializationSupport
     {
         public static CheckStatusOk createOk(SaveStatus status, Ballot promised, Ballot accepted, @Nullable Timestamp executeAt,
                                              boolean isCoordinating, Durability durability,
-                                             @Nullable AbstractRoute route, @Nullable RoutingKey homeKey)
+                                             @Nullable Route<?> route, @Nullable RoutingKey homeKey)
         {
             return new CheckStatusOk(status, promised, accepted, executeAt, isCoordinating, durability, route, homeKey);
         }
         public static CheckStatusOk createOk(SaveStatus status, Ballot promised, Ballot accepted, @Nullable Timestamp executeAt,
                                              boolean isCoordinating, Durability durability,
-                                             @Nullable AbstractRoute route, @Nullable RoutingKey homeKey,
+                                             @Nullable Route<?> route, @Nullable RoutingKey homeKey,
                                              PartialTxn partialTxn, PartialDeps committedDeps, Writes writes, Result result)
         {
             return new CheckStatusOkFull(status, promised, accepted, executeAt, isCoordinating, durability, route, homeKey,
@@ -66,15 +65,15 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
         No, Route, All
     }
 
-    public final RoutingKeys someKeys;
+    public final Unseekables<?, ?> query;
     public final long startEpoch;
     public final long endEpoch;
     public final IncludeInfo includeInfo;
 
-    public CheckStatus(TxnId txnId, RoutingKeys someKeys, long startEpoch, long endEpoch, IncludeInfo includeInfo)
+    public CheckStatus(TxnId txnId, Unseekables<?, ?> query, long startEpoch, long endEpoch, IncludeInfo includeInfo)
     {
         super(txnId);
-        this.someKeys = someKeys;
+        this.query = query;
         this.startEpoch = startEpoch;
         this.endEpoch = endEpoch;
         this.includeInfo = includeInfo;
@@ -87,19 +86,15 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
     }
 
     @Override
-    public Iterable<Key> keys()
+    public Seekables<?, ?> keys()
     {
-        return Collections.emptyList();
+        return Keys.EMPTY;
     }
 
-    public CheckStatus(Id to, Topologies topologies, TxnId txnId, RoutingKeys someKeys, IncludeInfo includeInfo)
+    public CheckStatus(Id to, Topologies topologies, TxnId txnId, Unseekables<?, ?> query, IncludeInfo includeInfo)
     {
         super(txnId);
-        // TODO (now): cleanup use of instanceof to avoid hotspot cache thrashing
-        if (someKeys instanceof AbstractRoute)
-            this.someKeys = computeScope(to, topologies, (AbstractRoute) someKeys, 0, AbstractRoute::sliceStrict, PartialRoute::union);
-        else
-            this.someKeys = computeScope(to, topologies, someKeys, 0, RoutingKeys::slice, RoutingKeys::union);
+        this.query = computeScope(to, topologies, (Unseekables) query, 0, Unseekables::slice, Unseekables::union);
         this.startEpoch = topologies.oldestEpoch();
         this.endEpoch = topologies.currentEpoch();
         this.includeInfo = includeInfo;
@@ -107,7 +102,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
 
     public void process()
     {
-        node.mapReduceConsumeLocal(this, someKeys, startEpoch, endEpoch, this);
+        node.mapReduceConsumeLocal(this, query, startEpoch, endEpoch, this);
     }
 
     @Override
@@ -139,12 +134,12 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
         else node.reply(replyTo, replyContext, ok);
     }
 
-    public interface CheckStatusReply extends Reply
+    public static abstract class CheckStatusReply implements Reply
     {
-        boolean isOk();
+        abstract public boolean isOk();
     }
 
-    public static class CheckStatusOk implements CheckStatusReply
+    public static class CheckStatusOk extends CheckStatusReply
     {
         public final SaveStatus saveStatus;
         public final Ballot promised;
@@ -152,7 +147,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
         public final @Nullable Timestamp executeAt; // not set if invalidating or invalidated
         public final boolean isCoordinating;
         public final Durability durability; // i.e. on all shards
-        public final @Nullable AbstractRoute route;
+        public final @Nullable Route<?> route;
         public final @Nullable RoutingKey homeKey;
 
         public CheckStatusOk(Node node, Command command)
@@ -162,8 +157,8 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
         }
 
         private CheckStatusOk(SaveStatus saveStatus, Ballot promised, Ballot accepted, @Nullable Timestamp executeAt,
-                              boolean isCoordinating, Durability durability,
-                              @Nullable AbstractRoute route, @Nullable RoutingKey homeKey)
+                      boolean isCoordinating, Durability durability,
+                      @Nullable Route<?> route, @Nullable RoutingKey homeKey)
         {
             this.saveStatus = saveStatus;
             this.promised = promised;
@@ -216,7 +211,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
             CheckStatusOk maxPromised = prefer.promised.compareTo(defer.promised) >= 0 ? prefer : defer;
             CheckStatusOk maxDurability = prefer.durability.compareTo(defer.durability) >= 0 ? prefer : defer;
             CheckStatusOk maxHomeKey = prefer.homeKey != null || defer.homeKey == null ? prefer : defer;
-            AbstractRoute mergedRoute = AbstractRoute.merge(prefer.route, defer.route);
+            Route<?> mergedRoute = Route.merge(prefer.route, (Route)defer.route);
 
             // if the maximum (or preferred equal) is the same on all dimensions, return it
             if (mergeStatus == maxStatus.saveStatus && maxStatus == maxPromised && maxStatus == maxDurability
@@ -257,7 +252,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
         }
 
         protected CheckStatusOkFull(SaveStatus status, Ballot promised, Ballot accepted, Timestamp executeAt,
-                                  boolean isCoordinating, Durability durability, AbstractRoute route,
+                                  boolean isCoordinating, Durability durability, Route<?> route,
                                   RoutingKey homeKey, PartialTxn partialTxn, PartialDeps committedDeps, Writes writes, Result result)
         {
             super(status, promised, accepted, executeAt, isCoordinating, durability, route, homeKey);
@@ -304,19 +299,19 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
                                          max.homeKey, partialTxn, committedDeps, fullMax.writes, fullMax.result);
         }
 
-        public Known sufficientFor(AbstractKeys<?, ?> forKeys)
+        public Known sufficientFor(Unseekables<?, ?> unseekables)
         {
-            return sufficientFor(forKeys, saveStatus, partialTxn, committedDeps, writes, result);
+            return sufficientFor(unseekables, saveStatus, partialTxn, committedDeps, writes, result);
         }
 
-        private static Known sufficientFor(AbstractKeys<?, ?> forKeys, SaveStatus maxStatus, PartialTxn partialTxn, PartialDeps committedDeps, Writes writes, Result result)
+        private static Known sufficientFor(Unseekables<?, ?> unseekables, SaveStatus maxStatus, PartialTxn partialTxn, PartialDeps committedDeps, Writes writes, Result result)
         {
             Status.Definition definition = maxStatus.known.definition;
             switch (definition)
             {
                 default: throw new AssertionError();
                 case DefinitionKnown:
-                    if (partialTxn != null && partialTxn.covers(forKeys))
+                    if (partialTxn != null && partialTxn.covers(unseekables))
                         break;
                     definition = Definition.DefinitionUnknown;
                 case DefinitionUnknown:
@@ -329,7 +324,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
             {
                 default: throw new AssertionError();
                 case DepsKnown:
-                    if (committedDeps != null && committedDeps.covers(forKeys))
+                    if (committedDeps != null && committedDeps.covers(unseekables))
                         break;
                     deps = KnownDeps.DepsUnknown;
                 case NoDeps:
@@ -371,7 +366,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
         }
     }
 
-    public static class CheckStatusNack implements CheckStatusReply
+    public static class CheckStatusNack extends CheckStatusReply
     {
         private static final CheckStatusNack instance = new CheckStatusNack();
 

@@ -4,14 +4,12 @@ import java.util.function.BiConsumer;
 
 import accord.api.RoutingKey;
 import accord.local.Node;
-import accord.local.Node.Id;
 import accord.local.Status;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
-import accord.primitives.Route;
-import accord.primitives.RoutingKeys;
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
+import accord.primitives.*;
+
+import static accord.primitives.Route.isFullRoute;
 
 /**
  * Find the Route of a known (txnId, homeKey) pair
@@ -20,10 +18,10 @@ public class FindRoute extends CheckShards
 {
     public static class Result
     {
-        public final Route route;
+        public final FullRoute<?> route;
         public final Timestamp executeAt;
 
-        public Result(Route route, Timestamp executeAt)
+        public Result(FullRoute<?> route, Timestamp executeAt)
         {
             this.route = route;
             this.executeAt = executeAt;
@@ -31,7 +29,7 @@ public class FindRoute extends CheckShards
 
         public Result(CheckStatusOk ok)
         {
-            this.route = (Route)ok.route;
+            this.route = Route.castToFullRoute(ok.route);
             this.executeAt = ok.saveStatus.status.compareTo(Status.PreCommitted) >= 0 ? ok.executeAt : null;
         }
     }
@@ -53,7 +51,7 @@ public class FindRoute extends CheckShards
     @Override
     protected boolean isSufficient(CheckStatusOk ok)
     {
-        return ok.route instanceof Route;
+        return isFullRoute(ok.route);
     }
 
     @Override

@@ -191,7 +191,7 @@ public class Json
             List<Key> keys = new ArrayList<>();
             in.beginArray();
             while (in.hasNext())
-                keys.add(MaelstromKey.read(in));
+                keys.add(MaelstromKey.readKey(in));
             in.endArray();
             return Keys.of(keys);
         }
@@ -208,7 +208,7 @@ public class Json
                 return;
             }
 
-            Keys keys = txn.keys();
+            Keys keys = (Keys)txn.keys();
             MaelstromRead read = (MaelstromRead) txn.read();
             MaelstromUpdate update = (MaelstromUpdate) txn.update();
 
@@ -217,7 +217,7 @@ public class Json
             out.beginArray();
             for (int i = 0 ; i < keys.size() ; ++i)
             {
-                MaelstromKey key = (MaelstromKey) keys.get(i);
+                MaelstromKey.Key key = (MaelstromKey.Key) keys.get(i);
                 if (read.keys.indexOf(key) >= 0)
                 {
                     key.datum.write(out);
@@ -267,7 +267,7 @@ public class Json
                     case "r":
                         in.beginArray();
                         while (in.hasNext())
-                            buildReadKeys.add(MaelstromKey.read(in));
+                            buildReadKeys.add(MaelstromKey.readKey(in));
                         in.endArray();
                         break;
                     case "append":
@@ -275,7 +275,7 @@ public class Json
                         while (in.hasNext())
                         {
                             in.beginArray();
-                            Key key = MaelstromKey.read(in);
+                            Key key = MaelstromKey.readKey(in);
                             buildKeys.add(key);
                             Value append = Value.read(in);
                             update.put(key, append);
@@ -336,7 +336,7 @@ public class Json
             while (in.hasNext())
             {
                 in.beginArray();
-                Key key = MaelstromKey.read(in);
+                Key key = MaelstromKey.readKey(in);
                 TxnId txnId = GSON.fromJson(in, TxnId.class);
                 byKey.computeIfAbsent(key, ignore -> new ArrayList<>()).add(txnId);
                 in.endArray();
@@ -452,7 +452,7 @@ public class Json
             while (in.hasNext())
             {
                 in.beginArray();
-                MaelstromKey key = MaelstromKey.read(in);
+                Key key = MaelstromKey.readKey(in);
                 Value value = Value.read(in);
                 result.put(key, value);
                 in.endArray();
@@ -487,7 +487,8 @@ public class Json
                                 .registerTypeAdapter(TxnId.class, TXNID_ADAPTER)
                                 .registerTypeAdapter(Timestamp.class, TIMESTAMP_ADAPTER)
                                 .registerTypeAdapter(Datum.class, Datum.GSON_ADAPTER)
-                                .registerTypeAdapter(MaelstromKey.class, MaelstromKey.GSON_ADAPTER)
+                                .registerTypeAdapter(MaelstromKey.Key.class, MaelstromKey.GSON_KEY_ADAPTER)
+                                .registerTypeAdapter(MaelstromKey.Routing.class, MaelstromKey.GSON_ROUTING_ADAPTER)
                                 .registerTypeAdapter(Value.class, Value.GSON_ADAPTER)
                                 .registerTypeAdapter(Writes.class, TXN_WRITES_ADAPTER)
                                 .registerTypeAdapter(MaelstromResult.class, MaelstromResult.GSON_ADAPTER)

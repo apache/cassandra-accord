@@ -24,7 +24,7 @@ import javax.annotation.Nullable;
 
 import accord.local.Status.Known;
 import accord.primitives.*;
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 
 import accord.api.RoutingKey;
 import accord.local.Node;
@@ -39,12 +39,12 @@ import static accord.utils.Functions.reduceNonNull;
  */
 public class MaybeRecover extends CheckShards
 {
-    @Nullable final AbstractRoute route;
+    @Nullable final Route<?> route;
     final RoutingKey homeKey;
     final ProgressToken prevProgress;
     final BiConsumer<Outcome, Throwable> callback;
 
-    MaybeRecover(Node node, TxnId txnId, RoutingKey homeKey, @Nullable AbstractRoute route, ProgressToken prevProgress, BiConsumer<Outcome, Throwable> callback)
+    MaybeRecover(Node node, TxnId txnId, RoutingKey homeKey, @Nullable Route<?> route, ProgressToken prevProgress, BiConsumer<Outcome, Throwable> callback)
     {
         // we only want to enquire with the home shard, but we prefer maximal route information for running Invalidation against, if necessary
         super(node, txnId, RoutingKeys.of(homeKey), txnId.epoch, IncludeInfo.Route);
@@ -54,7 +54,7 @@ public class MaybeRecover extends CheckShards
         this.callback = callback;
     }
 
-    public static void maybeRecover(Node node, TxnId txnId, RoutingKey homeKey, @Nullable AbstractRoute route,
+    public static void maybeRecover(Node node, TxnId txnId, RoutingKey homeKey, @Nullable Route<?> route,
                                     ProgressToken prevProgress, BiConsumer<Outcome, Throwable> callback)
     {
         MaybeRecover maybeRecover = new MaybeRecover(node, txnId, homeKey, route, prevProgress, callback);
@@ -82,17 +82,17 @@ public class MaybeRecover extends CheckShards
         }
         else
         {
-            Preconditions.checkState(merged != null);
+            Invariants.checkState(merged != null);
             Known known = merged.saveStatus.known;
 
             switch (known.outcome)
             {
                 default: throw new AssertionError();
                 case OutcomeUnknown:
-                    if (!known.isDefinitionKnown() && !(merged.route instanceof Route))
+                    if (!known.isDefinitionKnown() && !Route.isFullRoute(merged.route))
                     {
                         // order important, as route could be a Route which does not implement RoutingKeys.union
-                        RoutingKeys someKeys = reduceNonNull(RoutingKeys::union, this.contactKeys, merged.route, route);
+                        Unseekables<?, ?> someKeys = reduceNonNull(Unseekables::merge, (Unseekables)this.contact, merged.route, route);
                         // for correctness reasons, we have not necessarily preempted the initial pre-accept round and
                         // may have raced with it, so we must attempt to recover anything we see pre-accepted.
                         Invalidate.invalidate(node, txnId, someKeys.with(homeKey), callback);
@@ -100,14 +100,14 @@ public class MaybeRecover extends CheckShards
                     }
                 case OutcomeKnown:
                 case OutcomeApplied:
-                    Preconditions.checkState(merged.route instanceof Route);
+                    Invariants.checkState(Route.isFullRoute(merged.route));
                     if (hasMadeProgress(merged)) callback.accept(merged.toProgressToken(), null);
-                    else node.recover(txnId, (Route) merged.route).addCallback(callback);
+                    else node.recover(txnId, Route.castToFullRoute(merged.route)).addCallback(callback);
                     break;
 
                 case InvalidationApplied:
                     // TODO: we should simply invoke commitInvalidate
-                    RoutingKeys someKeys = reduceNonNull(RoutingKeys::union, this.contactKeys, merged.route, route);
+                    Unseekables<?, ?> someKeys = reduceNonNull(Unseekables::merge, (Unseekables)contact, merged.route, route);
                     Invalidate.invalidate(node, txnId, someKeys.with(homeKey), callback);
             }
         }
