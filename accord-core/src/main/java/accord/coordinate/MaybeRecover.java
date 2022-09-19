@@ -94,6 +94,8 @@ public class MaybeRecover extends CheckShards
                     {
                         // order important, as route could be a Route which does not implement RoutingKeys.union
                         RoutingKeys someKeys = reduceNonNull(RoutingKeys::union, this.contactKeys, merged.route, route);
+                        // for correctness reasons, we have not necessarily preempted the initial pre-accept round and
+                        // may have raced with it, so we must attempt to recover anything we see pre-accepted.
                         Invalidate.invalidateIfNotWitnessed(node, txnId, someKeys, homeKey, callback);
                         break;
                     }

@@ -128,10 +128,17 @@ public class Invalidate implements Callback<InvalidateReply>
             switch (maxStatus)
             {
                 default: throw new IllegalStateException();
+                case AcceptedInvalidate:
+                    // latest accept also invalidating, so we're on the same page and should finish our invalidation
                 case NotWitnessed:
                     break;
-                case PreAccepted:
+
+                    case PreAccepted:
                 case Accepted:
+                    // note: we do not attempt to calculate PreAccept outcome here, we rely on the caller to tell us
+                    // what is safe to do. If the caller knows no decision was reached with PreAccept, we can safely
+                    // invalidate if we see PreAccept, and only need to recover if we see Accept
+                    // TODO: if we see Accept, go straight to propose to save some unnecessary work
                     if (recoverIfAtLeast.compareTo(maxStatus) > 0)
                         break;
 
@@ -139,6 +146,7 @@ public class Invalidate implements Callback<InvalidateReply>
                 case ReadyToExecute:
                 case PreApplied:
                 case Applied:
+                    // TODO: if we see Committed or above, go straight to Execute if we have assembled enough information
                     if (route != null)
                     {
                         RecoverWithRoute.recover(node, ballot, txnId, route, callback);
@@ -157,9 +165,6 @@ public class Invalidate implements Callback<InvalidateReply>
                     }
                     return;
 
-                case AcceptedInvalidate:
-                    break; // latest accept also invalidating, so we're on the same page and should finish our invalidation
-
                 case Invalidated:
                     isDone = true;
                     node.forEachLocalSince(contextFor(txnId), informKeys, txnId, safeStore -> {
@@ -173,9 +178,8 @@ public class Invalidate implements Callback<InvalidateReply>
 
         // if we have witnessed the transaction, but are able to invalidate, do we want to proceed?
         // Probably simplest to do so, but perhaps better for user if we don't.
-        proposeInvalidate(node, ballot, txnId, invalidateWithKey).addCallback((success, fail) -> {
+        proposeInvalidate(node, ballot, txnId, invalidateWithKey, (success, fail) -> {
             isDone = true;
-
             if (fail != null)
             {
                 callback.accept(null, fail);

@@ -45,6 +45,9 @@ import com.google.common.collect.Sets;
 import org.apache.cassandra.utils.concurrent.AsyncFuture;
 import org.apache.cassandra.utils.concurrent.Future;
 
+import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
+import static accord.messages.Commit.Invalidate.commitInvalidate;
+
 /**
  * Perform initial rounds of PreAccept and Accept until we have reached agreement about when we should execute.
  * If we are preempted by a recovery coordinator, we abort and let them complete (and notify us about the execution result)
@@ -276,15 +279,33 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
 
             // TODO: perhaps don't submit Accept immediately if we almost have enough for fast-path,
             //       but by sending accept we rule out hybrid fast-path
-            node.withEpoch(executeAt.epoch, () -> Propose.propose(node, tracker.topologies(), Ballot.ZERO, txnId, txn, route, executeAt, deps, this));
+            // TODO: if we receive a MAX response, perhaps defer to permit at least one other node to respond before invalidating
+            if (node.agent().isExpired(txnId, executeAt.real))
+            {
+                proposeInvalidate(node, Ballot.ZERO, txnId, route.homeKey, (success, fail) -> {
+                    if (fail != null)
+                    {
+                        accept(null, fail);
+                    }
+                    else
+                    {
+                        commitInvalidate(node, txnId, route, executeAt);
+                        accept(null, new Timeout(txnId, route.homeKey));
+                    }
+                });
+            }
+            else
+            {
+                node.withEpoch(executeAt.epoch, () -> Propose.propose(node, tracker.topologies(), Ballot.ZERO, txnId, txn, route, executeAt, deps, this));
+            }
         }
     }
 
     @Override
     public void accept(Result success, Throwable failure)
     {
-        if (failure instanceof Timeout)
-            failure = ((Timeout) failure).with(txnId, route.homeKey);
+        if (failure instanceof CoordinateFailed)
+            ((CoordinateFailed) failure).set(txnId, route.homeKey);
 
         if (success != null) trySuccess(success);
         else tryFailure(failure);

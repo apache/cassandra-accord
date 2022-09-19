@@ -109,8 +109,8 @@ public class ListRequest implements Request
             else if (fail instanceof CoordinateFailed)
             {
                 ((Cluster)node.scheduler()).onDone(() -> {
-                    RoutingKey homeKey = ((CoordinateFailed) fail).homeKey;
-                    TxnId txnId = ((CoordinateFailed) fail).txnId;
+                    RoutingKey homeKey = ((CoordinateFailed) fail).homeKey();
+                    TxnId txnId = ((CoordinateFailed) fail).txnId();
                     CheckOnResult.checkOnResult(node, txnId, homeKey, (s, f) -> {
                         switch (s)
                         {

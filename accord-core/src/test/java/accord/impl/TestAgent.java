@@ -23,6 +23,9 @@ import accord.api.Agent;
 import accord.api.Result;
 import accord.local.Command;
 import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+
+import java.util.concurrent.TimeUnit;
 
 public class TestAgent implements Agent
 {
@@ -48,5 +51,11 @@ public class TestAgent implements Agent
     @Override
     public void onHandledException(Throwable t)
     {
+    }
+
+    @Override
+    public boolean isExpired(TxnId initiated, long now)
+    {
+        return TimeUnit.SECONDS.convert(now - initiated.real, TimeUnit.MICROSECONDS) >= 10;
     }
 }

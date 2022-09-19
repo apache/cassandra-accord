@@ -246,13 +246,11 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
         if (executeAt() == null)
         {
-            Timestamp max = safeStore.maxConflict(partialTxn.keys());
             TxnId txnId = txnId();
             // unlike in the Accord paper, we partition shards within a node, so that to ensure a total order we must either:
             //  - use a global logical clock to issue new timestamps; or
             //  - assign each shard _and_ process a unique id, and use both as components of the timestamp
-            setExecuteAt(txnId.compareTo(max) > 0 && txnId.epoch >= safeStore.latestEpoch()
-                    ? txnId : safeStore.uniqueNow(max));
+            setExecuteAt(safeStore.preaccept(txnId, partialTxn.keys()));
 
             if (status() == NotWitnessed)
                 setStatus(PreAccepted);

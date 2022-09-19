@@ -40,7 +40,7 @@ import accord.primitives.TxnId;
 import accord.messages.Accept;
 import accord.messages.Accept.AcceptOk;
 import accord.messages.Accept.AcceptReply;
-import org.apache.cassandra.utils.concurrent.AsyncFuture;
+import com.google.common.base.Preconditions;
 
 class Propose implements Callback<AcceptReply>
 {
@@ -132,59 +132,73 @@ class Propose implements Callback<AcceptReply>
     }
 
     // A special version for proposing the invalidation of a transaction; only needs to succeed on one shard
-    static class Invalidate extends AsyncFuture<Void> implements Callback<AcceptReply>
+    static class Invalidate implements Callback<AcceptReply>
     {
         final Node node;
         final Ballot ballot;
         final TxnId txnId;
-        final RoutingKey someKey;
+        final RoutingKey invalidateWithKey;
+        final BiConsumer<Void, Throwable> callback;
 
         private final QuorumShardTracker acceptTracker;
+        private boolean isDone;
 
-        Invalidate(Node node, Shard shard, Ballot ballot, TxnId txnId, RoutingKey someKey)
+        Invalidate(Node node, Shard shard, Ballot ballot, TxnId txnId, RoutingKey invalidateWithKey, BiConsumer<Void, Throwable> callback)
         {
             this.node = node;
             this.acceptTracker = new QuorumShardTracker(shard);
             this.ballot = ballot;
             this.txnId = txnId;
-            this.someKey = someKey;
+            this.invalidateWithKey = invalidateWithKey;
+            this.callback = callback;
         }
 
-        public static Invalidate proposeInvalidate(Node node, Ballot ballot, TxnId txnId, RoutingKey someKey)
+        public static Invalidate proposeInvalidate(Node node, Ballot ballot, TxnId txnId, RoutingKey invalidateWithKey, BiConsumer<Void, Throwable> callback)
         {
-            Shard shard = node.topology().forEpochIfKnown(someKey, txnId.epoch);
-            Invalidate invalidate = new Invalidate(node, shard, ballot, txnId, someKey);
-            node.send(shard.nodes, to -> new Accept.Invalidate(ballot, txnId, someKey), invalidate);
+            Shard shard = node.topology().forEpochIfKnown(invalidateWithKey, txnId.epoch);
+            Invalidate invalidate = new Invalidate(node, shard, ballot, txnId, invalidateWithKey, callback);
+            node.send(shard.nodes, to -> new Accept.Invalidate(ballot, txnId, invalidateWithKey), invalidate);
             return invalidate;
         }
 
         @Override
         public void onSuccess(Id from, AcceptReply reply)
         {
-            if (isDone())
+            if (isDone)
                 return;
 
             if (!reply.isOk())
             {
-                tryFailure(new Preempted(txnId, null));
+                isDone = true;
+                callback.accept(null, new Preempted(txnId, null));
                 return;
             }
 
             if (acceptTracker.success(from))
-                trySuccess(null);
+            {
+                isDone = true;
+                callback.accept(null, null);
+            }
         }
 
         @Override
         public void onFailure(Id from, Throwable failure)
         {
             if (acceptTracker.failure(from))
-                tryFailure(new Timeout(txnId, null));
+            {
+                isDone = true;
+                callback.accept(null, new Timeout(txnId, null));
+            }
         }
 
         @Override
         public void onCallbackFailure(Id from, Throwable failure)
         {
-            tryFailure(failure);
+            if (isDone)
+                return;
+
+            isDone = true;
+            callback.accept(null, failure);
         }
     }
 }

@@ -54,6 +54,8 @@ import accord.topology.Topology;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static java.util.concurrent.TimeUnit.SECONDS;
+
 public class Cluster implements Scheduler
 {
     public static final Logger trace = LoggerFactory.getLogger("accord.impl.basic.Trace");
@@ -218,7 +220,7 @@ public class Cluster implements Scheduler
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(node, messageSink, randomSupplier, topology, lookup::get, topologyUpdates);
                 lookup.put(node, new Node(node, messageSink, configService,
-                                          nowSupplier.get(), () -> new ListStore(node), new ListAgent(onFailure),
+                                          nowSupplier.get(), () -> new ListStore(node), new ListAgent(30L, onFailure),
                                           randomSupplier.get(), sinks, SimpleProgressLog::new, InMemoryCommandStores.Synchronized::new));
             }
 
@@ -228,8 +230,8 @@ public class Cluster implements Scheduler
                 Collections.shuffle(nodesList, shuffleRandom);
                 int partitionSize = shuffleRandom.nextInt((topologyFactory.rf+1)/2);
                 sinks.partitionSet = new LinkedHashSet<>(nodesList.subList(0, partitionSize));
-            }, 5L, TimeUnit.SECONDS);
-            Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1L, TimeUnit.SECONDS);
+            }, 5L, SECONDS);
+            Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1L, SECONDS);
 
             Packet next;
             while ((next = in.get()) != null)

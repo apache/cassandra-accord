@@ -28,11 +28,30 @@ import accord.primitives.TxnId;
  */
 public class CoordinateFailed extends Throwable
 {
-    public final TxnId txnId;
-    public final @Nullable RoutingKey homeKey;
+    private @Nullable TxnId txnId;
+    private @Nullable RoutingKey homeKey;
     public CoordinateFailed(TxnId txnId, @Nullable RoutingKey homeKey)
     {
         this.txnId = txnId;
         this.homeKey = homeKey;
+    }
+
+    void set(TxnId txnId, RoutingKey homeKey)
+    {
+        if (this.txnId == null && txnId != null)
+            this.txnId = txnId;
+
+        if (this.homeKey == null && homeKey != null)
+            this.homeKey = homeKey;
+    }
+
+    public @Nullable TxnId txnId()
+    {
+        return txnId;
+    }
+
+    public @Nullable RoutingKey homeKey()
+    {
+        return homeKey;
     }
 }
