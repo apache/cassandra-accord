@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 
 import accord.primitives.*;
+import accord.messages.Commit;
 import com.google.common.base.Preconditions;
 
 import accord.api.Result;
@@ -231,15 +232,8 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             {
                 default: throw new IllegalStateException();
                 case Invalidated:
-                {
-                    Timestamp invalidateUntil = recoverOks.stream().map(ok -> ok.executeAt).reduce(txnId, Timestamp::max);
-                    node.withEpoch(invalidateUntil.epoch, () -> {
-                        commitInvalidate(node, txnId, route, invalidateUntil);
-                    });
-                    isDone = true;
-                    callback.accept(ProgressToken.INVALIDATED, null);
+                    commitInvalidate();
                     return;
-                }
 
                 case Applied:
                 case PreApplied:
@@ -273,22 +267,11 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
                 case Accepted:
                     // no need to preaccept the later round, as future operations always include every old epoch (until it is fully migrated)
-                    node.withEpoch(acceptOrCommit.executeAt.epoch, () -> {
-                        Propose.propose(node, ballot, txnId, txn, route, acceptOrCommit.executeAt, mergeDeps(), this);
-                    });
+                    propose(acceptOrCommit.executeAt, mergeDeps());
                     return;
 
                 case AcceptedInvalidate:
-                    proposeInvalidate(node, ballot, txnId, route.homeKey).addCallback((success, fail) -> {
-                        if (fail != null) accept(null, fail);
-                        else
-                        {
-                            Timestamp invalidateUntil = recoverOks.stream().map(ok -> ok.executeAt).reduce(txnId, Timestamp::max);
-                            commitInvalidate(node, txnId, route, invalidateUntil);
-                            isDone = true;
-                            callback.accept(ProgressToken.INVALIDATED, null);
-                        }
-                    });
+                    invalidate();
                     return;
 
                 case NotWitnessed:
@@ -297,46 +280,62 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             }
         }
 
+        if (!tracker.hasMetFastPathCriteria())
+        {
+            invalidate();
+            return;
+        }
+
+        for (RecoverOk ok : recoverOks)
+        {
+            if (ok.rejectsFastPath)
+            {
+                invalidate();
+                return;
+            }
+        }
+
         // should all be PreAccept
         Deps deps = mergeDeps();
         Deps earlierAcceptedNoWitness = Deps.merge(recoverOks, ok -> ok.earlierAcceptedNoWitness);
         Deps earlierCommittedWitness = Deps.merge(recoverOks, ok -> ok.earlierCommittedWitness);
-        Timestamp maxExecuteAt = txnId;
-        boolean rejectsFastPath = false;
-        for (RecoverOk ok : recoverOks)
+        earlierAcceptedNoWitness = earlierAcceptedNoWitness.without(earlierCommittedWitness::contains);
+        if (!earlierAcceptedNoWitness.isEmpty())
         {
-            maxExecuteAt = Timestamp.max(maxExecuteAt, ok.executeAt);
-            rejectsFastPath |= ok.rejectsFastPath;
+            // If there exist commands that were proposed an earlier execution time than us that have not witnessed us,
+            // we have to be certain these commands have not successfully committed without witnessing us (thereby
+            // ruling out a fast path decision for us and changing our recovery decision).
+            // So, we wait for these commands to finish committing before retrying recovery.
+            // TODO: check paper: do we assume that witnessing in PreAccept implies witnessing in Accept? Not guaranteed.
+            // See whitepaper for more details
+            awaitCommits(node, earlierAcceptedNoWitness).addCallback((success, failure) -> {
+                if (failure != null) accept(null, failure);
+                else retry();
+            });
+            return;
         }
+        propose(txnId, deps);
+    }
 
-        Timestamp executeAt;
-        if (rejectsFastPath || !tracker.hasMetFastPathCriteria())
-        {
-            executeAt = maxExecuteAt;
-        }
-        else
-        {
-            earlierAcceptedNoWitness.without(earlierCommittedWitness::contains);
-            if (!earlierAcceptedNoWitness.isEmpty())
-            {
-                // If there exist commands that were proposed an earlier execution time than us that have not witnessed us,
-                // we have to be certain these commands have not successfully committed without witnessing us (thereby
-                // ruling out a fast path decision for us and changing our recovery decision).
-                // So, we wait for these commands to finish committing before retrying recovery.
-                // TODO: check paper: do we assume that witnessing in PreAccept implies witnessing in Accept? Not guaranteed.
-                // See whitepaper for more details
-                awaitCommits(node, earlierAcceptedNoWitness).addCallback((success, failure) -> {
-                    if (failure != null) accept(null, failure);
-                    else retry();
-                });
-                return;
-            }
-            executeAt = txnId;
-        }
-
-        node.withEpoch(executeAt.epoch, () -> {
-            Propose.propose(node, ballot, txnId, txn, route, executeAt, deps, this);
+    private void invalidate()
+    {
+        proposeInvalidate(node, ballot, txnId, route.homeKey, (success, fail) -> {
+            if (fail != null) accept(null, fail);
+            else commitInvalidate();
         });
+    }
+
+    private void commitInvalidate()
+    {
+        Timestamp invalidateUntil = recoverOks.stream().map(ok -> ok.executeAt).reduce(txnId, Timestamp::max);
+        node.withEpoch(invalidateUntil.epoch, () -> Commit.Invalidate.commitInvalidate(node, txnId, route, invalidateUntil));
+        isDone = true;
+        callback.accept(ProgressToken.INVALIDATED, null);
+    }
+
+    private void propose(Timestamp executeAt, Deps deps)
+    {
+        node.withEpoch(executeAt.epoch, () -> Propose.propose(node, ballot, txnId, txn, route, executeAt, deps, this));
     }
 
     private Deps mergeDeps()

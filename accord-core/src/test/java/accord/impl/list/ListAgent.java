@@ -26,13 +26,16 @@ import accord.api.Agent;
 import accord.api.Result;
 import accord.local.Command;
 import accord.primitives.Timestamp;
-import accord.primitives.Txn;
+import accord.primitives.TxnId;
 
 public class ListAgent implements Agent
 {
+    final long timeout;
     final Consumer<Throwable> onFailure;
-    public ListAgent(Consumer<Throwable> onFailure)
+
+    public ListAgent(long timeout, Consumer<Throwable> onFailure)
     {
+        this.timeout = timeout;
         this.onFailure = onFailure;
     }
 
@@ -62,5 +65,11 @@ public class ListAgent implements Agent
     @Override
     public void onHandledException(Throwable t)
     {
+    }
+
+    @Override
+    public boolean isExpired(TxnId initiated, long now)
+    {
+        return now - initiated.real >= timeout;
     }
 }

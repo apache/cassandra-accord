@@ -712,6 +712,7 @@ public class StrictSerializabilityVerifier
     final int[] bufNewPeerSteps;
     final UnknownStepHolder[] bufUnknownSteps;
 
+    // TODO (soon): verify operations with unknown outcomes are finalised by the first operation that starts after the coordinator abandons the txn
     public StrictSerializabilityVerifier(int keyCount)
     {
         this.keyCount = keyCount;

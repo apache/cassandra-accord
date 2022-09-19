@@ -60,12 +60,11 @@ public interface SafeCommandStore
 
     CommandStore commandStore();
     DataStore dataStore();
-    Timestamp uniqueNow(Timestamp atLeast);
     Agent agent();
     ProgressLog progressLog();
     CommandStore.RangesForEpoch ranges();
     long latestEpoch();
-    Timestamp maxConflict(Keys keys);
+    Timestamp preaccept(TxnId txnId, Keys keys);
 
     Future<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer);
     <T> Future<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function);

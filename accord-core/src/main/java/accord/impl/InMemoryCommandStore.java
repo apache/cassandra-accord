@@ -133,12 +133,6 @@ public class InMemoryCommandStore
         }
 
         @Override
-        public Timestamp uniqueNow(Timestamp atLeast)
-        {
-            return time.uniqueNow(atLeast);
-        }
-
-        @Override
         public Agent agent()
         {
             return agent;
@@ -163,7 +157,17 @@ public class InMemoryCommandStore
         }
 
         @Override
-        public Timestamp maxConflict(Keys keys)
+        public Timestamp preaccept(TxnId txnId, Keys keys)
+        {
+            Timestamp max = maxConflict(keys);
+            long epoch = latestEpoch();
+            if (txnId.compareTo(max) > 0 && txnId.epoch >= epoch && !agent.isExpired(txnId, time.now()))
+                return txnId;
+
+            return time.uniqueNow(max);
+        }
+
+        private Timestamp maxConflict(Keys keys)
         {
             return keys.stream()
                     .map(this::maybeCommandsForKey)

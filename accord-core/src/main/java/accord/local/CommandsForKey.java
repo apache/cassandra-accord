@@ -83,7 +83,7 @@ public abstract class CommandsForKey implements CommandListener
     public abstract CommandTimeseries<TxnId> committedByExecuteAt();
 
     public abstract Timestamp max();
-    public abstract void updateMax(Timestamp timestamp);
+    protected abstract void updateMax(Timestamp timestamp);
 
     @Override
     public PreLoadContext listenerPreLoadContext(TxnId caller)
@@ -94,7 +94,7 @@ public abstract class CommandsForKey implements CommandListener
     @Override
     public void onChange(SafeCommandStore safeStore, Command command)
     {
-        logger.trace("cfk[{}]: updating as listener in response to change on {} with status {} ({})",
+        logger.trace("[{}]: updating as listener in response to change on {} with status {} ({})",
                      key(), command.txnId(), command.status(), command);
         updateMax(command.executeAt());
         switch (command.status())

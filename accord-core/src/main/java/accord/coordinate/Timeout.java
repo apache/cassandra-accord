@@ -32,11 +32,4 @@ public class Timeout extends CoordinateFailed
     {
         super(txnId, homeKey);
     }
-
-    Timeout with(TxnId txnId, RoutingKey homeKey)
-    {
-        if (this.txnId == null || (this.homeKey == null && homeKey != null))
-            return new Timeout(txnId, homeKey);
-        return this;
-    }
 }

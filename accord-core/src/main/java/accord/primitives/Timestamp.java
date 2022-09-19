@@ -23,7 +23,6 @@ import accord.local.Node.Id;
 public class Timestamp implements Comparable<Timestamp>
 {
     public static final Timestamp NONE = new Timestamp(0, 0, 0, Id.NONE);
-    public static final Timestamp MAX = new Timestamp(Long.MAX_VALUE, Long.MAX_VALUE, Integer.MAX_VALUE, Id.MAX);
 
     public final long epoch;
     public final long real;
