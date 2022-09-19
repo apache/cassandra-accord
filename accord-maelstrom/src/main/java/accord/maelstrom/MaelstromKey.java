@@ -20,20 +20,44 @@ package accord.maelstrom;
 
 import java.io.IOException;
 
-import accord.api.Key;
 import accord.api.RoutingKey;
-import accord.maelstrom.Datum.Kind;
-import accord.primitives.KeyRange;
 
+import accord.primitives.RoutableKey;
 import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
 import javax.annotation.Nonnull;
 
-public class MaelstromKey implements Key
+public class MaelstromKey implements RoutableKey
 {
-    public static class Range extends KeyRange.EndInclusive
+    public static class Key extends MaelstromKey implements accord.api.Key
+    {
+        public Key(Datum.Kind kind, Object value)
+        {
+            super(kind, value);
+        }
+
+        public Key(Double value)
+        {
+            super(value);
+        }
+    }
+
+    public static class Routing extends MaelstromKey implements accord.api.RoutingKey
+    {
+        public Routing(Datum.Kind kind, Object value)
+        {
+            super(kind, value);
+        }
+
+        public Routing(Double value)
+        {
+            super(value);
+        }
+    }
+
+    public static class Range extends accord.primitives.Range.EndInclusive
     {
         public Range(RoutingKey start, RoutingKey end)
         {
@@ -41,15 +65,15 @@ public class MaelstromKey implements Key
         }
 
         @Override
-        public KeyRange subRange(RoutingKey start, RoutingKey end)
+        public accord.primitives.Range subRange(RoutingKey start, RoutingKey end)
         {
-            return new Range((MaelstromKey) start, (MaelstromKey) end);
+            return new Range(start, end);
         }
     }
 
     final Datum datum;
 
-    public MaelstromKey(Kind kind, Object value)
+    public MaelstromKey(Datum.Kind kind, Object value)
     {
         datum = new Datum(kind, value);
     }
@@ -60,30 +84,48 @@ public class MaelstromKey implements Key
     }
 
     @Override
-    public int compareTo(@Nonnull RoutingKey that)
+    public int compareTo(@Nonnull RoutableKey that)
     {
-        if (that instanceof InfiniteRoutingKey)
-            return -that.compareTo(this);
         return datum.compareTo(((MaelstromKey) that).datum);
     }
 
-    public static MaelstromKey read(JsonReader in) throws IOException
+    public static Key readKey(JsonReader in) throws IOException
     {
-        return Datum.read(in, MaelstromKey::new);
+        return Datum.read(in, Key::new);
     }
 
-    public static final TypeAdapter<MaelstromKey> GSON_ADAPTER = new TypeAdapter<MaelstromKey>()
+    public static Routing readRouting(JsonReader in) throws IOException
+    {
+        return Datum.read(in, Routing::new);
+    }
+
+    public static final TypeAdapter<Key> GSON_KEY_ADAPTER = new TypeAdapter<Key>()
     {
         @Override
-        public void write(JsonWriter out, MaelstromKey value) throws IOException
+        public void write(JsonWriter out, Key value) throws IOException
         {
             value.datum.write(out);
         }
 
         @Override
-        public MaelstromKey read(JsonReader in) throws IOException
+        public Key read(JsonReader in) throws IOException
         {
-            return MaelstromKey.read(in);
+            return MaelstromKey.readKey(in);
+        }
+    };
+
+    public static final TypeAdapter<Routing> GSON_ROUTING_ADAPTER = new TypeAdapter<Routing>()
+    {
+        @Override
+        public void write(JsonWriter out, Routing value) throws IOException
+        {
+            value.datum.write(out);
+        }
+
+        @Override
+        public Routing read(JsonReader in) throws IOException
+        {
+            return MaelstromKey.readRouting(in);
         }
     };
 
@@ -94,8 +136,10 @@ public class MaelstromKey implements Key
     }
 
     @Override
-    public Key toRoutingKey()
+    public RoutingKey toUnseekable()
     {
-        return this;
+        if (this instanceof Routing)
+            return (Routing)this;
+        return new Routing(datum.kind, datum.value);
     }
 }

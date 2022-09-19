@@ -7,12 +7,12 @@ import accord.local.Node;
 import accord.local.Status;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
-import accord.primitives.Route;
 import accord.primitives.RoutingKeys;
 import accord.primitives.TxnId;
 import com.google.common.base.Preconditions;
 
-import javax.annotation.Nonnull;
+import static accord.primitives.Route.castToFullRoute;
+import static accord.primitives.Route.isFullRoute;
 
 /**
  * A result of null indicates the transaction is globally persistent
@@ -62,7 +62,7 @@ public class RecoverWithHomeKey extends CheckShards implements BiConsumer<Object
         {
             callback.accept(null, fail);
         }
-        else if (merged == null || !(merged.route instanceof Route))
+        else if (merged == null || !isFullRoute(merged.route))
         {
             switch (success)
             {
@@ -75,13 +75,13 @@ public class RecoverWithHomeKey extends CheckShards implements BiConsumer<Object
                 case Quorum:
                     if (witnessedByInvalidation != null && witnessedByInvalidation.compareTo(Status.PreAccepted) > 0)
                         throw new IllegalStateException("We previously invalidated, finding a status that should be recoverable");
-                    Invalidate.invalidate(node, txnId, contactKeys.with(homeKey), true, callback);
+                    Invalidate.invalidate(node, txnId, contact.with(homeKey), true, callback);
             }
         }
         else
         {
             // start recovery
-            RecoverWithRoute.recover(node, txnId, (Route)merged.route, witnessedByInvalidation, callback);
+            RecoverWithRoute.recover(node, txnId, castToFullRoute(merged.route), witnessedByInvalidation, callback);
         }
     }
 }

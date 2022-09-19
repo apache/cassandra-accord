@@ -32,13 +32,10 @@ import accord.messages.Commit;
 import accord.messages.Commit.Kind;
 import accord.messages.InformHomeDurable;
 import accord.primitives.Deps;
-import accord.primitives.Route;
 import accord.primitives.Txn;
+import accord.primitives.*;
 import accord.topology.Shard;
 import accord.topology.Topologies;
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
-import accord.primitives.Writes;
 
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.local.Status.Durability.Durable;
@@ -48,7 +45,7 @@ public class Persist implements Callback<ApplyReply>
 {
     final Node node;
     final TxnId txnId;
-    final Route route;
+    final FullRoute<?> route;
     final Txn txn;
     final Timestamp executeAt;
     final Deps deps;
@@ -56,13 +53,13 @@ public class Persist implements Callback<ApplyReply>
     final Set<Id> persistedOn;
     boolean isDone;
 
-    public static void persist(Node node, Topologies sendTo, Topologies applyTo, TxnId txnId, Route route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    public static void persist(Node node, Topologies sendTo, Topologies applyTo, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         Persist persist = new Persist(node, applyTo, txnId, route, txn, executeAt, deps);
         node.send(sendTo.nodes(), to -> new Apply(to, sendTo, applyTo, executeAt.epoch, txnId, route, executeAt, deps, writes, result), persist);
     }
 
-    public static void persistAndCommit(Node node, TxnId txnId, Route route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    public static void persistAndCommit(Node node, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         Topologies sendTo = node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
         Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch);
@@ -70,7 +67,7 @@ public class Persist implements Callback<ApplyReply>
         node.send(sendTo.nodes(), to -> new Apply(to, sendTo, applyTo, executeAt.epoch, txnId, route, executeAt, deps, writes, result), persist);
     }
 
-    private Persist(Node node, Topologies topologies, TxnId txnId, Route route, Txn txn, Timestamp executeAt, Deps deps)
+    private Persist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps)
     {
         this.node = node;
         this.txnId = txnId;
@@ -96,14 +93,14 @@ public class Persist implements Callback<ApplyReply>
                     if (!isDone)
                     {
                         // TODO: send to non-home replicas also, so they may clear their log more easily?
-                        Shard homeShard = node.topology().forEpochIfKnown(route.homeKey, txnId.epoch);
-                        node.send(homeShard, new InformHomeDurable(txnId, route.homeKey, executeAt, Durable, persistedOn));
+                        Shard homeShard = node.topology().forEpochIfKnown(route.homeKey(), txnId.epoch);
+                        node.send(homeShard, new InformHomeDurable(txnId, route.homeKey(), executeAt, Durable, persistedOn));
                         isDone = true;
                     }
                     else if (!tracker.hasInFlight() && !tracker.hasFailures())
                     {
-                        Shard homeShard = node.topology().forEpochIfKnown(route.homeKey, txnId.epoch);
-                        node.send(homeShard, new InformHomeDurable(txnId, route.homeKey, executeAt, Universal, persistedOn));
+                        Shard homeShard = node.topology().forEpochIfKnown(route.homeKey(), txnId.epoch);
+                        node.send(homeShard, new InformHomeDurable(txnId, route.homeKey(), executeAt, Universal, persistedOn));
                     }
                 }
                 break;

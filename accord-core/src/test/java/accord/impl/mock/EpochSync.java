@@ -22,7 +22,8 @@ import accord.coordinate.FetchData;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.*;
 import accord.messages.*;
-import accord.primitives.AbstractRoute;
+import accord.primitives.KeyRoute;
+import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies.Single;
@@ -61,7 +62,7 @@ public class EpochSync implements Runnable
     private static class SyncCommitted implements Request
     {
         private final TxnId txnId;
-        private AbstractRoute route;
+        private Route<?> route;
         private final Timestamp executeAt;
         private final long epoch;
 
@@ -75,7 +76,7 @@ public class EpochSync implements Runnable
 
         void update(Command command)
         {
-            route = AbstractRoute.merge(route, command.route());
+            route = Route.merge((Route)route, command.route());
         }
 
         @Override
@@ -99,9 +100,9 @@ public class EpochSync implements Runnable
     {
         private final QuorumTracker tracker;
 
-        public CommandSync(Node node, AbstractRoute route, SyncCommitted message, Topology topology)
+        public CommandSync(Node node, Route<?> route, SyncCommitted message, Topology topology)
         {
-            this.tracker = new QuorumTracker(new Single(node.topology().sorter(), topology.forKeys(route)));
+            this.tracker = new QuorumTracker(new Single(node.topology().sorter(), topology.forSelection(route)));
             node.send(tracker.nodes(), message, this);
         }
 
@@ -127,7 +128,7 @@ public class EpochSync implements Runnable
             tryFailure(failure);
         }
 
-        public static void sync(Node node, AbstractRoute route, SyncCommitted message, Topology topology)
+        public static void sync(Node node, Route<?> route, SyncCommitted message, Topology topology)
         {
             try
             {

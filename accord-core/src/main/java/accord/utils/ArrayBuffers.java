@@ -19,12 +19,15 @@
 package accord.utils;
 
 import accord.api.Key;
+import accord.api.RoutingKey;
+import accord.primitives.Range;
 import accord.primitives.TxnId;
-import com.google.common.base.Preconditions;
 
 import java.lang.reflect.Array;
 import java.util.Arrays;
 import java.util.function.IntFunction;
+
+import static accord.utils.Invariants.checkArgument;
 
 /**
  * A set of utility classes and interfaces for managing a collection of buffers for arrays of certain types.
@@ -51,6 +54,8 @@ public class ArrayBuffers
     // TODO: we should periodically clear the thread locals to ensure we aren't slowly accumulating unnecessarily large objects on every thread
     private static final ThreadLocal<IntBufferCache> INTS = ThreadLocal.withInitial(() -> new IntBufferCache(4, 1 << 14));
     private static final ThreadLocal<ObjectBufferCache<Key>> KEYS = ThreadLocal.withInitial(() -> new ObjectBufferCache<>(3, 1 << 9, Key[]::new));
+    private static final ThreadLocal<ObjectBufferCache<RoutingKey>> ROUTINGKEYS = ThreadLocal.withInitial(() -> new ObjectBufferCache<>(3, 1 << 9, RoutingKey[]::new));
+    private static final ThreadLocal<ObjectBufferCache<Range>> KEYRANGES = ThreadLocal.withInitial(() -> new ObjectBufferCache<>(3, 1 << 7, Range[]::new));
     private static final ThreadLocal<ObjectBufferCache<TxnId>> TXN_IDS = ThreadLocal.withInitial(() -> new ObjectBufferCache<>(3, 1 << 12, TxnId[]::new));
 
     public static IntBuffers cachedInts()
@@ -61,6 +66,16 @@ public class ArrayBuffers
     public static ObjectBuffers<Key> cachedKeys()
     {
         return KEYS.get();
+    }
+
+    public static ObjectBuffers<RoutingKey> cachedRoutingKeys()
+    {
+        return ROUTINGKEYS.get();
+    }
+
+    public static ObjectBuffers<Range> cachedRanges()
+    {
+        return KEYRANGES.get();
     }
 
     public static ObjectBuffers<TxnId> cachedTxnIds()
@@ -87,7 +102,7 @@ public class ArrayBuffers
          * either the buffer will be returned and the size optionally captured, or else the result may be
          * shrunk to the size of the contents, depending on implementation.
          */
-        int[] complete(int[] buffer, int size);
+        int[] complete(int[] buffer, int usedSize);
 
         /**
          * The buffer is no longer needed by the caller, which is discarding the array;
@@ -100,13 +115,13 @@ public class ArrayBuffers
          *
          * @return true if the buffer is discarded (and discard-able), false if it was retained or is believed to be in use
          */
-        boolean discard(int[] buffer, int size);
+        boolean discard(int[] buffer, int usedSize);
 
         /**
          * Indicate this buffer is definitely unused, and return it to a pool if possible
          * @return true if the buffer is discarded (and discard-able), false if it was retained
          */
-        boolean forceDiscard(int[] buffer);
+        boolean forceDiscard(int[] buffer, int usedSize);
     }
 
     public interface ObjectBuffers<T>
@@ -177,22 +192,22 @@ public class ArrayBuffers
         }
 
         @Override
-        public int[] complete(int[] buffer, int size)
+        public int[] complete(int[] buffer, int usedSize)
         {
-            if (size == buffer.length)
+            if (usedSize == buffer.length)
                 return buffer;
 
-            return Arrays.copyOf(buffer, size);
+            return Arrays.copyOf(buffer, usedSize);
         }
 
         @Override
-        public boolean discard(int[] buffer, int size)
+        public boolean discard(int[] buffer, int usedSize)
         {
-            return forceDiscard(buffer);
+            return forceDiscard(buffer, usedSize);
         }
 
         @Override
-        public boolean forceDiscard(int[] buffer)
+        public boolean forceDiscard(int[] buffer, int usedSize)
         {
             // if FULLY_UNCACHED we want our caller to also not cache us, so we indicate the buffer has been retained
             return !FULLY_UNCACHED;
@@ -225,8 +240,7 @@ public class ArrayBuffers
         @Override
         public T[] completeWithExisting(T[] buffer, int size)
         {
-            Preconditions.checkArgument(buffer.length == size);
-            return buffer;
+            return checkArgument(buffer, buffer.length == size);
         }
 
         @Override
@@ -322,28 +336,28 @@ public class ArrayBuffers
     {
         IntBufferCache(int maxCount, int maxSize)
         {
-            super(int[]::new, (i1, i2) -> {}, maxCount, maxSize);
+            super(int[]::new, (array, size) -> {}, maxCount, maxSize);
         }
 
         @Override
-        public int[] complete(int[] buffer, int size)
+        public int[] complete(int[] buffer, int usedSize)
         {
-            if (size == buffer.length)
+            if (usedSize == buffer.length)
                 return buffer;
 
-            return Arrays.copyOf(buffer, size);
+            return Arrays.copyOf(buffer, usedSize);
         }
 
         @Override
-        public boolean discard(int[] buffer, int size)
+        public boolean discard(int[] buffer, int usedSize)
         {
-            return discardInternal(buffer, buffer.length, size, false);
+            return discardInternal(buffer, buffer.length, usedSize, false);
         }
 
         @Override
-        public boolean forceDiscard(int[] buffer)
+        public boolean forceDiscard(int[] buffer, int usedSize)
         {
-            return discardInternal(buffer, buffer.length, -1, true);
+            return discardInternal(buffer, buffer.length, usedSize, true);
         }
 
         @Override
@@ -522,21 +536,21 @@ public class ArrayBuffers
         }
 
         @Override
-        public int[] complete(int[] buffer, int size)
+        public int[] complete(int[] buffer, int usedSize)
         {
             return buffer;
         }
 
         @Override
-        public boolean discard(int[] buffer, int size)
+        public boolean discard(int[] buffer, int usedSize)
         {
             return false;
         }
 
         @Override
-        public boolean forceDiscard(int[] buffer)
+        public boolean forceDiscard(int[] buffer, int usedSize)
         {
-            if (!ints.forceDiscard(buffer))
+            if (!ints.forceDiscard(buffer, usedSize))
                 return false;
 
             if (savedInts != null && savedInts.length >= buffer.length)

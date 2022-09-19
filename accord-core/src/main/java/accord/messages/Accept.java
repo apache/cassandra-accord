@@ -18,7 +18,6 @@
 
 package accord.messages;
 
-import accord.api.Key;
 import accord.local.SafeCommandStore;
 import accord.primitives.*;
 import accord.local.Node.Id;
@@ -27,7 +26,7 @@ import accord.topology.Topologies;
 import accord.api.RoutingKey;
 import accord.local.Command.AcceptOutcome;
 import accord.primitives.PartialDeps;
-import accord.primitives.Route;
+import accord.primitives.FullRoute;
 import accord.primitives.Txn;
 import accord.primitives.Ballot;
 import accord.local.Command;
@@ -47,7 +46,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
 {
     public static class SerializerSupport
     {
-        public static Accept create(TxnId txnId, PartialRoute scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Ballot ballot, Timestamp executeAt, Keys keys, PartialDeps partialDeps, Txn.Kind kind)
+        public static Accept create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, PartialDeps partialDeps, Txn.Kind kind)
         {
             return new Accept(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey, ballot, executeAt, keys, partialDeps, kind);
         }
@@ -55,21 +54,21 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
 
     public final Ballot ballot;
     public final Timestamp executeAt;
-    public final Keys keys;
+    public final Seekables<?, ?> keys;
     public final PartialDeps partialDeps;
     public final Txn.Kind kind;
 
-    public Accept(Id to, Topologies topologies, Ballot ballot, TxnId txnId, Route route, Timestamp executeAt, Keys keys, Deps deps, Txn.Kind kind)
+    public Accept(Id to, Topologies topologies, Ballot ballot, TxnId txnId, FullRoute<?> route, Timestamp executeAt, Seekables<?, ?> keys, Deps deps, Txn.Kind kind)
     {
         super(to, topologies, txnId, route);
         this.ballot = ballot;
         this.executeAt = executeAt;
-        this.keys = keys.slice(scope.covering);
-        this.partialDeps = deps.slice(scope.covering);
+        this.keys = keys.slice(scope.covering());
+        this.partialDeps = deps.slice(scope.covering());
         this.kind = kind;
     }
 
-    private Accept(TxnId txnId, PartialRoute scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Ballot ballot, Timestamp executeAt, Keys keys, PartialDeps partialDeps, Txn.Kind kind)
+    private Accept(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, PartialDeps partialDeps, Txn.Kind kind)
     {
         super(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey);
         this.ballot = ballot;
@@ -126,7 +125,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     }
 
     @Override
-    public Iterable<Key> keys()
+    public Seekables<?, ?> keys()
     {
         return keys;
     }

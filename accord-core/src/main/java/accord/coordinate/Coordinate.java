@@ -24,18 +24,13 @@ import java.util.function.BiConsumer;
 import accord.api.Result;
 import accord.coordinate.tracking.FastPathTracker;
 import accord.coordinate.tracking.RequestStatus;
-import accord.primitives.Route;
+import accord.primitives.*;
 import accord.topology.Topologies;
-import accord.primitives.Ballot;
 import accord.messages.Callback;
 import accord.local.Node;
-import accord.primitives.Deps;
 import accord.local.Node.Id;
-import accord.primitives.Timestamp;
 import accord.messages.PreAccept;
 import accord.messages.PreAccept.PreAcceptOk;
-import accord.primitives.Txn;
-import accord.primitives.TxnId;
 import accord.messages.PreAccept.PreAcceptReply;
 import com.google.common.base.Preconditions;
 
@@ -56,13 +51,13 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
     final Node node;
     final TxnId txnId;
     final Txn txn;
-    final Route route;
+    final FullRoute<?> route;
 
     private FastPathTracker tracker;
     private boolean preAcceptIsDone;
     private final List<PreAcceptOk> successes;
 
-    private Coordinate(Node node, TxnId txnId, Txn txn, Route route)
+    private Coordinate(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
     {
         this.node = node;
         this.txnId = txnId;
@@ -80,7 +75,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
         node.send(tracker.nodes(), to -> new PreAccept(to, tracker.topologies(), txnId, txn, route), this);
     }
 
-    public static Future<Result> coordinate(Node node, TxnId txnId, Txn txn, Route route)
+    public static Future<Result> coordinate(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
     {
         Coordinate coordinate = new Coordinate(node, txnId, txn, route);
         coordinate.start();
@@ -100,7 +95,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
                 break;
             case Failed:
                 preAcceptIsDone = true;
-                tryFailure(new Timeout(txnId, route.homeKey));
+                tryFailure(new Timeout(txnId, route.homeKey()));
                 break;
             case Success:
                 onPreAccepted();
@@ -121,7 +116,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
         if (!reply.isOk())
         {
             // we've been preempted by a recovery coordinator; defer to it, and wait to hear any result
-            tryFailure(new Preempted(txnId, route.homeKey));
+            tryFailure(new Preempted(txnId, route.homeKey()));
             return;
         }
 
@@ -161,7 +156,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
             // TODO: if we receive a MAX response, perhaps defer to permit at least one other node to respond before invalidating
             if (node.agent().isExpired(txnId, executeAt.real))
             {
-                proposeInvalidate(node, Ballot.ZERO, txnId, route.homeKey, (success, fail) -> {
+                proposeInvalidate(node, Ballot.ZERO, txnId, route.homeKey(), (success, fail) -> {
                     if (fail != null)
                     {
                         accept(null, fail);
@@ -171,7 +166,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
                         node.withEpoch(executeAt.epoch, () -> {
                             commitInvalidate(node, txnId, route, executeAt);
                             // TODO: this should be Invalidated rather than Timeout?
-                            accept(null, new Timeout(txnId, route.homeKey));
+                            accept(null, new Timeout(txnId, route.homeKey()));
                         });
                     }
                 });
@@ -181,7 +176,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
                 node.withEpoch(executeAt.epoch, () -> {
                     Topologies topologies = tracker.topologies();
                     if (executeAt.epoch > txnId.epoch)
-                        topologies = node.topology().withUnsyncedEpochs(txn, txnId.epoch, executeAt.epoch);
+                        topologies = node.topology().withUnsyncedEpochs(route, txnId.epoch, executeAt.epoch);
                     Propose.propose(node, topologies, Ballot.ZERO, txnId, txn, route, executeAt, deps, this);
                 });
             }
@@ -192,7 +187,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
     public void accept(Result success, Throwable failure)
     {
         if (failure instanceof CoordinateFailed)
-            ((CoordinateFailed) failure).set(txnId, route.homeKey);
+            ((CoordinateFailed) failure).set(txnId, route.homeKey());
 
         if (success != null) trySuccess(success);
         else tryFailure(failure);

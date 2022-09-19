@@ -1,6 +1,5 @@
 package accord.messages;
 
-import accord.api.Key;
 import accord.api.ProgressLog.ProgressShard;
 import accord.local.Command;
 import accord.local.Node.Id;
@@ -22,7 +21,7 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
 {
     public static class SerializationSupport
     {
-        public static InformDurable create(TxnId txnId, PartialRoute scope, long waitForEpoch, Timestamp executeAt, Durability durability)
+        public static InformDurable create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, Durability durability)
         {
             return new InformDurable(txnId, scope, waitForEpoch, executeAt, durability);
         }
@@ -32,14 +31,14 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     public final Durability durability;
     private transient ProgressShard shard;
 
-    public InformDurable(Id to, Topologies topologies, AbstractRoute route, TxnId txnId, Timestamp executeAt, Durability durability)
+    public InformDurable(Id to, Topologies topologies, Route<?> route, TxnId txnId, Timestamp executeAt, Durability durability)
     {
         super(to, topologies, route, txnId);
         this.executeAt = executeAt;
         this.durability = durability;
     }
 
-    private InformDurable(TxnId txnId, PartialRoute scope, long waitForEpoch, Timestamp executeAt, Durability durability)
+    private InformDurable(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, Durability durability)
     {
         super(txnId, scope, waitForEpoch);
         this.executeAt = executeAt;
@@ -54,12 +53,12 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
             // we need to pick a progress log, but this node might not have participated in the coordination epoch
             // in this rare circumstance we simply pick a key to select some progress log to coordinate this
             at = executeAt;
-            progressKey = node.selectProgressKey(executeAt.epoch, scope, scope.homeKey);
+            progressKey = node.selectProgressKey(executeAt.epoch, scope, scope.homeKey());
             shard = Adhoc;
         }
         else
         {
-            shard = scope.homeKey.equals(progressKey) ? Home : Local;
+            shard = scope.homeKey().equals(progressKey) ? Home : Local;
         }
 
         // TODO (soon): do not load from disk to perform this update
@@ -70,7 +69,7 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     public Reply apply(SafeCommandStore safeStore)
     {
         Command command = safeStore.command(txnId);
-        command.setDurability(safeStore, durability, scope.homeKey, executeAt);
+        command.setDurability(safeStore, durability, scope.homeKey(), executeAt);
         safeStore.progressLog().durable(txnId, scope, shard);
         return Ok;
     }
@@ -109,8 +108,8 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     }
 
     @Override
-    public Iterable<Key> keys()
+    public Seekables<?, ?> keys()
     {
-        return Collections.emptyList();
+        return Keys.EMPTY;
     }
 }

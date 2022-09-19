@@ -19,34 +19,40 @@
 package accord.utils;
 
 import accord.api.Key;
-import accord.primitives.KeyRange;
+import accord.impl.IntKey.Raw;
+import accord.impl.IntKey.Routing;
+import accord.primitives.Range;
 import accord.impl.IntKey;
-import accord.primitives.KeyRange.EndInclusive;
-import accord.primitives.KeyRange.StartInclusive;
+import accord.primitives.Range.EndInclusive;
+import accord.primitives.Range.StartInclusive;
 import accord.primitives.Keys;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-public class KeyRangeTest
+public class RangeTest
 {
-    static IntKey k(int v)
+    static Raw k(int v)
     {
-        return new IntKey(v);
+        return new IntKey.Raw(v);
+    }
+    static Routing r(int v)
+    {
+        return new Routing(v);
     }
 
-    private static KeyRange r(int start, int end)
+    private static Range r(int start, int end)
     {
         return IntKey.range(start, end);
     }
 
-    static KeyRange rangeEndIncl(int start, int end)
+    static Range rangeEndIncl(int start, int end)
     {
-        return new EndInclusive(k(start), k(end));
+        return new EndInclusive(r(start), r(end));
     }
 
-    static KeyRange rangeStartIncl(int start, int end)
+    static Range rangeStartIncl(int start, int end)
     {
-        return new StartInclusive(k(start), k(end));
+        return new StartInclusive(r(start), r(end));
     }
 
     static Keys keys(int... values)
@@ -90,20 +96,20 @@ public class KeyRangeTest
     @Test
     void containsTest()
     {
-        KeyRange endInclRange = rangeEndIncl(10, 20);
+        Range endInclRange = rangeEndIncl(10, 20);
         Assertions.assertFalse(endInclRange.containsKey(k(10)));
         Assertions.assertFalse(endInclRange.startInclusive());
         Assertions.assertTrue(endInclRange.containsKey(k(20)));
         Assertions.assertTrue(endInclRange.endInclusive());
 
-        KeyRange startInclRange = rangeStartIncl(10, 20);
+        Range startInclRange = rangeStartIncl(10, 20);
         Assertions.assertTrue(startInclRange.containsKey(k(10)));
         Assertions.assertTrue(startInclRange.startInclusive());
         Assertions.assertFalse(startInclRange.containsKey(k(20)));
         Assertions.assertFalse(startInclRange.endInclusive());
     }
 
-    private static void assertHigherKeyIndex(int expectedIdx, KeyRange range, Keys keys)
+    private static void assertHigherKeyIndex(int expectedIdx, Range range, Keys keys)
     {
         if (expectedIdx > 0 && expectedIdx < keys.size())
             Assertions.assertTrue(range.containsKey(keys.get(expectedIdx - 1)));
@@ -133,7 +139,7 @@ public class KeyRangeTest
         assertHigherKeyIndex(7, rangeStartIncl(20, 25), keys);
     }
 
-    private static void assertLowKeyIndex(int expectedIdx, KeyRange range, Keys keys, int lowerBound)
+    private static void assertLowKeyIndex(int expectedIdx, Range range, Keys keys, int lowerBound)
     {
         if (expectedIdx >= 0 && expectedIdx < keys.size())
         {
@@ -149,7 +155,7 @@ public class KeyRangeTest
         Assertions.assertEquals(expectedIdx, actualIdx);
     }
 
-    private static void assertLowKeyIndex(int expectedIdx, KeyRange range, Keys keys)
+    private static void assertLowKeyIndex(int expectedIdx, Range range, Keys keys)
     {
         assertLowKeyIndex(expectedIdx, range, keys, 0);
     }
@@ -219,7 +225,7 @@ public class KeyRangeTest
         Assertions.assertEquals(-1, r(100, 200).compareIntersecting(r(201, 300)));
     }
 
-    private static void assertIntersection(KeyRange expected, KeyRange a, KeyRange b)
+    private static void assertIntersection(Range expected, Range a, Range b)
     {
         Assertions.assertEquals(expected, a.intersection(b));
         Assertions.assertEquals(expected, b.intersection(a));
@@ -238,7 +244,7 @@ public class KeyRangeTest
     @Test
     void intersectsTest()
     {
-        KeyRange range = r(100, 200);
+        Range range = r(100, 200);
         Assertions.assertTrue(range.intersects(keys(50, 150, 250)));
         Assertions.assertTrue(range.intersects(keys(150, 250)));
         Assertions.assertTrue(range.intersects(keys(50, 150)));

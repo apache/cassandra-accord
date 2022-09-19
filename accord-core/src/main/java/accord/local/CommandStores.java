@@ -20,16 +20,14 @@ package accord.local;
 
 import accord.api.*;
 import accord.local.CommandStore.RangesForEpoch;
-import accord.primitives.AbstractKeys;
-import accord.primitives.KeyRanges;
-import accord.primitives.RoutingKeys;
+import accord.primitives.*;
+import accord.api.RoutingKey;
 import accord.topology.Topology;
 import accord.utils.MapReduce;
 import accord.utils.MapReduceConsume;
 
 import accord.utils.ReducingFuture;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import org.apache.cassandra.utils.concurrent.Future;
 
 import java.util.ArrayList;
@@ -39,6 +37,8 @@ import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
 import static accord.local.PreLoadContext.empty;
+
+import static accord.utils.Invariants.checkArgument;
 
 /**
  * Manages the single threaded metadata shards
@@ -78,7 +78,7 @@ public abstract class CommandStores<S extends CommandStore>
             return shardFactory.create(id, generation, shardIndex, numShards, time, agent, store, progressLogFactory, rangesForEpoch);
         }
 
-        ShardedRanges createShardedRanges(int generation, long epoch, KeyRanges ranges, RangesForEpoch rangesForEpoch)
+        ShardedRanges createShardedRanges(int generation, long epoch, Ranges ranges, RangesForEpoch rangesForEpoch)
         {
             CommandStore[] newStores = new CommandStore[numShards];
             for (int i=0; i<numShards; i++)
@@ -92,42 +92,40 @@ public abstract class CommandStores<S extends CommandStore>
     {
         final CommandStore[] shards;
         final long[] epochs;
-        final KeyRanges[] ranges;
+        final Ranges[] ranges;
 
-        protected ShardedRanges(CommandStore[] shards, long epoch, KeyRanges ranges)
+        protected ShardedRanges(CommandStore[] shards, long epoch, Ranges ranges)
         {
-            Preconditions.checkArgument(shards.length <= 64);
-            this.shards = shards;
+            this.shards = checkArgument(shards, shards.length <= 64);
             this.epochs = new long[] { epoch };
-            this.ranges = new KeyRanges[] { ranges };
+            this.ranges = new Ranges[] { ranges };
         }
 
-        private ShardedRanges(CommandStore[] shards, long[] epochs, KeyRanges[] ranges)
+        private ShardedRanges(CommandStore[] shards, long[] epochs, Ranges[] ranges)
         {
-            Preconditions.checkArgument(shards.length <= 64);
-            this.shards = shards;
+            this.shards = checkArgument(shards, shards.length <= 64);
             this.epochs = epochs;
             this.ranges = ranges;
         }
 
-        ShardedRanges withRanges(long epoch, KeyRanges ranges)
+        ShardedRanges withRanges(long epoch, Ranges ranges)
         {
             long[] newEpochs = Arrays.copyOf(this.epochs, this.epochs.length + 1);
-            KeyRanges[] newRanges = Arrays.copyOf(this.ranges, this.ranges.length + 1);
+            Ranges[] newRanges = Arrays.copyOf(this.ranges, this.ranges.length + 1);
             newEpochs[this.epochs.length] = epoch;
             newRanges[this.ranges.length] = ranges;
             return new ShardedRanges(shards, newEpochs, newRanges);
         }
 
-        KeyRanges rangesForEpoch(long epoch)
+        Ranges rangesForEpoch(long epoch)
         {
             int i = Arrays.binarySearch(epochs, epoch);
             if (i < 0) i = -2 -i;
-            if (i < 0) return KeyRanges.EMPTY;
+            if (i < 0) return Ranges.EMPTY;
             return ranges[i];
         }
 
-        KeyRanges rangesBetweenEpochs(long fromInclusive, long toInclusive)
+        Ranges rangesBetweenEpochs(long fromInclusive, long toInclusive)
         {
             if (fromInclusive > toInclusive)
                 throw new IndexOutOfBoundsException();
@@ -141,19 +139,19 @@ public abstract class CommandStores<S extends CommandStore>
 
             int j = Arrays.binarySearch(epochs, toInclusive);
             if (j < 0) j = -2 - j;
-            if (i > j) return KeyRanges.EMPTY;
+            if (i > j) return Ranges.EMPTY;
 
-            KeyRanges result = ranges[i++];
+            Ranges result = ranges[i++];
             while (i <= j)
                 result = result.union(ranges[i++]);
             return result;
         }
 
-        KeyRanges rangesSinceEpoch(long epoch)
+        Ranges rangesSinceEpoch(long epoch)
         {
             int i = Arrays.binarySearch(epochs, epoch);
             if (i < 0) i = Math.max(0, -2 -i);
-            KeyRanges result = ranges[i++];
+            Ranges result = ranges[i++];
             while (i < ranges.length)
                 result = ranges[i++].union(result);
             return result;
@@ -171,27 +169,46 @@ public abstract class CommandStores<S extends CommandStore>
             return -1L >>> (64 - shards.length);
         }
 
-        public long shards(AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch)
+        public <T extends Routable> long shards(Routables<T, ?> keysOrRanges, long minEpoch, long maxEpoch)
         {
-            long accumulate = 0L;
-            for (int i = Math.max(0, indexForEpoch(minEpoch)), maxi = indexForEpoch(maxEpoch); i <= maxi ; ++i)
+            long terminalValue = -1L >>> (32 - shards.length);
+            switch (keysOrRanges.kindOfContents())
             {
-                accumulate = keys.foldl(ranges[i], ShardedRanges::addKeyIndex, shards.length, accumulate, -1L);
+                default: throw new AssertionError();
+                case Key:
+                {
+                    long accumulate = 0L;
+                    for (int i = Math.max(0, indexForEpoch(minEpoch)), maxi = indexForEpoch(maxEpoch); i <= maxi ; ++i)
+                    {
+                        accumulate = Routables.foldl((AbstractKeys<?, ?>)keysOrRanges, ranges[i], ShardedRanges::addKeyIndex, shards.length, accumulate, terminalValue);
+                    }
+                    return accumulate;
+                }
+
+                case Range:
+                {
+                    long accumulate = 0L;
+                    for (int i = Math.max(0, indexForEpoch(minEpoch)), maxi = indexForEpoch(maxEpoch); i <= maxi ; ++i)
+                    {
+                        // include every shard if we match a range
+                        accumulate = Routables.foldl((Ranges)keysOrRanges, ranges[i], (idx, k, p, a) -> p, terminalValue, accumulate, terminalValue);
+                    }
+                    return accumulate;
+                }
             }
-            return accumulate;
         }
 
-        KeyRanges currentRanges()
+        Ranges currentRanges()
         {
             return ranges[ranges.length - 1];
         }
 
-        static long keyIndex(RoutingKey key, long numShards)
+        static long keyIndex(RoutableKey key, long numShards)
         {
             return Integer.toUnsignedLong(key.routingHash()) % numShards;
         }
 
-        private static long addKeyIndex(int i, RoutingKey key, long numShards, long accumulate)
+        private static long addKeyIndex(int i, RoutableKey key, long numShards, long accumulate)
         {
             return accumulate | (1L << keyIndex(key, numShards));
         }
@@ -243,21 +260,21 @@ public abstract class CommandStores<S extends CommandStore>
 
     private Snapshot updateTopology(Snapshot prev, Topology newTopology)
     {
-        Preconditions.checkArgument(!newTopology.isSubset(), "Use full topology for CommandStores.updateTopology");
+        checkArgument(!newTopology.isSubset(), "Use full topology for CommandStores.updateTopology");
 
         long epoch = newTopology.epoch();
         if (epoch <= prev.global.epoch())
             return prev;
 
         Topology newLocalTopology = newTopology.forNode(supplier.time.id()).trim();
-        KeyRanges added = newLocalTopology.ranges().difference(prev.local.ranges());
-        KeyRanges subtracted = prev.local.ranges().difference(newLocalTopology.ranges());
+        Ranges added = newLocalTopology.ranges().difference(prev.local.ranges());
+        Ranges subtracted = prev.local.ranges().difference(newLocalTopology.ranges());
 //            for (ShardedRanges range : stores.ranges)
 //            {
 //                // FIXME: remove this (and the corresponding check in TopologyRandomizer) once lower bounds are implemented.
 //                //  In the meantime, the logic needed to support acquiring ranges that we previously replicated is pretty
 //                //  convoluted without the ability to jettison epochs.
-//                Preconditions.checkState(!range.ranges.intersects(added));
+//                Invariants.checkState(!range.ranges.intersects(added));
 //            }
 
         if (added.isEmpty() && subtracted.isEmpty())
@@ -292,19 +309,19 @@ public abstract class CommandStores<S extends CommandStore>
         return new RangesForEpoch()
         {
             @Override
-            public KeyRanges at(long epoch)
+            public Ranges at(long epoch)
             {
                 return current.ranges[generation].rangesForEpoch(epoch);
             }
 
             @Override
-            public KeyRanges between(long fromInclusive, long toInclusive)
+            public Ranges between(long fromInclusive, long toInclusive)
             {
                 return current.ranges[generation].rangesBetweenEpochs(fromInclusive, toInclusive);
             }
 
             @Override
-            public KeyRanges since(long epoch)
+            public Ranges since(long epoch)
             {
                 return current.ranges[generation].rangesSinceEpoch(epoch);
             }
@@ -315,11 +332,6 @@ public abstract class CommandStores<S extends CommandStore>
                 return current.ranges[generation].rangesForEpoch(epoch).contains(key);
             }
 
-            @Override
-            public boolean intersects(long epoch, AbstractKeys<?, ?> keys)
-            {
-                return at(epoch).intersects(keys);
-            }
         };
     }
 
@@ -356,12 +368,12 @@ public abstract class CommandStores<S extends CommandStore>
         return forEach(context, RoutingKeys.of(key), minEpoch, maxEpoch, forEach, true);
     }
 
-    public Future<Void> forEach(PreLoadContext context, AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
+    public Future<Void> forEach(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
     {
         return forEach(context, keys, minEpoch, maxEpoch, forEach, true);
     }
 
-    private Future<Void> forEach(PreLoadContext context, AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach, boolean matchesMultiple)
+    private Future<Void> forEach(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach, boolean matchesMultiple)
     {
         return this.mapReduce(context, keys, minEpoch, maxEpoch, new MapReduce<SafeCommandStore, Void>()
         {
@@ -384,7 +396,7 @@ public abstract class CommandStores<S extends CommandStore>
     }
 
     /**
-     * See {@link #mapReduceConsume(PreLoadContext, AbstractKeys, long, long, MapReduceConsume)}
+     * See {@link #mapReduceConsume(PreLoadContext, Routables, long, long, MapReduceConsume)}
      */
     public <O> void mapReduceConsume(PreLoadContext context, RoutingKey key, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
     {
@@ -398,13 +410,13 @@ public abstract class CommandStores<S extends CommandStore>
      * Note that {@code reduce} and {@code accept} are invoked by only one thread, and never concurrently with {@code apply},
      * so they do not require mutual exclusion.
      *
-     * Implementations are expected to invoke {@link #mapReduceConsume(PreLoadContext, AbstractKeys, long, long, MapReduceConsume, MapReduceAdapter)}
+     * Implementations are expected to invoke {@link #mapReduceConsume(PreLoadContext, Routables, long, long, MapReduceConsume, MapReduceAdapter)}
      */
-    public abstract <O> void mapReduceConsume(PreLoadContext context, AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume);
+    public abstract <O> void mapReduceConsume(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume);
     public abstract <O> void mapReduceConsume(PreLoadContext context, IntStream commandStoreIds, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume);
 
-    protected <T1, T2, O> void mapReduceConsume(PreLoadContext context, AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume,
-                                                   MapReduceAdapter<? super S, T1, T2, O> adapter)
+    protected <T1, T2, O> void mapReduceConsume(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume,
+                                                MapReduceAdapter<? super S, T1, T2, O> adapter)
     {
         T1 reduced = mapReduce(context, keys, minEpoch, maxEpoch, mapReduceConsume, adapter);
         adapter.consume(mapReduceConsume, reduced);
@@ -417,7 +429,7 @@ public abstract class CommandStores<S extends CommandStore>
         adapter.consume(mapReduceConsume, reduced);
     }
 
-    protected <T1, T2, O> T1 mapReduce(PreLoadContext context, AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch, MapReduce<? super SafeCommandStore, O> mapReduce,
+    protected <T1, T2, O> T1 mapReduce(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduce<? super SafeCommandStore, O> mapReduce,
                                        MapReduceAdapter<? super S, T1, T2, O> adapter)
     {
         T2 accumulator = adapter.allocate();

@@ -2,24 +2,22 @@ package accord.primitives;
 
 import java.util.Arrays;
 import java.util.Iterator;
-import java.util.function.BiFunction;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import accord.api.RoutingKey;
-import accord.utils.IndexedFold;
-import accord.utils.IndexedFoldIntersectToLong;
-import accord.utils.IndexedFoldToLong;
-import accord.utils.IndexedPredicate;
-import accord.utils.IndexedRangeFoldToLong;
-import accord.utils.SortedArrays;
+import accord.utils.*;
 import net.nicoulaj.compilecommand.annotations.Inline;
+
+import static accord.primitives.Routable.Kind.Key;
 
 @SuppressWarnings("rawtypes")
 // TODO: check that foldl call-sites are inlined and optimised by HotSpot
-public abstract class AbstractKeys<K extends RoutingKey, KS extends AbstractKeys<K, KS>> implements Iterable<K>
+public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K, ?>> implements Iterable<K>, Routables<K, KS>
 {
     final K[] keys;
 
@@ -37,58 +35,82 @@ public abstract class AbstractKeys<K extends RoutingKey, KS extends AbstractKeys
         return Arrays.equals(keys, that.keys);
     }
 
-    @Override
-    public int hashCode()
-    {
-        return Arrays.hashCode(keys);
-    }
-
-    public int indexOf(K key)
+    public final int indexOf(K key)
     {
         return Arrays.binarySearch(keys, key);
     }
 
-    public boolean contains(K key)
-    {
-        return indexOf(key) >= 0;
-    }
-
-    public K get(int indexOf)
+    public final K get(int indexOf)
     {
         return keys[indexOf];
     }
 
-    /**
-     * return true if this keys collection contains all keys found in the given keys
-     */
-    public boolean containsAll(AbstractKeys<K, ?> that)
+    @Override
+    public final Unseekable.Kind kindOfContents()
     {
-        if (that.isEmpty())
-            return true;
-
-        return foldlIntersect(that, (li, ri, k, p, v) -> v + 1, 0, 0, 0) == that.size();
+        return Key;
     }
 
-
-    public boolean isEmpty()
+    public final boolean isEmpty()
     {
         return keys.length == 0;
     }
 
-    public int size()
+    public final int size()
     {
         return keys.length;
     }
 
-    public int findNext(K key, int startIndex)
+    public final boolean contains(RoutableKey key)
+    {
+        return Arrays.binarySearch(keys, key) >= 0;
+    }
+
+    public final boolean containsAll(Routables<?, ?> keysOrRanges)
+    {
+        return keysOrRanges.size() == Routables.foldl(keysOrRanges, this, (i, k, p, v) -> v + 1, 0, 0, 0);
+    }
+
+    @Override
+    public boolean intersects(AbstractRanges<?> ranges)
+    {
+        // TODO (now): make this final
+        return ranges.intersects(this);
+    }
+
+    public final int findNext(K key, int startIndex)
     {
         return SortedArrays.exponentialSearch(keys, startIndex, keys.length, key);
     }
 
-    // returns thisIdx in top 32 bits, thatIdx in bottom
-    public long findNextIntersection(int thisIdx, AbstractKeys<K, ?> that, int thatIdx)
+    @Override
+    public final int findNext(int thisIndex, Range find, SortedArrays.Search search)
     {
-        return SortedArrays.findNextIntersection(this.keys, thisIdx, that.keys, thatIdx);
+        return SortedArrays.exponentialSearch(keys, thisIndex, size(), find, Range::compareTo, search);
+    }
+
+    @Override
+    public final int findNext(int thisIndex, K find, SortedArrays.Search search)
+    {
+        return SortedArrays.exponentialSearch(keys, thisIndex, size(), find, RoutableKey::compareTo, search);
+    }
+
+    @Override
+    public final long findNextIntersection(int thisIdx, AbstractRanges<?> that, int thatIdx)
+    {
+        return SortedArrays.findNextIntersectionWithMultipleMatches(this.keys, thisIdx, that.ranges, thatIdx, (RoutableKey k, Range r) -> -r.compareTo(k), Range::compareTo);
+    }
+
+    @Override
+    public final long findNextIntersection(int thisIdx, AbstractKeys<?, ?> that, int thatIdx)
+    {
+        return SortedArrays.findNextIntersection(this.keys, thisIdx, that.keys, thatIdx, RoutableKey::compareTo);
+    }
+
+    @Override
+    public final long findNextIntersection(int thisIndex, Routables<K, ?> with, int withIndex)
+    {
+        return findNextIntersection(thisIndex, (AbstractKeys<?, ?>) with, withIndex);
     }
 
     public Stream<K> stream()
@@ -122,14 +144,13 @@ public abstract class AbstractKeys<K extends RoutingKey, KS extends AbstractKeys
         return stream().map(Object::toString).collect(Collectors.joining(",", "[", "]"));
     }
 
-
-
-    protected K[] slice(KeyRanges ranges, IntFunction<K[]> factory)
+    // TODO (now): accept cached buffers
+    protected K[] slice(Ranges ranges, IntFunction<K[]> factory)
     {
-        return SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareTo(k), KeyRange::compareTo);
+        return SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareTo(k), Range::compareTo);
     }
 
-    public boolean any(KeyRanges ranges, Predicate<? super K> predicate)
+    public boolean any(Ranges ranges, Predicate<? super K> predicate)
     {
         return 1 == foldl(ranges, (i1, key, i2, i3) -> predicate.test(key) ? 1 : 0, 0, 0, 1);
     }
@@ -149,27 +170,9 @@ public abstract class AbstractKeys<K extends RoutingKey, KS extends AbstractKeys
      * If terminateAfter is greater than 0, the method will return once terminateAfter matches are encountered
      */
     @Inline
-    public <V> V foldl(KeyRanges rs, IndexedFold<? super K, V> fold, V accumulator)
+    public final <V> V foldl(Ranges rs, IndexedFold<? super K, V> fold, V accumulator)
     {
-        int ki = 0, ri = 0;
-        while (true)
-        {
-            long rki = rs.findNextIntersection(ri, this, ki);
-            if (rki < 0)
-                break;
-
-            ri = (int)(rki >>> 32);
-            ki = (int)(rki);
-            KeyRange range = rs.get(ri);
-            int nextai = range.nextHigherKeyIndex(this, ki + 1);
-            while (ki < nextai)
-            {
-                accumulator = fold.apply(ki, get(ki), accumulator);
-                ++ki;
-            }
-        }
-
-        return accumulator;
+        return Routables.foldl(this, rs, fold, accumulator);
     }
 
     /**
@@ -177,67 +180,19 @@ public abstract class AbstractKeys<K extends RoutingKey, KS extends AbstractKeys
      * If terminateAfter is greater than 0, the method will return once terminateAfter matches are encountered
      */
     @Inline
-    public <V> V foldl(IndexedFold<? super K, V> fold, V accumulator)
+    public final void forEach(Ranges rs, Consumer<? super K> forEach)
     {
-        for (int ki = 0; ki < size() ; ++ki)
-            accumulator = fold.apply(ki, get(ki), accumulator);
-        return accumulator;
+        Routables.foldl(this, rs, (i, k, consumer) -> { consumer.accept(k); return consumer; }, forEach);
     }
 
     @Inline
-    public long foldl(KeyRanges rs, IndexedFoldToLong<? super K> fold, long param, long initialValue, long terminalValue)
+    public final long foldl(Ranges rs, IndexedFoldToLong<? super K> fold, long param, long initialValue, long terminalValue)
     {
-        int ki = 0, ri = 0;
-        done: while (true)
-        {
-            long rki = rs.findNextIntersection(ri, this, ki);
-            if (rki < 0)
-                break;
-
-            ri = (int)(rki >>> 32);
-            ki = (int)(rki);
-            KeyRange range = rs.get(ri);
-            int nextai = range.nextHigherKeyIndex(this, ki + 1);
-            while (ki < nextai)
-            {
-                initialValue = fold.apply(ki, get(ki), param, initialValue);
-                if (initialValue == terminalValue)
-                    break done;
-                ++ki;
-            }
-        }
-
-        return initialValue;
-    }
-
-    /**
-     * A fold variation permitting more efficient operation over indices only, by providing ranges of matching indices
-     */
-    @Inline
-    public long rangeFoldl(KeyRanges rs, IndexedRangeFoldToLong fold, long param, long initialValue, long terminalValue)
-    {
-        int ki = 0, ri = 0;
-        while (true)
-        {
-            long rki = rs.findNextIntersection(ri, this, ki);
-            if (rki < 0)
-                break;
-
-            ri = (int)(rki >>> 32);
-            ki = (int)(rki);
-            KeyRange range = rs.get(ri);
-            int nextai = range.nextHigherKeyIndex(this, ki + 1);
-            initialValue = fold.apply(ki, nextai, param, initialValue);
-            if (initialValue == terminalValue)
-                break;
-            ki = nextai;
-        }
-
-        return initialValue;
+        return Routables.foldl(this, rs, fold, param, initialValue, terminalValue);
     }
 
     @Inline
-    public long foldl(IndexedFoldToLong<? super K> fold, long param, long initialValue, long terminalValue)
+    public final long foldl(IndexedFoldToLong<? super K> fold, long param, long initialValue, long terminalValue)
     {
         for (int i = 0; i < keys.length; i++)
         {
@@ -248,55 +203,25 @@ public abstract class AbstractKeys<K extends RoutingKey, KS extends AbstractKeys
         return initialValue;
     }
 
-    /**
-     * A fold variation that intersects two key sets, invoking the fold function only on those
-     * items that are members of both sets (with their corresponding indices).
-     */
-    @Inline
-    public long foldlIntersect(AbstractKeys<K, ?> intersect, IndexedFoldIntersectToLong<? super K> fold, long param, long initialValue, long terminalValue)
-    {
-        return SortedArrays.foldlIntersection(this.keys, intersect.keys, fold, param, initialValue, terminalValue);
-    }
-
-    /**
-     * A fold variation that invokes the fold function only on those items that are members of this set
-     * and NOT the provided set.
-     */
-    @Inline
-    public long foldlDifference(AbstractKeys<K, ?> subtract, IndexedFoldToLong<? super K> fold, long param, long initialValue, long terminalValue)
-    {
-        return SortedArrays.foldlDifference(keys, subtract.keys, fold, param, initialValue, terminalValue);
-    }
-
-    public Route toRoute(RoutingKey homeKey)
+    public final FullKeyRoute toRoute(RoutingKey homeKey)
     {
         if (isEmpty())
-            return new Route(homeKey, new RoutingKey[] { homeKey });
+            return new FullKeyRoute(homeKey, new RoutingKey[] { homeKey });
 
         RoutingKey[] result = toRoutingKeysArray(homeKey);
         int pos = Arrays.binarySearch(result, homeKey);
-        return new Route(result[pos], result);
+        return new FullKeyRoute(result[pos], result);
     }
 
-    public PartialRoute toPartialRoute(KeyRanges ranges, RoutingKey homeKey)
-    {
-        if (isEmpty())
-            return new PartialRoute(ranges, homeKey, new RoutingKey[] { homeKey });
-
-        RoutingKey[] result = toRoutingKeysArray(homeKey);
-        int pos = Arrays.binarySearch(result, homeKey);
-        return new PartialRoute(ranges, result[pos], result);
-    }
-
-    private RoutingKey[] toRoutingKeysArray(RoutingKey homeKey)
+    protected RoutingKey[] toRoutingKeysArray(RoutingKey withKey)
     {
         RoutingKey[] result;
         int resultCount;
-        int insertPos = Arrays.binarySearch(keys, homeKey);
+        int insertPos = Arrays.binarySearch(keys, withKey);
         if (insertPos < 0)
             insertPos = -1 - insertPos;
 
-        if (insertPos < keys.length && keys[insertPos].toRoutingKey().equals(homeKey))
+        if (insertPos < keys.length && keys[insertPos].toUnseekable().equals(withKey))
         {
             result = new RoutingKey[keys.length];
             resultCount = copyToRoutingKeys(keys, 0, result, 0, keys.length);
@@ -305,8 +230,8 @@ public abstract class AbstractKeys<K extends RoutingKey, KS extends AbstractKeys
         {
             result = new RoutingKey[1 + keys.length];
             resultCount = copyToRoutingKeys(keys, 0, result, 0, insertPos);
-            if (resultCount == 0 || !homeKey.equals(result[resultCount - 1]))
-                result[resultCount++] = homeKey;
+            if (resultCount == 0 || !withKey.equals(result[resultCount - 1]))
+                result[resultCount++] = withKey;
             resultCount += copyToRoutingKeys(keys, insertPos, result, resultCount, keys.length - insertPos);
         }
 
@@ -316,19 +241,24 @@ public abstract class AbstractKeys<K extends RoutingKey, KS extends AbstractKeys
         return result;
     }
 
-    public RoutingKeys toRoutingKeys()
+    public final RoutingKeys toUnseekables()
+    {
+        return toUnseekables(array -> array.length == 0 ? RoutingKeys.EMPTY : new RoutingKeys(array));
+    }
+
+    private <R> R toUnseekables(Function<RoutingKey[], R> constructor)
     {
         if (isEmpty())
-            return RoutingKeys.EMPTY;
+            constructor.apply(RoutingKeys.EMPTY.keys);
 
         RoutingKey[] result = new RoutingKey[keys.length];
         int resultCount = copyToRoutingKeys(keys, 0, result, 0, keys.length);
         if (resultCount < result.length)
             result = Arrays.copyOf(result, resultCount);
-        return new RoutingKeys(result);
+        return constructor.apply(result);
     }
 
-    private static <K extends RoutingKey> int copyToRoutingKeys(K[] src, int srcPos, RoutingKey[] trg, int trgPos, int count)
+    private static <K extends RoutableKey> int copyToRoutingKeys(K[] src, int srcPos, RoutingKey[] trg, int trgPos, int count)
     {
         if (count == 0)
             return 0;
@@ -336,16 +266,28 @@ public abstract class AbstractKeys<K extends RoutingKey, KS extends AbstractKeys
         int srcEnd = srcPos + count;
         int trgStart = trgPos;
         if (trgPos == 0)
-            trg[trgPos++] = src[srcPos++].toRoutingKey();
+            trg[trgPos++] = src[srcPos++].toUnseekable();
 
         while (srcPos < srcEnd)
         {
-            RoutingKey next = src[srcPos++].toRoutingKey();
+            RoutingKey next = src[srcPos++].toUnseekable();
             if (!next.equals(trg[trgPos - 1]))
                 trg[trgPos++] = next;
         }
 
         return trgPos - trgStart;
+    }
+
+    static <T extends RoutableKey> T[] sort(T[] keys)
+    {
+        Arrays.sort(keys);
+        return keys;
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Arrays.hashCode(keys);
     }
 
 }

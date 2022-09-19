@@ -30,7 +30,7 @@ import java.util.TreeSet;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 
 /**
  * Nomenclature:

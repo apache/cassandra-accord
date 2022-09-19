@@ -20,23 +20,23 @@ package accord.topology;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 
 import accord.local.Node.Id;
 import accord.api.Key;
-import accord.primitives.KeyRange;
+import accord.primitives.Range;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 
+import static accord.utils.Invariants.checkArgument;
+
 // TODO: concept of region/locality
 public class Shard
 {
-    public final KeyRange range;
+    public final Range range;
     // TODO: use BTreeSet to combine these two (or introduce version that operates over long values)
     public final List<Id> nodes;
     public final Set<Id> nodeSet;
@@ -47,24 +47,22 @@ public class Shard
     public final int fastPathQuorumSize;
     public final int slowPathQuorumSize;
 
-    public Shard(KeyRange range, List<Id> nodes, Set<Id> fastPathElectorate, Set<Id> joining)
+    public Shard(Range range, List<Id> nodes, Set<Id> fastPathElectorate, Set<Id> joining)
     {
-        Preconditions.checkArgument(Iterables.all(joining, nodes::contains),
-                                    "joining nodes must also be present in nodes");
         this.range = range;
         this.nodes = ImmutableList.copyOf(nodes);
-        this.nodeSet = ImmutableSet.copyOf(nodes);
-        Preconditions.checkArgument(nodes.size() == nodeSet.size());
+        this.nodeSet = checkArgument(ImmutableSet.copyOf(nodes), set -> set.size() == nodes.size());
         this.maxFailures = maxToleratedFailures(nodes.size());
         this.fastPathElectorate = ImmutableSet.copyOf(fastPathElectorate);
-        this.joining = ImmutableSet.copyOf(joining);
+        this.joining = checkArgument(ImmutableSet.copyOf(joining), Iterables.all(joining, nodes::contains),
+                "joining nodes must also be present in nodes");
         int e = fastPathElectorate.size();
         this.recoveryFastPathSize = (maxFailures+1)/2;
         this.slowPathQuorumSize = slowPathQuorumSize(nodes.size());
         this.fastPathQuorumSize = fastPathQuorumSize(nodes.size(), e, maxFailures);
     }
 
-    public Shard(KeyRange range, List<Id> nodes, Set<Id> fastPathElectorate)
+    public Shard(Range range, List<Id> nodes, Set<Id> fastPathElectorate)
     {
         this(range, nodes, fastPathElectorate, Collections.emptySet());
     }
@@ -78,7 +76,7 @@ public class Shard
     @VisibleForTesting
     static int fastPathQuorumSize(int replicas, int electorate, int f)
     {
-        Preconditions.checkArgument(electorate >= replicas - f);
+        checkArgument(electorate >= replicas - f);
         return (f + electorate)/2 + 1;
     }
 

@@ -23,7 +23,7 @@ import accord.api.Key;
 import accord.impl.IntKey;
 import accord.impl.TopologyFactory;
 import accord.local.Node;
-import accord.primitives.KeyRange;
+import accord.primitives.Range;
 import accord.primitives.Keys;
 import com.google.common.collect.Iterables;
 import org.junit.jupiter.api.Assertions;
@@ -31,43 +31,42 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
-import static accord.impl.IntKey.key;
-import static accord.impl.IntKey.range;
+import static accord.impl.IntKey.*;
 
 public class TopologyTest
 {
     private static void assertRangeForKey(Topology topology, int key, int start, int end)
     {
         Key expectedKey = key(key);
-        Shard shard = topology.forKey(key(key));
-        KeyRange expectedRange = range(start, end);
+        Shard shard = topology.forKey(routing(key));
+        Range expectedRange = range(start, end);
         Assertions.assertTrue(expectedRange.containsKey(expectedKey));
         Assertions.assertTrue(shard.range.containsKey(expectedKey));
         Assertions.assertEquals(expectedRange, shard.range);
 
-        Topology subTopology = topology.forKeys(Keys.of(expectedKey));
+        Topology subTopology = topology.forSelection(Keys.of(expectedKey).toUnseekables());
         shard = Iterables.getOnlyElement(subTopology.shards());
         Assertions.assertTrue(shard.range.containsKey(expectedKey));
         Assertions.assertEquals(expectedRange, shard.range);
     }
 
-    private static Topology topology(List<Node.Id> ids, int rf, KeyRange... ranges)
+    private static Topology topology(List<Node.Id> ids, int rf, Range... ranges)
     {
         TopologyFactory topologyFactory = new TopologyFactory(rf, ranges);
         return topologyFactory.toTopology(ids);
     }
 
-    private static Topology topology(int numNodes, int rf, KeyRange... ranges)
+    private static Topology topology(int numNodes, int rf, Range... ranges)
     {
         return topology(Utils.ids(numNodes), rf, ranges);
     }
 
-    private static Topology topology(KeyRange... ranges)
+    private static Topology topology(Range... ranges)
     {
         return topology(1, 1, ranges);
     }
 
-    private static KeyRange r(int start, int end)
+    private static Range r(int start, int end)
     {
         return IntKey.range(start, end);
     }
@@ -76,7 +75,7 @@ public class TopologyTest
     {
         try
         {
-            topology.forKey(key(key));
+            topology.forKey(routing(key));
             Assertions.fail("Expected exception");
         }
         catch (IllegalArgumentException e)

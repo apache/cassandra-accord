@@ -21,12 +21,9 @@ package accord.messages;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
-import accord.api.Key;
 import accord.local.*;
 import accord.local.Node.Id;
-import accord.local.Status.Known;
-import accord.primitives.RoutingKeys;
-import accord.primitives.TxnId;
+import accord.primitives.*;
 import accord.utils.MapReduceConsume;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,20 +32,20 @@ import static accord.local.Status.Committed;
 import static accord.utils.Utils.listOf;
 import accord.topology.Topology;
 
-public class WaitOnCommit implements EpochRequest, MapReduceConsume<SafeCommandStore, Void>, PreLoadContext, CommandListener
+public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore, Void>, PreLoadContext, CommandListener
 {
     private static final Logger logger = LoggerFactory.getLogger(WaitOnCommit.class);
 
     public static class SerializerSupport
     {
-        public static WaitOnCommit create(TxnId txnId, RoutingKeys scope)
+        public static WaitOnCommit create(TxnId txnId, Unseekables<?, ?> scope)
         {
             return new WaitOnCommit(txnId, scope);
         }
     }
 
     public final TxnId txnId;
-    public final RoutingKeys scope;
+    public final Unseekables<?, ?> scope;
 
     private transient Node node;
     private transient Id replyTo;
@@ -56,13 +53,13 @@ public class WaitOnCommit implements EpochRequest, MapReduceConsume<SafeCommandS
     private transient volatile int waitingOn;
     private static final AtomicIntegerFieldUpdater<WaitOnCommit> waitingOnUpdater = AtomicIntegerFieldUpdater.newUpdater(WaitOnCommit.class, "waitingOn");
 
-    public WaitOnCommit(Id to, Topology topologies, TxnId txnId, RoutingKeys someKeys)
+    public WaitOnCommit(Id to, Topology topologies, TxnId txnId, Unseekables<?, ?> unseekables)
     {
         this.txnId = txnId;
-        this.scope = someKeys.slice(topologies.rangesForNode(to));
+        this.scope = unseekables.slice(topologies.rangesForNode(to));
     }
 
-    public WaitOnCommit(TxnId txnId, RoutingKeys scope)
+    public WaitOnCommit(TxnId txnId, Unseekables<?, ?> scope)
     {
         this.txnId = txnId;
         this.scope = scope;
@@ -159,9 +156,9 @@ public class WaitOnCommit implements EpochRequest, MapReduceConsume<SafeCommandS
     }
 
     @Override
-    public Iterable<Key> keys()
+    public Seekables<?, ?> keys()
     {
-        return Collections.emptyList();
+        return Keys.EMPTY;
     }
 
     @Override

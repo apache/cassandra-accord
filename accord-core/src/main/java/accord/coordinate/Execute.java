@@ -40,17 +40,17 @@ import static accord.messages.Commit.Kind.Maximal;
 class Execute extends ReadCoordinator<ReadReply>
 {
     final Txn txn;
-    final Keys readScope;
-    final Route route;
+    final Seekables<?, ?> readScope;
+    final FullRoute<?> route;
     final Timestamp executeAt;
     final Deps deps;
     final Topologies applyTo;
     final BiConsumer<Result, Throwable> callback;
     private Data data;
 
-    private Execute(Node node, TxnId txnId, Txn txn, Route route, Keys readScope, Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
+    private Execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
     {
-        super(node, node.topology().forEpoch(readScope, executeAt.epoch), txnId);
+        super(node, node.topology().forEpoch(readScope.toUnseekables(), executeAt.epoch), txnId);
         this.txn = txn;
         this.route = route;
         this.readScope = readScope;
@@ -60,12 +60,12 @@ class Execute extends ReadCoordinator<ReadReply>
         this.callback = callback;
     }
 
-    public static void execute(Node node, TxnId txnId, Txn txn, Route route, Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
+    public static void execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
     {
         if (txn.read().keys().isEmpty())
         {
-            Topologies sendTo = node.topology().forEpoch(route, txnId.epoch);
-            Topologies applyTo = node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
+            Topologies sendTo = node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
+            Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch);
             Result result = txn.result(txnId, null);
             Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, null), result);
             callback.accept(result, null);
@@ -105,7 +105,7 @@ class Execute extends ReadCoordinator<ReadReply>
         {
             default: throw new IllegalStateException();
             case Redundant:
-                callback.accept(null, new Preempted(txnId, route.homeKey));
+                callback.accept(null, new Preempted(txnId, route.homeKey()));
                 return Action.Abort;
             case NotCommitted:
                 // the replica may be missing the original commit, or the additional commit, so send everything

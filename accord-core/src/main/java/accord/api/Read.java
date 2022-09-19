@@ -19,7 +19,7 @@
 package accord.api;
 
 import accord.local.SafeCommandStore;
-import accord.primitives.KeyRanges;
+import accord.primitives.Ranges;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -75,6 +75,6 @@ public interface Read
         }
     }
 
-    Read slice(KeyRanges ranges);
+    Read slice(Ranges ranges);
     Read merge(Read other);
 }

@@ -20,7 +20,7 @@ package accord.impl.list;
 
 import accord.api.*;
 import accord.local.SafeCommandStore;
-import accord.primitives.KeyRanges;
+import accord.primitives.Ranges;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -60,7 +60,7 @@ public class ListRead implements Read
     }
 
     @Override
-    public Read slice(KeyRanges ranges)
+    public Read slice(Ranges ranges)
     {
         return new ListRead(readKeys.slice(ranges), keys.slice(ranges));
     }

@@ -22,30 +22,44 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-import accord.api.Key;
 import accord.api.RoutingKey;
-import accord.primitives.KeyRange;
+import accord.primitives.RoutableKey;
 import accord.primitives.Keys;
-import accord.primitives.PartialRoute;
 import accord.primitives.RoutingKeys;
 
 import javax.annotation.Nonnull;
 
 import static accord.utils.Utils.toArray;
 
-public class IntKey implements Key
+public class IntKey implements RoutableKey
 {
-    public static class Range extends KeyRange.EndInclusive
+    public static class Raw extends IntKey implements accord.api.Key
     {
-        public Range(IntKey start, IntKey end)
+        public Raw(int key)
+        {
+            super(key);
+        }
+    }
+
+    public static class Routing extends IntKey implements accord.api.RoutingKey
+    {
+        public Routing(int key)
+        {
+            super(key);
+        }
+    }
+
+    public static class Range extends accord.primitives.Range.EndInclusive
+    {
+        public Range(Routing start, Routing end)
         {
             super(start, end);
         }
 
         @Override
-        public KeyRange subRange(RoutingKey start, RoutingKey end)
+        public accord.primitives.Range subRange(RoutingKey start, RoutingKey end)
         {
-            return new Range((IntKey)start, (IntKey)end);
+            return new Range((Routing)start, (Routing)end);
         }
     }
 
@@ -57,66 +71,69 @@ public class IntKey implements Key
     }
 
     @Override
-    public int compareTo(@Nonnull RoutingKey that)
+    public int compareTo(@Nonnull RoutableKey that)
     {
-        if (that instanceof InfiniteRoutingKey)
-            return -that.compareTo(this);
         return Integer.compare(this.key, ((IntKey)that).key);
     }
 
-    public static IntKey key(int k)
+    public static Raw key(int k)
     {
-        return new IntKey(k);
+        return new Raw(k);
+    }
+
+    public static Routing routing(int k)
+    {
+        return new Routing(k);
     }
 
     public static Keys keys(int k0, int... kn)
     {
-        Key[] keys = new Key[kn.length + 1];
-        keys[0] = new IntKey(k0);
+        Raw[] keys = new Raw[kn.length + 1];
+        keys[0] = new Raw(k0);
         for (int i=0; i<kn.length; i++)
-            keys[i + 1] = new IntKey(kn[i]);
+            keys[i + 1] = new Raw(kn[i]);
 
         return Keys.of(keys);
     }
 
     public static RoutingKeys scope(int k0, int... kn)
     {
-        return keys(k0, kn).toRoutingKeys();
+        return keys(k0, kn).toUnseekables();
     }
 
     public static Keys keys(int[] keyArray)
     {
-        Key[] keys = new Key[keyArray.length];
+        Raw[] keys = new Raw[keyArray.length];
         for (int i=0; i<keyArray.length; i++)
-            keys[i] = new IntKey(keyArray[i]);
+            keys[i] = new Raw(keyArray[i]);
 
         return Keys.of(keys);
     }
 
-    public static KeyRange range(IntKey start, IntKey end)
+    public static accord.primitives.Range range(Routing start, Routing end)
     {
         return new Range(start, end);
     }
 
-    public static KeyRange range(int start, int end)
+    public static accord.primitives.Range range(int start, int end)
     {
-        return range(key(start), key(end));
+        return range(routing(start), routing(end));
     }
 
-    public static KeyRange[] ranges(int count)
+    public static accord.primitives.Range[] ranges(int count)
     {
-        List<KeyRange> result = new ArrayList<>();
+        List<accord.primitives.Range> result = new ArrayList<>();
         long delta = (Integer.MAX_VALUE - (long)Integer.MIN_VALUE) / count;
         long start = Integer.MIN_VALUE;
-        IntKey prev = new IntKey((int)start);
+        Routing prev = new Routing((int)start);
         for (int i = 1 ; i < count ; ++i)
         {
-            IntKey next = new IntKey((int)Math.min(Integer.MAX_VALUE, start + i * delta));
+            Routing next = new Routing((int)Math.min(Integer.MAX_VALUE, start + i * delta));
             result.add(new Range(prev, next));
             prev = next;
         }
-        result.add(new Range(prev, new IntKey(Integer.MAX_VALUE)));
-        return toArray(result, KeyRange[]::new);
+        result.add(new Range(prev, new Routing(Integer.MAX_VALUE)));
+        return toArray(result, accord.primitives.Range[]::new);
     }
 
     @Override
@@ -147,8 +164,10 @@ public class IntKey implements Key
     }
 
     @Override
-    public RoutingKey toRoutingKey()
+    public RoutingKey toUnseekable()
     {
-        return this;
+        if (this instanceof IntKey.Routing)
+            return (Routing)this;
+        return new Routing(key);
     }
 }

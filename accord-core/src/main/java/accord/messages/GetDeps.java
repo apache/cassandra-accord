@@ -1,20 +1,13 @@
 package accord.messages;
 
-import accord.api.Key;
 import accord.local.SafeCommandStore;
-import com.google.common.base.Preconditions;
+import accord.primitives.*;
+import accord.utils.Invariants;
 
 import accord.local.Node.Id;
-import accord.primitives.KeyRanges;
-import accord.primitives.Keys;
-import accord.primitives.PartialDeps;
-import accord.primitives.PartialRoute;
-import accord.primitives.Route;
-import accord.primitives.Timestamp;
-import accord.primitives.Txn;
-import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
+import javax.annotation.Nonnull;
 import java.util.Collections;
 
 import static accord.messages.PreAccept.calculatePartialDeps;
@@ -23,25 +16,25 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
 {
     public static final class SerializationSupport
     {
-        public static GetDeps create(TxnId txnId, PartialRoute scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Keys keys, Timestamp executeAt, Txn.Kind kind)
+        public static GetDeps create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Seekables<?, ?> keys, Timestamp executeAt, Txn.Kind kind)
         {
             return new GetDeps(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey, keys, executeAt, kind);
         }
     }
 
-    public final Keys keys;
+    public final Seekables<?, ?> keys;
     public final Timestamp executeAt;
     public final Txn.Kind kind;
 
-    public GetDeps(Id to, Topologies topologies, Route route, TxnId txnId, Txn txn, Timestamp executeAt)
+    public GetDeps(Id to, Topologies topologies, FullRoute<?> route, TxnId txnId, Txn txn, Timestamp executeAt)
     {
         super(to, topologies, txnId, route);
-        this.keys = txn.keys().slice(scope.covering);
+        this.keys = txn.keys().slice(scope.covering());
         this.executeAt = executeAt;
         this.kind = txn.kind();
     }
 
-    protected GetDeps(TxnId txnId, PartialRoute scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Keys keys, Timestamp executeAt, Txn.Kind kind)
+    protected GetDeps(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Seekables<?, ?> keys, Timestamp executeAt, Txn.Kind kind)
     {
         super(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey);
         this.keys = keys;
@@ -58,7 +51,7 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
     public PartialDeps apply(SafeCommandStore instance)
     {
         // TODO: shrink ranges to those that intersect key
-        KeyRanges ranges = instance.ranges().between(minEpoch, executeAt.epoch);
+        Ranges ranges = instance.ranges().between(minEpoch, executeAt.epoch);
         return calculatePartialDeps(instance, txnId, keys, kind, executeAt, ranges);
     }
 
@@ -97,7 +90,7 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
     }
 
     @Override
-    public Iterable<Key> keys()
+    public Seekables<?, ?> keys()
     {
         return keys;
     }
@@ -106,10 +99,9 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
     {
         public final PartialDeps deps;
 
-        public GetDepsOk(PartialDeps deps)
+        public GetDepsOk(@Nonnull PartialDeps deps)
         {
-            Preconditions.checkNotNull(deps);
-            this.deps = deps;
+            this.deps = Invariants.nonNull(deps);
         }
 
         @Override

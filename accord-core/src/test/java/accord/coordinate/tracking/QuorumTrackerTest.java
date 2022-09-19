@@ -20,8 +20,8 @@ package accord.coordinate.tracking;
 
 import accord.impl.TopologyUtils;
 import accord.local.Node;
-import accord.primitives.KeyRange;
-import accord.primitives.KeyRanges;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import org.junit.jupiter.api.Assertions;
@@ -35,7 +35,7 @@ import static accord.utils.Utils.toArray;
 public class QuorumTrackerTest
 {
     private static final Node.Id[] ids = toArray(ids(5), Node.Id[]::new);
-    private static final KeyRanges ranges = TopologyUtils.initialRanges(5, 500);
+    private static final Ranges ranges = TopologyUtils.initialRanges(5, 500);
     private static final Topology topology = TopologyUtils.initialTopology(ids, ranges, 3);
         /*
         (000, 100](100, 200](200, 300](300, 400](400, 500]
@@ -129,7 +129,7 @@ public class QuorumTrackerTest
     @Test
     void multiTopology()
     {
-        KeyRange range = range(100, 200);
+        Range range = range(100, 200);
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(4, 5, 6), idSet(4, 5)));
 
@@ -149,7 +149,7 @@ public class QuorumTrackerTest
     @Test
     void multiTopologyFailure()
     {
-        KeyRange range = range(100, 200);
+        Range range = range(100, 200);
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(4, 5, 6), idSet(4, 5)));
 

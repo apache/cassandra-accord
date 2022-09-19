@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import accord.primitives.KeyRange;
+import accord.primitives.Range;
 import accord.local.Node.Id;
 import accord.maelstrom.Datum.Kind;
 import accord.topology.Shard;
@@ -39,7 +39,7 @@ public class TopologyFactory
     final int shards;
     final int rf;
     final Kind[] kinds;
-    final KeyRange[][] ranges;
+    final Range[][] ranges;
 
     public TopologyFactory(int shards, int rf)
     {
@@ -50,10 +50,10 @@ public class TopologyFactory
         for (int i = 0 ; i < kinds.length ; ++i)
         {
             Kind kind = kinds[i];
-            MaelstromKey[] starts = kind.split(shards);
-            MaelstromKey[] ends = new MaelstromKey[shards];
+            MaelstromKey.Routing[] starts = kind.split(shards);
+            MaelstromKey.Routing[] ends = new MaelstromKey.Routing[shards];
             System.arraycopy(starts, 1, ends, 0, shards - 1);
-            ends[shards - 1] = new MaelstromKey(kind, null);
+            ends[shards - 1] = new MaelstromKey.Routing(kind, null);
             this.ranges[i] = new MaelstromKey.Range[shards];
             for (int j=0; j<shards; j++)
                 ranges[i][j] = new MaelstromKey.Range(starts[j], ends[j]);

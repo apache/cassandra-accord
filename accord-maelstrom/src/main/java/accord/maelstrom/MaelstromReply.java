@@ -95,7 +95,7 @@ public class MaelstromReply extends Body implements Reply
         {
             in.beginArray();
             String op = in.nextString();
-            Key key = MaelstromKey.read(in);
+            Key key = MaelstromKey.readKey(in);
             switch (op)
             {
                 default: throw new IllegalStateException("Invalid op: " + op);

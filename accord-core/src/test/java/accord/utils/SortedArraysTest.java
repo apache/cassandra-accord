@@ -18,7 +18,6 @@
 
 package accord.utils;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.Sets;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -113,15 +112,15 @@ class SortedArraysTest
 
                 // uses Search.FAST
                 long lr = SortedArrays.findNextIntersection(jint, i, jint, i);
-                int left = (int) (lr >>> 32);
-                int right = (int) lr;
+                int left = (int) (lr);
+                int right = (int) (lr >>> 32);
                 Assertions.assertEquals(left, right);
                 Assertions.assertEquals(left, i);
 
                 // uses Search.CEIL
                 lr = SortedArrays.findNextIntersectionWithMultipleMatches(jint, i, jint, i, Integer::compare, Integer::compare);
-                left = (int) (lr >>> 32);
-                right = (int) lr;
+                left = (int) lr;
+                right = (int) (lr >>> 32);
                 Assertions.assertEquals(left, right);
                 Assertions.assertEquals(left, i);
             }
@@ -147,7 +146,7 @@ class SortedArraysTest
                 {
                     if (a[i].equals(b[j]))
                     {
-                        long ab = ((long)i << 32) | j;
+                        long ab = i | ((long)j << 32);
                         expected.add(ab);
                     }
                 }
@@ -160,8 +159,8 @@ class SortedArraysTest
                 if (ab == -1)
                     return; // no more matches...
                 seen.add(ab);
-                ai = (int) (ab >>> 32);
-                bi = (int) ab;
+                ai = (int) (ab);
+                bi = (int) (ab >>> 32);
                 // since data is unique just "consume" both pointers so can find the next one
                 ai++;
                 bi++;
@@ -329,7 +328,7 @@ class SortedArraysTest
         // remapper requires data to be sorted and unique, so make sure this is true
         Arrays.sort(target);
         for (int i = 1; i < target.length; i++)
-            Preconditions.checkArgument(!target[i - 1].equals(target[i]));
+            Invariants.checkArgument(!target[i - 1].equals(target[i]));
         return target;
     }
 

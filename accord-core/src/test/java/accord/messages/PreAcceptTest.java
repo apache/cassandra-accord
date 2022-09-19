@@ -21,6 +21,7 @@ package accord.messages;
 import accord.api.RoutingKey;
 import accord.impl.*;
 import accord.impl.InMemoryCommandsForKey.InMemoryCommandTimeseries;
+import accord.impl.IntKey.Raw;
 import accord.impl.mock.*;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -42,6 +43,7 @@ import java.util.Random;
 import static accord.Utils.id;
 import static accord.Utils.writeTxn;
 import static accord.impl.InMemoryCommandStore.inMemory;
+import static accord.impl.IntKey.routing;
 import static accord.impl.mock.MockCluster.configService;
 import static accord.utils.Utils.listOf;
 
@@ -52,7 +54,7 @@ public class PreAcceptTest
     private static final Id ID3 = id(3);
     private static final List<Id> IDS = listOf(ID1, ID2, ID3);
     private static final Topology TOPOLOGY = TopologyFactory.toTopology(IDS, 3, IntKey.range(0, 100));
-    private static final KeyRanges FULL_RANGE = KeyRanges.single(IntKey.range(new IntKey(Integer.MIN_VALUE), new IntKey(Integer.MAX_VALUE)));
+    private static final Ranges FULL_RANGE = Ranges.single(IntKey.range(routing(Integer.MIN_VALUE), routing(Integer.MAX_VALUE)));
 
     private static final ReplyContext REPLY_CONTEXT = Network.replyCtxFor(0);
 
@@ -75,7 +77,7 @@ public class PreAcceptTest
 
     private static PreAccept preAccept(TxnId txnId, Txn txn, RoutingKey homeKey)
     {
-        Route route = txn.keys().toRoute(homeKey);
+        FullRoute<?> route = txn.keys().toRoute(homeKey);
         return PreAccept.SerializerSupport.create(txnId, route.slice(FULL_RANGE), txnId.epoch, txnId.epoch, false, txnId.epoch, txn.slice(FULL_RANGE, true), route);
     }
 
@@ -89,14 +91,13 @@ public class PreAcceptTest
 
         try
         {
-            IntKey key = IntKey.key(10);
-            Keys keys = Keys.of(key);
+            Raw key = IntKey.key(10);
             CommandStore commandStore = node.unsafeForKey(key);
             Assertions.assertFalse(inMemory(commandStore).hasCommandsForKey(key));
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
-            PreAccept preAccept = preAccept(txnId, txn, key);
+            PreAccept preAccept = preAccept(txnId, txn, key.toUnseekable());
             clock.increment(10);
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
@@ -122,13 +123,13 @@ public class PreAcceptTest
         Node node = createNode(ID1, messageSink, clock);
         try
         {
-            IntKey key = IntKey.key(10);
+            Raw key = IntKey.key(10);
             CommandStore commandStore = node.unsafeForKey(key);
             Assertions.assertFalse(inMemory(commandStore).hasCommandsForKey(key));
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
-            PreAccept preAccept = preAccept(txnId, txn, key);
+            PreAccept preAccept = preAccept(txnId, txn, key.toUnseekable());
             preAccept.process(node, ID2, REPLY_CONTEXT);
         }
         finally
@@ -150,15 +151,15 @@ public class PreAcceptTest
         Node node = createNode(ID1, messageSink, clock);
         try
         {
-            IntKey key1 = IntKey.key(10);
-            PreAccept preAccept1 = preAccept(clock.idForNode(1, ID2), writeTxn(Keys.of(key1)), key1);
+            Raw key1 = IntKey.key(10);
+            PreAccept preAccept1 = preAccept(clock.idForNode(1, ID2), writeTxn(Keys.of(key1)), key1.toUnseekable());
             preAccept1.process(node, ID2, REPLY_CONTEXT);
 
             messageSink.clearHistory();
-            IntKey key2 = IntKey.key(11);
+            Raw key2 = IntKey.key(11);
             Keys keys = Keys.of(key1, key2);
             TxnId txnId2 = new TxnId(1, 50, 0, ID3);
-            PreAccept preAccept2 = preAccept(txnId2, writeTxn(keys), key2);
+            PreAccept preAccept2 = preAccept(txnId2, writeTxn(keys), key2.toUnseekable());
             clock.increment(10);
             preAccept2.process(node, ID3, REPLY_CONTEXT);
 
@@ -185,12 +186,12 @@ public class PreAcceptTest
         Clock clock = new Clock(100);
         Node node = createNode(ID1, messageSink, clock);
         messageSink.clearHistory();
-        IntKey key = IntKey.key(10);
+        Raw key = IntKey.key(10);
         try
         {
             Keys keys = Keys.of(key);
             TxnId txnId = new TxnId(1, 110, 0, ID2);
-            PreAccept preAccept = preAccept(txnId, writeTxn(keys), key);
+            PreAccept preAccept = preAccept(txnId, writeTxn(keys), key.toUnseekable());
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
             messageSink.assertHistorySizes(0, 1);
@@ -214,7 +215,7 @@ public class PreAcceptTest
 
         try
         {
-            IntKey key = IntKey.key(10);
+            Raw key = IntKey.key(10);
             Keys keys = Keys.of(key);
             CommandStore commandStore = node.unsafeForKey(key);
 
@@ -223,7 +224,7 @@ public class PreAcceptTest
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(keys);
-            PreAccept preAccept = preAccept(txnId, txn, key);
+            PreAccept preAccept = preAccept(txnId, txn, key.toUnseekable());
 
             clock.increment(10);
             preAccept.process(node, ID2, REPLY_CONTEXT);

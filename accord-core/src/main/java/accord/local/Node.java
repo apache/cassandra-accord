@@ -48,12 +48,13 @@ import accord.messages.Callback;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
 import accord.messages.Reply;
+import accord.coordinate.RecoverWithRoute;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.topology.TopologyManager;
+import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.utils.concurrent.AsyncFuture;
 import org.apache.cassandra.utils.concurrent.Future;
-import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 public class Node implements ConfigurationService.Listener, NodeTimeService
 {
@@ -200,6 +201,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         }
     }
 
+    @Inline
     public <T> Future<T> withEpoch(long epoch, Supplier<Future<T>> supplier)
     {
         if (topology.hasEpoch(epoch))
@@ -252,14 +254,14 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return nowSupplier.getAsLong();
     }
 
-    public Future<Void> forEachLocal(PreLoadContext context, AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
+    public Future<Void> forEachLocal(PreLoadContext context, Unseekables<?, ?> unseekables, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
     {
-        return commandStores.forEach(context, keys, minEpoch, maxEpoch, forEach);
+        return commandStores.forEach(context, unseekables, minEpoch, maxEpoch, forEach);
     }
 
-    public Future<Void> forEachLocalSince(PreLoadContext context, AbstractKeys<?, ?> keys, Timestamp since, Consumer<SafeCommandStore> forEach)
+    public Future<Void> forEachLocalSince(PreLoadContext context, Unseekables<?, ?> unseekables, Timestamp since, Consumer<SafeCommandStore> forEach)
     {
-        return commandStores.forEach(context, keys, since.epoch, Long.MAX_VALUE, forEach);
+        return commandStores.forEach(context, unseekables, since.epoch, Long.MAX_VALUE, forEach);
     }
 
     public Future<Void> ifLocal(PreLoadContext context, RoutingKey key, long epoch, Consumer<SafeCommandStore> ifLocal)
@@ -287,7 +289,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         commandStores.mapReduceConsume(context, key, minEpoch, maxEpoch, mapReduceConsume);
     }
 
-    public <T> void mapReduceConsumeLocal(PreLoadContext context, AbstractKeys<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<SafeCommandStore, T> mapReduceConsume)
+    public <T> void mapReduceConsumeLocal(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<SafeCommandStore, T> mapReduceConsume)
     {
         commandStores.mapReduceConsume(context, keys, minEpoch, maxEpoch, mapReduceConsume);
     }
@@ -383,60 +385,65 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return Coordinate.coordinate(this, txnId, txn, computeRoute(txnId, txn.keys()));
     }
 
-    public Route computeRoute(TxnId txnId, Keys keys)
+    public FullRoute<?> computeRoute(TxnId txnId, Seekables<?, ?> keysOrRanges)
     {
-        RoutingKey homeKey = trySelectHomeKey(txnId, keys);
+        RoutingKey homeKey = trySelectHomeKey(txnId, keysOrRanges);
         if (homeKey == null)
             homeKey = selectRandomHomeKey(txnId);
 
-        return keys.toRoute(homeKey);
+        return keysOrRanges.toRoute(homeKey);
     }
 
-    private @Nullable RoutingKey trySelectHomeKey(TxnId txnId, Keys keys)
+    private @Nullable RoutingKey trySelectHomeKey(TxnId txnId, Seekables<?, ?> keysOrRanges)
     {
-        int i = topology().localForEpoch(txnId.epoch).ranges().findFirstKey(keys);
-        return i >= 0 ? keys.get(i).toRoutingKey() : null;
+        int i = (int)keysOrRanges.findNextIntersection(0, topology().localForEpoch(txnId.epoch).ranges(), 0);
+        return i >= 0 ? keysOrRanges.get(i).someIntersectingRoutingKey() : null;
     }
 
-    public RoutingKey selectProgressKey(long epoch, AbstractKeys<?, ?> keys, RoutingKey homeKey)
+    public RoutingKey selectProgressKey(TxnId txnId, Route<?> route, RoutingKey homeKey)
     {
-        RoutingKey progressKey = trySelectProgressKey(epoch, keys, homeKey);
+        return selectProgressKey(txnId.epoch, route, homeKey);
+    }
+
+    public RoutingKey selectProgressKey(long epoch, Route<?> route, RoutingKey homeKey)
+    {
+        RoutingKey progressKey = trySelectProgressKey(epoch, route, homeKey);
         if (progressKey == null)
             throw new IllegalStateException();
         return progressKey;
     }
 
-    public RoutingKey trySelectProgressKey(TxnId txnId, AbstractRoute route)
+    public RoutingKey trySelectProgressKey(TxnId txnId, Route<?> route)
     {
-        return trySelectProgressKey(txnId, route, route.homeKey);
+        return trySelectProgressKey(txnId, route, route.homeKey());
     }
 
-    public RoutingKey trySelectProgressKey(TxnId txnId, AbstractKeys<?, ?> keys, RoutingKey homeKey)
+    public RoutingKey trySelectProgressKey(TxnId txnId, Route<?> route, RoutingKey homeKey)
     {
-        return trySelectProgressKey(txnId.epoch, keys, homeKey);
+        return trySelectProgressKey(txnId.epoch, route, homeKey);
     }
 
-    public RoutingKey trySelectProgressKey(long epoch, AbstractKeys<?, ?> keys, RoutingKey homeKey)
+    public RoutingKey trySelectProgressKey(long epoch, Route<?> route, RoutingKey homeKey)
     {
-        return trySelectProgressKey(this.topology.localForEpoch(epoch), keys, homeKey);
+        return trySelectProgressKey(this.topology.localForEpoch(epoch), route, homeKey);
     }
 
-    private static RoutingKey trySelectProgressKey(Topology topology, AbstractKeys<?, ?> keys, RoutingKey homeKey)
+    private static RoutingKey trySelectProgressKey(Topology topology, Route<?> route, RoutingKey homeKey)
     {
         if (topology.ranges().contains(homeKey))
             return homeKey;
 
-        int i = topology.ranges().findFirstKey(keys);
+        int i = (int)route.findNextIntersection(0, topology.ranges(), 0);
         if (i < 0)
             return null;
-        return keys.get(i).toRoutingKey();
+        return route.get(i).someIntersectingRoutingKey();
     }
 
     public RoutingKey selectRandomHomeKey(TxnId txnId)
     {
-        KeyRanges ranges = topology().localForEpoch(txnId.epoch).ranges();
-        KeyRange range = ranges.get(ranges.size() == 1 ? 0 : random.nextInt(ranges.size()));
-        return range.endInclusive() ? range.end() : range.start();
+        Ranges ranges = topology().localForEpoch(txnId.epoch).ranges();
+        Range range = ranges.get(ranges.size() == 1 ? 0 : random.nextInt(ranges.size()));
+        return range.someIntersectingRoutingKey();
     }
 
     static class RecoverFuture<T> extends AsyncFuture<T> implements BiConsumer<T, Throwable>
@@ -449,7 +456,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         }
     }
 
-    public Future<? extends Outcome> recover(TxnId txnId, Route route)
+    public Future<? extends Outcome> recover(TxnId txnId, FullRoute<?> route)
     {
         {
             Future<? extends Outcome> result = coordinating.get(txnId);
@@ -471,7 +478,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     }
 
     // TODO: coalesce other maybeRecover calls also? perhaps have mutable knownStatuses so we can inject newer ones?
-    public Future<? extends Outcome> maybeRecover(TxnId txnId, RoutingKey homeKey, @Nullable AbstractRoute route, ProgressToken prevProgress)
+    public Future<? extends Outcome> maybeRecover(TxnId txnId, RoutingKey homeKey, @Nullable Route<?> route, ProgressToken prevProgress)
     {
         Future<? extends Outcome> result = coordinating.get(txnId);
         if (result != null)

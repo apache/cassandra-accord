@@ -32,10 +32,10 @@ import accord.topology.Topologies;
 
 import accord.api.RoutingKey;
 import accord.local.Node;
-import accord.local.Node.Id;
 import accord.messages.BeginInvalidation;
 import accord.messages.BeginInvalidation.InvalidateReply;
 import accord.messages.Callback;
+import accord.utils.Invariants;
 import com.google.common.base.Preconditions;
 
 import javax.annotation.Nullable;
@@ -43,7 +43,6 @@ import javax.annotation.Nullable;
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.local.Status.Accepted;
-import static accord.local.Status.AcceptedInvalidate;
 import static accord.primitives.ProgressToken.INVALIDATED;
 
 public class Invalidate implements Callback<InvalidateReply>
@@ -51,7 +50,7 @@ public class Invalidate implements Callback<InvalidateReply>
     private final Node node;
     private final Ballot ballot;
     private final TxnId txnId;
-    private final RoutingKeys invalidateWithKeys;
+    private final Unseekables<?, ?> invalidateWith;
     private final BiConsumer<Outcome, Throwable> callback;
 
     private boolean isDone;
@@ -61,38 +60,38 @@ public class Invalidate implements Callback<InvalidateReply>
     private final InvalidationTracker tracker;
     private Throwable failure;
 
-    private Invalidate(Node node, Ballot ballot, TxnId txnId, RoutingKeys invalidateWithKeys, boolean transitivelyInvokedByPriorInvalidation, BiConsumer<Outcome, Throwable> callback)
+    private Invalidate(Node node, Ballot ballot, TxnId txnId, Unseekables<?, ?> invalidateWith, boolean transitivelyInvokedByPriorInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
         this.callback = callback;
         this.node = node;
         this.ballot = ballot;
         this.txnId = txnId;
-        this.invalidateWithKeys = invalidateWithKeys;
         this.transitivelyInvokedByPriorInvalidation = transitivelyInvokedByPriorInvalidation;
-        Topologies topologies = node.topology().forEpoch(invalidateWithKeys, txnId.epoch);
+        this.invalidateWith = invalidateWith;
+        Topologies topologies = node.topology().forEpoch(invalidateWith, txnId.epoch);
         this.tracker = new InvalidationTracker(topologies);
     }
 
-    public static Invalidate invalidate(Node node, TxnId txnId, RoutingKeys invalidateWithKeys, BiConsumer<Outcome, Throwable> callback)
+    public static Invalidate invalidate(Node node, TxnId txnId, Unseekables<?, ?> invalidateWith, BiConsumer<Outcome, Throwable> callback)
     {
-        return invalidate(node, txnId, invalidateWithKeys, false, callback);
+        return invalidate(node, txnId, invalidateWith, false, callback);
     }
 
-    public static Invalidate invalidate(Node node, TxnId txnId, RoutingKeys invalidateWithKeys, boolean transitivelyInvokedByPriorInvalidation, BiConsumer<Outcome, Throwable> callback)
+    public static Invalidate invalidate(Node node, TxnId txnId, Unseekables<?, ?> invalidateWith, boolean transitivelyInvokedByPriorInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
         Ballot ballot = new Ballot(node.uniqueNow());
-        Invalidate invalidate = new Invalidate(node, ballot, txnId, invalidateWithKeys, transitivelyInvokedByPriorInvalidation, callback);
+        Invalidate invalidate = new Invalidate(node, ballot, txnId, invalidateWith, transitivelyInvokedByPriorInvalidation, callback);
         invalidate.start();
         return invalidate;
     }
 
     private void start()
     {
-        node.send(tracker.nodes(), to -> new BeginInvalidation(to, tracker.topologies(), txnId, invalidateWithKeys, ballot), this);
+        node.send(tracker.nodes(), to -> new BeginInvalidation(to, tracker.topologies(), txnId, invalidateWith, ballot), this);
     }
 
     @Override
-    public synchronized void onSuccess(Id from, InvalidateReply reply)
+    public synchronized void onSuccess(Node.Id from, InvalidateReply reply)
     {
         if (isDone || isPrepareDone)
             return;
@@ -102,7 +101,7 @@ public class Invalidate implements Callback<InvalidateReply>
     }
 
     @Override
-    public void onFailure(Id from, Throwable failure)
+    public void onFailure(Node.Id from, Throwable failure)
     {
         if (isDone || isPrepareDone)
             return;
@@ -140,13 +139,13 @@ public class Invalidate implements Callback<InvalidateReply>
 
     private void invalidate()
     {
-        Preconditions.checkState(!isPrepareDone);
+        Invariants.checkState(!isPrepareDone);
         isPrepareDone = true;
 
         // first look to see if it has already been
         {
-            Route route = InvalidateReply.findRoute(replies);
-            RoutingKey homeKey = route != null ? route.homeKey : InvalidateReply.findHomeKey(replies);
+            FullRoute<?> route = InvalidateReply.findRoute(replies);
+            RoutingKey homeKey = route != null ? route.homeKey() : InvalidateReply.findHomeKey(replies);
             InvalidateReply maxReply = InvalidateReply.max(replies);
 
             switch (maxReply.status)
@@ -186,7 +185,7 @@ public class Invalidate implements Callback<InvalidateReply>
                         if (!witnessedByInvalidation.hasBeen(Accepted))
                         {
                             Preconditions.checkState(tracker.all(InvalidationShardTracker::isPromised));
-                            if (!invalidateWithKeys.containsAll(route))
+                            if (!invalidateWith.containsAll(route))
                                 witnessedByInvalidation = null;
                         }
                         RecoverWithRoute.recover(node, ballot, txnId, route, witnessedByInvalidation, callback);
@@ -196,7 +195,7 @@ public class Invalidate implements Callback<InvalidateReply>
                         Preconditions.checkState(maxReply.status.hasBeen(Accepted) || tracker.all(InvalidationShardTracker::isPromised));
                         // if we included the home shard, and we have either a recoverable status OR have not rejected the fast path,
                         // we must have at least one response that should contain the Route
-                        if (invalidateWithKeys.contains(homeKey) && tracker.isPromisedForKey(homeKey, txnId.epoch))
+                        if (invalidateWith.contains(homeKey) && tracker.isPromisedForKey(homeKey, txnId.epoch))
                             throw new IllegalStateException("Received replies from a node that must have known the route, but that did not include it");
 
                         // if < Accepted, we should have short-circuited to invalidation above. This guarantees no Invaldate/Recover loop, as any later status will forbid invoking Invalidate
@@ -206,7 +205,7 @@ public class Invalidate implements Callback<InvalidateReply>
                         if (!witnessedByInvalidation.hasBeen(Accepted))
                         {
                             Preconditions.checkState(tracker.all(InvalidationShardTracker::isPromised));
-                            if (!invalidateWithKeys.contains(homeKey))
+                            if (!invalidateWith.contains(homeKey))
                                 witnessedByInvalidation = null;
                         }
 
@@ -228,7 +227,8 @@ public class Invalidate implements Callback<InvalidateReply>
 
         // if we have witnessed the transaction, but are able to invalidate, do we want to proceed?
         // Probably simplest to do so, but perhaps better for user if we don't.
-        RoutingKey invalidateWithKey = invalidateWithKeys.slice(KeyRanges.of(tracker.promisedShard().range)).get(0);
+        // TODO (RangeTxns): This should be a Routable, or we should guarantee it is safe to operate on any key in the range
+        RoutingKey invalidateWithKey = invalidateWith.slice(Ranges.of(tracker.promisedShard().range)).get(0).someIntersectingRoutingKey();
         proposeInvalidate(node, ballot, txnId, invalidateWithKey, (success, fail) -> {
             /**
              * We're now inside our *exactly once* callback we registered with proposeInvalidate, and we need to
@@ -256,12 +256,12 @@ public class Invalidate implements Callback<InvalidateReply>
 
     private void commitInvalidate()
     {
-        @Nullable AbstractRoute route = InvalidateReply.mergeRoutes(replies);
+        @Nullable Route<?> route = InvalidateReply.mergeRoutes(replies);
         // TODO: commitInvalidate (and others) should skip the network for local applications,
         //  so we do not need to explicitly do so here before notifying the waiter
-        Commit.Invalidate.commitInvalidate(node, txnId, route != null ? route.union(invalidateWithKeys) : invalidateWithKeys, txnId);
+        Commit.Invalidate.commitInvalidate(node, txnId, route != null ? Unseekables.merge(route, (Unseekables)invalidateWith) : invalidateWith, txnId);
         // TODO: pick a reasonable upper bound, so we don't invalidate into an epoch/commandStore that no longer cares about this command
-        node.forEachLocalSince(contextFor(txnId), invalidateWithKeys, txnId, safeStore -> {
+        node.forEachLocalSince(contextFor(txnId), invalidateWith, txnId, safeStore -> {
             safeStore.command(txnId).commitInvalidate(safeStore);
         }).addCallback((s, f) -> {
             callback.accept(INVALIDATED, null);
@@ -271,7 +271,7 @@ public class Invalidate implements Callback<InvalidateReply>
     }
 
     @Override
-    public void onCallbackFailure(Id from, Throwable failure)
+    public void onCallbackFailure(Node.Id from, Throwable failure)
     {
         if (isDone)
             return;

@@ -24,7 +24,7 @@ import java.util.TreeMap;
 import accord.api.Key;
 import accord.api.Data;
 import accord.api.Update;
-import accord.primitives.KeyRanges;
+import accord.primitives.Ranges;
 import accord.primitives.Keys;
 
 public class MaelstromUpdate extends TreeMap<Key, Value> implements Update
@@ -46,7 +46,7 @@ public class MaelstromUpdate extends TreeMap<Key, Value> implements Update
     }
 
     @Override
-    public Update slice(KeyRanges ranges)
+    public Update slice(Ranges ranges)
     {
         MaelstromUpdate result = new MaelstromUpdate();
         for (Map.Entry<Key, Value> e : entrySet())

@@ -19,7 +19,8 @@
 package accord.local;
 
 import accord.api.Key;
-import accord.api.RoutingKey;
+import accord.primitives.Keys;
+import accord.primitives.Seekables;
 import accord.primitives.TxnId;
 
 import java.util.Collections;
@@ -38,9 +39,9 @@ public interface PreLoadContext
     /**
      * @return keys of the {@link CommandsForKey} objects that need to be loaded into memory before this operation is run
      */
-    Iterable<Key> keys();
+    Seekables<?, ?> keys();
 
-    static PreLoadContext contextFor(Iterable<TxnId> txnIds, Iterable<Key> keys)
+    static PreLoadContext contextFor(Iterable<TxnId> txnIds, Seekables<?, ?> keys)
     {
         return new PreLoadContext()
         {
@@ -48,27 +49,37 @@ public interface PreLoadContext
             public Iterable<TxnId> txnIds() { return txnIds; }
 
             @Override
-            public Iterable<Key> keys() { return keys; }
+            public Seekables<?, ?> keys() { return keys; }
         };
     }
 
-    static PreLoadContext contextFor(TxnId txnId, Iterable<Key> keys)
+    static PreLoadContext contextFor(TxnId txnId, Seekables<?, ?> keysOrRanges)
     {
-        return contextFor(Collections.singleton(txnId), keys);
+        switch (keysOrRanges.kindOfContents())
+        {
+            default: throw new AssertionError();
+            case Range: return contextFor(txnId); // TODO (soon): this won't work for actual range queries
+            case Key: return contextFor(Collections.singleton(txnId), keysOrRanges);
+        }
     }
 
     static PreLoadContext contextFor(TxnId txnId)
     {
-        return contextFor(Collections.singleton(txnId), Collections.emptyList());
+        return contextFor(Collections.singleton(txnId), Keys.EMPTY);
+    }
+
+    static PreLoadContext contextFor(Iterable<TxnId> txnIds)
+    {
+        return contextFor(txnIds, Keys.EMPTY);
     }
 
     static PreLoadContext contextFor(Key key)
     {
-        return contextFor(Collections.emptyList(), Collections.singleton(key));
+        return contextFor(Collections.emptyList(), Keys.of(key));
     }
 
     static PreLoadContext empty()
     {
-        return contextFor(Collections.emptyList(), Collections.emptyList());
+        return contextFor(Collections.emptyList(), Keys.EMPTY);
     }
 }

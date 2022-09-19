@@ -21,10 +21,10 @@ package accord.topology;
 import accord.api.TopologySorter;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.primitives.KeyRanges;
+import accord.primitives.Ranges;
 import accord.utils.IndexedConsumer;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.Sets;
+import accord.utils.Invariants;
 
 import java.util.*;
 
@@ -58,7 +58,7 @@ public interface Topologies extends TopologySorter
 
     int estimateUniqueNodes();
 
-    KeyRanges computeRangesForNode(Id node);
+    Ranges computeRangesForNode(Id node);
 
     int maxShardsPerEpoch();
 
@@ -193,7 +193,7 @@ public interface Topologies extends TopologySorter
         }
 
         @Override
-        public KeyRanges computeRangesForNode(Id node)
+        public Ranges computeRangesForNode(Id node)
         {
             return topology.rangesForNode(node);
         }
@@ -329,9 +329,9 @@ public interface Topologies extends TopologySorter
         }
 
         @Override
-        public KeyRanges computeRangesForNode(Id node)
+        public Ranges computeRangesForNode(Id node)
         {
-            KeyRanges ranges = KeyRanges.EMPTY;
+            Ranges ranges = Ranges.EMPTY;
             for (int i = 0, mi = size() ; i < mi ; i++)
                 ranges = ranges.union(get(i).rangesForNode(node));
             return ranges;
@@ -345,7 +345,7 @@ public interface Topologies extends TopologySorter
 
         public void add(Topology topology)
         {
-            Preconditions.checkArgument(topologies.isEmpty() || topology.epoch == topologies.get(topologies.size() - 1).epoch - 1);
+            Invariants.checkArgument(topologies.isEmpty() || topology.epoch == topologies.get(topologies.size() - 1).epoch - 1);
             topologies.add(topology);
         }
 

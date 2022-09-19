@@ -1,5 +1,6 @@
 package accord.utils;
 
+import javax.annotation.Nonnull;
 import java.util.List;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -12,15 +13,12 @@ public class Functions
         return a == null ? b : b == null ? a : merge.apply(a, b);
     }
 
-    public static <T> T reduceNonNull(BiFunction<T, T, T> merge, T a, T ... bs)
+    public static <T1, T2> T1 reduceNonNull(BiFunction<T1, T2, T1> merge, @Nonnull T1 a, T2 ... bs)
     {
-        for (T b : bs)
+        for (T2 b : bs)
         {
             if (b != null)
-            {
-                if (a == null) a = b;
-                else a = merge.apply(a, b);
-            }
+                a = merge.apply(a, b);
         }
         return a;
     }

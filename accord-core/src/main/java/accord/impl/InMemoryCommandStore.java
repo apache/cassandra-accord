@@ -22,9 +22,11 @@ import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.ProgressLog;
-import accord.api.RoutingKey;
+import accord.local.CommandStore; // java8 fails compilation if this is in correct position
+import accord.local.SyncCommandStores.SyncCommandStore; // java8 fails compilation if this is in correct position
+import accord.impl.InMemoryCommandStore.SingleThread.AsyncState;
+import accord.impl.InMemoryCommandStore.Synchronized.SynchronizedState;
 import accord.local.Command;
-import accord.local.CommandStore;
 import accord.local.CommandStore.RangesForEpoch;
 import accord.local.CommandsForKey;
 import accord.local.CommandListener;
@@ -33,25 +35,19 @@ import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
 import accord.local.SyncCommandStores;
-import accord.local.SyncCommandStores.SyncCommandStore;
-import accord.impl.InMemoryCommandStore.SingleThread.AsyncState;
-import accord.impl.InMemoryCommandStore.Synchronized.SynchronizedState;
-import accord.primitives.KeyRange;
-import accord.primitives.KeyRanges;
-import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.primitives.*;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
 
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.NavigableMap;
-import java.util.Objects;
 import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BinaryOperator;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -68,7 +64,7 @@ public class InMemoryCommandStore
 
         private final CommandStore commandStore;
         private final NavigableMap<TxnId, Command> commands = new TreeMap<>();
-        private final NavigableMap<RoutingKey, InMemoryCommandsForKey> commandsForKey = new TreeMap<>();
+        private final NavigableMap<RoutableKey, InMemoryCommandsForKey> commandsForKey = new TreeMap<>();
 
         public State(NodeTimeService time, Agent agent, DataStore store, ProgressLog progressLog, RangesForEpoch rangesForEpoch, CommandStore commandStore)
         {
@@ -158,9 +154,9 @@ public class InMemoryCommandStore
         }
 
         @Override
-        public Timestamp preaccept(TxnId txnId, Keys keys)
+        public Timestamp preaccept(TxnId txnId, Seekables<?, ?> keys)
         {
-            Timestamp max = maxConflict(keys);
+            Timestamp max = maxConflict(keys, ranges().at(txnId.epoch));
             long epoch = latestEpoch();
             if (txnId.compareTo(max) > 0 && txnId.epoch >= epoch && !agent.isExpired(txnId, time.now()))
                 return txnId;
@@ -174,26 +170,21 @@ public class InMemoryCommandStore
             return time;
         }
 
-        private Timestamp maxConflict(Keys keys)
+        private Timestamp maxConflict(Seekables<?, ?> keysOrRanges, Ranges slice)
         {
-            return keys.stream()
-                    .map(this::maybeCommandsForKey)
-                    .filter(Objects::nonNull)
-                    .map(CommandsForKey::max)
-                    .max(Comparator.naturalOrder())
-                    .orElse(Timestamp.NONE);
+            return mapReduce(keysOrRanges, slice, CommandsForKey::max, (a, b) -> a.compareTo(b) >= 0 ? a : b, Timestamp.NONE);
         }
 
-        public void forEpochCommands(KeyRanges ranges, long epoch, Consumer<Command> consumer)
+        public void forEpochCommands(Ranges ranges, long epoch, Consumer<Command> consumer)
         {
             Timestamp minTimestamp = new Timestamp(epoch, Long.MIN_VALUE, Integer.MIN_VALUE, Node.Id.NONE);
             Timestamp maxTimestamp = new Timestamp(epoch, Long.MAX_VALUE, Integer.MAX_VALUE, Node.Id.MAX);
-            for (KeyRange range : ranges)
+            for (Range range : ranges)
             {
-                Iterable<InMemoryCommandsForKey> rangeCommands = commandsForKey.subMap(range.start(),
-                        range.startInclusive(),
-                        range.end(),
-                        range.endInclusive()).values();
+                Iterable<InMemoryCommandsForKey> rangeCommands = commandsForKey.subMap(
+                        range.start(), range.startInclusive(),
+                        range.end(), range.endInclusive()
+                ).values();
                 for (InMemoryCommandsForKey commands : rangeCommands)
                 {
                     commands.forWitnessed(minTimestamp, maxTimestamp, cmd -> consumer.accept((Command) cmd));
@@ -201,11 +192,11 @@ public class InMemoryCommandStore
             }
         }
 
-        public void forCommittedInEpoch(KeyRanges ranges, long epoch, Consumer<Command> consumer)
+        public void forCommittedInEpoch(Ranges ranges, long epoch, Consumer<Command> consumer)
         {
             Timestamp minTimestamp = new Timestamp(epoch, Long.MIN_VALUE, Integer.MIN_VALUE, Node.Id.NONE);
             Timestamp maxTimestamp = new Timestamp(epoch, Long.MAX_VALUE, Integer.MAX_VALUE, Node.Id.MAX);
-            for (KeyRange range : ranges)
+            for (Range range : ranges)
             {
                 Iterable<InMemoryCommandsForKey> rangeCommands = commandsForKey.subMap(range.start(),
                         range.startInclusive(),
@@ -213,11 +204,75 @@ public class InMemoryCommandStore
                         range.endInclusive()).values();
                 for (InMemoryCommandsForKey commands : rangeCommands)
                 {
-
                     Collection<Command> committed = commands.committedByExecuteAt()
                             .between(minTimestamp, maxTimestamp).map(cmd -> (Command) cmd).collect(Collectors.toList());
                     committed.forEach(consumer);
                 }
+            }
+        }
+
+        public <T> T mapReduce(Routables<?, ?> keysOrRanges, Ranges slice, Function<CommandsForKey, T> map, BinaryOperator<T> reduce, T initialValue)
+        {
+            switch (keysOrRanges.kindOfContents()) {
+                default:
+                    throw new AssertionError();
+                case Key:
+                    // TODO: efficiency
+                    AbstractKeys<Key, ?> keys = (AbstractKeys<Key, ?>) keysOrRanges;
+                    return keys.stream()
+                            .filter(slice::contains)
+                            .filter(commandStore::hashIntersects)
+                            .map(this::commandsForKey)
+                            .map(map)
+                            .reduce(initialValue, reduce);
+                case Range:
+                    // TODO: efficiency
+                    Ranges ranges = (Ranges) keysOrRanges;
+                    return ranges.slice(slice).stream().flatMap(range ->
+                            commandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive()).values().stream()
+                    ).map(map).reduce(initialValue, reduce);
+            }
+        }
+
+        public void forEach(Routables<?, ?> keysOrRanges, Ranges slice, Consumer<CommandsForKey> forEach)
+        {
+            switch (keysOrRanges.kindOfContents()) {
+                default:
+                    throw new AssertionError();
+                case Key:
+                    AbstractKeys<Key, ?> keys = (AbstractKeys<Key, ?>) keysOrRanges;
+                    keys.forEach(slice, key -> {
+                        if (commandStore.hashIntersects(key))
+                            forEach.accept(commandsForKey(key));
+                    });
+                    break;
+                case Range:
+                    Ranges ranges = (Ranges) keysOrRanges;
+                    // TODO: zero allocation
+                    ranges.slice(slice).forEach(range -> {
+                        commandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive())
+                                .values().forEach(forEach);
+                    });
+            }
+        }
+
+        public void forEach(Routable keyOrRange, Ranges slice, Consumer<CommandsForKey> forEach)
+        {
+            switch (keyOrRange.kind())
+            {
+                default: throw new AssertionError();
+                case Key:
+                    Key key = (Key) keyOrRange;
+                    if (slice.contains(key))
+                        forEach.accept(commandsForKey(key));
+                    break;
+                case Range:
+                    Range range = (Range) keyOrRange;
+                    // TODO: zero allocation
+                    Ranges.of(range).slice(slice).forEach(r -> {
+                        commandsForKey.subMap(r.start(), r.startInclusive(), r.end(), r.endInclusive())
+                                .values().forEach(forEach);
+                    });
             }
         }
     }
@@ -451,14 +506,14 @@ public class InMemoryCommandStore
             }
 
             @Override
-            public void forEpochCommands(KeyRanges ranges, long epoch, Consumer<Command> consumer)
+            public void forEpochCommands(Ranges ranges, long epoch, Consumer<Command> consumer)
             {
                 assertThread();
                 super.forEpochCommands(ranges, epoch, consumer);
             }
 
             @Override
-            public void forCommittedInEpoch(KeyRanges ranges, long epoch, Consumer<Command> consumer)
+            public void forCommittedInEpoch(Ranges ranges, long epoch, Consumer<Command> consumer)
             {
                 assertThread();
                 super.forCommittedInEpoch(ranges, epoch, consumer);

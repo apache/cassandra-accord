@@ -18,33 +18,33 @@
 
 package accord.utils;
 
-import accord.primitives.KeyRange;
+import accord.primitives.Range;
 import accord.impl.IntKey;
-import accord.primitives.KeyRanges;
+import accord.primitives.Ranges;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-public class KeyRangesTest
+public class RangesTest
 {
-    private static KeyRange r(int start, int end)
+    private static Range r(int start, int end)
     {
         return IntKey.range(start, end);
     }
 
-    private static KeyRanges ranges(KeyRange... ranges)
+    private static Ranges ranges(Range... ranges)
     {
-        return KeyRanges.of(ranges);
+        return Ranges.of(ranges);
     }
 
     @Test
     void rangeIndexForKeyTest()
     {
-        KeyRanges ranges = ranges(r(100, 200), r(300, 400));
-        Assertions.assertEquals(-1, ranges.rangeIndexForKey(IntKey.key(50)));
-        Assertions.assertEquals(0, ranges.rangeIndexForKey(IntKey.key(150)));
-        Assertions.assertEquals(-2, ranges.rangeIndexForKey(IntKey.key(250)));
-        Assertions.assertEquals(1, ranges.rangeIndexForKey(IntKey.key(350)));
-        Assertions.assertEquals(-3, ranges.rangeIndexForKey(IntKey.key(450)));
+        Ranges ranges = ranges(r(100, 200), r(300, 400));
+        Assertions.assertEquals(-1, ranges.indexOf(IntKey.key(50)));
+        Assertions.assertEquals(0, ranges.indexOf(IntKey.key(150)));
+        Assertions.assertEquals(-2, ranges.indexOf(IntKey.key(250)));
+        Assertions.assertEquals(1, ranges.indexOf(IntKey.key(350)));
+        Assertions.assertEquals(-3, ranges.indexOf(IntKey.key(450)));
     }
 
     @Test
@@ -82,7 +82,7 @@ public class KeyRangesTest
                                 ranges(r(0, 50), r(100, 150)).union(ranges(r(50, 100), r(150, 200))));
     }
 
-    private static void assertMergeResult(KeyRanges expected, KeyRanges input1, KeyRanges input2)
+    private static void assertMergeResult(Ranges expected, Ranges input1, Ranges input2)
     {
         Assertions.assertEquals(expected, input1.union(input2));
         Assertions.assertEquals(expected, input2.union(input1));
@@ -95,7 +95,7 @@ public class KeyRangesTest
                           ranges(r(100, 250), r(300, 350)),
                           ranges(r(0, 50), r(200, 300), r(310, 315)));
         assertMergeResult(ranges(r(0, 100)),
-                          KeyRanges.EMPTY,
+                          Ranges.EMPTY,
                           ranges(r(0, 100)));
     }
 
@@ -110,7 +110,7 @@ public class KeyRangesTest
     @Test
     void selectTest()
     {
-        KeyRanges testRanges = ranges(r(0, 100), r(100, 200), r(200, 300), r(300, 400), r(400, 500));
+        Ranges testRanges = ranges(r(0, 100), r(100, 200), r(200, 300), r(300, 400), r(400, 500));
         Assertions.assertEquals(ranges(testRanges.get(1), testRanges.get(3)), testRanges.select(new int[]{1, 3}));
     }
 }

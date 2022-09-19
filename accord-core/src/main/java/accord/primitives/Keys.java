@@ -27,10 +27,9 @@ import accord.utils.ArrayBuffers.ObjectBuffers;
 
 import static accord.utils.ArrayBuffers.cachedKeys;
 
-@SuppressWarnings("rawtypes")
 // TODO: this should probably be a BTree
 // TODO: check that foldl call-sites are inlined and optimised by HotSpot
-public class Keys extends AbstractKeys<Key, Keys>
+public class Keys extends AbstractKeys<Key, Keys> implements Seekables<Key, Keys>
 {
     public static class SerializationSupport
     {
@@ -67,60 +66,15 @@ public class Keys extends AbstractKeys<Key, Keys>
     }
 
     @Override
-    public int hashCode()
-    {
-        return Arrays.hashCode(keys);
-    }
-
-    public int indexOf(Key key)
-    {
-        return Arrays.binarySearch(keys, key);
-    }
-
-    public boolean contains(Key key)
-    {
-        return indexOf(key) >= 0;
-    }
-
-    public Key get(int indexOf)
-    {
-        return keys[indexOf];
-    }
-
-    public boolean isEmpty()
-    {
-        return keys.length == 0;
-    }
-
-    public int size()
-    {
-        return keys.length;
-    }
-
-    /**
-     * return true if this keys collection contains all keys found in the given keys
-     */
-    public boolean containsAll(Keys that)
-    {
-        if (that.isEmpty())
-            return true;
-
-        return foldlIntersect(that, (li, ri, k, p, v) -> v + 1, 0, 0, 0) == that.size();
-    }
-
     public Keys union(Keys that)
     {
         return wrap(SortedArrays.linearUnion(keys, that.keys, cachedKeys()), that);
     }
 
-    public Keys slice(KeyRanges ranges)
+    @Override
+    public Keys slice(Ranges ranges)
     {
-        return wrap(SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, Key[]::new, (k, r) -> -r.compareTo(k), KeyRange::compareTo));
-    }
-
-    public int findNext(Key key, int startIndex)
-    {
-        return SortedArrays.exponentialSearch(keys, startIndex, keys.length, key);
+        return wrap(SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, Key[]::new, (k, r) -> -r.compareTo(k), Range::compareTo));
     }
 
     public Keys with(Key key)
@@ -276,19 +230,13 @@ public class Keys extends AbstractKeys<Key, Keys>
         return new Keys(keys);
     }
 
-    private Keys wrap(Key[] wrap, Keys that)
+    private Keys wrap(Key[] wrap, AbstractKeys<Key, ?> that)
     {
-        return wrap == keys ? this : wrap == that.keys ? that : new Keys(wrap);
+        return wrap == keys ? this : wrap == that.keys && that instanceof Keys ? (Keys)that : new Keys(wrap);
     }
 
     private Keys wrap(Key[] wrap)
     {
         return wrap == keys ? this : new Keys(wrap);
-    }
-
-    private static Key[] sort(Key[] array)
-    {
-        Arrays.sort(array);
-        return array;
     }
 }

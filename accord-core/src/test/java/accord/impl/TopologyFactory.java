@@ -20,8 +20,8 @@ package accord.impl;
 
 
 import accord.local.Node;
-import accord.primitives.KeyRange;
-import accord.primitives.KeyRanges;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
 import accord.topology.Topology;
 
 import java.util.*;
@@ -32,9 +32,9 @@ public class TopologyFactory
 {
     public final int rf;
     // TODO: convert to KeyRanges
-    public final KeyRange[] shardRanges;
+    public final Range[] shardRanges;
 
-    public TopologyFactory(int rf, KeyRange... shardRanges)
+    public TopologyFactory(int rf, Range... shardRanges)
     {
         this.rf = rf;
         this.shardRanges = shardRanges;
@@ -42,7 +42,7 @@ public class TopologyFactory
 
     public Topology toTopology(Node.Id[] cluster)
     {
-        return TopologyUtils.initialTopology(cluster, KeyRanges.ofSortedAndDeoverlapped(shardRanges), rf);
+        return TopologyUtils.initialTopology(cluster, Ranges.ofSortedAndDeoverlapped(shardRanges), rf);
     }
 
     public Topology toTopology(List<Node.Id> cluster)
@@ -50,7 +50,7 @@ public class TopologyFactory
         return toTopology(toArray(cluster, Node.Id[]::new));
     }
 
-    public static Topology toTopology(List<Node.Id> cluster, int rf, KeyRange... ranges)
+    public static Topology toTopology(List<Node.Id> cluster, int rf, Range... ranges)
     {
         return new TopologyFactory(rf, ranges).toTopology(cluster);
     }

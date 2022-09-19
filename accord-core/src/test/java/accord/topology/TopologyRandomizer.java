@@ -20,8 +20,9 @@ package accord.topology;
 
 import accord.burn.TopologyUpdates;
 import accord.impl.IntHashKey;
+import accord.impl.IntHashKey.Hash;
 import accord.local.Node;
-import accord.primitives.KeyRanges;
+import accord.primitives.Ranges;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,7 +37,7 @@ public class TopologyRandomizer
     private final Random random;
     private final BiConsumer<Node.Id, Topology> notifier;
     private final List<Topology> epochs = new ArrayList<>();
-    private final Map<Node.Id, KeyRanges> previouslyReplicated = new HashMap<>();
+    private final Map<Node.Id, Ranges> previouslyReplicated = new HashMap<>();
     private final TopologyUpdates topologyUpdates;
 
     public TopologyRandomizer(Supplier<Random> randomSupplier, Topology initialTopology, TopologyUpdates topologyUpdates, Function<Node.Id, Node> lookup)
@@ -93,10 +94,10 @@ public class TopologyRandomizer
             // no adjustment is possible
             return shards;
 
-        IntHashKey newBound = IntHashKey.forHash(minBound.hash + random.nextInt(maxBound.hash - minBound.hash));
+        Hash newBound = IntHashKey.forHash(minBound.hash + random.nextInt(maxBound.hash - minBound.hash));
 
-        shards[idx] = new Shard(IntHashKey.range((IntHashKey)leftRange.start(), newBound), left.nodes, left.fastPathElectorate, left.joining);
-        shards[idx+1] = new Shard(IntHashKey.range(newBound, (IntHashKey)rightRange.end()), right.nodes, right.fastPathElectorate, right.joining);
+        shards[idx] = new Shard(IntHashKey.range((Hash)leftRange.start(), newBound), left.nodes, left.fastPathElectorate, left.joining);
+        shards[idx+1] = new Shard(IntHashKey.range(newBound, (Hash)rightRange.end()), right.nodes, right.fastPathElectorate, right.joining);
         logger.debug("Updated boundary on {} & {} {} {} to {} {}", idx, idx + 1, left, right,
                      shards[idx].toString(true), shards[idx + 1].toString(true));
 
@@ -182,15 +183,15 @@ public class TopologyRandomizer
         return shards;
     }
 
-    private static Map<Node.Id, KeyRanges> getAdditions(Topology current, Topology next)
+    private static Map<Node.Id, Ranges> getAdditions(Topology current, Topology next)
     {
-        Map<Node.Id, KeyRanges> additions = new HashMap<>();
+        Map<Node.Id, Ranges> additions = new HashMap<>();
         for (Node.Id node : next.nodes())
         {
-            KeyRanges prev = current.rangesForNode(node);
-            if (prev == null) prev = KeyRanges.EMPTY;
+            Ranges prev = current.rangesForNode(node);
+            if (prev == null) prev = Ranges.EMPTY;
 
-            KeyRanges added = next.rangesForNode(node).difference(prev);
+            Ranges added = next.rangesForNode(node).difference(prev);
             if (added.isEmpty())
                 continue;
 
@@ -199,14 +200,14 @@ public class TopologyRandomizer
         return additions;
     }
 
-    private static boolean reassignsRanges(Topology current, Shard[] nextShards, Map<Node.Id, KeyRanges> previouslyReplicated)
+    private static boolean reassignsRanges(Topology current, Shard[] nextShards, Map<Node.Id, Ranges> previouslyReplicated)
     {
         Topology next = new Topology(current.epoch + 1, nextShards);
-        Map<Node.Id, KeyRanges> additions = getAdditions(current, next);
+        Map<Node.Id, Ranges> additions = getAdditions(current, next);
 
-        for (Map.Entry<Node.Id, KeyRanges> entry : additions.entrySet())
+        for (Map.Entry<Node.Id, Ranges> entry : additions.entrySet())
         {
-            if (previouslyReplicated.getOrDefault(entry.getKey(), KeyRanges.EMPTY).intersects(entry.getValue()))
+            if (previouslyReplicated.getOrDefault(entry.getKey(), Ranges.EMPTY).intersects(entry.getValue()))
                 return true;
         }
         return false;
@@ -240,12 +241,12 @@ public class TopologyRandomizer
         if (reassignsRanges(current, shards, previouslyReplicated))
             return null;
 
-        Map<Node.Id, KeyRanges> nextAdditions = getAdditions(current, nextTopology);
-        for (Map.Entry<Node.Id, KeyRanges> entry : nextAdditions.entrySet())
+        Map<Node.Id, Ranges> nextAdditions = getAdditions(current, nextTopology);
+        for (Map.Entry<Node.Id, Ranges> entry : nextAdditions.entrySet())
         {
-            KeyRanges previous = previouslyReplicated.getOrDefault(entry.getKey(), KeyRanges.EMPTY);
-            KeyRanges added = entry.getValue();
-            KeyRanges merged = previous.union(added).mergeTouching();
+            Ranges previous = previouslyReplicated.getOrDefault(entry.getKey(), Ranges.EMPTY);
+            Ranges added = entry.getValue();
+            Ranges merged = previous.union(added).mergeTouching();
             previouslyReplicated.put(entry.getKey(), merged);
         }
 

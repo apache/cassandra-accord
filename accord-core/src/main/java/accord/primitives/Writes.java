@@ -19,13 +19,8 @@
 package accord.primitives;
 
 import accord.api.Write;
-import accord.local.CommandStore;
 import accord.local.SafeCommandStore;
-import accord.primitives.Keys;
-import accord.primitives.Timestamp;
-import accord.primitives.KeyRanges;
 import accord.utils.ReducingFuture;
-import com.google.common.base.Preconditions;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
@@ -72,7 +67,7 @@ public class Writes
         if (write == null)
             return SUCCESS;
 
-        KeyRanges ranges = safeStore.ranges().since(executeAt.epoch);
+        Ranges ranges = safeStore.ranges().since(executeAt.epoch);
         if (ranges == null)
             return SUCCESS;
 

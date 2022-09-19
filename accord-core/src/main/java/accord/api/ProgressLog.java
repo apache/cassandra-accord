@@ -22,13 +22,13 @@ import java.util.Set;
 
 import javax.annotation.Nullable;
 
-import accord.coordinate.CheckOn;
 import accord.coordinate.InformHomeOfTxn;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.Node.Id;
 import accord.local.Status.Known;
-import accord.primitives.*;
+import accord.primitives.Unseekables;
+import accord.primitives.TxnId;
 
 /**
  * This interface is responsible for managing incomplete transactions *and retrying them*.
@@ -169,7 +169,7 @@ public interface ProgressLog
      * If this replica has not witnessed the outcome of the transaction, it should poll a majority of each shard
      * for its outcome, using the provided route (if any).
      */
-    void durable(TxnId txnId, @Nullable RoutingKeys someKeys, ProgressShard shard);
+    void durable(TxnId txnId, @Nullable Unseekables<?, ?> unseekables, ProgressShard shard);
 
     /**
      * The parameter is a command that some other command's execution is most proximally blocked by.
@@ -189,7 +189,7 @@ public interface ProgressLog
      *
      * @param blockedBy     is the transaction id that is blocking progress
      * @param blockedUntil  either Committed or Executed; the state we are waiting for
-     * @param blockedOnKeys the keys we should locally report any progress updates to
+     * @param blockedOn the keys we should report any progress updates to
      */
-    void waiting(TxnId blockedBy, Known blockedUntil, RoutingKeys blockedOnKeys);
+    void waiting(TxnId blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn);
 }

@@ -18,10 +18,12 @@
 
 package accord.api;
 
+import accord.primitives.RoutableKey;
+import accord.primitives.Seekable;
+
 /**
- * A routing key for determining which shards are involved in a transaction
+ * A key we can find in both the cluster and on disk
  */
-public interface Key extends RoutingKey
+public interface Key extends Seekable, RoutableKey
 {
-    RoutingKey toRoutingKey();
 }

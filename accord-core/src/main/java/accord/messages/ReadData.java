@@ -23,13 +23,13 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
-import accord.api.Key;
 import accord.primitives.*;
 
 import accord.local.*;
 import accord.api.Data;
 import accord.topology.Topologies;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,30 +49,30 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
 
     public static class SerializerSupport
     {
-        public static ReadData create(TxnId txnId, Keys scope, long executeAtEpoch, long waitForEpoch)
+        public static ReadData create(TxnId txnId, Seekables<?, ?> scope, long executeAtEpoch, long waitForEpoch)
         {
             return new ReadData(txnId, scope, executeAtEpoch, waitForEpoch);
         }
     }
 
     public final long executeAtEpoch;
-    public final Keys readScope; // TODO: this should be RoutingKeys as we have the Keys locally - but for simplicity for now we use Keys to implement keys()
+    public final Seekables<?, ?> readScope; // TODO: this should be RoutingKeys as we have the Keys locally - but for simplicity for now we use Keys to implement keys()
     private final long waitForEpoch;
     private Data data;
     private transient boolean isObsolete; // TODO: respond with the Executed result we have stored?
     private transient BitSet waitingOn;
     private transient int waitingOnCount;
 
-    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Keys readScope, Timestamp executeAt)
+    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Seekables<?, ?> readScope, Timestamp executeAt)
     {
         super(txnId);
         this.executeAtEpoch = executeAt.epoch;
         int startIndex = latestRelevantEpochIndex(to, topologies, readScope);
-        this.readScope = computeScope(to, topologies, readScope, startIndex, Keys::slice, Keys::union);
+        this.readScope = computeScope(to, topologies, (Seekables)readScope, startIndex, Seekables::slice, Seekables::union);
         this.waitForEpoch = computeWaitForEpoch(to, topologies, startIndex);
     }
 
-    ReadData(TxnId txnId, Keys readScope, long executeAtEpoch, long waitForEpoch)
+    ReadData(TxnId txnId, Seekables<?, ?> readScope, long executeAtEpoch, long waitForEpoch)
     {
         super(txnId);
         this.executeAtEpoch = executeAtEpoch;
@@ -146,7 +146,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
             default:
                 throw new AssertionError();
             case Committed:
-                if (command.partialTxn().keys().none(safeStore.commandStore()::hashIntersects))
+                if (!Iterables.any(command.partialTxn().keys(), safeStore.commandStore()::hashIntersects))
                     throw new IllegalStateException();
             case NotWitnessed:
             case PreAccepted:
@@ -160,7 +160,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
                 if (status == Committed)
                     return null;
 
-                safeStore.progressLog().waiting(txnId, Committed.minKnown, readScope.toRoutingKeys());
+                safeStore.progressLog().waiting(txnId, Committed.minKnown, readScope.toUnseekables());
                 return NotCommitted;
 
             case ReadyToExecute:
@@ -256,7 +256,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
     }
 
     @Override
-    public Iterable<Key> keys()
+    public Seekables<?, ?> keys()
     {
         return readScope;
     }

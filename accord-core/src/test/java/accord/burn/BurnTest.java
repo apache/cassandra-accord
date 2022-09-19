@@ -269,7 +269,7 @@ public class BurnTest
     {
 //        Long overrideSeed = null;
         int count = 1;
-        Long overrideSeed = 7792816336687881037L;
+        Long overrideSeed = 1683848112394089134L;
         for (int i = 0 ; i < args.length ; i += 2)
         {
             switch (args[i])

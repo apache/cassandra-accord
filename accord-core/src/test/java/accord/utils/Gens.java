@@ -18,7 +18,7 @@
 
 package accord.utils;
 
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 
 import java.lang.reflect.Array;
 import java.util.ArrayList;
@@ -74,7 +74,7 @@ public class Gens {
 
         public Gen.IntGen between(int min, int max)
         {
-            Preconditions.checkArgument(max >= min);
+            Invariants.checkArgument(max >= min);
             if (min == max)
                 return of(min);
             // since bounds is exclusive, if max == max_value unable to do +1 to include... so will return a gen
@@ -96,7 +96,7 @@ public class Gens {
         }
 
         public Gen.LongGen between(long min, long max) {
-            Preconditions.checkArgument(max >= min);
+            Invariants.checkArgument(max >= min);
             if (min == max)
                 return of(min);
             // since bounds is exclusive, if max == max_value unable to do +1 to include... so will return a gen

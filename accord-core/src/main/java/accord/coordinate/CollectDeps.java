@@ -10,11 +10,7 @@ import accord.local.Node.Id;
 import accord.messages.Callback;
 import accord.messages.GetDeps;
 import accord.messages.GetDeps.GetDepsOk;
-import accord.primitives.Deps;
-import accord.primitives.Route;
-import accord.primitives.Timestamp;
-import accord.primitives.Txn;
-import accord.primitives.TxnId;
+import accord.primitives.*;
 import accord.topology.Topologies;
 
 import static accord.coordinate.tracking.RequestStatus.Failed;
@@ -24,7 +20,7 @@ class CollectDeps implements Callback<GetDepsOk>
 {
     final Node node;
     final TxnId txnId;
-    final Route route;
+    final FullRoute<?> route;
     final Txn txn;
 
     final Timestamp executeAt;
@@ -34,7 +30,7 @@ class CollectDeps implements Callback<GetDepsOk>
     private final BiConsumer<Deps, Throwable> callback;
     private boolean isDone;
 
-    CollectDeps(Node node, Topologies topologies, TxnId txnId, Route route, Txn txn, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
+    CollectDeps(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
     {
         this.node = node;
         this.txnId = txnId;
@@ -46,7 +42,7 @@ class CollectDeps implements Callback<GetDepsOk>
         this.tracker = new QuorumTracker(topologies);
     }
 
-    public static void withDeps(Node node, TxnId txnId, Route route, Txn txn, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
+    public static void withDeps(Node node, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
     {
         Topologies topologies = node.topology().withUnsyncedEpochs(route, txnId, executeAt);
         CollectDeps collect = new CollectDeps(node, topologies, txnId, route, txn, executeAt, callback);
@@ -70,7 +66,7 @@ class CollectDeps implements Callback<GetDepsOk>
         if (tracker.recordFailure(from) == Failed)
         {
             isDone = true;
-            callback.accept(null, new Timeout(txnId, route.homeKey));
+            callback.accept(null, new Timeout(txnId, route.homeKey()));
         }
     }
 

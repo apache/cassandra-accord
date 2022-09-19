@@ -22,53 +22,52 @@ import java.util.function.BiFunction;
 
 import accord.local.SafeCommandStore;
 import accord.utils.MapReduceConsume;
-import com.google.common.base.Preconditions;
+import accord.primitives.*;
+import accord.utils.Invariants;
 
 import accord.api.RoutingKey;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.primitives.AbstractKeys;
-import accord.primitives.AbstractRoute;
-import accord.primitives.KeyRanges;
 import accord.local.PreLoadContext;
+import accord.primitives.Ranges;
 import accord.primitives.PartialRoute;
 import accord.primitives.Route;
+import accord.primitives.FullRoute;
 import accord.topology.Topologies;
 import accord.topology.Topology;
-import accord.primitives.TxnId;
 
 import static java.lang.Long.min;
 
-public abstract class TxnRequest<R> implements EpochRequest, PreLoadContext, MapReduceConsume<SafeCommandStore, R>
+public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, R>
 {
     public static abstract class WithUnsynced<R> extends TxnRequest<R>
     {
         public final long minEpoch; // TODO: can this just always be TxnId.epoch?
         public final boolean doNotComputeProgressKey;
 
-        protected WithUnsynced(Id to, Topologies topologies, TxnId txnId, Route route)
+        public WithUnsynced(Id to, Topologies topologies, TxnId txnId, FullRoute<?> route)
         {
             this(to, topologies, txnId, route, latestRelevantEpochIndex(to, topologies, route));
         }
 
-        protected WithUnsynced(Id to, Topologies topologies, TxnId txnId, Route route, int startIndex)
+        private WithUnsynced(Id to, Topologies topologies, TxnId txnId, FullRoute<?> route, int startIndex)
         {
             super(to, topologies, route, txnId, startIndex);
             this.minEpoch = topologies.oldestEpoch();
             this.doNotComputeProgressKey = doNotComputeProgressKey(topologies, startIndex, txnId, waitForEpoch());
 
-            // TODO (soon): alongside Invariants class, introduce PARANOID mode for checking extra invariants
-            KeyRanges ranges = topologies.forEpoch(txnId.epoch).rangesForNode(to);
+            // TODO (now): alongside Invariants class, introduce PARANOID mode for checking extra invariants
+            Ranges ranges = topologies.forEpoch(txnId.epoch).rangesForNode(to);
             if (doNotComputeProgressKey)
             {
-                Preconditions.checkState(!ranges.intersects(route)); // confirm dest is not a replica on txnId.epoch
+                Invariants.checkState(!route.intersects(ranges)); // confirm dest is not a replica on txnId.epoch
             }
             else
             {
-                boolean intersects = ranges.intersects(route);
+                boolean intersects = route.intersects(ranges);
                 long progressEpoch = Math.min(waitForEpoch(), txnId.epoch);
-                KeyRanges computesRangesOn = topologies.forEpoch(progressEpoch).rangesForNode(to);
-                boolean check = computesRangesOn != null && computesRangesOn.intersects(route);
+                Ranges computesRangesOn = topologies.forEpoch(progressEpoch).rangesForNode(to);
+                boolean check = computesRangesOn != null && route.intersects(computesRangesOn);
                 if (check != intersects)
                     throw new IllegalStateException();
             }
@@ -91,26 +90,26 @@ public abstract class TxnRequest<R> implements EpochRequest, PreLoadContext, Map
     }
 
     public final TxnId txnId;
-    public final PartialRoute scope;
+    public final PartialRoute<?> scope;
     public final long waitForEpoch;
     protected transient RoutingKey progressKey;
     protected transient Node node;
     protected transient Id replyTo;
     protected transient ReplyContext replyContext;
 
-    protected TxnRequest(Id to, Topologies topologies, AbstractRoute route, TxnId txnId)
+    public TxnRequest(Node.Id to, Topologies topologies, Route<?> route, TxnId txnId)
     {
         this(to, topologies, route, txnId, latestRelevantEpochIndex(to, topologies, route));
     }
 
-    protected TxnRequest(Id to, Topologies topologies, AbstractRoute route, TxnId txnId, int startIndex)
+    public TxnRequest(Node.Id to, Topologies topologies, Route<?> route, TxnId txnId, int startIndex)
     {
         this(txnId, computeScope(to, topologies, route, startIndex), computeWaitForEpoch(to, topologies, startIndex));
     }
 
-    protected TxnRequest(TxnId txnId, PartialRoute scope, long waitForEpoch)
+    public TxnRequest(TxnId txnId, PartialRoute<?> scope, long waitForEpoch)
     {
-        Preconditions.checkState(!scope.isEmpty());
+        Invariants.checkState(!scope.isEmpty());
         this.txnId = txnId;
         this.scope = scope;
         this.waitForEpoch = waitForEpoch;
@@ -120,7 +119,7 @@ public abstract class TxnRequest<R> implements EpochRequest, PreLoadContext, Map
      * The portion of the complete Route that this TxnRequest applies to. Should represent the complete
      * range owned by the target node for the involved epochs.
      */
-    public PartialRoute scope()
+    public PartialRoute<?> scope()
     {
         return scope;
     }
@@ -149,17 +148,17 @@ public abstract class TxnRequest<R> implements EpochRequest, PreLoadContext, Map
     {
         // if waitForEpoch < txnId.epoch, then this replica's ownership is unchanged
         long progressEpoch = min(waitForEpoch(), txnId.epoch);
-        return node.trySelectProgressKey(progressEpoch, scope, scope.homeKey);
+        return node.trySelectProgressKey(progressEpoch, scope, scope.homeKey());
     }
 
     protected abstract void process();
 
     // finds the first topology index that intersects with the node
-    protected static int latestRelevantEpochIndex(Node.Id node, Topologies topologies, AbstractKeys<?, ?> keys)
+    protected static int latestRelevantEpochIndex(Node.Id node, Topologies topologies, Routables<?, ?> route)
     {
-        KeyRanges latest = topologies.current().rangesForNode(node);
+        Ranges latest = topologies.current().rangesForNode(node);
 
-        if (latest.intersects(keys))
+        if (route.intersects(latest))
             return 0;
 
         int i = 0;
@@ -174,16 +173,16 @@ public abstract class TxnRequest<R> implements EpochRequest, PreLoadContext, Map
             latest = topologies.get(i).rangesForNode(node);
         }
 
-        if (latest.intersects(keys))
+        if (route.intersects(latest))
             return i;
 
         // find first non-empty intersection for node
         while (++i < mi)
         {
-            KeyRanges next = topologies.get(i).rangesForNode(node);
+            Ranges next = topologies.get(i).rangesForNode(node);
             if (!next.equals(latest))
             {
-                if (next.intersects(keys))
+                if (route.intersects(next))
                     return i;
                 latest = next;
             }
@@ -198,9 +197,9 @@ public abstract class TxnRequest<R> implements EpochRequest, PreLoadContext, Map
      * on the assumption that this might also mean some local shard rearrangement
      * (ignoring the case where the latest epochs do not intersect the keys at all)
      */
-    public static long computeWaitForEpoch(Node.Id node, Topologies topologies, AbstractKeys<?, ?> keys)
+    public static long computeWaitForEpoch(Node.Id node, Topologies topologies, Unseekables<?, ?> scope)
     {
-        return computeWaitForEpoch(node, topologies, latestRelevantEpochIndex(node, topologies, keys));
+        return computeWaitForEpoch(node, topologies, latestRelevantEpochIndex(node, topologies, scope));
     }
 
     public static long computeWaitForEpoch(Node.Id node, Topologies topologies, int startIndex)
@@ -210,11 +209,11 @@ public abstract class TxnRequest<R> implements EpochRequest, PreLoadContext, Map
         if (i == mi)
             return topologies.oldestEpoch();
 
-        KeyRanges latest = topologies.get(i - 1).rangesForNode(node);
+        Ranges latest = topologies.get(i - 1).rangesForNode(node);
         while (i < mi)
         {
             Topology topology = topologies.get(i);
-            KeyRanges ranges = topology.rangesForNode(node);
+            Ranges ranges = topology.rangesForNode(node);
             if (!ranges.equals(latest))
                 break;
             ++i;
@@ -222,18 +221,18 @@ public abstract class TxnRequest<R> implements EpochRequest, PreLoadContext, Map
         return topologies.get(i - 1).epoch();
     }
 
-    public static PartialRoute computeScope(Node.Id node, Topologies topologies, Route keys)
+    public static PartialRoute<?> computeScope(Node.Id node, Topologies topologies, FullRoute<?> fullRoute)
     {
-        return computeScope(node, topologies, keys, latestRelevantEpochIndex(node, topologies, keys));
+        return computeScope(node, topologies, fullRoute, latestRelevantEpochIndex(node, topologies, fullRoute));
     }
 
-    public static PartialRoute computeScope(Node.Id node, Topologies topologies, AbstractRoute route, int startIndex)
+    public static PartialRoute<?> computeScope(Node.Id node, Topologies topologies, Route<?> route, int startIndex)
     {
-        return computeScope(node, topologies, route, startIndex, AbstractRoute::slice, PartialRoute::union);
+        return computeScope(node, topologies, route, startIndex, Route::slice, PartialRoute::union);
     }
 
     // TODO: move to Topologies
-    public static <I extends AbstractKeys<?, ?>, O extends AbstractKeys<?, ?>> O computeScope(Node.Id node, Topologies topologies, I keys, int startIndex, BiFunction<I, KeyRanges, O> slice, BiFunction<O, O, O> merge)
+    public static <I, O> O computeScope(Node.Id node, Topologies topologies, I keys, int startIndex, BiFunction<I, Ranges, O> slice, BiFunction<O, O, O> merge)
     {
         O scope = computeScopeInternal(node, topologies, keys, startIndex, slice, merge);
         if (scope == null)
@@ -241,14 +240,14 @@ public abstract class TxnRequest<R> implements EpochRequest, PreLoadContext, Map
         return scope;
     }
 
-    private static <I, O> O computeScopeInternal(Node.Id node, Topologies topologies, I keys, int startIndex, BiFunction<I, KeyRanges, O> slice, BiFunction<O, O, O> merge)
+    private static <I, O> O computeScopeInternal(Node.Id node, Topologies topologies, I keys, int startIndex, BiFunction<I, Ranges, O> slice, BiFunction<O, O, O> merge)
     {
-        KeyRanges last = null;
+        Ranges last = null;
         O scope = null;
         for (int i = startIndex, mi = topologies.size() ; i < mi ; ++i)
         {
             Topology topology = topologies.get(i);
-            KeyRanges ranges = topology.rangesForNode(node);
+            Ranges ranges = topology.rangesForNode(node);
             if (ranges != last && !ranges.equals(last))
             {
                 O add = slice.apply(keys, ranges);

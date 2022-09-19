@@ -21,7 +21,7 @@ package accord.coordinate;
 import accord.coordinate.tracking.FastPathTracker;
 import accord.impl.TopologyUtils;
 import accord.local.Node;
-import accord.primitives.KeyRanges;
+import accord.primitives.Ranges;
 import accord.topology.Shard;
 import accord.topology.Topology;
 
@@ -34,7 +34,7 @@ import static accord.utils.Utils.toArray;
 public class PreAcceptTrackerTest
 {
     private static final Node.Id[] ids = toArray(ids(5), Node.Id[]::new);
-    private static final KeyRanges ranges = TopologyUtils.initialRanges(5, 500);
+    private static final Ranges ranges = TopologyUtils.initialRanges(5, 500);
     private static final Topology topology = TopologyUtils.initialTopology(ids, ranges, 3);
         /*
         (000, 100](100, 200](200, 300](300, 400](400, 500]

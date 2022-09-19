@@ -33,7 +33,7 @@ import accord.coordinate.*;
 import accord.local.*;
 import accord.local.Status.Known;
 import accord.primitives.*;
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
@@ -66,6 +66,7 @@ import static accord.local.Status.Durability.Durable;
 import static accord.local.Status.Known.Nothing;
 import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
+import static accord.primitives.Route.isFullRoute;
 
 // TODO: consider propagating invalidations in the same way as we do applied
 public class SimpleProgressLog implements Runnable, ProgressLog.Factory
@@ -205,7 +206,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
                                         commandStore.execute(contextFor(txnId), safeStore -> {
                                             Command cmd = safeStore.command(txnId);
                                             cmd.setDurability(safeStore, token.durability, homeKey, null);
-                                            safeStore.progressLog().durable(txnId, cmd.maxRoutingKeys(), null);
+                                            safeStore.progressLog().durable(txnId, cmd.maxUnseekables(), null);
                                         }).addCallback(commandStore.agent());
                                     }
 
@@ -296,7 +297,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
             if (!command.status().hasBeen(Status.PreCommitted))
                 return false;
 
-            if (!(command.route() instanceof Route))
+            if (!isFullRoute(command.route()))
                 return false;
 
             if (!node.topology().hasEpoch(command.executeAt().epoch))
@@ -384,7 +385,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
                 return;
             }
 
-            Route route = (Route) command.route();
+            FullRoute<?> route = Route.castToFullRoute(command.route());
             Timestamp executeAt = command.executeAt();
             investigating = new CoordinateAwareness();
             Topologies topologies = node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
@@ -402,15 +403,16 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
     {
         Known blockedUntil = Nothing;
         Progress progress = NoneExpected;
-        RoutingKeys blockedOnKeys;
+
+        Unseekables<?, ?> blockedOn;
 
         Object debugInvestigating;
 
-        void recordBlocking(Known blockedUntil, RoutingKeys blockedOnKeys)
+        void recordBlocking(Known blockedUntil, Unseekables<?, ?> blockedOn)
         {
-            Preconditions.checkState(!blockedOnKeys.isEmpty());
-            if (this.blockedOnKeys == null) this.blockedOnKeys = blockedOnKeys;
-            else this.blockedOnKeys = this.blockedOnKeys.union(blockedOnKeys);
+            Invariants.checkState(!blockedOn.isEmpty());
+            if (this.blockedOn == null) this.blockedOn = blockedOn;
+            else this.blockedOn = Unseekables.merge(this.blockedOn, (Unseekables)blockedOn);
             if (!blockedUntil.isSatisfiedBy(this.blockedUntil))
             {
                 this.blockedUntil = this.blockedUntil.merge(blockedUntil);
@@ -444,7 +446,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
             long srcEpoch = (executeAt != null ? executeAt : txnId).epoch;
             // TODO: compute fromEpoch, the epoch we already have this txn replicated until
             long toEpoch = Math.max(srcEpoch, node.topology().epoch());
-            RoutingKeys someKeys = someKeys(command);
+            Unseekables<?, ?> someKeys = unseekables(command);
 
             BiConsumer<Known, Throwable> callback = (success, fail) -> {
                 if (progress != Investigating)
@@ -463,20 +465,16 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
             });
         }
 
-        private RoutingKeys someKeys(Command command)
+        private Unseekables<?, ?> unseekables(Command command)
         {
-            AbstractRoute someRoute = command.route();
-            if (someRoute == null)
-                return blockedOnKeys;
-            if (blockedOnKeys instanceof AbstractRoute)
-                someRoute = AbstractRoute.merge(someRoute, (AbstractRoute) blockedOnKeys);
-            return someRoute;
+            return Unseekables.merge((Route)command.route(), blockedOn);
         }
 
-        private void invalidate(Node node, TxnId txnId, RoutingKeys someKeys)
+        private void invalidate(Node node, TxnId txnId, Unseekables<?, ?> someKeys)
         {
             progress = Investigating;
-            RoutingKey someKey = someKeys instanceof AbstractRoute ? ((AbstractRoute) someKeys).homeKey : someKeys.get(0);
+            // TODO (RangeTxns): This should be a Routable, or we should guarantee it is safe to operate on any key in the range
+            RoutingKey someKey = Route.isRoute(someKeys) ? (Route.castToRoute(someKeys)).homeKey() : someKeys.get(0).someIntersectingRoutingKey();
             someKeys = someKeys.with(someKey);
             debugInvestigating = Invalidate.invalidate(node, txnId, someKeys, (success, fail) -> {
                 if (progress != Investigating)
@@ -515,12 +513,12 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
             this.commandStore = commandStore;
         }
 
-        void recordBlocking(TxnId txnId, Known waitingFor, RoutingKeys someKeys)
+        void recordBlocking(TxnId txnId, Known waitingFor, Unseekables<?, ?> unseekables)
         {
-            Preconditions.checkArgument(txnId.equals(this.txnId));
+            Invariants.checkArgument(txnId.equals(this.txnId));
             if (blockingState == null)
                 blockingState = new BlockingState();
-            blockingState.recordBlocking(waitingFor, someKeys);
+            blockingState.recordBlocking(waitingFor, unseekables);
         }
 
         void ensureAtLeast(NonHomeState ensureAtLeast)
@@ -647,7 +645,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
         @Override
         public void preaccepted(Command command, ProgressShard shard)
         {
-            Preconditions.checkState(shard != Unsure);
+            Invariants.checkState(shard != Unsure);
 
             if (shard.isProgress())
             {
@@ -675,7 +673,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
 
         private void ensureSafeOrAtLeast(Command command, ProgressShard shard, CoordinateStatus newStatus, Progress newProgress)
         {
-            Preconditions.checkState(shard != Unsure);
+            Invariants.checkState(shard != Unsure);
 
             State state = null;
             assert newStatus.isAtMost(ReadyToExecute);
@@ -722,7 +720,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
         {
             State state = recordApply(command.txnId());
 
-            Preconditions.checkState(shard == Home || state == null || state.coordinateState == null);
+            Invariants.checkState(shard == Home || state == null || state.coordinateState == null);
 
             // note: we permit Unsure here, so we check if we have any local home state
             if (shard.isProgress())
@@ -746,25 +744,25 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
         {
             State state = ensure(command.txnId());
             if (!command.status().hasBeen(PreApplied))
-                state.recordBlocking(command.txnId(), PreApplied.minKnown, command.maxRoutingKeys());
+                state.recordBlocking(command.txnId(), PreApplied.minKnown, command.maxUnseekables());
             state.local().durableGlobal();
             state.global().durableGlobal(node, command, persistedOn);
         }
 
         @Override
-        public void durable(TxnId txnId, RoutingKeys someKeys, ProgressShard shard)
+        public void durable(TxnId txnId, Unseekables<?, ?> unseekables, ProgressShard shard)
         {
             State state = ensure(txnId);
             // TODO: we can probably simplify things by requiring (empty) Apply messages to be sent also to the coordinating topology
-            state.recordBlocking(txnId, PreApplied.minKnown, someKeys);
+            state.recordBlocking(txnId, PreApplied.minKnown, unseekables);
         }
 
-        public void waiting(TxnId blockedBy, Known blockedUntil, RoutingKeys blockedOnKeys)
+        public void waiting(TxnId blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn)
         {
             // TODO (soon): forward to progress shard for processing (if known)
             // TODO (soon): if we are co-located with the home shard, don't need to do anything unless we're in a
             //              later topology that wasn't covered by its coordination
-            ensure(blockedBy).recordBlocking(blockedBy, blockedUntil, blockedOnKeys);
+            ensure(blockedBy).recordBlocking(blockedBy, blockedUntil, blockedOn);
         }
     }
 

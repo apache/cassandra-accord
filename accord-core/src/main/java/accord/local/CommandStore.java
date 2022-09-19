@@ -20,15 +20,15 @@ package accord.local;
 
 import accord.api.*;
 import accord.local.CommandStores.ShardedRanges;
-import accord.primitives.AbstractKeys;
-import accord.primitives.KeyRanges;
-import accord.primitives.Keys;
+import accord.api.ProgressLog;
+import accord.primitives.*;
+import accord.api.DataStore;
 import org.apache.cassandra.utils.concurrent.Future;
-
-import com.google.common.base.Preconditions;
 
 import java.util.function.Consumer;
 import java.util.function.Function;
+
+import static accord.utils.Invariants.checkArgument;
 
 /**
  * Single threaded internal shard of accord transaction metadata
@@ -50,11 +50,10 @@ public abstract class CommandStore
 
     public interface RangesForEpoch
     {
-        KeyRanges at(long epoch);
-        KeyRanges between(long fromInclusive, long toInclusive);
-        KeyRanges since(long epoch);
+        Ranges at(long epoch);
+        Ranges between(long fromInclusive, long toInclusive);
+        Ranges since(long epoch);
         boolean owns(long epoch, RoutingKey key);
-        boolean intersects(long epoch, AbstractKeys<?, ?> keys);
     }
 
     private final int id; // unique id
@@ -67,10 +66,9 @@ public abstract class CommandStore
                         int shardIndex,
                         int numShards)
     {
-        Preconditions.checkArgument(shardIndex < numShards);
         this.id = id;
         this.generation = generation;
-        this.shardIndex = shardIndex;
+        this.shardIndex = checkArgument(shardIndex, shardIndex < numShards);
         this.numShards = numShards;
     }
 
@@ -91,14 +89,14 @@ public abstract class CommandStore
         return generation;
     }
 
-    public boolean hashIntersects(RoutingKey key)
+    public boolean hashIntersects(RoutableKey key)
     {
         return ShardedRanges.keyIndex(key, numShards) == shardIndex;
     }
 
-    public boolean intersects(Keys keys, KeyRanges ranges)
+    public boolean hashIntersects(Routable routable)
     {
-        return keys.any(ranges, this::hashIntersects);
+        return routable instanceof Range || hashIntersects((RoutableKey) routable);
     }
 
     public abstract Agent agent();

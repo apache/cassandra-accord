@@ -1,6 +1,5 @@
 package accord.messages;
 
-import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.local.*;
 import accord.local.Node.Id;
@@ -11,30 +10,32 @@ import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.List;
 
+import static accord.primitives.Route.castToFullRoute;
+import static accord.primitives.Route.isFullRoute;
 import static accord.utils.Functions.mapReduceNonNull;
 
-public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.InvalidateReply> implements EpochRequest, PreLoadContext
+public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.InvalidateReply> implements Request, PreLoadContext
 {
     public final Ballot ballot;
-    public final RoutingKeys someKeys;
+    public final Unseekables<?, ?> someUnseekables;
 
-    public BeginInvalidation(Id to, Topologies topologies, TxnId txnId, RoutingKeys someKeys, Ballot ballot)
+    public BeginInvalidation(Id to, Topologies topologies, TxnId txnId, Unseekables<?, ?> someUnseekables, Ballot ballot)
     {
         super(txnId);
-        this.someKeys = someKeys.slice(topologies.computeRangesForNode(to));
+        this.someUnseekables = someUnseekables.slice(topologies.computeRangesForNode(to));
         this.ballot = ballot;
     }
 
-    public BeginInvalidation(TxnId txnId, RoutingKeys someKeys, Ballot ballot)
+    public BeginInvalidation(TxnId txnId, Unseekables<?, ?> someUnseekables, Ballot ballot)
     {
         super(txnId);
-        this.someKeys = someKeys;
+        this.someUnseekables = someUnseekables;
         this.ballot = ballot;
     }
 
     public void process()
     {
-        node.mapReduceConsumeLocal(this, someKeys, txnId.epoch, txnId.epoch, this);
+        node.mapReduceConsumeLocal(this, someUnseekables, txnId.epoch, txnId.epoch, this);
     }
 
     @Override
@@ -57,7 +58,7 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
         boolean isOk = o1.isPromised() && o2.isPromised();
         Ballot supersededBy = isOk ? null : Ballot.nonNullOrMax(o1.supersededBy, o2.supersededBy);
         boolean acceptedFastPath = o1.acceptedFastPath && o2.acceptedFastPath;
-        AbstractRoute route =  AbstractRoute.merge(o1.route, o2.route);
+        Route<?> route =  Route.merge((Route)o1.route, o2.route);
         RoutingKey homeKey = o1.homeKey != null ? o1.homeKey : o2.homeKey != null ? o2.homeKey : null;
         InvalidateReply maxStatus = Status.max(o1, o1.status, o1.accepted, o2, o2.status, o2.accepted);
         return new InvalidateReply(supersededBy, maxStatus.accepted, maxStatus.status, acceptedFastPath, route, homeKey);
@@ -70,9 +71,9 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
     }
 
     @Override
-    public Iterable<Key> keys()
+    public Seekables<?, ?> keys()
     {
-        return Collections.emptyList();
+        return Keys.EMPTY;
     }
 
     @Override
@@ -102,10 +103,10 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
         public final Ballot accepted;
         public final Status status;
         public final boolean acceptedFastPath;
-        public final @Nullable AbstractRoute route;
+        public final @Nullable Route<?> route;
         public final @Nullable RoutingKey homeKey;
 
-        public InvalidateReply(Ballot supersededBy, Ballot accepted, Status status, boolean acceptedFastPath, @Nullable AbstractRoute route, @Nullable RoutingKey homeKey)
+        public InvalidateReply(Ballot supersededBy, Ballot accepted, Status status, boolean acceptedFastPath, @Nullable Route<?> route, @Nullable RoutingKey homeKey)
         {
             this.supersededBy = supersededBy;
             this.accepted = accepted;
@@ -132,19 +133,19 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
             return MessageType.BEGIN_INVALIDATE_RSP;
         }
 
-        public static Route findRoute(List<InvalidateReply> invalidateOks)
+        public static FullRoute<?> findRoute(List<InvalidateReply> invalidateOks)
         {
             for (InvalidateReply ok : invalidateOks)
             {
-                if (ok.route instanceof Route)
-                    return (Route)ok.route;
+                if (isFullRoute(ok.route))
+                    return castToFullRoute(ok.route);
             }
             return null;
         }
 
-        public static AbstractRoute mergeRoutes(List<InvalidateReply> invalidateOks)
+        public static Route<?> mergeRoutes(List<InvalidateReply> invalidateOks)
         {
-            return mapReduceNonNull(ok -> ok.route, AbstractRoute::union, invalidateOks);
+            return mapReduceNonNull(ok -> (Route)ok.route, Route::union, invalidateOks);
         }
 
         public static InvalidateReply max(List<InvalidateReply> invalidateReplies)

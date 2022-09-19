@@ -21,14 +21,13 @@ package accord.local;
 import java.util.stream.Stream;
 
 import accord.api.Key;
+import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
-
-import static accord.utils.Utils.*;
 
 public abstract class CommandsForKey implements CommandListener
 {
@@ -103,7 +102,7 @@ public abstract class CommandsForKey implements CommandListener
     @Override
     public PreLoadContext listenerPreLoadContext(TxnId caller)
     {
-        return PreLoadContext.contextFor(caller, listOf(key()));
+        return PreLoadContext.contextFor(caller, Keys.of(key()));
     }
 
     @Override

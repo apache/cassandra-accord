@@ -18,11 +18,9 @@
 
 package accord.topology;
 
-import accord.api.TopologySorter;
-import accord.impl.SizeOfIntersectionSorter;
 import accord.local.Node;
-import accord.primitives.KeyRange;
-import accord.primitives.Keys;
+import accord.primitives.Range;
+import accord.primitives.RoutingKeys;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -38,7 +36,7 @@ public class TopologyManagerTest
     @Test
     void fastPathReconfiguration()
     {
-        KeyRange range = range(100, 200);
+        Range range = range(100, 200);
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(1, 2, 3), idSet(2, 3)));
 
@@ -83,8 +81,8 @@ public class TopologyManagerTest
         service.onEpochSyncComplete(id(1), 1);
         service.onEpochSyncComplete(id(2), 1);
         Assertions.assertFalse(service.getEpochStateUnsafe(1).syncComplete());
-        Assertions.assertTrue(service.getEpochStateUnsafe(1).syncCompleteFor(keys(150)));
-        Assertions.assertFalse(service.getEpochStateUnsafe(1).syncCompleteFor(keys(250)));
+        Assertions.assertTrue(service.getEpochStateUnsafe(1).syncCompleteFor(keys(150).toUnseekables()));
+        Assertions.assertFalse(service.getEpochStateUnsafe(1).syncCompleteFor(keys(250).toUnseekables()));
     }
 
     /**
@@ -93,7 +91,7 @@ public class TopologyManagerTest
     @Test
     void existingEpochPendingSync()
     {
-        KeyRange range = range(100, 200);
+        Range range = range(100, 200);
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(1, 2, 3), idSet(2, 3)));
         Topology topology3 = topology(3, shard(range, idList(1, 2, 3), idSet(1, 2)));
@@ -127,7 +125,7 @@ public class TopologyManagerTest
     @Test
     void futureEpochPendingSync()
     {
-        KeyRange range = range(100, 200);
+        Range range = range(100, 200);
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(1, 2, 3), idSet(2, 3)));
 
@@ -146,7 +144,7 @@ public class TopologyManagerTest
     @Test
     void forKeys()
     {
-        KeyRange range = range(100, 200);
+        Range range = range(100, 200);
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(1, 2, 3), idSet(2, 3)));
 
@@ -158,13 +156,13 @@ public class TopologyManagerTest
         service.onTopologyUpdate(topology2);
         Assertions.assertFalse(service.getEpochStateUnsafe(1).syncComplete());
 
-        Keys keys = keys(150);
-        Assertions.assertEquals(topologies(topology2.forKeys(keys), topology1.forKeys(keys)),
+        RoutingKeys keys = keys(150).toUnseekables();
+        Assertions.assertEquals(topologies(topology2.forSelection(keys), topology1.forSelection(keys)),
                                 service.withUnsyncedEpochs(keys, 2, 2));
 
         service.onEpochSyncComplete(id(1), 1);
         service.onEpochSyncComplete(id(2), 1);
-        Assertions.assertEquals(topologies(topology2.forKeys(keys)),
+        Assertions.assertEquals(topologies(topology2.forSelection(keys)),
                                 service.withUnsyncedEpochs(keys, 2, 2));
     }
 
@@ -188,12 +186,12 @@ public class TopologyManagerTest
 
         // no acks, so all epoch 1 shards should be included
         Assertions.assertEquals(topologies(topology2, topology1),
-                                service.withUnsyncedEpochs(keys(150, 250), 2, 2));
+                                service.withUnsyncedEpochs(keys(150, 250).toUnseekables(), 2, 2));
 
         // first topology acked, so only the second shard should be included
         service.onEpochSyncComplete(id(1), 1);
         service.onEpochSyncComplete(id(2), 1);
-        Topologies actual = service.withUnsyncedEpochs(keys(150, 250), 2, 2);
+        Topologies actual = service.withUnsyncedEpochs(keys(150, 250).toUnseekables(), 2, 2);
         Assertions.assertEquals(topologies(topology2, topology(1, shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)))),
                                 actual);
     }

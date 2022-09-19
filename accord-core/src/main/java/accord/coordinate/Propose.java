@@ -29,16 +29,11 @@ import accord.coordinate.tracking.QuorumTracker;
 import accord.coordinate.tracking.QuorumTracker.QuorumShardTracker;
 import accord.coordinate.tracking.RequestStatus;
 import accord.messages.Callback;
-import accord.primitives.Route;
+import accord.primitives.*;
 import accord.topology.Shard;
 import accord.topology.Topologies;
-import accord.primitives.Ballot;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.primitives.Timestamp;
-import accord.primitives.Deps;
-import accord.primitives.Txn;
-import accord.primitives.TxnId;
 import accord.messages.Accept;
 import accord.messages.Accept.AcceptReply;
 
@@ -51,7 +46,7 @@ class Propose implements Callback<AcceptReply>
     final Ballot ballot;
     final TxnId txnId;
     final Txn txn;
-    final Route route;
+    final FullRoute<?> route;
     final Deps deps;
 
     private final List<AcceptReply> acceptOks;
@@ -60,7 +55,7 @@ class Propose implements Callback<AcceptReply>
     private final BiConsumer<Result, Throwable> callback;
     private boolean isDone;
 
-    Propose(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, Route route, Deps deps, Timestamp executeAt, BiConsumer<Result, Throwable> callback)
+    Propose(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Deps deps, Timestamp executeAt, BiConsumer<Result, Throwable> callback)
     {
         this.node = node;
         this.ballot = ballot;
@@ -74,14 +69,14 @@ class Propose implements Callback<AcceptReply>
         this.acceptTracker = new QuorumTracker(topologies);
     }
 
-    public static void propose(Node node, Ballot ballot, TxnId txnId, Txn txn, Route route,
+    public static void propose(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route,
                                Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
     {
         Topologies topologies = node.topology().withUnsyncedEpochs(route, txnId, executeAt);
         propose(node, topologies, ballot, txnId, txn, route, executeAt, deps, callback);
     }
 
-    public static void propose(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, Route route,
+    public static void propose(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route,
                                Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
     {
         Propose propose = new Propose(node, topologies, ballot, txnId, txn, route, deps, executeAt, callback);
@@ -100,7 +95,7 @@ class Propose implements Callback<AcceptReply>
             case Redundant:
             case RejectedBallot:
                 isDone = true;
-                callback.accept(null, new Preempted(txnId, route.homeKey));
+                callback.accept(null, new Preempted(txnId, route.homeKey()));
                 break;
             case Success:
                 acceptOks.add(reply);
@@ -115,7 +110,7 @@ class Propose implements Callback<AcceptReply>
         if (acceptTracker.recordFailure(from) == Failed)
         {
             isDone = true;
-            callback.accept(null, new Timeout(txnId, route.homeKey));
+            callback.accept(null, new Timeout(txnId, route.homeKey()));
         }
     }
 
