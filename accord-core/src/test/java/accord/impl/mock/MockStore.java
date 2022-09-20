@@ -57,7 +57,7 @@ public class MockStore implements DataStore
             }
 
             @Override
-            public Future<Data> read(Key key, CommandStore commandStore, Timestamp executeAt, DataStore store)
+            public Future<Data> read(Key key, boolean forWriteTxn, CommandStore commandStore, Timestamp executeAt, DataStore store)
             {
                 return ImmediateFuture.success(DATA);
             }

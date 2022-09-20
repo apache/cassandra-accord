@@ -43,7 +43,7 @@ public class MaelstromRead implements Read
     }
 
     @Override
-    public Future<Data> read(Key key, CommandStore commandStore, Timestamp executeAt, DataStore store)
+    public Future<Data> read(Key key, boolean forWriteTxn, CommandStore commandStore, Timestamp executeAt, DataStore store)
     {
         MaelstromStore s = (MaelstromStore)store;
         MaelstromData result = new MaelstromData();

@@ -47,7 +47,7 @@ public class ListRead implements Read
     }
 
     @Override
-    public Future<Data> read(Key key, CommandStore commandStore, Timestamp executeAt, DataStore store)
+    public Future<Data> read(Key key, boolean forWriteTxn, CommandStore commandStore, Timestamp executeAt, DataStore store)
     {
         ListStore s = (ListStore)store;
         ListData result = new ListData();

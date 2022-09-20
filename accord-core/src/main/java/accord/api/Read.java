@@ -35,7 +35,7 @@ import java.util.function.BiConsumer;
 public interface Read
 {
     Keys keys();
-    Future<Data> read(Key key, CommandStore commandStore, Timestamp executeAt, DataStore store);
+    Future<Data> read(Key key, boolean forWriteTxn, CommandStore commandStore, Timestamp executeAt, DataStore store);
 
     class ReadFuture extends AsyncPromise<Data> implements BiConsumer<Data, Throwable>
     {

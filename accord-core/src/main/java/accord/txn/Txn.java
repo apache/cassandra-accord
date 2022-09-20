@@ -147,7 +147,7 @@ public abstract class Txn
             if (!commandStore.hashIntersects(key))
                 return accumulate;
 
-            Future<Data> result = read().read(key, command.commandStore(), command.executeAt(), commandStore.store());
+            Future<Data> result = read().read(key, isWrite(), command.commandStore(), command.executeAt(), commandStore.store());
             accumulate.add(result);
             return accumulate;
         }, new ArrayList<>());
