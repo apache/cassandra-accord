@@ -400,7 +400,7 @@ public class Node implements ConfigurationService.Listener
 
     public Future<Result> coordinate(TxnId txnId, Txn txn)
     {
-        // TODO: The combination of updating the epoch of the next timestamp with epochs we don’t have topologies for,
+        // TODO: The combination of updating the epoch of the next timestamp with epochs we don't have topologies for,
         //  and requiring preaccept to talk to its topology epoch means that learning of a new epoch via timestamp
         //  (ie not via config service) will halt any new txns from a node until it receives this topology
         Future<Result> result = withEpoch(txnId.epoch, () -> initiateCoordination(txnId, txn));
