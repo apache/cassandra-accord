@@ -406,7 +406,6 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
             case Executed:
             case Applied:
             case Invalidated:
-                boolean notifyListeners = false;
                 if (isUnableToApply())
                 {
                     updatePredecessor(command);
@@ -414,13 +413,12 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
                     {
                         removeWaitingOnCommit(command);
                     }
-                    notifyListeners = true;
                 }
                 else
                 {
                     command.removeListener(this);
                 }
-                maybeExecute(notifyListeners);
+                maybeExecute(false);
                 break;
         }
     }
