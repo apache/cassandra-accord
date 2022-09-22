@@ -545,12 +545,12 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         if (cur == null)
             return null;
 
-        Command next;
-        while (null != (next = cur.directlyBlockedBy()))
-        {
-            prev = cur;
-            cur = next;
-        }
+//        Command next;
+//        while (null != (next = cur.directlyBlockedBy()))
+//        {
+//            prev = cur;
+//            cur = next;
+//        }
 
         Keys someKeys = cur.someKeys();
         if (someKeys == null)
