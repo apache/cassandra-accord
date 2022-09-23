@@ -19,6 +19,7 @@
 package accord.messages;
 
 import accord.api.Key;
+import accord.local.*;
 import accord.utils.VisibleForImplementation;
 import accord.api.Result;
 import accord.coordinate.Persist;
@@ -27,17 +28,12 @@ import accord.topology.Topologies;
 import java.util.List;
 import java.util.stream.Stream;
 
-import accord.local.CommandStore;
-import accord.local.CommandsForKey;
 import accord.primitives.Keys;
 import accord.txn.Writes;
 import accord.primitives.Ballot;
-import accord.local.Node;
 import accord.local.Node.Id;
 import accord.primitives.Timestamp;
-import accord.local.Command;
 import accord.primitives.Deps;
-import accord.local.Status;
 import accord.txn.Txn;
 import accord.primitives.TxnId;
 import com.google.common.base.Preconditions;
@@ -357,7 +353,7 @@ public class BeginRecovery extends TxnRequest
         }
     }
 
-    private static Stream<Command> uncommittedStartedAfter(CommandStore commandStore, TxnId startedAfter, Keys keys)
+    private static Stream<PartialCommand.WithDeps> uncommittedStartedAfter(CommandStore commandStore, TxnId startedAfter, Keys keys)
     {
         return keys.stream().flatMap(key -> {
             CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
@@ -367,7 +363,7 @@ public class BeginRecovery extends TxnRequest
         });
     }
 
-    private static Stream<Command> committedExecutesAfter(CommandStore commandStore, TxnId startedAfter, Keys keys)
+    private static Stream<PartialCommand.WithDeps> committedExecutesAfter(CommandStore commandStore, TxnId startedAfter, Keys keys)
     {
         return keys.stream().flatMap(key -> {
             CommandsForKey forKey = commandStore.maybeCommandsForKey(key);

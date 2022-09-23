@@ -21,6 +21,7 @@ package accord.impl;
 import accord.api.Key;
 import accord.local.Command;
 import accord.local.CommandsForKey;
+import accord.local.PartialCommand;
 import accord.primitives.Timestamp;
 
 import java.util.NavigableMap;
@@ -34,7 +35,7 @@ public class InMemoryCommandsForKey extends CommandsForKey
         private final NavigableMap<Timestamp, Command> commands = new TreeMap<>();
 
         @Override
-        public Command get(Timestamp timestamp)
+        public PartialCommand.WithDeps get(Timestamp timestamp)
         {
             return commands.get(timestamp);
         }
@@ -62,27 +63,27 @@ public class InMemoryCommandsForKey extends CommandsForKey
         }
 
         @Override
-        public Stream<Command> before(Timestamp timestamp)
+        public Stream<PartialCommand.WithDeps> before(Timestamp timestamp)
         {
-            return commands.headMap(timestamp, false).values().stream();
+            return commands.headMap(timestamp, false).values().stream().map(cmd -> cmd);
         }
 
         @Override
-        public Stream<Command> after(Timestamp timestamp)
+        public Stream<PartialCommand.WithDeps> after(Timestamp timestamp)
         {
-            return commands.tailMap(timestamp, false).values().stream();
+            return commands.tailMap(timestamp, false).values().stream().map(cmd -> cmd);
         }
 
         @Override
-        public Stream<Command> between(Timestamp min, Timestamp max)
+        public Stream<PartialCommand.WithDeps> between(Timestamp min, Timestamp max)
         {
-            return commands.subMap(min, true, max, true).values().stream();
+            return commands.subMap(min, true, max, true).values().stream().map(cmd -> cmd);
         }
 
         @Override
-        public Stream<Command> all()
+        public Stream<PartialCommand.WithDeps> all()
         {
-            return commands.values().stream();
+            return commands.values().stream().map(cmd -> cmd);
         }
     }
 

@@ -31,13 +31,13 @@ import org.slf4j.LoggerFactory;
 
 import static accord.utils.Utils.*;
 
-public abstract class CommandsForKey implements Listener, Iterable<Command>
+public abstract class CommandsForKey implements Listener, Iterable<PartialCommand.WithDeps>
 {
     private static final Logger logger = LoggerFactory.getLogger(CommandsForKey.class);
 
     public interface CommandTimeseries
     {
-        Command get(Timestamp timestamp);
+        PartialCommand.WithDeps get(Timestamp timestamp);
         void add(Timestamp timestamp, Command command);
         void remove(Timestamp timestamp);
 
@@ -46,19 +46,19 @@ public abstract class CommandsForKey implements Listener, Iterable<Command>
         /**
          * All commands before (exclusive of) the given timestamp
          */
-        Stream<Command> before(Timestamp timestamp);
+        Stream<PartialCommand.WithDeps> before(Timestamp timestamp);
 
         /**
          * All commands after (exclusive of) the given timestamp
          */
-        Stream<Command> after(Timestamp timestamp);
+        Stream<PartialCommand.WithDeps> after(Timestamp timestamp);
 
         /**
          * All commands between (inclusive of) the given timestamps
          */
-        Stream<Command> between(Timestamp min, Timestamp max);
+        Stream<PartialCommand.WithDeps> between(Timestamp min, Timestamp max);
 
-        Stream<Command> all();
+        Stream<PartialCommand.WithDeps> all();
     }
 
     public abstract Key key();
@@ -102,7 +102,7 @@ public abstract class CommandsForKey implements Listener, Iterable<Command>
         command.addListener(this);
     }
 
-    public void forWitnessed(Timestamp minTs, Timestamp maxTs, Consumer<Command> consumer)
+    public void forWitnessed(Timestamp minTs, Timestamp maxTs, Consumer<PartialCommand> consumer)
     {
         uncommitted().between(minTs, maxTs)
                 .filter(cmd -> cmd.hasBeen(Status.PreAccepted)).forEach(consumer);
@@ -112,7 +112,7 @@ public abstract class CommandsForKey implements Listener, Iterable<Command>
     }
 
     @Override
-    public Iterator<Command> iterator()
+    public Iterator<PartialCommand.WithDeps> iterator()
     {
         return Iterators.concat(uncommitted().all().iterator(), committedByExecuteAt().all().iterator());
     }

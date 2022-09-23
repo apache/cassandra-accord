@@ -27,7 +27,6 @@ import accord.primitives.*;
 import accord.txn.Txn;
 import accord.txn.Writes;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Verify;
 import com.google.common.collect.Iterables;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.slf4j.Logger;
@@ -40,73 +39,73 @@ import java.util.function.Function;
 import static accord.local.Status.*;
 import static accord.utils.Utils.listOf;
 
-public abstract class Command implements Listener, Consumer<Listener>, TxnOperation
+public abstract class Command implements Listener, Consumer<Listener>, TxnOperation, PartialCommand.WithDeps
 {
     private static final Logger logger = LoggerFactory.getLogger(Command.class);
 
-    public abstract TxnId txnId();
     public abstract CommandStore commandStore();
 
     public abstract Key homeKey();
+
     protected abstract void setHomeKey(Key key);
 
     public abstract Key progressKey();
+
     protected abstract void setProgressKey(Key key);
 
-    public abstract Txn txn();
     protected abstract void setTxn(Txn txn);
 
     public abstract Ballot promised();
+
     public abstract void promised(Ballot ballot);
 
     public abstract Ballot accepted();
+
     public abstract void accepted(Ballot ballot);
 
-    public abstract Timestamp executeAt();
     public abstract void executeAt(Timestamp timestamp);
 
     public abstract Deps savedDeps();
+
     public abstract void savedDeps(Deps deps);
 
     public abstract Writes writes();
+
     public abstract void writes(Writes writes);
 
     public abstract Result result();
+
     public abstract void result(Result result);
 
-    public abstract Status status();
     public abstract void status(Status status);
 
     public abstract boolean isGloballyPersistent();
+
     public abstract void isGloballyPersistent(boolean v);
 
     public abstract Command addListener(Listener listener);
-    public abstract void removeListener(Listener listener);
+
     public abstract void notifyListeners();
 
     public abstract void addWaitingOnCommit(Command command);
-    public abstract boolean isWaitingOnCommit();
-    public abstract void removeWaitingOnCommit(Command command);
-    public abstract Command firstWaitingOnCommit();
 
-    public abstract void addWaitingOnApplyIfAbsent(Command command);
+    public abstract boolean isWaitingOnCommit();
+
+    public abstract void removeWaitingOnCommit(PartialCommand command);
+
+    public abstract PartialCommand firstWaitingOnCommit();
+
+    public abstract void addWaitingOnApplyIfAbsent(PartialCommand command);
+
     public abstract boolean isWaitingOnApply();
-    public abstract void removeWaitingOnApply(Command command);
-    public abstract Command firstWaitingOnApply();
+
+    public abstract void removeWaitingOnApply(PartialCommand command);
+
+    public abstract PartialCommand firstWaitingOnApply();
 
     public boolean isUnableToApply()
     {
         return isWaitingOnCommit() || isWaitingOnApply();
-    }
-
-    public boolean hasBeen(Status status)
-    {
-        return status().hasBeen(status);
-    }
-
-    public boolean is(Status status)
-    {
-        return status() == status;
     }
 
     @Override
@@ -387,14 +386,14 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         return TxnOperation.scopeFor(listOf(txnId(), caller), Collections.emptyList());
     }
 
-    @Override
-    public void onChange(Command command)
+    private void onChangeInternal(PartialCommand command)
     {
         logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
                      txnId(), command.txnId(), command.status(), command);
         switch (command.status())
         {
-            default: throw new IllegalStateException();
+            default:
+                throw new IllegalStateException();
             case NotWitnessed:
             case PreAccepted:
             case Accepted:
@@ -421,6 +420,12 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
                 maybeExecute(false);
                 break;
         }
+    }
+
+    @Override
+    public void onChange(Command command)
+    {
+        onChangeInternal(command);
     }
 
     protected void postApply()
@@ -497,7 +502,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
     /**
      * @param dependency is either committed or invalidated
      */
-    private void updatePredecessor(Command dependency)
+    private void updatePredecessor(PartialCommand dependency)
     {
         Preconditions.checkState(dependency.hasBeen(Committed));
         if (dependency.hasBeen(Invalidated))
@@ -541,7 +546,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
     public BlockedBy blockedBy()
     {
         Command prev = this;
-        Command cur = directlyBlockedBy();
+        PartialCommand cur = directlyBlockedBy();
         if (cur == null)
             return null;
 
@@ -577,13 +582,6 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         else if (!current.equals(homeKey)) throw new AssertionError();
     }
 
-    public Keys someKeys()
-    {
-        if (txn() != null)
-            return txn().keys();
-
-        return null;
-    }
 
     public Key someKey()
     {
@@ -643,7 +641,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         return promised().node;
     }
 
-    private Command directlyBlockedBy()
+    private PartialCommand directlyBlockedBy()
     {
         // firstly we're waiting on every dep to commit
         while (isWaitingOnCommit())
@@ -651,9 +649,9 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
             // TODO: when we change our liveness mechanism this may not be a problem
             // cannot guarantee that listener updating this set is invoked before this method by another listener
             // so we must check the entry is still valid, and potentially remove it if not
-            Command waitingOn = firstWaitingOnCommit();
+            PartialCommand waitingOn = firstWaitingOnCommit();
             if (!waitingOn.hasBeen(Committed)) return waitingOn;
-            onChange(waitingOn);
+            onChangeInternal(waitingOn);
         }
 
         while (isWaitingOnApply())
@@ -661,9 +659,9 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
             // TODO: when we change our liveness mechanism this may not be a problem
             // cannot guarantee that listener updating this set is invoked before this method by another listener
             // so we must check the entry is still valid, and potentially remove it if not
-            Command waitingOn = firstWaitingOnApply();
+            PartialCommand waitingOn = firstWaitingOnApply();
             if (!waitingOn.hasBeen(Applied)) return waitingOn;
-            onChange(waitingOn);
+            onChangeInternal(waitingOn);
         }
 
         return null;

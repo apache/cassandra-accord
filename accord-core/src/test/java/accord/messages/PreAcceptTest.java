@@ -103,7 +103,7 @@ public class PreAcceptTest
             clock.increment(10);
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
-            Command command = commandStore.commandsForKey(key).uncommitted().get(txnId);
+            PartialCommand command = commandStore.commandsForKey(key).uncommitted().get(txnId);
             Assertions.assertEquals(Status.PreAccepted, command.status());
 
             messageSink.assertHistorySizes(0, 1);
@@ -231,7 +231,7 @@ public class PreAcceptTest
             clock.increment(10);
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
-            Command command = commandStore.commandsForKey(key).uncommitted().get(txnId);
+            PartialCommand command = commandStore.commandsForKey(key).uncommitted().get(txnId);
             Assertions.assertEquals(Status.PreAccepted, command.status());
 
             messageSink.assertHistorySizes(0, 1);

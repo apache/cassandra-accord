@@ -50,8 +50,8 @@ public class InMemoryCommand extends Command
 
     private boolean isGloballyPersistent; // only set on home shard
 
-    private NavigableMap<TxnId, Command> waitingOnCommit;
-    private NavigableMap<TxnId, Command> waitingOnApply;
+    private NavigableMap<TxnId, PartialCommand> waitingOnCommit;
+    private NavigableMap<TxnId, PartialCommand> waitingOnApply;
 
     private final Listeners listeners = new Listeners();
 
@@ -270,7 +270,7 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public void removeWaitingOnCommit(Command command)
+    public void removeWaitingOnCommit(PartialCommand command)
     {
         if (waitingOnCommit == null)
             return;
@@ -278,13 +278,13 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public Command firstWaitingOnCommit()
+    public PartialCommand firstWaitingOnCommit()
     {
         return isWaitingOnCommit() ? waitingOnCommit.firstEntry().getValue() : null;
     }
 
     @Override
-    public void addWaitingOnApplyIfAbsent(Command command)
+    public void addWaitingOnApplyIfAbsent(PartialCommand command)
     {
         if (waitingOnApply == null)
             waitingOnApply = new TreeMap<>();
@@ -299,7 +299,7 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public void removeWaitingOnApply(Command command)
+    public void removeWaitingOnApply(PartialCommand command)
     {
         if (waitingOnApply == null)
             return;
@@ -307,7 +307,7 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public Command firstWaitingOnApply()
+    public PartialCommand firstWaitingOnApply()
     {
         return isWaitingOnApply() ? waitingOnApply.firstEntry().getValue() : null;
     }

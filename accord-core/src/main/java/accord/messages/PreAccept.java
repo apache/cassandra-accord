@@ -22,19 +22,16 @@ import java.util.Collections;
 import java.util.Objects;
 import java.util.function.Consumer;
 
+import accord.local.*;
 import accord.utils.VisibleForImplementation;
 import com.google.common.annotations.VisibleForTesting;
 
 import accord.api.Key;
-import accord.local.CommandStore;
-import accord.local.CommandsForKey;
-import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.TxnRequest.WithUnsynced;
 import accord.topology.Topologies;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
-import accord.local.Command;
 import accord.primitives.Deps;
 import accord.txn.Txn;
 import accord.primitives.TxnId;
@@ -214,7 +211,7 @@ public class PreAccept extends WithUnsynced
                '}';
     }
 
-    private static Consumer<Command> conflicts(TxnId txnId, boolean isWrite, Deps.OrderedBuilder builder)
+    private static Consumer<PartialCommand> conflicts(TxnId txnId, boolean isWrite, Deps.OrderedBuilder builder)
     {
         return command -> {
             if (!txnId.equals(command.txnId()) && (isWrite || command.txn().isWrite()))

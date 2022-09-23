@@ -95,7 +95,6 @@ public abstract class InMemoryCommandStore extends CommandStore
         return commandsForKey.get(key);
     }
 
-    // TODO: command store api will need to support something like this for repair/streaming
     public void forEpochCommands(KeyRanges ranges, long epoch, Consumer<Command> consumer)
     {
         Timestamp minTimestamp = new Timestamp(epoch, Long.MIN_VALUE, Integer.MIN_VALUE, Node.Id.NONE);
@@ -108,12 +107,11 @@ public abstract class InMemoryCommandStore extends CommandStore
                                                                            range.endInclusive()).values();
             for (CommandsForKey commands : rangeCommands)
             {
-                commands.forWitnessed(minTimestamp, maxTimestamp, consumer);
+                commands.forWitnessed(minTimestamp, maxTimestamp, cmd -> consumer.accept((Command) cmd));
             }
         }
     }
 
-    // TODO: command store api will need to support something like this for repair/streaming
     public void forCommittedInEpoch(KeyRanges ranges, long epoch, Consumer<Command> consumer)
     {
         Timestamp minTimestamp = new Timestamp(epoch, Long.MIN_VALUE, Integer.MIN_VALUE, Node.Id.NONE);
@@ -128,7 +126,7 @@ public abstract class InMemoryCommandStore extends CommandStore
             {
 
                 Collection<Command> committed = commands.committedByExecuteAt()
-                        .between(minTimestamp, maxTimestamp).collect(Collectors.toList());
+                        .between(minTimestamp, maxTimestamp).map(cmd -> (Command) cmd).collect(Collectors.toList());
                 committed.forEach(consumer);
             }
         }
