@@ -387,11 +387,11 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
         Status blockedOn = Status.NotWitnessed;
         Progress progress = NoneExpected;
         Keys someKeys;
-        Command blocking;
+        PartialCommand blocking;
 
         Object debugInvestigating;
 
-        void recordBlocking(Command blocking, Keys someKeys)
+        void recordBlocking(PartialCommand blocking, Keys someKeys)
         {
             this.blocking = blocking;
             if (blocking.txn() != null && !blocking.txn().keys().containsAll(someKeys))
@@ -539,7 +539,7 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
             this.command = command;
         }
 
-        void recordBlocking(Command blockedByCommand, Keys someKeys)
+        void recordBlocking(PartialCommand blockedByCommand, Keys someKeys)
         {
             Preconditions.checkArgument(blockedByCommand.txnId().equals(txnId));
             if (blockingState == null)
@@ -739,9 +739,9 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
         }
 
         @Override
-        public void waiting(TxnId blockedBy, Keys someKeys)
+        public void waiting(PartialCommand blockedByCommand, Keys someKeys)
         {
-            Command blockedByCommand = commandStore.command(blockedBy);
+            TxnId blockedBy = blockedByCommand.txnId();
             if (!blockedByCommand.hasBeen(Executed))
                 ensure(blockedBy).recordBlocking(blockedByCommand, someKeys);
         }

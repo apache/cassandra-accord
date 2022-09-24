@@ -473,8 +473,8 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
             BlockedBy blockedBy = blockedBy();
             if (blockedBy != null)
             {
-                logger.trace("{}: not executing, blocked on {}", txnId(), blockedBy.txnId);
-                commandStore().progressLog().waiting(blockedBy.txnId, blockedBy.someKeys);
+                logger.trace("{}: not executing, blocked on {}", txnId(), blockedBy.command.txnId());
+                commandStore().progressLog().waiting(blockedBy.command, blockedBy.someKeys);
                 if (notifyListenersOnNoop) notifyListeners();
                 return Write.SUCCESS;
             }
@@ -533,12 +533,12 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
     // TEMPORARY: once we can invalidate commands that have not been witnessed on any shard, we do not need to know the home shard
     static class BlockedBy
     {
-        final TxnId txnId;
+        final PartialCommand command;
         final Keys someKeys;
 
-        BlockedBy(TxnId txnId, Keys someKeys)
+        BlockedBy(PartialCommand command, Keys someKeys)
         {
-            this.txnId = txnId;
+            this.command = command;
             this.someKeys = someKeys;
         }
     }
@@ -560,7 +560,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         Keys someKeys = cur.someKeys();
         if (someKeys == null)
             someKeys = prev.savedDeps().someKeys(cur.txnId());
-        return new BlockedBy(cur.txnId(), someKeys);
+        return new BlockedBy(cur, someKeys);
     }
 
     /**

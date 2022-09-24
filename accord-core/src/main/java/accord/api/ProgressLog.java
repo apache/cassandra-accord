@@ -26,6 +26,7 @@ import accord.coordinate.CheckOnUncommitted;
 import accord.coordinate.InformHomeOfTxn;
 import accord.local.CommandStore;
 import accord.local.Node.Id;
+import accord.local.PartialCommand;
 import accord.primitives.Keys;
 import accord.primitives.TxnId;
 
@@ -138,5 +139,5 @@ public interface ProgressLog
      *
      * In all other scenarios, the implementation is free to choose its course of action.
      */
-    void waiting(TxnId blockedBy, @Nullable Keys someKeys);
+    void waiting(PartialCommand command, @Nullable Keys someKeys);
 }

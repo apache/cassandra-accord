@@ -111,7 +111,7 @@ public class CommandTest
         }
 
         @Override
-        public void waiting(TxnId blockedBy, @Nullable Keys someKeys)
+        public void waiting(PartialCommand blockedBy, @Nullable Keys someKeys)
         {
         }
     }

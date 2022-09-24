@@ -125,7 +125,7 @@ public class WaitOnCommit extends TxnRequest
                 case Accepted:
                 case AcceptedInvalidate:
                     command.addListener(this);
-                    instance.progressLog().waiting(txnId, keys);
+                    instance.progressLog().waiting(command, keys);
                     break;
 
                 case Committed:
