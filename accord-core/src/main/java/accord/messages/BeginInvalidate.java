@@ -121,6 +121,12 @@ public class BeginInvalidate implements EpochRequest, TxnOperation
         {
             return toString("InvalidateOk");
         }
+
+        @Override
+        public MessageType type()
+        {
+            return MessageType.BEGIN_INVALIDATE_RSP;
+        }
     }
 
     public static class InvalidateNack extends RecoverNack
@@ -144,6 +150,12 @@ public class BeginInvalidate implements EpochRequest, TxnOperation
         public String toString()
         {
             return "InvalidateNack{supersededBy:" + supersededBy + '}';
+        }
+
+        @Override
+        public MessageType type()
+        {
+            return MessageType.BEGIN_INVALIDATE_RSP;
         }
     }
 }
