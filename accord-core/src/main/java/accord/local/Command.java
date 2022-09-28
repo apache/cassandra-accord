@@ -176,7 +176,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
 
         witness(txn, homeKey, progressKey);
         boolean isProgressShard = progressKey != null && handles(txnId().epoch, progressKey);
-        commandStore().progressLog().preaccept(txnId(), isProgressShard, isProgressShard && progressKey.equals(homeKey));
+        commandStore().progressLog().preaccept(this, isProgressShard, isProgressShard && progressKey.equals(homeKey));
 
         logger.trace("{}: preaccepted with executeAt: {}, deps: {}", txnId(), executeAt(), savedDeps());
         notifyListeners();
@@ -205,7 +205,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         status(Accepted);
 
         boolean isProgressShard = progressKey != null && handles(txnId().epoch, progressKey);
-        commandStore().progressLog().accept(txnId(), isProgressShard, isProgressShard && progressKey.equals(homeKey));
+        commandStore().progressLog().accept(this, isProgressShard, isProgressShard && progressKey.equals(homeKey));
         logger.trace("{}: preaccepted with executeAt: {}, deps: {}", txnId(), executeAt, deps);
 
         notifyListeners();
@@ -290,7 +290,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
 
 
         boolean isProgressShard = progressKey != null && handles(txnId().epoch, progressKey);
-        commandStore().progressLog().commit(txnId(), isProgressShard, isProgressShard && progressKey.equals(homeKey));
+        commandStore().progressLog().commit(this, isProgressShard, isProgressShard && progressKey.equals(homeKey));
 
         return true;
     }
@@ -318,7 +318,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         status(Invalidated);
 
         boolean isProgressShard = progressKey() != null && handles(txnId().epoch, progressKey());
-        commandStore().progressLog().invalidate(txnId(), isProgressShard, isProgressShard && progressKey().equals(homeKey()));
+        commandStore().progressLog().invalidate(this, isProgressShard, isProgressShard && progressKey().equals(homeKey()));
         logger.trace("{}: committed invalidated", txnId());
 
         notifyListeners();
@@ -344,7 +344,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         logger.trace("{}: apply, status set to Executed with executeAt: {}, deps: {}", txnId(), executeAt, deps);
 
         boolean isProgressShard = progressKey != null && handles(txnId().epoch, progressKey);
-        commandStore().progressLog().execute(txnId(), isProgressShard, isProgressShard && progressKey.equals(homeKey));
+        commandStore().progressLog().execute(this, isProgressShard, isProgressShard && progressKey.equals(homeKey));
 
         return maybeExecute(true);
     }
@@ -361,7 +361,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         witness(txn, homeKey, progressKey);
         boolean isProgressShard = progressKey != null && handles(txnId().epoch, progressKey);
         if (status == NotWitnessed)
-            commandStore().progressLog().preaccept(txnId(), isProgressShard, isProgressShard && progressKey.equals(homeKey));
+            commandStore().progressLog().preaccept(this, isProgressShard, isProgressShard && progressKey.equals(homeKey));
         promised(ballot);
         logger.trace("{}: recovery started with executeAt: {}, deps: {}", txnId(), executeAt(), savedDeps());
         return true;
@@ -488,7 +488,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
                 status(ReadyToExecute);
                 logger.trace("{}: set to ReadyToExecute", txnId());
                 boolean isProgressShard = progressKey() != null && handles(txnId().epoch, progressKey());
-                commandStore().progressLog().readyToExecute(txnId(), isProgressShard, isProgressShard && progressKey().equals(homeKey()));
+                commandStore().progressLog().readyToExecute(this, isProgressShard, isProgressShard && progressKey().equals(homeKey()));
                 notifyListeners();
                 break;
             case Executed:

@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.Set;
 
 import accord.api.Key;
+import accord.local.Command;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.primitives.Timestamp;
@@ -49,8 +50,9 @@ public class InformOfPersistence implements Request, TxnOperation
     public void process(Node node, Id replyToNode, ReplyContext replyContext)
     {
         Reply reply = node.ifLocal(this, homeKey, txnId, instance -> {
-            instance.command(txnId).setGloballyPersistent(homeKey, executeAt);
-            instance.progressLog().executedOnAllShards(txnId, persistedOn);
+            Command command = instance.command(txnId);
+            command.setGloballyPersistent(homeKey, executeAt);
+            instance.progressLog().executedOnAllShards(command, persistedOn);
             return ok();
         });
 

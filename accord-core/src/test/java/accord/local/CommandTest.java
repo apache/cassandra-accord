@@ -76,37 +76,37 @@ public class CommandTest
     private static class NoOpProgressLog implements ProgressLog
     {
         @Override
-        public void preaccept(TxnId txnId, boolean isProgressShard, boolean isHomeShard)
+        public void preaccept(Command command, boolean isProgressShard, boolean isHomeShard)
         {
         }
 
         @Override
-        public void accept(TxnId txnId, boolean isProgressShard, boolean isHomeShard)
+        public void accept(Command command, boolean isProgressShard, boolean isHomeShard)
         {
         }
 
         @Override
-        public void commit(TxnId txnId, boolean isProgressShard, boolean isHomeShard)
+        public void commit(Command command, boolean isProgressShard, boolean isHomeShard)
         {
         }
 
         @Override
-        public void readyToExecute(TxnId txnId, boolean isProgressShard, boolean isHomeShard)
+        public void readyToExecute(Command command, boolean isProgressShard, boolean isHomeShard)
         {
         }
 
         @Override
-        public void execute(TxnId txnId, boolean isProgressShard, boolean isHomeShard)
+        public void execute(Command command, boolean isProgressShard, boolean isHomeShard)
         {
         }
 
         @Override
-        public void invalidate(TxnId txnId, boolean isProgressShard, boolean isHomeShard)
+        public void invalidate(Command command, boolean isProgressShard, boolean isHomeShard)
         {
         }
 
         @Override
-        public void executedOnAllShards(TxnId txnId, Set<Id> persistedOn)
+        public void executedOnAllShards(Command command, Set<Id> persistedOn)
         {
         }
 
