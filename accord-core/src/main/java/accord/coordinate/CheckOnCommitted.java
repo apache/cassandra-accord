@@ -26,6 +26,9 @@ import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.messages.CheckStatus.IncludeInfo;
 import accord.topology.Shard;
 import accord.primitives.TxnId;
+import com.google.common.collect.Iterables;
+
+import java.util.Collections;
 
 import static accord.local.Status.Executed;
 
@@ -73,7 +76,7 @@ public class CheckOnCommitted extends CheckShardStatus<CheckStatusOkFull>
         }
 
         Key progressKey = node.trySelectProgressKey(txnId, max.txn.keys(), max.homeKey);
-        TxnOperation scope = TxnOperation.scopeFor(txnId, max.txn.keys());
+        TxnOperation scope = TxnOperation.scopeFor(Iterables.concat(Collections.singleton(txnId), max.deps.txnIds()), max.txn.keys());
         switch (max.status)
         {
             default: throw new IllegalStateException();
