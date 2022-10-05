@@ -23,9 +23,10 @@ import accord.local.CommandStore;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 import accord.primitives.KeyRanges;
+import accord.utils.ReducingFuture;
 import com.google.common.base.Preconditions;
 import org.apache.cassandra.utils.concurrent.Future;
-import org.apache.cassandra.utils.concurrent.FutureCombiner;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +34,7 @@ import java.util.Objects;
 
 public class Writes
 {
+    public static final Future<Void> SUCCESS = ImmediateFuture.success(null);
     public final Timestamp executeAt;
     public final Keys keys;
     public final Write write;
@@ -59,22 +61,22 @@ public class Writes
         return Objects.hash(executeAt, keys, write);
     }
 
-    public Future<?> apply(CommandStore commandStore)
+    public Future<Void> apply(CommandStore commandStore)
     {
         if (write == null)
-            return Write.SUCCESS;
+            return SUCCESS;
 
         KeyRanges ranges = commandStore.ranges().since(executeAt.epoch);
         if (ranges == null)
-            return Write.SUCCESS;
+            return SUCCESS;
 
-        List<Future<?>> futures = keys.foldl(ranges, (index, key, accumulate) -> {
+        List<Future<Void>> futures = keys.foldl(ranges, (index, key, accumulate) -> {
             if (commandStore.hashIntersects(key))
                 accumulate.add(write.apply(key, commandStore, executeAt, commandStore.store()));
             return accumulate;
         }, new ArrayList<>());
         Preconditions.checkState(!futures.isEmpty());
-        return futures.size() > 1 ? FutureCombiner.allOf(futures) : futures.get(0);
+        return ReducingFuture.reduce(futures, (l, r) -> null);
     }
 
     @Override

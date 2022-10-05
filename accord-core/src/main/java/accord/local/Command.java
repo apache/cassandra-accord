@@ -298,7 +298,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
     public Future<Void> commitAndBeginExecution(Txn txn, Key homeKey, Key progressKey, Timestamp executeAt, Deps deps)
     {
         if (!commit(txn, homeKey, progressKey, executeAt, deps))
-            return Write.SUCCESS;
+            return Writes.SUCCESS;
 
         return maybeExecute(true);
     }
@@ -330,7 +330,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         if (hasBeen(Executed) && executeAt.equals(executeAt()))
         {
             logger.trace("{}: skipping apply - already executed ({})", txnId(), status());
-            return Write.SUCCESS;
+            return Writes.SUCCESS;
         }
         else if (!hasBeen(Committed))
             commit(txn, homeKey, progressKey, executeAt, deps);
@@ -465,7 +465,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         if (status() != Committed && status() != Executed)
         {
             if (notifyListenersOnNoop) notifyListeners();
-            return Write.SUCCESS;
+            return Writes.SUCCESS;
         }
 
         if (isUnableToApply())
@@ -476,7 +476,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
                 logger.trace("{}: not executing, blocked on {}", txnId(), blockedBy.command.txnId());
                 commandStore().progressLog().waiting(blockedBy.command, blockedBy.someKeys);
                 if (notifyListenersOnNoop) notifyListeners();
-                return Write.SUCCESS;
+                return Writes.SUCCESS;
             }
             assert !isWaitingOnApply();
         }
@@ -496,7 +496,7 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
                 if (notifyListenersOnNoop) notifyListeners();
                 return apply();
         }
-        return Write.SUCCESS;
+        return Writes.SUCCESS;
     }
 
     /**

@@ -92,7 +92,7 @@ public class Apply extends TxnRequest
             throw new RuntimeException(e.getCause());
         }
 
-        return Write.SUCCESS;
+        return Writes.SUCCESS;
     }
 
     public void process(Node node, Id replyToNode, ReplyContext replyContext)
