@@ -20,8 +20,8 @@ package accord.messages;
 
 import accord.api.Key;
 import accord.primitives.Keys;
+import accord.utils.ReducingFuture;
 import accord.utils.VisibleForImplementation;
-import accord.api.Write;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Result;
@@ -33,10 +33,9 @@ import accord.txn.Txn;
 import accord.primitives.TxnId;
 import com.google.common.collect.Iterables;
 import org.apache.cassandra.utils.concurrent.Future;
-import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
 import java.util.Collections;
-import java.util.concurrent.ExecutionException;
+import java.util.List;
 
 import static accord.messages.MessageType.APPLY_REQ;
 import static accord.messages.MessageType.APPLY_RSP;
@@ -76,32 +75,17 @@ public class Apply extends TxnRequest
         this.result = result;
     }
 
-    static Future<Void> waitAndReduce(Future<Void> left, Future<Void> right)
-    {
-        try
-        {
-            if (left != null) left.get();
-            if (right != null) right.get();
-        }
-        catch (InterruptedException e)
-        {
-            throw new UncheckedInterruptedException(e);
-        }
-        catch (ExecutionException e)
-        {
-            throw new RuntimeException(e.getCause());
-        }
-
-        return Writes.SUCCESS;
-    }
-
     public void process(Node node, Id replyToNode, ReplyContext replyContext)
     {
         Key progressKey = node.trySelectProgressKey(txnId, txn.keys(), homeKey);
-        node.mapReduceLocalSince(this, scope(), executeAt,
-                                 instance -> instance.command(txnId).apply(txn, homeKey, progressKey, executeAt, deps, writes, result), Apply::waitAndReduce);
-        // note, we do not also commit here if txnId.epoch != executeAt.epoch, as the scope() for a commit would be different
-        node.reply(replyToNode, replyContext, ApplyOk.INSTANCE);
+        List<Future<Void>> futures = node.mapLocalSince(this, scope(), executeAt, instance -> instance.command(txnId).apply(txn, homeKey, progressKey, executeAt, deps, writes, result));
+
+        ReducingFuture.reduce(futures, (l, r) -> null).addCallback((unused, failure) -> {
+            if (failure != null)
+                // TODO: notify coordinator of failures
+                // note, we do not also commit here if txnId.epoch != executeAt.epoch, as the scope() for a commit would be different
+                node.reply(replyToNode, replyContext, ApplyOk.INSTANCE);
+        });
     }
 
     @Override

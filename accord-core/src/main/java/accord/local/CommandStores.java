@@ -315,7 +315,7 @@ public abstract class CommandStores
                 commandStore.shutdown();
     }
 
-    private static <T> Fold<TxnOperation, Void, List<Future<T>>> mapReduceFold(Function<CommandStore, T> map)
+    private static <T> Fold<TxnOperation, Void, List<Future<T>>> mapFold(Function<CommandStore, T> map)
     {
         return (store, op, i, t) -> { t.add(store.process(op, map)); return t; };
     }
@@ -358,7 +358,7 @@ public abstract class CommandStores
 
     public <T> T mapReduce(TxnOperation operation, Key key, long minEpoch, long maxEpoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
-        return mapReduce(operation, ShardedRanges::shard, key, minEpoch, maxEpoch, mapReduceFold(map), reduce);
+        return mapReduce(operation, ShardedRanges::shard, key, minEpoch, maxEpoch, mapFold(map), reduce);
     }
 
     public <T> T mapReduce(TxnOperation operation, Key key, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
@@ -374,7 +374,12 @@ public abstract class CommandStores
     public <T> T mapReduce(TxnOperation operation, Keys keys, long minEpoch, long maxEpoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
         // probably need to split txnOperation and scope stuff here
-        return mapReduce(operation, ShardedRanges::shards, keys, minEpoch, maxEpoch, mapReduceFold(map), reduce);
+        return mapReduce(operation, ShardedRanges::shards, keys, minEpoch, maxEpoch, mapFold(map), reduce);
+    }
+
+    public <T> List<Future<T>> mapAsync(TxnOperation operation, Keys keys, long minEpoch, long maxEpoch, Function<CommandStore, T> map)
+    {
+        return foldl(ShardedRanges::shards, keys, minEpoch, maxEpoch, mapFold(map), operation, null, ArrayList::new);
     }
 
     public void setup(Consumer<CommandStore> forEach)

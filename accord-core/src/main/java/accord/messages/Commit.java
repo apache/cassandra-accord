@@ -19,9 +19,11 @@
 package accord.messages;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 
 import accord.api.Key;
+import accord.utils.ReducingFuture;
 import accord.utils.VisibleForImplementation;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -32,6 +34,7 @@ import accord.primitives.Deps;
 import accord.txn.Txn;
 import accord.primitives.TxnId;
 import com.google.common.collect.Iterables;
+import org.apache.cassandra.utils.concurrent.Future;
 
 // TODO: CommitOk responses, so we can send again if no reply received? Or leave to recovery?
 public class Commit extends ReadData
@@ -127,11 +130,18 @@ public class Commit extends ReadData
     public void process(Node node, Id from, ReplyContext replyContext)
     {
         Key progressKey = node.trySelectProgressKey(txnId, txn.keys(), homeKey);
-        node.mapReduceLocal(this, txnId.epoch, executeAt.epoch,
-                            instance -> instance.command(txnId).commitAndBeginExecution(txn, homeKey, progressKey, executeAt, deps), Apply::waitAndReduce);
+        List<Future<Void>> futures = node.mapLocal(this, txnId.epoch, executeAt.epoch,
+                                                   instance -> instance.command(txnId).commitAndBeginExecution(txn, homeKey, progressKey, executeAt, deps));
 
         if (read)
-            super.process(node, from, replyContext);
+        {
+            ReducingFuture.reduce(futures, (l, r) -> null).addCallback((unused, throwable) -> {
+                if (throwable == null)
+                    super.process(node, from, replyContext);
+                else
+                    node.reply(from, replyContext, new ReadNack());
+            });
+        }
     }
 
     @Override

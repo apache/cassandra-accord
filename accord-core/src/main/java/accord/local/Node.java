@@ -59,7 +59,9 @@ import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 import accord.txn.Txn;
 import accord.primitives.TxnId;
+import com.google.common.util.concurrent.Futures;
 import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.FutureCombiner;
 
 public class Node implements ConfigurationService.Listener
 {
@@ -292,9 +294,19 @@ public class Node implements ConfigurationService.Listener
         return commandStores.mapReduce(request, request.scope(), minEpoch, maxEpoch, map, reduce);
     }
 
+    public <T> List<T> mapLocal(TxnRequest request, long minEpoch, long maxEpoch, Function<CommandStore, T> map)
+    {
+        return Futures.getUnchecked(FutureCombiner.allOf(commandStores.mapAsync(request, request.scope(), minEpoch, maxEpoch, map)));
+    }
+
     public <T> T mapReduceLocalSince(TxnOperation operation, Keys keys, Timestamp since, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
         return commandStores.mapReduce(operation, keys, since.epoch, Long.MAX_VALUE, map, reduce);
+    }
+
+    public <T> List<T> mapLocalSince(TxnOperation operation, Keys keys, Timestamp since, Function<CommandStore, T> map)
+    {
+        return Futures.getUnchecked(FutureCombiner.allOf(commandStores.mapAsync(operation, keys, since.epoch, Long.MAX_VALUE, map)));
     }
 
     public <T> T ifLocal(TxnOperation operation, Key key, Timestamp at, Function<CommandStore, T> ifLocal)
