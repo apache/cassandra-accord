@@ -23,6 +23,7 @@ import accord.api.DataStore;
 import accord.api.Write;
 import accord.primitives.Timestamp;
 import accord.local.CommandStore;
+import accord.txn.Writes;
 import accord.utils.Timestamped;
 import org.apache.cassandra.utils.concurrent.Future;
 
@@ -36,6 +37,6 @@ public class MaelstromWrite extends TreeMap<Key, Value> implements Write
         MaelstromStore s = (MaelstromStore) store;
         if (containsKey(key))
             s.data.merge(key, new Timestamped<>(executeAt, get(key)), Timestamped::merge);
-        return SUCCESS;
+        return Writes.SUCCESS;
     }
 }

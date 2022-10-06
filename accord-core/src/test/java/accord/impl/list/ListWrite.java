@@ -27,6 +27,7 @@ import accord.api.DataStore;
 import accord.api.Write;
 import accord.primitives.Timestamp;
 import accord.local.CommandStore;
+import accord.txn.Writes;
 import accord.utils.Timestamped;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.slf4j.Logger;
@@ -41,11 +42,11 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
     {
         ListStore s = (ListStore) store;
         if (!containsKey(key))
-            return SUCCESS;
+            return Writes.SUCCESS;
         int[] data = get(key);
         s.data.merge(key, new Timestamped<>(executeAt, data), Timestamped::merge);
         logger.trace("WRITE on {} at {} key:{} -> {}", s.node, executeAt, key, data);
-        return SUCCESS;
+        return Writes.SUCCESS;
     }
 
     @Override
