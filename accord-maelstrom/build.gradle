@@ -20,10 +20,6 @@ plugins {
     id 'accord.java-conventions'
 }
 
-compileJava {
-    sourceCompatibility = JavaVersion.VERSION_1_8
-}
-
 dependencies {
     implementation project(':accord-core')
     implementation group: 'org.apache.cassandra', name: 'cassandra-all', version: '4.1-alpha1'

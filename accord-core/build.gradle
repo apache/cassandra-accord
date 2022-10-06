@@ -29,10 +29,6 @@ java {
   withSourcesJar()
 }
 
-compileJava {
-    sourceCompatibility = JavaVersion.VERSION_1_8
-}
-
 dependencies {
     implementation group: 'org.apache.cassandra', name: 'cassandra-all', version: '4.1-alpha1'
     implementation group: "net.ju-n.compile-command-annotations", name: "compile-command-annotations", version: "1.2.0"
