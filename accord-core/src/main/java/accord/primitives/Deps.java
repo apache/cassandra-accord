@@ -54,6 +54,22 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         return new Deps(keys, NO_TXNIDS, keysToTxnId);
     }
 
+    @VisibleForImplementation
+    public static class SerializerSupport
+    {
+        private SerializerSupport() {}
+
+        public static int keyToTxnIdCount(Deps deps)
+        {
+            return deps.keyToTxnId.length;
+        }
+
+        public static int keyToTxnId(Deps deps, int idx)
+        {
+            return deps.keyToTxnId[idx];
+        }
+    }
+
     /**
      * Expects Command to be provided in TxnId order
      */
@@ -1047,18 +1063,6 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
     public TxnId txnId(int i)
     {
         return txnIds[i];
-    }
-
-    @VisibleForImplementation
-    public int keyToTxnIdCount()
-    {
-        return keyToTxnId.length;
-    }
-
-    @VisibleForImplementation
-    public int keyToTxnId(int idx)
-    {
-        return keyToTxnId[idx];
     }
 
     public Collection<TxnId> txnIds()

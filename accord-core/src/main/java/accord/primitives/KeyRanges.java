@@ -36,8 +36,7 @@ public class KeyRanges implements Iterable<KeyRange>
 
     final KeyRange[] ranges;
 
-    @VisibleForImplementation
-    public KeyRanges(KeyRange[] ranges)
+    private KeyRanges(KeyRange[] ranges)
     {
         Preconditions.checkNotNull(ranges);
         this.ranges = ranges;
