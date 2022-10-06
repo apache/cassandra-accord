@@ -15,7 +15,7 @@ public class ReducingFuture<V> extends AsyncPromise<V>
     private final BiFunction<V, V, V> reducer;
     private volatile int pending;
 
-    private ReducingFuture(List<? extends Future<V>> futures, BiFunction<V, V, V> reducer)
+    protected ReducingFuture(List<? extends Future<V>> futures, BiFunction<V, V, V> reducer)
     {
         this.futures = futures;
         this.reducer = reducer;

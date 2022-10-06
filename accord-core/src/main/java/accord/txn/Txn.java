@@ -26,6 +26,7 @@ import accord.api.*;
 import accord.local.*;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
+import accord.utils.ReducingFuture;
 import org.apache.cassandra.utils.concurrent.Future;
 
 import javax.annotation.Nonnull;
@@ -140,7 +141,18 @@ public abstract class Txn
         return "{read:" + read().toString() + (update() != null ? ", update:" + update() : "") + '}';
     }
 
-    public Read.ReadFuture read(Command command, Keys readKeys)
+    public class ReadFuture extends ReducingFuture<Data>
+    {
+        public final Keys scope;
+
+        public ReadFuture(List<? extends Future<Data>> futures, Keys scope)
+        {
+            super(futures, Data::merge);
+            this.scope = scope;
+        }
+    }
+
+    public ReadFuture read(Command command, Keys scope)
     {
         List<Future<Data>> futures = keys().foldl(command.commandStore().ranges().at(command.executeAt().epoch), (index, key, accumulate) -> {
             CommandStore commandStore = command.commandStore();
@@ -151,6 +163,6 @@ public abstract class Txn
             accumulate.add(result);
             return accumulate;
         }, new ArrayList<>());
-        return new Read.ReadFuture(readKeys, futures);
+        return new ReadFuture(futures, scope);
     }
 }

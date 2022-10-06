@@ -50,7 +50,7 @@ public class ReadData extends TxnRequest
         final Deps deps;
         final Node node;
         final Node.Id replyToNode;
-        final Keys readKeys;
+        final Keys scope;
         final Keys txnKeys;
         final ReplyContext replyContext;
 
@@ -58,14 +58,14 @@ public class ReadData extends TxnRequest
         boolean isObsolete; // TODO: respond with the Executed result we have stored?
         Set<CommandStore> waitingOn;
 
-        LocalRead(TxnId txnId, Deps deps, Node node, Id replyToNode, Keys readKeys, Keys txnKeys, ReplyContext replyContext)
+        LocalRead(TxnId txnId, Deps deps, Node node, Id replyToNode, Keys scope, Keys txnKeys, ReplyContext replyContext)
         {
-            Preconditions.checkArgument(!readKeys.isEmpty());
+            Preconditions.checkArgument(!scope.isEmpty());
             this.txnId = txnId;
             this.deps = deps;
             this.node = node;
             this.replyToNode = replyToNode;
-            this.readKeys = readKeys;
+            this.scope = scope;
             this.txnKeys = txnKeys;  // TODO (now): is this needed? Does the read update commands per key?
             this.replyContext = replyContext;
         }
@@ -143,7 +143,7 @@ public class ReadData extends TxnRequest
         private void read(Command command)
         {
             logger.trace("{}: executing read", command.txnId());
-            command.read(readKeys).addCallback((next, throwable) -> {
+            command.read(scope).addCallback((next, throwable) -> {
                 if (throwable != null)
                 {
                     logger.trace("{}: read failed for {}: {}", txnId, command.commandStore(), throwable);

@@ -18,10 +18,7 @@
 
 package accord.local;
 
-import accord.api.Key;
-import accord.api.Read;
-import accord.api.Result;
-import accord.api.Write;
+import accord.api.*;
 import accord.local.Node.Id;
 import accord.primitives.*;
 import accord.txn.Txn;
@@ -452,9 +449,9 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
         );
     }
 
-    public Read.ReadFuture read(Keys readKeys)
+    public Txn.ReadFuture read(Keys scope)
     {
-        return txn().read(this, readKeys);
+        return txn().read(this, scope);
     }
 
     private Future<Void> maybeExecute(boolean notifyListenersOnNoop)
