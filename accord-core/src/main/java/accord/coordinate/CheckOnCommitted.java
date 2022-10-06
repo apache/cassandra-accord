@@ -21,7 +21,7 @@ package accord.coordinate;
 import accord.api.Key;
 import accord.local.Command;
 import accord.local.Node;
-import accord.local.TxnOperation;
+import accord.local.PreLoadContext;
 import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.messages.CheckStatus.IncludeInfo;
 import accord.topology.Shard;
@@ -76,24 +76,24 @@ public class CheckOnCommitted extends CheckShardStatus<CheckStatusOkFull>
         }
 
         Key progressKey = node.trySelectProgressKey(txnId, max.txn.keys(), max.homeKey);
-        TxnOperation scope = TxnOperation.scopeFor(Iterables.concat(Collections.singleton(txnId), max.deps.txnIds()), max.txn.keys());
+        PreLoadContext loadContext = PreLoadContext.contextFor(Iterables.concat(Collections.singleton(txnId), max.deps.txnIds()), max.txn.keys());
         switch (max.status)
         {
             default: throw new IllegalStateException();
             case Executed:
             case Applied:
-                node.forEachLocalSince(scope, max.txn.keys(), max.executeAt.epoch, commandStore -> {
+                node.forEachLocalSince(loadContext, max.txn.keys(), max.executeAt.epoch, commandStore -> {
                     Command command = commandStore.command(txnId);
                     command.apply(max.txn, max.homeKey, progressKey, max.executeAt, max.deps, max.writes, max.result);
                 });
-                node.forEachLocal(scope, max.txn.keys(), txnId.epoch, max.executeAt.epoch - 1, commandStore -> {
+                node.forEachLocal(loadContext, max.txn.keys(), txnId.epoch, max.executeAt.epoch - 1, commandStore -> {
                     Command command = commandStore.command(txnId);
                     command.commit(max.txn, max.homeKey, progressKey, max.executeAt, max.deps);
                 });
                 break;
             case Committed:
             case ReadyToExecute:
-                node.forEachLocalSince(scope, max.txn.keys(), txnId.epoch, commandStore -> {
+                node.forEachLocalSince(loadContext, max.txn.keys(), txnId.epoch, commandStore -> {
                     Command command = commandStore.command(txnId);
                     command.commit(max.txn, max.homeKey, progressKey, max.executeAt, max.deps);
                 });

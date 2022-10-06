@@ -592,8 +592,8 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
 
         void update(Node node)
         {
-            TxnOperation scope = TxnOperation.scopeFor(txnId);
-            commandStore.process(scope, cs -> {
+            PreLoadContext context = PreLoadContext.contextFor(txnId);
+            commandStore.process(context, cs -> {
                 Command command = cs.command(txnId);
                 if (blockingState != null)
                     blockingState.update(node, txnId, command);
@@ -832,8 +832,8 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
         public void process(Node node, Id from, ReplyContext replyContext)
         {
             Key progressKey = node.trySelectProgressKey(txnId, txn.keys(), homeKey);
-            TxnOperation scope = TxnOperation.scopeFor(txnId, txn.keys());
-            node.reply(from, replyContext, node.mapReduceLocalSince(scope, scope(), executeAt, instance -> {
+            PreLoadContext context = PreLoadContext.contextFor(txnId, txn.keys());
+            node.reply(from, replyContext, node.mapReduceLocalSince(context, scope(), executeAt, instance -> {
                 Command command = instance.command(txnId);
                 command.apply(txn, homeKey, progressKey, executeAt, deps, writes, result);
                 if (homeKey.equals(progressKey) && command.handles(txnId.epoch, progressKey))

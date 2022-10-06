@@ -25,7 +25,7 @@ import accord.api.Key;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.primitives.KeyRanges;
-import accord.local.TxnOperation;
+import accord.local.PreLoadContext;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.primitives.Keys;
@@ -33,7 +33,7 @@ import accord.primitives.TxnId;
 
 import static java.lang.Long.min;
 
-public abstract class TxnRequest implements EpochRequest, TxnOperation
+public abstract class TxnRequest implements EpochRequest, PreLoadContext
 {
     public static abstract class WithUnsynced extends TxnRequest
     {

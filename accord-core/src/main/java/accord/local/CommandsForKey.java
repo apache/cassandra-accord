@@ -70,9 +70,9 @@ public abstract class CommandsForKey implements Listener, Iterable<PartialComman
     public abstract void updateMax(Timestamp timestamp);
 
     @Override
-    public TxnOperation listenerScope(TxnId caller)
+    public PreLoadContext listenerPreLoadContext(TxnId caller)
     {
-        return TxnOperation.scopeFor(caller, listOf(key()));
+        return PreLoadContext.contextFor(caller, listOf(key()));
     }
 
     @Override

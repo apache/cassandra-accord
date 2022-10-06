@@ -36,7 +36,7 @@ import java.util.function.Function;
 import static accord.local.Status.*;
 import static accord.utils.Utils.listOf;
 
-public abstract class Command implements Listener, Consumer<Listener>, TxnOperation, PartialCommand.WithDeps
+public abstract class Command implements Listener, Consumer<Listener>, PreLoadContext, PartialCommand.WithDeps
 {
     private static final Logger logger = LoggerFactory.getLogger(Command.class);
 
@@ -378,9 +378,9 @@ public abstract class Command implements Listener, Consumer<Listener>, TxnOperat
     }
 
     @Override
-    public TxnOperation listenerScope(TxnId caller)
+    public PreLoadContext listenerPreLoadContext(TxnId caller)
     {
-        return TxnOperation.scopeFor(listOf(txnId(), caller), Collections.emptyList());
+        return PreLoadContext.contextFor(listOf(txnId(), caller), Collections.emptyList());
     }
 
     private void onChangeInternal(PartialCommand command)

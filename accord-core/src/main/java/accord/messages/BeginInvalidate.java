@@ -24,7 +24,7 @@ import accord.local.Command;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.Status;
-import accord.local.TxnOperation;
+import accord.local.PreLoadContext;
 import accord.messages.BeginRecovery.RecoverNack;
 import accord.messages.BeginRecovery.RecoverOk;
 import accord.messages.BeginRecovery.RecoverReply;
@@ -37,7 +37,7 @@ import accord.txn.Writes;
 
 import java.util.Collections;
 
-public class BeginInvalidate implements EpochRequest, TxnOperation
+public class BeginInvalidate implements EpochRequest, PreLoadContext
 {
     public final Ballot ballot;
     public final TxnId txnId;

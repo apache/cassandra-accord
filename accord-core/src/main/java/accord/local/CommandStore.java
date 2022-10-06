@@ -155,7 +155,7 @@ public abstract class CommandStore
         return keys.any(ranges, this::hashIntersects);
     }
 
-    public static void onEach(TxnOperation scope, Collection<CommandStore> stores, Consumer<? super CommandStore> consumer)
+    public static void onEach(PreLoadContext scope, Collection<CommandStore> stores, Consumer<? super CommandStore> consumer)
     {
         for (CommandStore store : stores)
             store.process(scope, consumer);
@@ -168,9 +168,9 @@ public abstract class CommandStore
 
     public abstract <T> Future<T> processSetup(Function<? super CommandStore, T> function);
 
-    public abstract Future<Void> process(TxnOperation scope, Consumer<? super CommandStore> consumer);
+    public abstract Future<Void> process(PreLoadContext context, Consumer<? super CommandStore> consumer);
 
-    public abstract <T> Future<T> process(TxnOperation scope, Function<? super CommandStore, T> function);
+    public abstract <T> Future<T> process(PreLoadContext context, Function<? super CommandStore, T> function);
 
     public abstract void shutdown();
 

@@ -44,7 +44,7 @@ public class ReadData extends TxnRequest
 {
     private static final Logger logger = LoggerFactory.getLogger(ReadData.class);
 
-    static class LocalRead implements Listener, TxnOperation
+    static class LocalRead implements Listener, PreLoadContext
     {
         final TxnId txnId;
         final Deps deps;
@@ -83,12 +83,12 @@ public class ReadData extends TxnRequest
         }
 
         @Override
-        public TxnOperation listenerScope(TxnId caller)
+        public PreLoadContext listenerPreLoadContext(TxnId caller)
         {
             Set<TxnId> ids = new HashSet<>(deps.txnIds());
             ids.add(txnId);
             ids.add(caller);
-            return TxnOperation.scopeFor(ids, keys());
+            return PreLoadContext.contextFor(ids, keys());
         }
 
         @Override

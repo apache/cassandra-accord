@@ -21,7 +21,7 @@ package accord.messages;
 import accord.api.Key;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.TxnOperation;
+import accord.local.PreLoadContext;
 import accord.txn.Txn;
 import accord.primitives.TxnId;
 
@@ -30,7 +30,7 @@ import java.util.Collections;
 import static accord.messages.InformOfTxn.InformOfTxnNack.nack;
 import static accord.messages.InformOfTxn.InformOfTxnOk.ok;
 
-public class InformOfTxn implements EpochRequest, TxnOperation
+public class InformOfTxn implements EpochRequest, PreLoadContext
 {
     public final TxnId txnId;
     public final Key homeKey;

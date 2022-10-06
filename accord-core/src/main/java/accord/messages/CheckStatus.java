@@ -27,14 +27,14 @@ import accord.local.Status;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.Timestamp;
-import accord.local.TxnOperation;
+import accord.local.PreLoadContext;
 import accord.txn.Txn;
 import accord.primitives.TxnId;
 import accord.txn.Writes;
 
 import java.util.Collections;
 
-public class CheckStatus implements Request, TxnOperation
+public class CheckStatus implements Request, PreLoadContext
 {
     // order is important
     public enum IncludeInfo

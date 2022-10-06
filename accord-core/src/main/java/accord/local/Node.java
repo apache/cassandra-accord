@@ -269,14 +269,14 @@ public class Node implements ConfigurationService.Listener
         commandStores.forEach(request, minEpoch, maxEpoch, forEach);
     }
 
-    public void forEachLocal(TxnOperation operation, Keys keys, long minEpoch, long maxEpoch, Consumer<CommandStore> forEach)
+    public void forEachLocal(PreLoadContext context, Keys keys, long minEpoch, long maxEpoch, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(operation, keys, minEpoch, maxEpoch, forEach);
+        commandStores.forEach(context, keys, minEpoch, maxEpoch, forEach);
     }
 
-    public void forEachLocalSince(TxnOperation operation, Keys keys, Timestamp since, Consumer<CommandStore> forEach)
+    public void forEachLocalSince(PreLoadContext context, Keys keys, Timestamp since, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(operation, keys, since.epoch, Long.MAX_VALUE, forEach);
+        commandStores.forEach(context, keys, since.epoch, Long.MAX_VALUE, forEach);
     }
 
     public void forEachLocalSince(TxnRequest request, Timestamp since, Consumer<CommandStore> forEach)
@@ -284,9 +284,9 @@ public class Node implements ConfigurationService.Listener
         commandStores.forEach(request, since.epoch, Long.MAX_VALUE, forEach);
     }
 
-    public void forEachLocalSince(TxnOperation operation, Keys keys, long sinceEpoch, Consumer<CommandStore> forEach)
+    public void forEachLocalSince(PreLoadContext context, Keys keys, long sinceEpoch, Consumer<CommandStore> forEach)
     {
-        commandStores.forEachSince(operation, keys, sinceEpoch, forEach);
+        commandStores.forEachSince(context, keys, sinceEpoch, forEach);
     }
 
     public <T> T mapReduceLocal(TxnRequest request, long minEpoch, long maxEpoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
@@ -299,34 +299,34 @@ public class Node implements ConfigurationService.Listener
         return Futures.getUnchecked(FutureCombiner.allOf(commandStores.mapAsync(request, request.scope(), minEpoch, maxEpoch, map)));
     }
 
-    public <T> T mapReduceLocalSince(TxnOperation operation, Keys keys, Timestamp since, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T mapReduceLocalSince(PreLoadContext context, Keys keys, Timestamp since, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
-        return commandStores.mapReduce(operation, keys, since.epoch, Long.MAX_VALUE, map, reduce);
+        return commandStores.mapReduce(context, keys, since.epoch, Long.MAX_VALUE, map, reduce);
     }
 
-    public <T> List<T> mapLocalSince(TxnOperation operation, Keys keys, Timestamp since, Function<CommandStore, T> map)
+    public <T> List<T> mapLocalSince(PreLoadContext context, Keys keys, Timestamp since, Function<CommandStore, T> map)
     {
-        return Futures.getUnchecked(FutureCombiner.allOf(commandStores.mapAsync(operation, keys, since.epoch, Long.MAX_VALUE, map)));
+        return Futures.getUnchecked(FutureCombiner.allOf(commandStores.mapAsync(context, keys, since.epoch, Long.MAX_VALUE, map)));
     }
 
-    public <T> T ifLocal(TxnOperation operation, Key key, Timestamp at, Function<CommandStore, T> ifLocal)
+    public <T> T ifLocal(PreLoadContext context, Key key, Timestamp at, Function<CommandStore, T> ifLocal)
     {
-        return ifLocal(operation, key, at.epoch, ifLocal);
+        return ifLocal(context, key, at.epoch, ifLocal);
     }
 
-    public <T> T ifLocal(TxnOperation operation, Key key, long epoch, Function<CommandStore, T> ifLocal)
+    public <T> T ifLocal(PreLoadContext context, Key key, long epoch, Function<CommandStore, T> ifLocal)
     {
-        return commandStores.mapReduce(operation, key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
+        return commandStores.mapReduce(context, key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
     }
 
-    public <T> T ifLocalSince(TxnOperation operation, Key key, Timestamp since, Function<CommandStore, T> ifLocal)
+    public <T> T ifLocalSince(PreLoadContext context, Key key, Timestamp since, Function<CommandStore, T> ifLocal)
     {
-        return ifLocalSince(operation, key, since.epoch, ifLocal);
+        return ifLocalSince(context, key, since.epoch, ifLocal);
     }
 
-    public <T> T ifLocalSince(TxnOperation operation, Key key, long epoch, Function<CommandStore, T> ifLocal)
+    public <T> T ifLocalSince(PreLoadContext context, Key key, long epoch, Function<CommandStore, T> ifLocal)
     {
-        return commandStores.mapReduceSince(operation, key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
+        return commandStores.mapReduceSince(context, key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
     }
 
     public <T extends Collection<CommandStore>> T collectLocal(Keys keys, Timestamp at, IntFunction<T> factory)

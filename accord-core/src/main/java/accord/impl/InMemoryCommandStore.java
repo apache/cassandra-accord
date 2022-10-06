@@ -185,7 +185,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        public synchronized Future<Void> process(TxnOperation unused, Consumer<? super CommandStore> consumer)
+        public synchronized Future<Void> process(PreLoadContext context, Consumer<? super CommandStore> consumer)
         {
             Promise<Void> promise = new AsyncPromise<>();
             processInternal(consumer, promise);
@@ -193,7 +193,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        public synchronized <T> Future<T> process(TxnOperation unused, Function<? super CommandStore, T> function)
+        public synchronized <T> Future<T> process(PreLoadContext context, Function<? super CommandStore, T> function)
         {
             AsyncPromise<T> promise = new AsyncPromise<>();
             processInternal(function, promise);
@@ -276,7 +276,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        public Future<Void> process(TxnOperation unused, Consumer<? super CommandStore> consumer)
+        public Future<Void> process(PreLoadContext context, Consumer<? super CommandStore> consumer)
         {
             ConsumerWrapper future = new ConsumerWrapper(consumer);
             executor.execute(future);
@@ -284,7 +284,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        public <T> Future<T> process(TxnOperation unused, Function<? super CommandStore, T> function)
+        public <T> Future<T> process(PreLoadContext context, Function<? super CommandStore, T> function)
         {
             FunctionWrapper<T> future = new FunctionWrapper<>(function);
             executor.execute(future);

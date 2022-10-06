@@ -27,12 +27,12 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-import accord.local.TxnOperation;
+import accord.local.PreLoadContext;
 
 import static accord.messages.InformOfTxn.InformOfTxnNack.nack;
 import static accord.messages.InformOfTxn.InformOfTxnOk.ok;
 
-public class InformOfPersistence implements Request, TxnOperation
+public class InformOfPersistence implements Request, PreLoadContext
 {
     public final TxnId txnId;
     public final Key homeKey;

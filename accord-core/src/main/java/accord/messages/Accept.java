@@ -20,7 +20,7 @@ package accord.messages;
 
 import accord.primitives.*;
 import accord.utils.VisibleForImplementation;
-import accord.local.TxnOperation;
+import accord.local.PreLoadContext;
 import accord.messages.TxnRequest.WithUnsynced;
 import accord.local.Node.Id;
 import accord.api.Key;
@@ -110,7 +110,7 @@ public class Accept extends WithUnsynced
     }
 
     // TODO (now): can EpochRequest inherit TxnOperation?
-    public static class Invalidate implements EpochRequest, TxnOperation
+    public static class Invalidate implements EpochRequest, PreLoadContext
     {
         public final Ballot ballot;
         public final TxnId txnId;

@@ -37,7 +37,7 @@ public class WaitOnCommit extends TxnRequest
 {
     private static final Logger logger = LoggerFactory.getLogger(WaitOnCommit.class);
 
-    static class LocalWait implements Listener, TxnOperation
+    static class LocalWait implements Listener, PreLoadContext
     {
         final Node node;
         final Id replyToNode;
@@ -67,9 +67,9 @@ public class WaitOnCommit extends TxnRequest
         }
 
         @Override
-        public TxnOperation listenerScope(TxnId caller)
+        public PreLoadContext listenerPreLoadContext(TxnId caller)
         {
-            return TxnOperation.scopeFor(listOf(txnId, caller), keys());
+            return PreLoadContext.contextFor(listOf(txnId, caller), keys());
         }
 
         @Override

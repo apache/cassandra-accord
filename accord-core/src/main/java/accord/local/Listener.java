@@ -27,7 +27,7 @@ public interface Listener
     /**
      * Scope needed to run onChange
      */
-    TxnOperation listenerScope(TxnId caller);
+    PreLoadContext listenerPreLoadContext(TxnId caller);
 
     /**
      * Indicates the command to listener relationship doesn't need to persist across restarts

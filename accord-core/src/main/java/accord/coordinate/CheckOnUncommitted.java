@@ -21,7 +21,7 @@ package accord.coordinate;
 import accord.api.Key;
 import accord.local.Command;
 import accord.local.Node;
-import accord.local.TxnOperation;
+import accord.local.PreLoadContext;
 import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.topology.Shard;
 import accord.primitives.Keys;
@@ -69,7 +69,7 @@ public class CheckOnUncommitted extends CheckOnCommitted
         {
             default: throw new IllegalStateException();
             case Invalidated:
-                node.forEachLocalSince(TxnOperation.scopeFor(txnId), someKeys, txnId.epoch, commandStore -> {
+                node.forEachLocalSince(PreLoadContext.contextFor(txnId), someKeys, txnId.epoch, commandStore -> {
                     Command command = commandStore.ifPresent(txnId);
                     if (command != null)
                         command.commitInvalidate();
@@ -79,7 +79,7 @@ public class CheckOnUncommitted extends CheckOnCommitted
                 break;
             case PreAccepted:
             case Accepted:
-                node.forEachLocalSince(TxnOperation.scopeFor(txnId), full.txn.keys(), txnId.epoch, commandStore -> {
+                node.forEachLocalSince(PreLoadContext.contextFor(txnId), full.txn.keys(), txnId.epoch, commandStore -> {
                     Command command = commandStore.ifPresent(txnId);
                     if (command != null)
                         command.homeKey(full.homeKey);

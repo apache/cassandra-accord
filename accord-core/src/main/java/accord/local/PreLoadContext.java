@@ -24,13 +24,10 @@ import accord.primitives.TxnId;
 import java.util.Collections;
 
 /**
- * An operation that is executed in the context of a command store.
- *
- * In implementations that do not keep all data in memory, the implementation needs to know which
- * commands and commands for keys need to be in memory before it passes the function or consumer
- * off to the command store for processing. The methods on TxnOperation do this.
+ * Lists txnids and keys of commands and commands for key that will be needed for an operation. Used
+ * to ensure the necessary state is in memory for an operation before it executes.
  */
-public interface TxnOperation
+public interface PreLoadContext
 {
     /**
      * @return ids of the {@link Command} objects that need to be loaded into memory before this operation is run
@@ -42,9 +39,9 @@ public interface TxnOperation
      */
     Iterable<Key> keys();
 
-    static TxnOperation scopeFor(Iterable<TxnId> txnIds, Iterable<Key> keys)
+    static PreLoadContext contextFor(Iterable<TxnId> txnIds, Iterable<Key> keys)
     {
-        return new TxnOperation()
+        return new PreLoadContext()
         {
             @Override
             public Iterable<TxnId> txnIds() { return txnIds; }
@@ -54,18 +51,18 @@ public interface TxnOperation
         };
     }
 
-    static TxnOperation scopeFor(TxnId txnId, Iterable<Key> keys)
+    static PreLoadContext contextFor(TxnId txnId, Iterable<Key> keys)
     {
-        return scopeFor(Collections.singleton(txnId), keys);
+        return contextFor(Collections.singleton(txnId), keys);
     }
 
-    static TxnOperation scopeFor(TxnId txnId)
+    static PreLoadContext contextFor(TxnId txnId)
     {
-        return scopeFor(Collections.singleton(txnId), Collections.emptyList());
+        return contextFor(Collections.singleton(txnId), Collections.emptyList());
     }
 
-    static TxnOperation scopeFor(Key key)
+    static PreLoadContext contextFor(Key key)
     {
-        return scopeFor(Collections.emptyList(), Collections.singleton(key));
+        return contextFor(Collections.emptyList(), Collections.singleton(key));
     }
 }
