@@ -81,7 +81,7 @@ public class Apply extends TxnRequest
         List<Future<Void>> futures = node.mapLocalSince(this, scope(), executeAt, instance -> instance.command(txnId).apply(txn, homeKey, progressKey, executeAt, deps, writes, result));
 
         ReducingFuture.reduce(futures, (l, r) -> null).addCallback((unused, failure) -> {
-            if (failure != null)
+            if (failure == null)
                 // TODO: notify coordinator of failures
                 // note, we do not also commit here if txnId.epoch != executeAt.epoch, as the scope() for a commit would be different
                 node.reply(replyToNode, replyContext, ApplyOk.INSTANCE);
