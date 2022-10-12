@@ -15,13 +15,11 @@ public class ReducingFuture<V> extends AsyncPromise<V>
     private final BiFunction<V, V, V> reducer;
     private volatile int pending;
 
-    protected ReducingFuture(List<? extends Future<V>> futures, BiFunction<V, V, V> reducer)
+    private ReducingFuture(List<? extends Future<V>> futures, BiFunction<V, V, V> reducer)
     {
         this.futures = futures;
         this.reducer = reducer;
         this.pending = futures.size();
-        if (futures.size() == 0)
-            trySuccess(null);
         futures.forEach(f -> f.addListener(this::operationComplete));
     }
 
@@ -46,7 +44,7 @@ public class ReducingFuture<V> extends AsyncPromise<V>
 
     public static <T> Future<T> reduce(List<? extends Future<T>> futures, BiFunction<T, T, T> reducer)
     {
-        Preconditions.checkArgument(!futures.isEmpty());
+        Preconditions.checkArgument(!futures.isEmpty(), "future list is empty");
 
         if (futures.size() == 1)
             return futures.get(0);

@@ -152,6 +152,6 @@ public abstract class Txn
             accumulate.add(result);
             return accumulate;
         }, new ArrayList<>());
-        return ReducingFuture.reduce(futures, (d1, d2) -> d1.merge(d2));
+        return ReducingFuture.reduce(futures, Data::merge);
     }
 }
