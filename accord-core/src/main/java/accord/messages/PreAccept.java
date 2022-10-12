@@ -23,7 +23,6 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 import accord.local.*;
-import accord.utils.VisibleForImplementation;
 import com.google.common.annotations.VisibleForTesting;
 
 import accord.api.Key;
@@ -38,6 +37,14 @@ import accord.primitives.TxnId;
 
 public class PreAccept extends WithUnsynced
 {
+    public static class SerializerSupport
+    {
+        public static PreAccept create(Keys scope, long epoch, TxnId txnId, Txn txn, Key homeKey)
+        {
+            return new PreAccept(scope, epoch, txnId, txn, homeKey);
+        }
+    }
+
     public final Key homeKey;
     public final Txn txn;
     public final long maxEpoch;
@@ -50,8 +57,6 @@ public class PreAccept extends WithUnsynced
         this.maxEpoch = topologies.currentEpoch();
     }
 
-    @VisibleForTesting
-    @VisibleForImplementation
     public PreAccept(Keys scope, long epoch, TxnId txnId, Txn txn, Key homeKey)
     {
         super(scope, epoch, txnId);

@@ -19,7 +19,6 @@
 package accord.messages;
 
 import accord.primitives.*;
-import accord.utils.VisibleForImplementation;
 import accord.local.PreLoadContext;
 import accord.messages.TxnRequest.WithUnsynced;
 import accord.local.Node.Id;
@@ -37,6 +36,14 @@ import static accord.messages.PreAccept.calculateDeps;
 
 public class Accept extends WithUnsynced
 {
+    public static class SerializerSupport
+    {
+        public static Accept create(Keys scope, long epoch, TxnId txnId, Ballot ballot, Key homeKey, Txn txn, Timestamp executeAt, Deps deps)
+        {
+            return new Accept(scope, epoch, txnId, ballot, homeKey, txn, executeAt, deps);
+        }
+    }
+
     public final Ballot ballot;
     public final Key homeKey;
     public final Txn txn;
@@ -53,8 +60,7 @@ public class Accept extends WithUnsynced
         this.deps = deps;
     }
 
-    @VisibleForImplementation
-    public Accept(Keys scope, long epoch, TxnId txnId, Ballot ballot, Key homeKey, Txn txn, Timestamp executeAt, Deps deps)
+    protected Accept(Keys scope, long epoch, TxnId txnId, Ballot ballot, Key homeKey, Txn txn, Timestamp executeAt, Deps deps)
     {
         super(scope, epoch, txnId);
         this.ballot = ballot;

@@ -24,7 +24,6 @@ import java.util.Set;
 
 import accord.api.Key;
 import accord.utils.ReducingFuture;
-import accord.utils.VisibleForImplementation;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.topology.Topologies;
@@ -39,6 +38,14 @@ import org.apache.cassandra.utils.concurrent.Future;
 // TODO: CommitOk responses, so we can send again if no reply received? Or leave to recovery?
 public class Commit extends ReadData
 {
+    public static class SerializerSupport
+    {
+        public static Commit create(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Deps deps, Key homeKey, Timestamp executeAt, boolean read)
+        {
+            return new Commit(scope, waitForEpoch, txnId, txn, deps, homeKey, executeAt, read);
+        }
+    }
+
     public final boolean read;
 
     public Commit(Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, boolean read)
@@ -47,7 +54,6 @@ public class Commit extends ReadData
         this.read = read;
     }
 
-    @VisibleForImplementation
     public Commit(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Deps deps, Key homeKey, Timestamp executeAt, boolean read)
     {
         super(scope, waitForEpoch, txnId, txn, deps, homeKey, executeAt);
@@ -162,6 +168,14 @@ public class Commit extends ReadData
 
     public static class Invalidate extends TxnRequest
     {
+        public static class SerializerSupport
+        {
+            public static Invalidate create(Keys scope, long waitForEpoch, TxnId txnId, Keys txnKeys)
+            {
+                return new Invalidate(scope, waitForEpoch, txnId, txnKeys);
+            }
+        }
+
         public final TxnId txnId;
         public final Keys txnKeys;
 
@@ -172,8 +186,7 @@ public class Commit extends ReadData
             this.txnKeys = txnKeys;
         }
 
-        @VisibleForImplementation
-        public Invalidate(Keys scope, long waitForEpoch, TxnId txnId, Keys txnKeys)
+        protected Invalidate(Keys scope, long waitForEpoch, TxnId txnId, Keys txnKeys)
         {
             super(scope, waitForEpoch);
             this.txnId = txnId;

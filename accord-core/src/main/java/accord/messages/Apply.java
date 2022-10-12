@@ -21,7 +21,6 @@ package accord.messages;
 import accord.api.Key;
 import accord.primitives.Keys;
 import accord.utils.ReducingFuture;
-import accord.utils.VisibleForImplementation;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Result;
@@ -42,6 +41,14 @@ import static accord.messages.MessageType.APPLY_RSP;
 
 public class Apply extends TxnRequest
 {
+    public static class SerializationSupport
+    {
+        public static Apply create(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
+        {
+            return new Apply(scope, waitForEpoch, txnId, txn, homeKey, executeAt, deps, writes, result);
+        }
+    }
+
     public final TxnId txnId;
     public final Txn txn;
     public final Key homeKey;
@@ -62,8 +69,7 @@ public class Apply extends TxnRequest
         this.result = result;
     }
 
-    @VisibleForImplementation
-    public Apply(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    protected Apply(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         super(scope, waitForEpoch);
         this.txnId = txnId;

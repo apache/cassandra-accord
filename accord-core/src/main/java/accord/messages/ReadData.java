@@ -23,7 +23,6 @@ import java.util.HashSet;
 import java.util.Set;
 
 import accord.primitives.Deps;
-import accord.utils.VisibleForImplementation;
 import com.google.common.base.Preconditions;
 
 import accord.api.Key;
@@ -199,6 +198,14 @@ public class ReadData extends TxnRequest
         }
     }
 
+    public static class SerializerSupport
+    {
+        public static ReadData create(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Deps deps, Key homeKey, Timestamp executeAt)
+        {
+            return new ReadData(scope, waitForEpoch, txnId, txn, deps, homeKey, executeAt);
+        }
+    }
+
     public final TxnId txnId;
     public final Txn txn;
     public final Deps deps;
@@ -215,8 +222,7 @@ public class ReadData extends TxnRequest
         this.executeAt = executeAt;
     }
 
-    @VisibleForImplementation
-    public ReadData(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Deps deps, Key homeKey, Timestamp executeAt)
+    protected ReadData(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Deps deps, Key homeKey, Timestamp executeAt)
     {
         super(scope, waitForEpoch);
         this.txnId = txnId;

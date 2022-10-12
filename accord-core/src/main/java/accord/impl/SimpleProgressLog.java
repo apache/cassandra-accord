@@ -30,7 +30,6 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
 
 import accord.local.*;
-import accord.utils.VisibleForImplementation;
 import com.google.common.base.Preconditions;
 
 import accord.api.Key;
@@ -814,6 +813,14 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
 
     public static class ApplyAndCheck extends Apply
     {
+        public static class SerializerSupport
+        {
+            public static ApplyAndCheck create(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result, Set<Id> notPersisted)
+            {
+                return new ApplyAndCheck(scope, waitForEpoch, txnId, txn, homeKey, executeAt, deps, writes, result, notPersisted);
+            }
+        }
+
         public final Set<Id> notPersisted;
         ApplyAndCheck(Id id, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Deps deps, Timestamp executeAt, Writes writes, Result result, Set<Id> notPersisted)
         {
@@ -821,7 +828,6 @@ public class SimpleProgressLog implements Runnable, ProgressLog.Factory
             this.notPersisted = notPersisted;
         }
 
-        @VisibleForImplementation
         public ApplyAndCheck(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result, Set<Id> notPersisted)
         {
             super(scope, waitForEpoch, txnId, txn, homeKey, executeAt, deps, writes, result);

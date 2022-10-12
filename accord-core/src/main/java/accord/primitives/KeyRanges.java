@@ -19,7 +19,6 @@
 package accord.primitives;
 
 import accord.api.Key;
-import accord.utils.VisibleForImplementation;
 import accord.utils.SortedArrays;
 
 import com.google.common.base.Preconditions;

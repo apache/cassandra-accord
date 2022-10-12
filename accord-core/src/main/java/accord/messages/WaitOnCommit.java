@@ -27,7 +27,6 @@ import accord.local.Node.Id;
 import accord.topology.Topologies;
 import accord.primitives.TxnId;
 import accord.primitives.Keys;
-import accord.utils.VisibleForImplementation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,6 +35,14 @@ import static accord.utils.Utils.listOf;
 public class WaitOnCommit extends TxnRequest
 {
     private static final Logger logger = LoggerFactory.getLogger(WaitOnCommit.class);
+
+    public static class SerializerSupport
+    {
+        public static WaitOnCommit create(Keys scope, long waitForEpoch, TxnId txnId)
+        {
+            return new WaitOnCommit(scope, waitForEpoch, txnId);
+        }
+    }
 
     static class LocalWait implements Listener, PreLoadContext
     {
@@ -153,8 +160,7 @@ public class WaitOnCommit extends TxnRequest
         this.txnId = txnId;
     }
 
-    @VisibleForImplementation
-    public WaitOnCommit(Keys scope, long waitForEpoch, TxnId txnId)
+    protected WaitOnCommit(Keys scope, long waitForEpoch, TxnId txnId)
     {
         super(scope, waitForEpoch);
         this.txnId = txnId;

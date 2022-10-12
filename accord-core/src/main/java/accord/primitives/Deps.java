@@ -27,7 +27,6 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import accord.api.Key;
-import accord.utils.VisibleForImplementation;
 import accord.utils.SortedArrays;
 import com.google.common.base.Preconditions;
 
@@ -54,7 +53,6 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         return new Deps(keys, NO_TXNIDS, keysToTxnId);
     }
 
-    @VisibleForImplementation
     public static class SerializerSupport
     {
         private SerializerSupport() {}
@@ -67,6 +65,11 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         public static int keyToTxnId(Deps deps, int idx)
         {
             return deps.keyToTxnId[idx];
+        }
+
+        public static Deps create(Keys keys, TxnId[] txnIds, int[] keyToTxnId)
+        {
+            return new Deps(keys, txnIds, keyToTxnId);
         }
     }
 
@@ -406,8 +409,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
     // Lazy loaded in ensureTxnIdToKey()
     int[] txnIdToKey; // TxnId -> [Key]
 
-    @VisibleForImplementation
-    public Deps(Keys keys, TxnId[] txnIds, int[] keyToTxnId)
+    Deps(Keys keys, TxnId[] txnIds, int[] keyToTxnId)
     {
         this.keys = keys;
         this.txnIds = txnIds;
