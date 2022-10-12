@@ -75,7 +75,6 @@ public class Writes
                 accumulate.add(write.apply(key, commandStore, executeAt, commandStore.store()));
             return accumulate;
         }, new ArrayList<>());
-        Preconditions.checkState(!futures.isEmpty());
         return ReducingFuture.reduce(futures, (l, r) -> null);
     }
 

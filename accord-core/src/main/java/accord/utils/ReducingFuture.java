@@ -1,8 +1,8 @@
 package accord.utils;
 
+import com.google.common.base.Preconditions;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
-import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
@@ -46,8 +46,7 @@ public class ReducingFuture<V> extends AsyncPromise<V>
 
     public static <T> Future<T> reduce(List<? extends Future<T>> futures, BiFunction<T, T, T> reducer)
     {
-        if (futures.isEmpty())
-            return ImmediateFuture.success(null);
+        Preconditions.checkArgument(!futures.isEmpty());
 
         if (futures.size() == 1)
             return futures.get(0);
