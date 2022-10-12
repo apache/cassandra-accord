@@ -141,18 +141,7 @@ public abstract class Txn
         return "{read:" + read().toString() + (update() != null ? ", update:" + update() : "") + '}';
     }
 
-    public class ReadFuture extends ReducingFuture<Data>
-    {
-        public final Keys scope;
-
-        public ReadFuture(List<? extends Future<Data>> futures, Keys scope)
-        {
-            super(futures, Data::merge);
-            this.scope = scope;
-        }
-    }
-
-    public ReadFuture read(Command command, Keys scope)
+    public Future<Data> read(Command command)
     {
         List<Future<Data>> futures = keys().foldl(command.commandStore().ranges().at(command.executeAt().epoch), (index, key, accumulate) -> {
             CommandStore commandStore = command.commandStore();
@@ -163,6 +152,6 @@ public abstract class Txn
             accumulate.add(result);
             return accumulate;
         }, new ArrayList<>());
-        return new ReadFuture(futures, scope);
+        return ReducingFuture.reduce(futures, (d1, d2) -> d1.merge(d2));
     }
 }

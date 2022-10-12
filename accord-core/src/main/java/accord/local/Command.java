@@ -449,9 +449,9 @@ public abstract class Command implements Listener, Consumer<Listener>, PreLoadCo
         );
     }
 
-    public Txn.ReadFuture read(Keys scope)
+    public Future<Data> read(Keys scope)
     {
-        return txn().read(this, scope);
+        return txn().read(this);
     }
 
     private Future<Void> maybeExecute(boolean notifyListenersOnNoop)
