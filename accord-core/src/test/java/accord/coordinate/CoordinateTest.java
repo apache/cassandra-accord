@@ -70,7 +70,7 @@ public class CoordinateTest
     {
         TxnId txnId = new TxnId(1, clock, 0, node.id());
         Txn txn = writeTxn(keys);
-        Result result = Coordinate.coordinate(node, txnId, txn, node.selectHomeKey(txnId, txn.keys)).get();
+        Result result = Coordinate.coordinate(node, txnId, txn, node.selectHomeKey(txnId, txn.keys())).get();
         Assertions.assertEquals(MockStore.RESULT, result);
         return txnId;
     }
@@ -86,6 +86,61 @@ public class CoordinateTest
             TxnId txnId1 = coordinate(node, 100, keys(50, 350, 550));
             TxnId txnId2 = coordinate(node, 150, keys(250, 350, 450));
             TxnId txnId3 = coordinate(node, 125, keys(50, 60, 70, 80, 350, 550));
+        }
+    }
+
+    @Test
+    void writeOnlyTest() throws Throwable
+    {
+        try (MockCluster cluster = MockCluster.builder().nodes(3).replication(3).build())
+        {
+            cluster.networkFilter.isolate(ids(5, 7));
+
+            Node node = cluster.get(1);
+            Assertions.assertNotNull(node);
+
+            Keys keys = keys(10);
+            Txn txn = new Txn.InMemory(keys, MockStore.read(Keys.EMPTY), MockStore.QUERY, MockStore.update(keys));
+            Result result = cluster.get(id(1)).coordinate(txn).get();
+            Assertions.assertEquals(MockStore.RESULT, result);
+        }
+    }
+
+    @Test
+    void readOnlyTest() throws Throwable
+    {
+        try (MockCluster cluster = MockCluster.builder().nodes(3).replication(3).build())
+        {
+            cluster.networkFilter.isolate(ids(5, 7));
+
+            Node node = cluster.get(1);
+            Assertions.assertNotNull(node);
+
+            Keys keys = keys(10);
+            Txn txn = new Txn.InMemory(keys, MockStore.read(keys), MockStore.QUERY, MockStore.update(Keys.EMPTY));
+            Result result = cluster.get(id(1)).coordinate(txn).get();
+            Assertions.assertEquals(MockStore.RESULT, result);
+        }
+    }
+
+    @Test
+    void simpleTxnThenReadOnlyTest() throws Throwable
+    {
+        try (MockCluster cluster = MockCluster.builder().build())
+        {
+            Node node = cluster.get(1);
+            Assertions.assertNotNull(node);
+
+            TxnId txnId = new TxnId(1, 100, 0, node.id());
+            Keys oneKey = keys(10);
+            Keys twoKeys = keys(10, 20);
+            Txn txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.QUERY, MockStore.update(twoKeys));
+            Result result = Coordinate.coordinate(node, txnId, txn, txn.keys().get(0)).get();
+            Assertions.assertEquals(MockStore.RESULT, result);
+
+            txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.QUERY, MockStore.update(Keys.EMPTY));
+            result = cluster.get(id(1)).coordinate(txn).get();
+            Assertions.assertEquals(MockStore.RESULT, result);
         }
     }
 }

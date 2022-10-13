@@ -26,6 +26,8 @@ import accord.api.Key;
 import accord.primitives.KeyRange;
 import accord.primitives.Keys;
 
+import static accord.utils.Utils.toArray;
+
 public class IntKey implements Key
 {
     private static class Range extends KeyRange.EndInclusive
@@ -102,7 +104,7 @@ public class IntKey implements Key
             prev = next;
         }
         result.add(new Range(prev, new IntKey(Integer.MAX_VALUE)));
-        return result.toArray(KeyRange[]::new);
+        return toArray(result, KeyRange[]::new);
     }
 
     @Override

@@ -18,19 +18,33 @@
 
 package accord.messages;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import accord.api.Key;
 import accord.local.*;
 import accord.local.Node.Id;
 import accord.topology.Topologies;
 import accord.primitives.TxnId;
 import accord.primitives.Keys;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import static accord.utils.Utils.listOf;
 
 public class WaitOnCommit extends TxnRequest
 {
-    static class LocalWait implements Listener
+    private static final Logger logger = LoggerFactory.getLogger(WaitOnCommit.class);
+
+    public static class SerializerSupport
+    {
+        public static WaitOnCommit create(Keys scope, long waitForEpoch, TxnId txnId)
+        {
+            return new WaitOnCommit(scope, waitForEpoch, txnId);
+        }
+    }
+
+    static class LocalWait implements Listener, PreLoadContext
     {
         final Node node;
         final Id replyToNode;
@@ -48,8 +62,34 @@ public class WaitOnCommit extends TxnRequest
         }
 
         @Override
+        public Iterable<TxnId> txnIds()
+        {
+            return Collections.singleton(txnId);
+        }
+
+        @Override
+        public Iterable<Key> keys()
+        {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public PreLoadContext listenerPreLoadContext(TxnId caller)
+        {
+            return PreLoadContext.contextFor(listOf(txnId, caller), keys());
+        }
+
+        @Override
+        public String toString()
+        {
+            return "WaitOnCommit$LocalWait{" + txnId + '}';
+        }
+
+        @Override
         public synchronized void onChange(Command command)
         {
+            logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
+                         this, command.txnId(), command.status(), command);
             switch (command.status())
             {
                 default: throw new IllegalStateException();
@@ -70,6 +110,12 @@ public class WaitOnCommit extends TxnRequest
             ack();
         }
 
+        @Override
+        public boolean isTransient()
+        {
+            return true;
+        }
+
         private void ack()
         {
             if (waitingOn.decrementAndGet() == 0)
@@ -86,7 +132,7 @@ public class WaitOnCommit extends TxnRequest
                 case Accepted:
                 case AcceptedInvalidate:
                     command.addListener(this);
-                    instance.progressLog().waiting(txnId, keys);
+                    instance.progressLog().waiting(command, keys);
                     break;
 
                 case Committed:
@@ -102,7 +148,7 @@ public class WaitOnCommit extends TxnRequest
         {
             List<CommandStore> instances = node.collectLocal(keys, txnId, ArrayList::new);
             waitingOn.set(instances.size());
-            instances.forEach(instance -> instance.processBlocking(ignore -> setup(keys, instance)));
+            CommandStore.onEach(this, instances, instance -> setup(keys, instance));
         }
     }
 
@@ -112,6 +158,24 @@ public class WaitOnCommit extends TxnRequest
     {
         super(to, topologies, keys);
         this.txnId = txnId;
+    }
+
+    protected WaitOnCommit(Keys scope, long waitForEpoch, TxnId txnId)
+    {
+        super(scope, waitForEpoch);
+        this.txnId = txnId;
+    }
+
+    @Override
+    public Iterable<TxnId> txnIds()
+    {
+        return Collections.singleton(txnId);
+    }
+
+    @Override
+    public Iterable<Key> keys()
+    {
+        return scope();
     }
 
     public void process(Node node, Id replyToNode, ReplyContext replyContext)

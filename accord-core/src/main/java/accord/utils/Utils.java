@@ -16,42 +16,39 @@
  * limitations under the License.
  */
 
-package accord.impl;
-
-
-import accord.local.Node;
-import accord.primitives.KeyRange;
-import accord.primitives.KeyRanges;
-import accord.topology.Topology;
+package accord.utils;
 
 import java.util.*;
+import java.util.function.IntFunction;
 
-import static accord.utils.Utils.toArray;
-
-public class TopologyFactory
+// TODO: remove when jdk8 support is dropped
+public class Utils
 {
-    public final int rf;
-    // TODO: convert to KeyRanges
-    final KeyRange[] ranges;
-
-    public TopologyFactory(int rf, KeyRange... ranges)
+    // reimplements Collection#toArray
+    public static <T> T[] toArray(Collection<T> src, IntFunction<T[]> factory)
     {
-        this.rf = rf;
-        this.ranges = ranges;
+        T[] dst = factory.apply(src.size());
+        int i = 0;
+        for (T item : src)
+            dst[i++] = item;
+        return dst;
     }
 
-    public Topology toTopology(Node.Id[] cluster)
+    // reimplements Collection#toArray
+    public static <T> T[] toArray(List<T> src, IntFunction<T[]> factory)
     {
-        return TopologyUtils.initialTopology(cluster, KeyRanges.ofSortedAndDeoverlapped(ranges), rf);
+        T[] dst = factory.apply(src.size());
+        for (int i=0; i<dst.length; i++)
+            dst[i] = src.get(i);
+        return dst;
     }
 
-    public Topology toTopology(List<Node.Id> cluster)
+    // reimplements List#of
+    public static <T> List<T> listOf(T... src)
     {
-        return toTopology(toArray(cluster, Node.Id[]::new));
-    }
-
-    public static Topology toTopology(List<Node.Id> cluster, int rf, KeyRange... ranges)
-    {
-        return new TopologyFactory(rf, ranges).toTopology(cluster);
+        List<T> dst = new ArrayList<>(src.length);
+        for (int i=0; i<src.length; i++)
+            dst.add(src[i]);
+        return dst;
     }
 }

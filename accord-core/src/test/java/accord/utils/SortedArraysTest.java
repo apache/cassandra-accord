@@ -35,6 +35,7 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static accord.utils.Property.qt;
+import static accord.utils.Utils.toArray;
 
 class SortedArraysTest
 {
@@ -177,7 +178,7 @@ class SortedArraysTest
             Set<Integer> seen = new HashSet<>();
             Stream.of(a).forEach(seen::add);
             Stream.of(b).forEach(seen::add);
-            Integer[] expected = seen.toArray(Integer[]::new);
+            Integer[] expected = toArray(seen, Integer[]::new);
             Arrays.sort(expected);
 
             assertArrayEquals(expected, SortedArrays.linearUnion(a, b, Integer[]::new));
@@ -193,7 +194,7 @@ class SortedArraysTest
             Set<Integer> left = new HashSet<>(Arrays.asList(a));
             Set<Integer> right = new HashSet<>(Arrays.asList(b));
             Set<Integer> intersection = Sets.intersection(left, right);
-            Integer[] expected = intersection.toArray(Integer[]::new);
+            Integer[] expected = toArray(intersection, Integer[]::new);
             Arrays.sort(expected);
 
             assertArrayEquals(expected, SortedArrays.linearIntersection(a, b, Integer[]::new));
@@ -243,13 +244,13 @@ class SortedArraysTest
 
             {
                 Set<Integer> difference = Sets.difference(left, right);
-                Integer[] expected = difference.toArray(Integer[]::new);
+                Integer[] expected = toArray(difference, Integer[]::new);
                 Arrays.sort(expected);
                 assertArrayEquals(expected, SortedArrays.linearDifference(a, b, Integer[]::new));
             }
             {
                 Set<Integer> difference = Sets.difference(right, left);
-                Integer[] expected = difference.toArray(Integer[]::new);
+                Integer[] expected = toArray(difference, Integer[]::new);
                 Arrays.sort(expected);
                 assertArrayEquals(expected, SortedArrays.linearDifference(b, a, Integer[]::new));
             }

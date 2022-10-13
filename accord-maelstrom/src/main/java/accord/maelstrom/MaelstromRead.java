@@ -21,6 +21,9 @@ package accord.maelstrom;
 import accord.api.*;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
+import accord.local.CommandStore;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 public class MaelstromRead implements Read
 {
@@ -40,11 +43,11 @@ public class MaelstromRead implements Read
     }
 
     @Override
-    public Data read(Key key, Timestamp executeAt, DataStore store)
+    public Future<Data> read(Key key, boolean forWriteTxn, CommandStore commandStore, Timestamp executeAt, DataStore store)
     {
         MaelstromStore s = (MaelstromStore)store;
         MaelstromData result = new MaelstromData();
         result.put(key, s.get(key));
-        return result;
+        return ImmediateFuture.success(result);
     }
 }

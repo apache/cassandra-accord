@@ -18,22 +18,32 @@
 
 package accord.messages;
 
+import accord.primitives.*;
+import accord.local.PreLoadContext;
 import accord.messages.TxnRequest.WithUnsynced;
 import accord.local.Node.Id;
-import accord.topology.Topologies;
 import accord.api.Key;
-import accord.primitives.Ballot;
+import accord.local.CommandStore;
+import accord.topology.Topologies;
 import accord.local.Node;
-import accord.primitives.Timestamp;
 import accord.local.Command;
-import accord.primitives.Deps;
 import accord.txn.Txn;
-import accord.primitives.TxnId;
+import com.google.common.annotations.VisibleForTesting;
+
+import java.util.Collections;
 
 import static accord.messages.PreAccept.calculateDeps;
 
 public class Accept extends WithUnsynced
 {
+    public static class SerializerSupport
+    {
+        public static Accept create(Keys scope, long epoch, TxnId txnId, Ballot ballot, Key homeKey, Txn txn, Timestamp executeAt, Deps deps)
+        {
+            return new Accept(scope, epoch, txnId, ballot, homeKey, txn, executeAt, deps);
+        }
+    }
+
     public final Ballot ballot;
     public final Key homeKey;
     public final Txn txn;
@@ -42,7 +52,7 @@ public class Accept extends WithUnsynced
 
     public Accept(Id to, Topologies topologies, Ballot ballot, TxnId txnId, Key homeKey, Txn txn, Timestamp executeAt, Deps deps)
     {
-        super(to, topologies, txn.keys, txnId);
+        super(to, topologies, txn.keys(), txnId);
         this.ballot = ballot;
         this.homeKey = homeKey;
         this.txn = txn;
@@ -50,18 +60,33 @@ public class Accept extends WithUnsynced
         this.deps = deps;
     }
 
-    public void process(Node node, Node.Id replyToNode, ReplyContext replyContext)
+    protected Accept(Keys scope, long epoch, TxnId txnId, Ballot ballot, Key homeKey, Txn txn, Timestamp executeAt, Deps deps)
     {
-        Key progressKey = progressKey(node, homeKey);
+        super(scope, epoch, txnId);
+        this.ballot = ballot;
+        this.homeKey = homeKey;
+        this.txn = txn;
+        this.executeAt = executeAt;
+        this.deps = deps;
+    }
+
+    @VisibleForTesting
+    public AcceptReply process(CommandStore instance, Key progressKey)
+    {
         // TODO: when we begin expunging old epochs we need to ensure we handle the case where we do not fully handle the keys;
         //       since this will likely imply the transaction has been applied or aborted we can indicate the coordinator
         //       should enquire as to the result
-        node.reply(replyToNode, replyContext, node.mapReduceLocal(scope(), minEpoch, executeAt.epoch, instance -> {
-            Command command = instance.command(txnId);
-            if (!command.accept(ballot, txn, homeKey, progressKey, executeAt, deps))
-                return new AcceptNack(txnId, command.promised());
-            return new AcceptOk(txnId, calculateDeps(instance, txnId, txn, executeAt));
-        }, (r1, r2) -> {
+        Command command = instance.command(txnId);
+        if (!command.accept(ballot, txn, homeKey, progressKey, executeAt, deps))
+            return new AcceptNack(txnId, command.promised());
+        return new AcceptOk(txnId, calculateDeps(instance, txnId, txn, executeAt));
+    }
+
+    public void process(Node node, Node.Id replyToNode, ReplyContext replyContext)
+    {
+        Key progressKey = progressKey(node, homeKey);
+        node.reply(replyToNode, replyContext, node.mapReduceLocal(this, minEpoch, executeAt.epoch, cs -> process(cs, progressKey),
+        (r1, r2) -> {
             if (!r1.isOK()) return r1;
             if (!r2.isOK()) return r2;
             AcceptOk ok1 = (AcceptOk) r1;
@@ -73,12 +98,25 @@ public class Accept extends WithUnsynced
     }
 
     @Override
+    public Iterable<TxnId> txnIds()
+    {
+        return Collections.singleton(txnId);
+    }
+
+    @Override
+    public Iterable<Key> keys()
+    {
+        return txn.keys();
+    }
+
+    @Override
     public MessageType type()
     {
         return MessageType.ACCEPT_REQ;
     }
 
-    public static class Invalidate implements EpochRequest
+    // TODO (now): can EpochRequest inherit TxnOperation?
+    public static class Invalidate implements EpochRequest, PreLoadContext
     {
         public final Ballot ballot;
         public final TxnId txnId;
@@ -93,12 +131,24 @@ public class Accept extends WithUnsynced
 
         public void process(Node node, Node.Id replyToNode, ReplyContext replyContext)
         {
-            node.reply(replyToNode, replyContext, node.ifLocal(someKey, txnId.epoch, instance -> {
+            node.reply(replyToNode, replyContext, node.ifLocal(this, someKey, txnId.epoch, instance -> {
                 Command command = instance.command(txnId);
                 if (!command.acceptInvalidate(ballot))
                     return new AcceptNack(txnId, command.promised());
                 return new AcceptOk(txnId, null);
             }));
+        }
+
+        @Override
+        public Iterable<TxnId> txnIds()
+        {
+            return Collections.singleton(txnId);
+        }
+
+        @Override
+        public Iterable<Key> keys()
+        {
+            return Collections.emptyList();
         }
 
         @Override

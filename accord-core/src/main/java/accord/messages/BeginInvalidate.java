@@ -24,6 +24,7 @@ import accord.local.Command;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.Status;
+import accord.local.PreLoadContext;
 import accord.messages.BeginRecovery.RecoverNack;
 import accord.messages.BeginRecovery.RecoverOk;
 import accord.messages.BeginRecovery.RecoverReply;
@@ -34,11 +35,13 @@ import accord.txn.Txn;
 import accord.primitives.TxnId;
 import accord.txn.Writes;
 
-public class BeginInvalidate implements EpochRequest
+import java.util.Collections;
+
+public class BeginInvalidate implements EpochRequest, PreLoadContext
 {
-    final Ballot ballot;
-    final TxnId txnId;
-    final Key someKey;
+    public final Ballot ballot;
+    public final TxnId txnId;
+    public final Key someKey;
 
     public BeginInvalidate(TxnId txnId, Key someKey, Ballot ballot)
     {
@@ -49,7 +52,7 @@ public class BeginInvalidate implements EpochRequest
 
     public void process(Node node, Id replyToNode, ReplyContext replyContext)
     {
-        RecoverReply reply = node.ifLocal(someKey, txnId, instance -> {
+        RecoverReply reply = node.ifLocal(this, someKey, txnId, instance -> {
             Command command = instance.command(txnId);
 
             if (!command.preAcceptInvalidate(ballot))
@@ -60,6 +63,18 @@ public class BeginInvalidate implements EpochRequest
         });
 
         node.reply(replyToNode, replyContext, reply);
+    }
+
+    @Override
+    public Iterable<TxnId> txnIds()
+    {
+        return Collections.singleton(txnId);
+    }
+
+    @Override
+    public Iterable<Key> keys()
+    {
+        return Collections.emptyList();
     }
 
     @Override
@@ -106,6 +121,12 @@ public class BeginInvalidate implements EpochRequest
         {
             return toString("InvalidateOk");
         }
+
+        @Override
+        public MessageType type()
+        {
+            return MessageType.BEGIN_INVALIDATE_RSP;
+        }
     }
 
     public static class InvalidateNack extends RecoverNack
@@ -129,6 +150,12 @@ public class BeginInvalidate implements EpochRequest
         public String toString()
         {
             return "InvalidateNack{supersededBy:" + supersededBy + '}';
+        }
+
+        @Override
+        public MessageType type()
+        {
+            return MessageType.BEGIN_INVALIDATE_RSP;
         }
     }
 }

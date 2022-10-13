@@ -18,129 +18,113 @@
 
 package accord.local;
 
-import java.util.NavigableMap;
-import java.util.TreeMap;
-import java.util.function.Consumer;
-
-import com.google.common.base.Preconditions;
-
-import accord.api.Key;
-import accord.api.Result;
+import accord.api.*;
 import accord.local.Node.Id;
-import accord.primitives.KeyRanges;
-import accord.primitives.Ballot;
-import accord.primitives.Deps;
-import accord.primitives.Keys;
-import accord.primitives.Timestamp;
+import accord.primitives.*;
 import accord.txn.Txn;
-import accord.primitives.TxnId;
 import accord.txn.Writes;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.Iterables;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import static accord.local.Status.Accepted;
-import static accord.local.Status.AcceptedInvalidate;
-import static accord.local.Status.Applied;
-import static accord.local.Status.Committed;
-import static accord.local.Status.Executed;
-import static accord.local.Status.Invalidated;
-import static accord.local.Status.NotWitnessed;
-import static accord.local.Status.PreAccepted;
-import static accord.local.Status.ReadyToExecute;
+import java.util.Collections;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
-// TODO: this needs to be backed by persistent storage
-public class Command implements Listener, Consumer<Listener>
+import static accord.local.Status.*;
+import static accord.utils.Utils.listOf;
+
+public abstract class Command implements Listener, Consumer<Listener>, PreLoadContext, PartialCommand.WithDeps
 {
-    public final CommandStore commandStore;
-    private final TxnId txnId;
-    private Key homeKey, progressKey;
-    private Txn txn; // TODO: only store this on the home shard, or split to each shard independently
-    private Ballot promised = Ballot.ZERO, accepted = Ballot.ZERO;
-    private Timestamp executeAt; // TODO: compress these states together
-    private Deps deps = Deps.NONE;
-    private Writes writes;
-    private Result result;
+    private static final Logger logger = LoggerFactory.getLogger(Command.class);
 
-    private Status status = NotWitnessed;
-    private boolean isGloballyPersistent; // only set on home shard
+    public abstract CommandStore commandStore();
 
-    private NavigableMap<TxnId, Command> waitingOnCommit;
-    private NavigableMap<Timestamp, Command> waitingOnApply;
+    public abstract Key homeKey();
 
-    private final Listeners listeners = new Listeners();
+    protected abstract void setHomeKey(Key key);
 
-    public Command(CommandStore commandStore, TxnId id)
+    public abstract Key progressKey();
+
+    protected abstract void setProgressKey(Key key);
+
+    protected abstract void setTxn(Txn txn);
+
+    public abstract Ballot promised();
+
+    public abstract void promised(Ballot ballot);
+
+    public abstract Ballot accepted();
+
+    public abstract void accepted(Ballot ballot);
+
+    public abstract void executeAt(Timestamp timestamp);
+
+    public abstract Deps savedDeps();
+
+    public abstract void savedDeps(Deps deps);
+
+    public abstract Writes writes();
+
+    public abstract void writes(Writes writes);
+
+    public abstract Result result();
+
+    public abstract void result(Result result);
+
+    public abstract void status(Status status);
+
+    public abstract boolean isGloballyPersistent();
+
+    public abstract void isGloballyPersistent(boolean v);
+
+    public abstract Command addListener(Listener listener);
+
+    public abstract void notifyListeners();
+
+    public abstract void addWaitingOnCommit(Command command);
+
+    public abstract boolean isWaitingOnCommit();
+
+    public abstract void removeWaitingOnCommit(PartialCommand command);
+
+    public abstract PartialCommand firstWaitingOnCommit();
+
+    public abstract void addWaitingOnApplyIfAbsent(PartialCommand command);
+
+    public abstract boolean isWaitingOnApply();
+
+    public abstract void removeWaitingOnApply(PartialCommand command);
+
+    public abstract PartialCommand firstWaitingOnApply();
+
+    public boolean isUnableToApply()
     {
-        this.commandStore = commandStore;
-        this.txnId = id;
+        return isWaitingOnCommit() || isWaitingOnApply();
     }
 
-    public TxnId txnId()
+    @Override
+    public Iterable<TxnId> txnIds()
     {
-        return txnId;
+        return Iterables.concat(Collections.singleton(txnId()), savedDeps().txnIds());
     }
 
-    public Txn txn()
+    @Override
+    public Iterable<Key> keys()
     {
-        return txn;
-    }
-
-    public Ballot promised()
-    {
-        return promised;
-    }
-
-    public Ballot accepted()
-    {
-        return accepted;
-    }
-
-    public Timestamp executeAt()
-    {
-        return executeAt;
-    }
-
-    public Deps savedDeps()
-    {
-        return deps;
-    }
-
-    public Writes writes()
-    {
-        return writes;
-    }
-
-    public Result result()
-    {
-        return result;
-    }
-
-    public Status status()
-    {
-        return status;
-    }
-
-    public boolean hasBeen(Status status)
-    {
-        return this.status.compareTo(status) >= 0;
-    }
-
-    public boolean is(Status status)
-    {
-        return this.status == status;
-    }
-
-    public boolean isGloballyPersistent()
-    {
-        return isGloballyPersistent;
+        return txn().keys();
     }
 
     public void setGloballyPersistent(Key homeKey, Timestamp executeAt)
     {
         homeKey(homeKey);
         if (!hasBeen(Committed))
-            this.executeAt = executeAt;
-        else if (!this.executeAt.equals(executeAt))
-            commandStore.agent().onInconsistentTimestamp(this, this.executeAt, executeAt);
-        isGloballyPersistent = true;
+            this.executeAt(executeAt);
+        else if (!this.executeAt().equals(executeAt))
+            commandStore().agent().onInconsistentTimestamp(this, this.executeAt(), executeAt);
+        isGloballyPersistent(true);
     }
 
     // requires that command != null
@@ -152,21 +136,22 @@ public class Command implements Listener, Consumer<Listener>
         homeKey(homeKey);
         progressKey(progressKey);
 
-        if (status == NotWitnessed)
-            status = PreAccepted;
+        if (status() == NotWitnessed)
+            status(PreAccepted);
 
-        if (executeAt == null)
+        if (executeAt() == null)
         {
-            Timestamp max = commandStore.maxConflict(txn.keys);
+            Timestamp max = commandStore().maxConflict(txn.keys());
             // unlike in the Accord paper, we partition shards within a node, so that to ensure a total order we must either:
             //  - use a global logical clock to issue new timestamps; or
             //  - assign each shard _and_ process a unique id, and use both as components of the timestamp
-            executeAt = txnId.compareTo(max) > 0 && txnId.epoch >= commandStore.latestEpoch()
-                        ? txnId : commandStore.uniqueNow(max);
+            Timestamp witnessed = txnId().compareTo(max) > 0 && txnId().epoch >= commandStore().latestEpoch()
+                    ? txnId() : commandStore().uniqueNow(max);
+            executeAt(witnessed);
 
-            txn.keys().foldl(commandStore.ranges().since(txnId.epoch), (i, key, param) -> {
-                if (commandStore.hashIntersects(key))
-                    commandStore.commandsForKey(key).register(this);
+            txn.keys().foldl(commandStore().ranges().since(txnId().epoch), (i, key, param) -> {
+                if (commandStore().hashIntersects(key))
+                    commandStore().commandsForKey(key).register(this);
                 return null;
             }, null);
         }
@@ -174,53 +159,76 @@ public class Command implements Listener, Consumer<Listener>
 
     public boolean preaccept(Txn txn, Key homeKey, Key progressKey)
     {
-        if (promised.compareTo(Ballot.ZERO) > 0)
+        if (promised().compareTo(Ballot.ZERO) > 0)
+        {
+            logger.trace("{}: skipping preaccept - witnessed higher ballot ({})", txnId(), promised());
             return false;
+        }
 
         if (hasBeen(PreAccepted))
+        {
+            logger.trace("{}: skipping preaccept - already preaccepted ({})", txnId(), status());
             return true;
+        }
 
         witness(txn, homeKey, progressKey);
-        boolean isProgressShard = progressKey != null && handles(txnId.epoch, progressKey);
-        commandStore.progressLog().preaccept(txnId, isProgressShard, isProgressShard && progressKey.equals(homeKey));
+        boolean isProgressShard = progressKey != null && handles(txnId().epoch, progressKey);
+        commandStore().progressLog().preaccept(this, isProgressShard, isProgressShard && progressKey.equals(homeKey));
 
-        listeners.forEach(this);
+        logger.trace("{}: preaccepted with executeAt: {}, deps: {}", txnId(), executeAt(), savedDeps());
+        notifyListeners();
         return true;
     }
 
     public boolean accept(Ballot ballot, Txn txn, Key homeKey, Key progressKey, Timestamp executeAt, Deps deps)
     {
-        if (this.promised.compareTo(ballot) > 0)
+        if (promised().compareTo(ballot) > 0)
+        {
+            logger.trace("{}: skipping accept - witnessed higher ballot ({} > {})", txnId(), promised(), ballot);
             return false;
+        }
 
         if (hasBeen(Committed))
+        {
+            logger.trace("{}: skipping accept - already committed ({})", txnId(), status());
             return false;
+        }
 
         witness(txn, homeKey, progressKey);
-        this.deps = deps;
-        this.executeAt = executeAt;
-        promised = accepted = ballot;
-        status = Accepted;
+        savedDeps(deps);
+        executeAt(executeAt);
+        promised(ballot);
+        accepted(ballot);
+        status(Accepted);
 
-        boolean isProgressShard = progressKey != null && handles(txnId.epoch, progressKey);
-        commandStore.progressLog().accept(txnId, isProgressShard, isProgressShard && progressKey.equals(homeKey));
+        boolean isProgressShard = progressKey != null && handles(txnId().epoch, progressKey);
+        commandStore().progressLog().accept(this, isProgressShard, isProgressShard && progressKey.equals(homeKey));
+        logger.trace("{}: preaccepted with executeAt: {}, deps: {}", txnId(), executeAt, deps);
 
-        listeners.forEach(this);
+        notifyListeners();
         return true;
     }
 
     public boolean acceptInvalidate(Ballot ballot)
     {
-        if (this.promised.compareTo(ballot) > 0)
+        if (this.promised().compareTo(ballot) > 0)
+        {
+            logger.trace("{}: skipping accept invalidated - witnessed higher ballot ({} > {})", txnId(), promised(), ballot);
             return false;
+        }
 
         if (hasBeen(Committed))
+        {
+            logger.trace("{}: skipping accept invalidated - already committed ({})", txnId(), status());
             return false;
+        }
 
-        promised = accepted = ballot;
-        status = AcceptedInvalidate;
+        promised(ballot);
+        accepted(ballot);
+        status(AcceptedInvalidate);
+        logger.trace("{}: accepted invalidated", txnId());
 
-        listeners.forEach(this);
+        notifyListeners();
         return true;
     }
 
@@ -229,25 +237,28 @@ public class Command implements Listener, Consumer<Listener>
     {
         if (hasBeen(Committed))
         {
-            if (executeAt.equals(this.executeAt) && status != Invalidated)
+            logger.trace("{}: skipping commit - already committed ({})", txnId(), status());
+            if (executeAt.equals(executeAt()) && status() != Invalidated)
                 return false;
 
-            commandStore.agent().onInconsistentTimestamp(this, (status == Invalidated ? Timestamp.NONE : this.executeAt), executeAt);
+            commandStore().agent().onInconsistentTimestamp(this, (status() == Invalidated ? Timestamp.NONE : this.executeAt()), executeAt);
         }
 
         witness(txn, homeKey, progressKey);
-        this.status = Committed;
-        this.deps = deps;
-        this.executeAt = executeAt;
-        this.waitingOnCommit = new TreeMap<>();
-        this.waitingOnApply = new TreeMap<>();
+        savedDeps(deps);
+        executeAt(executeAt);
+        status(Committed);
+        Preconditions.checkState(!isWaitingOnCommit());
+        Preconditions.checkState(!isWaitingOnApply());
+        logger.trace("{}: committed with executeAt: {}, deps: {}", txnId(), executeAt, deps);
 
-        KeyRanges ranges = commandStore.ranges().since(executeAt.epoch);
+        KeyRanges ranges = commandStore().ranges().since(executeAt.epoch);
         if (ranges != null)
         {
-            savedDeps().forEachOn(ranges, commandStore::hashIntersects, txnId -> {
-                Command command = commandStore.command(txnId);
-                switch (command.status)
+            savedDeps().forEachOn(ranges, commandStore()::hashIntersects, txnId -> {
+                Command command = commandStore().command(txnId);
+                logger.trace("{}: dep {} is {}", txnId(), command.txnId(), command.status());
+                switch (command.status())
                 {
                     default:
                         throw new IllegalStateException();
@@ -257,7 +268,7 @@ public class Command implements Listener, Consumer<Listener>
                     case AcceptedInvalidate:
                         // we don't know when these dependencies will execute, and cannot execute until we do
                         command.addListener(this);
-                        waitingOnCommit.put(txnId, command);
+                        addWaitingOnCommit(command);
                         break;
                     case Committed:
                         // TODO: split into ReadyToRead and ReadyToWrite;
@@ -274,101 +285,112 @@ public class Command implements Listener, Consumer<Listener>
             });
         }
 
-        if (waitingOnCommit.isEmpty())
-        {
-            waitingOnCommit = null;
-            if (waitingOnApply.isEmpty())
-                waitingOnApply = null;
-        }
 
-        boolean isProgressShard = progressKey != null && handles(txnId.epoch, progressKey);
-        commandStore.progressLog().commit(txnId, isProgressShard, isProgressShard && progressKey.equals(homeKey));
+        boolean isProgressShard = progressKey != null && handles(txnId().epoch, progressKey);
+        commandStore().progressLog().commit(this, isProgressShard, isProgressShard && progressKey.equals(homeKey));
 
-        maybeExecute(false);
-        listeners.forEach(this);
         return true;
     }
 
+    public Future<Void> commitAndBeginExecution(Txn txn, Key homeKey, Key progressKey, Timestamp executeAt, Deps deps)
+    {
+        if (!commit(txn, homeKey, progressKey, executeAt, deps))
+            return Writes.SUCCESS;
+
+        return maybeExecute(true);
+    }
+
+    // TODO (now): commitInvalidate may need to update cfks _if_ possible
     public boolean commitInvalidate()
     {
         if (hasBeen(Committed))
         {
+            logger.trace("{}: skipping commit invalidated - already committed ({})", txnId(), status());
             if (!hasBeen(Invalidated))
-                commandStore.agent().onInconsistentTimestamp(this, Timestamp.NONE, executeAt);
+                commandStore().agent().onInconsistentTimestamp(this, Timestamp.NONE, executeAt());
 
             return false;
         }
 
-        status = Invalidated;
+        status(Invalidated);
 
-        boolean isProgressShard = progressKey != null && handles(txnId.epoch, progressKey);
-        commandStore.progressLog().invalidate(txnId, isProgressShard, isProgressShard && progressKey.equals(homeKey));
+        boolean isProgressShard = progressKey() != null && handles(txnId().epoch, progressKey());
+        commandStore().progressLog().invalidate(this, isProgressShard, isProgressShard && progressKey().equals(homeKey()));
+        logger.trace("{}: committed invalidated", txnId());
 
-        listeners.forEach(this);
+        notifyListeners();
         return true;
     }
 
-    public boolean apply(Txn txn, Key homeKey, Key progressKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    public Future<Void> apply(Txn txn, Key homeKey, Key progressKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
-        if (hasBeen(Executed) && executeAt.equals(this.executeAt))
-            return false;
+        if (hasBeen(Executed) && executeAt.equals(executeAt()))
+        {
+            logger.trace("{}: skipping apply - already executed ({})", txnId(), status());
+            return Writes.SUCCESS;
+        }
         else if (!hasBeen(Committed))
             commit(txn, homeKey, progressKey, executeAt, deps);
-        else if (!executeAt.equals(this.executeAt))
-            commandStore.agent().onInconsistentTimestamp(this, this.executeAt, executeAt);
+        else if (!executeAt.equals(executeAt()))
+            commandStore().agent().onInconsistentTimestamp(this, executeAt(), executeAt);
 
-        this.executeAt = executeAt;
-        this.writes = writes;
-        this.result = result;
-        this.status = Executed;
+        executeAt(executeAt);
+        writes(writes);
+        result(result);
+        status(Executed);
+        logger.trace("{}: apply, status set to Executed with executeAt: {}, deps: {}", txnId(), executeAt, deps);
 
-        boolean isProgressShard = progressKey != null && handles(txnId.epoch, progressKey);
-        commandStore.progressLog().execute(txnId, isProgressShard, isProgressShard && progressKey.equals(homeKey));
+        boolean isProgressShard = progressKey != null && handles(txnId().epoch, progressKey);
+        commandStore().progressLog().execute(this, isProgressShard, isProgressShard && progressKey.equals(homeKey));
 
-        maybeExecute(false);
-        this.listeners.forEach(this);
-        return true;
+        return maybeExecute(true);
     }
 
     public boolean recover(Txn txn, Key homeKey, Key progressKey, Ballot ballot)
     {
-        if (this.promised.compareTo(ballot) > 0)
+        if (this.promised().compareTo(ballot) > 0)
+        {
+            logger.trace("{}: skipping recover - higher ballot witnessed ({})", txnId(), promised());
             return false;
+        }
 
-        Status status = this.status;
+        Status status = status();
         witness(txn, homeKey, progressKey);
-        boolean isProgressShard = progressKey != null && handles(txnId.epoch, progressKey);
+        boolean isProgressShard = progressKey != null && handles(txnId().epoch, progressKey);
         if (status == NotWitnessed)
-            commandStore.progressLog().preaccept(txnId, isProgressShard, isProgressShard && progressKey.equals(homeKey));
-        this.promised = ballot;
+            commandStore().progressLog().preaccept(this, isProgressShard, isProgressShard && progressKey.equals(homeKey));
+        promised(ballot);
+        logger.trace("{}: recovery started with executeAt: {}, deps: {}", txnId(), executeAt(), savedDeps());
         return true;
     }
 
     public boolean preAcceptInvalidate(Ballot ballot)
     {
-        if (this.promised.compareTo(ballot) > 0)
+        if (promised().compareTo(ballot) > 0)
+        {
+            logger.trace("{}: skipping preaccept invalidate - higher ballot witnessed ({})", txnId(), promised());
             return false;
+        }
 
-        this.promised = ballot;
+        promised(ballot);
+        logger.trace("{}: preaccepted invalidated", txnId());
         return true;
     }
 
-    public boolean addListener(Listener listener)
-    {
-        return listeners.add(listener);
-    }
-
-    public void removeListener(Listener listener)
-    {
-        listeners.remove(listener);
-    }
-
     @Override
-    public void onChange(Command command)
+    public PreLoadContext listenerPreLoadContext(TxnId caller)
     {
-        switch (command.status)
+        return PreLoadContext.contextFor(listOf(txnId(), caller), Collections.emptyList());
+    }
+
+    private void onChangeInternal(PartialCommand command)
+    {
+        logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
+                     txnId(), command.txnId(), command.status(), command);
+        switch (command.status())
         {
-            default: throw new IllegalStateException();
+            default:
+                throw new IllegalStateException();
             case NotWitnessed:
             case PreAccepted:
             case Accepted:
@@ -380,97 +402,140 @@ public class Command implements Listener, Consumer<Listener>
             case Executed:
             case Applied:
             case Invalidated:
-                if (waitingOnApply != null)
+                if (isUnableToApply())
                 {
                     updatePredecessor(command);
-                    if (waitingOnCommit != null)
+                    if (isWaitingOnCommit())
                     {
-                        if (waitingOnCommit.remove(command.txnId) != null && waitingOnCommit.isEmpty())
-                            waitingOnCommit = null;
+                        removeWaitingOnCommit(command);
                     }
-                    if (waitingOnCommit == null && waitingOnApply.isEmpty())
-                        waitingOnApply = null;
                 }
                 else
                 {
                     command.removeListener(this);
                 }
-                maybeExecute(true);
+                maybeExecute(false);
                 break;
         }
     }
 
-    private void maybeExecute(boolean notifyListeners)
+    @Override
+    public void onChange(Command command)
     {
-        if (status != Committed && status != Executed)
-            return;
+        onChangeInternal(command);
+    }
 
-        if (waitingOnApply != null)
+    protected void postApply()
+    {
+        logger.trace("{} applied, setting status to Applied and notifying listeners", txnId());
+        status(Applied);
+        notifyListeners();
+    }
+
+    private static Function<CommandStore, Void> callPostApply(TxnId txnId)
+    {
+        return commandStore -> {
+            commandStore.command(txnId).postApply();
+            return null;
+        };
+    }
+
+    protected Future<Void> apply()
+    {
+        // important: we can't include a reference to *this* in the lambda, since the C* implementation may evict
+        // the command instance from memory between now and the write completing (and post apply being called)
+        return writes().apply(commandStore()).flatMap(unused ->
+            commandStore().process(this, callPostApply(txnId()))
+        );
+    }
+
+    public Future<Data> read(Keys scope)
+    {
+        return txn().read(this);
+    }
+
+    private Future<Void> maybeExecute(boolean notifyListenersOnNoop)
+    {
+        if (logger.isTraceEnabled())
+            logger.trace("{}: Maybe executing with status {}. Will notify listeners on noop: {}", txnId(), status(), notifyListenersOnNoop);
+
+        if (status() != Committed && status() != Executed)
+        {
+            if (notifyListenersOnNoop) notifyListeners();
+            return Writes.SUCCESS;
+        }
+
+        if (isUnableToApply())
         {
             BlockedBy blockedBy = blockedBy();
             if (blockedBy != null)
             {
-                commandStore.progressLog().waiting(blockedBy.txnId, blockedBy.someKeys);
-                return;
+                logger.trace("{}: not executing, blocked on {}", txnId(), blockedBy.command.txnId());
+                commandStore().progressLog().waiting(blockedBy.command, blockedBy.someKeys);
+                if (notifyListenersOnNoop) notifyListeners();
+                return Writes.SUCCESS;
             }
-            assert waitingOnApply == null;
+            assert !isWaitingOnApply();
         }
 
-        switch (status)
+        switch (status())
         {
             case Committed:
                 // TODO: maintain distinct ReadyToRead and ReadyToWrite states
-                status = ReadyToExecute;
-                boolean isProgressShard = progressKey != null && handles(txnId.epoch, progressKey);
-                commandStore.progressLog().readyToExecute(txnId, isProgressShard, isProgressShard && progressKey.equals(homeKey));
-                if (notifyListeners)
-                    listeners.forEach(this);
+                status(ReadyToExecute);
+                logger.trace("{}: set to ReadyToExecute", txnId());
+                boolean isProgressShard = progressKey() != null && handles(txnId().epoch, progressKey());
+                commandStore().progressLog().readyToExecute(this, isProgressShard, isProgressShard && progressKey().equals(homeKey()));
+                notifyListeners();
                 break;
             case Executed:
-                writes.apply(commandStore);
-                status = Applied;
-                if (notifyListeners)
-                    listeners.forEach(this);
+                logger.trace("{}: applying", txnId());
+                if (notifyListenersOnNoop) notifyListeners();
+                return apply();
         }
+        return Writes.SUCCESS;
     }
 
     /**
      * @param dependency is either committed or invalidated
      */
-    private void updatePredecessor(Command dependency)
+    private void updatePredecessor(PartialCommand dependency)
     {
         Preconditions.checkState(dependency.hasBeen(Committed));
         if (dependency.hasBeen(Invalidated))
         {
+            logger.trace("{}: {} is invalidated. Stop listening and removing from waiting on commit set.", txnId(), dependency.txnId());
             dependency.removeListener(this);
-            if (waitingOnCommit.remove(dependency.txnId) != null && waitingOnCommit.isEmpty())
-                waitingOnCommit = null;
+            removeWaitingOnCommit(dependency);
         }
-        else if (dependency.executeAt.compareTo(executeAt) > 0)
+        else if (dependency.executeAt().compareTo(executeAt()) > 0)
         {
             // cannot be a predecessor if we execute later
+            logger.trace("{}: {} executes after us. Stop listening.", txnId(), dependency.txnId());
             dependency.removeListener(this);
         }
         else if (dependency.hasBeen(Applied))
         {
-            waitingOnApply.remove(dependency.executeAt);
+            logger.trace("{}: {} has been applied. Stop listening and removing from waiting on apply set.", txnId(), dependency.txnId());
+            removeWaitingOnApply(dependency);
             dependency.removeListener(this);
         }
         else
         {
-            waitingOnApply.putIfAbsent(dependency.executeAt, dependency);
+            logger.trace("{}: adding {} to waiting on apply set.", txnId(), dependency.txnId());
+            addWaitingOnApplyIfAbsent(dependency);
         }
     }
 
     // TEMPORARY: once we can invalidate commands that have not been witnessed on any shard, we do not need to know the home shard
     static class BlockedBy
     {
-        final TxnId txnId;
+        final PartialCommand command;
         final Keys someKeys;
 
-        BlockedBy(TxnId txnId, Keys someKeys)
+        BlockedBy(PartialCommand command, Keys someKeys)
         {
-            this.txnId = txnId;
+            this.command = command;
             this.someKeys = someKeys;
         }
     }
@@ -478,21 +543,14 @@ public class Command implements Listener, Consumer<Listener>
     public BlockedBy blockedBy()
     {
         Command prev = this;
-        Command cur = directlyBlockedBy();
+        PartialCommand cur = directlyBlockedBy();
         if (cur == null)
             return null;
 
-        Command next;
-        while (null != (next = cur.directlyBlockedBy()))
-        {
-            prev = cur;
-            cur = next;
-        }
-
         Keys someKeys = cur.someKeys();
         if (someKeys == null)
-            someKeys = prev.deps.someKeys(cur.txnId);
-        return new BlockedBy(cur.txnId, someKeys);
+            someKeys = prev.savedDeps().someKeys(cur.txnId());
+        return new BlockedBy(cur, someKeys);
     }
 
     /**
@@ -506,21 +564,22 @@ public class Command implements Listener, Consumer<Listener>
      *
      * TODO: Markdown documentation explaining the home shard and local shard concepts
      */
-    public Key homeKey()
+
+    public final void homeKey(Key homeKey)
     {
-        return homeKey;
+        Key current = homeKey();
+        if (current == null) setHomeKey(homeKey);
+        else if (!current.equals(homeKey)) throw new AssertionError();
     }
 
-    public void homeKey(Key homeKey)
-    {
-        if (this.homeKey == null) this.homeKey = homeKey;
-        else if (!this.homeKey.equals(homeKey)) throw new IllegalStateException();
-    }
 
-    public Keys someKeys()
+    public Key someKey()
     {
-        if (txn != null)
-            return txn.keys;
+        if (homeKey() != null)
+            return homeKey();
+
+        if (txn().keys() != null)
+            return txn().keys().get(0);
 
         return null;
     }
@@ -532,36 +591,34 @@ public class Command implements Listener, Consumer<Listener>
      *
      * Preferentially, this is homeKey on nodes that replicate it, and otherwise any key that is replicated, as of txnId.epoch
      */
-    public Key progressKey()
-    {
-        return progressKey;
-    }
 
-    public void progressKey(Key progressKey)
+    public final void progressKey(Key progressKey)
     {
-        if (this.progressKey == null) this.progressKey = progressKey;
-        else if (!this.progressKey.equals(progressKey)) throw new IllegalStateException();
+        Key current = progressKey();
+        if (current == null) setProgressKey(progressKey);
+        else if (!current.equals(progressKey)) throw new AssertionError();
     }
 
     // does this specific Command instance execute (i.e. does it lose ownership post Commit)
     public boolean executes()
     {
-        KeyRanges ranges = commandStore.ranges().at(executeAt.epoch);
-        return ranges != null && txn.keys.any(ranges, commandStore::hashIntersects);
+        KeyRanges ranges = commandStore().ranges().at(executeAt().epoch);
+        return ranges != null && txn().keys().any(ranges, commandStore()::hashIntersects);
     }
 
-    public void txn(Txn txn)
+    public final void txn(Txn txn)
     {
-        if (this.txn == null) this.txn = txn;
-        else if (!this.txn.equals(txn)) throw new IllegalStateException();
+        Txn current = txn();
+        if (current == null) setTxn(txn);
+        else if (!current.equals(txn)) throw new AssertionError();
     }
 
     public boolean handles(long epoch, Key someKey)
     {
-        if (!commandStore.hashIntersects(someKey))
+        if (!commandStore().hashIntersects(someKey))
             return false;
 
-        KeyRanges ranges = commandStore.ranges().at(epoch);
+        KeyRanges ranges = commandStore().ranges().at(epoch);
         if (ranges == null)
             return false;
         return ranges.contains(someKey);
@@ -569,32 +626,32 @@ public class Command implements Listener, Consumer<Listener>
 
     private Id coordinator()
     {
-        if (promised.equals(Ballot.ZERO))
-            return txnId.node;
-        return promised.node;
+        if (promised().equals(Ballot.ZERO))
+            return txnId().node;
+        return promised().node;
     }
 
-    private Command directlyBlockedBy()
+    private PartialCommand directlyBlockedBy()
     {
         // firstly we're waiting on every dep to commit
-        while (waitingOnCommit != null)
+        while (isWaitingOnCommit())
         {
             // TODO: when we change our liveness mechanism this may not be a problem
             // cannot guarantee that listener updating this set is invoked before this method by another listener
             // so we must check the entry is still valid, and potentially remove it if not
-            Command waitingOn = waitingOnCommit.firstEntry().getValue();
+            PartialCommand waitingOn = firstWaitingOnCommit();
             if (!waitingOn.hasBeen(Committed)) return waitingOn;
-            onChange(waitingOn);
+            onChangeInternal(waitingOn);
         }
 
-        while (waitingOnApply != null)
+        while (isWaitingOnApply())
         {
             // TODO: when we change our liveness mechanism this may not be a problem
             // cannot guarantee that listener updating this set is invoked before this method by another listener
             // so we must check the entry is still valid, and potentially remove it if not
-            Command waitingOn = waitingOnApply.firstEntry().getValue();
+            PartialCommand waitingOn = firstWaitingOnApply();
             if (!waitingOn.hasBeen(Applied)) return waitingOn;
-            onChange(waitingOn);
+            onChangeInternal(waitingOn);
         }
 
         return null;
@@ -610,11 +667,11 @@ public class Command implements Listener, Consumer<Listener>
     public String toString()
     {
         return "Command{" +
-               "txnId=" + txnId +
-               ", status=" + status +
-               ", txn=" + txn +
-               ", executeAt=" + executeAt +
-               ", deps=" + deps +
+               "txnId=" + txnId() +
+               ", status=" + status() +
+               ", txn=" + txn() +
+               ", executeAt=" + executeAt() +
+               ", deps=" + savedDeps() +
                '}';
     }
 }

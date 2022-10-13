@@ -19,9 +19,11 @@
 package accord.messages;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 
 import accord.api.Key;
+import accord.utils.ReducingFuture;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.topology.Topologies;
@@ -30,17 +32,31 @@ import accord.primitives.Timestamp;
 import accord.primitives.Deps;
 import accord.txn.Txn;
 import accord.primitives.TxnId;
+import com.google.common.collect.Iterables;
+import org.apache.cassandra.utils.concurrent.Future;
 
 // TODO: CommitOk responses, so we can send again if no reply received? Or leave to recovery?
 public class Commit extends ReadData
 {
-    public final Deps deps;
+    public static class SerializerSupport
+    {
+        public static Commit create(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Deps deps, Key homeKey, Timestamp executeAt, boolean read)
+        {
+            return new Commit(scope, waitForEpoch, txnId, txn, deps, homeKey, executeAt, read);
+        }
+    }
+
     public final boolean read;
 
     public Commit(Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, boolean read)
     {
-        super(to, topologies, txnId, txn, homeKey, executeAt);
-        this.deps = deps;
+        super(to, topologies, txnId, txn, deps, homeKey, executeAt);
+        this.read = read;
+    }
+
+    public Commit(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Deps deps, Key homeKey, Timestamp executeAt, boolean read)
+    {
+        super(scope, waitForEpoch, txnId, txn, deps, homeKey, executeAt);
         this.read = read;
     }
 
@@ -99,19 +115,39 @@ public class Commit extends ReadData
     {
         for (Node.Id to : commitTo.nodes())
         {
-            Invalidate send = new Invalidate(to, commitTo, txnId, someKeys);
+            // TODO (now) confirm somekeys == txnkeys
+            Invalidate send = new Invalidate(to, commitTo, txnId, someKeys, someKeys);
             node.send(to, send);
         }
     }
 
+    @Override
+    public Iterable<TxnId> txnIds()
+    {
+        return Iterables.concat(Collections.singleton(txnId), deps.txnIds());
+    }
+
+    @Override
+    public Iterable<Key> keys()
+    {
+        return txn.keys();
+    }
+
     public void process(Node node, Id from, ReplyContext replyContext)
     {
-        Key progressKey = node.trySelectProgressKey(txnId, txn.keys, homeKey);
-        node.forEachLocal(scope(), txnId.epoch, executeAt.epoch,
-                          instance -> instance.command(txnId).commit(txn, homeKey, progressKey, executeAt, deps));
+        Key progressKey = node.trySelectProgressKey(txnId, txn.keys(), homeKey);
+        List<Future<Void>> futures = node.mapLocal(this, txnId.epoch, executeAt.epoch,
+                                                   instance -> instance.command(txnId).commitAndBeginExecution(txn, homeKey, progressKey, executeAt, deps));
 
         if (read)
-            super.process(node, from, replyContext);
+        {
+            ReducingFuture.reduce(futures, (l, r) -> null).addCallback((unused, throwable) -> {
+                if (throwable == null)
+                    super.process(node, from, replyContext);
+                else
+                    node.reply(from, replyContext, new ReadNack());
+            });
+        }
     }
 
     @Override
@@ -132,17 +168,46 @@ public class Commit extends ReadData
 
     public static class Invalidate extends TxnRequest
     {
-        final TxnId txnId;
+        public static class SerializerSupport
+        {
+            public static Invalidate create(Keys scope, long waitForEpoch, TxnId txnId, Keys txnKeys)
+            {
+                return new Invalidate(scope, waitForEpoch, txnId, txnKeys);
+            }
+        }
 
-        public Invalidate(Id to, Topologies topologies, TxnId txnId, Keys someKeys)
+        public final TxnId txnId;
+        public final Keys txnKeys;
+
+        public Invalidate(Id to, Topologies topologies, TxnId txnId, Keys txnKeys, Keys someKeys)
         {
             super(to, topologies, someKeys);
             this.txnId = txnId;
+            this.txnKeys = txnKeys;
+        }
+
+        protected Invalidate(Keys scope, long waitForEpoch, TxnId txnId, Keys txnKeys)
+        {
+            super(scope, waitForEpoch);
+            this.txnId = txnId;
+            this.txnKeys = txnKeys;
+        }
+
+        @Override
+        public Iterable<TxnId> txnIds()
+        {
+            return Collections.singleton(txnId);
+        }
+
+        @Override
+        public Iterable<Key> keys()
+        {
+            return Collections.emptyList();
         }
 
         public void process(Node node, Id from, ReplyContext replyContext)
         {
-            node.forEachLocal(scope(), txnId.epoch, instance -> instance.command(txnId).commitInvalidate());
+            node.forEachLocal(this, txnId.epoch, instance -> instance.command(txnId).commitInvalidate());
         }
 
         @Override

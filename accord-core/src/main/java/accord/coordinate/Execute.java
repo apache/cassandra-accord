@@ -37,6 +37,7 @@ import accord.local.Node.Id;
 import accord.messages.Commit;
 import accord.messages.ReadData;
 import accord.messages.ReadData.ReadOk;
+import com.google.common.base.Preconditions;
 
 class Execute implements Callback<ReadReply>
 {
@@ -61,7 +62,7 @@ class Execute implements Callback<ReadReply>
         this.executeAt = executeAt;
         this.deps = deps;
         this.topologies = node.topology().forEpoch(txn, executeAt.epoch);
-        Topologies readTopologies = node.topology().forEpoch(txn.read.keys(), executeAt.epoch);
+        Topologies readTopologies = node.topology().forEpoch(txn.read().keys(), executeAt.epoch);
         this.readTracker = new ReadTracker(readTopologies);
         this.callback = callback;
     }
@@ -70,6 +71,12 @@ class Execute implements Callback<ReadReply>
     {
         Set<Id> readSet = readTracker.computeMinimalReadSetAndMarkInflight();
         Commit.commitAndRead(node, topologies, txnId, txn, homeKey, executeAt, deps, readSet, this);
+        // skip straight to persistence if there's no read
+        if (txn.read().keys().isEmpty())
+        {
+            Preconditions.checkState(readTracker.hasCompletedRead());
+            persist();
+        }
     }
 
     public static void execute(Node node, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
@@ -78,13 +85,18 @@ class Execute implements Callback<ReadReply>
         execute.start();
     }
 
+    private void persist()
+    {
+        isDone = true;
+        Result result = txn.result(data);
+        callback.accept(result, null);
+        Persist.persist(node, topologies, txnId, homeKey, txn, executeAt, deps, txn.execute(executeAt, data), result);
+    }
+
     @Override
     public void onSuccess(Id from, ReadReply reply)
     {
         if (isDone)
-            return;
-
-        if (!reply.isFinal())
             return;
 
         if (!reply.isOK())
@@ -100,12 +112,7 @@ class Execute implements Callback<ReadReply>
         readTracker.recordReadSuccess(from);
 
         if (readTracker.hasCompletedRead())
-        {
-            isDone = true;
-            Result result = txn.result(data);
-            callback.accept(result, null);
-            Persist.persist(node, topologies, txnId, homeKey, txn, executeAt, deps, txn.execute(executeAt, data), result);
-        }
+            persist();
     }
 
     @Override
@@ -113,7 +120,7 @@ class Execute implements Callback<ReadReply>
     {
         Set<Id> readFrom = readTracker.computeMinimalReadSetAndMarkInflight();
         if (readFrom != null)
-            node.send(readFrom, to -> new ReadData(to, readTracker.topologies(), txnId, txn, homeKey, executeAt), this);
+            node.send(readFrom, to -> new ReadData(to, readTracker.topologies(), txnId, txn, deps, homeKey, executeAt), this);
     }
 
     @Override
@@ -133,7 +140,7 @@ class Execute implements Callback<ReadReply>
         Set<Id> readFrom = readTracker.computeMinimalReadSetAndMarkInflight();
         if (readFrom != null)
         {
-            node.send(readFrom, to -> new ReadData(to, readTracker.topologies(), txnId, txn, homeKey, executeAt), this);
+            node.send(readFrom, to -> new ReadData(to, readTracker.topologies(), txnId, txn, deps, homeKey, executeAt), this);
         }
         else if (readTracker.hasFailed())
         {

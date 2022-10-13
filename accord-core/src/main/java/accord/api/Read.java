@@ -20,6 +20,9 @@ package accord.api;
 
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
+import accord.local.CommandStore;
+import org.apache.cassandra.utils.concurrent.Future;
+
 
 /**
  * A read to be performed on potentially multiple shards, the inputs of which may be fed to a {@link Query}
@@ -29,5 +32,5 @@ import accord.primitives.Timestamp;
 public interface Read
 {
     Keys keys();
-    Data read(Key key, Timestamp executeAt, DataStore store);
+    Future<Data> read(Key key, boolean forWriteTxn, CommandStore commandStore, Timestamp executeAt, DataStore store);
 }

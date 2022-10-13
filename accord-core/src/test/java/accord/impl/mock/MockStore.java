@@ -28,6 +28,9 @@ import accord.api.Update;
 import accord.api.Write;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
+import accord.local.CommandStore;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 public class MockStore implements DataStore
 {
@@ -41,7 +44,7 @@ public class MockStore implements DataStore
 
     public static final Result RESULT = new Result() {};
     public static final Query QUERY = (data, read, update) -> RESULT;
-    public static final Write WRITE = (key, executeAt, store) -> {};
+    public static final Write WRITE = (key, commandStore, executeAt, store) -> ImmediateFuture.success(null);
 
     public static Read read(Keys keys)
     {
@@ -54,9 +57,9 @@ public class MockStore implements DataStore
             }
 
             @Override
-            public Data read(Key key, Timestamp executeAt, DataStore store)
+            public Future<Data> read(Key key, boolean forWriteTxn, CommandStore commandStore, Timestamp executeAt, DataStore store)
             {
-                return DATA;
+                return ImmediateFuture.success(DATA);
             }
         };
     }

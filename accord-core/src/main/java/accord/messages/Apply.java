@@ -19,6 +19,8 @@
 package accord.messages;
 
 import accord.api.Key;
+import accord.primitives.Keys;
+import accord.utils.ReducingFuture;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Result;
@@ -28,15 +30,28 @@ import accord.primitives.Timestamp;
 import accord.txn.Writes;
 import accord.txn.Txn;
 import accord.primitives.TxnId;
+import com.google.common.collect.Iterables;
+import org.apache.cassandra.utils.concurrent.Future;
+
+import java.util.Collections;
+import java.util.List;
 
 import static accord.messages.MessageType.APPLY_REQ;
 import static accord.messages.MessageType.APPLY_RSP;
 
 public class Apply extends TxnRequest
 {
+    public static class SerializationSupport
+    {
+        public static Apply create(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
+        {
+            return new Apply(scope, waitForEpoch, txnId, txn, homeKey, executeAt, deps, writes, result);
+        }
+    }
+
     public final TxnId txnId;
     public final Txn txn;
-    protected final Key homeKey;
+    public final Key homeKey;
     public final Timestamp executeAt;
     public final Deps deps;
     public final Writes writes;
@@ -44,7 +59,7 @@ public class Apply extends TxnRequest
 
     public Apply(Node.Id to, Topologies topologies, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
-        super(to, topologies, txn.keys);
+        super(to, topologies, txn.keys());
         this.txnId = txnId;
         this.txn = txn;
         this.homeKey = homeKey;
@@ -54,13 +69,41 @@ public class Apply extends TxnRequest
         this.result = result;
     }
 
+    protected Apply(Keys scope, long waitForEpoch, TxnId txnId, Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    {
+        super(scope, waitForEpoch);
+        this.txnId = txnId;
+        this.txn = txn;
+        this.homeKey = homeKey;
+        this.executeAt = executeAt;
+        this.deps = deps;
+        this.writes = writes;
+        this.result = result;
+    }
+
     public void process(Node node, Id replyToNode, ReplyContext replyContext)
     {
-        Key progressKey = node.trySelectProgressKey(txnId, txn.keys, homeKey);
-        node.forEachLocalSince(scope(), executeAt,
-                               instance -> instance.command(txnId).apply(txn, homeKey, progressKey, executeAt, deps, writes, result));
-        // note, we do not also commit here if txnId.epoch != executeAt.epoch, as the scope() for a commit would be different
-        node.reply(replyToNode, replyContext, ApplyOk.INSTANCE);
+        Key progressKey = node.trySelectProgressKey(txnId, txn.keys(), homeKey);
+        List<Future<Void>> futures = node.mapLocalSince(this, scope(), executeAt, instance -> instance.command(txnId).apply(txn, homeKey, progressKey, executeAt, deps, writes, result));
+
+        ReducingFuture.reduce(futures, (l, r) -> null).addCallback((unused, failure) -> {
+            if (failure == null)
+                // TODO: notify coordinator of failures
+                // note, we do not also commit here if txnId.epoch != executeAt.epoch, as the scope() for a commit would be different
+                node.reply(replyToNode, replyContext, ApplyOk.INSTANCE);
+        });
+    }
+
+    @Override
+    public Iterable<TxnId> txnIds()
+    {
+        return Iterables.concat(Collections.singleton(txnId), deps.txnIds());
+    }
+
+    @Override
+    public Iterable<Key> keys()
+    {
+        return txn.keys();
     }
 
     @Override

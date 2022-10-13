@@ -27,11 +27,14 @@ import accord.local.Status;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.Timestamp;
+import accord.local.PreLoadContext;
 import accord.txn.Txn;
 import accord.primitives.TxnId;
 import accord.txn.Writes;
 
-public class CheckStatus implements Request
+import java.util.Collections;
+
+public class CheckStatus implements Request, PreLoadContext
 {
     // order is important
     public enum IncludeInfo
@@ -49,10 +52,10 @@ public class CheckStatus implements Request
         }
     }
 
-    final TxnId txnId;
-    final Key key; // the key's commandStore to consult - not necessarily the homeKey
-    final long epoch;
-    final IncludeInfo includeInfo;
+    public final TxnId txnId;
+    public final Key key; // the key's commandStore to consult - not necessarily the homeKey
+    public final long epoch;
+    public final IncludeInfo includeInfo;
 
     public CheckStatus(TxnId txnId, Key key, long epoch, IncludeInfo includeInfo)
     {
@@ -62,10 +65,22 @@ public class CheckStatus implements Request
         this.includeInfo = includeInfo;
     }
 
+    @Override
+    public Iterable<TxnId> txnIds()
+    {
+        return Collections.singleton(txnId);
+    }
+
+    @Override
+    public Iterable<Key> keys()
+    {
+        return Collections.emptyList();
+    }
+
     public void process(Node node, Id replyToNode, ReplyContext replyContext)
     {
 
-        Reply reply = node.ifLocal(key, epoch, instance -> {
+        Reply reply = node.ifLocal(this, key, epoch, instance -> {
             Command command = instance.command(txnId);
             boolean includeInfo = this.includeInfo.include(command.status());
             if (includeInfo)
@@ -107,7 +122,7 @@ public class CheckStatus implements Request
         public final boolean isCoordinating;
         public final boolean hasExecutedOnAllShards;
 
-        CheckStatusOk(Status status, Ballot promised, Ballot accepted, boolean isCoordinating, boolean hasExecutedOnAllShards)
+        public CheckStatusOk(Status status, Ballot promised, Ballot accepted, boolean isCoordinating, boolean hasExecutedOnAllShards)
         {
             this.status = status;
             this.promised = promised;
@@ -187,7 +202,7 @@ public class CheckStatus implements Request
         public final Writes writes;
         public final Result result;
 
-        CheckStatusOkFull(Status status, Ballot promised, Ballot accepted, boolean isCoordinating, boolean hasExecutedOnAllShards,
+        public CheckStatusOkFull(Status status, Ballot promised, Ballot accepted, boolean isCoordinating, boolean hasExecutedOnAllShards,
                           Txn txn, Key homeKey, Timestamp executeAt, Deps deps, Writes writes, Result result)
         {
             super(status, promised, accepted, isCoordinating, hasExecutedOnAllShards);
@@ -253,7 +268,7 @@ public class CheckStatus implements Request
             return MessageType.CHECK_STATUS_RSP;
         }
 
-        static CheckStatusNack nack()
+        public static CheckStatusNack nack()
         {
             return instance;
         }

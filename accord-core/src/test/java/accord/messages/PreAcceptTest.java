@@ -19,6 +19,7 @@
 package accord.messages;
 
 import accord.api.Key;
+import accord.impl.*;
 import accord.impl.mock.*;
 import accord.impl.SimpleProgressLog;
 import accord.local.Node;
@@ -46,14 +47,16 @@ import java.util.Random;
 
 import static accord.Utils.id;
 import static accord.Utils.writeTxn;
+import static accord.impl.InMemoryCommandStore.inMemory;
 import static accord.impl.mock.MockCluster.configService;
+import static accord.utils.Utils.listOf;
 
 public class PreAcceptTest
 {
     private static final Id ID1 = id(1);
     private static final Id ID2 = id(2);
     private static final Id ID3 = id(3);
-    private static final List<Id> IDS = List.of(ID1, ID2, ID3);
+    private static final List<Id> IDS = listOf(ID1, ID2, ID3);
     private static final Topology TOPOLOGY = TopologyFactory.toTopology(IDS, 3, IntKey.range(0, 100));
 
     private static final ReplyContext REPLY_CONTEXT = Network.replyCtxFor(0);
@@ -71,12 +74,12 @@ public class PreAcceptTest
                         new Random(),
                         scheduler,
                         SimpleProgressLog::new,
-                        CommandStores.SingleThread::new);
+                        InMemoryCommandStores.SingleThread::new);
     }
 
     private static PreAccept preAccept(TxnId txnId, Txn txn, Key homeKey)
     {
-        return new PreAccept(txn.keys, txnId.epoch, txnId, txn, homeKey);
+        return new PreAccept(txn.keys(), txnId.epoch, txnId, txn, homeKey);
     }
 
     @Test
@@ -92,7 +95,7 @@ public class PreAcceptTest
             IntKey key = IntKey.key(10);
             Keys keys = Keys.of(key);
             CommandStore commandStore = node.unsafeForKey(key);
-            Assertions.assertFalse(commandStore.hasCommandsForKey(key));
+            Assertions.assertFalse(inMemory(commandStore).hasCommandsForKey(key));
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
@@ -100,7 +103,7 @@ public class PreAcceptTest
             clock.increment(10);
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
-            Command command = commandStore.commandsForKey(key).uncommitted.get(txnId);
+            PartialCommand command = commandStore.commandsForKey(key).uncommitted().get(txnId);
             Assertions.assertEquals(Status.PreAccepted, command.status());
 
             messageSink.assertHistorySizes(0, 1);
@@ -124,7 +127,7 @@ public class PreAcceptTest
         {
             IntKey key = IntKey.key(10);
             CommandStore commandStore = node.unsafeForKey(key);
-            Assertions.assertFalse(commandStore.hasCommandsForKey(key));
+            Assertions.assertFalse(inMemory(commandStore).hasCommandsForKey(key));
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
@@ -228,7 +231,7 @@ public class PreAcceptTest
             clock.increment(10);
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
-            Command command = commandStore.commandsForKey(key).uncommitted.get(txnId);
+            PartialCommand command = commandStore.commandsForKey(key).uncommitted().get(txnId);
             Assertions.assertEquals(Status.PreAccepted, command.status());
 
             messageSink.assertHistorySizes(0, 1);

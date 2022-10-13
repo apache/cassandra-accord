@@ -34,6 +34,7 @@ import java.util.function.Supplier;
 import accord.coordinate.Timeout;
 import accord.local.CommandStores;
 import accord.impl.SimpleProgressLog;
+import accord.impl.InMemoryCommandStores;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.MessageSink;
@@ -187,8 +188,7 @@ public class Cluster implements Scheduler
                     if (deliver.body.in_reply_to > Body.SENTINEL_MSG_ID || body instanceof Reply)
                     {
                         Reply reply = (Reply) body;
-                        Callback callback = reply.isFinal() ? sinks.get(deliver.dest).callbacks.remove(deliver.body.in_reply_to)
-                                                            : sinks.get(deliver.dest).callbacks.get(deliver.body.in_reply_to);
+                        Callback callback = sinks.get(deliver.dest).callbacks.remove(deliver.body.in_reply_to);
                         if (callback != null)
                             on.scheduler().now(() -> {
                                 try
@@ -296,7 +296,7 @@ public class Cluster implements Scheduler
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
                 lookup.put(node, new Node(node, messageSink, new SimpleConfigService(topology),
                                           nowSupplier.get(), MaelstromStore::new, MaelstromAgent.INSTANCE,
-                                          randomSupplier.get(), sinks, SimpleProgressLog::new, CommandStores.SingleThread::new));
+                                          randomSupplier.get(), sinks, SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new));
             }
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));

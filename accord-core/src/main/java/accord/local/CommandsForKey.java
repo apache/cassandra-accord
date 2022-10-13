@@ -19,40 +19,77 @@
 package accord.local;
 
 import java.util.Iterator;
-import java.util.NavigableMap;
-import java.util.TreeMap;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 
+import accord.api.Key;
 import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import com.google.common.collect.Iterators;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public class CommandsForKey implements Listener, Iterable<Command>
+import static accord.utils.Utils.*;
+
+public abstract class CommandsForKey implements Listener, Iterable<PartialCommand.WithDeps>
 {
-    // TODO: efficiency
-    public final NavigableMap<Timestamp, Command> uncommitted = new TreeMap<>();
-    public final NavigableMap<Timestamp, Command> committedById = new TreeMap<>();
-    public final NavigableMap<Timestamp, Command> committedByExecuteAt = new TreeMap<>();
+    private static final Logger logger = LoggerFactory.getLogger(CommandsForKey.class);
 
-    private Timestamp max = Timestamp.NONE;
-
-    public Timestamp max()
+    public interface CommandTimeseries
     {
-        return max;
+        PartialCommand.WithDeps get(Timestamp timestamp);
+        void add(Timestamp timestamp, Command command);
+        void remove(Timestamp timestamp);
+
+        boolean isEmpty();
+
+        /**
+         * All commands before (exclusive of) the given timestamp
+         */
+        Stream<PartialCommand.WithDeps> before(Timestamp timestamp);
+
+        /**
+         * All commands after (exclusive of) the given timestamp
+         */
+        Stream<PartialCommand.WithDeps> after(Timestamp timestamp);
+
+        /**
+         * All commands between (inclusive of) the given timestamps
+         */
+        Stream<PartialCommand.WithDeps> between(Timestamp min, Timestamp max);
+
+        Stream<PartialCommand.WithDeps> all();
+    }
+
+    public abstract Key key();
+    public abstract CommandTimeseries uncommitted();
+    public abstract CommandTimeseries committedById();
+    public abstract CommandTimeseries committedByExecuteAt();
+
+    public abstract Timestamp max();
+    public abstract void updateMax(Timestamp timestamp);
+
+    @Override
+    public PreLoadContext listenerPreLoadContext(TxnId caller)
+    {
+        return PreLoadContext.contextFor(caller, listOf(key()));
     }
 
     @Override
     public void onChange(Command command)
     {
-        max = Timestamp.max(max, command.executeAt());
+        logger.trace("cfk[{}]: updating as listener in response to change on {} with status {} ({})",
+                     key(), command.txnId(), command.status(), command);
+        updateMax(command.executeAt());
         switch (command.status())
         {
             case Applied:
             case Executed:
             case Committed:
-                committedById.put(command.txnId(), command);
-                committedByExecuteAt.put(command.executeAt(), command);
+                committedById().add(command.txnId(), command);
+                committedByExecuteAt().add(command.executeAt(), command);
             case Invalidated:
-                uncommitted.remove(command.txnId());
+                uncommitted().remove(command.txnId());
                 command.removeListener(this);
                 break;
         }
@@ -60,28 +97,28 @@ public class CommandsForKey implements Listener, Iterable<Command>
 
     public void register(Command command)
     {
-        max = Timestamp.max(max, command.executeAt());
-        uncommitted.put(command.txnId(), command);
+        updateMax(command.executeAt());
+        uncommitted().add(command.txnId(), command);
         command.addListener(this);
     }
 
-    public void forWitnessed(Timestamp minTs, Timestamp maxTs, Consumer<Command> consumer)
+    public void forWitnessed(Timestamp minTs, Timestamp maxTs, Consumer<PartialCommand> consumer)
     {
-        uncommitted.subMap(minTs, true, maxTs, true).values().stream()
+        uncommitted().between(minTs, maxTs)
                 .filter(cmd -> cmd.hasBeen(Status.PreAccepted)).forEach(consumer);
-        committedById.subMap(minTs, true, maxTs, true).values().forEach(consumer);
-        committedByExecuteAt.subMap(minTs, true, maxTs, true).values().stream()
+        committedById().between(minTs, maxTs).forEach(consumer);
+        committedByExecuteAt().between(minTs, maxTs)
                 .filter(cmd -> cmd.txnId().compareTo(minTs) < 0 || cmd.txnId().compareTo(maxTs) > 0).forEach(consumer);
     }
 
     @Override
-    public Iterator<Command> iterator()
+    public Iterator<PartialCommand.WithDeps> iterator()
     {
-        return Iterators.concat(uncommitted.values().iterator(), committedByExecuteAt.values().iterator());
+        return Iterators.concat(uncommitted().all().iterator(), committedByExecuteAt().all().iterator());
     }
 
     public boolean isEmpty()
     {
-        return uncommitted.isEmpty() && committedById.isEmpty();
+        return uncommitted().isEmpty() && committedById().isEmpty();
     }
 }

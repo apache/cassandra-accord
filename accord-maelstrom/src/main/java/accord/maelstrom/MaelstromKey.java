@@ -67,7 +67,7 @@ public class MaelstromKey implements Key
         return Datum.read(in, MaelstromKey::new);
     }
 
-    public static final TypeAdapter<MaelstromKey> GSON_ADAPTER = new TypeAdapter<>()
+    public static final TypeAdapter<MaelstromKey> GSON_ADAPTER = new TypeAdapter<MaelstromKey>()
     {
         @Override
         public void write(JsonWriter out, MaelstromKey value) throws IOException

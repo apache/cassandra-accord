@@ -21,12 +21,14 @@ package accord.impl;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.zip.CRC32C;
+import java.util.zip.CRC32;
 
 import accord.api.Key;
 import accord.primitives.KeyRange;
 import accord.primitives.KeyRanges;
 import accord.primitives.Keys;
+
+import static accord.utils.Utils.toArray;
 
 public class IntHashKey implements Key
 {
@@ -121,7 +123,7 @@ public class IntHashKey implements Key
             prev = next;
         }
         result.add(new Range(prev, new IntHashKey(Integer.MIN_VALUE, Integer.MAX_VALUE)));
-        return result.toArray(KeyRange[]::new);
+        return toArray(result, KeyRange[]::new);
     }
 
     public static KeyRange range(IntHashKey start, IntHashKey end)
@@ -153,7 +155,7 @@ public class IntHashKey implements Key
 
     private static int hash(int key)
     {
-        CRC32C crc32c = new CRC32C();
+        CRC32 crc32c = new CRC32();
         crc32c.update(key);
         crc32c.update(key >> 8);
         crc32c.update(key >> 16);

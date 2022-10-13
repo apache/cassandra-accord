@@ -59,6 +59,7 @@ public class Timestamp implements Comparable<Timestamp>
     @Override
     public int compareTo(Timestamp that)
     {
+        if (this == that) return 0;
         int c = Long.compare(this.epoch, that.epoch);
         if (c == 0) c = Long.compare(this.real, that.real);
         if (c == 0) c = Integer.compare(this.logical, that.logical);

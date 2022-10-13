@@ -21,6 +21,7 @@ package accord.impl.mock;
 import accord.NetworkFilter;
 import accord.api.MessageSink;
 import accord.coordinate.Timeout;
+import accord.impl.InMemoryCommandStores;
 import accord.impl.TopologyUtils;
 import accord.local.CommandStores;
 import accord.impl.SimpleProgressLog;
@@ -110,7 +111,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                         new Random(),
                         new ThreadPoolScheduler(),
                         SimpleProgressLog::new,
-                        CommandStores.SingleThread::new);
+                        InMemoryCommandStores.SingleThread::new);
     }
 
     private void init(Topology topology)
@@ -173,8 +174,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
             return;
         }
 
-        Callback callback = reply.isFinal() ? callbacks.remove(replyingToMessage)
-                                            : callbacks.get(replyingToMessage);
+        Callback callback = callbacks.remove(replyingToMessage);
 
         if (networkFilter.shouldDiscard(from, replyingToNode, reply))
         {

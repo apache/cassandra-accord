@@ -28,6 +28,7 @@ import java.util.function.IntFunction;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import accord.messages.*;
 import com.google.common.annotations.VisibleForTesting;
 
 import accord.api.*;
@@ -44,7 +45,6 @@ import accord.api.ProgressLog;
 import accord.api.Scheduler;
 import accord.api.DataStore;
 import accord.coordinate.Recover;
-import accord.messages.Callback;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
@@ -59,7 +59,9 @@ import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 import accord.txn.Txn;
 import accord.primitives.TxnId;
+import com.google.common.util.concurrent.Futures;
 import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.FutureCombiner;
 
 public class Node implements ConfigurationService.Listener
 {
@@ -148,6 +150,11 @@ public class Node implements ConfigurationService.Listener
 
         configService.registerListener(this);
         onTopologyUpdate(topology, false);
+    }
+
+    public CommandStores commandStores()
+    {
+        return commandStores;
     }
 
     public ConfigurationService configService()
@@ -252,74 +259,74 @@ public class Node implements ConfigurationService.Listener
         return nowSupplier.getAsLong();
     }
 
-    public void forEachLocal(Consumer<CommandStore> forEach)
+    public void forEachLocal(TxnRequest request, long epoch, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(forEach);
+        commandStores.forEach(request, epoch, forEach);
     }
 
-    public void forEachLocal(Keys keys, long epoch, Consumer<CommandStore> forEach)
+    public void forEachLocal(TxnRequest request, long minEpoch, long maxEpoch, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(keys, epoch, forEach);
+        commandStores.forEach(request, minEpoch, maxEpoch, forEach);
     }
 
-    public void forEachLocal(Keys keys, long minEpoch, long maxEpoch, Consumer<CommandStore> forEach)
+    public void forEachLocal(PreLoadContext context, Keys keys, long minEpoch, long maxEpoch, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(keys, minEpoch, maxEpoch, forEach);
+        commandStores.forEach(context, keys, minEpoch, maxEpoch, forEach);
     }
 
-    public void forEachLocal(Keys keys, Timestamp minAt, Timestamp maxAt, Consumer<CommandStore> forEach)
+    public void forEachLocalSince(PreLoadContext context, Keys keys, Timestamp since, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(keys, minAt.epoch, maxAt.epoch, forEach);
+        commandStores.forEach(context, keys, since.epoch, Long.MAX_VALUE, forEach);
     }
 
-    public void forEachLocalSince(Keys keys, Timestamp since, Consumer<CommandStore> forEach)
+    public void forEachLocalSince(TxnRequest request, Timestamp since, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(keys, since.epoch, Long.MAX_VALUE, forEach);
+        commandStores.forEach(request, since.epoch, Long.MAX_VALUE, forEach);
     }
 
-    public void forEachLocalSince(Keys keys, long sinceEpoch, Consumer<CommandStore> forEach)
+    public void forEachLocalSince(PreLoadContext context, Keys keys, long sinceEpoch, Consumer<CommandStore> forEach)
     {
-        commandStores.forEach(keys, sinceEpoch, Long.MAX_VALUE, forEach);
+        commandStores.forEachSince(context, keys, sinceEpoch, forEach);
     }
 
-    public <T> T mapReduceLocal(Keys keys, Timestamp at, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T mapReduceLocal(TxnRequest request, long minEpoch, long maxEpoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
-        return commandStores.mapReduce(keys, at.epoch, at.epoch, map, reduce);
+        return commandStores.mapReduce(request, request.scope(), minEpoch, maxEpoch, map, reduce);
     }
 
-    public <T> T mapReduceLocal(Keys keys, long epoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> List<T> mapLocal(TxnRequest request, long minEpoch, long maxEpoch, Function<CommandStore, T> map)
     {
-        return commandStores.mapReduce(keys, epoch, epoch, map, reduce);
+        return Futures.getUnchecked(FutureCombiner.allOf(commandStores.mapAsync(request, request.scope(), minEpoch, maxEpoch, map)));
     }
 
-    public <T> T mapReduceLocal(Keys keys, long minEpoch, long maxEpoch, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> T mapReduceLocalSince(PreLoadContext context, Keys keys, Timestamp since, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
     {
-        return commandStores.mapReduce(keys, minEpoch, maxEpoch, map, reduce);
+        return commandStores.mapReduce(context, keys, since.epoch, Long.MAX_VALUE, map, reduce);
     }
 
-    public <T> T mapReduceLocalSince(Keys keys, Timestamp since, Function<CommandStore, T> map, BiFunction<T, T, T> reduce)
+    public <T> List<T> mapLocalSince(PreLoadContext context, Keys keys, Timestamp since, Function<CommandStore, T> map)
     {
-        return commandStores.mapReduce(keys, since.epoch, Long.MAX_VALUE, map, reduce);
+        return Futures.getUnchecked(FutureCombiner.allOf(commandStores.mapAsync(context, keys, since.epoch, Long.MAX_VALUE, map)));
     }
 
-    public <T> T ifLocal(Key key, Timestamp at, Function<CommandStore, T> ifLocal)
+    public <T> T ifLocal(PreLoadContext context, Key key, Timestamp at, Function<CommandStore, T> ifLocal)
     {
-        return ifLocal(key, at.epoch, ifLocal);
+        return ifLocal(context, key, at.epoch, ifLocal);
     }
 
-    public <T> T ifLocal(Key key, long epoch, Function<CommandStore, T> ifLocal)
+    public <T> T ifLocal(PreLoadContext context, Key key, long epoch, Function<CommandStore, T> ifLocal)
     {
-        return commandStores.mapReduce(key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
+        return commandStores.mapReduce(context, key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
     }
 
-    public <T> T ifLocalSince(Key key, Timestamp since, Function<CommandStore, T> ifLocal)
+    public <T> T ifLocalSince(PreLoadContext context, Key key, Timestamp since, Function<CommandStore, T> ifLocal)
     {
-        return ifLocalSince(key, since.epoch, ifLocal);
+        return ifLocalSince(context, key, since.epoch, ifLocal);
     }
 
-    public <T> T ifLocalSince(Key key, long epoch, Function<CommandStore, T> ifLocal)
+    public <T> T ifLocalSince(PreLoadContext context, Key key, long epoch, Function<CommandStore, T> ifLocal)
     {
-        return commandStores.mapReduceSince(key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
+        return commandStores.mapReduceSince(context, key, epoch, ifLocal, (a, b) -> { throw new IllegalStateException();} );
     }
 
     public <T extends Collection<CommandStore>> T collectLocal(Keys keys, Timestamp at, IntFunction<T> factory)
@@ -405,7 +412,7 @@ public class Node implements ConfigurationService.Listener
 
     public Future<Result> coordinate(TxnId txnId, Txn txn)
     {
-        // TODO: The combination of updating the epoch of the next timestamp with epochs we don’t have topologies for,
+        // TODO: The combination of updating the epoch of the next timestamp with epochs we don't have topologies for,
         //  and requiring preaccept to talk to its topology epoch means that learning of a new epoch via timestamp
         //  (ie not via config service) will halt any new txns from a node until it receives this topology
         Future<Result> result = withEpoch(txnId.epoch, () -> initiateCoordination(txnId, txn));
@@ -417,11 +424,11 @@ public class Node implements ConfigurationService.Listener
 
     private Future<Result> initiateCoordination(TxnId txnId, Txn txn)
     {
-        Key homeKey = trySelectHomeKey(txnId, txn.keys);
+        Key homeKey = trySelectHomeKey(txnId, txn.keys());
         if (homeKey == null)
         {
             homeKey = selectRandomHomeKey(txnId);
-            txn = new Txn(txn.keys.with(homeKey), txn.read, txn.query, txn.update);
+            txn = new Txn.InMemory(txn.keys().with(homeKey), txn.read(), txn.query(), txn.update());
         }
         return Coordinate.coordinate(this, txnId, txn, homeKey);
     }
