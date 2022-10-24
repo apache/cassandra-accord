@@ -52,4 +52,16 @@ public enum Status
     {
         return compareTo(equalOrGreaterThan) >= 0;
     }
+
+    public boolean isInvalidated()
+    {
+        switch (this)
+        {
+            case AcceptedInvalidate:
+            case Invalidated:
+                return true;
+            default:
+                return false;
+        }
+    }
 }
