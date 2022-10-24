@@ -32,6 +32,8 @@ import com.google.common.annotations.VisibleForTesting;
 
 import java.util.Collections;
 
+import javax.annotation.Nullable;
+
 import static accord.messages.PreAccept.calculateDeps;
 
 public class Accept extends WithUnsynced
@@ -184,6 +186,7 @@ public class Accept extends WithUnsynced
     public static class AcceptOk implements AcceptReply
     {
         public final TxnId txnId;
+        @Nullable
         public final Deps deps;
 
         public AcceptOk(TxnId txnId, Deps deps)
