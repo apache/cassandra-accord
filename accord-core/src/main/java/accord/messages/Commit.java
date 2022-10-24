@@ -213,7 +213,7 @@ public class Commit extends ReadData
         @Override
         public MessageType type()
         {
-            return MessageType.COMMIT_REQ;
+            return MessageType.COMMIT_INVALIDATE;
         }
 
         @Override
