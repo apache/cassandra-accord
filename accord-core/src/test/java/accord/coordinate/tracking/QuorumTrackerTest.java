@@ -58,13 +58,13 @@ public class QuorumTrackerTest
         Topology subTopology = topology(topology.get(0));
         QuorumTracker responses = new QuorumTracker(topologies(subTopology));
 
-        responses.success(ids[0]);
+        responses.recordSuccess(ids[0]);
         assertResponseState(responses, false, false, true);
 
-        responses.success(ids[1]);
+        responses.recordSuccess(ids[1]);
         assertResponseState(responses, true, false, true);
 
-        responses.success(ids[2]);
+        responses.recordSuccess(ids[2]);
         assertResponseState(responses, true, false, false);
     }
 
@@ -77,14 +77,14 @@ public class QuorumTrackerTest
         Topology subTopology = topology(topology.get(0));
         QuorumTracker responses = new QuorumTracker(topologies(subTopology));
 
-        responses.success(ids[0]);
+        responses.recordSuccess(ids[0]);
         assertResponseState(responses, false, false, true);
 
-        responses.success(ids[1]);
+        responses.recordSuccess(ids[1]);
         assertResponseState(responses, true, false, true);
 
         Assertions.assertFalse(subTopology.get(0).nodes.contains(ids[4]));
-        responses.success(ids[4]);
+        responses.recordSuccess(ids[4]);
         assertResponseState(responses, true, false, true);
     }
 
@@ -94,13 +94,13 @@ public class QuorumTrackerTest
         Topology subTopology = topology(topology.get(0));
         QuorumTracker responses = new QuorumTracker(topologies(subTopology));
 
-        responses.success(ids[0]);
+        responses.recordSuccess(ids[0]);
         assertResponseState(responses, false, false, true);
 
-        responses.failure(ids[1]);
+        responses.recordFailure(ids[1]);
         assertResponseState(responses, false, false, true);
 
-        responses.failure(ids[2]);
+        responses.recordFailure(ids[2]);
         assertResponseState(responses, false, true, false);
     }
 
@@ -118,11 +118,11 @@ public class QuorumTrackerTest
         Assertions.assertSame(subTopology.get(1), responses.unsafeGet(1).shard);
         Assertions.assertSame(subTopology.get(2), responses.unsafeGet(2).shard);
 
-        responses.success(ids[1]);
+        responses.recordSuccess(ids[1]);
         assertResponseState(responses, false, false, true);
-        responses.success(ids[2]);
+        responses.recordSuccess(ids[2]);
         assertResponseState(responses, false, false, true);
-        responses.success(ids[3]);
+        responses.recordSuccess(ids[3]);
         assertResponseState(responses, true, false, true);
     }
 
@@ -135,14 +135,14 @@ public class QuorumTrackerTest
 
         QuorumTracker responses = new QuorumTracker(topologies(topology2, topology1));
 
-        responses.success(id(1));
+        responses.recordSuccess(id(1));
         assertResponseState(responses, false, false, true);
-        responses.success(id(2));
+        responses.recordSuccess(id(2));
         assertResponseState(responses, false, false, true);
 
-        responses.success(id(4));
+        responses.recordSuccess(id(4));
         assertResponseState(responses, false, false, true);
-        responses.success(id(5));
+        responses.recordSuccess(id(5));
         assertResponseState(responses, true, false, true);
     }
 
@@ -155,14 +155,14 @@ public class QuorumTrackerTest
 
         QuorumTracker responses = new QuorumTracker(topologies(topology2, topology1));
 
-        responses.success(id(1));
+        responses.recordSuccess(id(1));
         assertResponseState(responses, false, false, true);
-        responses.success(id(2));
+        responses.recordSuccess(id(2));
         assertResponseState(responses, false, false, true);
 
-        responses.failure(id(4));
+        responses.recordFailure(id(4));
         assertResponseState(responses, false, false, true);
-        responses.failure(id(5));
+        responses.recordFailure(id(5));
         assertResponseState(responses, false, true, true);
     }
 }

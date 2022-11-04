@@ -18,27 +18,74 @@
 
 package accord.coordinate.tracking;
 
-import accord.coordinate.tracking.AbstractQuorumTracker.QuorumShardTracker;
 import accord.local.Node;
+import accord.topology.Shard;
 import accord.topology.Topologies;
-import accord.topology.Topologies.Single;
-import accord.topology.Topology;
 
-public class QuorumTracker extends AbstractQuorumTracker<QuorumShardTracker>
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.*;
+
+public class QuorumTracker extends AbstractTracker<QuorumTracker.QuorumShardTracker, Object>
 {
+    public static class QuorumShardTracker extends ShardTracker
+    {
+        protected int successes;
+        protected int failures;
+
+        public QuorumShardTracker(Shard shard)
+        {
+            super(shard);
+        }
+
+        public ShardOutcomes onSuccess(Object ignore)
+        {
+            return ++successes == shard.slowPathQuorumSize ? Success : NoChange;
+        }
+
+        // return true iff hasFailed()
+        public ShardOutcomes onFailure(Object ignore)
+        {
+            return ++failures > shard.maxFailures ? Fail : NoChange;
+        }
+
+        public boolean hasReachedQuorum()
+        {
+            return successes >= shard.slowPathQuorumSize;
+        }
+
+        boolean hasInFlight()
+        {
+            return successes + failures < shard.rf();
+        }
+
+        boolean hasFailures()
+        {
+            return failures > 0;
+        }
+
+        boolean hasFailed()
+        {
+            return failures > shard.maxFailures;
+        }
+    }
+
     public QuorumTracker(Topologies topologies)
     {
         super(topologies, QuorumShardTracker[]::new, QuorumShardTracker::new);
     }
 
-    public QuorumTracker(Topology topology)
+    public RequestStatus recordSuccess(Node.Id node)
     {
-        super(new Single(topology, false), QuorumShardTracker[]::new, QuorumShardTracker::new);
+        return recordResponse(this, node, QuorumShardTracker::onSuccess, null);
     }
 
-    // return true iff hasReachedQuorum()
-    public boolean success(Node.Id node)
+    // return true iff hasFailed()
+    public RequestStatus recordFailure(Node.Id node)
     {
-        return allForNode(node, QuorumShardTracker::success) && hasReachedQuorum();
+        return recordResponse(this, node, QuorumShardTracker::onFailure, null);
+    }
+
+    public boolean hasFailures()
+    {
+        return any(QuorumShardTracker::hasFailures);
     }
 }

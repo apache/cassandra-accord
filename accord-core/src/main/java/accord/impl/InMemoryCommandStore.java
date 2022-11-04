@@ -85,6 +85,7 @@ public class InMemoryCommandStore
             return commands.get(txnId);
         }
 
+        // TODO (soon): mimic caching to test C* behaviour
         public Command ifLoaded(TxnId txnId)
         {
             return commands.get(txnId);

@@ -18,232 +18,281 @@
 
 package accord.coordinate.tracking;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.function.Function;
-import java.util.function.IntFunction;
+import java.util.*;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 
+import accord.topology.Shard;
+import accord.topology.ShardSelection;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
-import accord.coordinate.tracking.ReadTracker.ReadShardTracker;
 import accord.local.Node.Id;
-import accord.topology.Shard;
 import accord.topology.Topologies;
 
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.*;
 import static com.google.common.collect.Sets.newHashSetWithExpectedSize;
 
-public class ReadTracker<T extends ReadShardTracker> extends AbstractResponseTracker<T>
+public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, Boolean>
 {
+    private static final ShardOutcome<ReadTracker> DataSuccess = tracker -> {
+        --tracker.waitingOnShards;
+        --tracker.waitingOnData;
+        return ShardOutcomes.Success;
+    };
+
     public static class ReadShardTracker extends ShardTracker
     {
-        private boolean hasData = false;
+        protected boolean hasData = false;
+        protected int quorum; // if !hasData, a slowPathQuorum will trigger success
         protected int inflight;
-        private int contacted;
-        private int slow;
+        protected int contacted;
+        protected int slow;
 
         public ReadShardTracker(Shard shard)
         {
             super(shard);
         }
 
-        public void recordInflightRead(Id node)
+        public ShardOutcome<? super ReadTracker> recordInFlightRead(boolean ignore)
         {
             ++contacted;
             ++inflight;
+            return NoChange;
         }
 
-        // TODO: this is clunky, restructure the tracker to handle this more cleanly
-        // record a node as contacted, even though it isn't
-        public void recordContacted(Id node)
+        public ShardOutcome<? super ReadTracker> recordSlowResponse(boolean ignore)
         {
-            ++contacted;
-        }
-
-        public void recordSlowRead(Id node)
-        {
+            Preconditions.checkState(!hasFailed());
             ++slow;
+
+            if (shouldRead() && canRead())
+                return SendMore;
+
+            return NoChange;
         }
 
-        public void unrecordSlowRead(Id node)
+        /**
+         * Have received a requested data payload with desired contents
+         */
+        public ShardOutcome<? super ReadTracker> recordReadSuccess(boolean isSlow)
         {
-            --slow;
+            Preconditions.checkState(inflight > 0);
+            boolean hadSucceeded = hasSucceeded();
+            --inflight;
+            if (isSlow) --slow;
+            hasData = true;
+            return hadSucceeded ? NoChange : DataSuccess;
         }
 
-        public boolean recordReadSuccess(Id node)
+        public ShardOutcome<? super ReadTracker> recordQuorumReadSuccess(boolean isSlow)
         {
-            Preconditions.checkArgument(shard.nodes.contains(node));
+            Preconditions.checkState(inflight > 0);
+            boolean hadSucceeded = hasSucceeded();
+            --inflight;
+            ++quorum;
+            if (isSlow) --slow;
+
+            if (hadSucceeded)
+                return NoChange;
+
+            if (quorum == shard.slowPathQuorumSize)
+                return Success;
+
+            return ensureProgressOrFail();
+        }
+
+        public ShardOutcomes recordReadFailure(boolean isSlow)
+        {
             Preconditions.checkState(inflight > 0);
             --inflight;
-            hasData = true;
-            return true;
+            if (isSlow) --slow;
+
+            return ensureProgressOrFail();
+        }
+
+        private ShardOutcomes ensureProgressOrFail()
+        {
+            if (!shouldRead())
+                return NoChange;
+
+            if (canRead())
+                return SendMore;
+
+            return hasInFlight() ? NoChange : Fail;
+        }
+
+        public boolean hasReachedQuorum()
+        {
+            return quorum >= shard.slowPathQuorumSize;
+        }
+
+        public boolean hasSucceeded()
+        {
+            return hasData() || hasReachedQuorum();
+        }
+
+        @Override
+        boolean hasInFlight()
+        {
+            return inflight > 0;
         }
 
         public boolean shouldRead()
         {
-            return !hasData && inflight == slow;
+            return !hasSucceeded() && inflight == slow;
         }
 
-        public boolean recordReadFailure(Id node)
+        public boolean canRead()
         {
-            Preconditions.checkState(inflight > 0);
-            --inflight;
-            return true;
-        }
-
-        public boolean hasCompletedRead()
-        {
-            return hasData;
+            return contacted < shard.rf();
         }
 
         public boolean hasFailed()
         {
-            return !hasData && inflight == 0 && contacted == shard.nodes.size();
+            return !hasData && inflight == 0 && contacted == shard.nodes.size() && !hasReachedQuorum();
+        }
+
+        public boolean hasData()
+        {
+            return hasData;
         }
     }
 
     // TODO: abstract the candidate selection process so the implementation may prioritise based on distance/health etc
-    private final List<Id> candidates;
-    private final Set<Id> inflight;
+    // TODO: faster Id sets and arrays using primitive ints when unambiguous
+    final Set<Id> inflight;
+    final List<Id> candidates;
     private Set<Id> slow;
+    protected int waitingOnData;
 
-    public static ReadTracker<ReadShardTracker> create(Topologies topologies)
+    public ReadTracker(Topologies topologies)
     {
-        return new ReadTracker<>(topologies, ReadShardTracker[]::new, ReadShardTracker::new);
-    }
-
-    public ReadTracker(Topologies topologies, IntFunction<T[]> arrayFactory, Function<Shard, T> trackerFactory)
-    {
-        super(topologies, arrayFactory, trackerFactory);
-        candidates = new ArrayList<>(topologies.nodes());
-        inflight = newHashSetWithExpectedSize(trackerCount());
+        super(topologies, ReadShardTracker[]::new, ReadShardTracker::new);
+        this.candidates = new ArrayList<>(topologies.nodes()); // TODO: copyOfNodesAsList to avoid unnecessary copies
+        this.inflight = newHashSetWithExpectedSize(maxShardsPerEpoch());
+        this.waitingOnData = waitingOnShards;
     }
 
     @VisibleForTesting
-    void recordInflightRead(Id node)
+    protected void recordInFlightRead(Id node)
     {
         if (!inflight.add(node))
             throw new IllegalStateException(node + " already in flight");
 
-        forEachTrackerForNode(node, ReadShardTracker::recordInflightRead);
+        recordResponse(this, node, ReadShardTracker::recordInFlightRead, false);
     }
 
-    @VisibleForTesting
-    private void recordContacted(Id node)
-    {
-        forEachTrackerForNode(node, ReadShardTracker::recordContacted);
-    }
-
-    public void recordSlowRead(Id node)
-    {
-        if (slow == null)
-            slow = newHashSetWithExpectedSize(trackerCount());
-
-        if (slow.add(node))
-        {
-            forEachTrackerForNode(node, ReadShardTracker::recordSlowRead);
-        }
-    }
-
-    protected void recordResponse(Id node)
+    private boolean receiveResponseIsSlow(Id node)
     {
         if (!inflight.remove(node))
             throw new IllegalStateException("Nothing in flight for " + node);
 
-        if (slow != null && slow.remove(node))
-            forEachTrackerForNode(node, ReadShardTracker::unrecordSlowRead);
-    }
-
-    public boolean recordReadSuccess(Id node)
-    {
-        recordResponse(node);
-        return anyForNode(node, ReadShardTracker::recordReadSuccess);
-    }
-
-    public boolean recordReadFailure(Id node)
-    {
-        recordResponse(node);
-        return anyForNode(node, ReadShardTracker::recordReadFailure);
-    }
-
-    public boolean hasCompletedRead()
-    {
-        return all(ReadShardTracker::hasCompletedRead);
-    }
-
-    public boolean hasInFlight()
-    {
-        return !inflight.isEmpty();
-    }
-
-    public boolean hasFailed()
-    {
-        return any(ReadShardTracker::hasFailed);
-    }
-
-    private int intersectionSize(Id node, Set<ReadShardTracker> target)
-    {
-        return matchingTrackersForNode(node, target::contains);
-    }
-
-    private int compareIntersections(Id left, Id right, Set<ReadShardTracker> target)
-    {
-        return Integer.compare(intersectionSize(left, target), intersectionSize(right, target));
+        return slow != null && slow.remove(node);
     }
 
     /**
-     * Return the smallest set of nodes needed to satisfy required reads.
-     *
-     * Returns null if the read cannot be completed.
-     *
-     * TODO: prioritisation of nodes should be implementation-defined
+     * Record a response that immediately satisfies the criteria for the shards the node participates in
      */
-    public Set<Id> computeMinimalReadSetAndMarkInflight()
+    protected RequestStatus recordSlowResponse(Id from)
     {
-        Set<ReadShardTracker> toRead = foldl((tracker, accumulate) -> {
-            if (!tracker.shouldRead())
-                return accumulate;
+        if (!inflight.contains(from))
+            throw new IllegalStateException();
 
-            if (accumulate == null)
-                accumulate = new LinkedHashSet<>(); // determinism
+        if (slow == null)
+            slow = newHashSetWithExpectedSize(maxShardsPerEpoch());
 
-            accumulate.add(tracker);
-            return accumulate;
-        }, null);
+        if (!slow.add(from)) // we can mark slow responses due to ReadCoordinator.TryAlternative OR onSlowResponse
+            return RequestStatus.NoChange;
 
-        if (toRead == null)
-            return Collections.emptySet();
-
-        assert !toRead.isEmpty();
-        Set<Id> nodes = new HashSet<>();
-        while (!toRead.isEmpty())
-        {
-            if (candidates.isEmpty())
-            {
-                if (!nodes.isEmpty())
-                    nodes.forEach(this::recordContacted);
-                return null;
-            }
-
-            // TODO: Topology needs concept of locality/distance
-            candidates.sort((a, b) -> compareIntersections(a, b, toRead));
-
-            int i = candidates.size() - 1;
-            Id node = candidates.get(i);
-            nodes.add(node);
-            candidates.remove(i);
-            forEachTrackerForNode(node, (tracker, ignore) -> toRead.remove(tracker));
-        }
-
-        // must recordInFlightRead after loop, as we might return null if the reads are insufficient to make progress
-        // but in this case we need the tracker to
-        nodes.forEach(this::recordInflightRead);
-
-        return nodes;
+        return recordResponse(this, from, ReadShardTracker::recordSlowResponse, true);
     }
 
+    /**
+     * Record a response that immediately satisfies the criteria for the shards the node participates in
+     */
+    protected RequestStatus recordReadSuccess(Id from)
+    {
+        return recordResponse(from, ReadShardTracker::recordReadSuccess);
+    }
+
+    /**
+     * Record a response that contributes to a potential quorum decision (i.e. accept once we have such a quorum)
+     */
+    protected RequestStatus recordQuorumReadSuccess(Id from)
+    {
+        return recordResponse(from, ReadShardTracker::recordQuorumReadSuccess);
+    }
+
+    /**
+     * Record a failure response
+     */
+    protected RequestStatus recordReadFailure(Id from)
+    {
+        return recordResponse(from, ReadShardTracker::recordReadFailure);
+    }
+
+    protected RequestStatus recordResponse(Id from, BiFunction<? super ReadShardTracker, Boolean, ? extends ShardOutcome<? super ReadTracker>> function)
+    {
+        boolean isSlow = receiveResponseIsSlow(from);
+        return recordResponse(this, from, function, isSlow);
+    }
+
+    public <T1> RequestStatus trySendMore(BiConsumer<T1, Id> contact, T1 with)
+    {
+        ShardSelection toRead;
+        {
+            ShardSelection tmp = null;
+            for (int i = 0 ; i < trackers.length ; ++i)
+            {
+                ReadShardTracker tracker = trackers[i];
+                if (tracker == null || !tracker.shouldRead() || !tracker.canRead())
+                    continue;
+
+                if (tmp == null)
+                    tmp = new ShardSelection(); // determinism
+
+                tmp.set(i);
+            }
+            toRead = tmp;
+        }
+
+        Preconditions.checkState(toRead != null, "We were asked to read more, but found no shards in need of reading more");
+
+        // TODO: maybe for each additional candidate do one linear compare run to find better secondary match
+        //       OR at least discount candidates that do not contribute additional knowledge beyond those additional
+        //       candidates already contacted, since implementations are likely to sort primarily by health
+        candidates.sort((a, b) -> topologies().compare(a, b, toRead));
+        int i = candidates.size() - 1;
+        while (i >= 0)
+        {
+            Id candidate = candidates.get(i);
+            topologies().forEach((ti, topology) -> {
+                int offset = topologyOffset(ti);
+                topology.forEachOn(candidate, (si, s) -> toRead.clear(offset + si));
+            });
+
+            if (toRead.isEmpty())
+                break;
+
+            --i;
+        }
+
+        if (!toRead.isEmpty())
+            return RequestStatus.NoChange;
+
+        for (int j = candidates.size() - 1; j >= i; --j)
+        {
+            Id candidate = candidates.get(j);
+            recordInFlightRead(candidate);
+            contact.accept(with, candidate);
+            candidates.remove(j);
+        }
+        return RequestStatus.NoChange;
+    }
+
+    public boolean hasData()
+    {
+        return all(ReadShardTracker::hasData);
+    }
 }

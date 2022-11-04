@@ -19,7 +19,7 @@
 package accord.coordinate;
 
 import accord.api.RoutingKey;
-import accord.coordinate.tracking.AbstractQuorumTracker.QuorumShardTracker;
+import accord.coordinate.tracking.QuorumTracker.QuorumShardTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Callback;
@@ -29,6 +29,9 @@ import accord.topology.Shard;
 import accord.primitives.TxnId;
 import org.apache.cassandra.utils.concurrent.AsyncFuture;
 import org.apache.cassandra.utils.concurrent.Future;
+
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Success;
 
 public class InformHomeOfTxn extends AsyncFuture<Void> implements Callback<SimpleReply>
 {
@@ -61,7 +64,7 @@ public class InformHomeOfTxn extends AsyncFuture<Void> implements Callback<Simpl
         {
             default:
             case Ok:
-                if (tracker.success(from))
+                if (tracker.onSuccess(null) == Success)
                     trySuccess(null);
                 break;
 
@@ -78,7 +81,7 @@ public class InformHomeOfTxn extends AsyncFuture<Void> implements Callback<Simpl
         else this.failure.addSuppressed(failure);
 
         // TODO: if we fail and have an incorrect topology, trigger refresh
-        if (tracker.failure(from))
+        if (tracker.onFailure(null) == Fail)
             tryFailure(this.failure);
     }
 

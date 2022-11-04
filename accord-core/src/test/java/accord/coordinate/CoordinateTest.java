@@ -44,7 +44,7 @@ public class CoordinateTest
             Node node = cluster.get(1);
             Assertions.assertNotNull(node);
 
-            TxnId txnId = new TxnId(1, 100, 0, node.id());
+            TxnId txnId = node.nextTxnId();
             Keys keys = keys(10);
             Txn txn = writeTxn(keys);
             Route route = keys.toRoute(keys.get(0).toRoutingKey());
@@ -71,7 +71,8 @@ public class CoordinateTest
 
     private TxnId coordinate(Node node, long clock, Keys keys) throws Throwable
     {
-        TxnId txnId = new TxnId(1, clock, 0, node.id());
+        TxnId txnId = node.nextTxnId();
+        txnId = new TxnId(txnId.epoch, txnId.real + clock, 0, txnId.node);
         Txn txn = writeTxn(keys);
         Result result = Coordinate.coordinate(node, txnId, txn, node.computeRoute(txnId, txn.keys())).get();
         Assertions.assertEquals(MockStore.RESULT, result);
@@ -134,7 +135,7 @@ public class CoordinateTest
             Node node = cluster.get(1);
             Assertions.assertNotNull(node);
 
-            TxnId txnId = new TxnId(1, 100, 0, node.id());
+            TxnId txnId = node.nextTxnId();
             Keys oneKey = keys(10);
             Keys twoKeys = keys(10, 20);
             Txn txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.QUERY, MockStore.update(twoKeys));

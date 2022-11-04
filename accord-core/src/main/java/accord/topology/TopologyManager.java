@@ -20,6 +20,7 @@ package accord.topology;
 
 import accord.api.ConfigurationService;
 import accord.api.RoutingKey;
+import accord.api.TopologySorter;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.Node.Id;
 import accord.messages.EpochRequest;
@@ -37,7 +38,8 @@ import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 import java.util.*;
-import java.util.function.LongConsumer;
+
+import static accord.coordinate.tracking.RequestStatus.Success;
 
 /**
  * Manages topology state changes and update bookkeeping
@@ -63,12 +65,12 @@ public class TopologyManager implements ConfigurationService.Listener
         private boolean syncComplete = false;
         private boolean prevSynced;
 
-        EpochState(Id node, Topology global, boolean prevSynced)
+        EpochState(Id node, Topology global, TopologySorter sorter, boolean prevSynced)
         {
             this.global = global;
             this.local = global.forNode(node).trim();
             Preconditions.checkArgument(!global().isSubset());
-            this.syncTracker = new QuorumTracker(new Single(global(), false));
+            this.syncTracker = new QuorumTracker(new Single(sorter, global()));
             this.prevSynced = prevSynced;
         }
 
@@ -79,7 +81,7 @@ public class TopologyManager implements ConfigurationService.Listener
 
         public void recordSyncComplete(Id node)
         {
-            syncComplete = syncTracker.success(node);
+            syncComplete = syncTracker.recordSuccess(node) == Success;
         }
 
         Topology global()
@@ -114,7 +116,7 @@ public class TopologyManager implements ConfigurationService.Listener
             Boolean result = global().foldl(keys, (i, shard, acc) -> {
                 if (acc == Boolean.FALSE)
                     return acc;
-                return Boolean.valueOf(syncTracker.unsafeGet(i).hasReachedQuorum());
+                return syncTracker.unsafeGet(i).hasReachedQuorum();
             }, Boolean.TRUE);
             return result == Boolean.TRUE;
         }
@@ -125,7 +127,7 @@ public class TopologyManager implements ConfigurationService.Listener
         }
     }
 
-    private class Epochs
+    private static class Epochs
     {
         private final long currentEpoch;
         private final EpochState[] epochs;
@@ -220,11 +222,13 @@ public class TopologyManager implements ConfigurationService.Listener
         }
     }
 
+    private final TopologySorter.Supplier sorter;
     private final Id node;
     private volatile Epochs epochs;
 
-    public TopologyManager(Id node)
+    public TopologyManager(TopologySorter.Supplier sorter, Id node)
     {
+        this.sorter = sorter;
         this.node = node;
         this.epochs = new Epochs(new EpochState[0]);
     }
@@ -247,7 +251,7 @@ public class TopologyManager implements ConfigurationService.Listener
         System.arraycopy(current.epochs, 0, nextEpochs, 1, current.epochs.length);
 
         boolean prevSynced = current.epochs.length == 0 || current.epochs[0].syncComplete();
-        nextEpochs[0] = new EpochState(node, topology, prevSynced);
+        nextEpochs[0] = new EpochState(node, topology, sorter.get(topology), prevSynced);
 
         List<AsyncPromise<Void>> futureEpochFutures = new ArrayList<>(current.futureEpochFutures);
         AsyncPromise<Void> toComplete = !futureEpochFutures.isEmpty() ? futureEpochFutures.remove(0) : null;
@@ -265,6 +269,11 @@ public class TopologyManager implements ConfigurationService.Listener
     public void onEpochSyncComplete(Id node, long epoch)
     {
         epochs.syncComplete(node, epoch);
+    }
+
+    public TopologySorter.Supplier sorter()
+    {
+        return sorter;
     }
 
     public Topology current()
@@ -292,7 +301,7 @@ public class TopologyManager implements ConfigurationService.Listener
 
         EpochState maxEpochState = snapshot.get(maxEpoch);
         if (minEpoch == maxEpoch && !snapshot.requiresHistoricalTopologiesFor(keys, maxEpoch))
-            return new Single(maxEpochState.global.forKeys(keys), true);
+            return new Single(sorter, maxEpochState.global.forKeys(keys));
 
         int start = (int)(snapshot.currentEpoch - maxEpoch);
         int limit = (int)(Math.min(1 + snapshot.currentEpoch - minEpoch, snapshot.epochs.length));
@@ -315,7 +324,7 @@ public class TopologyManager implements ConfigurationService.Listener
                 epochState.global.visitNodeForKeysOnceOrMore(keys, (i1, i2) -> true, nodes::add);
         }
 
-        Topologies.Multi topologies = new Topologies.Multi(count);
+        Topologies.Multi topologies = new Topologies.Multi(sorter, count);
         for (int i = start; i < limit ; ++i)
         {
             EpochState epochState = snapshot.epochs[i];
@@ -338,14 +347,14 @@ public class TopologyManager implements ConfigurationService.Listener
         Epochs snapshot = epochs;
 
         if (minEpoch == maxEpoch)
-            return new Single(snapshot.get(minEpoch).global.forKeys(keys), true);
+            return new Single(sorter, snapshot.get(minEpoch).global.forKeys(keys));
 
         Set<Id> nodes = new LinkedHashSet<>();
         int count = (int)(1 + maxEpoch - minEpoch);
         for (int i = count - 1 ; i >= 0 ; --i)
             snapshot.get(minEpoch + i).global().visitNodeForKeysOnceOrMore(keys, (i1, i2) -> true, nodes::add);
 
-        Topologies.Multi topologies = new Topologies.Multi(count);
+        Topologies.Multi topologies = new Topologies.Multi(sorter, count);
         for (int i = count - 1 ; i >= 0 ; --i)
             topologies.add(snapshot.get(minEpoch + i).global.forKeys(keys, nodes));
 
@@ -355,7 +364,7 @@ public class TopologyManager implements ConfigurationService.Listener
     public Topologies forEpoch(AbstractKeys<?, ?> keys, long epoch)
     {
         EpochState state = epochs.get(epoch);
-        return new Single(state.global.forKeys(keys), true);
+        return new Single(sorter, state.global.forKeys(keys));
     }
 
     public Shard forEpochIfKnown(RoutingKey key, long epoch)

@@ -62,7 +62,7 @@ public class MaybeRecover extends CheckShards
     }
 
     @Override
-    protected boolean isSufficient(Id from, CheckStatusOk ok)
+    protected boolean isSufficient(CheckStatusOk ok)
     {
         return hasMadeProgress(ok);
     }
@@ -74,18 +74,15 @@ public class MaybeRecover extends CheckShards
     }
 
     @Override
-    protected void onDone(Done done, Throwable fail)
+    protected void onDone(Success success, Throwable fail)
     {
         if (fail != null)
         {
             callback.accept(null, fail);
         }
-        else if (merged == null)
-        {
-            callback.accept(null, new Timeout(txnId, homeKey));
-        }
         else
         {
+            Preconditions.checkState(merged != null);
             switch (merged.saveStatus.known)
             {
                 default: throw new AssertionError();
@@ -96,7 +93,7 @@ public class MaybeRecover extends CheckShards
                         RoutingKeys someKeys = reduceNonNull(RoutingKeys::union, this.contactKeys, merged.route, route);
                         // for correctness reasons, we have not necessarily preempted the initial pre-accept round and
                         // may have raced with it, so we must attempt to recover anything we see pre-accepted.
-                        Invalidate.invalidateIfNotWitnessed(node, txnId, someKeys, homeKey, callback);
+                        Invalidate.invalidate(node, txnId, someKeys, homeKey, callback);
                         break;
                     }
                 case ExecutionOrder:

@@ -125,13 +125,13 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private final Map<TxnId, Future<? extends Outcome>> coordinating = new ConcurrentHashMap<>();
 
     public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier,
-                Supplier<DataStore> dataSupplier, Agent agent, Random random, Scheduler scheduler,
+                Supplier<DataStore> dataSupplier, Agent agent, Random random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
                 Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory)
     {
         this.id = id;
         this.messageSink = messageSink;
         this.configService = configService;
-        this.topology = new TopologyManager(id);
+        this.topology = new TopologyManager(topologySorter, id);
         this.nowSupplier = nowSupplier;
         Topology topology = configService.currentTopology();
         this.now = new AtomicReference<>(new Timestamp(topology.epoch(), nowSupplier.getAsLong(), 0, id));

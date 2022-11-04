@@ -67,15 +67,8 @@ public class FetchData
         return fetchInternal(ranges, phase, node, txnId, route.sliceStrict(ranges), executeAt, untilLocalEpoch, callback);
     }
 
-    private static Object fetchInternal(Known target, Node node, TxnId txnId, PartialRoute route, @Nullable Timestamp executeAt, long untilLocalEpoch, BiConsumer<Known, Throwable> callback)
+    private static Object fetchInternal(KeyRanges ranges, Known target, Node node, TxnId txnId, PartialRoute route, @Nullable Timestamp executeAt, long untilLocalEpoch, BiConsumer<Known, Throwable> callback)
     {
-        KeyRanges ranges = node.topology().localRangesForEpochs(txnId.epoch, untilLocalEpoch);
-        return fetchInternal(ranges, target, node, txnId, route, executeAt, untilLocalEpoch, callback);
-    }
-
-    private static Object fetchInternal(KeyRanges localRanges, Known target, Node node, TxnId txnId, PartialRoute route, @Nullable Timestamp executeAt, long untilLocalEpoch, BiConsumer<Known, Throwable> callback)
-    {
-        KeyRanges ranges = node.topology().localRangesForEpochs(txnId.epoch, untilLocalEpoch);
         PartialRoute fetch = route.sliceStrict(ranges);
         long srcEpoch = target == ExecutionOrder || executeAt == null ? txnId.epoch : executeAt.epoch;
         return CheckOn.checkOn(target, node, txnId, fetch, srcEpoch, untilLocalEpoch, (ok, fail) -> {

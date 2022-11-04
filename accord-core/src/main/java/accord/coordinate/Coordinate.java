@@ -18,16 +18,13 @@
 
 package accord.coordinate;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.function.BiConsumer;
 
 import accord.api.Result;
 import accord.coordinate.tracking.FastPathTracker;
+import accord.coordinate.tracking.RequestStatus;
 import accord.primitives.Route;
-import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.primitives.Ballot;
 import accord.messages.Callback;
@@ -40,7 +37,7 @@ import accord.messages.PreAccept.PreAcceptOk;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.messages.PreAccept.PreAcceptReply;
-import com.google.common.collect.Sets;
+import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.utils.concurrent.AsyncFuture;
 import org.apache.cassandra.utils.concurrent.Future;
@@ -51,110 +48,19 @@ import static accord.messages.Commit.Invalidate.commitInvalidate;
 /**
  * Perform initial rounds of PreAccept and Accept until we have reached agreement about when we should execute.
  * If we are preempted by a recovery coordinator, we abort and let them complete (and notify us about the execution result)
+ *
+ * TODO: dedicated burn test to validate outcomes
  */
 public class Coordinate extends AsyncFuture<Result> implements Callback<PreAcceptReply>, BiConsumer<Result, Throwable>
 {
-    static class ShardTracker extends FastPathTracker.FastPathShardTracker
-    {
-        public ShardTracker(Shard shard)
-        {
-            super(shard);
-        }
-
-        @Override
-        public boolean includeInFastPath(Node.Id node, boolean withFastPathTimestamp)
-        {
-            return withFastPathTimestamp && shard.fastPathElectorate.contains(node);
-        }
-
-        @Override
-        public boolean hasMetFastPathCriteria()
-        {
-            return fastPathAccepts >= shard.fastPathQuorumSize;
-        }
-    }
-
-    static class PreacceptTracker extends FastPathTracker<ShardTracker>
-    {
-        volatile long supersedingEpoch = -1;
-        private final boolean fastPathPermitted;
-        private final Set<Id> successes = new HashSet<>();
-        private Set<Id> failures;
-
-        public PreacceptTracker(Topologies topologies, boolean fastPathPermitted)
-        {
-            super(topologies, Coordinate.ShardTracker[]::new, Coordinate.ShardTracker::new);
-            this.fastPathPermitted = fastPathPermitted;
-        }
-
-        public PreacceptTracker(Topologies topologies)
-        {
-            this(topologies, topologies.fastPathPermitted());
-        }
-
-        @Override
-        public boolean failure(Id node)
-        {
-            if (failures == null)
-                failures = new HashSet<>();
-            failures.add(node);
-            return super.failure(node);
-        }
-
-        @Override
-        public void recordSuccess(Id node, boolean withFastPathTimestamp)
-        {
-            successes.add(node);
-            super.recordSuccess(node, withFastPathTimestamp);
-        }
-
-        public void recordSuccess(Id node)
-        {
-            recordSuccess(node, false);
-        }
-
-        public synchronized boolean recordSupersedingEpoch(long epoch)
-        {
-            if (epoch <= supersedingEpoch)
-                return false;
-            supersedingEpoch = epoch;
-            return true;
-        }
-
-        public boolean hasSupersedingEpoch()
-        {
-            return supersedingEpoch > 0;
-        }
-
-        public PreacceptTracker withUpdatedTopologies(Topologies topologies)
-        {
-            PreacceptTracker tracker = new PreacceptTracker(topologies, false);
-            successes.forEach(tracker::recordSuccess);
-            if (failures != null)
-                failures.forEach(tracker::failure);
-            return tracker;
-        }
-
-        @Override
-        public boolean hasMetFastPathCriteria()
-        {
-            return fastPathPermitted && super.hasMetFastPathCriteria();
-        }
-
-        boolean shouldSlowPathAccept()
-        {
-            return (!fastPathPermitted || !hasInFlight()) && hasReachedQuorum();
-        }
-    }
-
     final Node node;
     final TxnId txnId;
     final Txn txn;
     final Route route;
 
-    private PreacceptTracker tracker;
-    private final List<PreAcceptOk> preAcceptOks = new ArrayList<>();
+    private FastPathTracker tracker;
     private boolean preAcceptIsDone;
+    private final List<PreAcceptOk> successes;
 
     private Coordinate(Node node, TxnId txnId, Txn txn, Route route)
     {
@@ -163,7 +69,8 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
         this.txn = txn;
         this.route = route;
         Topologies topologies = node.topology().withUnsyncedEpochs(route, txnId, txnId);
-        this.tracker = new PreacceptTracker(topologies);
+        this.tracker = new FastPathTracker(topologies);
+        this.successes = new ArrayList<>(tracker.topologies().estimateUniqueNodes());
     }
 
     private void start()
@@ -186,44 +93,24 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
         if (preAcceptIsDone)
             return;
 
-        if (tracker.failure(from))
+        switch (tracker.recordFailure(from))
         {
-            preAcceptIsDone = true;
-            tryFailure(new Timeout(txnId, route.homeKey));
+            default: throw new AssertionError();
+            case NoChange:
+                break;
+            case Failed:
+                preAcceptIsDone = true;
+                tryFailure(new Timeout(txnId, route.homeKey));
+                break;
+            case Success:
+                onPreAccepted();
         }
-
-        // if no other responses are expected and the slow quorum has been satisfied, proceed
-        if (tracker.shouldSlowPathAccept())
-            onPreAccepted();
     }
 
     @Override
     public void onCallbackFailure(Id from, Throwable failure)
     {
         tryFailure(failure);
-    }
-
-    // TODO (soon): I don't think we need to preaccept in later epochs? the Sync logic should take care of it for us,
-    //              since either we haven't synced between a majority and the earlier epochs are still involved for
-    //              later preaccepts, or they have been sync'd and the earlier transactions are known to the later epochs
-    //              (also, we aren't doing this on recovery, and everything works...)
-    private synchronized void onEpochUpdate()
-    {
-        if (!tracker.hasSupersedingEpoch())
-            return;
-        Topologies newTopologies = node.topology().withUnsyncedEpochs(txn.keys(), txnId.epoch, tracker.supersedingEpoch);
-        if (newTopologies.currentEpoch() < tracker.supersedingEpoch)
-            return;
-        Set<Id> previousNodes = tracker.nodes();
-        tracker = tracker.withUpdatedTopologies(newTopologies);
-
-        // send messages to new nodes
-        Set<Id> needMessages = Sets.difference(tracker.nodes(), previousNodes);
-        if (!needMessages.isEmpty())
-            node.send(needMessages, to -> new PreAccept(to, newTopologies, txnId, txn, route), this);
-
-        if (tracker.shouldSlowPathAccept())
-            onPreAccepted();
     }
 
     public synchronized void onSuccess(Id from, PreAcceptReply reply)
@@ -239,40 +126,32 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
         }
 
         PreAcceptOk ok = (PreAcceptOk) reply;
-        preAcceptOks.add(ok);
+        successes.add(ok);
 
         boolean fastPath = ok.witnessedAt.compareTo(txnId) == 0;
-        tracker.recordSuccess(from, fastPath);
-
-        // TODO: we should only update epoch if we need to in order to reach quorum
-        if (!fastPath && ok.witnessedAt.epoch > txnId.epoch && tracker.recordSupersedingEpoch(ok.witnessedAt.epoch))
-        {
-            node.configService().fetchTopologyForEpoch(ok.witnessedAt.epoch);
-            node.topology().awaitEpoch(ok.witnessedAt.epoch).addListener(this::onEpochUpdate);
-        }
-
-        if (!tracker.hasSupersedingEpoch() && (tracker.hasMetFastPathCriteria() || tracker.shouldSlowPathAccept()))
-            onPreAccepted(); // note, can already have invoked onPreAccepted in onEpochUpdate
+        // TODO: update formalisation (and proof), as we do not seek additional pre-accepts from later epochs.
+        //       instead we rely on accept to do our work: a quorum of accept in the later epoch
+        //       and its effect on preaccepted timestamps and the deps it returns create our sync point.
+        if (tracker.recordSuccess(from, fastPath) == RequestStatus.Success)
+            onPreAccepted();
     }
 
-    private void onPreAccepted()
+    private synchronized void onPreAccepted()
     {
-        if (preAcceptIsDone)
-            return;
-
+        Preconditions.checkState(!preAcceptIsDone);
         preAcceptIsDone = true;
-        if (tracker.hasMetFastPathCriteria())
+
+        if (tracker.hasFastPathAccepted())
         {
-            preAcceptIsDone = true;
-            Deps deps = Deps.merge(preAcceptOks, ok -> ok.witnessedAt.equals(txnId) ? ok.deps : null);
+            Deps deps = Deps.merge(successes, ok -> ok.witnessedAt.equals(txnId) ? ok.deps : null);
             Execute.execute(node, txnId, txn, route, txnId, deps, this);
         }
         else
         {
-            Deps deps = Deps.merge(preAcceptOks, ok -> ok.deps);
+            Deps deps = Deps.merge(successes, ok -> ok.deps);
             Timestamp executeAt; {
                 Timestamp accumulate = Timestamp.NONE;
-                for (PreAcceptOk preAcceptOk : preAcceptOks)
+                for (PreAcceptOk preAcceptOk : successes)
                     accumulate = Timestamp.max(accumulate, preAcceptOk.witnessedAt);
                 executeAt = accumulate;
             }
@@ -296,7 +175,12 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
             }
             else
             {
-                node.withEpoch(executeAt.epoch, () -> Propose.propose(node, tracker.topologies(), Ballot.ZERO, txnId, txn, route, executeAt, deps, this));
+                node.withEpoch(executeAt.epoch, () -> {
+                    Topologies topologies = tracker.topologies();
+                    if (executeAt.epoch > txnId.epoch)
+                        topologies = node.topology().withUnsyncedEpochs(txn, txnId.epoch, executeAt.epoch);
+                    Propose.propose(node, topologies, Ballot.ZERO, txnId, txn, route, executeAt, deps, this);
+                });
             }
         }
     }

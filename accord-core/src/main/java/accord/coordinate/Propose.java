@@ -24,8 +24,10 @@ import java.util.function.BiConsumer;
 
 import accord.api.Result;
 import accord.api.RoutingKey;
-import accord.coordinate.tracking.AbstractQuorumTracker.QuorumShardTracker;
+import accord.coordinate.tracking.AbstractTracker.ShardOutcomes;
 import accord.coordinate.tracking.QuorumTracker;
+import accord.coordinate.tracking.QuorumTracker.QuorumShardTracker;
+import accord.coordinate.tracking.RequestStatus;
 import accord.messages.Callback;
 import accord.primitives.Route;
 import accord.topology.Shard;
@@ -40,7 +42,9 @@ import accord.primitives.TxnId;
 import accord.messages.Accept;
 import accord.messages.Accept.AcceptOk;
 import accord.messages.Accept.AcceptReply;
-import com.google.common.base.Preconditions;
+
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
+import static accord.coordinate.tracking.RequestStatus.Failed;
 
 class Propose implements Callback<AcceptReply>
 {
@@ -102,7 +106,7 @@ class Propose implements Callback<AcceptReply>
             case Success:
                 AcceptOk ok = (AcceptOk) reply;
                 acceptOks.add(ok);
-                if (acceptTracker.success(from))
+                if (acceptTracker.recordSuccess(from) == RequestStatus.Success)
                     onAccepted();
         }
     }
@@ -110,7 +114,7 @@ class Propose implements Callback<AcceptReply>
     @Override
     public void onFailure(Id from, Throwable failure)
     {
-        if (acceptTracker.failure(from))
+        if (acceptTracker.recordFailure(from) == Failed)
         {
             isDone = true;
             callback.accept(null, new Timeout(txnId, route.homeKey));
@@ -174,7 +178,7 @@ class Propose implements Callback<AcceptReply>
                 return;
             }
 
-            if (acceptTracker.success(from))
+            if (acceptTracker.onSuccess(from) == ShardOutcomes.Success)
             {
                 isDone = true;
                 callback.accept(null, null);
@@ -184,7 +188,7 @@ class Propose implements Callback<AcceptReply>
         @Override
         public void onFailure(Id from, Throwable failure)
         {
-            if (acceptTracker.failure(from))
+            if (acceptTracker.onFailure(from) == Fail)
             {
                 isDone = true;
                 callback.accept(null, new Timeout(txnId, null));

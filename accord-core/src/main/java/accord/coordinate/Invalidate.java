@@ -22,11 +22,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
 
+import accord.coordinate.tracking.QuorumTracker;
+import accord.local.SaveStatus;
 import accord.primitives.*;
 import com.google.common.base.Preconditions;
 
 import accord.api.RoutingKey;
-import accord.coordinate.tracking.AbstractQuorumTracker.QuorumShardTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.Status;
@@ -38,25 +39,28 @@ import accord.messages.Callback;
 import accord.topology.Shard;
 
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Success;
 import static accord.local.PreLoadContext.contextFor;
-import static accord.local.Status.Accepted;
-import static accord.local.Status.PreAccepted;
+import static accord.local.Status.*;
+import static accord.local.Status.Known.Definition;
 import static accord.messages.Commit.Invalidate.commitInvalidate;
 import static accord.primitives.ProgressToken.INVALIDATED;
 
 public class Invalidate implements Callback<InvalidateReply>
 {
-    final Node node;
-    final Ballot ballot;
-    final TxnId txnId;
-    final RoutingKeys informKeys;
-    final RoutingKey invalidateWithKey;
-    final Status recoverIfAtLeast;
-    final BiConsumer<Outcome, Throwable> callback;
+    private final Node node;
+    private final Ballot ballot;
+    private final TxnId txnId;
+    private final RoutingKeys informKeys;
+    private final RoutingKey invalidateWithKey;
+    private final Status recoverIfAtLeast;
+    private final BiConsumer<Outcome, Throwable> callback;
 
-    boolean isDone;
-    final List<InvalidateOk> invalidateOks = new ArrayList<>();
-    final QuorumShardTracker preacceptTracker;
+    private boolean isDone;
+    private boolean isBallotPromised;
+    private final List<InvalidateOk> invalidateOks = new ArrayList<>();
+    private final QuorumTracker.QuorumShardTracker tracker;
 
     private Invalidate(Node node, Shard shard, Ballot ballot, TxnId txnId, RoutingKeys informKeys, RoutingKey invalidateWithKey, Status recoverIfAtLeast, BiConsumer<Outcome, Throwable> callback)
     {
@@ -68,15 +72,17 @@ public class Invalidate implements Callback<InvalidateReply>
         this.informKeys = informKeys;
         this.invalidateWithKey = invalidateWithKey;
         this.recoverIfAtLeast = recoverIfAtLeast;
-        this.preacceptTracker = new QuorumShardTracker(shard);
+        this.tracker = new QuorumTracker.QuorumShardTracker(shard);
     }
 
-    public static Invalidate invalidateIfNotWitnessed(Node node, TxnId txnId, RoutingKeys informKeys, RoutingKey invalidateWithKey, BiConsumer<Outcome, Throwable> callback)
+    public static Invalidate invalidate(Node node, TxnId txnId, RoutingKeys informKeys, RoutingKey invalidateWithKey, BiConsumer<Outcome, Throwable> callback)
     {
         return invalidate(node, txnId, informKeys, invalidateWithKey, PreAccepted, callback);
     }
 
-    public static Invalidate invalidate(Node node, TxnId txnId, RoutingKeys informKeys, RoutingKey invalidateWithKey, BiConsumer<Outcome, Throwable> callback)
+    // TODO (now): (file separately) this is a bug, as it is possible for a preaccept to still be in-flight.
+    //             It's not even safe to do it after an initial Invalidate round unless we ensure that recovery never pre-accepts with txnId (which we should also enforce)
+    public static Invalidate invalidateIfNotAccepted(Node node, TxnId txnId, RoutingKeys informKeys, RoutingKey invalidateWithKey, BiConsumer<Outcome, Throwable> callback)
     {
         return invalidate(node, txnId, informKeys, invalidateWithKey, Accepted, callback);
     }
@@ -93,7 +99,7 @@ public class Invalidate implements Callback<InvalidateReply>
     @Override
     public synchronized void onSuccess(Id from, InvalidateReply reply)
     {
-        if (isDone || preacceptTracker.hasReachedQuorum())
+        if (isDone || isBallotPromised)
             return;
 
         if (!reply.isOk())
@@ -113,19 +119,22 @@ public class Invalidate implements Callback<InvalidateReply>
 
         InvalidateOk ok = (InvalidateOk) reply;
         invalidateOks.add(ok);
-        if (preacceptTracker.success(from))
+        if (tracker.onSuccess(from) == Success)
             invalidate();
     }
 
     private void invalidate()
     {
+        Preconditions.checkState(!isBallotPromised);
+        isBallotPromised = true;
         // first look to see if it has already been
         {
-            Status maxStatus = invalidateOks.stream().map(ok -> ok.status).max(Comparable::compareTo).orElseThrow(IllegalStateException::new);
             Route route = InvalidateOk.findRoute(invalidateOks);
             RoutingKey homeKey = route != null ? route.homeKey : InvalidateOk.findHomeKey(invalidateOks);
+            SaveStatus maxStatus = invalidateOks.stream().map(ok -> ok.status).max(Comparable::compareTo).orElseThrow(IllegalStateException::new);
+            Known maxKnown = invalidateOks.stream().map(ok -> ok.status.known).max(Comparable::compareTo).orElseThrow(IllegalStateException::new);
 
-            switch (maxStatus)
+            switch (maxStatus.status)
             {
                 default: throw new IllegalStateException();
                 case AcceptedInvalidate:
@@ -133,13 +142,13 @@ public class Invalidate implements Callback<InvalidateReply>
                 case NotWitnessed:
                     break;
 
-                    case PreAccepted:
+                case PreAccepted:
                 case Accepted:
                     // note: we do not attempt to calculate PreAccept outcome here, we rely on the caller to tell us
                     // what is safe to do. If the caller knows no decision was reached with PreAccept, we can safely
                     // invalidate if we see PreAccept, and only need to recover if we see Accept
                     // TODO: if we see Accept, go straight to propose to save some unnecessary work
-                    if (recoverIfAtLeast.compareTo(maxStatus) > 0)
+                    if (recoverIfAtLeast.compareTo(maxStatus.status) > 0)
                         break;
 
                 case Committed:
@@ -151,12 +160,11 @@ public class Invalidate implements Callback<InvalidateReply>
                     {
                         RecoverWithRoute.recover(node, ballot, txnId, route, callback);
                     }
-                    else if (homeKey != null && homeKey.equals(invalidateWithKey))
-                    {
-                        throw new IllegalStateException("Received a reply from a node that must have known the route, but that did not include it");
-                    }
                     else if (homeKey != null)
                     {
+                        if (homeKey.equals(invalidateWithKey) && maxKnown.compareTo(Definition) >= 0)
+                            throw new IllegalStateException("Received a reply from a node that must have known the route, but that did not include it");
+
                         RecoverWithHomeKey.recover(node, txnId, homeKey, callback);
                     }
                     else
@@ -179,6 +187,11 @@ public class Invalidate implements Callback<InvalidateReply>
         // if we have witnessed the transaction, but are able to invalidate, do we want to proceed?
         // Probably simplest to do so, but perhaps better for user if we don't.
         proposeInvalidate(node, ballot, txnId, invalidateWithKey, (success, fail) -> {
+            /**
+             * We're now inside our *exactly once* callback we registered with proposeInvalidate, and we need to
+             * make sure we honour our own exactly once semantics with {@code callback}.
+             * So we are responsible for all exception handling.
+             */
             isDone = true;
             if (fail != null)
             {
@@ -211,10 +224,10 @@ public class Invalidate implements Callback<InvalidateReply>
     @Override
     public void onFailure(Id from, Throwable failure)
     {
-        if (isDone)
+        if (isDone || isBallotPromised)
             return;
 
-        if (preacceptTracker.failure(from))
+        if (tracker.onFailure(from) == Fail)
         {
             isDone = true;
             callback.accept(null, new Timeout(txnId, null));

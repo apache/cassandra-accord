@@ -19,20 +19,16 @@
 package accord.topology;
 
 import java.util.*;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
 import accord.api.RoutingKey;
 import accord.local.Node.Id;
-import accord.api.Key;
 import accord.primitives.AbstractKeys;
 import accord.primitives.KeyRange;
 import accord.primitives.KeyRanges;
-import accord.primitives.Keys;
-import accord.utils.IndexedConsumer;
-import accord.utils.IndexedBiFunction;
-import accord.utils.IndexedIntFunction;
-import accord.utils.IndexedPredicate;
+import accord.utils.*;
 
 import static accord.utils.SortedArrays.exponentialSearch;
 
@@ -44,6 +40,12 @@ public class Topology
     final KeyRanges ranges;
     final Map<Id, NodeInfo> nodeLookup;
     final KeyRanges subsetOfRanges;
+    /**
+     * This array is used to permit cheaper sharing of Topology objects between requests, as we must only specify
+     * the indexes within the parent Topology that we contain. This also permits us to perform efficient merges with
+     * {@code NodeInfo.supersetIndexes} to find the shards that intersect a given node without recomputing the NodeInfo.
+     * TODO: do not recompute nodeLookup
+     */
     final int[] supersetIndexes;
 
     static class NodeInfo
@@ -227,6 +229,7 @@ public class Topology
         int[] newSubset = new int[Math.min(select.size(), subsetOfRanges.size())];
         for (int i = 0 ; i < select.size() ; )
         {
+            // TODO: use SortedArrays.findNextIntersection
             // find the range containing the key at i
             subsetIndex = subsetOfRanges.rangeIndexForKey(subsetIndex, subsetOfRanges.size(), select.get(i));
             if (subsetIndex < 0 || subsetIndex >= subsetOfRanges.size())
@@ -272,30 +275,6 @@ public class Topology
         return accumulator;
     }
 
-    /**
-     * @param on the node to limit our selection to
-     * @param select may be a superSet of the keys owned by {@code on} but not of this {@code Topology}
-     */
-    public void forEachOn(Id on, Keys select, IndexedConsumer<Shard> consumer)
-    {
-        NodeInfo info = nodeLookup.get(on);
-        for (int i = 0, j = 0, k = 0 ; i < select.size() && j < supersetIndexes.length && k < info.supersetIndexes.length ;)
-        {
-            Key key = select.get(i);
-            Shard shard = shards[supersetIndexes[j]];
-            int c = supersetIndexes[j] - info.supersetIndexes[k];
-            if (c < 0) ++j;
-            else if (c > 0) ++k;
-            else
-            {
-                int rcmp = shard.range.compareKey(key);
-                if (rcmp < 0) ++i;
-                else if (rcmp == 0) { consumer.accept(j, shard); i++; j++; k++; }
-                else { j++; k++; }
-            }
-        }
-    }
-
     public void forEachOn(Id on, IndexedConsumer<Shard> consumer)
     {
         NodeInfo info = nodeLookup.get(on);
@@ -321,6 +300,35 @@ public class Topology
                 if (bi < 0) bi = -1 -bi;
             }
         }
+    }
+
+    public <P1, P2, P3, O> O mapReduceOn(Id on, int offset, IndexedTriFunction<? super P1, ? super P2, ? super P3, ? extends O> function, P1 p1, P2 p2, P3 p3, BiFunction<? super O, ? super O, ? extends O> reduce, O initialValue)
+    {
+        NodeInfo info = nodeLookup.get(on);
+        if (info == null)
+            return initialValue;
+        int[] a = supersetIndexes, b = info.supersetIndexes;
+        int ai = 0, bi = 0;
+        while (ai < a.length && bi < b.length)
+        {
+            if (a[ai] == b[bi])
+            {
+                O next = function.apply(offset + ai, p1, p2, p3);
+                initialValue = reduce.apply(initialValue, next);
+                ++ai; ++bi;
+            }
+            else if (a[ai] < b[bi])
+            {
+                ai = exponentialSearch(a, ai + 1, a.length, b[bi]);
+                if (ai < 0) ai = -1 -ai;
+            }
+            else
+            {
+                bi = exponentialSearch(b, bi + 1, b.length, a[ai]);
+                if (bi < 0) bi = -1 -bi;
+            }
+        }
+        return initialValue;
     }
 
     public int matchesOn(Id on, IndexedPredicate<Shard> consumer)
@@ -354,7 +362,7 @@ public class Topology
         return count;
     }
 
-    public int foldlIntOn(Id on, IndexedIntFunction<Shard> consumer, int offset, int initialValue, int terminalValue)
+    public <P> int foldlIntOn(Id on, IndexedIntFunction<P> consumer, P param, int offset, int initialValue, int terminalValue)
     {
         // TODO: this can be done by divide-and-conquer splitting of the lists and recursion, which should be more efficient
         NodeInfo info = nodeLookup.get(on);
@@ -366,7 +374,7 @@ public class Topology
         {
             if (a[ai] == b[bi])
             {
-                initialValue = consumer.apply(offset + ai, shards[a[ai]], initialValue);
+                initialValue = consumer.apply(offset + ai, param, initialValue);
                 if (terminalValue == initialValue)
                     return terminalValue;
                 ++ai; ++bi;
@@ -446,19 +454,6 @@ public class Topology
     public KeyRanges ranges()
     {
         return ranges;
-    }
-
-    // TODO: use SortedArrays impls
-    private static boolean intersects(int[] is, int[] js)
-    {
-        for (int i = 0, j = 0 ; i < is.length && j < js.length ;)
-        {
-            int c = is[i] - js[j];
-            if (c < 0) ++i;
-            else if (c > 0) ++j;
-            else return true;
-        }
-        return false;
     }
 
     public Shard[] unsafeGetShards()

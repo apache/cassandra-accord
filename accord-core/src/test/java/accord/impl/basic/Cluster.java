@@ -40,6 +40,7 @@ import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
 import accord.impl.SimpleProgressLog;
 import accord.impl.InMemoryCommandStores;
+import accord.impl.SizeOfIntersectionSorter;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Scheduler;
@@ -221,7 +222,8 @@ public class Cluster implements Scheduler
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(node, messageSink, randomSupplier, topology, lookup::get, topologyUpdates);
                 lookup.put(node, new Node(node, messageSink, configService,
                                           nowSupplier.get(), () -> new ListStore(node), new ListAgent(30L, onFailure),
-                                          randomSupplier.get(), sinks, SimpleProgressLog::new, InMemoryCommandStores.Synchronized::new));
+                                          randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
+                                          SimpleProgressLog::new, InMemoryCommandStores.Synchronized::new));
             }
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));

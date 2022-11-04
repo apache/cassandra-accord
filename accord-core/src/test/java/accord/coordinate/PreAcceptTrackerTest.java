@@ -41,14 +41,14 @@ public class PreAcceptTrackerTest
         [1, 2, 3] [2, 3, 4] [3, 4, 5] [4, 5, 1] [5, 1, 2]
          */
 
-    private static void assertResponseState(FastPathTracker<?> responses,
+    private static void assertResponseState(FastPathTracker responses,
                                             boolean quorumReached,
                                             boolean fastPathAccepted,
                                             boolean failed,
                                             boolean hasOutstandingResponses)
     {
         Assertions.assertEquals(quorumReached, responses.hasReachedQuorum());
-        Assertions.assertEquals(fastPathAccepted, responses.hasMetFastPathCriteria());
+        Assertions.assertEquals(fastPathAccepted, responses.hasFastPathAccepted());
         Assertions.assertEquals(failed, responses.hasFailed());
         Assertions.assertEquals(hasOutstandingResponses, responses.hasInFlight());
     }
@@ -57,7 +57,7 @@ public class PreAcceptTrackerTest
     void singleShard()
     {
         Topology subTopology = topology(topology.get(0));
-        FastPathTracker responses = new FastPathTracker<>(topologies(subTopology), Coordinate.ShardTracker[]::new, Coordinate.ShardTracker::new);
+        FastPathTracker responses = new FastPathTracker(topologies(subTopology));
 
         responses.recordSuccess(ids[0], false);
         assertResponseState(responses, false, false, false, true);
@@ -73,7 +73,7 @@ public class PreAcceptTrackerTest
     void singleShardFastPath()
     {
         Topology subTopology = topology(topology.get(0));
-        FastPathTracker responses = new FastPathTracker<>(topologies(subTopology), Coordinate.ShardTracker[]::new, Coordinate.ShardTracker::new);
+        FastPathTracker responses = new FastPathTracker(topologies(subTopology));
 
         responses.recordSuccess(ids[0], true);
         assertResponseState(responses, false, false, false, true);
@@ -92,7 +92,7 @@ public class PreAcceptTrackerTest
     void unexpectedResponsesAreIgnored()
     {
         Topology subTopology = topology(topology.get(0));
-        FastPathTracker responses = new FastPathTracker<>(topologies(subTopology), Coordinate.ShardTracker[]::new, Coordinate.ShardTracker::new);
+        FastPathTracker responses = new FastPathTracker(topologies(subTopology));
 
         responses.recordSuccess(ids[0], false);
         assertResponseState(responses, false, false, false, true);
@@ -109,15 +109,15 @@ public class PreAcceptTrackerTest
     void failure()
     {
         Topology subTopology = topology(topology.get(0));
-        FastPathTracker<?> responses = new FastPathTracker<>(topologies(subTopology), Coordinate.ShardTracker[]::new, Coordinate.ShardTracker::new);
+        FastPathTracker responses = new FastPathTracker(topologies(subTopology));
 
         responses.recordSuccess(ids[0], true);
         assertResponseState(responses, false, false, false, true);
 
-        responses.failure(ids[1]);
+        responses.recordFailure(ids[1]);
         assertResponseState(responses, false, false, false, true);
 
-        responses.failure(ids[2]);
+        responses.recordFailure(ids[2]);
         assertResponseState(responses, false, false, true, false);
     }
 
@@ -125,7 +125,7 @@ public class PreAcceptTrackerTest
     void multiShard()
     {
         Topology subTopology = new Topology(1, new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
-        FastPathTracker<Coordinate.ShardTracker> responses = new FastPathTracker<>(topologies(subTopology), Coordinate.ShardTracker[]::new, Coordinate.ShardTracker::new);
+        FastPathTracker responses = new FastPathTracker(topologies(subTopology));
         /*
         (000, 100](100, 200](200, 300]
         [1, 2, 3] [2, 3, 4] [3, 4, 5]

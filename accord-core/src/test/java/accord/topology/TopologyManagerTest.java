@@ -18,6 +18,8 @@
 
 package accord.topology;
 
+import accord.api.TopologySorter;
+import accord.impl.SizeOfIntersectionSorter;
 import accord.local.Node;
 import accord.primitives.KeyRange;
 import accord.primitives.Keys;
@@ -27,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import static accord.Utils.*;
 import static accord.impl.IntKey.keys;
 import static accord.impl.IntKey.range;
+import static accord.impl.SizeOfIntersectionSorter.SUPPLIER;
 
 public class TopologyManagerTest
 {
@@ -39,7 +42,7 @@ public class TopologyManagerTest
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(1, 2, 3), idSet(2, 3)));
 
-        TopologyManager service = new TopologyManager(ID);
+        TopologyManager service = new TopologyManager(SUPPLIER, ID);
 
         Assertions.assertSame(Topology.EMPTY, service.current());
         service.onTopologyUpdate(topology1);
@@ -64,7 +67,7 @@ public class TopologyManagerTest
                                       shard(range(100, 200), idList(1, 2, 3), idSet(3, 4)),
                                       shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)));
 
-        TopologyManager service = new TopologyManager(ID);
+        TopologyManager service = new TopologyManager(SUPPLIER, ID);
         service.onTopologyUpdate(topology1);
         service.onTopologyUpdate(topology2);
 
@@ -95,7 +98,7 @@ public class TopologyManagerTest
         Topology topology2 = topology(2, shard(range, idList(1, 2, 3), idSet(2, 3)));
         Topology topology3 = topology(3, shard(range, idList(1, 2, 3), idSet(1, 2)));
 
-        TopologyManager service = new TopologyManager(ID);
+        TopologyManager service = new TopologyManager(SUPPLIER, ID);
         service.onTopologyUpdate(topology1);
         service.onTopologyUpdate(topology2);
         service.onTopologyUpdate(topology3);
@@ -128,7 +131,7 @@ public class TopologyManagerTest
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(1, 2, 3), idSet(2, 3)));
 
-        TopologyManager service = new TopologyManager(ID);
+        TopologyManager service = new TopologyManager(SUPPLIER, ID);
         service.onTopologyUpdate(topology1);
 
         // sync epoch 2
@@ -147,7 +150,7 @@ public class TopologyManagerTest
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(1, 2, 3), idSet(2, 3)));
 
-        TopologyManager service = new TopologyManager(ID);
+        TopologyManager service = new TopologyManager(SUPPLIER, ID);
 
         Assertions.assertSame(Topology.EMPTY, service.current());
         service.onTopologyUpdate(topology1);
@@ -179,7 +182,7 @@ public class TopologyManagerTest
                                       shard(range(100, 200), idList(1, 2, 3), idSet(1, 2)),
                                       shard(range(200, 300), idList(4, 5, 6), idSet(5, 6)));
 
-        TopologyManager service = new TopologyManager(ID);
+        TopologyManager service = new TopologyManager(SUPPLIER, ID);
         service.onTopologyUpdate(topology1);
         service.onTopologyUpdate(topology2);
 
@@ -193,6 +196,5 @@ public class TopologyManagerTest
         Topologies actual = service.withUnsyncedEpochs(keys(150, 250), 2, 2);
         Assertions.assertEquals(topologies(topology2, topology(1, shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)))),
                                 actual);
-        Assertions.assertFalse(actual.fastPathPermitted());
     }
 }

@@ -76,14 +76,9 @@ public class CheckOn extends CheckShards
     // TODO: many callers only need to consult precisely executeAt.epoch remotely
     public static CheckOn checkOn(Known sufficientStatus, Node node, TxnId txnId, AbstractRoute route, long srcEpoch, long untilLocalEpoch, BiConsumer<? super CheckStatusOkFull, Throwable> callback)
     {
-        CheckOn checkOnCommitted = new CheckOn(node, sufficientStatus, txnId, route, srcEpoch, untilLocalEpoch, callback);
-        checkOnCommitted.start();
-        return checkOnCommitted;
-    }
-
-    public static CheckOn checkOnUncommitted(Node node, TxnId txnId, AbstractRoute route, long untilLocalEpoch, BiConsumer<? super CheckStatusOkFull, Throwable> callback)
-    {
-        return checkOn(ExecutionOrder, node, txnId, route, txnId.epoch, untilLocalEpoch, callback);
+        CheckOn checkOn = new CheckOn(node, sufficientStatus, txnId, route, srcEpoch, untilLocalEpoch, callback);
+        checkOn.start();
+        return checkOn;
     }
 
     protected AbstractRoute route()
@@ -94,23 +89,39 @@ public class CheckOn extends CheckShards
     @Override
     protected boolean isSufficient(Id from, CheckStatusOk ok)
     {
-        return ((CheckStatusOkFull)ok).sufficientFor(route()).compareTo(sufficient) >= 0;
+        KeyRanges rangesForNode = topologies().computeRangesForNode(from);
+        PartialRoute scope = this.route.slice(rangesForNode);
+        return isSufficient(scope, ok);
     }
 
     @Override
-    protected void onDone(Done done, Throwable failure)
+    protected boolean isSufficient(CheckStatusOk ok)
     {
+        return isSufficient(route, ok);
+    }
+
+    protected boolean isSufficient(AbstractRoute scope, CheckStatusOk ok)
+    {
+        return ((CheckStatusOkFull)ok).sufficientFor(scope).compareTo(sufficient) >= 0;
+    }
+
+    @Override
+    protected void onDone(Success success, Throwable failure)
+    {
+        Preconditions.checkState((success == null) != (failure == null));
         if (failure != null)
         {
             callback.accept(null, failure);
         }
-        else if (merged == null || merged.saveStatus == NotWitnessed)
-        {
-            callback.accept(CheckStatusOkFull.NOT_WITNESSED, null);
-        }
         else
         {
-            new OnDone().start();
+            if (success == Success.Success)
+                Preconditions.checkState(isSufficient(merged));
+
+            if (merged.saveStatus == NotWitnessed)
+                callback.accept(CheckStatusOkFull.NOT_WITNESSED, null);
+            else
+                new OnDone().start();
         }
     }
 

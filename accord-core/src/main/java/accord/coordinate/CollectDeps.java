@@ -17,6 +17,9 @@ import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
+import static accord.coordinate.tracking.RequestStatus.Failed;
+import static accord.coordinate.tracking.RequestStatus.Success;
+
 class CollectDeps implements Callback<GetDepsOk>
 {
     final Node node;
@@ -57,14 +60,14 @@ class CollectDeps implements Callback<GetDepsOk>
             return;
 
         oks.add(ok);
-        if (tracker.success(from))
+        if (tracker.recordSuccess(from) == Success)
             onQuorum();
     }
 
     @Override
     public void onFailure(Id from, Throwable failure)
     {
-        if (tracker.failure(from))
+        if (tracker.recordFailure(from) == Failed)
         {
             isDone = true;
             callback.accept(null, new Timeout(txnId, route.homeKey));

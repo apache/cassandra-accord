@@ -194,6 +194,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
         }
         else if (failure != null)
         {
+            // TODO (soon): test
             node.reply(replyTo, replyContext, ReadNack.Error);
             data = null;
             node.agent().onUncaughtException(failure); // TODO: probably a better way to handle this, as might not be uncaught

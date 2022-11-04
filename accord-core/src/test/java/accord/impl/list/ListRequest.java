@@ -61,14 +61,14 @@ public class ListRequest implements Request
         }
 
         @Override
-        protected Action check(Id from, CheckStatusOk ok)
+        protected Action checkSufficient(Id from, CheckStatusOk ok)
         {
             ++count;
-            return ok.saveStatus.hasBeen(PreApplied) ? Action.Accept : Action.Reject;
+            return ok.saveStatus.hasBeen(PreApplied) ? Action.Approve : Action.Reject;
         }
 
         @Override
-        protected void onDone(Done done, Throwable failure)
+        protected void onDone(CheckShards.Success done, Throwable failure)
         {
             if (failure != null) callback.accept(null, failure);
             else if (merged.saveStatus.hasBeen(Status.Invalidated)) callback.accept(Outcome.Invalidated, null);
@@ -77,7 +77,7 @@ public class ListRequest implements Request
         }
 
         @Override
-        protected boolean isSufficient(Id from, CheckStatusOk ok)
+        protected boolean isSufficient(CheckStatusOk ok)
         {
             throw new UnsupportedOperationException();
         }

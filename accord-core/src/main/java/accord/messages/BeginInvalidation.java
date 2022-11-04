@@ -40,7 +40,7 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
         if (!command.preacceptInvalidate(ballot))
             return new InvalidateNack(command.promised(), command.homeKey());
 
-        return new InvalidateOk(command.status(), command.route(), command.homeKey());
+        return new InvalidateOk(command.saveStatus(), command.route(), command.homeKey());
     }
 
     @Override
@@ -83,11 +83,11 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
 
     public static class InvalidateOk implements InvalidateReply
     {
-        public final Status status;
+        public final SaveStatus status;
         public final @Nullable AbstractRoute route;
         public final @Nullable RoutingKey homeKey;
 
-        public InvalidateOk(Status status, @Nullable AbstractRoute route, @Nullable RoutingKey homeKey)
+        public InvalidateOk(SaveStatus status, @Nullable AbstractRoute route, @Nullable RoutingKey homeKey)
         {
             this.status = status;
             this.route = route;

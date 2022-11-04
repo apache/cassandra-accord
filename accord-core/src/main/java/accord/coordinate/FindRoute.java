@@ -51,15 +51,16 @@ public class FindRoute extends CheckShards
     }
 
     @Override
-    protected boolean isSufficient(Id from, CheckStatusOk ok)
+    protected boolean isSufficient(CheckStatusOk ok)
     {
         return ok.route instanceof Route;
     }
 
     @Override
-    protected void onDone(Done done, Throwable failure)
+    protected void onDone(Success success, Throwable failure)
     {
         if (failure != null) callback.accept(null, failure);
-        else callback.accept(merged == null || merged.route == null ? null : new Result(merged), null);
+        else if (success == Success.Success) callback.accept(new Result(merged), null);
+        else callback.accept(null, null);
     }
 }

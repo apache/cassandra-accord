@@ -68,6 +68,7 @@ public class PreAcceptTest
                         new TestAgent(),
                         new Random(),
                         scheduler,
+                        SizeOfIntersectionSorter.SUPPLIER,
                         SimpleProgressLog::new,
                         InMemoryCommandStores.Synchronized::new);
     }

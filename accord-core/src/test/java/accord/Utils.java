@@ -18,6 +18,8 @@
 
 package accord;
 
+import accord.api.TopologySorter;
+import accord.impl.SizeOfIntersectionSorter;
 import accord.primitives.KeyRange;
 import accord.local.Node;
 import accord.impl.mock.MockStore;
@@ -109,6 +111,6 @@ public class Utils
 
     public static Topologies topologies(Topology... topologies)
     {
-        return new Topologies.Multi(topologies);
+        return new Topologies.Multi(SizeOfIntersectionSorter.SUPPLIER, topologies);
     }
 }
