@@ -10,6 +10,7 @@ import accord.utils.MapReduceConsume;
 import java.util.function.Function;
 import java.util.stream.IntStream;
 
+// TODO (soon): introduce new CommandStores that mimics asynchrony by integrating with Cluster scheduling for List workload
 public class SyncCommandStores extends CommandStores<SyncCommandStores.SyncCommandStore>
 {
     public interface SafeSyncCommandStore extends SafeCommandStore

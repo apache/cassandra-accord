@@ -1,6 +1,5 @@
 package accord.coordinate;
 
-import java.util.Set;
 import java.util.function.BiConsumer;
 
 import accord.local.Status.Known;
@@ -59,13 +58,26 @@ public class RecoverWithRoute extends CheckShards
     }
 
     @Override
-    protected void contact(Set<Id> nodes)
+    public void contact(Id to)
     {
-        node.send(nodes, to -> new CheckStatus(to, tracker.topologies(), txnId, route, IncludeInfo.All), this);
+        node.send(to, new CheckStatus(to, topologies(), txnId, route, IncludeInfo.All), this);
     }
 
     @Override
     protected boolean isSufficient(Id from, CheckStatusOk ok)
+    {
+        KeyRanges rangesForNode = topologies().forEpoch(txnId.epoch).rangesForNode(from);
+        PartialRoute route = this.route.slice(rangesForNode);
+        return isSufficient(route, ok);
+    }
+
+    @Override
+    protected boolean isSufficient(CheckStatusOk ok)
+    {
+        return isSufficient(route, merged);
+    }
+
+    protected boolean isSufficient(AbstractRoute route, CheckStatusOk ok)
     {
         CheckStatusOkFull full = (CheckStatusOkFull)ok;
         Known sufficientTo = full.sufficientFor(route);
@@ -75,14 +87,12 @@ public class RecoverWithRoute extends CheckShards
         if (sufficientTo == Known.Invalidation)
             return true;
 
-        KeyRanges rangesForNode = tracker.topologies().forEpoch(txnId.epoch).rangesForNode(from);
-        PartialRoute route = this.route.slice(rangesForNode);
         Preconditions.checkState(full.partialTxn.covers(route));
         return true;
     }
 
     @Override
-    protected void onDone(Done done, Throwable failure)
+    protected void onDone(Success success, Throwable failure)
     {
         if (failure != null)
         {

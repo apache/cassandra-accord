@@ -82,6 +82,11 @@ public class Shard
         return (f + electorate)/2 + 1;
     }
 
+    public boolean rejectsFastPath(int rejectCount)
+    {
+        return rejectCount > fastPathElectorate.size() - fastPathQuorumSize;
+    }
+
     static int slowPathQuorumSize(int replicas)
     {
         return replicas - maxToleratedFailures(replicas);

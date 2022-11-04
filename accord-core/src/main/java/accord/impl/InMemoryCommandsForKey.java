@@ -105,6 +105,7 @@ public class InMemoryCommandsForKey extends CommandsForKey
         }
     }
 
+    // TODO (now): add validation that anything inserted into *committedBy* has everything prior in its dependencies
     private final Key key;
     private final InMemoryCommandTimeseries<TxnIdWithExecuteAt> uncommitted = new InMemoryCommandTimeseries<>(cmd -> new TxnIdWithExecuteAt(cmd.txnId(), cmd.executeAt()));
     private final InMemoryCommandTimeseries<TxnId> committedById = new InMemoryCommandTimeseries<>(Command::txnId);

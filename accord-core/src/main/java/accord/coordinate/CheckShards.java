@@ -1,7 +1,5 @@
 package accord.coordinate;
 
-import java.util.Set;
-
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.CheckStatus;
@@ -16,7 +14,7 @@ import accord.topology.Topologies;
  * A result of null indicates the transaction is globally persistent
  * A result of CheckStatusOk indicates the maximum status found for the transaction, which may be used to assess progress
  */
-public abstract class CheckShards extends QuorumReadCoordinator<CheckStatusReply>
+public abstract class CheckShards extends ReadCoordinator<CheckStatusReply>
 {
     final RoutingKeys contactKeys;
 
@@ -44,23 +42,21 @@ public abstract class CheckShards extends QuorumReadCoordinator<CheckStatusReply
     }
 
     @Override
-    protected void contact(Set<Id> nodes)
+    protected void contact(Id id)
     {
-        node.send(nodes, new CheckStatus(txnId, contactKeys, txnId.epoch, untilRemoteEpoch, includeInfo), this);
+        node.send(id, new CheckStatus(txnId, contactKeys, txnId.epoch, untilRemoteEpoch, includeInfo), this);
     }
 
-    protected abstract boolean isSufficient(Id from, CheckStatusOk ok);
+    protected boolean isSufficient(Id from, CheckStatusOk ok) { return isSufficient(ok); }
+    protected abstract boolean isSufficient(CheckStatusOk ok);
 
-    protected Action check(Id from, CheckStatusOk ok)
+    protected Action checkSufficient(Id from, CheckStatusOk ok)
     {
         if (isSufficient(from, ok))
-            return Action.Accept;
+            return Action.Approve;
 
-        return Action.AcceptQuorum;
+        return Action.ApproveIfQuorum;
     }
-
-    @Override
-    protected abstract void onDone(Done done, Throwable failure);
 
     @Override
     protected Action process(Id from, CheckStatusReply reply)
@@ -72,7 +68,7 @@ public abstract class CheckShards extends QuorumReadCoordinator<CheckStatusReply
             if (merged == null) merged = ok;
             else merged = merged.merge(ok);
 
-            return check(from, ok);
+            return checkSufficient(from, ok);
         }
         else
         {

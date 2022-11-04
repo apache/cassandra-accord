@@ -46,7 +46,7 @@ import accord.primitives.*;
  *
  *  - Non-home shards may also be informed of transactions that are blocking the progress of other transactions.
  *    If the {@code waitingOn} transaction that is blocking progress is uncommitted it is required that the progress
- *    log invoke {@link CheckOn#checkOnUncommitted} for the transaction if no {@link #committed} is witnessed.
+ *    log invoke {@link accord.coordinate.FetchData#fetch} for the transaction if no {@link #committed} is witnessed.
  *
  *  - Members of the home shard will be informed of a transaction to monitor by the invocation of {@link #preaccepted} or
  *    {@link #accepted}. If this is not followed closely by {@link #committed}, {@link accord.coordinate.MaybeRecover} should

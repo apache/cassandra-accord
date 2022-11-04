@@ -22,7 +22,6 @@ import accord.local.Status.ExecutionStatus;
 import accord.local.Status.Known;
 import accord.local.Status.Phase;
 
-import static accord.local.Status.ExecutionStatus.*;
 import static accord.local.Status.Known.*;
 
 /**

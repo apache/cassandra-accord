@@ -34,10 +34,10 @@ import accord.local.Node.Id;
 import accord.messages.Commit;
 import accord.topology.Topology;
 
-import static accord.coordinate.AnyReadCoordinator.Action.Accept;
+import static accord.coordinate.ReadCoordinator.Action.Approve;
 import static accord.messages.Commit.Kind.Maximal;
 
-class Execute extends AnyReadCoordinator<ReadReply>
+class Execute extends ReadCoordinator<ReadReply>
 {
     final Txn txn;
     final Keys readScope;
@@ -78,26 +78,26 @@ class Execute extends AnyReadCoordinator<ReadReply>
     }
 
     @Override
-    void start(Set<Id> readSet)
+    protected void start(Set<Id> readSet)
     {
         Commit.commitMinimalAndRead(node, applyTo, txnId, txn, route, readScope, executeAt, deps, readSet, this);
     }
 
     @Override
-    void contact(Set<Id> nodes)
+    public void contact(Id to)
     {
-        node.send(nodes, to -> new ReadData(to, tracker.topologies(), txnId, readScope, executeAt), this);
+        node.send(to, new ReadData(to, topologies(), txnId, readScope, executeAt), this);
     }
 
     @Override
-    Action process(Id from, ReadReply reply)
+    protected Action process(Id from, ReadReply reply)
     {
         if (reply.isOk())
         {
             Data next = ((ReadOk) reply).data;
             if (next != null)
                 data = data == null ? next : data.merge(next);
-            return Accept;
+            return Approve;
         }
 
         ReadNack nack = (ReadNack) reply;
@@ -120,19 +120,21 @@ class Execute extends AnyReadCoordinator<ReadReply>
         }
     }
 
-    @Override
-    void onSuccess()
-    {
-        Result result = txn.result(txnId, data);
-        callback.accept(result, null);
-        // avoid re-calculating topologies if it is unchanged
-        Topologies sendTo = txnId.epoch == executeAt.epoch ? applyTo : node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
-        Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, data), result);
-    }
 
     @Override
-    public void onFailure(Throwable failure)
+    protected void onDone(Success success, Throwable failure)
     {
-        callback.accept(null, failure);
+        if (failure == null)
+        {
+            Result result = txn.result(txnId, data);
+            callback.accept(result, null);
+            // avoid re-calculating topologies if it is unchanged
+            Topologies sendTo = txnId.epoch == executeAt.epoch ? applyTo : node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
+            Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, data), result);
+        }
+        else
+        {
+            callback.accept(null, failure);
+        }
     }
 }

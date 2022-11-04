@@ -40,6 +40,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
 
+import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.local.Status.Durability.Durable;
 import static accord.local.Status.Durability.Universal;
 
@@ -90,7 +91,7 @@ public class Persist implements Callback<ApplyReply>
             case Redundant:
             case Applied:
                 persistedOn.add(from);
-                if (tracker.success(from))
+                if (tracker.recordSuccess(from) == Success)
                 {
                     if (!isDone)
                     {

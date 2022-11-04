@@ -18,6 +18,7 @@
 
 package accord.messages;
 
+import accord.api.TopologySorter;
 import accord.primitives.KeyRange;
 import accord.primitives.Route;
 import accord.topology.Topologies;
@@ -43,7 +44,7 @@ public class TxnRequestScopeTest
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(3, 4, 5), idSet(4, 5)));
 
-        Topologies.Multi topologies = new Topologies.Multi();
+        Topologies.Multi topologies = new Topologies.Multi((TopologySorter.StaticSorter)(a, b, s)->0);
         topologies.add(topology2);
         topologies.add(topology1);
 
@@ -74,7 +75,7 @@ public class TxnRequestScopeTest
                                       shard(range1, idList(4, 5, 6), idSet(4, 5)),
                                       shard(range2, idList(1, 2, 3), idSet(1, 2)) );
 
-        Topologies.Multi topologies = new Topologies.Multi();
+        Topologies.Multi topologies = new Topologies.Multi((TopologySorter.StaticSorter)(a,b,s)->0);
         topologies.add(topology2);
         topologies.add(topology1);
 

@@ -100,14 +100,14 @@ public class EpochSync implements Runnable
 
         public CommandSync(Node node, AbstractRoute route, SyncCommitted message, Topology topology)
         {
-            this.tracker = new QuorumTracker(new Single(topology.forKeys(route), false));
+            this.tracker = new QuorumTracker(new Single(node.topology().sorter(), topology.forKeys(route)));
             node.send(tracker.nodes(), message, this);
         }
 
         @Override
         public synchronized void onSuccess(Node.Id from, SimpleReply reply)
         {
-            tracker.success(from);
+            tracker.recordSuccess(from);
             if (tracker.hasReachedQuorum())
                 trySuccess(null);
         }
@@ -115,7 +115,7 @@ public class EpochSync implements Runnable
         @Override
         public synchronized void onFailure(Node.Id from, Throwable failure)
         {
-            tracker.failure(from);
+            tracker.recordFailure(from);
             if (tracker.hasFailed())
                 tryFailure(failure);
         }

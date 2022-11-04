@@ -25,14 +25,12 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 
+import accord.coordinate.tracking.*;
 import accord.primitives.*;
 import accord.messages.Commit;
 import com.google.common.base.Preconditions;
 
 import accord.api.Result;
-import accord.coordinate.tracking.FastPathTracker;
-import accord.coordinate.tracking.QuorumTracker;
-import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.messages.Callback;
 import accord.local.Node;
@@ -49,8 +47,9 @@ import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.Promise;
 
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
+import static accord.coordinate.tracking.RequestStatus.Failed;
+import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.messages.BeginRecovery.RecoverOk.maxAcceptedOrLater;
-import static accord.messages.Commit.Invalidate.commitInvalidate;
 
 // TODO: rename to Recover (verb); rename Recover message to not clash
 public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throwable>
@@ -65,7 +64,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         AwaitCommit(Node node, TxnId txnId, RoutingKeys someKeys)
         {
             Topology topology = node.topology().globalForEpoch(txnId.epoch).forKeys(someKeys);
-            this.tracker = new QuorumTracker(topology);
+            this.tracker = new QuorumTracker(new Topologies.Single(node.topology().sorter(), topology));
             node.send(topology.nodes(), to -> new WaitOnCommit(to, topology, txnId, someKeys), this);
         }
 
@@ -74,7 +73,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         {
             if (isDone()) return;
 
-            if (tracker.success(from))
+            if (tracker.recordSuccess(from) == Success)
                 trySuccess(null);
         }
 
@@ -83,7 +82,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         {
             if (isDone()) return;
 
-            if (tracker.failure(from))
+            if (tracker.recordFailure(from) == Failed)
                 tryFailure(new Timeout(txnId, route.homeKey));
         }
 
@@ -113,43 +112,17 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         return future;
     }
 
-    // TODO: not sure it makes sense to extend FastPathTracker, as intent here is a bit different
-    static class ShardTracker extends FastPathTracker.FastPathShardTracker
-    {
-        int responsesFromElectorate;
-        public ShardTracker(Shard shard)
-        {
-            super(shard);
-        }
-
-        @Override
-        public boolean includeInFastPath(Node.Id node, boolean withFastPathTimestamp)
-        {
-            if (!shard.fastPathElectorate.contains(node))
-                return false;
-
-            ++responsesFromElectorate;
-            return withFastPathTimestamp;
-        }
-
-        @Override
-        public boolean hasMetFastPathCriteria()
-        {
-            int fastPathRejections = responsesFromElectorate - fastPathAccepts;
-            return fastPathRejections <= shard.fastPathElectorate.size() - shard.fastPathQuorumSize;
-        }
-    }
-
-    final Node node;
-    final Ballot ballot;
-    final TxnId txnId;
-    final Txn txn;
-    final Route route;
-    final BiConsumer<Outcome, Throwable> callback;
+    private final Node node;
+    private final Ballot ballot;
+    private final TxnId txnId;
+    private final Txn txn;
+    private final Route route;
+    private final BiConsumer<Outcome, Throwable> callback;
     private boolean isDone;
 
-    final List<RecoverOk> recoverOks = new ArrayList<>();
-    final FastPathTracker<ShardTracker> tracker;
+    private final List<RecoverOk> recoverOks = new ArrayList<>();
+    private final RecoveryTracker tracker;
+    private boolean isBallotPromised;
 
     private Recover(Node node, Ballot ballot, TxnId txnId, Txn txn, Route route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
     {
@@ -160,7 +133,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         this.route = route;
         this.callback = callback;
         assert topologies.oldestEpoch() == topologies.currentEpoch() && topologies.currentEpoch() == txnId.epoch;
-        this.tracker = new FastPathTracker<>(topologies, ShardTracker[]::new, ShardTracker::new);
+        this.tracker = new RecoveryTracker(topologies);
     }
 
     @Override
@@ -203,7 +176,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
     @Override
     public synchronized void onSuccess(Id from, RecoverReply reply)
     {
-        if (isDone || tracker.hasReachedQuorum())
+        if (isDone || isBallotPromised)
             return;
 
         if (!reply.isOk())
@@ -215,14 +188,15 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         RecoverOk ok = (RecoverOk) reply;
         recoverOks.add(ok);
         boolean fastPath = ok.executeAt.compareTo(txnId) == 0;
-        tracker.recordSuccess(from, fastPath);
-
-        if (tracker.hasReachedQuorum())
+        if (tracker.recordSuccess(from, fastPath) == Success)
             recover();
     }
 
     private void recover()
     {
+        Preconditions.checkState(!isBallotPromised);
+        isBallotPromised = true;
+
         // first look for the most recent Accept; if present, go straight to proposing it again
         RecoverOk acceptOrCommit = maxAcceptedOrLater(recoverOks);
         if (acceptOrCommit != null)
@@ -280,19 +254,10 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             }
         }
 
-        if (!tracker.hasMetFastPathCriteria())
+        if (tracker.rejectsFastPath() || recoverOks.stream().anyMatch(ok -> ok.rejectsFastPath))
         {
             invalidate();
             return;
-        }
-
-        for (RecoverOk ok : recoverOks)
-        {
-            if (ok.rejectsFastPath)
-            {
-                invalidate();
-                return;
-            }
         }
 
         // should all be PreAccept
@@ -356,7 +321,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         if (isDone)
             return;
 
-        if (tracker.failure(from))
+        if (tracker.recordFailure(from) == Failed)
             accept(null, new Timeout(txnId, route.homeKey));
     }
 

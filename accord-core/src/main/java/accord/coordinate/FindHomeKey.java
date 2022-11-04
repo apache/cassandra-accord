@@ -30,13 +30,13 @@ public class FindHomeKey extends CheckShards
     }
 
     @Override
-    protected boolean isSufficient(Id from, CheckStatusOk ok)
+    protected boolean isSufficient(CheckStatusOk ok)
     {
         return ok.homeKey != null;
     }
 
     @Override
-    protected void onDone(Done done, Throwable failure)
+    protected void onDone(Success success, Throwable failure)
     {
         if (failure != null) callback.accept(null, failure);
         else callback.accept(merged == null ? null : merged.homeKey, null);

@@ -32,17 +32,17 @@ public class TopologyFactory
 {
     public final int rf;
     // TODO: convert to KeyRanges
-    final KeyRange[] ranges;
+    public final KeyRange[] shardRanges;
 
-    public TopologyFactory(int rf, KeyRange... ranges)
+    public TopologyFactory(int rf, KeyRange... shardRanges)
     {
         this.rf = rf;
-        this.ranges = ranges;
+        this.shardRanges = shardRanges;
     }
 
     public Topology toTopology(Node.Id[] cluster)
     {
-        return TopologyUtils.initialTopology(cluster, KeyRanges.ofSortedAndDeoverlapped(ranges), rf);
+        return TopologyUtils.initialTopology(cluster, KeyRanges.ofSortedAndDeoverlapped(shardRanges), rf);
     }
 
     public Topology toTopology(List<Node.Id> cluster)

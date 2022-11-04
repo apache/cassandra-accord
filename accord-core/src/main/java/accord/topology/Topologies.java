@@ -18,18 +18,19 @@
 
 package accord.topology;
 
+import accord.api.TopologySorter;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.primitives.KeyRanges;
 import accord.utils.IndexedConsumer;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Sets;
 
 import java.util.*;
-import java.util.function.Consumer;
 
 // TODO: we can probably most efficiently create a new synthetic Topology that applies for a range of epochs
 //       and permit Topology to implement it, so that
-public interface Topologies
+public interface Topologies extends TopologySorter
 {
     Topology current();
 
@@ -41,8 +42,6 @@ public interface Topologies
     {
         return current().epoch;
     }
-
-    boolean fastPathPermitted();
 
     // topologies are stored in reverse epoch order, with the highest epoch at idx 0
     Topology get(int i);
@@ -57,24 +56,16 @@ public interface Topologies
 
     Set<Node.Id> copyOfNodes();
 
+    int estimateUniqueNodes();
+
     KeyRanges computeRangesForNode(Id node);
+
+    int maxShardsPerEpoch();
 
     default void forEach(IndexedConsumer<Topology> consumer)
     {
         for (int i=0, mi=size(); i<mi; i++)
             consumer.accept(i, get(i));
-    }
-
-    default void forEachShard(Consumer<Shard> consumer)
-    {
-        for (int i=0, mi=size(); i<mi; i++)
-        {
-            Topology topology = get(i);
-            for (int j=0, mj=topology.size(); j<mj; j++)
-            {
-                consumer.accept(topology.get(j));
-            }
-        }
     }
 
     static boolean equals(Topologies t, Object o)
@@ -122,13 +113,19 @@ public interface Topologies
 
     class Single implements Topologies
     {
+        private final TopologySorter sorter;
         private final Topology topology;
-        private final boolean fastPathPermitted;
 
-        public Single(Topology topology, boolean fastPathPermitted)
+        public Single(TopologySorter.Supplier sorter, Topology topology)
         {
             this.topology = topology;
-            this.fastPathPermitted = fastPathPermitted;
+            this.sorter = sorter.get(this);
+        }
+
+        public Single(TopologySorter sorter, Topology topology)
+        {
+            this.topology = topology;
+            this.sorter = sorter;
         }
 
         @Override
@@ -149,12 +146,6 @@ public interface Topologies
         public long oldestEpoch()
         {
             return currentEpoch();
-        }
-
-        @Override
-        public boolean fastPathPermitted()
-        {
-            return fastPathPermitted;
         }
 
         @Override
@@ -196,9 +187,21 @@ public interface Topologies
         }
 
         @Override
+        public int estimateUniqueNodes()
+        {
+            return topology.nodes().size();
+        }
+
+        @Override
         public KeyRanges computeRangesForNode(Id node)
         {
             return topology.rangesForNode(node);
+        }
+
+        @Override
+        public int maxShardsPerEpoch()
+        {
+            return topology.size();
         }
 
         @Override
@@ -218,20 +221,33 @@ public interface Topologies
         {
             return Topologies.toString(this);
         }
+
+        @Override
+        public int compare(Id node1, Id node2, ShardSelection shards)
+        {
+            return sorter.compare(node1, node2, shards);
+        }
     }
 
     class Multi implements Topologies
     {
+        private final TopologySorter sorter;
         private final List<Topology> topologies;
+        private final int maxShardsPerEpoch;
 
-        public Multi(int initialCapacity)
+        public Multi(TopologySorter.Supplier sorter, int initialCapacity)
         {
             this.topologies = new ArrayList<>(initialCapacity);
+            this.sorter = sorter.get(this);
+            int maxShardsPerEpoch = 0;
+            for (int i = 0 ; i < topologies.size() ; ++i)
+                maxShardsPerEpoch = Math.max(maxShardsPerEpoch, topologies.get(i).size());
+            this.maxShardsPerEpoch = maxShardsPerEpoch;
         }
 
-        public Multi(Topology... topologies)
+        public Multi(TopologySorter.Supplier sorter, Topology... topologies)
         {
-            this(topologies.length);
+            this(sorter, topologies.length);
             for (Topology topology : topologies)
                 add(topology);
         }
@@ -255,15 +271,6 @@ public interface Topologies
         public long oldestEpoch()
         {
             return get(size() - 1).epoch;
-        }
-
-        @Override
-        public boolean fastPathPermitted()
-        {
-            // TODO (soon): this is overly restrictive: we can still take the fast-path during topology movements,
-            //              just not for transactions started across the initiation of a topology movement (i.e.
-            //              where the epoch changes while the transaction is being pre-accepted)
-            return false;
         }
 
         @Override
@@ -299,9 +306,17 @@ public interface Topologies
         }
 
         @Override
+        public int estimateUniqueNodes()
+        {
+            // just guess at one additional node per epoch, and at most twice as many nodes
+            int estSize = get(0).nodes().size();
+            return Math.min(estSize * 2, estSize + size() - 1);
+        }
+
+        @Override
         public Set<Node.Id> nodes()
         {
-            Set<Node.Id> result = new HashSet<>();
+            Set<Node.Id> result = Sets.newHashSetWithExpectedSize(estimateUniqueNodes());
             for (int i=0,mi=size(); i<mi; i++)
                 result.addAll(get(i).nodes());
             return result;
@@ -320,6 +335,12 @@ public interface Topologies
             for (int i = 0, mi = size() ; i < mi ; i++)
                 ranges = ranges.union(get(i).rangesForNode(node));
             return ranges;
+        }
+
+        @Override
+        public int maxShardsPerEpoch()
+        {
+            return maxShardsPerEpoch;
         }
 
         public void add(Topology topology)
@@ -344,6 +365,12 @@ public interface Topologies
         public String toString()
         {
             return Topologies.toString(this);
+        }
+
+        @Override
+        public int compare(Id node1, Id node2, ShardSelection shards)
+        {
+            return sorter.compare(node1, node2, shards);
         }
     }
 }

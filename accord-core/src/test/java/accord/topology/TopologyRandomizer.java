@@ -27,28 +27,31 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
-import java.util.function.BiFunction;
-import java.util.function.Function;
-import java.util.function.Supplier;
+import java.util.function.*;
 
+// TODO: add change replication factor
 public class TopologyRandomizer
 {
     private static final Logger logger = LoggerFactory.getLogger(TopologyRandomizer.class);
     private final Random random;
-    private final Function<Node.Id, Node> lookup;
+    private final BiConsumer<Node.Id, Topology> notifier;
     private final List<Topology> epochs = new ArrayList<>();
     private final Map<Node.Id, KeyRanges> previouslyReplicated = new HashMap<>();
     private final TopologyUpdates topologyUpdates;
 
     public TopologyRandomizer(Supplier<Random> randomSupplier, Topology initialTopology, TopologyUpdates topologyUpdates, Function<Node.Id, Node> lookup)
     {
+        this(randomSupplier, initialTopology, topologyUpdates, (id, topology) -> topologyUpdates.notify(lookup.apply(id), topology.nodes(), topology));
+    }
+    public TopologyRandomizer(Supplier<Random> randomSupplier, Topology initialTopology, TopologyUpdates topologyUpdates, BiConsumer<Node.Id, Topology> notifier)
+    {
         this.random = randomSupplier.get();
         this.topologyUpdates = topologyUpdates;
-        this.lookup = lookup;
         this.epochs.add(Topology.EMPTY);
         this.epochs.add(initialTopology);
         for (Node.Id node : initialTopology.nodes())
             previouslyReplicated.put(node, initialTopology.rangesForNode(node));
+        this.notifier = notifier;
     }
 
     private enum UpdateType
@@ -209,13 +212,17 @@ public class TopologyRandomizer
         return false;
     }
 
-    public synchronized void maybeUpdateTopology()
-    {
+    public synchronized void maybeUpdateTopology() {
         // if we don't limit the number of pending topology changes in flight,
         // the topology randomizer will keep the burn test busy indefinitely
         if (topologyUpdates.pendingTopologies() > 5 || random.nextInt(200) != 0)
             return;
 
+        updateTopology();
+    }
+
+    public synchronized Topology updateTopology()
+    {
         Topology current = epochs.get(epochs.size() - 1);
         Shard[] shards = current.unsafeGetShards().clone();
         int mutations = random.nextInt(current.size());
@@ -231,7 +238,7 @@ public class TopologyRandomizer
         //  In the meantime, the logic needed to support acquiring ranges that we previously replicated is pretty
         //  convoluted without the ability to jettison epochs.
         if (reassignsRanges(current, shards, previouslyReplicated))
-            return;
+            return null;
 
         Map<Node.Id, KeyRanges> nextAdditions = getAdditions(current, nextTopology);
         for (Map.Entry<Node.Id, KeyRanges> entry : nextAdditions.entrySet())
@@ -248,7 +255,7 @@ public class TopologyRandomizer
         List<Node.Id> nodes = new ArrayList<>(nextTopology.nodes());
 
         int originatorIdx = random.nextInt(nodes.size());
-        Node originator = lookup.apply(nodes.remove(originatorIdx));
-        topologyUpdates.notify(originator, nextTopology.nodes(), nextTopology);
+        notifier.accept(nodes.remove(originatorIdx), nextTopology);
+        return nextTopology;
     }
 }

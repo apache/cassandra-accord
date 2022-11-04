@@ -146,7 +146,7 @@ public class CommandTest
     {
         return new Node(id, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
                         new MockCluster.Clock(100), () -> storeSupport.data, new TestAgent(), new Random(), null,
-                        ignore -> ignore2 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new);
+                        SizeOfIntersectionSorter.SUPPLIER, ignore -> ignore2 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new);
     }
 
     @Test

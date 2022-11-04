@@ -21,10 +21,7 @@ package accord.impl.mock;
 import accord.NetworkFilter;
 import accord.api.MessageSink;
 import accord.coordinate.Timeout;
-import accord.impl.InMemoryCommandStores;
-import accord.impl.TopologyUtils;
-import accord.local.CommandStores;
-import accord.impl.SimpleProgressLog;
+import accord.impl.*;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.primitives.KeyRanges;
@@ -34,7 +31,6 @@ import accord.primitives.TxnId;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
-import accord.impl.TestAgent;
 import accord.topology.Topology;
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
@@ -111,6 +107,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                         new TestAgent(),
                         new Random(random.nextLong()),
                         new ThreadPoolScheduler(),
+                        SizeOfIntersectionSorter.SUPPLIER,
                         SimpleProgressLog::new,
                         InMemoryCommandStores.SingleThread::new);
     }

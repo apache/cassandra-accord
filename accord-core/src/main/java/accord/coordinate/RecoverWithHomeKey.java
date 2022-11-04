@@ -4,7 +4,6 @@ import java.util.function.BiConsumer;
 
 import accord.api.RoutingKey;
 import accord.local.Node;
-import accord.local.Node.Id;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
 import accord.primitives.Route;
@@ -41,13 +40,13 @@ public class RecoverWithHomeKey extends CheckShards implements BiConsumer<Object
     }
 
     @Override
-    protected boolean isSufficient(Id from, CheckStatusOk ok)
+    protected boolean isSufficient(CheckStatusOk ok)
     {
         return ok.route != null;
     }
 
     @Override
-    protected void onDone(Done done, Throwable fail)
+    protected void onDone(Success success, Throwable fail)
     {
         if (fail != null)
         {
@@ -55,19 +54,16 @@ public class RecoverWithHomeKey extends CheckShards implements BiConsumer<Object
         }
         else if (merged == null || !(merged.route instanceof Route))
         {
-            switch (done)
+            switch (success)
             {
                 default: throw new IllegalStateException();
-                case Exhausted:
-                    callback.accept(null, new Timeout(txnId, homeKey));
-                    return;
                 case Success:
                     // home shard must know full Route. Our success criteria is that the response contained a route,
                     // so reaching here without a response or one without a full Route is a bug.
                     callback.accept(null, new IllegalStateException());
                     return;
-                case ReachedQuorum:
-                    Invalidate.invalidate(node, txnId, contactKeys, homeKey, callback);
+                case Quorum:
+                    Invalidate.invalidateIfNotAccepted(node, txnId, contactKeys, homeKey, callback);
             }
         }
         else
