@@ -40,6 +40,7 @@ import java.util.function.Consumer;
 
 import static accord.impl.InMemoryCommandStore.inMemory;
 import static accord.impl.mock.MockCluster.configService;
+import static accord.local.Status.Committed;
 import static accord.messages.SimpleReply.Ok;
 
 public class EpochSync implements Runnable
@@ -80,9 +81,9 @@ public class EpochSync implements Runnable
         @Override
         public void process(Node node, Node.Id from, ReplyContext replyContext)
         {
-            FetchData.fetch(Status.Known.ExecutionOrder, node, txnId, route, executeAt, epoch, (outcome, fail) -> {
+            FetchData.fetch(Committed.minKnown, node, txnId, route, executeAt, epoch, (outcome, fail) -> {
                 if (fail != null) process(node, from, replyContext);
-                else if (outcome.compareTo(Status.Known.ExecutionOrder) < 0) throw new IllegalStateException();
+                else if (!Committed.minKnown.isSatisfiedBy(outcome)) throw new IllegalStateException();
                 else node.reply(from, replyContext, Ok);
             });
         }

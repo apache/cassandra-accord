@@ -22,7 +22,6 @@ import accord.local.Node;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 
 import javax.annotation.Nonnull;
 
@@ -32,10 +31,9 @@ import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.*;
 
 public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathShardTracker, Node.Id>
 {
-    private static final ShardOutcome<FastPathTracker> NewFastPathSuccess = tracker -> {
-        --tracker.waitingOnShards;
+    private static final ShardOutcome<FastPathTracker> NewFastPathSuccess = (tracker, shardIndex) -> {
         --tracker.waitingOnFastPathSuccess;
-        return ShardOutcomes.Success;
+        return --tracker.waitingOnShards == 0 ? Success : NoChange;
     };
 
     public static class FastPathShardTracker extends ShardTracker
@@ -168,5 +166,20 @@ public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathSha
     public boolean hasFastPathAccepted()
     {
         return waitingOnFastPathSuccess == 0;
+    }
+
+    public boolean hasFailed()
+    {
+        return any(FastPathShardTracker::hasFailed);
+    }
+
+    public boolean hasInFlight()
+    {
+        return any(FastPathShardTracker::hasInFlight);
+    }
+
+    public boolean hasReachedQuorum()
+    {
+        return all(FastPathShardTracker::hasReachedQuorum);
     }
 }

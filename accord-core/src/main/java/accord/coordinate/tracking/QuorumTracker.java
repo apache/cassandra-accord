@@ -88,4 +88,19 @@ public class QuorumTracker extends AbstractTracker<QuorumTracker.QuorumShardTrac
     {
         return any(QuorumShardTracker::hasFailures);
     }
+
+    public boolean hasFailed()
+    {
+        return any(QuorumShardTracker::hasFailed);
+    }
+
+    public boolean hasInFlight()
+    {
+        return any(QuorumShardTracker::hasInFlight);
+    }
+
+    public boolean hasReachedQuorum()
+    {
+        return all(QuorumShardTracker::hasReachedQuorum);
+    }
 }

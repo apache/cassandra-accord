@@ -20,9 +20,9 @@ package accord.local;
 
 import accord.api.*;
 import accord.local.Status.Durability;
-import accord.local.Status.ExecutionStatus;
 import accord.local.Status.Known;
 import accord.primitives.*;
+import accord.primitives.Txn.Kind;
 import accord.primitives.Writes;
 import com.google.common.base.Preconditions;
 import org.apache.cassandra.utils.concurrent.Future;
@@ -35,10 +35,8 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-import static accord.local.Status.ExecutionStatus.Decided;
-import static accord.local.Status.ExecutionStatus.Done;
-import static accord.local.Status.Known.Definition;
-import static accord.local.Status.Known.Nothing;
+import static accord.local.Status.*;
+import static accord.local.Status.Known.*;
 import static accord.utils.Utils.listOf;
 
 import javax.annotation.Nonnull;
@@ -64,15 +62,6 @@ import static accord.local.Command.EnsureAction.Check;
 import static accord.local.Command.EnsureAction.Ignore;
 import static accord.local.Command.EnsureAction.Set;
 import static accord.local.Command.EnsureAction.TrySet;
-import static accord.local.Status.Accepted;
-import static accord.local.Status.AcceptedInvalidate;
-import static accord.local.Status.Applied;
-import static accord.local.Status.Committed;
-import static accord.local.Status.PreApplied;
-import static accord.local.Status.Invalidated;
-import static accord.local.Status.NotWitnessed;
-import static accord.local.Status.PreAccepted;
-import static accord.local.Status.ReadyToExecute;
 
 public abstract class Command implements CommandListener, BiConsumer<SafeCommandStore, CommandListener>, PreLoadContext
 {
@@ -81,21 +70,28 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     public abstract TxnId txnId();
 
     // TODO (now): pack this into TxnId
-    public abstract Txn.Kind kind();
+    public abstract Kind kind();
+    public abstract void setKind(Kind kind);
 
+    // TODO (now): should any of these calls be replaced by corresponding known() registers?
     public boolean hasBeen(Status status)
     {
         return status().hasBeen(status);
     }
 
-    public boolean hasBeen(Known phase)
+    public boolean has(Known known)
     {
-        return known().compareTo(phase) >= 0;
+        return known.isSatisfiedBy(saveStatus().known);
     }
 
-    public boolean hasBeen(ExecutionStatus phase)
+    public boolean has(Definition definition)
     {
-        return status().execution.compareTo(phase) >= 0;
+        return known().definition.compareTo(definition) >= 0;
+    }
+
+    public boolean has(Outcome outcome)
+    {
+        return known().outcome.compareTo(outcome) >= 0;
     }
 
     public boolean is(Status status)
@@ -137,12 +133,6 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     public abstract Ballot accepted();
     protected abstract void setAccepted(Ballot ballot);
 
-    public void saveRoute(SafeCommandStore safeStore, Route route)
-    {
-        setRoute(route);
-        updateHomeKey(safeStore, route.homeKey);
-    }
-
     public abstract Timestamp executeAt();
     protected abstract void setExecuteAt(Timestamp timestamp);
 
@@ -167,7 +157,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     public Status status() { return saveStatus().status; }
     protected void setStatus(Status status) { setSaveStatus(SaveStatus.get(status, known())); }
 
-    public abstract Known known();
+    public Known known() { return saveStatus().known; }
 
     public abstract Durability durability();
     public abstract void setDurability(Durability v);
@@ -177,23 +167,18 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     protected abstract void notifyListeners(SafeCommandStore safeStore);
 
     protected abstract void addWaitingOnCommit(TxnId txnId);
-    protected abstract boolean isWaitingOnCommit();
     protected abstract void removeWaitingOnCommit(TxnId txnId);
     protected abstract TxnId firstWaitingOnCommit();
 
     protected abstract void addWaitingOnApplyIfAbsent(TxnId txnId, Timestamp executeAt);
-    protected abstract boolean isWaitingOnApply();
+    protected abstract TxnId firstWaitingOnApply(@Nullable TxnId ifExecutesBefore);
+
     protected abstract void removeWaitingOn(TxnId txnId, Timestamp executeAt);
-    protected abstract TxnId firstWaitingOnApply();
+    protected abstract boolean isWaitingOnDependency();
 
     public boolean hasBeenWitnessed()
     {
         return partialTxn() != null;
-    }
-
-    public boolean isUnableToExecute()
-    {
-        return isWaitingOnCommit() || isWaitingOnApply();
     }
 
     @Override
@@ -212,7 +197,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     public void setDurability(SafeCommandStore safeStore, Durability durability, RoutingKey homeKey, @Nullable Timestamp executeAt)
     {
         updateHomeKey(safeStore, homeKey);
-        if (executeAt != null && hasBeen(Committed) && !this.executeAt().equals(executeAt))
+        if (executeAt != null && hasBeen(PreCommitted) && !this.executeAt().equals(executeAt))
             safeStore.agent().onInconsistentTimestamp(this, this.executeAt(), executeAt);
         setDurability(durability);
     }
@@ -224,19 +209,35 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
     public AcceptOutcome preaccept(SafeCommandStore safeStore, PartialTxn partialTxn, AbstractRoute route, @Nullable RoutingKey progressKey)
     {
-        if (promised().compareTo(Ballot.ZERO) > 0)
-            return AcceptOutcome.RejectedBallot;
-
-        return preacceptInternal(safeStore, partialTxn, route, progressKey);
+        return preacceptOrRecover(safeStore, partialTxn, route, progressKey, Ballot.ZERO);
     }
 
-    private AcceptOutcome preacceptInternal(SafeCommandStore safeStore, PartialTxn partialTxn, AbstractRoute route, @Nullable RoutingKey progressKey)
+    public AcceptOutcome recover(SafeCommandStore safeStore, PartialTxn partialTxn, AbstractRoute route, @Nullable RoutingKey progressKey, Ballot ballot)
     {
-        if (known() != Nothing)
+        return preacceptOrRecover(safeStore, partialTxn, route, progressKey, ballot);
+    }
+
+    private AcceptOutcome preacceptOrRecover(SafeCommandStore safeStore, PartialTxn partialTxn, AbstractRoute route, @Nullable RoutingKey progressKey, Ballot ballot)
+    {
+        int compareBallots = promised().compareTo(ballot);
+        if (compareBallots > 0)
+        {
+            logger.trace("{}: skipping preaccept - higher ballot witnessed ({})", txnId(), promised());
+            return AcceptOutcome.RejectedBallot;
+        }
+        else if (compareBallots < 0)
+        {
+            // save the new ballot as a promise
+            setPromised(ballot);
+        }
+
+        if (known().definition.isKnown())
         {
             Preconditions.checkState(status() == Invalidated || executeAt() != null);
-            logger.trace("{}: skipping preaccept - already preaccepted ({})", txnId(), status());
-            return AcceptOutcome.Redundant;
+            logger.trace("{}: skipping preaccept - already known ({})", txnId(), status());
+            // in case of Ballot.ZERO, we must either have a competing recovery coordinator or have late delivery of the
+            // preaccept; in the former case we should abandon coordination, and in the latter we have already completed
+            return ballot.equals(Ballot.ZERO) ? AcceptOutcome.Redundant : AcceptOutcome.Success;
         }
 
         KeyRanges coordinateRanges = coordinateRanges(safeStore);
@@ -250,7 +251,10 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             // unlike in the Accord paper, we partition shards within a node, so that to ensure a total order we must either:
             //  - use a global logical clock to issue new timestamps; or
             //  - assign each shard _and_ process a unique id, and use both as components of the timestamp
-            setExecuteAt(safeStore.preaccept(txnId, partialTxn.keys()));
+            // if we are performing recovery (i.e. non-zero ballot), do not permit a fast path decision as we want to
+            // invalidate any transactions that were not completed by their initial coordinator
+            if (ballot.equals(Ballot.ZERO)) setExecuteAt(safeStore.preaccept(txnId, partialTxn.keys()));
+            else setExecuteAt(safeStore.time().uniqueNow(txnId));
 
             if (status() == NotWitnessed)
                 setStatus(PreAccepted);
@@ -258,7 +262,8 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         }
         else
         {
-            setSaveStatus(SaveStatus.get(status(), Definition));
+            // TODO: in the case that we are pre-committed but had not been preaccepted/accepted, should we inform progressLog?
+            setSaveStatus(SaveStatus.enrich(saveStatus(), DefinitionOnly));
         }
         set(safeStore, KeyRanges.EMPTY, coordinateRanges, shard, route, partialTxn, Set, null, Ignore);
 
@@ -277,7 +282,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         return true;
     }
 
-    public AcceptOutcome accept(SafeCommandStore safeStore, Ballot ballot, PartialRoute route, Keys keys, @Nullable RoutingKey progressKey, Timestamp executeAt, PartialDeps partialDeps)
+    public AcceptOutcome accept(SafeCommandStore safeStore, Ballot ballot, Kind kind, PartialRoute route, Keys keys, @Nullable RoutingKey progressKey, Timestamp executeAt, PartialDeps partialDeps)
     {
         if (this.promised().compareTo(ballot) > 0)
         {
@@ -285,11 +290,14 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             return AcceptOutcome.RejectedBallot;
         }
 
-        if (hasBeen(Committed))
+        if (hasBeen(PreCommitted))
         {
             logger.trace("{}: skipping accept - already committed ({})", txnId(), status());
             return AcceptOutcome.Redundant;
         }
+
+        if (known().isDefinitionKnown() && !kind().equals(kind))
+            throw new IllegalArgumentException("Transaction kind is different to the definition we have already received");
 
         TxnId txnId = txnId();
         KeyRanges coordinateRanges = coordinateRanges(safeStore);
@@ -303,6 +311,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         setExecuteAt(executeAt);
         setPromised(ballot);
         setAccepted(ballot);
+        setKind(kind);
         set(safeStore, coordinateRanges, executeRanges, shard, route, null, Ignore, partialDeps, Set);
         switch (status())
         {
@@ -331,7 +340,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             return AcceptOutcome.RejectedBallot;
         }
 
-        if (hasBeen(Committed))
+        if (hasBeen(PreCommitted))
         {
             logger.trace("{}: skipping accept invalidated - already committed ({})", txnId(), status());
             return AcceptOutcome.Redundant;
@@ -340,6 +349,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         setPromised(ballot);
         setAccepted(ballot);
         setStatus(AcceptedInvalidate);
+        setPartialDeps(null);
         logger.trace("{}: accepted invalidated", txnId());
 
         notifyListeners(safeStore);
@@ -351,13 +361,14 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     // relies on mutual exclusion for each key
     public CommitOutcome commit(SafeCommandStore safeStore, AbstractRoute route, @Nullable RoutingKey progressKey, @Nullable PartialTxn partialTxn, Timestamp executeAt, PartialDeps partialDeps)
     {
-        if (hasBeen(Committed))
+        if (hasBeen(PreCommitted))
         {
             logger.trace("{}: skipping commit - already committed ({})", txnId(), status());
-            if (executeAt.equals(executeAt()) && status() != Invalidated)
-                return CommitOutcome.Redundant;
+            if (!executeAt.equals(executeAt()) || status() == Invalidated)
+                safeStore.agent().onInconsistentTimestamp(this, (status() == Invalidated ? Timestamp.NONE : this.executeAt()), executeAt);
 
-            safeStore.agent().onInconsistentTimestamp(this, (status() == Invalidated ? Timestamp.NONE : this.executeAt()), executeAt);
+            if (hasBeen(Committed))
+                return CommitOutcome.Redundant;
         }
 
         KeyRanges coordinateRanges = coordinateRanges(safeStore);
@@ -380,6 +391,24 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         // TODO (now): introduce intermediate status to avoid reentry when notifying listeners (which might notify us)
         maybeExecute(safeStore, shard, true, true);
         return CommitOutcome.Success;
+    }
+
+    // relies on mutual exclusion for each key
+    public void precommit(SafeCommandStore safeStore, Timestamp executeAt)
+    {
+        if (hasBeen(PreCommitted))
+        {
+            logger.trace("{}: skipping precommit - already committed ({})", txnId(), status());
+            if (executeAt.equals(executeAt()) && status() != Invalidated)
+                return;
+
+            safeStore.agent().onInconsistentTimestamp(this, (status() == Invalidated ? Timestamp.NONE : this.executeAt()), executeAt);
+        }
+
+        setExecuteAt(executeAt);
+        setStatus(PreCommitted);
+        notifyListeners(safeStore);
+        logger.trace("{}: precommitted with executeAt: {}", txnId(), executeAt);
     }
 
     protected void populateWaitingOn(SafeCommandStore safeStore)
@@ -406,6 +435,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                             command.addListener(this);
                             addWaitingOnCommit(command.txnId());
                             break;
+                        case PreCommitted:
                         case Committed:
                             // TODO: split into ReadyToRead and ReadyToWrite;
                             //       the distributed read can be performed as soon as those keys are ready, and in parallel with any other reads
@@ -426,7 +456,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     // TODO (now): commitInvalidate may need to update cfks _if_ possible
     public void commitInvalidate(SafeCommandStore safeStore)
     {
-        if (hasBeen(Committed))
+        if (hasBeen(PreCommitted))
         {
             logger.trace("{}: skipping commit invalidated - already committed ({})", txnId(), status());
             if (!hasBeen(Invalidated))
@@ -455,7 +485,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             logger.trace("{}: skipping apply - already executed ({})", txnId(), status());
             return ApplyOutcome.Redundant;
         }
-        else if (hasBeen(Committed) && !executeAt.equals(this.executeAt()))
+        else if (hasBeen(PreCommitted) && !executeAt.equals(this.executeAt()))
         {
             safeStore.agent().onInconsistentTimestamp(this, this.executeAt(), executeAt);
         }
@@ -488,32 +518,6 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         return ApplyOutcome.Success;
     }
 
-    public AcceptOutcome recover(SafeCommandStore safeStore, PartialTxn partialTxn, AbstractRoute route, @Nullable RoutingKey progressKey, Ballot ballot)
-    {
-        if (promised().compareTo(ballot) > 0)
-        {
-            logger.trace("{}: skipping preaccept invalidate - higher ballot witnessed ({})", txnId(), promised());
-            return AcceptOutcome.RejectedBallot;
-        }
-
-        if (executeAt() == null)
-        {
-            Preconditions.checkState(status() == NotWitnessed || status() == AcceptedInvalidate);
-            switch (preacceptInternal(safeStore, partialTxn, route, progressKey))
-            {
-                default:
-                case RejectedBallot:
-                case Redundant:
-                    throw new IllegalStateException();
-
-                case Success:
-            }
-        }
-
-        setPromised(ballot);
-        return AcceptOutcome.Success;
-    }
-
     @Override
     public PreLoadContext listenerPreLoadContext(TxnId caller)
     {
@@ -535,6 +539,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             case AcceptedInvalidate:
                 break;
 
+            case PreCommitted:
             case Committed:
             case ReadyToExecute:
             case PreApplied:
@@ -589,7 +594,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             return false;
         }
 
-        if (isUnableToExecute())
+        if (isWaitingOnDependency())
         {
             if (alwaysNotifyListeners)
                 notifyListeners(safeStore);
@@ -631,7 +636,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
      */
     private boolean updatePredecessor(Command dependency)
     {
-        Preconditions.checkState(dependency.hasBeen(Committed));
+        Preconditions.checkState(dependency.hasBeen(PreCommitted));
         if (dependency.hasBeen(Invalidated))
         {
             logger.trace("{}: {} is invalidated. Stop listening and removing from waiting on commit set.", txnId(), dependency.txnId());
@@ -654,7 +659,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             dependency.removeListener(this);
             return true;
         }
-        else if (isUnableToExecute())
+        else if (isWaitingOnDependency())
         {
             logger.trace("{}: adding {} to waiting on apply set.", txnId(), dependency.txnId());
             addWaitingOnApplyIfAbsent(dependency.txnId(), dependency.executeAt());
@@ -669,7 +674,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
     private void insertPredecessor(Command dependency)
     {
-        Preconditions.checkState(dependency.hasBeen(Committed));
+        Preconditions.checkState(dependency.hasBeen(PreCommitted));
         if (dependency.hasBeen(Invalidated))
         {
             logger.trace("{}: {} is invalidated. Do not insert.", txnId(), dependency.txnId());
@@ -701,7 +706,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
     static class NotifyWaitingOn implements PreLoadContext, Consumer<SafeCommandStore>
     {
-        ExecutionStatus[] blockedUntil = new ExecutionStatus[4];
+        Known[] blockedUntil = new Known[4];
         TxnId[] txnIds = new TxnId[4];
         int depth;
 
@@ -718,7 +723,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             while (depth >= 0)
             {
                 Command cur = safeStore.ifLoaded(txnIds[depth]);
-                ExecutionStatus until = blockedUntil[depth];
+                Known until = blockedUntil[depth];
                 if (cur == null)
                 {
                     // need to load; schedule execution for later
@@ -728,7 +733,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
                 if (prev != null)
                 {
-                    if (cur.hasBeen(until) || (cur.hasBeen(Committed) && cur.executeAt().compareTo(prev.executeAt()) > 0))
+                    if (cur.has(until) || (cur.hasBeen(PreCommitted) && cur.executeAt().compareTo(prev.executeAt()) > 0))
                     {
                         prev.updatePredecessorAndMaybeExecute(safeStore, cur, false);
                         --depth;
@@ -736,25 +741,26 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                         continue;
                     }
                 }
-                else if (cur.hasBeen(until))
+                else if (cur.has(until))
                 {
                     // we're done; have already applied
                     Preconditions.checkState(depth == 0);
                     break;
                 }
 
-                TxnId directlyBlockedBy = cur.firstWaitingOnCommit();
-                if (directlyBlockedBy != null)
+                TxnId directlyBlockedOnCommit = cur.firstWaitingOnCommit();
+                TxnId directlyBlockedOnApply = cur.firstWaitingOnApply(directlyBlockedOnCommit);
+                if (directlyBlockedOnApply != null)
                 {
-                    push(directlyBlockedBy, Decided);
+                    push(directlyBlockedOnApply, Done);
                 }
-                else if (null != (directlyBlockedBy = cur.firstWaitingOnApply()))
+                else if (directlyBlockedOnCommit != null)
                 {
-                    push(directlyBlockedBy, Done);
+                    push(directlyBlockedOnCommit, ExecuteAtOnly);
                 }
                 else
                 {
-                    if (cur.hasBeen(Committed) && !cur.hasBeen(ReadyToExecute) && !cur.isUnableToExecute())
+                    if (cur.hasBeen(Committed) && !cur.hasBeen(ReadyToExecute) && !cur.isWaitingOnDependency())
                     {
                         if (!cur.maybeExecute(safeStore, cur.progressShard(safeStore), false, false))
                             throw new AssertionError("Is able to Apply, but has not done so");
@@ -766,7 +772,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                     if (someKeys == null && prev != null) someKeys = prev.partialDeps().someRoutingKeys(cur.txnId());
                     Preconditions.checkState(someKeys != null);
                     logger.trace("{} blocked on {} until {}", txnIds[0], cur.txnId(), until);
-                    safeStore.progressLog().waiting(cur.txnId(), until.requires, someKeys);
+                    safeStore.progressLog().waiting(cur.txnId(), until, someKeys);
                     return;
                 }
                 prev = cur;
@@ -778,7 +784,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             return i >= 0 ? safeStore.command(txnIds[i]) : null;
         }
 
-        void push(TxnId by, ExecutionStatus until)
+        void push(TxnId by, Known until)
         {
             if (++depth == txnIds.length)
             {
@@ -979,6 +985,9 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         if (!validate(ensurePartialTxn, existingRanges, additionalRanges, covers(partialTxn()), covers(partialTxn), "txn", partialTxn))
             return false;
 
+        if (partialTxn != null && kind() != null && !kind().equals(partialTxn.kind()))
+            throw new IllegalArgumentException("Transaction has different kind to the definition we previously received");
+
         if (shard.isHome() && ensurePartialTxn != Ignore)
         {
             if (!hasQuery(partialTxn()) && !hasQuery(partialTxn))
@@ -1020,6 +1029,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
             case Set:
             case TrySet:
+                setKind(partialTxn.kind());
                 setPartialTxn(partialTxn = partialTxn.slice(allRanges, shard.isHome()));
                 partialTxn.keys().forEach(key -> {
                     // TODO: no need to register on PreAccept if already Accepted
@@ -1155,15 +1165,6 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             return false;
 
         return safeStore.ranges().at(epoch).contains(someKey);
-    }
-
-    private TxnId directlyBlockedBy()
-    {
-        // firstly we're waiting on every dep to commit
-        TxnId directlyBlockedBy = firstWaitingOnCommit();
-        if (directlyBlockedBy != null)
-            return directlyBlockedBy;
-        return firstWaitingOnApply();
     }
 
     @Override

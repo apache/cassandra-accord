@@ -39,18 +39,18 @@ public class QuorumTrackerReconciler extends TrackerReconciler<QuorumShardTracke
         switch (status)
         {
             case Failed:
-                Assertions.assertTrue(tracker.any(ShardTracker::hasFailed));
+                Assertions.assertTrue(tracker.any(QuorumShardTracker::hasFailed));
                 Assertions.assertFalse(tracker.all(QuorumShardTracker::hasReachedQuorum));
                 break;
 
             case Success:
                 Assertions.assertTrue(tracker.all(QuorumShardTracker::hasReachedQuorum));
-                Assertions.assertFalse(tracker.any(ShardTracker::hasFailed));
+                Assertions.assertFalse(tracker.any(QuorumShardTracker::hasFailed));
                 break;
 
             case NoChange:
                 Assertions.assertFalse(tracker.all(QuorumShardTracker::hasReachedQuorum));
-                Assertions.assertFalse(tracker.any(ShardTracker::hasFailed));
+                Assertions.assertFalse(tracker.any(QuorumShardTracker::hasFailed));
         }
     }
 }

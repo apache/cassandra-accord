@@ -32,33 +32,46 @@ import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.function.Predicate;
 
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.NoChange;
+
 public abstract class AbstractTracker<ST extends ShardTracker, P>
 {
-    /**
-     * Represents the logical result of a ShardFunction applied to a ShardTracker,
-     * encapsulating also any modification it should make to the AbstractTracker
-     * containing the shard.
-     */
-    public interface ShardOutcome<T extends AbstractTracker<?, ?>>
-    {
-        ShardOutcomes apply(T tracker);
-    }
-
     public enum ShardOutcomes implements ShardOutcome<AbstractTracker<?, ?>>
     {
-        Fail, SendMore, Success, NoChange;
+        Fail(RequestStatus.Failed),
+        Success(RequestStatus.Success),
+        SendMore(null),
+        NoChange(RequestStatus.NoChange);
 
-        static ShardOutcomes min(ShardOutcomes a, ShardOutcomes b)
+        final RequestStatus result;
+
+        ShardOutcomes(RequestStatus result) {
+            this.result = result;
+        }
+
+        private boolean isTerminalState()
+        {
+            return compareTo(Success) <= 0;
+        }
+
+        private static ShardOutcomes min(ShardOutcomes a, ShardOutcomes b)
         {
             return a.compareTo(b) <= 0 ? a : b;
         }
 
         @Override
-        public ShardOutcomes apply(AbstractTracker<?, ?> tracker)
+        public ShardOutcomes apply(AbstractTracker<?, ?> tracker, int shardIndex)
         {
             if (this == Success)
-                --tracker.waitingOnShards;
+                return --tracker.waitingOnShards == 0 ? Success : NoChange;
             return this;
+        }
+
+        private RequestStatus toRequestStatus(AbstractTracker<?, ?> tracker)
+        {
+            if (result != null)
+                return result;
+            return tracker.trySendMore();
         }
     }
 
@@ -114,32 +127,20 @@ public abstract class AbstractTracker<ST extends ShardTracker, P>
     RequestStatus recordResponse(T self, Id node, BiFunction<? super ST, P, ? extends ShardOutcome<? super T>> function, P param, int topologyLimit)
     {
         Preconditions.checkState(self == this); // we just accept self as parameter for type safety
-        ShardOutcomes minShardStatus = ShardOutcomes.NoChange;
+        ShardOutcomes status = NoChange;
         int maxShards = maxShardsPerEpoch();
-        for (int i = 0; i < topologyLimit && minShardStatus != ShardOutcomes.Fail; ++i)
+        for (int i = 0; i < topologyLimit && !status.isTerminalState() ; ++i)
         {
-            minShardStatus = topologies.get(i).mapReduceOn(node, i * maxShards, AbstractTracker::apply, self, function, param, ShardOutcomes::min, minShardStatus);
+            status = topologies.get(i).mapReduceOn(node, i * maxShards, AbstractTracker::apply, self, function, param, ShardOutcomes::min, status);
         }
 
-        switch (minShardStatus)
-        {
-            default: throw new AssertionError();
-            case SendMore:
-                return trySendMore();
-            case Success:
-                if (waitingOnShards == 0)
-                    return RequestStatus.Success;
-            case NoChange:
-                return RequestStatus.NoChange;
-            case Fail:
-                return RequestStatus.Failed;
-        }
+        return status.toRequestStatus(this);
     }
 
     static <ST extends ShardTracker, P, T extends AbstractTracker<ST, P>>
     ShardOutcomes apply(int trackerIndex, T tracker, BiFunction<? super ST, P, ? extends ShardOutcome<? super T>> function, P param)
     {
-        return function.apply(tracker.trackers[trackerIndex], param).apply(tracker);
+        return function.apply(tracker.trackers[trackerIndex], param).apply(tracker, trackerIndex);
     }
 
     public boolean any(Predicate<ST> test)
@@ -162,28 +163,19 @@ public abstract class AbstractTracker<ST extends ShardTracker, P>
         return true;
     }
 
-    public boolean hasFailed()
-    {
-        return any(ShardTracker::hasFailed);
-    }
-
-    public boolean hasInFlight()
-    {
-        return any(ShardTracker::hasInFlight);
-    }
-
-    public boolean hasReachedQuorum()
-    {
-        return all(ShardTracker::hasReachedQuorum);
-    }
-
     public Set<Id> nodes()
     {
         return topologies.nodes();
     }
 
+    public ST get(int shardIndex)
+    {
+        int maxShardsPerEpoch = maxShardsPerEpoch();
+        return get(shardIndex / maxShardsPerEpoch, shardIndex % maxShardsPerEpoch);
+    }
+
     @VisibleForTesting
-    public ST unsafeGet(int topologyIdx, int shardIdx)
+    public ST get(int topologyIdx, int shardIdx)
     {
         if (shardIdx >= maxShardsPerEpoch())
             throw new IndexOutOfBoundsException();
@@ -193,11 +185,5 @@ public abstract class AbstractTracker<ST extends ShardTracker, P>
     protected int maxShardsPerEpoch()
     {
         return maxShardsPerEpoch;
-    }
-
-    public ST unsafeGet(int i)
-    {
-        Preconditions.checkArgument(topologies.size() == 1);
-        return unsafeGet(0, i);
     }
 }

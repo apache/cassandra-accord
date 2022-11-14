@@ -35,10 +35,9 @@ import static com.google.common.collect.Sets.newHashSetWithExpectedSize;
 
 public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, Boolean>
 {
-    private static final ShardOutcome<ReadTracker> DataSuccess = tracker -> {
-        --tracker.waitingOnShards;
+    private static final ShardOutcome<ReadTracker> DataSuccess = (tracker, shardIndex) -> {
         --tracker.waitingOnData;
-        return ShardOutcomes.Success;
+        return --tracker.waitingOnShards == 0 ? Success : NoChange;
     };
 
     public static class ReadShardTracker extends ShardTracker
@@ -132,7 +131,6 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
             return hasData() || hasReachedQuorum();
         }
 
-        @Override
         boolean hasInFlight()
         {
             return inflight > 0;
@@ -294,5 +292,10 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
     public boolean hasData()
     {
         return all(ReadShardTracker::hasData);
+    }
+
+    public boolean hasFailed()
+    {
+        return any(ReadShardTracker::hasFailed);
     }
 }

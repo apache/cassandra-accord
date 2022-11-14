@@ -34,7 +34,8 @@ import com.google.common.base.Preconditions;
 
 import accord.topology.Topology;
 
-import static accord.local.Status.Known.Definition;
+import static accord.local.Status.Committed;
+import static accord.local.Status.Known.DefinitionOnly;
 
 // TODO: CommitOk responses, so we can send again if no reply received? Or leave to recovery?
 public class Commit extends TxnRequest<ReadNack>
@@ -158,7 +159,7 @@ public class Commit extends TxnRequest<ReadNack>
             case Insufficient:
                 Preconditions.checkState(!command.hasBeenWitnessed());
                 if (defer == null)
-                    defer = new Defer(Definition, Commit.this);
+                    defer = new Defer(DefinitionOnly, Committed.minKnown, Commit.this);
                 defer.add(command, safeStore.commandStore());
                 return ReadNack.NotCommitted;
         }

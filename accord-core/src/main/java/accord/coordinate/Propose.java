@@ -40,7 +40,6 @@ import accord.primitives.Deps;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.messages.Accept;
-import accord.messages.Accept.AcceptOk;
 import accord.messages.Accept.AcceptReply;
 
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
@@ -55,7 +54,7 @@ class Propose implements Callback<AcceptReply>
     final Route route;
     final Deps deps;
 
-    private final List<AcceptOk> acceptOks;
+    private final List<AcceptReply> acceptOks;
     private final Timestamp executeAt;
     private final QuorumTracker acceptTracker;
     private final BiConsumer<Result, Throwable> callback;
@@ -104,8 +103,7 @@ class Propose implements Callback<AcceptReply>
                 callback.accept(null, new Preempted(txnId, route.homeKey));
                 break;
             case Success:
-                AcceptOk ok = (AcceptOk) reply;
-                acceptOks.add(ok);
+                acceptOks.add(reply);
                 if (acceptTracker.recordSuccess(from) == RequestStatus.Success)
                     onAccepted();
         }

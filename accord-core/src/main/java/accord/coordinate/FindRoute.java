@@ -32,7 +32,7 @@ public class FindRoute extends CheckShards
         public Result(CheckStatusOk ok)
         {
             this.route = (Route)ok.route;
-            this.executeAt = ok.saveStatus.status.compareTo(Status.Committed) >= 0 ? ok.executeAt : null;
+            this.executeAt = ok.saveStatus.status.compareTo(Status.PreCommitted) >= 0 ? ok.executeAt : null;
         }
     }
 

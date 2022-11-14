@@ -4,11 +4,15 @@ import java.util.function.BiConsumer;
 
 import accord.api.RoutingKey;
 import accord.local.Node;
+import accord.local.Status;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
 import accord.primitives.Route;
 import accord.primitives.RoutingKeys;
 import accord.primitives.TxnId;
+import com.google.common.base.Preconditions;
+
+import javax.annotation.Nonnull;
 
 /**
  * A result of null indicates the transaction is globally persistent
@@ -18,17 +22,23 @@ public class RecoverWithHomeKey extends CheckShards implements BiConsumer<Object
 {
     final RoutingKey homeKey;
     final BiConsumer<Outcome, Throwable> callback;
+    final Status witnessedByInvalidation;
 
-    RecoverWithHomeKey(Node node, TxnId txnId, RoutingKey homeKey, BiConsumer<Outcome, Throwable> callback)
+    RecoverWithHomeKey(Node node, TxnId txnId, RoutingKey homeKey, Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
         super(node, txnId, RoutingKeys.of(homeKey), txnId.epoch, IncludeInfo.Route);
+        this.witnessedByInvalidation = witnessedByInvalidation;
+        // if witnessedByInvalidation == AcceptedInvalidate then we cannot assume its definition was known, and our comparison with the status is invalid
+        Preconditions.checkState(witnessedByInvalidation != Status.AcceptedInvalidate);
+        // if witnessedByInvalidation == Invalidated we should anyway not be recovering
+        Preconditions.checkState(witnessedByInvalidation != Status.Invalidated);
         this.homeKey = homeKey;
         this.callback = callback;
     }
 
-    public static RecoverWithHomeKey recover(Node node, TxnId txnId, RoutingKey homeKey, BiConsumer<Outcome, Throwable> callback)
+    public static RecoverWithHomeKey recover(Node node, TxnId txnId, RoutingKey homeKey, Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
-        RecoverWithHomeKey maybeRecover = new RecoverWithHomeKey(node, txnId, homeKey, callback);
+        RecoverWithHomeKey maybeRecover = new RecoverWithHomeKey(node, txnId, homeKey, witnessedByInvalidation, callback);
         maybeRecover.start();
         return maybeRecover;
     }
@@ -63,13 +73,15 @@ public class RecoverWithHomeKey extends CheckShards implements BiConsumer<Object
                     callback.accept(null, new IllegalStateException());
                     return;
                 case Quorum:
-                    Invalidate.invalidateIfNotAccepted(node, txnId, contactKeys, homeKey, callback);
+                    if (witnessedByInvalidation != null && witnessedByInvalidation.compareTo(Status.PreAccepted) > 0)
+                        throw new IllegalStateException("We previously invalidated, finding a status that should be recoverable");
+                    Invalidate.invalidate(node, txnId, contactKeys.with(homeKey), true, callback);
             }
         }
         else
         {
             // start recovery
-            node.recover(txnId, (Route) merged.route).addCallback(callback);
+            RecoverWithRoute.recover(node, txnId, (Route)merged.route, witnessedByInvalidation, callback);
         }
     }
 }

@@ -24,7 +24,6 @@ import java.util.HashSet;
 import java.util.Set;
 
 import accord.api.Key;
-import accord.local.Status.Known;
 import accord.primitives.*;
 
 import accord.local.*;
@@ -121,6 +120,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
             case PreAccepted:
             case Accepted:
             case AcceptedInvalidate:
+            case PreCommitted:
             case Committed:
                 return;
 
@@ -152,6 +152,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
             case PreAccepted:
             case Accepted:
             case AcceptedInvalidate:
+            case PreCommitted:
                 waitingOn.set(safeStore.commandStore().id());
                 ++waitingOnCount;
                 command.addListener(this);
@@ -159,7 +160,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
                 if (status == Committed)
                     return null;
 
-                safeStore.progressLog().waiting(txnId, Known.ExecutionOrder, readScope.toRoutingKeys());
+                safeStore.progressLog().waiting(txnId, Committed.minKnown, readScope.toRoutingKeys());
                 return NotCommitted;
 
             case ReadyToExecute:

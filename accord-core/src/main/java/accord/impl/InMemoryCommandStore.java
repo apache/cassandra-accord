@@ -168,6 +168,12 @@ public class InMemoryCommandStore
             return time.uniqueNow(max);
         }
 
+        @Override
+        public NodeTimeService time()
+        {
+            return time;
+        }
+
         private Timestamp maxConflict(Keys keys)
         {
             return keys.stream()

@@ -268,12 +268,26 @@ public class BurnTest
     public static void main(String[] args) throws Exception
     {
 //        Long overrideSeed = null;
-        Long overrideSeed = -5707319446834273528L;
-        do
+        int count = 1;
+        Long overrideSeed = 7792816336687881037L;
+        for (int i = 0 ; i < args.length ; i += 2)
+        {
+            switch (args[i])
+            {
+                default: throw new IllegalArgumentException("Invalid option: " + args[i]);
+                case "-c":
+                    count = Integer.parseInt(args[i + 1]);
+                    overrideSeed = null;
+                    break;
+                case "-s":
+                    overrideSeed = Long.parseLong(args[i + 1]);
+                    count = 1;
+            }
+        }
+        while (count-- > 0)
         {
             run(overrideSeed != null ? overrideSeed : ThreadLocalRandom.current().nextLong());
         }
-        while (overrideSeed == null);
     }
 
     @Test

@@ -229,6 +229,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                     return;
 
                 case ReadyToExecute:
+                case PreCommitted:
                 case Committed:
                     // TODO: in some cases we can use the deps we already have (e.g. if we have a quorum of Committed responses)
                     node.withEpoch(executeAt.epoch, () -> {

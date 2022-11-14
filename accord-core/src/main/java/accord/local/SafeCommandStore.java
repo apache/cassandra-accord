@@ -58,6 +58,7 @@ public interface SafeCommandStore
      */
     void addAndInvokeListener(TxnId txnId, CommandListener listener);
 
+    NodeTimeService time();
     CommandStore commandStore();
     DataStore dataStore();
     Agent agent();

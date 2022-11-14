@@ -41,6 +41,11 @@ public abstract class CommandsForKey implements CommandListener
 
         boolean isEmpty();
 
+        /**
+         * Test whether or not the dependencies of a command contain a given transaction id.
+         * NOTE that this applies only to commands that have at least proposed dependencies;
+         * if no dependencies are known the command will not be tested.
+         */
         enum TestDep { WITH, WITHOUT, ANY_DEPS }
         enum TestStatus
         {
@@ -55,12 +60,22 @@ public abstract class CommandsForKey implements CommandListener
         /**
          * All commands before (exclusive of) the given timestamp
          *
+         * Note that {@code testDep} applies only to commands that know at least proposed deps; if specified any
+         * commands that do not know any deps will be ignored.
+         *
          * TODO (soon): TestDep should be asynchronous; data should not be kept memory-resident as only used for recovery
+         *
+         * TODO: we don't really need TestStatus anymore, but for clarity it might be nice to retain it to declare intent.
+         *       This is because we only use it in places where TestDep is specified, and the statuses we want to rule-out
+         *       do not have any deps.
          */
         Stream<T> before(Timestamp timestamp, TestKind testKind, TestDep testDep, @Nullable TxnId depId, TestStatus testStatus, @Nullable Status status);
 
         /**
-         * All commands after (exclusive of) the given timestamp
+         * All commands after (exclusive of) the given timestamp.
+         *
+         * Note that {@code testDep} applies only to commands that know at least proposed deps; if specified any
+         * commands that do not know any deps will be ignored.
          */
         Stream<T> after(Timestamp timestamp, TestKind testKind, TestDep testDep, @Nullable TxnId depId, TestStatus testStatus, @Nullable Status status);
     }
@@ -99,9 +114,17 @@ public abstract class CommandsForKey implements CommandListener
         updateMax(command.executeAt());
         switch (command.status())
         {
+            default: throw new AssertionError();
+            case PreAccepted:
+            case NotWitnessed:
+            case Accepted:
+            case AcceptedInvalidate:
+            case PreCommitted:
+                break;
             case Applied:
             case PreApplied:
             case Committed:
+            case ReadyToExecute:
                 committedById().add(command.txnId(), command);
                 committedByExecuteAt().add(command.executeAt(), command);
             case Invalidated:

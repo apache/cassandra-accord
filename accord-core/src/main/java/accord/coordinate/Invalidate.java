@@ -22,29 +22,28 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
 
-import accord.coordinate.tracking.QuorumTracker;
-import accord.local.SaveStatus;
+import accord.coordinate.tracking.InvalidationTracker;
+import accord.coordinate.tracking.InvalidationTracker.InvalidationShardTracker;
+import accord.coordinate.tracking.RequestStatus;
+import accord.local.Status;
+import accord.messages.Commit;
 import accord.primitives.*;
-import com.google.common.base.Preconditions;
+import accord.topology.Topologies;
 
 import accord.api.RoutingKey;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.Status;
 import accord.messages.BeginInvalidation;
-import accord.messages.BeginInvalidation.InvalidateNack;
-import accord.messages.BeginInvalidation.InvalidateOk;
 import accord.messages.BeginInvalidation.InvalidateReply;
 import accord.messages.Callback;
-import accord.topology.Shard;
+import com.google.common.base.Preconditions;
+
+import javax.annotation.Nullable;
 
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
-import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
-import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Success;
 import static accord.local.PreLoadContext.contextFor;
-import static accord.local.Status.*;
-import static accord.local.Status.Known.Definition;
-import static accord.messages.Commit.Invalidate.commitInvalidate;
+import static accord.local.Status.Accepted;
+import static accord.local.Status.AcceptedInvalidate;
 import static accord.primitives.ProgressToken.INVALIDATED;
 
 public class Invalidate implements Callback<InvalidateReply>
@@ -52,89 +51,105 @@ public class Invalidate implements Callback<InvalidateReply>
     private final Node node;
     private final Ballot ballot;
     private final TxnId txnId;
-    private final RoutingKeys informKeys;
-    private final RoutingKey invalidateWithKey;
-    private final Status recoverIfAtLeast;
+    private final RoutingKeys invalidateWithKeys;
     private final BiConsumer<Outcome, Throwable> callback;
 
     private boolean isDone;
-    private boolean isBallotPromised;
-    private final List<InvalidateOk> invalidateOks = new ArrayList<>();
-    private final QuorumTracker.QuorumShardTracker tracker;
+    private boolean isPrepareDone;
+    private final boolean transitivelyInvokedByPriorInvalidation;
+    private final List<InvalidateReply> replies = new ArrayList<>();
+    private final InvalidationTracker tracker;
+    private Throwable failure;
 
-    private Invalidate(Node node, Shard shard, Ballot ballot, TxnId txnId, RoutingKeys informKeys, RoutingKey invalidateWithKey, Status recoverIfAtLeast, BiConsumer<Outcome, Throwable> callback)
+    private Invalidate(Node node, Ballot ballot, TxnId txnId, RoutingKeys invalidateWithKeys, boolean transitivelyInvokedByPriorInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
         this.callback = callback;
-        Preconditions.checkArgument(informKeys.contains(invalidateWithKey));
         this.node = node;
         this.ballot = ballot;
         this.txnId = txnId;
-        this.informKeys = informKeys;
-        this.invalidateWithKey = invalidateWithKey;
-        this.recoverIfAtLeast = recoverIfAtLeast;
-        this.tracker = new QuorumTracker.QuorumShardTracker(shard);
+        this.invalidateWithKeys = invalidateWithKeys;
+        this.transitivelyInvokedByPriorInvalidation = transitivelyInvokedByPriorInvalidation;
+        Topologies topologies = node.topology().forEpoch(invalidateWithKeys, txnId.epoch);
+        this.tracker = new InvalidationTracker(topologies);
     }
 
-    public static Invalidate invalidate(Node node, TxnId txnId, RoutingKeys informKeys, RoutingKey invalidateWithKey, BiConsumer<Outcome, Throwable> callback)
+    public static Invalidate invalidate(Node node, TxnId txnId, RoutingKeys invalidateWithKeys, BiConsumer<Outcome, Throwable> callback)
     {
-        return invalidate(node, txnId, informKeys, invalidateWithKey, PreAccepted, callback);
+        return invalidate(node, txnId, invalidateWithKeys, false, callback);
     }
 
-    // TODO (now): (file separately) this is a bug, as it is possible for a preaccept to still be in-flight.
-    //             It's not even safe to do it after an initial Invalidate round unless we ensure that recovery never pre-accepts with txnId (which we should also enforce)
-    public static Invalidate invalidateIfNotAccepted(Node node, TxnId txnId, RoutingKeys informKeys, RoutingKey invalidateWithKey, BiConsumer<Outcome, Throwable> callback)
-    {
-        return invalidate(node, txnId, informKeys, invalidateWithKey, Accepted, callback);
-    }
-
-    private static Invalidate invalidate(Node node, TxnId txnId, RoutingKeys informKeys, RoutingKey invalidateWithKey, Status recoverIfAtLeast, BiConsumer<Outcome, Throwable> callback)
+    public static Invalidate invalidate(Node node, TxnId txnId, RoutingKeys invalidateWithKeys, boolean transitivelyInvokedByPriorInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
         Ballot ballot = new Ballot(node.uniqueNow());
-        Shard shard = node.topology().forEpochIfKnown(invalidateWithKey, txnId.epoch);
-        Invalidate invalidate = new Invalidate(node, shard, ballot, txnId, informKeys, invalidateWithKey, recoverIfAtLeast, callback);
-        node.send(shard.nodes, to -> new BeginInvalidation(txnId, invalidateWithKey, ballot), invalidate);
+        Invalidate invalidate = new Invalidate(node, ballot, txnId, invalidateWithKeys, transitivelyInvokedByPriorInvalidation, callback);
+        invalidate.start();
         return invalidate;
+    }
+
+    private void start()
+    {
+        node.send(tracker.nodes(), to -> new BeginInvalidation(to, tracker.topologies(), txnId, invalidateWithKeys, ballot), this);
     }
 
     @Override
     public synchronized void onSuccess(Id from, InvalidateReply reply)
     {
-        if (isDone || isBallotPromised)
+        if (isDone || isPrepareDone)
             return;
 
-        if (!reply.isOk())
+        replies.add(reply);
+        handle(tracker.recordSuccess(from, reply.isPromised(), reply.acceptedFastPath));
+    }
+
+    @Override
+    public void onFailure(Id from, Throwable failure)
+    {
+        if (isDone || isPrepareDone)
+            return;
+
+        if (this.failure == null) this.failure = failure;
+        else this.failure.addSuppressed(failure);
+
+        handle(tracker.recordFailure(from));
+    }
+
+    private void handle(RequestStatus status)
+    {
+        switch (status)
         {
-            InvalidateNack nack = (InvalidateNack) reply;
-            if (nack.homeKey != null)
-            {
-                node.ifLocalSince(contextFor(txnId), invalidateWithKey, txnId, safeStore -> {
-                    safeStore.command(txnId).updateHomeKey(safeStore, nack.homeKey);
-                }).addCallback(node.agent());
-            }
+            default: throw new AssertionError();
+            case Success:
+                // EITHER we have a shard that has promised AND a shard that decisively rejects the fast path
+                // OR we have promises from EVERY shard so that we can decisively move forwards by guaranteeing
+                // either that recovery will succeed or that if it fails to find sufficient information then in
+                // combination with this invalidation we have ruled out the possibility of the transaction completing
+                // successfully
+                invalidate();
+                break;
 
-            isDone = true;
-            callback.accept(null, new Preempted(txnId, null));
-            return;
+            case Failed:
+                // We reach here if we failed to obtain promises from every shard.
+                // If we had any actual failures reported we propagate these
+                isDone = isPrepareDone = true;
+                callback.accept(null, failure != null ? failure : new Preempted(txnId, null));
+                break;
+
+            case NoChange:
         }
-
-        InvalidateOk ok = (InvalidateOk) reply;
-        invalidateOks.add(ok);
-        if (tracker.onSuccess(from) == Success)
-            invalidate();
     }
 
     private void invalidate()
     {
-        Preconditions.checkState(!isBallotPromised);
-        isBallotPromised = true;
+        Preconditions.checkState(!isPrepareDone);
+        isPrepareDone = true;
+
         // first look to see if it has already been
         {
-            Route route = InvalidateOk.findRoute(invalidateOks);
-            RoutingKey homeKey = route != null ? route.homeKey : InvalidateOk.findHomeKey(invalidateOks);
-            SaveStatus maxStatus = invalidateOks.stream().map(ok -> ok.status).max(Comparable::compareTo).orElseThrow(IllegalStateException::new);
-            Known maxKnown = invalidateOks.stream().map(ok -> ok.status.known).max(Comparable::compareTo).orElseThrow(IllegalStateException::new);
+            Route route = InvalidateReply.findRoute(replies);
+            RoutingKey homeKey = route != null ? route.homeKey : InvalidateReply.findHomeKey(replies);
+            InvalidateReply maxReply = InvalidateReply.max(replies);
 
-            switch (maxStatus.status)
+            switch (maxReply.status)
             {
                 default: throw new IllegalStateException();
                 case AcceptedInvalidate:
@@ -143,14 +158,11 @@ public class Invalidate implements Callback<InvalidateReply>
                     break;
 
                 case PreAccepted:
-                case Accepted:
-                    // note: we do not attempt to calculate PreAccept outcome here, we rely on the caller to tell us
-                    // what is safe to do. If the caller knows no decision was reached with PreAccept, we can safely
-                    // invalidate if we see PreAccept, and only need to recover if we see Accept
-                    // TODO: if we see Accept, go straight to propose to save some unnecessary work
-                    if (recoverIfAtLeast.compareTo(maxStatus.status) > 0)
+                    if (tracker.isSafeToInvalidate() || transitivelyInvokedByPriorInvalidation)
                         break;
 
+                case Accepted:
+                case PreCommitted:
                 case Committed:
                 case ReadyToExecute:
                 case PreApplied:
@@ -158,14 +170,47 @@ public class Invalidate implements Callback<InvalidateReply>
                     // TODO: if we see Committed or above, go straight to Execute if we have assembled enough information
                     if (route != null)
                     {
-                        RecoverWithRoute.recover(node, ballot, txnId, route, callback);
+                        // The data we see might have made it only to a minority in the event of PreAccept ONLY.
+                        // We want to protect against infinite loops, so we inform the recovery of the state we have
+                        // witnessed during our initial invalidation.
+
+                        // However, if the state is not guaranteed to be recoverable (i.e. PreAccept/NotWitnessed),
+                        // we do not relay this information unless we can guarantee that any shard recovery may contact
+                        // has been prevented from reaching a _later_ fast-path decision by our promises.
+                        // Which means checking we contacted every shard, since we only reach this point if we have promises
+                        // from every shard we contacted.
+
+                        // Note that there's lots of scope for variations in behaviour here, but lots of care is needed.
+
+                        Status witnessedByInvalidation = maxReply.status;
+                        if (!witnessedByInvalidation.hasBeen(Accepted))
+                        {
+                            Preconditions.checkState(tracker.all(InvalidationShardTracker::isPromised));
+                            if (!invalidateWithKeys.containsAll(route))
+                                witnessedByInvalidation = null;
+                        }
+                        RecoverWithRoute.recover(node, ballot, txnId, route, witnessedByInvalidation, callback);
                     }
                     else if (homeKey != null)
                     {
-                        if (homeKey.equals(invalidateWithKey) && maxKnown.compareTo(Definition) >= 0)
-                            throw new IllegalStateException("Received a reply from a node that must have known the route, but that did not include it");
+                        Preconditions.checkState(maxReply.status.hasBeen(Accepted) || tracker.all(InvalidationShardTracker::isPromised));
+                        // if we included the home shard, and we have either a recoverable status OR have not rejected the fast path,
+                        // we must have at least one response that should contain the Route
+                        if (invalidateWithKeys.contains(homeKey) && tracker.isPromisedForKey(homeKey, txnId.epoch))
+                            throw new IllegalStateException("Received replies from a node that must have known the route, but that did not include it");
 
-                        RecoverWithHomeKey.recover(node, txnId, homeKey, callback);
+                        // if < Accepted, we should have short-circuited to invalidation above. This guarantees no Invaldate/Recover loop, as any later status will forbid invoking Invalidate
+                        Preconditions.checkState(!(transitivelyInvokedByPriorInvalidation && !maxReply.status.hasBeen(Accepted)));
+
+                        Status witnessedByInvalidation = maxReply.status;
+                        if (!witnessedByInvalidation.hasBeen(Accepted))
+                        {
+                            Preconditions.checkState(tracker.all(InvalidationShardTracker::isPromised));
+                            if (!invalidateWithKeys.contains(homeKey))
+                                witnessedByInvalidation = null;
+                        }
+
+                        RecoverWithHomeKey.recover(node, txnId, homeKey, witnessedByInvalidation, callback);
                     }
                     else
                     {
@@ -174,18 +219,16 @@ public class Invalidate implements Callback<InvalidateReply>
                     return;
 
                 case Invalidated:
+                    // TODO: standardise semantics of async/sync local application prior to callback
                     isDone = true;
-                    node.forEachLocalSince(contextFor(txnId), informKeys, txnId, safeStore -> {
-                        safeStore.command(txnId).commitInvalidate(safeStore);
-                    }).addCallback((success, fail) -> {
-                        callback.accept(INVALIDATED, null);
-                    });
+                    commitInvalidate();
                     return;
             }
         }
 
         // if we have witnessed the transaction, but are able to invalidate, do we want to proceed?
         // Probably simplest to do so, but perhaps better for user if we don't.
+        RoutingKey invalidateWithKey = invalidateWithKeys.slice(KeyRanges.of(tracker.promisedShard().range)).get(0);
         proposeInvalidate(node, ballot, txnId, invalidateWithKey, (success, fail) -> {
             /**
              * We're now inside our *exactly once* callback we registered with proposeInvalidate, and we need to
@@ -196,42 +239,35 @@ public class Invalidate implements Callback<InvalidateReply>
             if (fail != null)
             {
                 callback.accept(null, fail);
-                return;
             }
-
-            try
+            else
             {
-                AbstractRoute route = InvalidateOk.mergeRoutes(invalidateOks);
-                // TODO: commitInvalidate (and others) should skip the network for local applications,
-                //  so we do not need to explicitly do so here before notifying the waiter
-                commitInvalidate(node, txnId, route != null ? route : informKeys, txnId);
-                // TODO: pick a reasonable upper bound, so we don't invalidate into an epoch/commandStore that no longer cares about this command
-                node.forEachLocalSince(contextFor(txnId), informKeys, txnId, safeStore -> {
-                    safeStore.command(txnId).commitInvalidate(safeStore);
-                }).addCallback((s, f) -> {
-                    callback.accept(INVALIDATED, null);
-                    if (f != null) // TODO: consider exception handling more carefully: should we catch these prior to passing to callbacks?
-                        node.agent().onUncaughtException(f);
-                });
-            }
-            catch (Throwable t)
-            {
-                callback.accept(null, t);
+                try
+                {
+                    commitInvalidate();
+                }
+                catch (Throwable t)
+                {
+                    callback.accept(null, t);
+                }
             }
         });
     }
 
-    @Override
-    public void onFailure(Id from, Throwable failure)
+    private void commitInvalidate()
     {
-        if (isDone || isBallotPromised)
-            return;
-
-        if (tracker.onFailure(from) == Fail)
-        {
-            isDone = true;
-            callback.accept(null, new Timeout(txnId, null));
-        }
+        @Nullable AbstractRoute route = InvalidateReply.mergeRoutes(replies);
+        // TODO: commitInvalidate (and others) should skip the network for local applications,
+        //  so we do not need to explicitly do so here before notifying the waiter
+        Commit.Invalidate.commitInvalidate(node, txnId, route != null ? route.union(invalidateWithKeys) : invalidateWithKeys, txnId);
+        // TODO: pick a reasonable upper bound, so we don't invalidate into an epoch/commandStore that no longer cares about this command
+        node.forEachLocalSince(contextFor(txnId), invalidateWithKeys, txnId, safeStore -> {
+            safeStore.command(txnId).commitInvalidate(safeStore);
+        }).addCallback((s, f) -> {
+            callback.accept(INVALIDATED, null);
+            if (f != null) // TODO: consider exception handling more carefully: should we catch these prior to passing to callbacks?
+                node.agent().onUncaughtException(f);
+        });
     }
 
     @Override

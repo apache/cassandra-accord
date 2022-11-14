@@ -114,9 +114,9 @@ public class QuorumTrackerTest
         [1, 2, 3] [2, 3, 4] [3, 4, 5]
          */
 
-        Assertions.assertSame(subTopology.get(0), responses.unsafeGet(0).shard);
-        Assertions.assertSame(subTopology.get(1), responses.unsafeGet(1).shard);
-        Assertions.assertSame(subTopology.get(2), responses.unsafeGet(2).shard);
+        Assertions.assertSame(subTopology.get(0), responses.get(0).shard);
+        Assertions.assertSame(subTopology.get(1), responses.get(1).shard);
+        Assertions.assertSame(subTopology.get(2), responses.get(2).shard);
 
         responses.recordSuccess(ids[1]);
         assertResponseState(responses, false, false, true);

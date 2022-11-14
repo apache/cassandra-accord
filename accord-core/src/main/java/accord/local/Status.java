@@ -18,21 +18,61 @@
 
 package accord.local;
 
-import static accord.local.Status.ExecutionStatus.*;
-import static accord.local.Status.Phase.*;
+import accord.messages.BeginRecovery;
+import accord.primitives.Ballot;
+import com.google.common.base.Preconditions;
+
+import java.util.List;
+import java.util.function.Function;
+import java.util.function.Predicate;
+
+import static accord.local.Status.Definition.*;
 import static accord.local.Status.Known.*;
+import static accord.local.Status.KnownDeps.*;
+import static accord.local.Status.KnownExecuteAt.*;
+import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
+import static accord.local.Status.KnownExecuteAt.ExecuteAtProposed;
+import static accord.local.Status.Outcome.*;
+import static accord.local.Status.Phase.*;
 
 public enum Status
 {
-    NotWitnessed      (None,      Undecided),
-    PreAccepted       (PreAccept, Undecided),
-    AcceptedInvalidate(Accept,    Undecided), // may or may not have witnessed
-    Accepted          (Accept,    Undecided), // may or may not have witnessed
-    Committed         (Commit,    Decided),
-    ReadyToExecute    (Commit,    Decided),
-    PreApplied        (Persist,   Decided),
-    Applied           (Persist,   Done),
-    Invalidated       (Persist,   Done);
+    NotWitnessed      (None,      Nothing),
+    PreAccepted       (PreAccept, DefinitionOnly),
+    AcceptedInvalidate(Accept,    DefinitionUnknown, ExecuteAtUnknown,  DepsUnknown,  OutcomeUnknown), // may or may not have witnessed
+    Accepted          (Accept,    DefinitionUnknown, ExecuteAtProposed, DepsProposed, OutcomeUnknown), // may or may not have witnessed
+
+    /**
+     * PreCommitted is a peculiar state, half-way between Accepted and Committed.
+     * We know the transaction is Committed and its execution timestamp, but we do
+     * not know its dependencies, and we may still have state leftover from the Accept round
+     * that is necessary for recovery.
+     *
+     * So, for execution of other transactions we may treat a PreCommitted transaction as Committed,
+     * using the timestamp to update our dependency set to rule it out as a dependency.
+     * But we do not have enough information to execute the transaction, and when recovery calculates
+     * {@link BeginRecovery#acceptedStartedBeforeAndDidNotWitness}, {@link BeginRecovery#committedExecutesAfterAndDidNotWitness}
+     * and {@link BeginRecovery#committedStartedBeforeAndDidWitness} we may not have the dependencies
+     * to calculate the result. For these operations we treat ourselves as whatever Accepted status
+     * we may have previously taken, using any proposed dependencies to compute the result.
+     *
+     * This state exists primarily to permit us to efficiently separate work between different home shards.
+     * Take a transaction A that reaches the Committed status and commits to all of its home shard A*'s replicas,
+     * but fails to commit to all shards. A takes an execution time later than its TxnId, and in the process
+     * adopts a dependency on a transaction B that is coordinated by its home shard B*, that has itself taken
+     * a dependency upon A. Importantly, B commits a lower executeAt than A and so will execute first, and once A*
+     * commits B, A will remove it from its dependencies. However, there is insufficient information on A*
+     * to commit B since it does not know A*'s dependencies, and B* will not process B until A* executes A.
+     * To solve this problem we simply permit the executeAt we discover for B to be propagated to A* without
+     * its dependencies. Though this does complicate the state machine a little.
+     */
+    PreCommitted      (Accept,    DefinitionUnknown, ExecuteAtKnown, DepsUnknown, OutcomeUnknown),
+
+    Committed         (Commit,    DefinitionKnown,   ExecuteAtKnown, DepsKnown,   OutcomeUnknown),
+    ReadyToExecute    (Commit,    DefinitionKnown,   ExecuteAtKnown, DepsKnown,   OutcomeUnknown),
+    PreApplied        (Persist,   DefinitionKnown,   ExecuteAtKnown, DepsKnown,   OutcomeKnown),
+    Applied           (Persist,   DefinitionKnown,   ExecuteAtKnown, DepsKnown,   OutcomeApplied),
+    Invalidated       (Persist,   NoOp,              NoExecuteAt,    NoDeps,      InvalidationApplied);
 
     /**
      * Represents the phase of a transaction from the perspective of coordination
@@ -44,53 +84,255 @@ public enum Status
      */
     public enum Phase
     {
-        // TODO: see if we can rename Commit here, or in ReplicationPhase, so we can have disjoint terms
         None, PreAccept, Accept, Commit, Persist
     }
 
     /**
-     * Represents the phase of a transaction from the perspective of dissemination of knowledge
-     * Nothing:        the transaction definition is not known
-     * Definition:     the transaction definition is known
-     * ExecutionOrder: the execution order decision is known
-     * Apply:          the transaction's execution outcome is known
-     * Invalidate:     the transaction is known to be invalidated
+     * A vector of various facets of knowledge about, or required for, processing a transaction.
+     * Each property is treated independently, there is no precedence relationship between them.
+     * Each property's values are however ordered with respect to each other.
      */
-    public enum Known
+    public static class Known
     {
-        Nothing(false, false),
-        Definition(true, false),
-        ExecutionOrder(true, true),
-        Outcome(true, true),
-        Invalidation(false, false);
+        public static final Known Nothing           = new Known(DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, OutcomeUnknown);
+        public static final Known DefinitionOnly    = new Known(DefinitionKnown,   ExecuteAtUnknown, DepsUnknown, OutcomeUnknown);
+        public static final Known ExecuteAtOnly     = new Known(DefinitionUnknown, ExecuteAtKnown,   DepsUnknown, OutcomeUnknown);
+        public static final Known Done              = new Known(DefinitionUnknown, ExecuteAtKnown,   DepsKnown,   OutcomeApplied);
 
-        public final boolean hasTxn;
-        public final boolean hasDeps;
+        public final Definition definition;
+        public final KnownExecuteAt executeAt;
+        public final KnownDeps deps;
+        public final Outcome outcome;
 
-        Known(boolean hasTxn, boolean hasDeps)
+        public Known(Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome)
         {
-            this.hasTxn = hasTxn;
-            this.hasDeps = hasDeps;
+            this.definition = definition;
+            this.executeAt = executeAt;
+            this.deps = deps;
+            this.outcome = outcome;
+        }
+
+        public Known merge(Known with)
+        {
+            Definition maxDefinition = definition.compareTo(with.definition) >= 0 ? definition : with.definition;
+            KnownExecuteAt maxExecuteAt = executeAt.compareTo(with.executeAt) >= 0 ? executeAt : with.executeAt;
+            KnownDeps maxDeps = deps.compareTo(with.deps) >= 0 ? deps : with.deps;
+            Outcome maxOutcome = outcome.compareTo(with.outcome) >= 0 ? outcome : with.outcome;
+            if (maxDefinition == definition && maxExecuteAt == executeAt && maxDeps == deps &&  maxOutcome == outcome)
+                return this;
+            if (maxDefinition == with.definition && maxExecuteAt == with.executeAt && maxDeps == with.deps && maxOutcome == with.outcome)
+                return with;
+            return new Known(maxDefinition, maxExecuteAt, maxDeps, maxOutcome);
+        }
+
+        public boolean isSatisfiedBy(Known that)
+        {
+            return this.definition.compareTo(that.definition) <= 0
+                    && this.executeAt.compareTo(that.executeAt) <= 0
+                    && this.deps.compareTo(that.deps) <= 0
+                    && this.outcome.compareTo(that.outcome) <= 0;
+        }
+
+        /**
+         * The logical epoch on which the specified knowledge is best sought or sent.
+         * i.e., if we include an outcome then the execution epoch
+         */
+        public LogicalEpoch epoch()
+        {
+            if (outcome.isKnown())
+                return LogicalEpoch.Execution;
+
+            return LogicalEpoch.Coordination;
+        }
+
+        public Known with(Outcome newOutcome)
+        {
+            if (outcome == newOutcome)
+                return this;
+            return new Known(definition, executeAt, deps, newOutcome);
+        }
+
+        public Known with(KnownDeps newDeps)
+        {
+            if (deps == newDeps)
+                return this;
+            return new Known(definition, executeAt, newDeps, outcome);
+        }
+
+        public Status propagate()
+        {
+            switch (outcome)
+            {
+                default: throw new AssertionError();
+                case InvalidationApplied:
+                    return Invalidated;
+
+                case OutcomeApplied:
+                case OutcomeKnown:
+                    if (executeAt.isDecisionKnown() && definition.isKnown() && deps.isDecisionKnown())
+                        return PreApplied;
+
+                case OutcomeUnknown:
+                    if (executeAt.isDecisionKnown() && definition.isKnown() && deps.isDecisionKnown())
+                        return Committed;
+
+                    if (executeAt.isDecisionKnown())
+                        return PreCommitted;
+
+                    if (definition.isKnown())
+                        return PreAccepted;
+
+                    if (deps.isDecisionKnown())
+                        throw new IllegalStateException();
+            }
+
+            return NotWitnessed;
+        }
+
+        public boolean isDefinitionKnown()
+        {
+            return definition.isKnown();
+        }
+
+        public boolean isDecisionKnown()
+        {
+            if (!deps.isDecisionKnown())
+                return false;
+            Preconditions.checkState(executeAt.isDecisionKnown());
+            return true;
+        }
+    }
+
+    public enum KnownExecuteAt
+    {
+        /**
+         * No decision is known to have been reached
+         */
+        ExecuteAtUnknown,
+
+        /**
+         * A decision to execute the transaction is known to have been proposed, and the associated executeAt timestamp
+         */
+        ExecuteAtProposed,
+
+        /**
+         * A decision to execute the transaction is known to have been reached, and the associated executeAt timestamp
+         */
+        ExecuteAtKnown,
+
+        /**
+         * A decision to invalidate the transaction is known to have been reached
+         */
+        NoExecuteAt,
+        ;
+
+        public boolean isDecisionKnown()
+        {
+            return compareTo(ExecuteAtKnown) >= 0;
+        }
+    }
+
+    public enum KnownDeps
+    {
+        /**
+         * No decision is known to have been reached
+         */
+        DepsUnknown,
+
+        /**
+         * A decision to execute the transaction is known to have been proposed, and the associated dependencies
+         * for the shard(s) in question are known for the coordination epoch (txnId.epoch) only.
+         */
+        DepsProposed,
+
+        /**
+         * A decision to execute the transaction is known to have been reached, and the associated dependencies
+         * for the shard(s) in question are known for the coordination and execution epochs.
+         */
+        DepsKnown,
+
+        /**
+         * A decision to invalidate the transaction is known to have been reached
+         */
+        NoDeps,
+        ;
+
+        public boolean isDecisionKnown()
+        {
+            return compareTo(DepsKnown) >= 0;
+        }
+
+        public boolean isProposalKnown()
+        {
+            return compareTo(DepsProposed) >= 0;
         }
     }
 
     /**
-     * Represents the coarse phase of a transaction from the perspective of completion of execution
-     * Undecided:  the transaction's execution order is being decided
-     * Decided:    the transaction's execution order has been decided
-     * Done:       the transaction's execution has completed (and been persisted to underlying storage)
+     * Whether the transaction's definition is known.
      */
-    public enum ExecutionStatus
+    public enum Definition
     {
-        Undecided(Nothing),
-        Decided(ExecutionOrder),
-        Done(Outcome);
+        /**
+         * The definition is not known
+         */
+        DefinitionUnknown,
 
-        final Known requires;
-        ExecutionStatus(Known requires)
+        /**
+         * The definition is known
+         */
+        DefinitionKnown,
+
+        /**
+         * The definition is irrelevant, as the transaction has been invalidated and may be treated as a no-op
+         */
+        NoOp;
+
+        public boolean isKnown()
         {
-            this.requires = requires;
+            return this == DefinitionKnown;
         }
+    }
+
+    /**
+     * Whether a transaction's outcome (and its application) is known
+     */
+    public enum Outcome
+    {
+        /**
+         * The outcome is not yet known (and may not yet be decided)
+         */
+        OutcomeUnknown,
+
+        /**
+         * The outcome is known, but may not have been applied
+         */
+        OutcomeKnown,
+
+        /**
+         * The outcome is known to have applied (at the source of this message)
+         */
+        OutcomeApplied,
+
+        /**
+         * The transaction is known to have been invalidated
+         */
+        InvalidationApplied;
+
+        public boolean isKnown()
+        {
+            return this == OutcomeKnown || this == OutcomeApplied;
+        }
+
+        public boolean isInvalidated()
+        {
+            return this == InvalidationApplied;
+        }
+    }
+
+    public enum LogicalEpoch
+    {
+        Coordination, Execution
     }
 
     /**
@@ -111,17 +353,18 @@ public enum Status
     }
 
     public final Phase phase;
-    public final ExecutionStatus execution;
+    public final Known minKnown;
 
-    Status(Phase phase, ExecutionStatus execution)
+    Status(Phase phase, Known minKnown)
     {
         this.phase = phase;
-        this.execution = execution;
+        this.minKnown = minKnown;
     }
 
-    public static Status max(Status a, Status b)
+    Status(Phase phase, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Status.Outcome outcome)
     {
-        return a.compareTo(b) >= 0 ? a : b;
+        this.phase = phase;
+        this.minKnown = new Known(definition, executeAt, deps, outcome);
     }
 
     // TODO: investigate all uses of hasBeen, and migrate as many as possible to testing Phase, ReplicationPhase and ExecutionStatus
@@ -131,8 +374,45 @@ public enum Status
         return compareTo(equalOrGreaterThan) >= 0;
     }
 
-    public boolean isAtLeast(Phase equalOrGreaterThan)
+    public static <T> T max(List<T> list, Function<T, Status> getStatus, Function<T, Ballot> getAccepted, Predicate<T> filter)
     {
-        return phase.compareTo(equalOrGreaterThan) >= 0;
+        T max = null;
+        Status maxStatus = null;
+        Ballot maxAccepted = null;
+        for (T item : list)
+        {
+            if (!filter.test(item))
+                continue;
+
+            Status status = getStatus.apply(item);
+            Ballot accepted = getAccepted.apply(item);
+            boolean update = max == null
+                          || maxStatus.phase.compareTo(status.phase) < 0
+                          || (status.phase.equals(Phase.Accept) && maxAccepted.compareTo(accepted) < 0);
+
+            if (!update)
+                continue;
+
+            max = item;
+            maxStatus = status;
+            maxAccepted = accepted;
+        }
+
+        return max;
+    }
+
+    public static <T> T max(T a, Status statusA, Ballot acceptedA, T b, Status statusB, Ballot acceptedB)
+    {
+        int c = statusA.phase.compareTo(statusB.phase);
+        if (c > 0) return a;
+        if (c < 0) return b;
+        if (statusA.phase != Phase.Accept || acceptedA.compareTo(acceptedB) >= 0)
+            return a;
+        return b;
+    }
+
+    public static Status max(Status a, Ballot acceptedA, Status b, Ballot acceptedB)
+    {
+        return max(a, a, acceptedA, b, b, acceptedB);
     }
 }

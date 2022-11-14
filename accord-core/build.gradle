@@ -43,6 +43,7 @@ task burn(type: JavaExec) {
     classpath sourceSets.main.runtimeClasspath, sourceSets.test.output
     main = 'accord.burn.BurnTest'
     jvmArgs '-Dlogback.configurationFile=burn-logback.xml'
+    args = ['-c', '1']
 }
 
 // the team is used to 'install' so make sure that still publishes locally
@@ -59,3 +60,29 @@ publishing {
     }
   }
 }
+
+task burnforkloop {
+    doLast {
+        (project.hasProperty('burnTimes') ? Integer.parseInt(project.getProperty('burnTimes')) : Integer.MAX_VALUE)
+                .times {
+                    javaexec {
+                        classpath sourceSets.main.runtimeClasspath, sourceSets.test.output
+                        main = 'accord.burn.BurnTest'
+                        jvmArgs '-Dlogback.configurationFile=burn-logback.xml'
+                        args = ['-c', '1']
+                    }
+                }
+    }
+}
+
+task burnloop {
+    doLast {
+        javaexec {
+            classpath sourceSets.main.runtimeClasspath, sourceSets.test.output
+            main = 'accord.burn.BurnTest'
+            jvmArgs '-Dlogback.configurationFile=burn-logback.xml'
+            args = ['-c', project.hasProperty('burnTimes') ? project.getProperty('burnTimes') : '1000000']
+        }
+    }
+}
+
