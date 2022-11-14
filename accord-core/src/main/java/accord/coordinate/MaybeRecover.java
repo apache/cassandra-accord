@@ -22,12 +22,12 @@ import java.util.function.BiConsumer;
 
 import javax.annotation.Nullable;
 
+import accord.local.Status.Known;
 import accord.primitives.*;
 import com.google.common.base.Preconditions;
 
 import accord.api.RoutingKey;
 import accord.local.Node;
-import accord.local.Node.Id;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
 
@@ -83,30 +83,32 @@ public class MaybeRecover extends CheckShards
         else
         {
             Preconditions.checkState(merged != null);
-            switch (merged.saveStatus.known)
+            Known known = merged.saveStatus.known;
+
+            switch (known.outcome)
             {
                 default: throw new AssertionError();
-                case Nothing:
-                    if (!(merged.route instanceof Route))
+                case OutcomeUnknown:
+                    if (!known.isDefinitionKnown() && !(merged.route instanceof Route))
                     {
                         // order important, as route could be a Route which does not implement RoutingKeys.union
                         RoutingKeys someKeys = reduceNonNull(RoutingKeys::union, this.contactKeys, merged.route, route);
                         // for correctness reasons, we have not necessarily preempted the initial pre-accept round and
                         // may have raced with it, so we must attempt to recover anything we see pre-accepted.
-                        Invalidate.invalidate(node, txnId, someKeys, homeKey, callback);
+                        Invalidate.invalidate(node, txnId, someKeys.with(homeKey), callback);
                         break;
                     }
-                case ExecutionOrder:
-                case Definition:
-                case Outcome:
+                case OutcomeKnown:
+                case OutcomeApplied:
                     Preconditions.checkState(merged.route instanceof Route);
                     if (hasMadeProgress(merged)) callback.accept(merged.toProgressToken(), null);
                     else node.recover(txnId, (Route) merged.route).addCallback(callback);
                     break;
 
-                case Invalidation:
+                case InvalidationApplied:
+                    // TODO: we should simply invoke commitInvalidate
                     RoutingKeys someKeys = reduceNonNull(RoutingKeys::union, this.contactKeys, merged.route, route);
-                    Invalidate.invalidate(node, txnId, someKeys, homeKey, callback);
+                    Invalidate.invalidate(node, txnId, someKeys.with(homeKey), callback);
             }
         }
     }

@@ -23,27 +23,25 @@ import accord.local.Node;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 
-import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.*;
-
 public class RecoveryTracker extends AbstractTracker<RecoveryTracker.RecoveryShardTracker, Node.Id>
 {
     public static class RecoveryShardTracker extends QuorumShardTracker
     {
         protected int fastPathRejects = 0;
 
-        RecoveryShardTracker(Shard shard)
+        private RecoveryShardTracker(Shard shard)
         {
             super(shard);
         }
 
-        ShardOutcomes onSuccessRejectFastPath(Node.Id from)
+        private ShardOutcomes onSuccessRejectFastPath(Node.Id from)
         {
             if (shard.fastPathElectorate.contains(from))
                 ++fastPathRejects;
             return onSuccess(from);
         }
 
-        boolean rejectsFastPath()
+        private boolean rejectsFastPath()
         {
             return fastPathRejects > shard.fastPathElectorate.size() - shard.fastPathQuorumSize;
         }
@@ -54,9 +52,9 @@ public class RecoveryTracker extends AbstractTracker<RecoveryTracker.RecoverySha
         super(topologies, RecoveryShardTracker[]::new, RecoveryShardTracker::new);
     }
 
-    public RequestStatus recordSuccess(Node.Id node, boolean withFastPathTimestamp)
+    public RequestStatus recordSuccess(Node.Id node, boolean acceptsFastPath)
     {
-        if (withFastPathTimestamp)
+        if (acceptsFastPath)
             return recordResponse(this, node, RecoveryShardTracker::onSuccess, node);
 
         return recordResponse(this, node, RecoveryShardTracker::onSuccessRejectFastPath, node);

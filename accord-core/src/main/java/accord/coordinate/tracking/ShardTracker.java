@@ -10,8 +10,4 @@ public abstract class ShardTracker
     {
         this.shard = shard;
     }
-
-    abstract boolean hasFailed();
-    abstract boolean hasReachedQuorum();
-    abstract boolean hasInFlight();
 }

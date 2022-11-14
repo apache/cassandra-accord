@@ -53,6 +53,7 @@ import accord.topology.Topology;
 import accord.topology.TopologyManager;
 import org.apache.cassandra.utils.concurrent.AsyncFuture;
 import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 public class Node implements ConfigurationService.Listener, NodeTimeService
 {
@@ -458,7 +459,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
         Future<Outcome> result = withEpoch(txnId.epoch, () -> {
             RecoverFuture<Outcome> future = new RecoverFuture<>();
-            RecoverWithRoute.recover(this, txnId, route, future);
+            RecoverWithRoute.recover(this, txnId, route, null, future);
             return future;
         });
         coordinating.putIfAbsent(txnId, result);

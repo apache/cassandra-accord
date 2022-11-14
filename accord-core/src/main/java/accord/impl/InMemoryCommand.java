@@ -24,7 +24,9 @@ import accord.local.*;
 import accord.local.Status.Durability;
 import accord.local.Status.Known;
 import accord.primitives.*;
+import accord.primitives.Txn.Kind;
 
+import javax.annotation.Nullable;
 import java.util.*;
 
 import static accord.local.Status.Durability.Local;
@@ -38,9 +40,10 @@ public class InMemoryCommand extends Command
     private AbstractRoute route;
     private RoutingKey homeKey, progressKey;
     private PartialTxn partialTxn;
+    private Kind kind;
     private Ballot promised = Ballot.ZERO, accepted = Ballot.ZERO;
     private Timestamp executeAt;
-    private PartialDeps partialDeps = PartialDeps.NONE;
+    private @Nullable PartialDeps partialDeps = null;
     private Writes writes;
     private Result result;
 
@@ -102,10 +105,15 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public Txn.Kind kind()
+    public Kind kind()
     {
-        // TODO (now): pack this into TxnId
-        return partialTxn.kind();
+        return kind;
+    }
+
+    @Override
+    public void setKind(Kind kind)
+    {
+        this.kind = kind;
     }
 
     @Override
@@ -187,13 +195,13 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public PartialDeps partialDeps()
+    public @Nullable PartialDeps partialDeps()
     {
         return partialDeps;
     }
 
     @Override
-    public void setPartialDeps(PartialDeps deps)
+    public void setPartialDeps(@Nullable PartialDeps deps)
     {
         this.partialDeps = deps;
     }
@@ -283,12 +291,6 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public boolean isWaitingOnCommit()
-    {
-        return waitingOnCommit != null && !waitingOnCommit.isEmpty();
-    }
-
-    @Override
     public void removeWaitingOnCommit(TxnId txnId)
     {
         if (waitingOnCommit == null)
@@ -311,10 +313,19 @@ public class InMemoryCommand extends Command
         waitingOnApply.put(executeAt, txnId);
     }
 
-    @Override
     public boolean isWaitingOnApply()
     {
         return waitingOnApply != null && !waitingOnApply.isEmpty();
+    }
+
+    public boolean isWaitingOnCommit()
+    {
+        return waitingOnCommit != null && !waitingOnCommit.isEmpty();
+    }
+
+    public boolean isWaitingOnDependency()
+    {
+        return isWaitingOnCommit() || isWaitingOnApply();
     }
 
     @Override
@@ -328,8 +339,15 @@ public class InMemoryCommand extends Command
     }
 
     @Override
-    public TxnId firstWaitingOnApply()
+    public TxnId firstWaitingOnApply(@Nullable TxnId ifExecutesBefore)
     {
-        return isWaitingOnApply() ? waitingOnApply.firstEntry().getValue() : null;
+        if (!isWaitingOnApply())
+            return null;
+
+        Map.Entry<Timestamp, TxnId> first = waitingOnApply.firstEntry();
+        if (ifExecutesBefore == null || first.getKey().compareTo(ifExecutesBefore) < 0)
+            return first.getValue();
+
+        return null;
     }
 }

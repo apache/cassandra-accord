@@ -41,19 +41,19 @@ public class FastPathTrackerReconciler extends TrackerReconciler<FastPathShardTr
         switch (status)
         {
             case Failed:
-                Assertions.assertTrue(tracker.any(ShardTracker::hasFailed));
+                Assertions.assertTrue(tracker.any(FastPathShardTracker::hasFailed));
                 Assertions.assertFalse(tracker.all(FastPathShardTracker::hasReachedQuorum));
                 break;
 
             case Success:
                 Assertions.assertTrue(tracker.all(FastPathShardTracker::hasReachedQuorum));
                 Assertions.assertTrue(tracker.all(shard -> shard.hasRejectedFastPath() || shard.hasMetFastPathCriteria()));
-                Assertions.assertFalse(tracker.any(ShardTracker::hasFailed));
+                Assertions.assertFalse(tracker.any(FastPathShardTracker::hasFailed));
                 break;
 
             case NoChange:
                 Assertions.assertFalse(tracker.all(shard -> shard.hasRejectedFastPath() || shard.hasMetFastPathCriteria()) && tracker.all(FastPathShardTracker::hasReachedQuorum));
-                Assertions.assertFalse(tracker.any(ShardTracker::hasFailed));
+                Assertions.assertFalse(tracker.any(FastPathShardTracker::hasFailed));
         }
     }
 }

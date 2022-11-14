@@ -112,6 +112,8 @@ public class ListRequest implements Request
                     RoutingKey homeKey = ((CoordinateFailed) fail).homeKey();
                     TxnId txnId = ((CoordinateFailed) fail).txnId();
                     CheckOnResult.checkOnResult(node, txnId, homeKey, (s, f) -> {
+                        if (f != null)
+                            return;
                         switch (s)
                         {
                             case Invalidated:

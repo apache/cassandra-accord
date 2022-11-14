@@ -31,6 +31,7 @@ import accord.utils.MapReduceConsume;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static accord.local.Status.Committed;
 import static accord.utils.Utils.listOf;
 import accord.topology.Topology;
 
@@ -86,9 +87,10 @@ public class WaitOnCommit implements EpochRequest, MapReduceConsume<SafeCommandS
             case PreAccepted:
             case Accepted:
             case AcceptedInvalidate:
+            case PreCommitted:
                 waitingOnUpdater.incrementAndGet(this);
                 command.addListener(this);
-                instance.progressLog().waiting(txnId, Known.ExecutionOrder, scope);
+                instance.progressLog().waiting(txnId, Committed.minKnown, scope);
                 break;
 
             case Committed:
@@ -114,6 +116,7 @@ public class WaitOnCommit implements EpochRequest, MapReduceConsume<SafeCommandS
             case AcceptedInvalidate:
                 return;
 
+            case PreCommitted:
             case Committed:
             case ReadyToExecute:
             case PreApplied:

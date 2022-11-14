@@ -41,10 +41,7 @@ import static accord.local.CommandsForKey.CommandTimeseries.TestDep.WITH;
 import static accord.local.CommandsForKey.CommandTimeseries.TestDep.WITHOUT;
 import static accord.local.CommandsForKey.CommandTimeseries.TestKind.RorWs;
 import static accord.local.CommandsForKey.CommandTimeseries.TestStatus.*;
-import static accord.local.Status.Accepted;
-import static accord.local.Status.AcceptedInvalidate;
-import static accord.local.Status.Committed;
-import static accord.local.Status.PreAccepted;
+import static accord.local.Status.*;
 import static accord.messages.PreAccept.calculatePartialDeps;
 
 public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
@@ -104,7 +101,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         }
 
         PartialDeps deps = command.partialDeps();
-        if (!command.hasBeen(Accepted))
+        if (!command.known().deps.isProposalKnown())
         {
             deps = calculatePartialDeps(safeStore, txnId, partialTxn.keys(), partialTxn.kind(), txnId, safeStore.ranges().at(txnId.epoch));
         }
@@ -112,7 +109,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         boolean rejectsFastPath;
         Deps earlierCommittedWitness, earlierAcceptedNoWitness;
 
-        if (command.hasBeen(Committed))
+        if (command.hasBeen(PreCommitted))
         {
             rejectsFastPath = false;
             earlierCommittedWitness = earlierAcceptedNoWitness = Deps.NONE;
@@ -121,7 +118,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         {
             rejectsFastPath = acceptedStartedAfterWithoutWitnessing(safeStore, txnId, partialTxn.keys()).anyMatch(ignore -> true);
             if (!rejectsFastPath)
-                rejectsFastPath = committedExecutesAfterWithoutWitnessing(safeStore, txnId, partialTxn.keys()).anyMatch(ignore -> true);
+                rejectsFastPath = committedExecutesAfterAndDidNotWitness(safeStore, txnId, partialTxn.keys()).anyMatch(ignore -> true);
 
             // TODO: introduce some good unit tests for verifying these two functions in a real repair scenario
             // committed txns with an earlier txnid and have our txnid as a dependency
@@ -267,22 +264,9 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
                    '}';
         }
 
-        public static <T extends RecoverOk> T maxAcceptedOrLater(List<T> recoverOks)
+        public static RecoverOk maxAcceptedOrLater(List<RecoverOk> recoverOks)
         {
-            T max = null;
-            for (T ok : recoverOks)
-            {
-                if (ok.status.phase.compareTo(Phase.Accept) < 0)
-                    continue;
-
-                boolean update =     max == null
-                                  || max.status.phase.compareTo(ok.status.phase) < 0
-                                  || (ok.status.phase.equals(Phase.Accept) && max.accepted.compareTo(ok.accepted) < 0);
-                if (update)
-                    max = ok;
-            }
-            return max;
-
+            return Status.max(recoverOks, r -> r.status, r -> r.accepted, r -> r.status.phase.compareTo(Phase.Accept) >= 0);
         }
     }
 
@@ -320,9 +304,18 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
 
                 // accepted txns with an earlier txnid that do not have our txnid as a dependency
                 builder.nextKey(key);
-                // TODO (now): think carefully about AcceptedInvalidate here: it may not succeed. But, if not, its
-                //             winning competitor must(?) be visible to us or a quorum has not yet been reached
-                forKey.uncommitted().before(txnId, RorWs, WITHOUT, txnId, IS, Accepted).forEach((command) -> {
+                /**
+                 * The idea here is to discover those transactions that have been Accepted without witnessing us
+                 * and whom may not have adopted us as dependencies as responses to the Accept. Once we have
+                 * reached a quorum for recovery any re-proposals will discover us. So we do not need to look
+                 * at AcceptedInvalidate, as these will either be invalidated OR will witness us when they propose
+                 * to Accept.
+                 *
+                 * Note that we treat PreCommitted as whatever status it held previously.
+                 * Which is to say, we expect the previously proposed dependencies (if any) to be used to evaluate this
+                 * condition.
+                 */
+                forKey.uncommitted().before(txnId, RorWs, WITHOUT, txnId, HAS_BEEN, Accepted).forEach((command) -> {
                     if (command.executeAt.compareTo(txnId) > 0)
                         builder.add(command.txnId);
                 });
@@ -339,8 +332,11 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
                 CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
                 if (forKey == null)
                     return;
-
-                // committed txns with an earlier txnid and have our txnid as a dependency
+                /**
+                 * The idea here is to discover those transactions that have been Committed and DID witness us
+                 * so that we can remove these from the set of acceptedStartedBeforeAndDidNotWitness
+                 * on other nodes, to minimise the number of transactions we try to wait for on recovery
+                 */
                 builder.nextKey(key);
                 forKey.committedById().before(txnId, RorWs, WITH, txnId, ANY_STATUS, null)
                         .forEach(builder::add);
@@ -356,19 +352,40 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
             if (forKey == null)
                 return Stream.of();
 
-            // TODO (now): think carefully about AcceptedInvalidate here: it may not succeed. But, if not, its
-            //             winning competitor must(?) be visible to us or a quorum has not yet been reached
+            /**
+             * The idea here is to discover those transactions that were started after us and have been Accepted
+             * and did not witness us as part of their pre-accept round, as this means that we CANNOT have taken
+             * the fast path. This is central to safe recovery, as if every transaction that executes later has
+             * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
+             * has not witnessed us we can safely invalidate it.
+             */
+
+            // AcceptedInvalidate, if successful, cannot take a dependency on us as it is a no-op; if another
+            // Accepted is successful then its status here is irrelevant, as it will either be informed by other
+            // replicas, or else will have to perform a new round that will adopt us as a dependency
             return forKey.uncommitted().after(startedAfter, RorWs, WITHOUT, startedAfter, HAS_BEEN, Accepted);
         });
     }
 
-    private static Stream<TxnId> committedExecutesAfterWithoutWitnessing(SafeCommandStore commandStore, TxnId startedAfter, Keys keys)
+    private static Stream<TxnId> committedExecutesAfterAndDidNotWitness(SafeCommandStore commandStore, TxnId startedAfter, Keys keys)
     {
         return keys.stream().flatMap(key -> {
             CommandsForKey forKey = commandStore.maybeCommandsForKey(key);
             if (forKey == null)
                 return Stream.of();
-            return forKey.committedByExecuteAt().after(startedAfter, RorWs, WITHOUT, startedAfter, ANY_STATUS, null);
+
+            /**
+             * The idea here is to discover those transactions that have been decided to execute after us
+             * and did not witness us as part of their pre-accept or accept round, as this means that we CANNOT have
+             * taken the fast path. This is central to safe recovery, as if every transaction that executes later has
+             * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
+             * has not witnessed us we can safely invalidate it.
+             */
+
+            // We declare HAS_BEEN Committed here only for clarity, as it is currently redundant, but if in future
+            // we revisit the statuses we store it is worth making clear that we require the full decided dependencies
+            // here in order for this evaluation to be valid.
+            return forKey.committedByExecuteAt().after(startedAfter, RorWs, WITHOUT, startedAfter, HAS_BEEN, Committed);
         });
     }
 }

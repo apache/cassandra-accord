@@ -131,9 +131,9 @@ public class PreAcceptTrackerTest
         [1, 2, 3] [2, 3, 4] [3, 4, 5]
          */
 
-        Assertions.assertSame(subTopology.get(0), responses.unsafeGet(0).shard);
-        Assertions.assertSame(subTopology.get(1), responses.unsafeGet(1).shard);
-        Assertions.assertSame(subTopology.get(2), responses.unsafeGet(2).shard);
+        Assertions.assertSame(subTopology.get(0), responses.get(0).shard);
+        Assertions.assertSame(subTopology.get(1), responses.get(1).shard);
+        Assertions.assertSame(subTopology.get(2), responses.get(2).shard);
 
         responses.recordSuccess(ids[1], true);
         assertResponseState(responses, false, false, false, true);
@@ -143,7 +143,7 @@ public class PreAcceptTrackerTest
 
         responses.recordSuccess(ids[3], true);
         // the middle shard will have reached fast path
-        Assertions.assertTrue(responses.unsafeGet(1).hasMetFastPathCriteria());
+        Assertions.assertTrue(responses.get(1).hasMetFastPathCriteria());
         // but since the others haven't, it won't report it as accepted
         assertResponseState(responses, true, false, false, true);
 

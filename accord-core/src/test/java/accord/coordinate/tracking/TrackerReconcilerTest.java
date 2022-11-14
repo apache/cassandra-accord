@@ -32,6 +32,12 @@ public class TrackerReconcilerTest
         test(10000, RecoveryTrackerReconciler::new);
     }
 
+    @Test
+    public void testInvalidationTracker()
+    {
+        test(10000, InvalidationTrackerReconciler::new);
+    }
+
     static <ST extends ShardTracker, T extends AbstractTracker<ST, ?>, E extends Enum<E>>
     void test(int count, BiFunction<Random, Topologies, ? extends TrackerReconciler<ST, T, E>> constructor)
     {

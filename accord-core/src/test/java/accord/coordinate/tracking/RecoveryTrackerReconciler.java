@@ -41,18 +41,18 @@ public class RecoveryTrackerReconciler extends TrackerReconciler<RecoveryShardTr
         switch (status)
         {
             case Failed:
-                Assertions.assertTrue(tracker.any(ShardTracker::hasFailed));
+                Assertions.assertTrue(tracker.any(RecoveryShardTracker::hasFailed));
                 Assertions.assertFalse(tracker.all(RecoveryShardTracker::hasReachedQuorum));
                 break;
 
             case Success:
                 Assertions.assertTrue(tracker.all(RecoveryShardTracker::hasReachedQuorum));
-                Assertions.assertFalse(tracker.any(ShardTracker::hasFailed));
+                Assertions.assertFalse(tracker.any(RecoveryShardTracker::hasFailed));
                 break;
 
             case NoChange:
                 Assertions.assertFalse(tracker.all(RecoveryShardTracker::hasReachedQuorum));
-                Assertions.assertFalse(tracker.any(ShardTracker::hasFailed));
+                Assertions.assertFalse(tracker.any(RecoveryShardTracker::hasFailed));
         }
     }
 }

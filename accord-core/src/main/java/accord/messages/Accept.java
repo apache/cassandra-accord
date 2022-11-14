@@ -36,11 +36,10 @@ import java.util.Collections;
 import accord.primitives.Deps;
 import accord.primitives.TxnId;
 
-import static accord.local.Command.AcceptOutcome.RejectedBallot;
-import static accord.local.Command.AcceptOutcome.Success;
-
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import static accord.local.Command.AcceptOutcome.*;
 import static accord.messages.PreAccept.calculatePartialDeps;
 
 // TODO: use different objects for send and receive, so can be more efficient (e.g. serialize without slicing, and without unnecessary fields)
@@ -84,31 +83,29 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     public synchronized AcceptReply apply(SafeCommandStore safeStore)
     {
         Command command = safeStore.command(txnId);
-        switch (command.accept(safeStore, ballot, scope, keys, progressKey, executeAt, partialDeps))
+        switch (command.accept(safeStore, ballot, kind, scope, keys, progressKey, executeAt, partialDeps))
         {
             default: throw new IllegalStateException();
             case Redundant:
-                return AcceptNack.REDUNDANT;
+                return AcceptReply.REDUNDANT;
             case RejectedBallot:
-                return new AcceptNack(RejectedBallot, command.promised());
+                return new AcceptReply(command.promised());
             case Success:
                 // TODO: we don't need to calculate deps if executeAt == txnId
-                return new AcceptOk(calculatePartialDeps(safeStore, txnId, keys, kind, executeAt, safeStore.ranges().between(minEpoch, executeAt.epoch)));
+                return new AcceptReply(calculatePartialDeps(safeStore, txnId, keys, kind, executeAt, safeStore.ranges().between(minEpoch, executeAt.epoch)));
         }
     }
 
     @Override
-    public AcceptReply reduce(AcceptReply r1, AcceptReply r2)
+    public AcceptReply reduce(AcceptReply ok1, AcceptReply ok2)
     {
-        if (!r1.isOk() || !r2.isOk())
-            return r1.outcome().compareTo(r2.outcome()) >= 0 ? r1 : r2;
+        if (!ok1.isOk() || !ok2.isOk())
+            return ok1.outcome().compareTo(ok2.outcome()) >= 0 ? ok1 : ok2;
 
-        AcceptOk ok1 = (AcceptOk) r1;
-        AcceptOk ok2 = (AcceptOk) r2;
         PartialDeps deps = ok1.deps.with(ok2.deps);
         if (deps == ok1.deps) return ok1;
         if (deps == ok2.deps) return ok2;
-        return new AcceptOk(deps);
+        return new AcceptReply(deps);
     }
 
     @Override
@@ -140,6 +137,77 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         return MessageType.ACCEPT_REQ;
     }
 
+    public String toString() {
+        return "Accept{" +
+                "ballot: " + ballot +
+                ", txnId: " + txnId +
+                ", executeAt: " + executeAt +
+                ", deps: " + partialDeps +
+                '}';
+    }
+
+    public static final class AcceptReply implements Reply
+    {
+        public static final AcceptReply ACCEPT_INVALIDATE = new AcceptReply(Success);
+        public static final AcceptReply REDUNDANT = new AcceptReply(Redundant);
+
+        public final AcceptOutcome outcome;
+        public final Ballot supersededBy;
+        public final @Nullable PartialDeps deps;
+
+        private AcceptReply(AcceptOutcome outcome)
+        {
+            this.outcome = outcome;
+            this.supersededBy = null;
+            this.deps = null;
+        }
+
+        public AcceptReply(Ballot supersededBy)
+        {
+            this.outcome = RejectedBallot;
+            this.supersededBy = supersededBy;
+            this.deps = null;
+        }
+
+        public AcceptReply(@Nonnull PartialDeps deps)
+        {
+            this.outcome = Success;
+            this.supersededBy = null;
+            this.deps = deps;
+        }
+
+        @Override
+        public MessageType type()
+        {
+            return MessageType.ACCEPT_RSP;
+        }
+
+        public boolean isOk()
+        {
+            return outcome == Success;
+        }
+
+        public AcceptOutcome outcome()
+        {
+            return outcome;
+        }
+
+        @Override
+        public String toString()
+        {
+            switch (outcome)
+            {
+                default: throw new AssertionError();
+                case Success:
+                    return "AcceptOk{deps=" + deps + '}';
+                case Redundant:
+                    return "AcceptNack()";
+                case RejectedBallot:
+                    return "AcceptNack(" + supersededBy + ")";
+            }
+        }
+    }
+
     public static class Invalidate extends AbstractEpochRequest<AcceptReply>
     {
         public final Ballot ballot;
@@ -165,11 +233,11 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
             {
                 default:
                 case Redundant:
-                    return AcceptNack.REDUNDANT;
+                    return AcceptReply.REDUNDANT;
                 case Success:
-                    return new AcceptOk(null);
+                    return AcceptReply.ACCEPT_INVALIDATE;
                 case RejectedBallot:
-                    return new AcceptNack(RejectedBallot, command.promised());
+                    return new AcceptReply(command.promised());
             }
         }
 
@@ -190,88 +258,5 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         {
             return txnId.epoch;
         }
-    }
-
-    public static abstract class AcceptReply implements Reply
-    {
-        @Override
-        public MessageType type()
-        {
-            return MessageType.ACCEPT_RSP;
-        }
-
-        public abstract boolean isOk();
-        public abstract AcceptOutcome outcome();
-    }
-
-    public static class AcceptOk extends AcceptReply
-    {
-        @Nullable
-        // TODO: migrate this to PartialDeps? Need to think carefully about semantics when ownership changes between txnId and executeAt
-        public final PartialDeps deps;
-
-        public AcceptOk(PartialDeps deps)
-        {
-            this.deps = deps;
-        }
-
-        @Override
-        public boolean isOk()
-        {
-            return true;
-        }
-
-        @Override
-        public AcceptOutcome outcome()
-        {
-            return Success;
-        }
-
-        @Override
-        public String toString()
-        {
-            return "AcceptOk{deps=" + deps + '}';
-        }
-    }
-
-    public static class AcceptNack extends AcceptReply
-    {
-        public static final AcceptNack REDUNDANT = new AcceptNack(AcceptOutcome.Redundant, null);
-
-        public final AcceptOutcome outcome;
-        public final Ballot supersededBy;
-
-        public AcceptNack(AcceptOutcome outcome, Ballot supersededBy)
-        {
-            this.outcome = outcome;
-            this.supersededBy = supersededBy;
-        }
-
-        @Override
-        public boolean isOk()
-        {
-            return false;
-        }
-
-        @Override
-        public AcceptOutcome outcome()
-        {
-            return outcome;
-        }
-
-        @Override
-        public String toString()
-        {
-            return "AcceptNack{" + outcome + ",supersededBy=" + supersededBy + '}';
-        }
-    }
-
-    public String toString() {
-        return "Accept{" +
-                "ballot: " + ballot +
-                ", txnId: " + txnId +
-                ", executeAt: " + executeAt +
-                ", deps: " + partialDeps +
-                '}';
     }
 }

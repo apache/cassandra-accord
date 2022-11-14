@@ -168,8 +168,11 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
                     }
                     else
                     {
-                        commitInvalidate(node, txnId, route, executeAt);
-                        accept(null, new Timeout(txnId, route.homeKey));
+                        node.withEpoch(executeAt.epoch, () -> {
+                            commitInvalidate(node, txnId, route, executeAt);
+                            // TODO: this should be Invalidated rather than Timeout?
+                            accept(null, new Timeout(txnId, route.homeKey));
+                        });
                     }
                 });
             }

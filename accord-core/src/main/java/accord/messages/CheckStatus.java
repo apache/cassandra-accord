@@ -211,20 +211,15 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
             CheckStatusOk defer = prefer == this ? that : this;
 
             // then select the max along each criteria, preferring the coordinator
-            CheckStatusOk maxAccepted = prefer.accepted.compareTo(defer.accepted) >= 0 ? prefer : defer;
-            CheckStatusOk maxStatus; {
-                int c = prefer.saveStatus.compareTo(defer.saveStatus);
-                if (c > 0) maxStatus = prefer;
-                else if (c < 0) maxStatus = defer;
-                else maxStatus = maxAccepted;
-            }
+            CheckStatusOk maxStatus = Status.max(prefer, prefer.saveStatus.status, prefer.accepted, defer, defer.saveStatus.status, defer.accepted);
+            SaveStatus mergeStatus = SaveStatus.merge(prefer.saveStatus, prefer.accepted, defer.saveStatus, defer.accepted);
             CheckStatusOk maxPromised = prefer.promised.compareTo(defer.promised) >= 0 ? prefer : defer;
             CheckStatusOk maxDurability = prefer.durability.compareTo(defer.durability) >= 0 ? prefer : defer;
             CheckStatusOk maxHomeKey = prefer.homeKey != null || defer.homeKey == null ? prefer : defer;
             AbstractRoute mergedRoute = AbstractRoute.merge(prefer.route, defer.route);
 
             // if the maximum (or preferred equal) is the same on all dimensions, return it
-            if (maxStatus == maxPromised && maxStatus == maxAccepted && maxStatus == maxDurability
+            if (mergeStatus == maxStatus.saveStatus && maxStatus == maxPromised && maxStatus == maxDurability
                 && maxStatus.route == mergedRoute && maxStatus == maxHomeKey)
             {
                 return maxStatus;
@@ -232,7 +227,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
 
             // otherwise assemble the maximum of each, and propagate isCoordinating from the origin we selected the promise from
             boolean isCoordinating = maxPromised == prefer ? prefer.isCoordinating : defer.isCoordinating;
-            return new CheckStatusOk(maxStatus.saveStatus, maxPromised.promised, maxAccepted.accepted, maxStatus.executeAt,
+            return new CheckStatusOk(mergeStatus, maxPromised.promised, maxStatus.accepted, maxStatus.executeAt,
                                      isCoordinating, maxDurability.durability, mergedRoute, maxHomeKey.homeKey);
         }
 
@@ -316,31 +311,47 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
 
         private static Known sufficientFor(AbstractKeys<?, ?> forKeys, SaveStatus maxStatus, PartialTxn partialTxn, PartialDeps committedDeps, Writes writes, Result result)
         {
-            Known learn = maxStatus.known;
-            switch (maxStatus.known)
+            Status.Definition definition = maxStatus.known.definition;
+            switch (definition)
             {
                 default: throw new AssertionError();
-                case Invalidation:
-                    break;
-                case Outcome:
-                    if (writes != null && result != null
-                        && committedDeps != null && committedDeps.covers(forKeys)
-                        && partialTxn != null && partialTxn.covers(forKeys))
-                        break;
-                    learn = Known.ExecutionOrder;
-                case ExecutionOrder:
-                    if (committedDeps != null && committedDeps.covers(forKeys)
-                        && partialTxn != null && partialTxn.covers(forKeys))
-                        break;
-                    learn = Known.Definition;
-                case Definition:
+                case DefinitionKnown:
                     if (partialTxn != null && partialTxn.covers(forKeys))
                         break;
-                    learn = Known.Nothing;
-                    // TODO (now): we should test Route presence here
-                case Nothing:
+                    definition = Definition.DefinitionUnknown;
+                case DefinitionUnknown:
+                case NoOp:
             }
-            return learn;
+
+            KnownExecuteAt executeAt = maxStatus.known.executeAt;
+            KnownDeps deps = maxStatus.known.deps;
+            switch (deps)
+            {
+                default: throw new AssertionError();
+                case DepsKnown:
+                    if (committedDeps != null && committedDeps.covers(forKeys))
+                        break;
+                    deps = KnownDeps.DepsUnknown;
+                case NoDeps:
+                case DepsProposed:
+                case DepsUnknown:
+            }
+
+            Status.Outcome outcome = maxStatus.known.outcome;
+            switch (outcome)
+            {
+                default: throw new AssertionError();
+                case OutcomeApplied:
+                case OutcomeKnown:
+                    if (writes != null && result != null)
+                        break;
+
+                    outcome = Outcome.OutcomeUnknown;
+                case InvalidationApplied:
+                case OutcomeUnknown:
+            }
+
+            return new Known(definition, executeAt, deps, outcome);
         }
 
         @Override

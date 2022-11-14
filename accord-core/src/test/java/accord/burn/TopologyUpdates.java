@@ -51,6 +51,7 @@ import java.util.stream.Stream;
 
 import static accord.coordinate.Invalidate.invalidate;
 import static accord.local.PreLoadContext.contextFor;
+import static accord.local.Status.*;
 import static accord.local.Status.Known.*;
 
 public class TopologyUpdates
@@ -102,7 +103,7 @@ public class TopologyUpdates
                 if (fail != null)
                     process(node, onDone);
                 else if (outcome == Nothing)
-                    invalidate(node, txnId, route.with(route.homeKey), route.homeKey, (i1, i2) -> process(node, onDone));
+                    invalidate(node, txnId, route.with(route.homeKey), (i1, i2) -> process(node, onDone));
                 else
                     onDone.accept(true);
             };
@@ -114,17 +115,21 @@ public class TopologyUpdates
                 case PreAccepted:
                 case Accepted:
                 case AcceptedInvalidate:
-                    FetchData.fetch(Definition, node, txnId, route, toEpoch, callback);
+                    FetchData.fetch(DefinitionOnly, node, txnId, route, toEpoch, callback);
                     break;
                 case Committed:
                 case ReadyToExecute:
-                    FetchData.fetch(ExecutionOrder, node, txnId, route, toEpoch, callback);
+                    FetchData.fetch(Committed.minKnown, node, txnId, route, toEpoch, callback);
                     break;
                 case PreApplied:
                 case Applied:
-                case Invalidated:
                     node.withEpoch(Math.max(executeAt.epoch, toEpoch), () -> {
-                        FetchData.fetch(Outcome, node, txnId, route, executeAt, toEpoch, callback);
+                        FetchData.fetch(PreApplied.minKnown, node, txnId, route, executeAt, toEpoch, callback);
+                    });
+                    break;
+                case Invalidated:
+                    node.forEachLocal(contextFor(txnId), route, txnId.epoch, toEpoch, safeStore -> {
+                        safeStore.command(txnId).commitInvalidate(safeStore);
                     });
             }
         }
@@ -183,6 +188,7 @@ public class TopologyUpdates
         });
     }
 
+    private static final boolean PREACCEPTED = false;
     private static final boolean COMMITTED_ONLY = true;
 
     /**
@@ -249,7 +255,7 @@ public class TopologyUpdates
                                                                        srcEpoch,
                                                                        localTopology.ranges(),
                                                                        allNodes,
-                                                                       trgEpoch, COMMITTED_ONLY));
+                                                                       trgEpoch, PREACCEPTED));
         return messageStream;
     }
 

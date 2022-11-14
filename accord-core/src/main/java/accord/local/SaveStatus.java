@@ -18,11 +18,14 @@
 
 package accord.local;
 
-import accord.local.Status.ExecutionStatus;
-import accord.local.Status.Known;
-import accord.local.Status.Phase;
+import accord.local.Status.*;
+import accord.primitives.Ballot;
 
-import static accord.local.Status.Known.*;
+import static accord.local.Status.Definition.DefinitionKnown;
+import static accord.local.Status.Definition.DefinitionUnknown;
+import static accord.local.Status.KnownDeps.*;
+import static accord.local.Status.KnownExecuteAt.*;
+import static accord.local.Status.Outcome.OutcomeUnknown;
 
 /**
  * Identical to Status but preserves whether we have previously been PreAccepted and therefore know the definition
@@ -32,34 +35,38 @@ import static accord.local.Status.Known.*;
  */
 public enum SaveStatus
 {
-    NotWitnessed                    (Status.NotWitnessed,       Nothing),
-    PreAccepted                     (Status.PreAccepted,        Definition),
-    AcceptedInvalidate              (Status.AcceptedInvalidate, Nothing), // may or may not have witnessed
-    AcceptedInvalidateWithDefinition(Status.AcceptedInvalidate, Definition), // may or may not have witnessed
-    Accepted                        (Status.Accepted,           Nothing), // may or may not have witnessed
-    AcceptedWithDefinition          (Status.Accepted,           Definition), // may or may not have witnessed
-    Committed                       (Status.Committed,          ExecutionOrder),
-    ReadyToExecute                  (Status.ReadyToExecute,     ExecutionOrder),
-    PreApplied                      (Status.PreApplied,         Outcome),
-    Applied                         (Status.Applied,            Outcome),
-    Invalidated                     (Status.Invalidated,        Invalidation);
+    NotWitnessed                    (Status.NotWitnessed),
+    PreAccepted                     (Status.PreAccepted),
+    AcceptedInvalidate              (Status.AcceptedInvalidate),
+    AcceptedInvalidateWithDefinition(Status.AcceptedInvalidate,    DefinitionKnown,   ExecuteAtUnknown,  DepsUnknown,  OutcomeUnknown),
+    Accepted                        (Status.Accepted),
+    AcceptedWithDefinition          (Status.Accepted,              DefinitionKnown,   ExecuteAtProposed, DepsProposed, OutcomeUnknown),
+    PreCommitted                    (Status.PreCommitted),
+    PreCommittedWithAcceptedDeps    (Status.PreCommitted,          DefinitionUnknown, ExecuteAtKnown,    DepsProposed, OutcomeUnknown),
+    PreCommittedWithDefinition      (Status.PreCommitted,          DefinitionKnown,   ExecuteAtKnown,    DepsUnknown,  OutcomeUnknown),
+    PreCommittedWithDefinitionAndAcceptedDeps(Status.PreCommitted, DefinitionKnown,   ExecuteAtKnown,    DepsProposed, OutcomeUnknown),
+    Committed                       (Status.Committed),
+    ReadyToExecute                  (Status.ReadyToExecute),
+    PreApplied                      (Status.PreApplied),
+    Applied                         (Status.Applied),
+    Invalidated                     (Status.Invalidated);
     
     public final Status status;
     public final Phase phase;
-    public final Known known;
-    public final ExecutionStatus execution;
+    public final Known known; // TODO: duplicate contents here to reduce indirection for majority of cases
 
-    SaveStatus(Status status, Known known)
+    SaveStatus(Status status)
     {
         this.status = status;
         this.phase = status.phase;
-        this.known = known;
-        this.execution = status.execution;
+        this.known = status.minKnown;
     }
 
-    public boolean isAtLeast(Phase phase)
+    SaveStatus(Status status, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome)
     {
-        return this.phase.compareTo(phase) >= 0;
+        this.status = status;
+        this.phase = status.phase;
+        this.known = new Known(definition, executeAt, deps, outcome);
     }
 
     public boolean hasBeen(Status status)
@@ -67,6 +74,7 @@ public enum SaveStatus
         return this.status.compareTo(status) >= 0;
     }
 
+    // TODO: exhaustive testing, particularly around PreCommitted
     public static SaveStatus get(Status status, Known known)
     {
         switch (status)
@@ -74,13 +82,43 @@ public enum SaveStatus
             default: throw new AssertionError();
             case NotWitnessed: return NotWitnessed;
             case PreAccepted: return PreAccepted;
-            case AcceptedInvalidate: return known.compareTo(Definition) >= 0 ? AcceptedInvalidateWithDefinition : AcceptedInvalidate;
-            case Accepted: return known.compareTo(Definition) >= 0 ? AcceptedWithDefinition : Accepted;
+            case AcceptedInvalidate:
+                // AcceptedInvalidate logically clears any proposed deps and executeAt
+                if (!known.executeAt.isDecisionKnown())
+                    return known.isDefinitionKnown() ? AcceptedInvalidateWithDefinition : AcceptedInvalidate;
+                // If we know the executeAt decision then we do not clear it, and fall-through to PreCommitted
+                // however, we still clear the deps, as any deps we might have previously seen proposed are now expired
+                // TODO: consider clearing Command.partialDeps in this case also
+                known = known.with(DepsUnknown);
+            case Accepted:
+                if (!known.executeAt.isDecisionKnown())
+                    return known.isDefinitionKnown() ? AcceptedWithDefinition : Accepted;
+                // if the decision is known, we're really PreCommitted
+            case PreCommitted:
+                if (known.isDefinitionKnown())
+                    return known.deps.isProposalKnown() ? PreCommittedWithDefinitionAndAcceptedDeps : PreCommittedWithDefinition;
+                return known.deps.isProposalKnown() ? PreCommittedWithAcceptedDeps : PreCommitted;
             case Committed: return Committed;
             case ReadyToExecute: return ReadyToExecute;
             case PreApplied: return PreApplied;
             case Applied: return Applied;
             case Invalidated: return Invalidated;
         }
+    }
+
+    public static SaveStatus enrich(SaveStatus status, Known known)
+    {
+        if (known.isSatisfiedBy(status.known))
+            return status;
+        return get(status.status, status.known.merge(known));
+    }
+
+    public static SaveStatus merge(SaveStatus a, Ballot acceptedA, SaveStatus b, Ballot acceptedB)
+    {
+        SaveStatus prefer;
+        if (a.phase != b.phase) prefer = a.phase.compareTo(b.phase) >= 0 ? a : b;
+        else if (a.phase == Phase.Accept) prefer = acceptedA.compareTo(acceptedB) >= 0 ? a : b;
+        else prefer = a.compareTo(b) >= 0 ? a : b;
+        return SaveStatus.enrich(prefer, (prefer == a ? b : a).known);
     }
 }

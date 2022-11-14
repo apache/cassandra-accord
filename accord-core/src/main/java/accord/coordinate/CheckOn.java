@@ -39,7 +39,6 @@ import java.util.Collections;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.local.SaveStatus.NotWitnessed;
 import static accord.local.Status.*;
-import static accord.local.Status.Known.*;
 
 /**
  * Check on the status of a transaction. Returns early once enough information has been achieved to meet the requested
@@ -102,7 +101,7 @@ public class CheckOn extends CheckShards
 
     protected boolean isSufficient(AbstractRoute scope, CheckStatusOk ok)
     {
-        return ((CheckStatusOkFull)ok).sufficientFor(scope).compareTo(sufficient) >= 0;
+        return sufficient.isSatisfiedBy(((CheckStatusOkFull)ok).sufficientFor(scope));
     }
 
     @Override
@@ -130,7 +129,7 @@ public class CheckOn extends CheckShards
         final AbstractRoute maxRoute;
         final RoutingKey progressKey;
         final CheckStatusOkFull full;
-        final Known sufficientTo;
+        final Known sufficientFor;
         final PartialTxn partialTxn;
         final PartialDeps partialDeps;
 
@@ -139,17 +138,17 @@ public class CheckOn extends CheckShards
             KeyRanges localRanges = node.topology().localRangesForEpochs(txnId.epoch, untilLocalEpoch);
             PartialRoute selfRoute = route().slice(localRanges);
             full = (CheckStatusOkFull) merged;
-            sufficientTo = full.sufficientFor(selfRoute);
+            sufficientFor = full.sufficientFor(selfRoute);
             maxRoute = Route.merge(route(), full.route);
             progressKey = node.trySelectProgressKey(txnId, maxRoute);
 
             PartialTxn partialTxn = null;
-            if (sufficientTo.hasTxn)
+            if (sufficientFor.definition.isKnown())
                 partialTxn = full.partialTxn.slice(localRanges, true).reconstitutePartial(selfRoute);
             this.partialTxn = partialTxn;
 
             PartialDeps partialDeps = null;
-            if (sufficientTo.hasDeps)
+            if (sufficientFor.deps.isDecisionKnown())
                 partialDeps = full.committedDeps.slice(localRanges).reconstitutePartial(selfRoute);
             this.partialDeps = partialDeps;
         }
@@ -157,11 +156,11 @@ public class CheckOn extends CheckShards
         void start()
         {
             Keys keys = Keys.EMPTY;
-            if (sufficientTo.hasTxn)
+            if (sufficientFor.definition.isKnown())
                 keys = partialTxn.keys();
 
             Iterable<TxnId> txnIds = Collections.singleton(txnId);
-            if (sufficientTo.hasDeps)
+            if (sufficientFor.deps.isDecisionKnown())
                 txnIds = Iterables.concat(txnIds, partialDeps.txnIds());
 
             PreLoadContext loadContext = contextFor(txnIds, keys);
@@ -172,25 +171,43 @@ public class CheckOn extends CheckShards
         public Void apply(SafeCommandStore safeStore)
         {
             Command command = safeStore.command(txnId);
-            switch (sufficientTo)
+            switch (sufficientFor.propagate())
             {
                 default: throw new IllegalStateException();
-                case Invalidation:
+                case Accepted:
+                case AcceptedInvalidate:
+                    // we never "propagate" accepted statuses as these are essentially votes,
+                    // and contribute nothing to our local state machine
+                    throw new IllegalStateException("Invalid states to propagate");
+
+                case Invalidated:
                     command.commitInvalidate(safeStore);
                     break;
-                case Outcome:
+
+                case Applied:
+                case PreApplied:
                     if (untilLocalEpoch >= full.executeAt.epoch)
                     {
                         confirm(command.commit(safeStore, maxRoute, progressKey, partialTxn, full.executeAt, partialDeps));
                         confirm(command.apply(safeStore, untilLocalEpoch, maxRoute, full.executeAt, partialDeps, full.writes, full.result));
                         break;
                     }
-                case ExecutionOrder:
+
+                case Committed:
+                case ReadyToExecute:
                     confirm(command.commit(safeStore, maxRoute, progressKey, partialTxn, full.executeAt, partialDeps));
                     break;
-                case Definition:
+
+                case PreCommitted:
+                    command.precommit(safeStore, full.executeAt);
+                    if (!sufficientFor.definition.isKnown())
+                        break;
+
+                case PreAccepted:
                     command.preaccept(safeStore, partialTxn, maxRoute, progressKey);
-                case Nothing:
+                    break;
+
+                case NotWitnessed:
                     break;
             }
 
@@ -204,7 +221,7 @@ public class CheckOn extends CheckShards
             if (!safeStore.commandStore().hashIntersects(homeKey))
                 return null;
 
-            Timestamp executeAt = merged.saveStatus.isAtLeast(Phase.Commit) ? merged.executeAt : null;
+            Timestamp executeAt = merged.saveStatus.known.executeAt.isDecisionKnown() ? merged.executeAt : null;
             command.setDurability(safeStore, merged.durability, homeKey, executeAt);
             safeStore.progressLog().durable(command, null);
             return null;

@@ -21,7 +21,6 @@ package accord.impl;
 import accord.api.Key;
 import accord.local.Command;
 import accord.local.CommandsForKey;
-import accord.local.PartialCommand;
 import accord.local.Status;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -36,6 +35,7 @@ import java.util.stream.Stream;
 
 import static accord.local.CommandsForKey.CommandTimeseries.TestDep.*;
 import static accord.local.CommandsForKey.CommandTimeseries.TestKind.RorWs;
+import static accord.local.Status.KnownDeps.DepsUnknown;
 import static accord.local.Status.PreAccepted;
 import static accord.primitives.Txn.Kind.WRITE;
 
@@ -79,7 +79,8 @@ public class InMemoryCommandsForKey extends CommandsForKey
         {
             return commands.headMap(timestamp, false).values().stream()
                     .filter(cmd -> testKind == RorWs || cmd.kind() == WRITE)
-                    .filter(cmd -> testDep == ANY_DEPS || (cmd.partialDeps().contains(depId) ^ (testDep == WITHOUT)))
+                    // If we don't have any dependencies, we treat a dependency filter as a mismatch
+                    .filter(cmd -> testDep == ANY_DEPS || (cmd.known().deps != DepsUnknown && (cmd.partialDeps().contains(depId) ^ (testDep == WITHOUT))))
                     .filter(cmd -> TestStatus.test(cmd.status(), testStatus, status))
                     .map(map);
         }
@@ -89,7 +90,8 @@ public class InMemoryCommandsForKey extends CommandsForKey
         {
             return commands.tailMap(timestamp, false).values().stream()
                     .filter(cmd -> testKind == RorWs || cmd.kind() == WRITE)
-                    .filter(cmd -> testDep == ANY_DEPS || (cmd.partialDeps().contains(depId) ^ (testDep == WITHOUT)))
+                    // If we don't have any dependencies, we treat a dependency filter as a mismatch
+                    .filter(cmd -> testDep == ANY_DEPS || (cmd.known().deps != DepsUnknown && (cmd.partialDeps().contains(depId) ^ (testDep == WITHOUT))))
                     .filter(cmd -> TestStatus.test(cmd.status(), testStatus, status))
                     .map(map);
         }

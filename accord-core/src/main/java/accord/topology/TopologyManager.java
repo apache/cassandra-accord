@@ -59,6 +59,7 @@ public class TopologyManager implements ConfigurationService.Listener
     private static final Future<Void> SUCCESS = ImmediateFuture.success(null);
     static class EpochState
     {
+        final Id self;
         private final Topology global;
         private final Topology local;
         private final QuorumTracker syncTracker;
@@ -68,6 +69,7 @@ public class TopologyManager implements ConfigurationService.Listener
         EpochState(Id node, Topology global, TopologySorter sorter, boolean prevSynced)
         {
             this.global = global;
+            this.self = node;
             this.local = global.forNode(node).trim();
             Preconditions.checkArgument(!global().isSubset());
             this.syncTracker = new QuorumTracker(new Single(sorter, global()));
@@ -81,7 +83,8 @@ public class TopologyManager implements ConfigurationService.Listener
 
         public void recordSyncComplete(Id node)
         {
-            syncComplete = syncTracker.recordSuccess(node) == Success;
+            if (syncTracker.recordSuccess(node) == Success)
+                syncComplete = true;
         }
 
         Topology global()
@@ -116,14 +119,14 @@ public class TopologyManager implements ConfigurationService.Listener
             Boolean result = global().foldl(keys, (i, shard, acc) -> {
                 if (acc == Boolean.FALSE)
                     return acc;
-                return syncTracker.unsafeGet(i).hasReachedQuorum();
+                return syncTracker.get(i).hasReachedQuorum();
             }, Boolean.TRUE);
             return result == Boolean.TRUE;
         }
 
         boolean shardIsUnsynced(int idx, Shard shard)
         {
-            return !prevSynced || !syncTracker.unsafeGet(idx).hasReachedQuorum();
+            return !prevSynced || !syncTracker.get(idx).hasReachedQuorum();
         }
     }
 

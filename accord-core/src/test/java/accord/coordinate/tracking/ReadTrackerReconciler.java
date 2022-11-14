@@ -2,15 +2,12 @@ package accord.coordinate.tracking;
 
 import accord.coordinate.tracking.ReadTracker.ReadShardTracker;
 import accord.local.Node;
-import accord.topology.Shard;
 import accord.topology.Topologies;
 import org.junit.jupiter.api.Assertions;
 
 import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.List;
 import java.util.Random;
-import java.util.stream.Stream;
 
 public class ReadTrackerReconciler extends TrackerReconciler<ReadShardTracker, ReadTracker, ReadTrackerReconciler.Rsp>
 {

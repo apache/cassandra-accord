@@ -179,9 +179,16 @@ public class Topology
     public Shard forKey(RoutingKey key)
     {
         int i = ranges.rangeIndexForKey(key);
-        if (i < 0 || i >= ranges.size())
+        if (i < 0)
             throw new IllegalArgumentException("Range not found for " + key);
         return shards[i];
+    }
+
+    public int indexForKey(RoutingKey key)
+    {
+        int i = ranges.rangeIndexForKey(key);
+        if (i < 0) return -1;
+        return Arrays.binarySearch(supersetIndexes, i);
     }
 
     public Topology forKeys(AbstractKeys<?, ?> select)

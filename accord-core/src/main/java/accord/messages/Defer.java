@@ -23,12 +23,13 @@ class Defer implements CommandListener
     int waitingOnCount;
     boolean isDone;
 
-    Defer(Known waitUntil, TxnRequest<?> request)
+    Defer(Known waitUntil, Known expireAt, TxnRequest<?> request)
     {
         this(command -> {
-            int c = command.known().compareTo(waitUntil);
-            if (c < 0) return No;
-            if (c > 0) return Expired; // the action we were waiting to perform must have already been completed
+            if (!waitUntil.isSatisfiedBy(command.known()))
+                return No;
+            if (expireAt.isSatisfiedBy(command.known()))
+                return Expired;
             return Yes;
         }, request);
     }
