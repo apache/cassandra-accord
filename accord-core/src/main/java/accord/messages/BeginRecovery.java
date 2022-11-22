@@ -333,7 +333,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
                  * on other nodes, to minimise the number of transactions we try to wait for on recovery
                  */
                 builder.nextKey(forKey.key());
-                forKey.committedById().before(txnId, RorWs, WITH, txnId, ANY_STATUS, null)
+                forKey.committedById().before(txnId, RorWs, WITH, txnId, HAS_BEEN, Committed)
                         .forEach(builder::add);
             });
             return builder.build();
@@ -363,7 +363,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
          * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
          * has not witnessed us we can safely invalidate it.
          */
-        return commandStore.mapReduce(keys, ranges, forKey -> forKey.committedByExecuteAt().after(startedAfter, RorWs, WITHOUT, startedAfter, ANY_STATUS, null),
+        return commandStore.mapReduce(keys, ranges, forKey -> forKey.committedByExecuteAt().after(startedAfter, RorWs, WITHOUT, startedAfter, HAS_BEEN, Committed),
                 Stream::concat, Stream.empty());
     }
 }
