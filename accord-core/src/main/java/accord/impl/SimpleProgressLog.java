@@ -759,13 +759,17 @@ public class SimpleProgressLog implements ProgressLog.Factory
         public void durable(TxnId txnId, Unseekables<?, ?> unseekables, ProgressShard shard)
         {
             State state = ensure(txnId);
-            // TODO: we can probably simplify things by requiring (empty) Apply messages to be sent also to the coordinating topology
+            // TODO (progress consider-prerelease): we can probably simplify things by requiring (empty) Apply messages to be sent also to the coordinating topology
             state.recordBlocking(txnId, PreApplied.minKnown, unseekables);
         }
 
         public void waiting(TxnId blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn)
         {
-            // TODO (soon): forward to progress shard for processing (if known)
+            // TODO (perf+ consider-prerelease): consider triggering a preemption of existing coordinator (if any) in some circumstances;
+            //     today, an LWT can pre-empt more efficiently (i.e. instantly) a failed operation whereas Accord will
+            //     wait for some progress interval before taking over; there is probably some middle ground where we trigger
+            //     faster preemption once we're blocked on a transaction, while still offering some amount of time to complete.
+            // TODO (soon): forward to local progress shard for processing (if known)
             // TODO (soon): if we are co-located with the home shard, don't need to do anything unless we're in a
             //              later topology that wasn't covered by its coordination
             ensure(blockedBy).recordBlocking(blockedBy, blockedUntil, blockedOn);

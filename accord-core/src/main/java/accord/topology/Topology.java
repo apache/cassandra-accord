@@ -27,6 +27,7 @@ import accord.api.RoutingKey;
 import accord.local.Node.Id;
 import accord.primitives.*;
 import accord.utils.*;
+import accord.utils.ArrayBuffers.IntBuffers;
 
 import static accord.utils.SortedArrays.Search.FLOOR;
 import static accord.utils.SortedArrays.exponentialSearch;
@@ -239,58 +240,66 @@ public class Topology
     private int[] subsetFor(Unseekables<?, ?> select, IndexedPredicate<Shard> predicate)
     {
         int count = 0;
-        int[] newSubset = new int[Math.min(select.size(), subsetOfRanges.size())];
-        Unseekables<?, ?> as = select;
-        Ranges bs = subsetOfRanges;
-        int ai = 0, bi = 0;
-        // ailim tracks which ai have been included; since there may be multiple matches
-        // we cannot increment ai to avoid missing a match with a second bi
-        int ailim = 0;
-
-        if (subsetOfRanges == ranges)
+        IntBuffers cachedInts = ArrayBuffers.cachedInts();
+        int[] newSubset = cachedInts.getInts(Math.min(select.size(), subsetOfRanges.size()));
+        try
         {
-            while (true)
+            Routables<?, ?> as = select;
+            Ranges bs = subsetOfRanges;
+            int ai = 0, bi = 0;
+            // ailim tracks which ai have been included; since there may be multiple matches
+            // we cannot increment ai to avoid missing a match with a second bi
+            int ailim = 0;
+
+            if (subsetOfRanges == ranges)
             {
-                long abi = as.findNextIntersection(ai, bs, bi);
-                if (abi < 0)
+                while (true)
                 {
-                    if (ailim < select.size())
+                    long abi = as.findNextIntersection(ai, bs, bi);
+                    if (abi < 0)
+                    {
+                        if (ailim < select.size())
+                            throw new IllegalArgumentException("Range not found for " + select.get(ailim));
+                        break;
+                    }
+
+                    bi = (int)(abi >>> 32);
+                    if (ailim < (int)abi)
                         throw new IllegalArgumentException("Range not found for " + select.get(ailim));
-                    break;
+
+                    if (predicate.test(bi, shards[bi]))
+                        newSubset[count++] = bi;
+
+                    ai = (int)abi;
+                    ailim = as.findNext(ai + 1, bs.get(bi), FLOOR);
+                    if (ailim < 0) ailim = -1 - ailim;
+                    else ailim++;
+                    ++bi;
                 }
-
-                bi = (int)(abi >>> 32);
-                if (ailim < (int)abi)
-                    throw new IllegalArgumentException("Range not found for " + select.get(ailim));
-
-                if (predicate.test(bi, shards[bi]))
-                    newSubset[count++] = bi;
-
-                ai = (int)abi;
-                ailim = as.findNext(ai + 1, bs.get(bi), FLOOR);
-                if (ailim < 0) ailim = -1 - ailim;
-                else ailim++;
-                ++bi;
             }
-        }
-        else
-        {
-            while (true)
+            else
             {
-                long abi = as.findNextIntersection(ai, bs, bi);
-                if (abi < 0)
-                    break;
+                while (true)
+                {
+                    long abi = as.findNextIntersection(ai, bs, bi);
+                    if (abi < 0)
+                        break;
 
-                bi = (int)(abi >>> 32);
-                if (predicate.test(bi, shards[bi]))
-                    newSubset[count++] = bi;
+                    bi = (int)(abi >>> 32);
+                    if (predicate.test(bi, shards[bi]))
+                        newSubset[count++] = bi;
 
-                ++bi;
+                    ++bi;
+                }
             }
         }
-        if (count != newSubset.length)
-            newSubset = Arrays.copyOf(newSubset, count);
-        return newSubset;
+        catch (Throwable t)
+        {
+            cachedInts.forceDiscard(newSubset, count);
+            throw t;
+        }
+
+        return cachedInts.completeAndDiscard(newSubset, count);
     }
 
     public void visitNodeForKeysOnceOrMore(Unseekables<?, ?> select, IndexedPredicate<Shard> predicate, Consumer<Id> nodes)

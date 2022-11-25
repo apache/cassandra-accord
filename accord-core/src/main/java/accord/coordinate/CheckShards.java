@@ -59,7 +59,7 @@ public abstract class CheckShards extends ReadCoordinator<CheckStatusReply>
     @Override
     protected Action process(Id from, CheckStatusReply reply)
     {
-        debug.put(from, reply);
+        if (debug != null) debug.put(from, reply);
         if (reply.isOk())
         {
             CheckStatusOk ok = (CheckStatusOk) reply;

@@ -35,6 +35,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 
 import accord.impl.IntHashKey;
 import accord.impl.basic.Cluster;
@@ -269,7 +270,8 @@ public class BurnTest
     {
 //        Long overrideSeed = null;
         int count = 1;
-        Long overrideSeed = 827391622236206128L;
+        Long overrideSeed = 188057951046487786L;
+        LongSupplier seedGenerator = ThreadLocalRandom.current()::nextLong;
         for (int i = 0 ; i < args.length ; i += 2)
         {
             switch (args[i])
@@ -282,11 +284,14 @@ public class BurnTest
                 case "-s":
                     overrideSeed = Long.parseLong(args[i + 1]);
                     count = 1;
+                    break;
+                case "--loop-seed":
+                    seedGenerator = new Random(Long.parseLong(args[i + 1]))::nextLong;
             }
         }
         while (count-- > 0)
         {
-            run(overrideSeed != null ? overrideSeed : ThreadLocalRandom.current().nextLong());
+            run(overrideSeed != null ? overrideSeed : seedGenerator.getAsLong());
         }
     }
 
