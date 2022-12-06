@@ -136,7 +136,7 @@ public class CheckOn extends CheckShards
 
         public OnDone()
         {
-            Ranges localRanges = node.topology().localRangesForEpochs(txnId.epoch, untilLocalEpoch);
+            Ranges localRanges = node.topology().localRangesForEpochs(txnId.epoch(), untilLocalEpoch);
             PartialRoute<?> selfRoute = route().slice(localRanges);
             full = (CheckStatusOkFull) merged;
             sufficientFor = full.sufficientFor(selfRoute);
@@ -165,7 +165,7 @@ public class CheckOn extends CheckShards
                 txnIds = Iterables.concat(txnIds, partialDeps.txnIds());
 
             PreLoadContext loadContext = contextFor(txnIds, keys);
-            node.mapReduceConsumeLocal(loadContext, route, txnId.epoch, untilLocalEpoch, this);
+            node.mapReduceConsumeLocal(loadContext, route, txnId.epoch(), untilLocalEpoch, this);
         }
 
         @Override
@@ -187,7 +187,7 @@ public class CheckOn extends CheckShards
 
                 case Applied:
                 case PreApplied:
-                    if (untilLocalEpoch >= full.executeAt.epoch)
+                    if (untilLocalEpoch >= full.executeAt.epoch())
                     {
                         confirm(command.commit(safeStore, maxRoute, progressKey, partialTxn, full.executeAt, partialDeps));
                         confirm(command.apply(safeStore, untilLocalEpoch, maxRoute, full.executeAt, partialDeps, full.writes, full.result));
@@ -216,7 +216,7 @@ public class CheckOn extends CheckShards
             if (!merged.durability.isDurable() || homeKey == null)
                 return null;
 
-            if (!safeStore.ranges().at(txnId.epoch).contains(homeKey))
+            if (!safeStore.ranges().at(txnId.epoch()).contains(homeKey))
                 return null;
 
             Timestamp executeAt = merged.saveStatus.known.executeAt.isDecisionKnown() ? merged.executeAt : null;

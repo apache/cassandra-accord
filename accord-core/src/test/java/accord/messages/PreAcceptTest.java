@@ -40,11 +40,13 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Random;
 
-import static accord.Utils.id;
-import static accord.Utils.writeTxn;
+import static accord.Utils.*;
 import static accord.impl.InMemoryCommandStore.inMemory;
+import static accord.impl.IntKey.range;
 import static accord.impl.IntKey.routing;
 import static accord.impl.mock.MockCluster.configService;
+import static accord.primitives.Routable.Domain.Key;
+import static accord.primitives.Txn.Kind.Write;
 import static accord.utils.Utils.listOf;
 
 public class PreAcceptTest
@@ -79,7 +81,7 @@ public class PreAcceptTest
     private static PreAccept preAccept(TxnId txnId, Txn txn, RoutingKey homeKey)
     {
         FullRoute<?> route = txn.keys().toRoute(homeKey);
-        return PreAccept.SerializerSupport.create(txnId, route.slice(FULL_RANGE), txnId.epoch, txnId.epoch, false, txnId.epoch, txn.slice(FULL_RANGE, true), route);
+        return PreAccept.SerializerSupport.create(txnId, route.slice(FULL_RANGE), txnId.epoch(), txnId.epoch(), false, txnId.epoch(), txn.slice(FULL_RANGE, true), route);
     }
 
     @Test
@@ -159,15 +161,15 @@ public class PreAcceptTest
             messageSink.clearHistory();
             Raw key2 = IntKey.key(11);
             Keys keys = Keys.of(key1, key2);
-            TxnId txnId2 = new TxnId(1, 50, 0, ID3);
+            TxnId txnId2 = new TxnId(1, 50, Write, Key, ID3);
             PreAccept preAccept2 = preAccept(txnId2, writeTxn(keys), key2.toUnseekable());
             clock.increment(10);
             preAccept2.process(node, ID3, REPLY_CONTEXT);
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID3, messageSink.responses.get(0).to);
-            PartialDeps expectedDeps = PartialDeps.NONE;
-            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId2, new TxnId(1, 110, 0, ID1), expectedDeps),
+            PartialDeps expectedDeps = Deps.NONE.slice(ranges(range(0, 12)));
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId2, Timestamp.fromValues(1, 110, ID1), expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
         finally
@@ -191,7 +193,7 @@ public class PreAcceptTest
         try
         {
             Keys keys = Keys.of(key);
-            TxnId txnId = new TxnId(1, 110, 0, ID2);
+            TxnId txnId = new TxnId(1, 110, Write, Key, ID2);
             PreAccept preAccept = preAccept(txnId, writeTxn(keys), key.toUnseekable());
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
@@ -235,7 +237,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, new TxnId(2, 110, 0, ID1), PartialDeps.NONE),
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, Timestamp.fromValues(2, 110, ID1), Deps.NONE.slice(ranges(range(0, 12)))),
                                     messageSink.responses.get(0).payload);
         }
         finally

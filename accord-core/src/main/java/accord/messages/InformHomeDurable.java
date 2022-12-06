@@ -32,7 +32,7 @@ public class InformHomeDurable implements Request
     public void process(Node node, Id replyToNode, ReplyContext replyContext)
     {
         // TODO (expected, efficiency): do not load txnId first
-        node.ifLocal(contextFor(txnId), homeKey, txnId.epoch, safeStore -> {
+        node.ifLocal(contextFor(txnId), homeKey, txnId.epoch(), safeStore -> {
             Command command = safeStore.command(txnId);
             command.setDurability(safeStore, durability, homeKey, executeAt);
             safeStore.progressLog().durable(command, persistedOn);

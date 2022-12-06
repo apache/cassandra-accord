@@ -65,23 +65,23 @@ public class DepsTest
     @Test
     public void testRandom()
     {
-        testOneRandom(seed(), 1000, 3, 50, 10, 4, 100, 10, 200, 1000);
-        testOneRandom(seed(), 1000, 3, 50, 10, 4, 10, 2, 200, 1000);
-        testOneRandom(seed(), 100, 3, 50, 10, 4, 10, 2, 200, 100);
+        testOneRandom(seed(), 1000, 3, 500, 4, 100, 10, 200, 1000);
+        testOneRandom(seed(), 1000, 3, 500, 4, 10, 2, 200, 1000);
+        testOneRandom(seed(), 100, 3, 500, 4, 10, 2, 200, 100);
     }
 
     @Test
     public void testMerge()
     {
-        testMerge(seed(), 100, 3, 50, 10, 4, 10, 5, 200, 100, 10);
-        testMerge(seed(), 1000, 3, 50, 10, 4, 100, 10, 200, 1000, 10);
+        testMerge(seed(), 100, 3, 500, 4, 10, 5, 200, 100, 10);
+        testMerge(seed(), 1000, 3, 500, 4, 100, 10, 200, 1000, 10);
     }
 
-    private static void testMerge(long seed, int uniqueTxnIdsRange, int epochRange, int realRange, int logicalRange, int nodeRange,
+    private static void testMerge(long seed, int uniqueTxnIdsRange, int epochRange, int hlcRange, int nodeRange,
                                  int uniqueKeysRange, int emptyKeysRange, int keyRange, int totalCountRange, int mergeCountRange)
     {
         Random random = random(seed);
-        Supplier<Deps> supplier = supplier(random, uniqueTxnIdsRange, epochRange, realRange, logicalRange, nodeRange,
+        Supplier<Deps> supplier = supplier(random, uniqueTxnIdsRange, epochRange, hlcRange, 0, nodeRange,
                                            uniqueKeysRange, emptyKeysRange, keyRange, totalCountRange);
         int count = 1 + random.nextInt(mergeCountRange);
         List<Deps> deps = new ArrayList<>(count);
@@ -93,14 +93,14 @@ public class DepsTest
     @Test
     public void testWith()
     {
-        testWith(seed(), 1000, 3, 50, 10, 4, 100, 10, 200, 1000, 10);
+        testWith(seed(), 1000, 3, 500, 4, 100, 10, 200, 1000, 10);
     }
 
-    private static void testWith(long seed, int uniqueTxnIdsRange, int epochRange, int realRange, int logicalRange, int nodeRange,
+    private static void testWith(long seed, int uniqueTxnIdsRange, int epochRange, int hlcRange, int nodeRange,
                                  int uniqueKeysRange, int emptyKeysRange, int keyRange, int totalCountRange, int mergeCountRange)
     {
         Random random = random(seed);
-        Supplier<Deps> supplier = supplier(random, uniqueTxnIdsRange, epochRange, realRange, logicalRange, nodeRange,
+        Supplier<Deps> supplier = supplier(random, uniqueTxnIdsRange, epochRange, hlcRange, 0, nodeRange,
                                            uniqueKeysRange, emptyKeysRange, keyRange, totalCountRange);
         Deps cur = supplier.get();
         int count = 1 + random.nextInt(mergeCountRange);
@@ -311,22 +311,21 @@ public class DepsTest
         static Deps generate(Gen.Random random)
         {
             int epochRange = 3;
-            int realRange = 50;
-            int logicalRange = 10;
+            int hlcRange = 500;
             double uniqueTxnIdsPercentage = 0.66D;
-            int uniqueTxnIds = random.nextPositive((int) ((realRange * logicalRange * epochRange) * uniqueTxnIdsPercentage));
+            int uniqueTxnIds = random.nextPositive((int) ((hlcRange * epochRange) * uniqueTxnIdsPercentage));
 
             int nodeRange = random.nextPositive(4);
             int uniqueKeys = random.nextInt(2, 200);
             int emptyKeys = random.nextInt(0, 10);
             int keyRange = random.nextInt(uniqueKeys + emptyKeys, 400);
             int totalCount = random.nextPositive(1000);
-            Deps deps = generate(random, uniqueTxnIds, epochRange, realRange, logicalRange, nodeRange, uniqueKeys, emptyKeys, keyRange, totalCount);
+            Deps deps = generate(random, uniqueTxnIds, epochRange, hlcRange, 0, nodeRange, uniqueKeys, emptyKeys, keyRange, totalCount);
             deps.testSimpleEquality();
             return deps;
         }
 
-        static Deps generate(Random random, int uniqueTxnIds, int epochRange, int realRange, int logicalRange, int nodeRange,
+        static Deps generate(Random random, int uniqueTxnIds, int epochRange, int hlcRange, int flagsRange, int nodeRange,
                              int uniqueKeys, int emptyKeys, int keyRange, int totalCount)
         {
             // populateKeys is a subset of keys
@@ -344,7 +343,7 @@ public class DepsTest
             List<TxnId> txnIds; {
                 TreeSet<TxnId> tmp = new TreeSet<>();
                 while (tmp.size() < uniqueTxnIds)
-                    tmp.add(new TxnId(random.nextInt(epochRange), random.nextInt(realRange), random.nextInt(logicalRange), new Id(random.nextInt(nodeRange))));
+                    tmp.add(TxnId.fromValues(random.nextInt(epochRange), random.nextInt(hlcRange), flagsRange == 0 ? 0 : random.nextInt(flagsRange), new Id(random.nextInt(nodeRange))));
                 txnIds = new ArrayList<>(tmp);
             }
 
@@ -469,17 +468,17 @@ public class DepsTest
         return Ranges.ofSortedAndDeoverlapped(ranges);
     }
 
-    private static void testOneRandom(long seed, int uniqueTxnIds, int epochRange, int realRange, int logicalRange, int nodeRange,
+    private static void testOneRandom(long seed, int uniqueTxnIds, int epochRange, int hlcRange, int nodeRange,
                                       int uniqueKeys, int emptyKeys, int keyRange, int totalCountRange)
     {
         Random random = random(seed);
         int totalCount = 1 + random.nextInt(totalCountRange - 1);
         testOneDeps(random,
-                    DepsTest.Deps.generate(random, uniqueTxnIds, epochRange, realRange, logicalRange, nodeRange, uniqueKeys, emptyKeys, keyRange, totalCount),
+                    DepsTest.Deps.generate(random, uniqueTxnIds, epochRange, hlcRange, 0, nodeRange, uniqueKeys, emptyKeys, keyRange, totalCount),
                     keyRange);
     }
 
-    private static Supplier<Deps> supplier(Random random, int uniqueTxnIdsRange, int epochRange, int realRange, int logicalRange, int nodeRange,
+    private static Supplier<Deps> supplier(Random random, int uniqueTxnIdsRange, int epochRange, int hlcRange, int flagRange, int nodeRange,
                                            int uniqueKeysRange, int emptyKeysRange, int keyRange, int totalCountRange)
     {
         return () -> {
@@ -491,7 +490,7 @@ public class DepsTest
             int emptyKeys = 1 + random.nextInt(emptyKeysRange - 1);
             int totalCount = random.nextInt(Math.min(totalCountRange, uniqueKeys * uniqueTxnIds));
             return DepsTest.Deps.generate(random, uniqueTxnIds,
-                                                  epochRange, realRange, logicalRange, nodeRange,
+                                                  epochRange, hlcRange, flagRange, nodeRange,
                                                   uniqueKeys, emptyKeys, keyRange, totalCount);
         };
     }
@@ -574,10 +573,10 @@ public class DepsTest
     public static void main(String[] args)
     {
         for (long seed = 0 ; seed < 10000 ; ++seed)
-            testMerge(seed, 100, 3, 50, 10, 4, 4, 2, 100, 10, 4);
+            testMerge(seed, 100, 3, 50, 4, 4, 2, 100, 10, 4);
 
         for (long seed = 0 ; seed < 10000 ; ++seed)
-            testMerge(seed, 1000, 3, 50, 10, 4, 20, 5, 200, 100, 4);
+            testMerge(seed, 1000, 3, 50, 4, 20, 5, 200, 100, 4);
     }
 
 }

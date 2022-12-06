@@ -26,7 +26,7 @@ public class RecoverWithHomeKey extends CheckShards implements BiConsumer<Object
 
     RecoverWithHomeKey(Node node, TxnId txnId, RoutingKey homeKey, Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
-        super(node, txnId, RoutingKeys.of(homeKey), txnId.epoch, IncludeInfo.Route);
+        super(node, txnId, RoutingKeys.of(homeKey), txnId.epoch(), IncludeInfo.Route);
         this.witnessedByInvalidation = witnessedByInvalidation;
         // if witnessedByInvalidation == AcceptedInvalidate then we cannot assume its definition was known, and our comparison with the status is invalid
         Preconditions.checkState(witnessedByInvalidation != Status.AcceptedInvalidate);

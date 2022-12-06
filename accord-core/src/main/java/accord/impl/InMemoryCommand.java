@@ -24,7 +24,6 @@ import accord.local.*;
 import accord.local.Status.Durability;
 import accord.local.Status.Known;
 import accord.primitives.*;
-import accord.primitives.Txn.Kind;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -40,7 +39,6 @@ public class InMemoryCommand extends Command
     private Route<?> route;
     private RoutingKey homeKey, progressKey;
     private PartialTxn partialTxn;
-    private Kind kind;
     private Ballot promised = Ballot.ZERO, accepted = Ballot.ZERO;
     private Timestamp executeAt;
     private @Nullable PartialDeps partialDeps = null;
@@ -102,18 +100,6 @@ public class InMemoryCommand extends Command
     public RoutingKey homeKey()
     {
         return homeKey;
-    }
-
-    @Override
-    public Kind kind()
-    {
-        return kind;
-    }
-
-    @Override
-    public void setKind(Kind kind)
-    {
-        this.kind = kind;
     }
 
     @Override

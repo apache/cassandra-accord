@@ -73,7 +73,7 @@ public class Commit extends TxnRequest<ReadNack>
             if (isHome)
                 sendRoute = route;
         }
-        else if (executeAt.epoch != txnId.epoch)
+        else if (executeAt.epoch() != txnId.epoch())
         {
             Ranges coordinateRanges = coordinateTopology.rangesForNode(to);
             Ranges executeRanges = topologies.computeRangesForNode(to);
@@ -104,11 +104,11 @@ public class Commit extends TxnRequest<ReadNack>
     public static void commitMinimalAndRead(Node node, Topologies executeTopologies, TxnId txnId, Txn txn, FullRoute<?> route, Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, Set<Id> readSet, Callback<ReadReply> callback)
     {
         Topologies allTopologies = executeTopologies;
-        if (txnId.epoch != executeAt.epoch)
-            allTopologies = node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
+        if (txnId.epoch() != executeAt.epoch())
+            allTopologies = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
 
-        Topology executeTopology = executeTopologies.forEpoch(executeAt.epoch);
-        Topology coordinateTopology = allTopologies.forEpoch(txnId.epoch);
+        Topology executeTopology = executeTopologies.forEpoch(executeAt.epoch());
+        Topology coordinateTopology = allTopologies.forEpoch(txnId.epoch());
         for (Node.Id to : executeTopology.nodes())
         {
             boolean read = readSet.contains(to);
@@ -140,7 +140,7 @@ public class Commit extends TxnRequest<ReadNack>
 
     public void process()
     {
-        node.mapReduceConsumeLocal(this, txnId.epoch, executeAt.epoch, this);
+        node.mapReduceConsumeLocal(this, txnId.epoch(), executeAt.epoch(), this);
     }
 
     // TODO (expected, efficiency, clarity): do not guard with synchronized; let mapReduceLocal decide how to enforce mutual exclusivity
@@ -207,15 +207,15 @@ public class Commit extends TxnRequest<ReadNack>
 
         public static void commitInvalidate(Node node, TxnId txnId, Unseekables<?, ?> inform, Timestamp until)
         {
-            commitInvalidate(node, txnId, inform, until.epoch);
+            commitInvalidate(node, txnId, inform, until.epoch());
         }
 
         public static void commitInvalidate(Node node, TxnId txnId, Unseekables<?, ?> inform, long untilEpoch)
         {
             // TODO (expected, safety): this kind of check needs to be inserted in all equivalent methods
-            Invariants.checkState(untilEpoch >= txnId.epoch);
+            Invariants.checkState(untilEpoch >= txnId.epoch());
             Invariants.checkState(node.topology().hasEpoch(untilEpoch));
-            Topologies commitTo = node.topology().preciseEpochs(inform, txnId.epoch, untilEpoch);
+            Topologies commitTo = node.topology().preciseEpochs(inform, txnId.epoch(), untilEpoch);
             commitInvalidate(node, commitTo, txnId, inform);
         }
 
@@ -270,7 +270,7 @@ public class Commit extends TxnRequest<ReadNack>
 
         public void process(Node node, Id from, ReplyContext replyContext)
         {
-            node.forEachLocal(this, scope, txnId.epoch, invalidateUntilEpoch,
+            node.forEachLocal(this, scope, txnId.epoch(), invalidateUntilEpoch,
                             safeStore -> safeStore.command(txnId).commitInvalidate(safeStore))
                     .addCallback(node.agent());
         }

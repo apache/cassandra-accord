@@ -56,15 +56,15 @@ public class Persist implements Callback<ApplyReply>
     public static void persist(Node node, Topologies sendTo, Topologies applyTo, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         Persist persist = new Persist(node, applyTo, txnId, route, txn, executeAt, deps);
-        node.send(sendTo.nodes(), to -> new Apply(to, sendTo, applyTo, executeAt.epoch, txnId, route, executeAt, deps, writes, result), persist);
+        node.send(sendTo.nodes(), to -> new Apply(to, sendTo, applyTo, executeAt.epoch(), txnId, route, executeAt, deps, writes, result), persist);
     }
 
     public static void persistAndCommit(Node node, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
-        Topologies sendTo = node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
-        Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch);
+        Topologies sendTo = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
+        Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch());
         Persist persist = new Persist(node, sendTo, txnId, route, txn, executeAt, deps);
-        node.send(sendTo.nodes(), to -> new Apply(to, sendTo, applyTo, executeAt.epoch, txnId, route, executeAt, deps, writes, result), persist);
+        node.send(sendTo.nodes(), to -> new Apply(to, sendTo, applyTo, executeAt.epoch(), txnId, route, executeAt, deps, writes, result), persist);
     }
 
     private Persist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps)
@@ -93,21 +93,21 @@ public class Persist implements Callback<ApplyReply>
                     if (!isDone)
                     {
                         // TODO (low priority, consider, efficiency): send to non-home replicas also, so they may clear their log more easily?
-                        Shard homeShard = node.topology().forEpochIfKnown(route.homeKey(), txnId.epoch);
+                        Shard homeShard = node.topology().forEpochIfKnown(route.homeKey(), txnId.epoch());
                         node.send(homeShard, new InformHomeDurable(txnId, route.homeKey(), executeAt, Durable, persistedOn));
                         isDone = true;
                     }
                     else if (!tracker.hasInFlight() && !tracker.hasFailures())
                     {
-                        Shard homeShard = node.topology().forEpochIfKnown(route.homeKey(), txnId.epoch);
+                        Shard homeShard = node.topology().forEpochIfKnown(route.homeKey(), txnId.epoch());
                         node.send(homeShard, new InformHomeDurable(txnId, route.homeKey(), executeAt, Universal, persistedOn));
                     }
                 }
                 break;
             case Insufficient:
-                Topologies topologies = node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
+                Topologies topologies = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
                 // TODO (easy, cleanup): use static method in Commit
-                node.send(from, new Commit(Kind.Maximal, from, topologies.forEpoch(txnId.epoch), topologies, txnId, txn, route, null, executeAt, deps, false));
+                node.send(from, new Commit(Kind.Maximal, from, topologies.forEpoch(txnId.epoch()), topologies, txnId, txn, route, null, executeAt, deps, false));
         }
     }
 

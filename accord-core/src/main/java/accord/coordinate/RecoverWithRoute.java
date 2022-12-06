@@ -31,7 +31,7 @@ public class RecoverWithRoute extends CheckShards
 
     private RecoverWithRoute(Node node, Topologies topologies, @Nullable Ballot promisedBallot, TxnId txnId, FullRoute<?> route, Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
-        super(node, txnId, route, txnId.epoch, IncludeInfo.All);
+        super(node, txnId, route, txnId.epoch(), IncludeInfo.All);
         // if witnessedByInvalidation == AcceptedInvalidate then we cannot assume its definition was known, and our comparison with the status is invalid
         Invariants.checkState(witnessedByInvalidation != Status.AcceptedInvalidate);
         // if witnessedByInvalidation == Invalidated we should anyway not be recovering
@@ -40,12 +40,12 @@ public class RecoverWithRoute extends CheckShards
         this.route = route;
         this.callback = callback;
         this.witnessedByInvalidation = witnessedByInvalidation;
-        assert topologies.oldestEpoch() == topologies.currentEpoch() && topologies.currentEpoch() == txnId.epoch;
+        assert topologies.oldestEpoch() == topologies.currentEpoch() && topologies.currentEpoch() == txnId.epoch();
     }
 
     public static RecoverWithRoute recover(Node node, TxnId txnId, FullRoute<?> route, @Nullable Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
-        return recover(node, node.topology().forEpoch(route, txnId.epoch), txnId, route, witnessedByInvalidation, callback);
+        return recover(node, node.topology().forEpoch(route, txnId.epoch()), txnId, route, witnessedByInvalidation, callback);
     }
 
     public static RecoverWithRoute recover(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, @Nullable Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
@@ -55,7 +55,7 @@ public class RecoverWithRoute extends CheckShards
 
     public static RecoverWithRoute recover(Node node, @Nullable Ballot promisedBallot, TxnId txnId, FullRoute<?> route, @Nullable Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
-        return recover(node, node.topology().forEpoch(route, txnId.epoch), promisedBallot, txnId, route, witnessedByInvalidation, callback);
+        return recover(node, node.topology().forEpoch(route, txnId.epoch()), promisedBallot, txnId, route, witnessedByInvalidation, callback);
     }
 
     public static RecoverWithRoute recover(Node node, Topologies topologies, Ballot ballot, TxnId txnId, FullRoute<?> route, Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
@@ -79,7 +79,7 @@ public class RecoverWithRoute extends CheckShards
     @Override
     protected boolean isSufficient(Id from, CheckStatusOk ok)
     {
-        Ranges rangesForNode = topologies().forEpoch(txnId.epoch).rangesForNode(from);
+        Ranges rangesForNode = topologies().forEpoch(txnId.epoch()).rangesForNode(from);
         PartialRoute<?> route = this.route.slice(rangesForNode);
         return isSufficient(route, ok);
     }
@@ -141,7 +141,7 @@ public class RecoverWithRoute extends CheckShards
                 if (known.deps.isDecisionKnown())
                 {
                     Deps deps = merged.committedDeps.reconstitute(route());
-                    node.withEpoch(merged.executeAt.epoch, () -> {
+                    node.withEpoch(merged.executeAt.epoch(), () -> {
                         Persist.persistAndCommit(node, txnId, route(), txn, merged.executeAt, deps, merged.writes, merged.result);
                     });
                     callback.accept(APPLIED, null);

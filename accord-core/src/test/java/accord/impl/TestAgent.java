@@ -56,6 +56,6 @@ public class TestAgent implements Agent
     @Override
     public boolean isExpired(TxnId initiated, long now)
     {
-        return TimeUnit.SECONDS.convert(now - initiated.real, TimeUnit.MICROSECONDS) >= 10;
+        return TimeUnit.SECONDS.convert(now - initiated.hlc(), TimeUnit.MICROSECONDS) >= 10;
     }
 }

@@ -96,9 +96,9 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     }
 
     @Override
-    public final Unseekable.Kind kindOfContents()
+    public final Routable.Domain kindOfContents()
     {
-        return Unseekable.Kind.Range;
+        return Routable.Domain.Range;
     }
 
     @Override

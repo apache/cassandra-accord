@@ -113,13 +113,13 @@ public class Json
                 in.nextNull();
                 return null;
             }
-            return readTimestamp(in, Timestamp::new);
+            return readTimestamp(in, Timestamp::fromBits);
         }
     };
 
     private interface TimestampFactory<T>
     {
-        T create(long epoch, long real, int logical, Id node);
+        T create(long msb, long lsb, Id node);
     }
 
     private static <T> T readTimestamp(JsonReader in, TimestampFactory<T> factory) throws IOException
@@ -130,12 +130,11 @@ public class Json
             return null;
         }
         in.beginArray();
-        long epoch = in.nextLong();
-        long real = in.nextLong();
-        int logical = in.nextInt();
+        long msb = in.nextLong();
+        long lsb = in.nextLong();
         Id node = ID_ADAPTER.read(in);
         in.endArray();
-        return factory.create(epoch, real, logical, node);
+        return factory.create(msb, lsb, node);
     }
 
     private static void writeTimestamp(JsonWriter out, Timestamp timestamp) throws IOException
@@ -146,9 +145,8 @@ public class Json
             return;
         }
         out.beginArray();
-        out.value(timestamp.epoch);
-        out.value(timestamp.real);
-        out.value(timestamp.logical);
+        out.value(timestamp.msb);
+        out.value(timestamp.lsb);
         ID_ADAPTER.write(out, timestamp.node);
         out.endArray();
     }
@@ -164,7 +162,7 @@ public class Json
         @Override
         public TxnId read(JsonReader in) throws IOException
         {
-            return readTimestamp(in, TxnId::new);
+            return readTimestamp(in, TxnId::fromBits);
         }
     };
 
@@ -179,7 +177,7 @@ public class Json
         @Override
         public Ballot read(JsonReader in) throws IOException
         {
-            return readTimestamp(in, Ballot::new);
+            return readTimestamp(in, Ballot::fromBits);
         }
     };
 

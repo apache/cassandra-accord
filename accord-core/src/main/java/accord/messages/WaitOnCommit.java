@@ -70,7 +70,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
         this.node = node;
         this.replyTo = replyToNode;
         this.replyContext = replyContext;
-        node.mapReduceConsumeLocal(this, scope, txnId.epoch, txnId.epoch, this);
+        node.mapReduceConsumeLocal(this, scope, txnId.epoch(), txnId.epoch(), this);
     }
 
     @Override
@@ -189,6 +189,6 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
     @Override
     public long waitForEpoch()
     {
-        return txnId.epoch;
+        return txnId.epoch();
     }
 }

@@ -49,8 +49,8 @@ public class InformHomeOfTxn extends AsyncFuture<Void> implements Callback<Simpl
 
     public static Future<Void> inform(Node node, TxnId txnId, RoutingKey homeKey)
     {
-        return node.withEpoch(txnId.epoch, () -> {
-            Shard homeShard = node.topology().forEpoch(homeKey, txnId.epoch);
+        return node.withEpoch(txnId.epoch(), () -> {
+            Shard homeShard = node.topology().forEpoch(homeKey, txnId.epoch());
             InformHomeOfTxn inform = new InformHomeOfTxn(txnId, homeKey, homeShard);
             node.send(homeShard.nodes, new InformOfTxnId(txnId, homeKey), inform);
             return inform;

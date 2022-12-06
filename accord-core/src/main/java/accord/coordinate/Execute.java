@@ -50,13 +50,13 @@ class Execute extends ReadCoordinator<ReadReply>
 
     private Execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
     {
-        super(node, node.topology().forEpoch(readScope.toUnseekables(), executeAt.epoch), txnId);
+        super(node, node.topology().forEpoch(readScope.toUnseekables(), executeAt.epoch()), txnId);
         this.txn = txn;
         this.route = route;
         this.readScope = readScope;
         this.executeAt = executeAt;
         this.deps = deps;
-        this.applyTo = node.topology().forEpoch(route, executeAt.epoch);
+        this.applyTo = node.topology().forEpoch(route, executeAt.epoch());
         this.callback = callback;
     }
 
@@ -64,8 +64,8 @@ class Execute extends ReadCoordinator<ReadReply>
     {
         if (txn.read().keys().isEmpty())
         {
-            Topologies sendTo = node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
-            Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch);
+            Topologies sendTo = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
+            Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch());
             Result result = txn.result(txnId, null);
             Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, null), result);
             callback.accept(result, null);
@@ -112,8 +112,8 @@ class Execute extends ReadCoordinator<ReadReply>
                 return Action.Abort;
             case NotCommitted:
                 // the replica may be missing the original commit, or the additional commit, so send everything
-                Topologies topology = node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
-                Topology coordinateTopology = topology.forEpoch(txnId.epoch);
+                Topologies topology = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
+                Topology coordinateTopology = topology.forEpoch(txnId.epoch());
                 node.send(from, new Commit(Maximal, from, coordinateTopology, topology, txnId, txn, route, readScope, executeAt, deps, false));
                 // also try sending a read command to another replica, in case they're ready to serve a response
                 return Action.TryAlternative;
@@ -132,7 +132,7 @@ class Execute extends ReadCoordinator<ReadReply>
             Result result = txn.result(txnId, data);
             callback.accept(result, null);
             // avoid re-calculating topologies if it is unchanged
-            Topologies sendTo = txnId.epoch == executeAt.epoch ? applyTo : node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
+            Topologies sendTo = txnId.epoch() == executeAt.epoch() ? applyTo : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
             Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, data), result);
         }
         else

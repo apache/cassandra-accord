@@ -17,7 +17,7 @@ public class FindHomeKey extends CheckShards
     final BiConsumer<RoutingKey, Throwable> callback;
     FindHomeKey(Node node, TxnId txnId, Unseekables<?, ?> unseekables, BiConsumer<RoutingKey, Throwable> callback)
     {
-        super(node, txnId, unseekables, txnId.epoch, IncludeInfo.No);
+        super(node, txnId, unseekables, txnId.epoch(), IncludeInfo.No);
         this.callback = callback;
     }
 

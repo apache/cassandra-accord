@@ -47,7 +47,7 @@ public class MaybeRecover extends CheckShards
     MaybeRecover(Node node, TxnId txnId, RoutingKey homeKey, @Nullable Route<?> route, ProgressToken prevProgress, BiConsumer<Outcome, Throwable> callback)
     {
         // we only want to enquire with the home shard, but we prefer maximal route information for running Invalidation against, if necessary
-        super(node, txnId, RoutingKeys.of(homeKey), txnId.epoch, IncludeInfo.Route);
+        super(node, txnId, RoutingKeys.of(homeKey), txnId.epoch(), IncludeInfo.Route);
         this.homeKey = homeKey;
         this.route = route;
         this.prevProgress = prevProgress;

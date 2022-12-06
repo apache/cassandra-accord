@@ -72,9 +72,6 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
     public abstract TxnId txnId();
 
-    public abstract Kind kind();
-    public abstract void setKind(Kind kind);
-
     // TODO (desirable, API consistency): should any of these calls be replaced by corresponding known() registers?
     public boolean hasBeen(Status status)
     {
@@ -295,12 +292,12 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             return AcceptOutcome.Redundant;
         }
 
-        if (known().isDefinitionKnown() && !kind().equals(kind))
+        if (known().isDefinitionKnown() && txnId().rw() != kind)
             throw new IllegalArgumentException("Transaction kind is different to the definition we have already received");
 
         TxnId txnId = txnId();
         Ranges coordinateRanges = coordinateRanges(safeStore);
-        Ranges acceptRanges = txnId.epoch == executeAt.epoch ? coordinateRanges : safeStore.ranges().between(txnId.epoch, executeAt.epoch);
+        Ranges acceptRanges = txnId.epoch() == executeAt.epoch() ? coordinateRanges : safeStore.ranges().between(txnId.epoch(), executeAt.epoch());
         ProgressShard shard = progressShard(safeStore, route, progressKey, coordinateRanges);
 
         if (!validate(coordinateRanges, Ranges.EMPTY, shard, route, Ignore, null, Ignore, partialDeps, Set))
@@ -312,7 +309,6 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         setExecuteAt(executeAt);
         setPromised(ballot);
         setAccepted(ballot);
-        setKind(kind);
         set(safeStore, coordinateRanges, Ranges.EMPTY, shard, route, null, Ignore, partialDeps, Set);
         switch (status())
         {
@@ -410,7 +406,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
     protected void populateWaitingOn(SafeCommandStore safeStore)
     {
-        Ranges ranges = safeStore.ranges().since(executeAt().epoch);
+        Ranges ranges = safeStore.ranges().since(executeAt().epoch());
         if (ranges != null) {
             partialDeps().forEachOn(ranges, txnId -> {
                 Command command = safeStore.ifLoaded(txnId);
@@ -492,7 +488,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         Ranges executeRanges = executeRanges(safeStore, executeAt);
         if (untilEpoch < safeStore.latestEpoch())
         {
-            Ranges expectedRanges = safeStore.ranges().between(executeAt.epoch, untilEpoch);
+            Ranges expectedRanges = safeStore.ranges().between(executeAt.epoch(), untilEpoch);
             Invariants.checkState(expectedRanges.containsAll(executeRanges));
         }
         ProgressShard shard = progressShard(safeStore, route, coordinateRanges);
@@ -830,7 +826,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             setHomeKey(homeKey);
             // TODO (low priority, safety): if we're processed on a node that does not know the latest epoch,
             //      do we guarantee the home key calculation is unchanged since the prior epoch?
-            if (progressKey() == null && owns(safeStore, txnId().epoch, homeKey))
+            if (progressKey() == null && owns(safeStore, txnId().epoch(), homeKey))
                 progressKey(homeKey);
         }
         else if (!this.homeKey().equals(homeKey))
@@ -892,7 +888,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         if (progressKey == NO_PROGRESS_KEY)
             return No;
 
-        Ranges coordinateRanges = safeStore.ranges().at(txnId().epoch);
+        Ranges coordinateRanges = safeStore.ranges().at(txnId().epoch());
         if (!coordinateRanges.contains(progressKey))
             return No;
 
@@ -901,12 +897,12 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
     private Ranges coordinateRanges(SafeCommandStore safeStore)
     {
-        return safeStore.ranges().at(txnId().epoch);
+        return safeStore.ranges().at(txnId().epoch());
     }
 
     private Ranges executeRanges(SafeCommandStore safeStore, Timestamp executeAt)
     {
-        return safeStore.ranges().since(executeAt.epoch);
+        return safeStore.ranges().since(executeAt.epoch());
     }
 
     enum EnsureAction { Ignore, Check, Add, TrySet, Set }
@@ -977,7 +973,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         if (!validate(ensurePartialTxn, existingRanges, additionalRanges, covers(partialTxn()), covers(partialTxn), "txn", partialTxn))
             return false;
 
-        if (partialTxn != null && kind() != null && !kind().equals(partialTxn.kind()))
+        if (partialTxn != null && txnId().rw() != partialTxn.kind())
             throw new IllegalArgumentException("Transaction has different kind to the definition we previously received");
 
         if (shard.isHome() && ensurePartialTxn != Ignore)
@@ -1019,7 +1015,6 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
             case Set:
             case TrySet:
-                setKind(partialTxn.kind());
                 setPartialTxn(partialTxn = partialTxn.slice(allRanges, shard.isHome()));
                 // TODO (expected, efficiency): we may register the same ranges more than once
                 safeStore.forEach(partialTxn.keys(), allRanges, forKey -> {

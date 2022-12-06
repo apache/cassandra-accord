@@ -63,7 +63,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
         AwaitCommit(Node node, TxnId txnId, Unseekables<?, ?> unseekables)
         {
-            Topology topology = node.topology().globalForEpoch(txnId.epoch).forSelection(unseekables);
+            Topology topology = node.topology().globalForEpoch(txnId.epoch()).forSelection(unseekables);
             this.tracker = new QuorumTracker(new Topologies.Single(node.topology().sorter(), topology));
             node.send(topology.nodes(), to -> new WaitOnCommit(to, topology, txnId, unseekables), this);
         }
@@ -132,7 +132,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         this.txn = txn;
         this.route = route;
         this.callback = callback;
-        assert topologies.oldestEpoch() == topologies.currentEpoch() && topologies.currentEpoch() == txnId.epoch;
+        assert topologies.oldestEpoch() == topologies.currentEpoch() && topologies.currentEpoch() == txnId.epoch();
         this.tracker = new RecoveryTracker(topologies);
     }
 
@@ -147,7 +147,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     public static Recover recover(Node node, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback)
     {
-        return recover(node, txnId, txn, route, callback, node.topology().forEpoch(route, txnId.epoch));
+        return recover(node, txnId, txn, route, callback, node.topology().forEpoch(route, txnId.epoch()));
     }
 
     public static Recover recover(Node node, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
@@ -158,7 +158,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     public static Recover recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback)
     {
-        return recover(node, ballot, txnId, txn, route, callback, node.topology().forEpoch(route, txnId.epoch));
+        return recover(node, ballot, txnId, txn, route, callback, node.topology().forEpoch(route, txnId.epoch()));
     }
 
     public static Recover recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
@@ -212,7 +212,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 case Applied:
                 case PreApplied:
                     // TODO (desired, efficiency): in some cases we can use the deps we already have (e.g. if we have a quorum of Committed responses)
-                    node.withEpoch(executeAt.epoch, () -> {
+                    node.withEpoch(executeAt.epoch(), () -> {
                         CollectDeps.withDeps(node, txnId, route, txn, acceptOrCommit.executeAt, (deps, fail) -> {
                             if (fail != null)
                             {
@@ -232,7 +232,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 case PreCommitted:
                 case Committed:
                     // TODO (desired, efficiency): in some cases we can use the deps we already have (e.g. if we have a quorum of Committed responses)
-                    node.withEpoch(executeAt.epoch, () -> {
+                    node.withEpoch(executeAt.epoch(), () -> {
                         CollectDeps.withDeps(node, txnId, route, txn, executeAt, (deps, fail) -> {
                             if (fail != null) accept(null, fail);
                             else Execute.execute(node, txnId, txn, route, acceptOrCommit.executeAt, deps, this);
@@ -294,14 +294,14 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
     private void commitInvalidate()
     {
         Timestamp invalidateUntil = recoverOks.stream().map(ok -> ok.executeAt).reduce(txnId, Timestamp::max);
-        node.withEpoch(invalidateUntil.epoch, () -> Commit.Invalidate.commitInvalidate(node, txnId, route, invalidateUntil));
+        node.withEpoch(invalidateUntil.epoch(), () -> Commit.Invalidate.commitInvalidate(node, txnId, route, invalidateUntil));
         isDone = true;
         callback.accept(ProgressToken.INVALIDATED, null);
     }
 
     private void propose(Timestamp executeAt, Deps deps)
     {
-        node.withEpoch(executeAt.epoch, () -> Propose.propose(node, ballot, txnId, txn, route, executeAt, deps, this));
+        node.withEpoch(executeAt.epoch(), () -> Propose.propose(node, ballot, txnId, txn, route, executeAt, deps, this));
     }
 
     private Deps mergeDeps()

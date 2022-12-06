@@ -79,7 +79,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
     @Override
     protected void process()
     {
-        node.mapReduceConsumeLocal(this, txnId.epoch, txnId.epoch, this);
+        node.mapReduceConsumeLocal(this, txnId.epoch(), txnId.epoch(), this);
     }
 
     @Override
@@ -105,7 +105,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         PartialDeps deps = command.partialDeps();
         if (!command.known().deps.isProposalKnown())
         {
-            deps = calculatePartialDeps(safeStore, txnId, partialTxn.keys(), partialTxn.kind(), txnId, safeStore.ranges().at(txnId.epoch));
+            deps = calculatePartialDeps(safeStore, txnId, partialTxn.keys(), partialTxn.kind(), txnId, safeStore.ranges().at(txnId.epoch()));
         }
 
         boolean rejectsFastPath;
@@ -118,7 +118,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         }
         else
         {
-            Ranges ranges = safeStore.ranges().at(txnId.epoch);
+            Ranges ranges = safeStore.ranges().at(txnId.epoch());
             rejectsFastPath = acceptedStartedAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys()).anyMatch(ignore -> true);
             if (!rejectsFastPath)
                 rejectsFastPath = committedExecutesAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys()).anyMatch(ignore -> true);

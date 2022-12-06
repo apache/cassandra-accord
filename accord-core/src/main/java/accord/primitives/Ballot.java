@@ -22,6 +22,21 @@ import accord.local.Node.Id;
 
 public class Ballot extends Timestamp
 {
+    public static Ballot fromBits(long msb, long lsb, Id node)
+    {
+        return new Ballot(msb, lsb, node);
+    }
+
+    public static Ballot fromValues(long epoch, long hlc, Id node)
+    {
+        return fromValues(epoch, hlc, 0, node);
+    }
+
+    public static Ballot fromValues(long epoch, long hlc, int flags, Id node)
+    {
+        return new Ballot(epoch, hlc, flags, node);
+    }
+
     public static final Ballot ZERO = new Ballot(Timestamp.NONE);
 
     public Ballot(Timestamp from)
@@ -29,8 +44,18 @@ public class Ballot extends Timestamp
         super(from);
     }
 
-    public Ballot(long epoch, long real, int logical, Id node)
+    Ballot(long epoch, long hlc, int flags, Id node)
     {
-        super(epoch, real, logical, node);
+        super(epoch, hlc, flags, node);
+    }
+
+    Ballot(long msb, long lsb, Id node)
+    {
+        super(msb, lsb, node);
+    }
+
+    public Ballot merge(Timestamp that)
+    {
+        return merge(this, that, Ballot::fromBits);
     }
 }

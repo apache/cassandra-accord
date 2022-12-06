@@ -34,7 +34,6 @@ import accord.messages.CheckStatus.IncludeInfo;
 import accord.messages.MessageType;
 import accord.messages.ReplyContext;
 import accord.primitives.RoutingKeys;
-import accord.primitives.RoutingKeys;
 import accord.primitives.Txn;
 import accord.messages.Request;
 import accord.primitives.TxnId;
@@ -51,7 +50,7 @@ public class ListRequest implements Request
         int count = 0;
         protected CheckOnResult(Node node, TxnId txnId, RoutingKey homeKey, BiConsumer<Outcome, Throwable> callback)
         {
-            super(node, txnId, RoutingKeys.of(homeKey), txnId.epoch, IncludeInfo.All);
+            super(node, txnId, RoutingKeys.of(homeKey), txnId.epoch(), IncludeInfo.All);
             this.callback = callback;
         }
 

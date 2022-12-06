@@ -65,7 +65,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
     public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Seekables<?, ?> readScope, Timestamp executeAt)
     {
         super(txnId);
-        this.executeAtEpoch = executeAt.epoch;
+        this.executeAtEpoch = executeAt.epoch();
         int startIndex = latestRelevantEpochIndex(to, topologies, readScope);
         this.readScope = computeScope(to, topologies, (Seekables)readScope, startIndex, Seekables::slice, Seekables::union);
         this.waitForEpoch = computeWaitForEpoch(to, topologies, startIndex);

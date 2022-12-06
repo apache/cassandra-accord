@@ -67,7 +67,7 @@ public class Writes
         if (write == null)
             return SUCCESS;
 
-        Ranges ranges = safeStore.ranges().since(executeAt.epoch);
+        Ranges ranges = safeStore.ranges().since(executeAt.epoch());
         if (ranges == null)
             return SUCCESS;
 

@@ -2,8 +2,6 @@ package accord.messages;
 
 import accord.api.RoutingKey;
 import accord.local.*;
-import accord.primitives.Keys;
-import accord.primitives.Seekables;
 import accord.primitives.TxnId;
 
 import java.util.Collections;
@@ -22,10 +20,11 @@ public class InformOfTxnId extends AbstractEpochRequest<Reply> implements Reques
         this.homeKey = homeKey;
     }
 
+    @Override
     public void process()
     {
         // TODO (expected, efficiency): do not first load txnId
-        node.mapReduceConsumeLocal(this, homeKey, txnId.epoch, this);
+        node.mapReduceConsumeLocal(this, homeKey, txnId.epoch(), this);
     }
 
     @Override
@@ -64,7 +63,7 @@ public class InformOfTxnId extends AbstractEpochRequest<Reply> implements Reques
     @Override
     public long waitForEpoch()
     {
-        return txnId.epoch;
+        return txnId.epoch();
     }
 
     @Override

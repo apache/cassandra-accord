@@ -155,7 +155,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
             //                                  but by sending accept we rule out hybrid fast-path
             // TODO (low priority, efficiency): if we receive an expired response, perhaps defer to permit at least one other
             //                                  node to respond before invalidating
-            if (node.agent().isExpired(txnId, executeAt.real))
+            if (node.agent().isExpired(txnId, executeAt.hlc()))
             {
                 proposeInvalidate(node, Ballot.ZERO, txnId, route.homeKey(), (success, fail) -> {
                     if (fail != null)
@@ -164,7 +164,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
                     }
                     else
                     {
-                        node.withEpoch(executeAt.epoch, () -> {
+                        node.withEpoch(executeAt.epoch(), () -> {
                             commitInvalidate(node, txnId, route, executeAt);
                             // TODO (required, API consistency): this should be Invalidated rather than Timeout?
                             accept(null, new Timeout(txnId, route.homeKey()));
@@ -174,10 +174,10 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
             }
             else
             {
-                node.withEpoch(executeAt.epoch, () -> {
+                node.withEpoch(executeAt.epoch(), () -> {
                     Topologies topologies = tracker.topologies();
-                    if (executeAt.epoch > txnId.epoch)
-                        topologies = node.topology().withUnsyncedEpochs(route, txnId.epoch, executeAt.epoch);
+                    if (executeAt.epoch() > txnId.epoch())
+                        topologies = node.topology().withUnsyncedEpochs(route, txnId.epoch(), executeAt.epoch());
                     Propose.propose(node, topologies, Ballot.ZERO, txnId, txn, route, executeAt, deps, this);
                 });
             }

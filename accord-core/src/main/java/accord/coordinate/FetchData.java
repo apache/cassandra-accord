@@ -36,7 +36,7 @@ public class FetchData
     public static Object fetch(Known fetch, Node node, TxnId txnId, Route<?> route, @Nullable Timestamp executeAt, long untilLocalEpoch, BiConsumer<Known, Throwable> callback)
     {
         Invariants.checkArgument(node.topology().hasEpoch(untilLocalEpoch));
-        Ranges ranges = node.topology().localRangesForEpochs(txnId.epoch, untilLocalEpoch);
+        Ranges ranges = node.topology().localRangesForEpochs(txnId.epoch(), untilLocalEpoch);
         if (!route.covers(ranges))
         {
             return fetchWithHomeKey(fetch, node, txnId, route.homeKey(), untilLocalEpoch, callback);
@@ -69,13 +69,13 @@ public class FetchData
 
     public static Object fetch(Known fetch, Node node, TxnId txnId, FullRoute<?> route, @Nullable Timestamp executeAt, long untilLocalEpoch, BiConsumer<Known, Throwable> callback)
     {
-        Ranges ranges = node.topology().localRangesForEpochs(txnId.epoch, untilLocalEpoch);
+        Ranges ranges = node.topology().localRangesForEpochs(txnId.epoch(), untilLocalEpoch);
         return fetchInternal(ranges, fetch, node, txnId, route.sliceStrict(ranges), executeAt, untilLocalEpoch, callback);
     }
 
     private static Object fetchInternal(Ranges ranges, Known target, Node node, TxnId txnId, PartialRoute<?> route, @Nullable Timestamp executeAt, long untilLocalEpoch, BiConsumer<Known, Throwable> callback)
     {
-        long srcEpoch = executeAt == null || target.epoch() == Coordination ? txnId.epoch : executeAt.epoch;
+        long srcEpoch = executeAt == null || target.epoch() == Coordination ? txnId.epoch() : executeAt.epoch();
         if (!node.topology().hasEpoch(srcEpoch))
             return node.topology().awaitEpoch(srcEpoch).map(ignore -> fetchInternal(ranges, target, node, txnId, route, executeAt, untilLocalEpoch, callback));
 
@@ -90,7 +90,7 @@ public class FetchData
                 Known sufficientFor = ok.sufficientFor(fetch);
                 // if we discover the executeAt as part of this action, use that to decide if we requested enough info
                 Timestamp exec = executeAt != null ? executeAt : ok.saveStatus.known.executeAt.isDecisionKnown() ? ok.executeAt : null;
-                if (sufficientFor.outcome == OutcomeKnown && (exec == null || untilLocalEpoch < exec.epoch))
+                if (sufficientFor.outcome == OutcomeKnown && (exec == null || untilLocalEpoch < exec.epoch()))
                     sufficientFor = sufficientFor.with(OutcomeUnknown);
                 callback.accept(sufficientFor, null);
             }
