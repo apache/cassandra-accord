@@ -126,11 +126,12 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 {
                     switch (progress)
                     {
-                        default: throw new AssertionError();
+                        default: throw new AssertionError("Unexpected progress: " + progress);
                         case NoneExpected:
                         case Done:
+                            return false;
                         case Investigating:
-                            throw new IllegalStateException();
+                            throw new IllegalStateException("Unexpected progress: " + progress);
                         case Expected:
                             Invariants.paranoid(!isFree());
                             progress = NoProgress;
@@ -209,11 +210,11 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     setProgress(Investigating);
                     switch (status)
                     {
-                        default: throw new AssertionError();
+                        default: throw new AssertionError("Unexpected status: " + status);
                         case NotWitnessed: // can't make progress if we haven't witnessed it yet
                         case Committed: // can't make progress if we aren't yet ReadyToExecute
                         case Done: // shouldn't be trying to make progress, as we're done
-                            throw new IllegalStateException();
+                            throw new IllegalStateException("Unexpected status: " + status);
 
                         case Uncommitted:
                         case ReadyToExecute:

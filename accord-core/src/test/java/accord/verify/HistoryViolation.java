@@ -27,4 +27,8 @@ public class HistoryViolation extends AssertionError
         super(detailMessage);
         this.primaryKey = primaryKey;
     }
+
+    public int primaryKey() {
+        return primaryKey;
+    }
 }

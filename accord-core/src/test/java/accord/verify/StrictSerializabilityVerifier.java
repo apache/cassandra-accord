@@ -30,7 +30,9 @@ import java.util.TreeSet;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
-import accord.utils.Invariants;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import static java.util.stream.Collectors.joining;
 
 /**
  * Nomenclature:
@@ -43,34 +45,36 @@ import accord.utils.Invariants;
  *               two kinds: 1) those values for keys [B,C..) at step index i for a read of key A, precede key A's step index i +1
  *                          2) those values for keys [B,C..) at step index i for a write of key A, precede key A's step index i
  *  max predecessor: the maximum predecessor that may be reached via any predecessor relation
- *
+ * <p>
  * Ensure there are no timestamp cycles in the implied list of predecessors, i.e. that we have a strict serializable order.
  * That is, we maintain links to the maximum predecessor step for each key, at each step for each key, and see if we can
  * find a path of predecessors that would witness us.
- *
+ * <p>
  * TODO (low priority): find and report a path when we encounter a violation
  */
 public class StrictSerializabilityVerifier
 {
+    private static final Logger logger = LoggerFactory.getLogger(StrictSerializabilityVerifier.class);
+
     /**
      * A link to the maximum predecessor node for a given key reachable from the transitive closure of predecessor
      * relations from a given register's observation (i.e. for a given sequence observed for a given key).
-     *
+     * <p>
      * A predecessor is an absolute happens-before relationship. This is created either:
      *  1) by witnessing some read for key A coincident with a write for key B,
      *     therefore the write for key B happened strictly after the write for key A; or
      *  2) any value for key A witnessed alongside a step index i for key B happens before i+1 for key B.
-     *
+     * <p>
      * For every observation step index i for key A, we have an outgoing MaxPredecessor link to every key.
      * This object both maintains the current maximum predecessor step index reachable via the transitive closure
      * of happens-before relationships, but represents a back-link from that step index for the referred-to key,
      * so that when its own predecessor memoized maximum predecessor values are updated we can propagate them here.
-     *
+     * <p>
      * In essence, each node in the happens-before graph maintains a link to every possible frontier of its transitive
      * closure in the graph, so that each time that frontier is updated the internal nodes that reference it are updated
      * to the new frontier. This ensures ~computationally optimal maintenance of this transitive closure at the expense
      * of quadratic memory utilisation, but for small numbers of unique keys this remains quite manageable (i.e. steps*keys^2)
-     *
+     * <p>
      * This graph can be interpreted quite simply: if any step index for a key can reach itself (or a successor) via
      * the transitive closure of happens-before relations then there is a serializability violation.
      */
@@ -143,6 +147,7 @@ public class StrictSerializabilityVerifier
     static class UnknownStepPredecessor extends MaxPredecessor
     {
         final UnknownStepHolder holder;
+
         UnknownStepPredecessor(Step successor, UnknownStepHolder holder)
         {
             super(successor.ofKey, successor, holder.step.ofKey);
@@ -228,6 +233,7 @@ public class StrictSerializabilityVerifier
         Map<Step, UnknownStepPredecessor> unknownStepPredecessors;
         Runnable onChange;
 
+        final int writeValue;
         int ofStepIndex;
 
         /**
@@ -247,9 +253,10 @@ public class StrictSerializabilityVerifier
 
         int maxPredecessorWrittenAfter = Integer.MIN_VALUE;
 
-        Step(int key, int stepIndex, int keyCount)
+        Step(int key, int stepIndex, int keyCount, int writeValue)
         {
             super(key, null, key);
+            this.writeValue = writeValue;
             this.ofStep = this;
             this.ofStepIndex = stepIndex;
             this.maxPeers = new int[keyCount];
@@ -312,21 +319,21 @@ public class StrictSerializabilityVerifier
             successor.predecessorStep = this;
         }
 
-        boolean updatePeers(int[] newPeers, UnknownStepHolder[] unknownSteps)
+        boolean updatePeers(int[] newPeerSteps, UnknownStepHolder[] newBlindWrites)
         {
             boolean updated = false;
-            for (int key = 0 ; key < newPeers.length ; ++key)
+            for (int key = 0 ; key < newPeerSteps.length ; ++key)
             {
-                int newPeer = newPeers[key];
+                int newPeer = newPeerSteps[key];
                 int maxPeer = maxPeers[key];
                 if (newPeer > maxPeer)
                 {
                     updated = true;
-                    maxPeers[key] = newPeers[key];
+                    maxPeers[key] = newPeerSteps[key];
                 }
-                if (unknownSteps != null)
+                if (newBlindWrites != null)
                 {
-                    UnknownStepHolder unknownStep = unknownSteps[key];
+                    UnknownStepHolder unknownStep = newBlindWrites[key];
                     if (unknownStep != null && unknownStep.step != this)
                     {
                         if (unknownStepPeers == null)
@@ -443,23 +450,29 @@ public class StrictSerializabilityVerifier
         @Override
         public String toString()
         {
-            return "{key: " + ofKey +
-                   ", peers:" + Arrays.toString(maxPeers) +
-                   ", preds:" + Arrays.toString(maxPredecessors) +
-                   (unknownStepPeers != null ? ", peers?:" + unknownStepPeers : "") +
-                   (unknownStepPredecessors != null ? ", preds?:" + unknownStepPredecessors.values() : "") +
-                   "}";
+            StringBuilder builder = new StringBuilder("{key: " + ofKey);
+            if (ofStepIndex < 0)
+                builder.append(", value: ").append(writeValue);
+            builder.append(", peers:").append(Arrays.toString(maxPeers))
+                    .append(", preds:").append(Arrays.toString(maxPredecessors))
+                    .append(unknownStepPeers != null ? ", peers?:" + unknownStepPeers : "")
+                    .append(unknownStepPredecessors != null ? ", preds?:" + unknownStepPredecessors.values() : "")
+                    .append("}");
+            return builder.toString();
         }
     }
 
+    // TODO (expected, testing): rethink this concept - should it be a Step? Does it provide any value? If not, it's more confusing.
     class FutureWrites extends Step
     {
-
         /**
          * Any write value we don't know the step index for because we did not perform a coincident read;
          * we wait until we witness a read containing the
-         *
-         * TODO (desired, testing): handle writes with unknown outcome
+         * <p>
+         * TODO: report a violation if we have witnessed a sequence missing any of these deferred operations
+         *       that started after they finished
+         * <p>
+         * TODO: handle writes with unknown outcome
          */
 
         final Map<Integer, UnknownStepHolder> byWriteValue = new HashMap<>();
@@ -467,7 +480,7 @@ public class StrictSerializabilityVerifier
 
         FutureWrites(int key, int keyCount)
         {
-            super(key, Integer.MAX_VALUE, keyCount);
+            super(key, Integer.MAX_VALUE, keyCount, Integer.MIN_VALUE);
         }
 
         void newSequence(int[] oldSequence, int[] newSequence)
@@ -490,9 +503,15 @@ public class StrictSerializabilityVerifier
         }
 
         @Override
+        boolean witnessedBetween(int start, int end, boolean isWrite)
+        {
+            return false;
+        }
+
+        @Override
         boolean updatePeers(int[] newPeers, UnknownStepHolder[] unknownSteps)
         {
-            return unknownSteps[ofKey].step.updatePeers(newPeers, unknownSteps);
+            return false;
         }
 
         @Override
@@ -506,9 +525,14 @@ public class StrictSerializabilityVerifier
         @Override
         boolean updatePredecessorsOfWrite(int[][] reads, int[] writes, StrictSerializabilityVerifier verifier)
         {
-            for (UnknownStepHolder holder : byWriteValue.values())
-                holder.step.updatePredecessorsOfWrite(reads, writes, verifier);
-            return super.updatePredecessorsOfWrite(reads, writes, verifier);
+            // TODO (required): this evidently wasn't carefully considered at the time, and removing it improves things
+            //                  but what if anything this trying to achieve?
+            //                  probably we DO want to update the predecessors of any NEW step. perhaps we also want
+            //                  and we probably want some additional unit tests around blind writes
+//            for (UnknownStepHolder holder : byWriteValue.values())
+//                holder.step.updatePredecessorsOfWrite(reads, writes, verifier);
+//            return super.updatePredecessorsOfWrite(reads, writes, verifier);
+            return false;
         }
 
         void recompute()
@@ -520,15 +544,15 @@ public class StrictSerializabilityVerifier
                 witnessedBetween(deferred.start, deferred.end, true);
         }
 
-        void register(UnknownStepHolder[] unknownSteps, int start, int end)
+        void register(UnknownStepHolder[] newBlindWrites, int start, int end)
         {
-            UnknownStepHolder unknownStep = unknownSteps[ofKey];
+            UnknownStepHolder unknownStep = newBlindWrites[ofKey];
             if (null != byWriteValue.putIfAbsent(unknownStep.writeValue, unknownStep))
                 throw new AssertionError();
             if (null != byTimestamp.putIfAbsent(end, unknownStep))
                 throw new AssertionError();
             // TODO (desired, testing): verify this propagation by unit test
-            unknownSteps[ofKey].step.receiveKnowledgePhasedPredecessors(this, StrictSerializabilityVerifier.this);
+            newBlindWrites[ofKey].step.receiveKnowledgePhasedPredecessors(this, StrictSerializabilityVerifier.this);
         }
 
         public void checkForUnwitnessed(int start)
@@ -538,6 +562,11 @@ public class StrictSerializabilityVerifier
                 Collection<UnknownStepHolder> notWitnessed = byTimestamp.headMap(start, false).values();
                 throw new HistoryViolation(ofKey, "Writes not witnessed: " + notWitnessed);
             }
+        }
+
+        public String toString()
+        {
+            return "FutureWrites:[" + byTimestamp.values().stream().map(s -> s.writeValue).map(Object::toString).collect(joining(",")) + ']';
         }
     }
 
@@ -557,6 +586,12 @@ public class StrictSerializabilityVerifier
         {
             this.key = key;
             this.futureWrites = new FutureWrites(key, keyCount);
+        }
+
+        void print()
+        {
+            for (Map.Entry<Integer, UnknownStepHolder> e : futureWrites.byWriteValue.entrySet())
+                logger.error("{}: {} -> ({}, {}, {})", key, e.getKey(), e.getValue().writeValue, e.getValue().start, e.getValue().end);
         }
 
         private void updateSequence(int[] sequence, int maybeWrite)
@@ -592,7 +627,7 @@ public class StrictSerializabilityVerifier
                 steps = Arrays.copyOf(steps, Math.max(step + 1, steps.length * 2));
 
             if (steps[step] == null)
-                insert(new Step(key, step, keyCount));
+                insert(new Step(key, step, keyCount, step == 0 ? -1 : sequence[step - 1]));
             return steps[step];
         }
 
@@ -618,28 +653,27 @@ public class StrictSerializabilityVerifier
                 step.setSuccessor(successor);
                 propagateToDirectSuccessor(step, successor);
             }
-
         }
 
-        private void updatePeersAndPredecessors(int[] newPeers, int[][] reads, int[] writes, int start, int end, UnknownStepHolder[] unknownSteps)
+        private void updatePeersAndPredecessors(int[] newPeerSteps, int[][] reads, int[] writes, int start, int end, UnknownStepHolder[] newBlindWrites)
         {
             Step step;
-            boolean updated = false;
-            if (newPeers[key] >= 0)
+            boolean updated;
+            if (newPeerSteps[key] >= 0)
             {
-                step = step(newPeers[key]);
+                step = step(newPeerSteps[key]);
             }
-            else if (unknownSteps != null && unknownSteps[key] != null)
+            else if (newBlindWrites != null && newBlindWrites[key] != null)
             {
                 assert writes[key] >= 0;
-                futureWrites.register(unknownSteps, start, end);
-                step = futureWrites;
+                futureWrites.register(newBlindWrites, start, end);
+                step = newBlindWrites[key].step;
             }
             else
             {
                 throw new IllegalStateException();
             }
-            updated = step.updatePeers(newPeers, unknownSteps);
+            updated = step.updatePeers(newPeerSteps, newBlindWrites);
             updated |= step.updatePredecessorsOfWrite(reads, writes, StrictSerializabilityVerifier.this);
             updated |= step.witnessedBetween(start, end, writes[key] >= 0);
             if (updated)
@@ -680,7 +714,13 @@ public class StrictSerializabilityVerifier
             if (step.successor != null)
                 propagateToDirectSuccessor(step, step.successor);
             if (step.onChange != null)
-                step.onChange.run();
+            {
+                // prevent reentrancy
+                Runnable run = step.onChange;
+                step.onChange = null;
+                run.run();
+                step.onChange = run;
+            }
         }
 
         void checkForUnwitnessed(int start)
@@ -735,7 +775,7 @@ public class StrictSerializabilityVerifier
 
     /**
      * Buffer a new read observation.
-     *
+     * <p>
      * Note that this should EXCLUDE any witnessed write for this key.
      * This is to simplify the creation of direct happens-before edges with observations for other keys
      * that are implied by the witnessing of a write (and is also marginally more efficient).
@@ -774,21 +814,24 @@ public class StrictSerializabilityVerifier
             {
                 int i = Arrays.binarySearch(registers[k].sequence, bufWrites[k]);
                 if (i >= 0) bufNewPeerSteps[k] = i + 1;
-                else bufUnknownSteps[k] = new UnknownStepHolder(bufWrites[k], start, end, new Step(k, Integer.MAX_VALUE, keyCount));
+                else bufUnknownSteps[k] = new UnknownStepHolder(bufWrites[k], start, end, new Step(k, Integer.MAX_VALUE, keyCount, bufWrites[k]));
                 hasUnknownSteps |= i < 0;
             }
         }
 
         for (int k = 0; k < bufReads.length ; ++k)
         {
+            if (bufReads[k] != null)
+                registers[k].updateSequence(bufReads[k], bufWrites[k]);
+        }
+        for (int k = 0; k < bufReads.length ; ++k)
+        {
             if (bufWrites[k] >= 0 || bufReads[k] != null)
             {
-                if (bufReads[k] != null)
-                    registers[k].updateSequence(bufReads[k], bufWrites[k]);
-
                 registers[k].updatePeersAndPredecessors(bufNewPeerSteps, bufReads, bufWrites, start, end, hasUnknownSteps ? bufUnknownSteps : null);
+                if (bufReads[k] != null)
+                    registers[k].checkForUnwitnessed(start);
             }
-            registers[k].checkForUnwitnessed(start);
         }
 
         refreshTransitive();
@@ -800,5 +843,19 @@ public class StrictSerializabilityVerifier
         {
             registers[next.ofKey].propagateToSuccessor(next.predecessorStep, next.ofStep);
         }
+    }
+
+    public void print()
+    {
+        for (Register r : registers)
+        {
+            if (r == null) continue;
+            r.print();
+        }
+    }
+
+    public void print(int k)
+    {
+        registers[k].print();
     }
 }
