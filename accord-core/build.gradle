@@ -86,3 +86,9 @@ task burnloop {
     }
 }
 
+tasks {
+    javadoc {
+        options { addStringOption("Xdoclint:none", "-quiet") }
+    }
+}
+
