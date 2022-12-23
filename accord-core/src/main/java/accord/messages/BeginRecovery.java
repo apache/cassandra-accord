@@ -301,7 +301,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         {
             commandStore.forEach(keys, ranges, forKey -> {
                 // accepted txns with an earlier txnid that do not have our txnid as a dependency
-                /**
+                /*
                  * The idea here is to discover those transactions that have been Accepted without witnessing us
                  * and whom may not have adopted us as dependencies as responses to the Accept. Once we have
                  * reached a quorum for recovery any re-proposals will discover us. So we do not need to look
@@ -327,7 +327,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         try (Deps.OrderedBuilder builder = Deps.orderedBuilder(true))
         {
             commandStore.forEach(keys, ranges, forKey -> {
-                /**
+                /*
                  * The idea here is to discover those transactions that have been Committed and DID witness us
                  * so that we can remove these from the set of acceptedStartedBeforeAndDidNotWitness
                  * on other nodes, to minimise the number of transactions we try to wait for on recovery
@@ -342,7 +342,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
 
     private static Stream<? extends TxnIdWithExecuteAt> acceptedStartedAfterWithoutWitnessing(SafeCommandStore commandStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
     {
-        /**
+        /*
          * The idea here is to discover those transactions that were started after us and have been Accepted
          * and did not witness us as part of their pre-accept round, as this means that we CANNOT have taken
          * the fast path. This is central to safe recovery, as if every transaction that executes later has
@@ -356,7 +356,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
 
     private static Stream<TxnId> committedExecutesAfterWithoutWitnessing(SafeCommandStore commandStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
     {
-        /**
+        /*
          * The idea here is to discover those transactions that have been decided to execute after us
          * and did not witness us as part of their pre-accept or accept round, as this means that we CANNOT have
          * taken the fast path. This is central to safe recovery, as if every transaction that executes later has

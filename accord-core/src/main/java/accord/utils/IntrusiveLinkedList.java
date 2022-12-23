@@ -42,14 +42,14 @@ public class IntrusiveLinkedList<O extends IntrusiveLinkedListNode> extends Intr
 
     public void addFirst(O add)
     {
-        if (add.prev != null)
+        if (add.next != null)
             throw new IllegalStateException();
         add(this, add, next);
     }
 
     public void addLast(O add)
     {
-        if (add.prev != null)
+        if (add.next != null)
             throw new IllegalStateException();
         add(prev, add, this);
     }

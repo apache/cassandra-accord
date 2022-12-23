@@ -29,22 +29,21 @@ import java.util.function.BiConsumer;
 
 import javax.annotation.Nullable;
 
+import accord.api.ProgressLog;
+import accord.api.RoutingKey;
 import accord.coordinate.*;
 import accord.impl.SimpleProgressLog.Instance.State.Monitoring;
 import accord.local.*;
-import accord.local.Status.Known;
-import accord.primitives.*;
-import accord.utils.IntrusiveLinkedList;
-import accord.utils.IntrusiveLinkedListNode;
-import accord.utils.Invariants;
-
-import accord.api.ProgressLog;
-import accord.api.RoutingKey;
 import accord.local.Node.Id;
+import accord.local.Status.Known;
 import accord.messages.Callback;
 import accord.messages.InformDurable;
 import accord.messages.SimpleReply;
+import accord.primitives.*;
 import accord.topology.Topologies;
+import accord.utils.IntrusiveLinkedList;
+import accord.utils.IntrusiveLinkedListNode;
+import accord.utils.Invariants;
 import org.apache.cassandra.utils.concurrent.Future;
 
 import static accord.api.ProgressLog.ProgressShard.Home;
@@ -68,21 +67,20 @@ import static accord.primitives.Route.isFullRoute;
 // TODO: consider propagating invalidations in the same way as we do applied
 public class SimpleProgressLog implements ProgressLog.Factory
 {
-    enum Progress
-    {
-        NoneExpected, Expected, NoProgress, Investigating, Done;
-    }
+    enum Progress { NoneExpected, Expected, NoProgress, Investigating, Done }
 
     enum CoordinateStatus
     {
         NotWitnessed, Uncommitted, Committed, ReadyToExecute, Done;
-        boolean isAtMost(CoordinateStatus equalOrLessThan)
+
+        boolean isAtMostReadyToExecute()
         {
-            return compareTo(equalOrLessThan) <= 0;
+            return compareTo(CoordinateStatus.ReadyToExecute) <= 0;
         }
-        boolean isAtLeast(CoordinateStatus equalOrGreaterThan)
+
+        boolean isAtLeastCommitted()
         {
-            return compareTo(equalOrGreaterThan) >= 0;
+            return compareTo(CoordinateStatus.Committed) >= 0;
         }
     }
 
@@ -158,7 +156,6 @@ public class SimpleProgressLog implements ProgressLog.Factory
             // exists only on home shard
             class CoordinateState extends Monitoring
             {
-
                 CoordinateStatus status = CoordinateStatus.NotWitnessed;
                 ProgressToken token = ProgressToken.NONE;
 
@@ -205,6 +202,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     }
                 }
 
+                @Override
                 void run(Command command)
                 {
                     setProgress(Investigating);
@@ -219,7 +217,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                         case Uncommitted:
                         case ReadyToExecute:
                         {
-                            if (status.isAtLeast(CoordinateStatus.Committed) && command.durability().isDurable())
+                            if (status.isAtLeastCommitted() && command.durability().isDurable())
                             {
                                 // must also be committed, as at the time of writing we do not guarantee dissemination of Commit
                                 // records to the home shard, so we only know the executeAt shards will have witnessed this
@@ -238,7 +236,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                                     Future<? extends Outcome> recover = node.maybeRecover(txnId, homeKey, command.route(), token);
                                     recover.addCallback((success, fail) -> {
-                                        if (status.isAtMost(ReadyToExecute) && progress() == Investigating)
+                                        if (status.isAtMostReadyToExecute() && progress() == Investigating)
                                         {
                                             setProgress(Expected);
                                             if (fail != null)
@@ -276,14 +274,15 @@ public class SimpleProgressLog implements ProgressLog.Factory
             // exists only on home shard
             class DisseminateState extends Monitoring
             {
-                // TODO: thread safety (schedule on progress log executor)
                 class CoordinateAwareness implements Callback<SimpleReply>
                 {
                     @Override
                     public void onSuccess(Id from, SimpleReply reply)
                     {
-                        notAwareOfDurability.remove(from);
-                        maybeDone();
+                        commandStore.execute(PreLoadContext.empty(), ignore -> {
+                            notAwareOfDurability.remove(from);
+                            maybeDone();
+                        });
                     }
 
                     @Override
@@ -298,8 +297,8 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 }
 
                 DisseminateStatus status = NotExecuted;
-                Set<Id> notAwareOfDurability;
-                Set<Id> notPersisted;
+                Set<Id> notAwareOfDurability; // TODO: use Agrona's IntHashSet as soon as Node.Id switches from long to int
+                Set<Id> notPersisted;         // TODO: use Agrona's IntHashSet as soon as Node.Id switches from long to int
 
                 List<Runnable> whenReady;
 
@@ -398,6 +397,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     });
                 }
 
+                @Override
                 void run(Command command)
                 {
                     switch (status)
@@ -461,6 +461,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                         setProgress(NoneExpected);
                 }
 
+                @Override
                 void run(Command command)
                 {
                     if (command.has(blockedUntil))
@@ -515,6 +516,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     });
                 }
 
+                @Override
                 public String toString()
                 {
                     return progress().toString();
@@ -542,8 +544,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                         if (progress() == Done)
                             return;
 
-                        if (fail != null) setProgress(Expected);
-                        else setProgress(Done);
+                        setProgress(fail != null ? Expected : Done);
                     });
                 }
 
@@ -628,7 +629,6 @@ public class SimpleProgressLog implements ProgressLog.Factory
         Instance(CommandStore commandStore)
         {
             this.commandStore = commandStore;
-            instances.add(this);
         }
 
         State ensure(TxnId txnId)
@@ -641,23 +641,21 @@ public class SimpleProgressLog implements ProgressLog.Factory
             return state != null ? state : ensure(txnId);
         }
 
-        @Override
-        public void unwitnessed(TxnId txnId, RoutingKey homeKey, ProgressShard shard)
-        {
-            if (shard.isHome())
-                ensure(txnId).ensureAtLeast(Uncommitted, Expected);
-        }
-
-        @Override
-        public void preaccepted(Command command, ProgressShard shard)
+        private void ensureSafeOrAtLeast(Command command, ProgressShard shard, CoordinateStatus newStatus, Progress newProgress)
         {
             Invariants.checkState(shard != Unsure);
 
+            State state = null;
+            assert newStatus.isAtMostReadyToExecute();
+            if (newStatus.isAtLeastCommitted())
+                state = recordCommit(command.txnId());
+
             if (shard.isProgress())
             {
-                State state = ensure(command.txnId());
-                if (shard.isHome()) state.ensureAtLeast(command, Uncommitted, Expected);
-                else state.touchNonHomeUnsafe();
+                state = ensure(command.txnId(), state);
+
+                if (shard.isHome()) state.ensureAtLeast(command, newStatus, newProgress);
+                else ensure(command.txnId()).setSafe();
             }
         }
 
@@ -677,21 +675,23 @@ public class SimpleProgressLog implements ProgressLog.Factory
             return state;
         }
 
-        private void ensureSafeOrAtLeast(Command command, ProgressShard shard, CoordinateStatus newStatus, Progress newProgress)
+        @Override
+        public void unwitnessed(TxnId txnId, RoutingKey homeKey, ProgressShard shard)
+        {
+            if (shard.isHome())
+                ensure(txnId).ensureAtLeast(Uncommitted, Expected);
+        }
+
+        @Override
+        public void preaccepted(Command command, ProgressShard shard)
         {
             Invariants.checkState(shard != Unsure);
 
-            State state = null;
-            assert newStatus.isAtMost(ReadyToExecute);
-            if (newStatus.isAtLeast(CoordinateStatus.Committed))
-                state = recordCommit(command.txnId());
-
             if (shard.isProgress())
             {
-                state = ensure(command.txnId(), state);
-
-                if (shard.isHome()) state.ensureAtLeast(command, newStatus, newProgress);
-                else ensure(command.txnId()).setSafe();
+                State state = ensure(command.txnId());
+                if (shard.isHome()) state.ensureAtLeast(command, Uncommitted, Expected);
+                else state.touchNonHomeUnsafe();
             }
         }
 
@@ -763,6 +763,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
             state.recordBlocking(txnId, PreApplied.minKnown, unseekables);
         }
 
+        @Override
         public void waiting(TxnId blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn)
         {
             // TODO (perf+ consider-prerelease): consider triggering a preemption of existing coordinator (if any) in some circumstances;
@@ -797,6 +798,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
             node.scheduler().once(() -> commandStore.execute(PreLoadContext.empty(), ignore -> run()), 200L, TimeUnit.MILLISECONDS);
         }
 
+        @Override
         public void run()
         {
             isScheduled = false;
@@ -825,8 +827,10 @@ public class SimpleProgressLog implements ProgressLog.Factory
     }
 
     @Override
-    public ProgressLog create(CommandStore commandStore)
+    public Instance create(CommandStore commandStore)
     {
-        return new Instance(commandStore);
+        Instance instance = new Instance(commandStore);
+        instances.add(instance);
+        return instance;
     }
 }

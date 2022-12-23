@@ -258,19 +258,19 @@ public class Topology
                     long abi = as.findNextIntersection(ai, bs, bi);
                     if (abi < 0)
                     {
-                        if (ailim < select.size())
-                            throw new IllegalArgumentException("Range not found for " + select.get(ailim));
+                        if (ailim < as.size())
+                            throw new IllegalArgumentException("Range not found for " + as.get(ailim));
                         break;
                     }
 
-                    bi = (int)(abi >>> 32);
-                    if (ailim < (int)abi)
-                        throw new IllegalArgumentException("Range not found for " + select.get(ailim));
+                    ai = (int)abi;
+                    if (ailim < ai)
+                        throw new IllegalArgumentException("Range not found for " + as.get(ailim));
 
+                    bi = (int)(abi >>> 32);
                     if (predicate.test(param, bi))
                         newSubset[count++] = bi;
 
-                    ai = (int)abi;
                     ailim = as.findNext(ai + 1, bs.get(bi), FLOOR);
                     if (ailim < 0) ailim = -1 - ailim;
                     else ailim++;
