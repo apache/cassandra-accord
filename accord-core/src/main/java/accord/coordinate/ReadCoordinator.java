@@ -71,7 +71,9 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
     @Override
     public void onSuccess(Id from, Reply reply)
     {
-        if (debug != null) debug.put(from, reply);
+        if (debug != null)
+            debug.put(from, reply);
+
         if (isDone)
             return;
 
