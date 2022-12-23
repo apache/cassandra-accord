@@ -212,7 +212,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
      */
     public abstract int compareTo(RoutableKey key);
 
-    public boolean containsKey(RoutableKey key)
+    public boolean contains(RoutableKey key)
     {
         return compareTo(key) == 0;
     }
@@ -232,12 +232,12 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         return 0;
     }
 
-    public boolean fullyContains(Range that)
+    public boolean contains(Range that)
     {
         return that.start.compareTo(this.start) >= 0 && that.end.compareTo(this.end) <= 0;
     }
 
-    public boolean intersects(Keys keys)
+    public boolean intersects(AbstractKeys<?, ?> keys)
     {
         return SortedArrays.binarySearch(keys.keys, 0, keys.size(), this, Range::compareTo, FAST) >= 0;
     }
@@ -287,7 +287,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
     public static Range slice(Range bound, Range toSlice)
     {
         Invariants.checkArgument(bound.compareIntersecting(toSlice) == 0);
-        if (bound.fullyContains(toSlice))
+        if (bound.contains(toSlice))
             return toSlice;
 
         return toSlice.subRange(

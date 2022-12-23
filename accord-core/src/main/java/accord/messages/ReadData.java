@@ -146,8 +146,6 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
             default:
                 throw new AssertionError();
             case Committed:
-                if (!Iterables.any(command.partialTxn().keys(), safeStore.commandStore()::hashIntersects))
-                    throw new IllegalStateException();
             case NotWitnessed:
             case PreAccepted:
             case Accepted:

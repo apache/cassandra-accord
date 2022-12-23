@@ -18,16 +18,15 @@
 
 package accord.impl;
 
+import accord.local.CommandStore; // java8 fails compilation if this is in correct position
+import accord.local.SyncCommandStores.SyncCommandStore; // java8 fails compilation if this is in correct position
 import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.impl.InMemoryCommandStore.SingleThread.AsyncState;
 import accord.impl.InMemoryCommandStore.Synchronized.SynchronizedState;
-import accord.local.CommandStore; // java8 fails compilation if this is in correct position
-import accord.local.SyncCommandStores.SyncCommandStore; // java8 fails compilation if this is in correct position
 import accord.local.Command;
-import accord.local.CommandStore.RangesForEpoch;
 import accord.local.CommandsForKey;
 import accord.local.CommandListener;
 import accord.local.Node;
@@ -35,9 +34,12 @@ import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
 import accord.local.SyncCommandStores;
+import accord.local.CommandStores.RangesForEpochHolder;
+import accord.local.CommandStores.RangesForEpoch;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.*;
+import accord.utils.Invariants;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
 
@@ -60,19 +62,20 @@ public class InMemoryCommandStore
         private final Agent agent;
         private final DataStore store;
         private final ProgressLog progressLog;
-        private final RangesForEpoch rangesForEpoch;
+        private final RangesForEpochHolder rangesForEpochHolder;
+        private RangesForEpoch rangesForEpoch;
 
         private final CommandStore commandStore;
         private final NavigableMap<TxnId, Command> commands = new TreeMap<>();
         private final NavigableMap<RoutableKey, InMemoryCommandsForKey> commandsForKey = new TreeMap<>();
 
-        public State(NodeTimeService time, Agent agent, DataStore store, ProgressLog progressLog, RangesForEpoch rangesForEpoch, CommandStore commandStore)
+        public State(NodeTimeService time, Agent agent, DataStore store, ProgressLog progressLog, RangesForEpochHolder rangesForEpoch, CommandStore commandStore)
         {
             this.time = time;
             this.agent = agent;
             this.store = store;
             this.progressLog = progressLog;
-            this.rangesForEpoch = rangesForEpoch;
+            this.rangesForEpochHolder = rangesForEpoch;
             this.commandStore = commandStore;
         }
 
@@ -144,6 +147,7 @@ public class InMemoryCommandStore
         @Override
         public RangesForEpoch ranges()
         {
+            Invariants.checkState(rangesForEpoch != null);
             return rangesForEpoch;
         }
 
@@ -162,6 +166,11 @@ public class InMemoryCommandStore
                 return txnId;
 
             return time.uniqueNow(max);
+        }
+
+        void refreshRanges()
+        {
+            rangesForEpoch = rangesForEpochHolder.get();
         }
 
         @Override
@@ -185,9 +194,10 @@ public class InMemoryCommandStore
                         range.start(), range.startInclusive(),
                         range.end(), range.endInclusive()
                 ).values();
+
                 for (InMemoryCommandsForKey commands : rangeCommands)
                 {
-                    commands.forWitnessed(minTimestamp, maxTimestamp, cmd -> consumer.accept((Command) cmd));
+                    commands.forWitnessed(minTimestamp, maxTimestamp, consumer);
                 }
             }
         }
@@ -204,9 +214,9 @@ public class InMemoryCommandStore
                         range.endInclusive()).values();
                 for (InMemoryCommandsForKey commands : rangeCommands)
                 {
-                    Collection<Command> committed = commands.committedByExecuteAt()
-                            .between(minTimestamp, maxTimestamp).map(cmd -> (Command) cmd).collect(Collectors.toList());
-                    committed.forEach(consumer);
+                    commands.committedByExecuteAt()
+                            .between(minTimestamp, maxTimestamp)
+                            .forEach(consumer);
                 }
             }
         }
@@ -221,7 +231,6 @@ public class InMemoryCommandStore
                     AbstractKeys<Key, ?> keys = (AbstractKeys<Key, ?>) keysOrRanges;
                     return keys.stream()
                             .filter(slice::contains)
-                            .filter(commandStore::hashIntersects)
                             .map(this::commandsForKey)
                             .map(map)
                             .reduce(initialValue, reduce);
@@ -241,10 +250,7 @@ public class InMemoryCommandStore
                     throw new AssertionError();
                 case Key:
                     AbstractKeys<Key, ?> keys = (AbstractKeys<Key, ?>) keysOrRanges;
-                    keys.forEach(slice, key -> {
-                        if (commandStore.hashIntersects(key))
-                            forEach.accept(commandsForKey(key));
-                    });
+                    keys.forEach(slice, key -> forEach.accept(commandsForKey(key)));
                     break;
                 case Range:
                     Ranges ranges = (Ranges) keysOrRanges;
@@ -281,7 +287,7 @@ public class InMemoryCommandStore
     {
         public static class SynchronizedState extends State implements SyncCommandStores.SafeSyncCommandStore
         {
-            public SynchronizedState(NodeTimeService time, Agent agent, DataStore store, ProgressLog progressLog, RangesForEpoch rangesForEpoch, CommandStore commandStore)
+            public SynchronizedState(NodeTimeService time, Agent agent, DataStore store, ProgressLog progressLog, RangesForEpochHolder rangesForEpoch, CommandStore commandStore)
             {
                 super(time, agent, store, progressLog, rangesForEpoch, commandStore);
             }
@@ -315,9 +321,9 @@ public class InMemoryCommandStore
 
         final SynchronizedState state;
 
-        public Synchronized(int id, int generation, int shardIndex, int numShards, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpoch rangesForEpoch)
+        public Synchronized(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpoch)
         {
-            super(id, generation, shardIndex, numShards);
+            super(id);
             this.state = new SynchronizedState(time, agent, store, progressLogFactory.create(this), rangesForEpoch, this);
         }
 
@@ -327,22 +333,28 @@ public class InMemoryCommandStore
             return state.agent();
         }
 
+        private SynchronizedState safeStore()
+        {
+            state.refreshRanges();
+            return state;
+        }
+
         @Override
         public Future<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
         {
-            return state.execute(context, consumer);
+            return safeStore().execute(context, consumer);
         }
 
         @Override
         public <T> Future<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
         {
-            return state.submit(context, function);
+            return safeStore().submit(context, function);
         }
 
         @Override
         public <T> T executeSync(PreLoadContext context, Function<? super SafeCommandStore, T> function)
         {
-            return state.executeSync(context, function);
+            return safeStore().executeSync(context, function);
         }
 
         @Override
@@ -376,7 +388,7 @@ public class InMemoryCommandStore
 
         class AsyncState extends State implements SafeCommandStore
         {
-            public AsyncState(NodeTimeService time, Agent agent, DataStore store, ProgressLog progressLog, RangesForEpoch rangesForEpoch, CommandStore commandStore)
+            public AsyncState(NodeTimeService time, Agent agent, DataStore store, ProgressLog progressLog, RangesForEpochHolder rangesForEpoch, CommandStore commandStore)
             {
                 super(time, agent, store, progressLog, rangesForEpoch, commandStore);
             }
@@ -399,18 +411,18 @@ public class InMemoryCommandStore
         private final ExecutorService executor;
         private final AsyncState state;
 
-        public SingleThread(int id, int generation, int shardIndex, int numShards, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpoch rangesForEpoch)
+        public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpoch)
         {
-            super(id, generation, shardIndex, numShards);
+            super(id);
             executor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
-                thread.setName(CommandStore.class.getSimpleName() + '[' + time.id() + ':' + shardIndex + ']');
+                thread.setName(CommandStore.class.getSimpleName() + '[' + time.id() + ']');
                 return thread;
             });
             state = newState(time, agent, store, progressLogFactory, rangesForEpoch);
         }
 
-        AsyncState newState(NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpoch rangesForEpoch)
+        AsyncState newState(NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpoch)
         {
             return new AsyncState(time, agent, store, progressLogFactory.create(this), rangesForEpoch, this);
         }
@@ -421,16 +433,22 @@ public class InMemoryCommandStore
             return state.agent();
         }
 
+        private State safeStore()
+        {
+            state.refreshRanges();
+            return state;
+        }
+
         @Override
         public Future<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
         {
-            return state.execute(context, consumer);
+            return safeStore().execute(context, consumer);
         }
 
         @Override
         public <T> Future<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
         {
-            return state.submit(context, function);
+            return safeStore().submit(context, function);
         }
 
         @Override
@@ -444,7 +462,7 @@ public class InMemoryCommandStore
     {
         class DebugState extends AsyncState
         {
-            public DebugState(NodeTimeService time, Agent agent, DataStore store, ProgressLog progressLog, RangesForEpoch rangesForEpoch, CommandStore commandStore)
+            public DebugState(NodeTimeService time, Agent agent, DataStore store, ProgressLog progressLog, RangesForEpochHolder rangesForEpoch, CommandStore commandStore)
             {
                 super(time, agent, store, progressLog, rangesForEpoch, commandStore);
             }
@@ -522,9 +540,9 @@ public class InMemoryCommandStore
 
         private final AtomicReference<Thread> expectedThread = new AtomicReference<>();
 
-        public Debug(int id, int generation, int shardIndex, int numShards, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpoch rangesForEpoch)
+        public Debug(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpoch)
         {
-            super(id, generation, shardIndex, numShards, time, agent, store, progressLogFactory, rangesForEpoch);
+            super(id, time, agent, store, progressLogFactory, rangesForEpoch);
         }
 
         private void assertThread()
@@ -543,7 +561,7 @@ public class InMemoryCommandStore
         }
 
         @Override
-        AsyncState newState(NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpoch rangesForEpoch)
+        AsyncState newState(NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpoch)
         {
             return new DebugState(time, agent, store, progressLogFactory.create(this), rangesForEpoch, this);
         }
@@ -551,7 +569,7 @@ public class InMemoryCommandStore
 
     public static State inMemory(CommandStore unsafeStore)
     {
-        return (unsafeStore instanceof Synchronized) ? ((Synchronized) unsafeStore).state : ((SingleThread) unsafeStore).state;
+        return (unsafeStore instanceof Synchronized) ? ((Synchronized) unsafeStore).safeStore() : ((SingleThread) unsafeStore).safeStore();
     }
 
     public static State inMemory(SafeCommandStore safeStore)

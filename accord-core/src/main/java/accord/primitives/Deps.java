@@ -1070,10 +1070,9 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
     /**
      * For each {@link TxnId} that references a key within the {@link Ranges}; the {@link TxnId} will be seen exactly once.
      * @param ranges to match on
-     * @param include function to say if a key should be used or not
      * @param forEach function to call on each unique {@link TxnId}
      */
-    public void forEachOn(Ranges ranges, Predicate<? super Key> include, Consumer<TxnId> forEach)
+    public void forEachOn(Ranges ranges, Consumer<TxnId> forEach)
     {
         // Find all keys within the ranges, but record existence within an int64 bitset.  Since the bitset is limited
         // to 64, this search must be called multiple times searching for different TxnIds in txnIds; this also has
@@ -1083,9 +1082,6 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         for (int offset = 0 ; offset < txnIds.length ; offset += 64)
         {
             long bitset = Routables.foldl(keys, ranges, (key, off, value, keyIndex) -> {
-                if (!include.test(key))
-                    return value;
-
                 int index = startOffset(keyIndex);
                 int end = endOffset(keyIndex);
                 if (off > 0)

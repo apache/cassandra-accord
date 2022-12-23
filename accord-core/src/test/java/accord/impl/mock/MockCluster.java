@@ -24,6 +24,7 @@ import accord.coordinate.Timeout;
 import accord.impl.*;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.local.ShardDistributor;
 import accord.primitives.Ranges;
 import accord.utils.EpochFunction;
 import accord.utils.ThreadPoolScheduler;
@@ -104,6 +105,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                         configurationService,
                         nowSupplier,
                         () -> store,
+                        new ShardDistributor.EvenSplit(8, new IntKey.Splitter()),
                         new TestAgent(),
                         new Random(random.nextLong()),
                         new ThreadPoolScheduler(),

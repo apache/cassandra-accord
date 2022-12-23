@@ -6,6 +6,8 @@ import java.util.function.Predicate;
 
 public class Invariants
 {
+    private static final boolean PARANOID = true;
+
     public static <T1, T2 extends T1> T2 checkType(T1 cast)
     {
         return (T2)cast;
@@ -23,6 +25,12 @@ public class Invariants
         if (cast != null && !to.isInstance(cast))
             throw new IllegalStateException(msg);
         return (T2)cast;
+    }
+
+    public static void paranoid(boolean condition)
+    {
+        if (PARANOID && !condition)
+            throw new IllegalStateException();
     }
 
     public static void checkState(boolean condition)

@@ -165,20 +165,12 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
         return !any(predicate);
     }
 
-    /**
-     * Count the number of keys matching the predicate and intersecting with the given ranges.
-     * If terminateAfter is greater than 0, the method will return once terminateAfter matches are encountered
-     */
     @Inline
     public final <V> V foldl(Ranges rs, IndexedFold<? super K, V> fold, V accumulator)
     {
         return Routables.foldl(this, rs, fold, accumulator);
     }
 
-    /**
-     * Count the number of keys matching the predicate and intersecting with the given ranges.
-     * If terminateAfter is greater than 0, the method will return once terminateAfter matches are encountered
-     */
     @Inline
     public final void forEach(Ranges rs, Consumer<? super K> forEach)
     {

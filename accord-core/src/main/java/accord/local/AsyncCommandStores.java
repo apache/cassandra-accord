@@ -55,9 +55,9 @@ public class AsyncCommandStores extends CommandStores<CommandStore>
         }
     }
 
-    public AsyncCommandStores(int num, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
+    public AsyncCommandStores(NodeTimeService time, Agent agent, DataStore store, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
     {
-        super(num, time, agent, store, progressLogFactory, shardFactory);
+        super(time, agent, store, shardDistributor, progressLogFactory, shardFactory);
     }
 
     @Override

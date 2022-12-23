@@ -74,7 +74,7 @@ public class Keys extends AbstractKeys<Key, Keys> implements Seekables<Key, Keys
     @Override
     public Keys slice(Ranges ranges)
     {
-        return wrap(SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, Key[]::new, (k, r) -> -r.compareTo(k), Range::compareTo));
+        return wrap(slice(ranges, Key[]::new));
     }
 
     public Keys with(Key key)

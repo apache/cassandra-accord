@@ -40,13 +40,13 @@ public class TopologyTest
         Key expectedKey = key(key);
         Shard shard = topology.forKey(routing(key));
         Range expectedRange = range(start, end);
-        Assertions.assertTrue(expectedRange.containsKey(expectedKey));
-        Assertions.assertTrue(shard.range.containsKey(expectedKey));
+        Assertions.assertTrue(expectedRange.contains(expectedKey));
+        Assertions.assertTrue(shard.range.contains(expectedKey));
         Assertions.assertEquals(expectedRange, shard.range);
 
         Topology subTopology = topology.forSelection(Keys.of(expectedKey).toUnseekables());
         shard = Iterables.getOnlyElement(subTopology.shards());
-        Assertions.assertTrue(shard.range.containsKey(expectedKey));
+        Assertions.assertTrue(shard.range.contains(expectedKey));
         Assertions.assertEquals(expectedRange, shard.range);
     }
 

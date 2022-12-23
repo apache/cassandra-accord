@@ -97,22 +97,22 @@ public class RangeTest
     void containsTest()
     {
         Range endInclRange = rangeEndIncl(10, 20);
-        Assertions.assertFalse(endInclRange.containsKey(k(10)));
+        Assertions.assertFalse(endInclRange.contains(k(10)));
         Assertions.assertFalse(endInclRange.startInclusive());
-        Assertions.assertTrue(endInclRange.containsKey(k(20)));
+        Assertions.assertTrue(endInclRange.contains(k(20)));
         Assertions.assertTrue(endInclRange.endInclusive());
 
         Range startInclRange = rangeStartIncl(10, 20);
-        Assertions.assertTrue(startInclRange.containsKey(k(10)));
+        Assertions.assertTrue(startInclRange.contains(k(10)));
         Assertions.assertTrue(startInclRange.startInclusive());
-        Assertions.assertFalse(startInclRange.containsKey(k(20)));
+        Assertions.assertFalse(startInclRange.contains(k(20)));
         Assertions.assertFalse(startInclRange.endInclusive());
     }
 
     private static void assertHigherKeyIndex(int expectedIdx, Range range, Keys keys)
     {
         if (expectedIdx > 0 && expectedIdx < keys.size())
-            Assertions.assertTrue(range.containsKey(keys.get(expectedIdx - 1)));
+            Assertions.assertTrue(range.contains(keys.get(expectedIdx - 1)));
         int actualIdx = range.nextHigherKeyIndex(keys, 0);
         Assertions.assertEquals(expectedIdx, actualIdx);
     }
@@ -143,12 +143,12 @@ public class RangeTest
     {
         if (expectedIdx >= 0 && expectedIdx < keys.size())
         {
-            Assertions.assertTrue(range.containsKey(keys.get(expectedIdx)));
+            Assertions.assertTrue(range.contains(keys.get(expectedIdx)));
         }
         else
         {
-            Assertions.assertFalse(range.containsKey(keys.get(lowerBound)));
-            Assertions.assertFalse(range.containsKey(keys.get(keys.size() - 1)));
+            Assertions.assertFalse(range.contains(keys.get(lowerBound)));
+            Assertions.assertFalse(range.contains(keys.get(keys.size() - 1)));
         }
 
         int actualIdx = range.nextCeilKeyIndex(keys, lowerBound);
@@ -190,17 +190,17 @@ public class RangeTest
     @Test
     void fullyContainsTest()
     {
-        Assertions.assertTrue(r(100, 200).fullyContains(r(100, 200)));
-        Assertions.assertTrue(r(100, 200).fullyContains(r(150, 200)));
-        Assertions.assertTrue(r(100, 200).fullyContains(r(100, 150)));
-        Assertions.assertTrue(r(100, 200).fullyContains(r(125, 175)));
+        Assertions.assertTrue(r(100, 200).contains(r(100, 200)));
+        Assertions.assertTrue(r(100, 200).contains(r(150, 200)));
+        Assertions.assertTrue(r(100, 200).contains(r(100, 150)));
+        Assertions.assertTrue(r(100, 200).contains(r(125, 175)));
 
-        Assertions.assertFalse(r(100, 200).fullyContains(r(50, 60)));
-        Assertions.assertFalse(r(100, 200).fullyContains(r(100, 250)));
-        Assertions.assertFalse(r(100, 200).fullyContains(r(150, 250)));
-        Assertions.assertFalse(r(100, 200).fullyContains(r(50, 200)));
-        Assertions.assertFalse(r(100, 200).fullyContains(r(50, 150)));
-        Assertions.assertFalse(r(100, 200).fullyContains(r(250, 260)));
+        Assertions.assertFalse(r(100, 200).contains(r(50, 60)));
+        Assertions.assertFalse(r(100, 200).contains(r(100, 250)));
+        Assertions.assertFalse(r(100, 200).contains(r(150, 250)));
+        Assertions.assertFalse(r(100, 200).contains(r(50, 200)));
+        Assertions.assertFalse(r(100, 200).contains(r(50, 150)));
+        Assertions.assertFalse(r(100, 200).contains(r(250, 260)));
     }
 
     @Test

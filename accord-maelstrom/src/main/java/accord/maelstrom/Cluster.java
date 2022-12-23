@@ -39,6 +39,7 @@ import accord.impl.InMemoryCommandStores;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.MessageSink;
+import accord.local.ShardDistributor;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.ReplyContext;
@@ -133,6 +134,9 @@ public class Cluster implements Scheduler
 
     private void add(Packet packet)
     {
+        if (packet == null)
+            throw new IllegalArgumentException();
+
         err.println(clock++ + " SEND " + packet);
         err.flush();
         if (lookup.apply(packet.dest) == null) responseSink.accept(packet);
@@ -296,7 +300,8 @@ public class Cluster implements Scheduler
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
                 lookup.put(node, new Node(node, messageSink, new SimpleConfigService(topology),
-                                          nowSupplier.get(), MaelstromStore::new, MaelstromAgent.INSTANCE,
+                                          nowSupplier.get(), MaelstromStore::new, new ShardDistributor.EvenSplit(8, new MaelstromKey.Splitter()),
+                                          MaelstromAgent.INSTANCE,
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
                                           SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new));
             }

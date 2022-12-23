@@ -65,12 +65,12 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
         throw new UnsupportedOperationException();
     }
 
-    public PartialRangeRoute slice(Ranges newRange)
+    public PartialRangeRoute slice(Ranges newRanges)
     {
-        if (newRange.containsAll(covering))
+        if (newRanges.containsAll(covering))
             return this;
 
-        return slice(newRange, this, homeKey, PartialRangeRoute::new);
+        return slice(newRanges, this, homeKey, PartialRangeRoute::new);
     }
 
     public Unseekables<Range, ?> with(RoutingKey withKey)

@@ -22,7 +22,9 @@ import java.io.IOException;
 
 import accord.api.RoutingKey;
 
+import accord.local.ShardDistributor;
 import accord.primitives.RoutableKey;
+import accord.utils.Invariants;
 import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
@@ -31,6 +33,77 @@ import javax.annotation.Nonnull;
 
 public class MaelstromKey implements RoutableKey
 {
+    public static class Splitter implements ShardDistributor.EvenSplit.Splitter<Long>
+    {
+        private static long hash(RoutingKey routingKey)
+        {
+            Datum.Hash hash = ((Datum.Hash)((MaelstromKey)routingKey).datum.value);
+            if (hash == null)
+                return Integer.MAX_VALUE;
+            return hash.hash;
+        }
+
+        @Override
+        public Long sizeOf(accord.primitives.Range range)
+        {
+            return hash(range.end()) - hash(range.start());
+        }
+
+        @Override
+        public accord.primitives.Range subRange(accord.primitives.Range range, Long start, Long end)
+        {
+            Invariants.checkState(end - start <= Integer.MAX_VALUE);
+            long startHash = hash(range.start());
+            Invariants.checkArgument(startHash + end <= hash(range.end()));
+            return range.subRange(
+                    new Routing(Datum.Kind.HASH, new Datum.Hash((int) (startHash + start))),
+                    new Routing(Datum.Kind.HASH, new Datum.Hash((int) (startHash + end)))
+            );
+        }
+
+        @Override
+        public Long zero()
+        {
+            return 0L;
+        }
+
+        @Override
+        public Long add(Long a, Long b)
+        {
+            return a + b;
+        }
+
+        @Override
+        public Long subtract(Long a, Long b)
+        {
+            return a - b;
+        }
+
+        @Override
+        public Long divide(Long a, int i)
+        {
+            return a / i;
+        }
+
+        @Override
+        public Long multiply(Long a, int i)
+        {
+            return a * i;
+        }
+
+        @Override
+        public int min(Long v, int i)
+        {
+            return (int)Math.min(v, i);
+        }
+
+        @Override
+        public int compare(Long a, Long b)
+        {
+            return a.compareTo(b);
+        }
+    }
+
     public static class Key extends MaelstromKey implements accord.api.Key
     {
         public Key(Datum.Kind kind, Object value)
@@ -130,16 +203,16 @@ public class MaelstromKey implements RoutableKey
     };
 
     @Override
-    public int routingHash()
-    {
-        return datum.hashCode();
-    }
-
-    @Override
     public RoutingKey toUnseekable()
     {
         if (this instanceof Routing)
             return (Routing)this;
         return new Routing(datum.kind, datum.value);
+    }
+
+    @Override
+    public String toString()
+    {
+        return datum.toString();
     }
 }

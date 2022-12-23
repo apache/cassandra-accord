@@ -37,6 +37,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nullable;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
@@ -52,7 +53,7 @@ public class CommandTest
     private static final Node.Id ID1 = id(1);
     private static final Node.Id ID2 = id(2);
     private static final Node.Id ID3 = id(3);
-    private static final List<Node.Id> IDS = List.of(ID1, ID2, ID3);
+    private static final List<Node.Id> IDS = Arrays.asList(ID1, ID2, ID3);
     private static final Range FULL_RANGE = IntKey.range(0, 100);
     private static final Ranges FULL_RANGES = Ranges.single(FULL_RANGE);
     private static final Topology TOPOLOGY = TopologyFactory.toTopology(IDS, 3, FULL_RANGE);
@@ -137,7 +138,7 @@ public class CommandTest
     private static Node createNode(Id id, CommandStoreSupport storeSupport)
     {
         return new Node(id, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
-                        new MockCluster.Clock(100), () -> storeSupport.data, new TestAgent(), new Random(), null,
+                        new MockCluster.Clock(100), () -> storeSupport.data, new ShardDistributor.EvenSplit(8, new IntKey.Splitter()), new TestAgent(), new Random(), null,
                         SizeOfIntersectionSorter.SUPPLIER, ignore -> ignore2 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new);
     }
 
