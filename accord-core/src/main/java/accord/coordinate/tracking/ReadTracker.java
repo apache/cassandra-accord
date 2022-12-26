@@ -265,9 +265,9 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
         while (i >= 0)
         {
             Id candidate = candidates.get(i);
-            topologies().forEach((ti, topology) -> {
+            topologies().forEach((topology, ti) -> {
                 int offset = topologyOffset(ti);
-                topology.forEachOn(candidate, (si, s) -> toRead.clear(offset + si));
+                topology.forEachOn(candidate, (s, si) -> toRead.clear(offset + si));
             });
 
             if (toRead.isEmpty())

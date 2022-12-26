@@ -191,7 +191,7 @@ public abstract class CommandStores<S extends CommandStore>
                     for (int i = Math.max(0, indexForEpoch(minEpoch)), maxi = indexForEpoch(maxEpoch); i <= maxi ; ++i)
                     {
                         // include every shard if we match a range
-                        accumulate = Routables.foldl((Ranges)keysOrRanges, ranges[i], (idx, k, p, a) -> p, terminalValue, accumulate, terminalValue);
+                        accumulate = Routables.foldl((Ranges)keysOrRanges, ranges[i], (k, p, a, idx) -> p, terminalValue, accumulate, terminalValue);
                     }
                     return accumulate;
                 }
@@ -208,7 +208,7 @@ public abstract class CommandStores<S extends CommandStore>
             return Integer.toUnsignedLong(key.routingHash()) % numShards;
         }
 
-        private static long addKeyIndex(int i, RoutableKey key, long numShards, long accumulate)
+        private static long addKeyIndex(RoutableKey key, long numShards, long accumulate, int i)
         {
             return accumulate | (1L << keyIndex(key, numShards));
         }

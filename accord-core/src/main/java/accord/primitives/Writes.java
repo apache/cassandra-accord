@@ -71,7 +71,7 @@ public class Writes
         if (ranges == null)
             return SUCCESS;
 
-        List<Future<Void>> futures = keys.foldl(ranges, (index, key, accumulate) -> {
+        List<Future<Void>> futures = keys.foldl(ranges, (key, accumulate, index) -> {
             if (safeStore.commandStore().hashIntersects(key))
                 accumulate.add(write.apply(key, safeStore, executeAt, safeStore.dataStore()));
             return accumulate;

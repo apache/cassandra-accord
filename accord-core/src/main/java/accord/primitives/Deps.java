@@ -218,7 +218,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
                 result[k] = keyCount + keyLimits[k];
                 int from = k == 0 ? 0 : keyLimits[k - 1];
                 int to = keyLimits[k];
-                offset = (int)SortedArrays.foldlIntersection(txnIds, 0, txnIdCount, keyToTxnId, from, to, (li, ri, key, p, v) -> {
+                offset = (int)SortedArrays.foldlIntersection(txnIds, 0, txnIdCount, keyToTxnId, from, to, (key, p, v, li, ri) -> {
                     result[(int)v] = li;
                     return v + 1;
                 }, keyCount, offset, -1);
@@ -1054,7 +1054,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
 
     public void forEachOn(Ranges ranges, Predicate<Key> include, BiConsumer<Key, TxnId> forEach)
     {
-        Routables.foldl(keys, ranges, (index, key, value) -> {
+        Routables.foldl(keys, ranges, (key, value, index) -> {
             if (!include.test(key))
                 return null;
 
@@ -1082,7 +1082,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         // does not rely on this ordering.
         for (int offset = 0 ; offset < txnIds.length ; offset += 64)
         {
-            long bitset = Routables.foldl(keys, ranges, (keyIndex, key, off, value) -> {
+            long bitset = Routables.foldl(keys, ranges, (key, off, value, keyIndex) -> {
                 if (!include.test(key))
                     return value;
 

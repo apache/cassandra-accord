@@ -18,7 +18,7 @@
 
 package accord.utils;
 
-public interface IndexedBiFunction<T, U, R>
+public interface IndexedBiFunction<P1, P2, O>
 {
-    R apply(int i, T t, U u);
+    O apply(P1 p1, P2 p2, int index);
 }

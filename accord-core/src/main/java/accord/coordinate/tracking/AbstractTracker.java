@@ -138,7 +138,7 @@ public abstract class AbstractTracker<ST extends ShardTracker, P>
     }
 
     static <ST extends ShardTracker, P, T extends AbstractTracker<ST, P>>
-    ShardOutcomes apply(int trackerIndex, T tracker, BiFunction<? super ST, P, ? extends ShardOutcome<? super T>> function, P param)
+    ShardOutcomes apply(T tracker, BiFunction<? super ST, P, ? extends ShardOutcome<? super T>> function, P param, int trackerIndex)
     {
         return function.apply(tracker.trackers[trackerIndex], param).apply(tracker, trackerIndex);
     }

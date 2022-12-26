@@ -53,7 +53,7 @@ public abstract class TrackerReconciler<ST extends ShardTracker, T extends Abstr
             RequestStatus newStatus = invoke(next, tracker, from);
             for (int i = 0 ; i < topologies().size() ; ++i)
             {
-                topologies().get(i).forEachOn(from, (si, s) -> {
+                topologies().get(i).forEachOn(from, (s, si) -> {
                     counts[si].compute(next, (ignore, cur) -> cur + 1);
                 });
             }

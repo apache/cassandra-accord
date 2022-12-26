@@ -148,7 +148,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 int nexti = valueIntersections.findLimit(is, i, ms, m);
                 while (i < nexti)
                 {
-                    initialValue = fold.apply(i, is.get(i), initialValue);
+                    initialValue = fold.apply(is.get(i), initialValue, i);
                     ++i;
                 }
             }
@@ -174,7 +174,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 int nexti = valueIntersections.findLimit(is, i, ms, m);
                 while (i < nexti)
                 {
-                    initialValue = fold.apply(i, is.get(i), param, initialValue);
+                    initialValue = fold.apply(is.get(i), param, initialValue, i);
                     if (initialValue == terminalValue)
                         break done;
                     ++i;
@@ -199,7 +199,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 int nexti = (int)(im);
                 while (i < nexti)
                 {
-                    initialValue = fold.apply(i, is.get(i), param, initialValue);
+                    initialValue = fold.apply(is.get(i), param, initialValue, i);
                     if (initialValue == terminalValue)
                         break done;
                     ++i;
@@ -227,7 +227,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 m = (int)(kri >>> 32);
 
                 int nexti = valueIntersections.findLimit(is, i, ms, m);
-                initialValue = fold.apply(i, nexti, param, initialValue);
+                initialValue = fold.apply(param, initialValue, i, nexti);
                 if (initialValue == terminalValue)
                     break;
                 i = nexti;

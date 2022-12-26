@@ -18,7 +18,6 @@
 
 package accord.utils;
 
-public interface IndexedFold<K, V>
+public interface IndexedFold<P1, Accumulate> extends IndexedBiFunction<P1, Accumulate, Accumulate>
 {
-    V apply(int index, K key, V value);
 }

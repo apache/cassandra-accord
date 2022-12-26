@@ -193,22 +193,22 @@ public class Topology
 
     public Topology forSelection(Unseekables<?, ?> select)
     {
-        return forSelection(select, (i, shard) -> true);
+        return forSelection(select, (ignore, index) -> true, null);
     }
 
-    public Topology forSelection(Unseekables<?, ?> select, IndexedPredicate<Shard> predicate)
+    public <P1> Topology forSelection(Unseekables<?, ?> select, IndexedPredicate<P1> predicate, P1 param)
     {
-        return forSubset(subsetFor(select, predicate));
+        return forSubset(subsetFor(select, predicate, param));
     }
 
     public Topology forSelection(Unseekables<?, ?> select, Collection<Id> nodes)
     {
-        return forSelection(select, nodes, (i, shard) -> true);
+        return forSelection(select, nodes, (ignore, index) -> true, null);
     }
 
-    public Topology forSelection(Unseekables<?, ?> select, Collection<Id> nodes, IndexedPredicate<Shard> predicate)
+    public <P1> Topology forSelection(Unseekables<?, ?> select, Collection<Id> nodes, IndexedPredicate<P1> predicate, P1 param)
     {
-        return forSubset(subsetFor(select, predicate), nodes);
+        return forSubset(subsetFor(select, predicate, param), nodes);
     }
 
     private Topology forSubset(int[] newSubset)
@@ -237,7 +237,7 @@ public class Topology
         return new Topology(epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
     }
 
-    private int[] subsetFor(Unseekables<?, ?> select, IndexedPredicate<Shard> predicate)
+    private <P1> int[] subsetFor(Unseekables<?, ?> select, IndexedPredicate<P1> predicate, P1 param)
     {
         int count = 0;
         IntBuffers cachedInts = ArrayBuffers.cachedInts();
@@ -267,7 +267,7 @@ public class Topology
                     if (ailim < (int)abi)
                         throw new IllegalArgumentException("Range not found for " + select.get(ailim));
 
-                    if (predicate.test(bi, shards[bi]))
+                    if (predicate.test(param, bi))
                         newSubset[count++] = bi;
 
                     ai = (int)abi;
@@ -286,7 +286,7 @@ public class Topology
                         break;
 
                     bi = (int)(abi >>> 32);
-                    if (predicate.test(bi, shards[bi]))
+                    if (predicate.test(param, bi))
                         newSubset[count++] = bi;
 
                     ++bi;
@@ -302,9 +302,14 @@ public class Topology
         return cachedInts.completeAndDiscard(newSubset, count);
     }
 
-    public void visitNodeForKeysOnceOrMore(Unseekables<?, ?> select, IndexedPredicate<Shard> predicate, Consumer<Id> nodes)
+    public <P1> void visitNodeForKeysOnceOrMore(Unseekables<?, ?> select, Consumer<Id> nodes)
     {
-        for (int shardIndex : subsetFor(select, predicate))
+        visitNodeForKeysOnceOrMore(select, (i1, i2) -> true, null, nodes);
+    }
+
+    public <P1> void visitNodeForKeysOnceOrMore(Unseekables<?, ?> select, IndexedPredicate<P1> predicate, P1 param, Consumer<Id> nodes)
+    {
+        for (int shardIndex : subsetFor(select, predicate, param))
         {
             Shard shard = shards[shardIndex];
             for (Id id : shard.nodes)
@@ -327,7 +332,7 @@ public class Topology
             ai = (int)(abi);
             bi = (int)(abi >>> 32);
 
-            accumulator = function.apply(bi, shards[bi], accumulator);
+            accumulator = function.apply(shards[bi], accumulator, bi);
             ++bi;
         }
 
@@ -345,7 +350,7 @@ public class Topology
         {
             if (a[ai] == b[bi])
             {
-                consumer.accept(ai, shards[a[ai]]);
+                consumer.accept(shards[a[ai]], ai);
                 ++ai; ++bi;
             }
             else if (a[ai] < b[bi])
@@ -372,7 +377,7 @@ public class Topology
         {
             if (a[ai] == b[bi])
             {
-                O next = function.apply(offset + ai, p1, p2, p3);
+                O next = function.apply(p1, p2, p3, offset + ai);
                 initialValue = reduce.apply(initialValue, next);
                 ++ai; ++bi;
             }
@@ -403,7 +408,7 @@ public class Topology
         {
             if (a[ai] == b[bi])
             {
-                if (consumer.test(ai, shards[a[ai]]))
+                if (consumer.test(shards[a[ai]], ai))
                     ++count;
                 ++ai; ++bi;
             }
@@ -433,7 +438,7 @@ public class Topology
         {
             if (a[ai] == b[bi])
             {
-                initialValue = consumer.apply(offset + ai, param, initialValue);
+                initialValue = consumer.apply(param, initialValue, offset + ai);
                 if (terminalValue == initialValue)
                     return terminalValue;
                 ++ai; ++bi;
@@ -455,7 +460,7 @@ public class Topology
     public void forEach(IndexedConsumer<Shard> consumer)
     {
         for (int i = 0; i < supersetIndexes.length ; ++i)
-            consumer.accept(i, shards[supersetIndexes[i]]);
+            consumer.accept(shards[supersetIndexes[i]], i);
     }
 
     public int size()
