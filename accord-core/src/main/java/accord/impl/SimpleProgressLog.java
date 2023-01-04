@@ -279,6 +279,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     @Override
                     public void onSuccess(Id from, SimpleReply reply)
                     {
+                        // TODO: callbacks should be associated with a commandStore for processing to avoid this
                         commandStore.execute(PreLoadContext.empty(), ignore -> {
                             notAwareOfDurability.remove(from);
                             maybeDone();
