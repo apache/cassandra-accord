@@ -88,7 +88,8 @@ public class Cluster implements Scheduler
     private void add(Packet packet)
     {
         boolean isReply = packet.message instanceof Reply;
-        trace.trace("{} {} {}", clock++, isReply ? "RPLY" : "SEND", packet);
+        if (trace.isTraceEnabled())
+            trace.trace("{} {} {}", clock++, isReply ? "RPLY" : "SEND", packet);
         if (lookup.apply(packet.dst) == null) responseSink.accept(packet);
         else pending.add(packet);
     }
@@ -140,11 +141,14 @@ public class Cluster implements Scheduler
                              || !partitionSet.contains(deliver.src) && !partitionSet.contains(deliver.dst));
             if (drop)
             {
-                trace.trace("{} DROP[{}] {}", clock++, on.epoch(), deliver);
+                if (trace.isTraceEnabled())
+                    trace.trace("{} DROP[{}] {}", clock++, on.epoch(), deliver);
                 return;
             }
 
-            trace.trace("{} RECV[{}] {}", clock++, on.epoch(), deliver);
+            if (trace.isTraceEnabled())
+                trace.trace("{} RECV[{}] {}", clock++, on.epoch(), deliver);
+
             if (deliver.message instanceof Reply)
             {
                 Reply reply = (Reply) deliver.message;

@@ -6,8 +6,8 @@ import java.util.function.Function;
 import accord.local.*;
 import accord.local.Status.Known;
 import accord.primitives.TxnId;
+import accord.utils.Invariants;
 
-import static accord.local.PreLoadContext.contextFor;
 import static accord.messages.Defer.Ready.Expired;
 import static accord.messages.Defer.Ready.No;
 import static accord.messages.Defer.Ready.Yes;
@@ -73,7 +73,8 @@ class Defer implements CommandListener
     @Override
     public PreLoadContext listenerPreLoadContext(TxnId caller)
     {
-        return contextFor(caller);
+        Invariants.checkState(caller.equals(request.txnId));
+        return request;
     }
 }
 

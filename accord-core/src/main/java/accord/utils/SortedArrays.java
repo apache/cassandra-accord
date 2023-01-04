@@ -855,7 +855,7 @@ public class SortedArrays
             ai = (int)(abi);
             bi = (int)(abi >>> 32);
 
-            initialValue = fold.apply(ai, bi, as[ai], param, initialValue);
+            initialValue = fold.apply(as[ai], param, initialValue, ai, bi);
             if (initialValue == terminalValue)
                 break;
 

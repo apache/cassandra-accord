@@ -65,7 +65,7 @@ public interface Topologies extends TopologySorter
     default void forEach(IndexedConsumer<Topology> consumer)
     {
         for (int i=0, mi=size(); i<mi; i++)
-            consumer.accept(i, get(i));
+            consumer.accept(get(i), i);
     }
 
     static boolean equals(Topologies t, Object o)

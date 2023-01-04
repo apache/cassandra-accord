@@ -18,7 +18,27 @@
 
 package accord.utils;
 
-public interface IndexedBiFunction<P1, P2, O>
+/**
+ * TODO COPIED FROM CASSANDRA
+ */
+public abstract class IntrusiveLinkedListNode
 {
-    O apply(P1 p1, P2 p2, int index);
+    IntrusiveLinkedListNode prev;
+    IntrusiveLinkedListNode next;
+
+    protected boolean isFree()
+    {
+        return next == null;
+    }
+
+    protected void remove()
+    {
+        if (next != null)
+        {
+            prev.next = next;
+            next.prev = prev;
+            next = null;
+            prev = null;
+        }
+    }
 }

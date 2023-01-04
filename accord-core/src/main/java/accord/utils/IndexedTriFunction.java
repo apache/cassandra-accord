@@ -18,7 +18,7 @@
 
 package accord.utils;
 
-public interface IndexedTriFunction<I1, I2, I3, O>
+public interface IndexedTriFunction<P1, P2, P3, V>
 {
-    O apply(int i0, I1 i1, I2 i2, I3 i3);
+    V apply(P1 p1, P2 p2, P3 p3, int index);
 }

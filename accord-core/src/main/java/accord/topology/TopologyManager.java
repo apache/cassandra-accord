@@ -113,7 +113,7 @@ public class TopologyManager implements ConfigurationService.Listener
                 return false;
             if (syncComplete)
                 return true;
-            Boolean result = global().foldl(intersect, (i, shard, acc) -> {
+            Boolean result = global().foldl(intersect, (shard, acc, i) -> {
                 if (acc == Boolean.FALSE)
                     return acc;
                 return syncTracker.get(i).hasReachedQuorum();
@@ -121,7 +121,7 @@ public class TopologyManager implements ConfigurationService.Listener
             return result == Boolean.TRUE;
         }
 
-        boolean shardIsUnsynced(int idx, Shard shard)
+        boolean shardIsUnsynced(int idx)
         {
             return !prevSynced || !syncTracker.get(idx).hasReachedQuorum();
         }
@@ -334,9 +334,9 @@ public class TopologyManager implements ConfigurationService.Listener
         {
             EpochState epochState = snapshot.epochs[i];
             if (epochState.epoch() < minEpoch)
-                epochState.global.visitNodeForKeysOnceOrMore(select, epochState::shardIsUnsynced, nodes::add);
+                epochState.global.visitNodeForKeysOnceOrMore(select, EpochState::shardIsUnsynced, epochState, nodes::add);
             else
-                epochState.global.visitNodeForKeysOnceOrMore(select, (i1, i2) -> true, nodes::add);
+                epochState.global.visitNodeForKeysOnceOrMore(select, nodes::add);
         }
 
         Topologies.Multi topologies = new Topologies.Multi(sorter, count);
@@ -344,9 +344,9 @@ public class TopologyManager implements ConfigurationService.Listener
         {
             EpochState epochState = snapshot.epochs[i];
             if (epochState.epoch() < minEpoch)
-                topologies.add(epochState.global.forSelection(select, nodes, epochState::shardIsUnsynced));
+                topologies.add(epochState.global.forSelection(select, nodes, EpochState::shardIsUnsynced, epochState));
             else
-                topologies.add(epochState.global.forSelection(select, nodes, (i1, i2) -> true));
+                topologies.add(epochState.global.forSelection(select, nodes, (ignore, idx) -> true, null));
         }
 
         return topologies;
@@ -362,7 +362,7 @@ public class TopologyManager implements ConfigurationService.Listener
         Set<Id> nodes = new LinkedHashSet<>();
         int count = (int)(1 + maxEpoch - minEpoch);
         for (int i = count - 1 ; i >= 0 ; --i)
-            snapshot.get(minEpoch + i).global().visitNodeForKeysOnceOrMore(keys, (i1, i2) -> true, nodes::add);
+            snapshot.get(minEpoch + i).global().visitNodeForKeysOnceOrMore(keys, nodes::add);
 
         Topologies.Multi topologies = new Topologies.Multi(sorter, count);
         for (int i = count - 1 ; i >= 0 ; --i)
