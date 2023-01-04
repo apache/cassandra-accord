@@ -18,7 +18,7 @@
 
 package accord.utils;
 
-public interface IndexedFunction<T, R>
+public interface IndexedFunction<P1, O>
 {
-    R apply(int i, T t);
+    O apply(P1 p1, int index);
 }

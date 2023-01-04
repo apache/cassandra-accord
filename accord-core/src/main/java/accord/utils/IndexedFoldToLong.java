@@ -18,7 +18,7 @@
 
 package accord.utils;
 
-public interface IndexedFoldToLong<K>
+public interface IndexedFoldToLong<P1>
 {
-    long apply(int index, K key, long param, long prev);
+    long apply(P1 p1, long p2, long accumulate, int index);
 }

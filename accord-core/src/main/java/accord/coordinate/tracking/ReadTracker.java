@@ -158,10 +158,9 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
     }
 
     // TODO: abstract the candidate selection process so the implementation may prioritise based on distance/health etc
-    // TODO: faster Id sets and arrays using primitive ints when unambiguous
-    final Set<Id> inflight;
-    final List<Id> candidates;
-    private Set<Id> slow;
+    final Set<Id> inflight;    // TODO: use Agrona's IntHashSet as soon as Node.Id switches from long to int
+    final List<Id> candidates; // TODO: use Agrona's IntArrayList as soon as Node.Id switches from long to int
+    private Set<Id> slow;      // TODO: use Agrona's IntHashSet as soon as Node.Id switches from long to int
     protected int waitingOnData;
 
     public ReadTracker(Topologies topologies)
@@ -265,9 +264,9 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
         while (i >= 0)
         {
             Id candidate = candidates.get(i);
-            topologies().forEach((ti, topology) -> {
+            topologies().forEach((topology, ti) -> {
                 int offset = topologyOffset(ti);
-                topology.forEachOn(candidate, (si, s) -> toRead.clear(offset + si));
+                topology.forEachOn(candidate, (s, si) -> toRead.clear(offset + si));
             });
 
             if (toRead.isEmpty())

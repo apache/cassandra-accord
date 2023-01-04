@@ -26,7 +26,6 @@ import java.util.stream.IntStream;
 import accord.api.Key;
 import accord.impl.IntKey;
 import accord.impl.IntKey.Raw;
-import accord.impl.IntKey.Routing;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Keys;
@@ -126,22 +125,22 @@ public class KeysTest
     void foldlTest()
     {
         List<Key> keys = new ArrayList<>();
-        long result = keys(150, 250, 350, 450, 550).foldl(ranges(r(200, 400)), (i, key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
+        long result = keys(150, 250, 350, 450, 550).foldl(ranges(r(200, 400)), (key, p2, v, i) -> { keys.add(key); return v * p2 + 1; }, 15, 0, -1);
         assertEquals(16, result);
         assertEquals(keys(250, 350), Keys.of(keys));
 
         keys.clear();
-        result = keys(150, 250, 350, 450, 550).foldl(ranges(r(0, 500)), (i, key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
+        result = keys(150, 250, 350, 450, 550).foldl(ranges(r(0, 500)), (key, p2, v, i) -> { keys.add(key); return v * p2 + 1; }, 15, 0, -1);
         assertEquals(3616, result);
         assertEquals(keys(150, 250, 350, 450), Keys.of(keys));
 
         keys.clear();
-        result = keys(150, 250, 350, 450, 550).foldl(ranges(r(500, 1000)), (i, key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
+        result = keys(150, 250, 350, 450, 550).foldl(ranges(r(500, 1000)), (key, p2, v, i) -> { keys.add(key); return v * p2 + 1; }, 15, 0, -1);
         assertEquals(1, result);
         assertEquals(keys(550), Keys.of(keys));
 
         keys.clear();
-        result = keys(150, 250, 350, 450, 550).foldl(ranges(r(0, 20), r(100, 140), r(149, 151), r(560, 2000)), (i, key, p, v) -> { keys.add(key); return v * p + 1; }, 15, 0, -1);
+        result = keys(150, 250, 350, 450, 550).foldl(ranges(r(0, 20), r(100, 140), r(149, 151), r(560, 2000)), (key, p2, v, i) -> { keys.add(key); return v * p2 + 1; }, 15, 0, -1);
         assertEquals(1, result);
         assertEquals(keys(150), Keys.of(keys));
     }
@@ -232,21 +231,21 @@ public class KeysTest
         qt().forAll(keysGen()).check(list -> {
             Keys keys = Keys.of(list);
 
-            Assertions.assertEquals(keys.size(), keys.foldl(ranges(range(Integer.MIN_VALUE, Integer.MAX_VALUE)), (index, key, accum) -> accum + 1, 0));
-            Assertions.assertEquals(keys.size(), keys.foldl(ranges(range(Integer.MIN_VALUE, Integer.MAX_VALUE)), (index, key, ignore, accum) -> accum + 1, -1, 0, Long.MAX_VALUE));
-            Assertions.assertEquals(keys.size(), keys.foldl((index, key, ignore, accum) -> accum + 1, -1, 0, Long.MAX_VALUE));
+            Assertions.assertEquals(keys.size(), keys.foldl(ranges(range(Integer.MIN_VALUE, Integer.MAX_VALUE)), (key, accum, index) -> accum + 1, 0));
+            Assertions.assertEquals(keys.size(), keys.foldl(ranges(range(Integer.MIN_VALUE, Integer.MAX_VALUE)), (p1, ignore, accum, index) -> accum + 1, -1, 0, Long.MAX_VALUE));
+            Assertions.assertEquals(keys.size(), keys.foldl((p1, ignore, accum, index) -> accum + 1, -1, 0, Long.MAX_VALUE));
 
             // early termination
-            Assertions.assertEquals(1, keys.foldl(ranges(range(Integer.MIN_VALUE, Integer.MAX_VALUE)), (index, key, ignore, accum) -> accum + 1, -1, 0, 1));
-            Assertions.assertEquals(1, keys.foldl((index, key, ignore, accum) -> accum + 1, -1, 0, 1));
+            Assertions.assertEquals(1, keys.foldl(ranges(range(Integer.MIN_VALUE, Integer.MAX_VALUE)), (p1, ignore, accum, index) -> accum + 1, -1, 0, 1));
+            Assertions.assertEquals(1, keys.foldl((p1, ignore, accum, index) -> accum + 1, -1, 0, 1));
 
-            Assertions.assertEquals(keys.size(), keys.foldl(ranges(keys), (index, key, accum) -> accum + 1, 0));
-            Assertions.assertEquals(keys.size(), keys.foldl(ranges(keys), (index, key, ignore, accum) -> accum + 1, -1, 0, Long.MAX_VALUE));
+            Assertions.assertEquals(keys.size(), keys.foldl(ranges(keys), (key, accum, index) -> accum + 1, 0));
+            Assertions.assertEquals(keys.size(), keys.foldl(ranges(keys), (p1, ignore, accum, index) -> accum + 1, -1, 0, Long.MAX_VALUE));
 
             for (Key k : keys)
             {
-                Assertions.assertEquals(1, keys.foldl(ranges(keys, k), (index, key, accum) -> accum + 1, 0));
-                Assertions.assertEquals(1, keys.foldl(ranges(keys, k), (index, key, ignore, accum) -> accum + 1, -1, 0, Long.MAX_VALUE));
+                Assertions.assertEquals(1, keys.foldl(ranges(keys, k), (key, accum, index) -> accum + 1, 0));
+                Assertions.assertEquals(1, keys.foldl(ranges(keys, k), (p1, ignore, accum, index) -> accum + 1, -1, 0, Long.MAX_VALUE));
             }
         });
     }

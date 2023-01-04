@@ -18,7 +18,7 @@
 
 package accord.utils;
 
-public interface IndexedPredicate<V>
+public interface IndexedPredicate<P1>
 {
-    boolean test(int i, V v);
+    boolean test(P1 p1, int index);
 }

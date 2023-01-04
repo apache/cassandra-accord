@@ -68,7 +68,7 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
 
     public final boolean containsAll(Routables<?, ?> keysOrRanges)
     {
-        return keysOrRanges.size() == Routables.foldl(keysOrRanges, this, (i, k, p, v) -> v + 1, 0, 0, 0);
+        return keysOrRanges.size() == Routables.foldl(keysOrRanges, this, (k, p, v, i) -> v + 1, 0, 0, 0);
     }
 
     @Override
@@ -152,12 +152,12 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
 
     public boolean any(Ranges ranges, Predicate<? super K> predicate)
     {
-        return 1 == foldl(ranges, (i1, key, i2, i3) -> predicate.test(key) ? 1 : 0, 0, 0, 1);
+        return 1 == foldl(ranges, (key, p2, prev, index) -> predicate.test(key) ? 1 : 0, 0, 0, 1);
     }
 
     public boolean any(Predicate<? super K> predicate)
     {
-        return 1 == foldl((i, key, p, v) -> predicate.test(key) ? 1 : 0, 0, 0, 1);
+        return 1 == foldl((key, p2, prev, index) -> predicate.test(key) ? 1 : 0, 0, 0, 1);
     }
 
     public boolean none(Predicate<? super K> predicate)
@@ -182,7 +182,7 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     @Inline
     public final void forEach(Ranges rs, Consumer<? super K> forEach)
     {
-        Routables.foldl(this, rs, (i, k, consumer) -> { consumer.accept(k); return consumer; }, forEach);
+        Routables.foldl(this, rs, (k, consumer, i) -> { consumer.accept(k); return consumer; }, forEach);
     }
 
     @Inline
@@ -196,7 +196,7 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     {
         for (int i = 0; i < keys.length; i++)
         {
-            initialValue = fold.apply(i, keys[i], param, initialValue);
+            initialValue = fold.apply(keys[i], param, initialValue, i);
             if (terminalValue == initialValue)
                 return initialValue;
         }

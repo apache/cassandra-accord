@@ -52,6 +52,8 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
         {
             // we need to pick a progress log, but this node might not have participated in the coordination epoch
             // in this rare circumstance we simply pick a key to select some progress log to coordinate this
+            // TODO (now): We might not replicate either txnId.epoch OR executeAt.epoch, but some inbetween.
+            //             Do we need to receive this message in that case? If so, we need to account for this when selecting a progress key
             at = executeAt;
             progressKey = node.selectProgressKey(executeAt.epoch, scope, scope.homeKey());
             shard = Adhoc;

@@ -1021,7 +1021,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                 if (partialTxn() != null)
                 {
                     partialTxn = partialTxn.slice(allRanges, shard.isHome());
-                    Routables.foldlMissing((Seekables)partialTxn.keys(), partialTxn().keys(), (i, keyOrRange, p, v) -> {
+                    Routables.foldlMissing((Seekables)partialTxn.keys(), partialTxn().keys(), (keyOrRange, p, v, i) -> {
                         // TODO: duplicate application of ranges
                         safeStore.forEach(keyOrRange, allRanges, forKey -> forKey.register(this));
                         return v;

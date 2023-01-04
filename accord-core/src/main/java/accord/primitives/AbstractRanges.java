@@ -77,7 +77,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     {
         if (this.isEmpty()) return that.isEmpty();
         if (that.isEmpty()) return true;
-        return Routables.rangeFoldl(that, this, (from, to, p, v) -> v + (to - from), 0, 0, 0) == that.size();
+        return Routables.rangeFoldl(that, this, (p, v, from, to) -> v + (to - from), 0, 0, 0) == that.size();
     }
 
     /**

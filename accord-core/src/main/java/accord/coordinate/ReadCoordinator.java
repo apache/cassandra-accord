@@ -16,6 +16,8 @@ import static com.google.common.collect.Sets.newHashSetWithExpectedSize;
 
 abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends ReadTracker implements Callback<Reply>
 {
+    private static final boolean DEBUG = false;
+
     protected enum Action
     {
         /**
@@ -53,7 +55,7 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
     final TxnId txnId;
     private boolean isDone;
     private Throwable failure;
-    Map<Id, Object> debug = new HashMap<>();
+    Map<Id, Object> debug = DEBUG ? new HashMap<>() : null;
 
     ReadCoordinator(Node node, Topologies topologies, TxnId txnId)
     {
@@ -69,7 +71,9 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
     @Override
     public void onSuccess(Id from, Reply reply)
     {
-        if (debug != null) debug.put(from, reply);
+        if (debug != null)
+            debug.put(from, reply);
+
         if (isDone)
             return;
 

@@ -118,6 +118,19 @@ public class ArrayBuffers
         boolean discard(int[] buffer, int usedSize);
 
         /**
+         * Equivalent to
+         *   int[] result = complete(buffer, usedSize);
+         *   discard(buffer, usedSize);
+         *   return result;
+         */
+        default int[] completeAndDiscard(int[] buffer, int usedSize)
+        {
+            int[] result = complete(buffer, usedSize);
+            discard(buffer, usedSize);
+            return result;
+        }
+
+        /**
          * Indicate this buffer is definitely unused, and return it to a pool if possible
          * @return true if the buffer is discarded (and discard-able), false if it was retained
          */
@@ -577,7 +590,6 @@ public class ArrayBuffers
                 return;
 
             savedInts = buffer;
-            return;
         }
     }
 

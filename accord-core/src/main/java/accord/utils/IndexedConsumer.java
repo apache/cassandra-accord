@@ -18,7 +18,7 @@
 
 package accord.utils;
 
-public interface IndexedConsumer<V>
+public interface IndexedConsumer<P1>
 {
-    void accept(int i, V v);
+    void accept(P1 p1, int index);
 }

@@ -18,7 +18,7 @@
 
 package accord.utils;
 
-public interface IndexedFoldIntersectToLong<K>
+public interface IndexedFoldIntersectToLong<P1>
 {
-    long apply(int leftIndex, int rightIndex, K key, long param, long prev);
+    long apply(P1 p1, long p2, long accumulate, int leftIndex, int rightIndex);
 }

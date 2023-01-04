@@ -35,7 +35,6 @@ import accord.utils.Invariants;
 import static accord.utils.ArrayBuffers.*;
 import static accord.utils.SortedArrays.*;
 import static accord.utils.SortedArrays.Search.FAST;
-import static accord.utils.Utils.listOf;
 
 /**
  * A collection of dependencies for a transaction, organised by the key the dependency is adopted via.
@@ -153,6 +152,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
 
             if (totalCount != keyOffset && !hasOrderedTxnId)
             {
+                // TODO: this allocates a significant amount of memory: would be preferable to be able to sort using a pre-defined scratch buffer
                 Arrays.sort(keyToTxnId, keyOffset, totalCount);
                 for (int i = keyOffset + 1 ; i < totalCount ; ++i)
                 {
@@ -218,7 +218,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
                 result[k] = keyCount + keyLimits[k];
                 int from = k == 0 ? 0 : keyLimits[k - 1];
                 int to = keyLimits[k];
-                offset = (int)SortedArrays.foldlIntersection(txnIds, 0, txnIdCount, keyToTxnId, from, to, (li, ri, key, p, v) -> {
+                offset = (int)SortedArrays.foldlIntersection(txnIds, 0, txnIdCount, keyToTxnId, from, to, (key, p, v, li, ri) -> {
                     result[(int)v] = li;
                     return v + 1;
                 }, keyCount, offset, -1);
@@ -885,63 +885,63 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
             return this;
 
         IntBuffers cache = ArrayBuffers.cachedInts();
-        int[] remapTxnIds = cache.getInts(txnIds.length);
-        int[] keyToTxnId = null;
+        TxnId[] oldTxnIds = txnIds;
+        int[] oldKeyToTxnId = keyToTxnId;
+        int[] remapTxnIds = cache.getInts(oldTxnIds.length);
+        int[] newKeyToTxnId = null;
+        TxnId[] newTxnIds;
         int o = 0;
         try
         {
-            TxnId[] txnIds; {
-                int count = 0;
-                for (int i = 0 ; i < this.txnIds.length ; ++i)
-                {
-                    if (remove.test(this.txnIds[i])) remapTxnIds[i] = -1;
-                    else remapTxnIds[i] = count++;
-                }
-
-                if (count == this.txnIds.length)
-                    return this;
-
-                if (count == 0)
-                    return NONE;
-
-                txnIds = new TxnId[count];
-                for (int i = 0 ; i < this.txnIds.length ; ++i)
-                {
-                    if (remapTxnIds[i] >= 0)
-                        txnIds[remapTxnIds[i]] = this.txnIds[i];
-                }
+            int count = 0;
+            for (int i = 0 ; i < oldTxnIds.length ; ++i)
+            {
+                if (remove.test(oldTxnIds[i])) remapTxnIds[i] = -1;
+                else remapTxnIds[i] = count++;
             }
 
-            keyToTxnId = cache.getInts(this.keyToTxnId.length);
+            if (count == oldTxnIds.length)
+                return this;
+
+            if (count == 0)
+                return NONE;
+
+            newTxnIds = new TxnId[count];
+            for (int i = 0 ; i < oldTxnIds.length ; ++i)
+            {
+                if (remapTxnIds[i] >= 0)
+                    newTxnIds[remapTxnIds[i]] = oldTxnIds[i];
+            }
+
+            newKeyToTxnId = cache.getInts(oldKeyToTxnId.length);
             int k = 0, i = keys.size();
             o = i;
-            while (i < this.keyToTxnId.length)
+            while (i < oldKeyToTxnId.length)
             {
-                while (this.keyToTxnId[k] == i)
-                    keyToTxnId[k++] = o;
+                while (oldKeyToTxnId[k] == i)
+                    newKeyToTxnId[k++] = o;
 
-                int remapped = remapTxnIds[this.keyToTxnId[i]];
+                int remapped = remapTxnIds[oldKeyToTxnId[i]];
                 if (remapped >= 0)
-                    keyToTxnId[o++] = remapped;
+                    newKeyToTxnId[o++] = remapped;
                 ++i;
             }
 
             while (k < keys.size())
-                keyToTxnId[k++] = o;
-
-            int[] result = cache.complete(keyToTxnId, o);
-            cache.discard(keyToTxnId, o);
-            return new Deps(keys, txnIds, result);
+                newKeyToTxnId[k++] = o;
         }
         catch (Throwable t)
         {
-            cache.forceDiscard(keyToTxnId, o);
+            cache.forceDiscard(newKeyToTxnId, o);
             throw t;
         }
         finally
         {
-            cache.forceDiscard(remapTxnIds, txnIds.length);
+            cache.forceDiscard(remapTxnIds, oldTxnIds.length);
         }
+
+        newKeyToTxnId = cache.completeAndDiscard(newKeyToTxnId, o);
+        return new Deps(keys, newTxnIds, newKeyToTxnId);
     }
 
     public boolean contains(TxnId txnId)
@@ -1054,7 +1054,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
 
     public void forEachOn(Ranges ranges, Predicate<Key> include, BiConsumer<Key, TxnId> forEach)
     {
-        Routables.foldl(keys, ranges, (index, key, value) -> {
+        Routables.foldl(keys, ranges, (key, value, index) -> {
             if (!include.test(key))
                 return null;
 
@@ -1082,7 +1082,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         // does not rely on this ordering.
         for (int offset = 0 ; offset < txnIds.length ; offset += 64)
         {
-            long bitset = Routables.foldl(keys, ranges, (keyIndex, key, off, value) -> {
+            long bitset = Routables.foldl(keys, ranges, (key, off, value, keyIndex) -> {
                 if (!include.test(key))
                     return value;
 
@@ -1151,7 +1151,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
 
     public Collection<TxnId> txnIds()
     {
-        return listOf(txnIds);
+        return Arrays.asList(txnIds);
     }
 
     public List<TxnId> txnIds(Key key)
