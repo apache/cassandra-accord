@@ -7,10 +7,15 @@ import java.util.function.Predicate;
 public class Invariants
 {
     private static final boolean PARANOID = true;
+    private static final boolean DEBUG = true;
 
     public static boolean isParanoid()
     {
         return PARANOID;
+    }
+    public static boolean debug()
+    {
+        return DEBUG;
     }
 
     public static <T1, T2 extends T1> T2 checkType(T1 cast)
@@ -55,6 +60,20 @@ public class Invariants
         if (param == null)
             throw new NullPointerException();
         return param;
+    }
+
+    public static int isNatural(int input)
+    {
+        if (input < 0)
+            throw new IllegalStateException();
+        return input;
+    }
+
+    public static long isNatural(long input)
+    {
+        if (input < 0)
+            throw new IllegalStateException();
+        return input;
     }
 
     public static void checkArgument(boolean condition)

@@ -26,12 +26,23 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
         this.covering = covering;
     }
 
+    public static PartialKeyRoute empty(RoutingKey homeKey)
+    {
+        return new PartialKeyRoute(Ranges.EMPTY, homeKey, RoutingKeys.EMPTY.keys);
+    }
+
     @Override
     public PartialKeyRoute sliceStrict(Ranges newRanges)
     {
         if (!covering.containsAll(newRanges))
             throw new IllegalArgumentException("Not covered");
 
+        return slice(newRanges);
+    }
+
+    @Override
+    public PartialKeyRoute slice(Ranges newRanges)
+    {
         RoutingKey[] keys = slice(newRanges, RoutingKey[]::new);
         return new PartialKeyRoute(newRanges, homeKey, keys);
     }
@@ -64,14 +75,13 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
         return new RoutingKeys(toRoutingKeysArray(withKey));
     }
 
-    @Override
-    public PartialKeyRoute slice(Ranges newRanges)
+    public PartialKeyRoute slice(Ranges newRanges, Slice slice)
     {
         if (newRanges.containsAll(covering))
             return this;
 
-        RoutingKey[] keys = slice(covering, RoutingKey[]::new);
-        return new PartialKeyRoute(covering, homeKey, keys);
+        RoutingKey[] keys = slice(newRanges, RoutingKey[]::new);
+        return new PartialKeyRoute(newRanges, homeKey, keys);
     }
 
     @Override
@@ -89,7 +99,7 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
         PartialKeyRoute that = (PartialKeyRoute) with;
         Invariants.checkState(homeKey.equals(that.homeKey));
         RoutingKey[] keys = SortedArrays.linearUnion(this.keys, that.keys, RoutingKey[]::new);
-        Ranges covering = this.covering.union(that.covering);
+        Ranges covering = this.covering.with(that.covering);
         if (covering == this.covering && keys == this.keys)
             return this;
         if (covering == that.covering && keys == that.keys)

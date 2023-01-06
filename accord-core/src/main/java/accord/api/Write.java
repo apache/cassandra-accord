@@ -19,6 +19,7 @@
 package accord.api;
 
 import accord.local.SafeCommandStore;
+import accord.primitives.Seekable;
 import accord.primitives.Timestamp;
 import org.apache.cassandra.utils.concurrent.Future;
 
@@ -29,5 +30,5 @@ import org.apache.cassandra.utils.concurrent.Future;
  */
 public interface Write
 {
-    Future<Void> apply(Key key, SafeCommandStore safeStore, Timestamp executeAt, DataStore store);
+    Future<Void> apply(Seekable key, SafeCommandStore safeStore, Timestamp executeAt, DataStore store);
 }

@@ -366,7 +366,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public Future<Result> coordinate(Txn txn)
     {
-        return coordinate(nextTxnId(txn.kind(), Key), txn);
+        return coordinate(nextTxnId(txn.kind(), txn.keys().domain()), txn);
     }
 
     public Future<Result> coordinate(TxnId txnId, Txn txn)
@@ -396,8 +396,9 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     private @Nullable RoutingKey trySelectHomeKey(TxnId txnId, Seekables<?, ?> keysOrRanges)
     {
-        int i = (int)keysOrRanges.findNextIntersection(0, topology().localForEpoch(txnId.epoch()).ranges(), 0);
-        return i >= 0 ? keysOrRanges.get(i).someIntersectingRoutingKey() : null;
+        Ranges owned = topology().localForEpoch(txnId.epoch()).ranges();
+        int i = (int)keysOrRanges.findNextIntersection(0, owned, 0);
+        return i >= 0 ? keysOrRanges.get(i).someIntersectingRoutingKey(owned) : null;
     }
 
     public RoutingKey selectProgressKey(TxnId txnId, Route<?> route, RoutingKey homeKey)
@@ -436,14 +437,14 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         int i = (int)route.findNextIntersection(0, topology.ranges(), 0);
         if (i < 0)
             return null;
-        return route.get(i).someIntersectingRoutingKey();
+        return route.get(i).someIntersectingRoutingKey(topology.ranges());
     }
 
     public RoutingKey selectRandomHomeKey(TxnId txnId)
     {
         Ranges ranges = topology().localForEpoch(txnId.epoch()).ranges();
         Range range = ranges.get(ranges.size() == 1 ? 0 : random.nextInt(ranges.size()));
-        return range.someIntersectingRoutingKey();
+        return range.someIntersectingRoutingKey(null);
     }
 
     static class RecoverFuture<T> extends AsyncFuture<T> implements BiConsumer<T, Throwable>

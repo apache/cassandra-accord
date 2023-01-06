@@ -94,7 +94,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
     public CheckStatus(Id to, Topologies topologies, TxnId txnId, Unseekables<?, ?> query, IncludeInfo includeInfo)
     {
         super(txnId);
-        this.query = computeScope(to, topologies, (Unseekables) query, 0, Unseekables::slice, Unseekables::union);
+        this.query = computeScope(to, topologies, (Unseekables) query, 0, Unseekables::slice, Unseekables::with);
         this.startEpoch = topologies.oldestEpoch();
         this.endEpoch = topologies.currentEpoch();
         this.includeInfo = includeInfo;

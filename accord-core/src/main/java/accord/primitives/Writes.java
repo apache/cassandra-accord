@@ -32,10 +32,10 @@ public class Writes
 {
     public static final Future<Void> SUCCESS = ImmediateFuture.success(null);
     public final Timestamp executeAt;
-    public final Keys keys;
+    public final Seekables<?, ?> keys;
     public final Write write;
 
-    public Writes(Timestamp executeAt, Keys keys, Write write)
+    public Writes(Timestamp executeAt, Seekables<?, ?> keys, Write write)
     {
         this.executeAt = executeAt;
         this.keys = keys;
@@ -71,7 +71,7 @@ public class Writes
         if (ranges == null)
             return SUCCESS;
 
-        List<Future<Void>> futures = keys.foldl(ranges, (key, accumulate, index) -> {
+        List<Future<Void>> futures = Routables.foldl(keys, ranges, (key, accumulate, index) -> {
             accumulate.add(write.apply(key, safeStore, executeAt, safeStore.dataStore()));
             return accumulate;
         }, new ArrayList<>());

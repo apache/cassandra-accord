@@ -22,6 +22,7 @@ import accord.api.Key;
 import accord.api.DataStore;
 import accord.api.Write;
 import accord.local.SafeCommandStore;
+import accord.primitives.Seekable;
 import accord.primitives.Timestamp;
 import accord.primitives.Writes;
 import accord.utils.Timestamped;
@@ -32,11 +33,11 @@ import java.util.TreeMap;
 public class MaelstromWrite extends TreeMap<Key, Value> implements Write
 {
     @Override
-    public Future<Void> apply(Key key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
+    public Future<Void> apply(Seekable key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
     {
         MaelstromStore s = (MaelstromStore) store;
         if (containsKey(key))
-            s.data.merge(key, new Timestamped<>(executeAt, get(key)), Timestamped::merge);
+            s.data.merge((Key)key, new Timestamped<>(executeAt, get(key)), Timestamped::merge);
         return Writes.SUCCESS;
     }
 }

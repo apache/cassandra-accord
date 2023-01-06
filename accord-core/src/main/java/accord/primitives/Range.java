@@ -64,7 +64,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         }
 
         @Override
-        public Range subRange(RoutingKey start, RoutingKey end)
+        public Range newRange(RoutingKey start, RoutingKey end)
         {
             return new EndInclusive(start, end);
         }
@@ -106,7 +106,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         }
 
         @Override
-        public Range subRange(RoutingKey start, RoutingKey end)
+        public Range newRange(RoutingKey start, RoutingKey end)
         {
             return new StartInclusive(start, end);
         }
@@ -135,7 +135,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
             }
 
             @Override
-            public Range subRange(RoutingKey start, RoutingKey end)
+            public Range newRange(RoutingKey start, RoutingKey end)
             {
                 throw new UnsupportedOperationException("subRange");
             }
@@ -197,7 +197,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
     public abstract boolean startInclusive();
     public abstract boolean endInclusive();
 
-    public abstract Range subRange(RoutingKey start, RoutingKey end);
+    public abstract Range newRange(RoutingKey start, RoutingKey end);
 
     @Override
     public Key asKey()
@@ -270,6 +270,14 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         return that.start.compareTo(this.start) >= 0 && that.end.compareTo(this.end) <= 0;
     }
 
+    public Range slice(Range truncateTo)
+    {
+        int cs = start.compareTo(truncateTo.start);
+        int ce = end.compareTo(truncateTo.end);
+        if (cs >= 0 && ce <= 0) return this;
+        return newRange(cs >= 0 ? start : truncateTo.start, ce <= 0 ? end : truncateTo.end);
+    }
+
     public boolean intersects(AbstractKeys<?, ?> keys)
     {
         return SortedArrays.binarySearch(keys.keys, 0, keys.size(), this, Range::compareTo, FAST) >= 0;
@@ -286,7 +294,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
 
         RoutingKey start = this.start.compareTo(that.start) > 0 ? this.start : that.start;
         RoutingKey end = this.end.compareTo(that.end) < 0 ? this.end : that.end;
-        return subRange(start, end);
+        return newRange(start, end);
     }
 
     /**
@@ -312,9 +320,33 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
     }
 
     @Override
-    public RoutingKey someIntersectingRoutingKey()
+    public RoutingKey someIntersectingRoutingKey(Ranges ranges)
     {
-        return startInclusive() ? start.toUnseekable() : end.toUnseekable();
+        if (ranges == null)
+            return startInclusive() ? start.toUnseekable() : end.toUnseekable();
+
+        int i = ranges.indexOf(this);
+        Range that = ranges.get(i);
+        if (this.start().compareTo(that.start()) <= 0)
+        {
+            if (startInclusive())
+                return that.start();
+
+            if (this.end().compareTo(that.end()) <= 0)
+                return this.end();
+
+            return that.end();
+        }
+        else
+        {
+            if (startInclusive())
+                return this.start();
+
+            if (that.end().compareTo(this.end()) <= 0)
+                return that.end();
+
+            return this.end();
+        }
     }
 
     public static Range slice(Range bound, Range toSlice)
@@ -323,7 +355,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         if (bound.contains(toSlice))
             return toSlice;
 
-        return toSlice.subRange(
+        return toSlice.newRange(
                 toSlice.start().compareTo(bound.start()) >= 0 ? toSlice.start() : bound.start(),
                 toSlice.end().compareTo(bound.end()) <= 0 ? toSlice.end() : bound.end()
         );

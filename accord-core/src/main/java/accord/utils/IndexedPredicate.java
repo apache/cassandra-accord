@@ -20,5 +20,8 @@ package accord.utils;
 
 public interface IndexedPredicate<P1>
 {
+    /**
+     * Apply some predicate to an object parameter and an associated index (usually within a collection).
+     */
     boolean test(P1 p1, int index);
 }

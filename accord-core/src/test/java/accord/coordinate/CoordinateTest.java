@@ -26,10 +26,9 @@ import accord.primitives.*;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import static accord.Utils.id;
-import static accord.Utils.ids;
-import static accord.Utils.writeTxn;
+import static accord.Utils.*;
 import static accord.impl.IntKey.keys;
+import static accord.impl.IntKey.range;
 import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Txn.Kind.Write;
 
@@ -47,6 +46,22 @@ public class CoordinateTest
             Keys keys = keys(10);
             Txn txn = writeTxn(keys);
             FullKeyRoute route = keys.toRoute(keys.get(0).toUnseekable());
+            Result result = Coordinate.coordinate(node, txnId, txn, route).get();
+            Assertions.assertEquals(MockStore.RESULT, result);
+        }
+    }
+    @Test
+    void simpleRangeTest() throws Throwable
+    {
+        try (MockCluster cluster = MockCluster.builder().build())
+        {
+            Node node = cluster.get(1);
+            Assertions.assertNotNull(node);
+
+            TxnId txnId = node.nextTxnId(Write, Key);
+            Ranges keys = ranges(range(1, 2));
+            Txn txn = writeTxn(keys);
+            FullRangeRoute route = keys.toRoute(keys.get(0).someIntersectingRoutingKey(null));
             Result result = Coordinate.coordinate(node, txnId, txn, route).get();
             Assertions.assertEquals(MockStore.RESULT, result);
         }

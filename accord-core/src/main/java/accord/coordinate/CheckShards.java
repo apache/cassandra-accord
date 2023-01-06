@@ -42,7 +42,8 @@ public abstract class CheckShards extends ReadCoordinator<CheckStatusReply>
     @Override
     protected void contact(Id id)
     {
-        node.send(id, new CheckStatus(txnId, contact.slice(topologies().computeRangesForNode(id)), txnId.epoch(), untilRemoteEpoch, includeInfo), this);
+        Unseekables<?, ?> unseekables = contact.slice(topologies().computeRangesForNode(id));
+        node.send(id, new CheckStatus(txnId, unseekables, txnId.epoch(), untilRemoteEpoch, includeInfo), this);
     }
 
     protected boolean isSufficient(Id from, CheckStatusOk ok) { return isSufficient(ok); }

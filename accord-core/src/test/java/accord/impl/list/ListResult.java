@@ -27,6 +27,7 @@ import accord.api.Result;
 import accord.messages.MessageType;
 import accord.primitives.Keys;
 import accord.messages.Reply;
+import accord.primitives.Seekables;
 import accord.primitives.TxnId;
 
 public class ListResult implements Result, Reply
@@ -34,16 +35,18 @@ public class ListResult implements Result, Reply
     public final Id client;
     public final long requestId;
     public final TxnId txnId;
-    public final Keys readKeys;
+    public final Seekables<?, ?> readKeys;
+    public final Keys responseKeys;
     public final int[][] read; // equal in size to keys.size()
     public final ListUpdate update;
 
-    public ListResult(Id client, long requestId, TxnId txnId, Keys readKeys, int[][] read, ListUpdate update)
+    public ListResult(Id client, long requestId, TxnId txnId, Seekables<?, ?> readKeys, Keys responseKeys, int[][] read, ListUpdate update)
     {
         this.client = client;
         this.requestId = requestId;
         this.txnId = txnId;
         this.readKeys = readKeys;
+        this.responseKeys = responseKeys;
         this.read = read;
         this.update = update;
     }
@@ -60,10 +63,10 @@ public class ListResult implements Result, Reply
         return "{client:" + client + ", "
                + "requestId:" + requestId + ", "
                + "txnId:" + txnId + ", "
-               + (readKeys == null
+               + (responseKeys == null
                   ? "invalidated!}"
-                  : "reads:" + IntStream.range(0, readKeys.size())
-                                      .mapToObj(i -> readKeys.get(i) + ":" + Arrays.toString(read[i]))
+                  : "reads:" + IntStream.range(0, responseKeys.size())
+                                      .mapToObj(i -> responseKeys.get(i) + ":" + Arrays.toString(read[i]))
                                       .collect(Collectors.joining(", ", "{", "}")) + ", "
                     + "writes:" + update + "}");
     }

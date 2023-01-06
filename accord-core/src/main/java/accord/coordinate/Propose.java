@@ -19,7 +19,9 @@
 package accord.coordinate;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BiConsumer;
 
 import accord.api.Result;
@@ -36,9 +38,11 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Accept;
 import accord.messages.Accept.AcceptReply;
+import accord.utils.Invariants;
 
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
 import static accord.coordinate.tracking.RequestStatus.Failed;
+import static accord.utils.Invariants.debug;
 
 class Propose implements Callback<AcceptReply>
 {
@@ -50,6 +54,7 @@ class Propose implements Callback<AcceptReply>
     final Deps deps;
 
     private final List<AcceptReply> acceptOks;
+    private final Map<Id, AcceptReply> debug = debug() ? new HashMap<>() : null;
     private final Timestamp executeAt;
     private final QuorumTracker acceptTracker;
     private final BiConsumer<Result, Throwable> callback;
@@ -80,7 +85,7 @@ class Propose implements Callback<AcceptReply>
                                Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
     {
         Propose propose = new Propose(node, topologies, ballot, txnId, txn, route, deps, executeAt, callback);
-        node.send(propose.acceptTracker.nodes(), to -> new Accept(to, topologies, ballot, txnId, route, executeAt, txn.keys(), deps, txn.kind()), propose);
+        node.send(propose.acceptTracker.nodes(), to -> new Accept(to, topologies, ballot, txnId, route, executeAt, txn.keys(), deps), propose);
     }
 
     @Override
@@ -88,6 +93,8 @@ class Propose implements Callback<AcceptReply>
     {
         if (isDone)
             return;
+
+        if (debug != null) debug.put(from, reply);
 
         switch (reply.outcome())
         {

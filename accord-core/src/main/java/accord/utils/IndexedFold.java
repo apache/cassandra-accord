@@ -20,4 +20,11 @@ package accord.utils;
 
 public interface IndexedFold<P1, Accumulate> extends IndexedBiFunction<P1, Accumulate, Accumulate>
 {
+    /**
+     * Apply some merge function accepting a constant object parameter p1, and the prior output of this function
+     * or the initial value, to some element of a collection, with the index of the element provided.
+     *
+     * This function is used for efficiently folding over some subset of a collection.
+     */
+    Accumulate apply(P1 p1, Accumulate p2, int index);
 }

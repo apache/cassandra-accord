@@ -19,10 +19,7 @@
 package accord.api;
 
 import accord.local.SafeCommandStore;
-import accord.primitives.Ranges;
-import accord.primitives.Keys;
-import accord.primitives.Timestamp;
-import accord.primitives.Txn;
+import accord.primitives.*;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
 
@@ -35,8 +32,8 @@ import java.util.function.BiConsumer;
  */
 public interface Read
 {
-    Keys keys();
-    Future<Data> read(Key key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store);
+    Seekables<?, ?> keys();
+    Future<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store);
 
     class ReadFuture extends AsyncPromise<Data> implements BiConsumer<Data, Throwable>
     {

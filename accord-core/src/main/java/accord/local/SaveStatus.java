@@ -84,20 +84,20 @@ public enum SaveStatus
             case PreAccepted: return PreAccepted;
             case AcceptedInvalidate:
                 // AcceptedInvalidate logically clears any proposed deps and executeAt
-                if (!known.executeAt.isDecisionKnown())
+                if (!known.executeAt.hasDecidedExecuteAt())
                     return known.isDefinitionKnown() ? AcceptedInvalidateWithDefinition : AcceptedInvalidate;
                 // If we know the executeAt decision then we do not clear it, and fall-through to PreCommitted
                 // however, we still clear the deps, as any deps we might have previously seen proposed are now expired
                 // TODO (expected, consider): consider clearing Command.partialDeps in this case also
                 known = known.with(DepsUnknown);
             case Accepted:
-                if (!known.executeAt.isDecisionKnown())
+                if (!known.executeAt.hasDecidedExecuteAt())
                     return known.isDefinitionKnown() ? AcceptedWithDefinition : Accepted;
                 // if the decision is known, we're really PreCommitted
             case PreCommitted:
                 if (known.isDefinitionKnown())
-                    return known.deps.isProposalKnown() ? PreCommittedWithDefinitionAndAcceptedDeps : PreCommittedWithDefinition;
-                return known.deps.isProposalKnown() ? PreCommittedWithAcceptedDeps : PreCommitted;
+                    return known.deps.hasProposedOrDecidedDeps() ? PreCommittedWithDefinitionAndAcceptedDeps : PreCommittedWithDefinition;
+                return known.deps.hasProposedOrDecidedDeps() ? PreCommittedWithAcceptedDeps : PreCommitted;
             case Committed: return Committed;
             case ReadyToExecute: return ReadyToExecute;
             case PreApplied: return PreApplied;

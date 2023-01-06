@@ -40,6 +40,7 @@ import java.util.Collections;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.local.SaveStatus.NotWitnessed;
 import static accord.local.Status.*;
+import static accord.primitives.Routables.Slice.Minimal;
 
 /**
  * Check on the status of a transaction. Returns early once enough information has been achieved to meet the requested
@@ -136,21 +137,23 @@ public class CheckOn extends CheckShards
 
         public OnDone()
         {
-            Ranges localRanges = node.topology().localRangesForEpochs(txnId.epoch(), untilLocalEpoch);
-            PartialRoute<?> selfRoute = route().slice(localRanges);
+            Ranges sliceRanges = node.topology().localRangesForEpochs(txnId.epoch(), untilLocalEpoch);
+            Ranges covering = route().sliceCovering(sliceRanges, Minimal);
+            Unseekables<?, ?> intersectingKeys = route().slice(covering, Minimal);
+
             full = (CheckStatusOkFull) merged;
-            sufficientFor = full.sufficientFor(selfRoute);
+            sufficientFor = full.sufficientFor(intersectingKeys);
             maxRoute = Route.merge((Route)route(), full.route);
             progressKey = node.trySelectProgressKey(txnId, maxRoute);
 
             PartialTxn partialTxn = null;
             if (sufficientFor.definition.isKnown())
-                partialTxn = full.partialTxn.slice(localRanges, true).reconstitutePartial(selfRoute);
+                partialTxn = full.partialTxn.slice(sliceRanges, true).reconstitutePartial(covering);
             this.partialTxn = partialTxn;
 
             PartialDeps partialDeps = null;
-            if (sufficientFor.deps.isDecisionKnown())
-                partialDeps = full.committedDeps.slice(localRanges).reconstitutePartial(selfRoute);
+            if (sufficientFor.deps.hasDecidedDeps())
+                partialDeps = full.committedDeps.slice(sliceRanges).reconstitutePartial(covering);
             this.partialDeps = partialDeps;
         }
 
@@ -161,7 +164,7 @@ public class CheckOn extends CheckShards
                 keys = partialTxn.keys();
 
             Iterable<TxnId> txnIds = Collections.singleton(txnId);
-            if (sufficientFor.deps.isDecisionKnown())
+            if (sufficientFor.deps.hasDecidedDeps())
                 txnIds = Iterables.concat(txnIds, partialDeps.txnIds());
 
             PreLoadContext loadContext = contextFor(txnIds, keys);
@@ -219,7 +222,7 @@ public class CheckOn extends CheckShards
             if (!safeStore.ranges().at(txnId.epoch()).contains(homeKey))
                 return null;
 
-            Timestamp executeAt = merged.saveStatus.known.executeAt.isDecisionKnown() ? merged.executeAt : null;
+            Timestamp executeAt = merged.saveStatus.known.executeAt.hasDecidedExecuteAt() ? merged.executeAt : null;
             command.setDurability(safeStore, merged.durability, homeKey, executeAt);
             safeStore.progressLog().durable(command, null);
             return null;

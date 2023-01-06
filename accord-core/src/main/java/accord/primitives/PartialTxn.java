@@ -5,6 +5,7 @@ import javax.annotation.Nullable;
 import accord.api.Query;
 import accord.api.Read;
 import accord.api.Update;
+import accord.utils.Invariants;
 
 public interface PartialTxn extends Txn
 {
@@ -12,7 +13,7 @@ public interface PartialTxn extends Txn
     // TODO (low priority, efficiency): efficient merge when more than one input
     PartialTxn with(PartialTxn add);
     Txn reconstitute(FullRoute<?> route);
-    PartialTxn reconstitutePartial(PartialRoute<?> route);
+    PartialTxn reconstitutePartial(Ranges covering);
 
     default boolean covers(Unseekables<?, ?> unseekables)
     {
@@ -56,8 +57,8 @@ public interface PartialTxn extends Txn
             if (!add.kind().equals(kind()))
                 throw new IllegalArgumentException();
 
-            Ranges covering = this.covering.union(add.covering());
-            Seekables<?, ?> keys = ((Seekables)this.keys()).union(add.keys());
+            Ranges covering = this.covering.with(add.covering());
+            Seekables<?, ?> keys = ((Seekables)this.keys()).with(add.keys());
             Read read = this.read().merge(add.read());
             Query query = this.query() == null ? add.query() : this.query();
             Update update = this.update() == null ? null : this.update().merge(add.update());
@@ -89,15 +90,15 @@ public interface PartialTxn extends Txn
         }
 
         @Override
-        public PartialTxn reconstitutePartial(PartialRoute<?> route)
+        public PartialTxn reconstitutePartial(Ranges covering)
         {
-            if (!covers(route))
-                throw new IllegalStateException("Incomplete PartialTxn: " + this + ", route: " + route);
+            if (!covers(covering))
+                throw new IllegalStateException("Incomplete PartialTxn: " + this + ", covering: " + covering);
 
-            if (covering.containsAll(route.covering()))
+            if (this.covering.containsAll(covering))
                 return this;
 
-            return new PartialTxn.InMemory(route.covering(), kind(), keys(), read(), query(), update());
+            return new PartialTxn.InMemory(covering, kind(), keys(), read(), query(), update());
         }
     }
 

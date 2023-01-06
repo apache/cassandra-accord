@@ -20,10 +20,7 @@ package accord.maelstrom;
 
 import accord.api.*;
 import accord.local.SafeCommandStore;
-import accord.primitives.Ranges;
-import accord.primitives.Keys;
-import accord.primitives.Timestamp;
-import accord.primitives.Txn;
+import accord.primitives.*;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
@@ -45,11 +42,11 @@ public class MaelstromRead implements Read
     }
 
     @Override
-    public Future<Data> read(Key key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
+    public Future<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
     {
         MaelstromStore s = (MaelstromStore)store;
         MaelstromData result = new MaelstromData();
-        result.put(key, s.get(key));
+        result.put((Key)key, s.get((Key)key));
         return ImmediateFuture.success(result);
     }
 
@@ -63,12 +60,12 @@ public class MaelstromRead implements Read
     public Read merge(Read other)
     {
         MaelstromRead that = (MaelstromRead) other;
-        Keys readKeys = this.readKeys.union(that.readKeys);
-        Keys keys = this.keys.union(that.keys);
+        Keys readKeys = this.readKeys.with(that.readKeys);
+        Keys keys = this.keys.with(that.keys);
         if (readKeys == this.readKeys && keys == this.keys)
             return this;
         if (readKeys == that.readKeys && keys == that.keys)
             return that;
-        return new MaelstromRead(readKeys.union(that.readKeys), keys.union(that.keys));
+        return new MaelstromRead(readKeys.with(that.readKeys), keys.with(that.keys));
     }
 }

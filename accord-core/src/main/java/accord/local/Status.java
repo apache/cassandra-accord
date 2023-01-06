@@ -20,9 +20,6 @@ package accord.local;
 
 import accord.messages.BeginRecovery;
 import accord.primitives.Ballot;
-import accord.primitives.Ranges;
-import accord.primitives.Seekables;
-import accord.primitives.TxnId;
 import com.google.common.base.Preconditions;
 
 import java.util.List;
@@ -172,20 +169,20 @@ public enum Status
 
                 case OutcomeApplied:
                 case OutcomeKnown:
-                    if (executeAt.isDecisionKnown() && definition.isKnown() && deps.isDecisionKnown())
+                    if (executeAt.hasDecidedExecuteAt() && definition.isKnown() && deps.hasDecidedDeps())
                         return PreApplied;
 
                 case OutcomeUnknown:
-                    if (executeAt.isDecisionKnown() && definition.isKnown() && deps.isDecisionKnown())
+                    if (executeAt.hasDecidedExecuteAt() && definition.isKnown() && deps.hasDecidedDeps())
                         return Committed;
 
-                    if (executeAt.isDecisionKnown())
+                    if (executeAt.hasDecidedExecuteAt())
                         return PreCommitted;
 
                     if (definition.isKnown())
                         return PreAccepted;
 
-                    if (deps.isDecisionKnown())
+                    if (deps.hasDecidedDeps())
                         throw new IllegalStateException();
             }
 
@@ -199,9 +196,9 @@ public enum Status
 
         public boolean isDecisionKnown()
         {
-            if (!deps.isDecisionKnown())
+            if (!deps.hasDecidedDeps())
                 return false;
-            Preconditions.checkState(executeAt.isDecisionKnown());
+            Preconditions.checkState(executeAt.hasDecidedExecuteAt());
             return true;
         }
     }
@@ -229,7 +226,7 @@ public enum Status
         NoExecuteAt,
         ;
 
-        public boolean isDecisionKnown()
+        public boolean hasDecidedExecuteAt()
         {
             return compareTo(ExecuteAtKnown) >= 0;
         }
@@ -260,14 +257,19 @@ public enum Status
         NoDeps,
         ;
 
-        public boolean isDecisionKnown()
+        public boolean hasDecidedDeps()
+        {
+            return this == DepsKnown;
+        }
+
+        public boolean isDecided()
         {
             return compareTo(DepsKnown) >= 0;
         }
 
-        public boolean isProposalKnown()
+        public boolean hasProposedOrDecidedDeps()
         {
-            return compareTo(DepsProposed) >= 0;
+            return this == DepsProposed || this == DepsKnown;
         }
     }
 

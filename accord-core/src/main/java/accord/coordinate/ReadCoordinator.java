@@ -9,15 +9,15 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
+import accord.utils.Invariants;
 
 import java.util.*;
 
+import static accord.utils.Invariants.debug;
 import static com.google.common.collect.Sets.newHashSetWithExpectedSize;
 
 abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends ReadTracker implements Callback<Reply>
 {
-    private static final boolean DEBUG = false;
-
     protected enum Action
     {
         /**
@@ -55,7 +55,7 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
     final TxnId txnId;
     private boolean isDone;
     private Throwable failure;
-    final Map<Id, Object> debug = DEBUG ? new HashMap<>() : null;
+    final Map<Id, Object> debug = debug() ? new HashMap<>() : null;
 
     ReadCoordinator(Node node, Topologies topologies, TxnId txnId)
     {

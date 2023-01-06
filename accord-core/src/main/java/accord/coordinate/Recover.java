@@ -19,7 +19,9 @@
 package accord.coordinate;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -50,6 +52,7 @@ import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
 import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.messages.BeginRecovery.RecoverOk.maxAcceptedOrLater;
+import static accord.utils.Invariants.debug;
 
 // TODO (low priority, cleanup): rename to Recover (verb); rename Recover message to not clash
 public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throwable>
@@ -123,6 +126,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
     private final List<RecoverOk> recoverOks = new ArrayList<>();
     private final RecoveryTracker tracker;
     private boolean isBallotPromised;
+    private final Map<Id, RecoverReply> debug = debug() ? new HashMap<>() : null;
 
     private Recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
     {
@@ -178,6 +182,8 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
     {
         if (isDone || isBallotPromised)
             return;
+
+        if (debug != null) debug.put(from, reply);
 
         if (!reply.isOk())
         {
@@ -306,7 +312,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     private Deps mergeDeps()
     {
-        Ranges ranges = recoverOks.stream().map(r -> r.deps.covering).reduce(Ranges::union).orElseThrow(NoSuchElementException::new);
+        Ranges ranges = recoverOks.stream().map(r -> r.deps.covering).reduce(Ranges::with).orElseThrow(NoSuchElementException::new);
         Invariants.checkState(ranges.containsAll(txn.keys()));
         return Deps.merge(recoverOks, r -> r.deps);
     }

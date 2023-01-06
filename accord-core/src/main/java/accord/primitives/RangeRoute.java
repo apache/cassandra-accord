@@ -5,6 +5,9 @@ import accord.utils.Invariants;
 
 import javax.annotation.Nonnull;
 
+import static accord.primitives.AbstractRanges.UnionMode.MERGE_OVERLAPPING;
+import static accord.primitives.Routables.Slice.Overlapping;
+
 public abstract class RangeRoute extends AbstractRanges<Route<Range>> implements Route<Range>
 {
     public final RoutingKey homeKey;
@@ -16,9 +19,27 @@ public abstract class RangeRoute extends AbstractRanges<Route<Range>> implements
     }
 
     @Override
+    public Unseekables<Range, ?> with(Unseekables<Range, ?> with)
+    {
+        if (isEmpty())
+            return with;
+
+        return union(MERGE_OVERLAPPING, this, (AbstractRanges<?>) with, null, null,
+                (left, right, rs) -> Ranges.ofSortedAndDeoverlapped(rs));
+    }
+
+    public Unseekables<Range, ?> with(RoutingKey withKey)
+    {
+        if (contains(withKey))
+            return this;
+
+        return with(Ranges.of(withKey.asRange()));
+    }
+
+    @Override
     public PartialRangeRoute slice(Ranges ranges)
     {
-        return slice(ranges, this, homeKey, PartialRangeRoute::new);
+        return slice(ranges, Overlapping, this, homeKey, PartialRangeRoute::new);
     }
 
     @Override

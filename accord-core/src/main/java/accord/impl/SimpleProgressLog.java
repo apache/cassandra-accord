@@ -515,8 +515,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 private void invalidate(Node node, TxnId txnId, Unseekables<?, ?> someKeys)
                 {
                     setProgress(Investigating);
-                    // TODO (now, rangetxns): This should be a Routable, or we should guarantee it is safe to operate on any key in the range
-                    RoutingKey someKey = Route.isRoute(someKeys) ? (Route.castToRoute(someKeys)).homeKey() : someKeys.get(0).someIntersectingRoutingKey();
+                    RoutingKey someKey = Route.isRoute(someKeys) ? (Route.castToRoute(someKeys)).homeKey() : someKeys.get(0).someIntersectingRoutingKey(null);
                     someKeys = someKeys.with(someKey);
                     debugInvestigating = Invalidate.invalidate(node, txnId, someKeys, (success, fail) -> {
                         commandStore.execute(PreLoadContext.empty(), ignore -> {

@@ -20,35 +20,35 @@ package accord.impl;
 
 import accord.api.Key;
 import accord.local.Command;
-import accord.local.CommandsForKey;
+import accord.local.SafeCommandStore.CommandFunction;
+import accord.local.SafeCommandStore.TestDep;
+import accord.local.SafeCommandStore.TestKind;
 import accord.local.Status;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
-import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.stream.Stream;
 
-import static accord.local.CommandsForKey.CommandTimeseries.TestDep.*;
-import static accord.local.CommandsForKey.CommandTimeseries.TestKind.RorWs;
+import static accord.local.SafeCommandStore.TestDep.*;
+import static accord.local.SafeCommandStore.TestKind.Ws;
 import static accord.local.Status.KnownDeps.DepsUnknown;
 import static accord.local.Status.PreAccepted;
+import static accord.local.Status.PreCommitted;
 
 public class InMemoryCommandsForKey extends CommandsForKey
 {
-    public static class InMemoryCommandTimeseries<T> implements CommandTimeseries<T>
+    public static class InMemoryCommandTimeseries implements CommandTimeseries
     {
         private final NavigableMap<Timestamp, Command> commands = new TreeMap<>();
+        private final Key key;
 
-        final Function<Command, T> map;
-
-        InMemoryCommandTimeseries(Function<Command, T> map)
+        public InMemoryCommandTimeseries(Key key)
         {
-            this.map = map;
+            this.key = key;
         }
 
         @Override
@@ -74,25 +74,27 @@ public class InMemoryCommandsForKey extends CommandsForKey
         }
 
         @Override
-        public Stream<T> before(@Nonnull Timestamp timestamp, @Nonnull TestKind testKind, @Nonnull TestDep testDep, @Nullable TxnId depId, @Nonnull TestStatus testStatus, @Nullable Status status)
+        public <T> T mapReduce(TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp,
+                               TestDep testDep, @Nullable TxnId depId,
+                               @Nullable Status minStatus, @Nullable Status maxStatus,
+                               CommandFunction<T, T> map, T initialValue, T terminalValue)
         {
-            return commands.headMap(timestamp, false).values().stream()
-                    .filter(cmd -> testKind == RorWs || cmd.txnId().isWrite())
-                    // If we don't have any dependencies, we treat a dependency filter as a mismatch
-                    .filter(cmd -> testDep == ANY_DEPS || (cmd.known().deps != DepsUnknown && (cmd.partialDeps().contains(depId) ^ (testDep == WITHOUT))))
-                    .filter(cmd -> TestStatus.test(cmd.status(), testStatus, status))
-                    .map(map);
-        }
 
-        @Override
-        public Stream<T> after(@Nonnull Timestamp timestamp, @Nonnull TestKind testKind, @Nonnull TestDep testDep, @Nullable TxnId depId, @Nonnull TestStatus testStatus, @Nullable Status status)
-        {
-            return commands.tailMap(timestamp, false).values().stream()
-                    .filter(cmd -> testKind == RorWs || cmd.txnId().isWrite())
+            for (Command cmd : (testTimestamp == TestTimestamp.BEFORE ? commands.headMap(timestamp, false) : commands.tailMap(timestamp, false)).values())
+            {
+                if (testKind == Ws && cmd.txnId().isRead()) continue;
                     // If we don't have any dependencies, we treat a dependency filter as a mismatch
-                    .filter(cmd -> testDep == ANY_DEPS || (cmd.known().deps != DepsUnknown && (cmd.partialDeps().contains(depId) ^ (testDep == WITHOUT))))
-                    .filter(cmd -> TestStatus.test(cmd.status(), testStatus, status))
-                    .map(map);
+                if (testDep != ANY_DEPS && (!cmd.known().deps.hasProposedOrDecidedDeps() || (cmd.partialDeps().contains(depId) != (testDep == WITH))))
+                    continue;
+                if (minStatus != null && minStatus.compareTo(cmd.status()) > 0)
+                    continue;
+                if (maxStatus != null && maxStatus.compareTo(cmd.status()) < 0)
+                    continue;
+                initialValue = map.apply(key, cmd.txnId(), cmd.executeAt(), initialValue);
+                if (initialValue.equals(terminalValue))
+                    break;
+            }
+            return initialValue;
         }
 
         public Stream<Command> between(Timestamp min, Timestamp max)
@@ -108,15 +110,16 @@ public class InMemoryCommandsForKey extends CommandsForKey
 
     // TODO (now): add validation that anything inserted into *committedBy* has everything prior in its dependencies
     private final Key key;
-    private final InMemoryCommandTimeseries<TxnIdWithExecuteAt> uncommitted = new InMemoryCommandTimeseries<>(cmd -> new TxnIdWithExecuteAt(cmd.txnId(), cmd.executeAt()));
-    private final InMemoryCommandTimeseries<TxnId> committedById = new InMemoryCommandTimeseries<>(Command::txnId);
-    private final InMemoryCommandTimeseries<TxnId> committedByExecuteAt = new InMemoryCommandTimeseries<>(Command::txnId);
+    private final InMemoryCommandTimeseries byId;
+    private final InMemoryCommandTimeseries byExecuteAt;
 
     private Timestamp max = Timestamp.NONE;
 
     public InMemoryCommandsForKey(Key key)
     {
         this.key = key;
+        this.byId = new InMemoryCommandTimeseries(key);
+        this.byExecuteAt = new InMemoryCommandTimeseries(key);
     }
 
     @Override
@@ -138,29 +141,20 @@ public class InMemoryCommandsForKey extends CommandsForKey
     }
 
     @Override
-    public InMemoryCommandTimeseries<TxnIdWithExecuteAt> uncommitted()
+    public InMemoryCommandTimeseries byId()
     {
-        return uncommitted;
+        return byId;
     }
 
     @Override
-    public InMemoryCommandTimeseries<TxnId> committedById()
+    public InMemoryCommandTimeseries byExecuteAt()
     {
-        return committedById;
-    }
-
-    @Override
-    public InMemoryCommandTimeseries<TxnId> committedByExecuteAt()
-    {
-        return committedByExecuteAt;
+        return byExecuteAt;
     }
 
     public void forWitnessed(Timestamp minTs, Timestamp maxTs, Consumer<Command> consumer)
     {
-        uncommitted().between(minTs, maxTs)
-                .filter(cmd -> cmd.hasBeen(PreAccepted)).forEach(consumer);
-        committedById().between(minTs, maxTs).forEach(consumer);
-        committedByExecuteAt().between(minTs, maxTs)
-                .filter(cmd -> cmd.txnId().compareTo(minTs) < 0 || cmd.txnId().compareTo(maxTs) > 0).forEach(consumer);
+        byId.between(minTs, maxTs).filter(cmd -> cmd.hasBeen(PreAccepted)).forEach(consumer);
+        byExecuteAt.between(minTs, maxTs).filter(cmd -> cmd.hasBeen(PreCommitted)).forEach(consumer);
     }
 }

@@ -42,7 +42,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
 {
     public static abstract class WithUnsynced<R> extends TxnRequest<R>
     {
-        public final long minEpoch; // TODO (low priority, clarity): can this just always be TxnId.epoch?
+        public final long minUnsyncedEpoch; // TODO (low priority, clarity): can this just always be TxnId.epoch?
         public final boolean doNotComputeProgressKey;
 
         public WithUnsynced(Id to, Topologies topologies, TxnId txnId, FullRoute<?> route)
@@ -53,7 +53,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
         private WithUnsynced(Id to, Topologies topologies, TxnId txnId, FullRoute<?> route, int startIndex)
         {
             super(to, topologies, route, txnId, startIndex);
-            this.minEpoch = topologies.oldestEpoch();
+            this.minUnsyncedEpoch = topologies.oldestEpoch();
             this.doNotComputeProgressKey = doNotComputeProgressKey(topologies, startIndex, txnId, waitForEpoch());
 
             Ranges ranges = topologies.forEpoch(txnId.epoch()).rangesForNode(to);
@@ -63,7 +63,6 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
             }
             else if (Invariants.isParanoid())
             {
-                boolean intersects = route.intersects(ranges);
                 long progressEpoch = Math.min(waitForEpoch(), txnId.epoch());
                 Ranges computesRangesOn = topologies.forEpoch(progressEpoch).rangesForNode(to);
                 if (computesRangesOn == null)
@@ -73,10 +72,10 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
             }
         }
 
-        protected WithUnsynced(TxnId txnId, PartialRoute scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey)
+        protected WithUnsynced(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minUnsyncedEpoch, boolean doNotComputeProgressKey)
         {
             super(txnId, scope, waitForEpoch);
-            this.minEpoch = minEpoch;
+            this.minUnsyncedEpoch = minUnsyncedEpoch;
             this.doNotComputeProgressKey = doNotComputeProgressKey;
         }
 
@@ -234,14 +233,6 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
 
     // TODO (low priority, clarity): move to Topologies
     public static <I, O> O computeScope(Node.Id node, Topologies topologies, I keys, int startIndex, BiFunction<I, Ranges, O> slice, BiFunction<O, O, O> merge)
-    {
-        O scope = computeScopeInternal(node, topologies, keys, startIndex, slice, merge);
-        if (scope == null)
-            throw new IllegalArgumentException("No intersection");
-        return scope;
-    }
-
-    private static <I, O> O computeScopeInternal(Node.Id node, Topologies topologies, I keys, int startIndex, BiFunction<I, Ranges, O> slice, BiFunction<O, O, O> merge)
     {
         Ranges last = null;
         O scope = null;

@@ -135,10 +135,10 @@ public class RecoverWithRoute extends CheckShards
             case OutcomeApplied:
             case OutcomeKnown:
                 Invariants.checkState(known.definition.isKnown());
-                Invariants.checkState(known.executeAt.isDecisionKnown());
+                Invariants.checkState(known.executeAt.hasDecidedExecuteAt());
                 // TODO (required): we might not be able to reconstitute Txn if we have GC'd on some shards
                 Txn txn = merged.partialTxn.reconstitute(route);
-                if (known.deps.isDecisionKnown())
+                if (known.deps.hasDecidedDeps())
                 {
                     Deps deps = merged.committedDeps.reconstitute(route());
                     node.withEpoch(merged.executeAt.epoch(), () -> {

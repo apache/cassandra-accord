@@ -1,12 +1,17 @@
 package accord.primitives;
 
 import accord.api.RoutingKey;
+import accord.primitives.Routable.Domain;
 import accord.utils.IndexedFold;
 import accord.utils.IndexedFoldToLong;
 import accord.utils.IndexedRangeFoldToLong;
 import accord.utils.SortedArrays;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
+import java.util.function.BiFunction;
+import java.util.function.Function;
+
+import static accord.primitives.Routables.Slice.Overlapping;
 import static accord.utils.SortedArrays.Search.FLOOR;
 
 /**
@@ -14,17 +19,37 @@ import static accord.utils.SortedArrays.Search.FLOOR;
  */
 public interface Routables<K extends Routable, U extends Routables<K, ?>> extends Iterable<K>
 {
+    enum Slice
+    {
+        /** (Default) Overlapping ranges are returned unmodified */
+        Overlapping,
+        /** Overlapping ranges are split/shrunk to the intersection of the overlaps */
+        Minimal,
+        /** Overlapping ranges are extended to the union of the overlaps */
+        Maximal
+    }
+
     int indexOf(K item);
     K get(int i);
     int size();
 
     boolean isEmpty();
     boolean intersects(AbstractRanges<?> ranges);
+    boolean intersects(AbstractKeys<?, ?> keys);
+    default boolean intersects(Routables<?, ?> routables)
+    {
+        switch (routables.domain())
+        {
+            default: throw new AssertionError();
+            case Key: return intersects((AbstractKeys<?, ?>) routables);
+            case Range: return intersects((AbstractRanges<?>) routables);
+        }
+    }
     boolean contains(RoutableKey key);
     boolean containsAll(Routables<?, ?> keysOrRanges);
 
     U slice(Ranges ranges);
-    Routables<K, U> union(U with);
+    Routables<K, ?> slice(Ranges ranges, Slice slice);
 
     /**
      * Search forwards from {code thisIndex} and {@code withIndex} to find the first entries in each collection
@@ -55,34 +80,81 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
     /**
      * Perform {@link SortedArrays#exponentialSearch} from {@code thisIndex} looking for {@code find} with behaviour of {@code search}
      */
-    int findNext(int thisIndex, K find, SortedArrays.Search search);
+    int findNext(int thisIndex, RoutableKey find, SortedArrays.Search search);
 
-    Routable.Domain kindOfContents();
+    Domain domain();
 
+    /**
+     * Fold-left over the {@code inputs} that intersect with {@code matching} in ascending order.
+     * Terminate once we hit {@code terminalValue}.
+     */
     @Inline
     static <Input extends Routable, T> T foldl(Routables<Input, ?> inputs, AbstractRanges<?> matching, IndexedFold<? super Input, T> fold, T initialValue)
     {
         return Helper.foldl(Routables::findNextIntersection, Helper::findLimit, inputs, matching, fold, initialValue);
     }
 
+    /**
+     * Fold-left over the {@code inputs} that intersect with {@code matching} in ascending order.
+     * If the inputs are ranges, narrow them to the parts the intersect with {@code matching}, so that we never visit
+     * any portion of a {@code Range} that is not in {@code matching} (See {@link Slice#Minimal}).
+     * Terminate once we hit {@code terminalValue}.
+     */
+    @Inline
+    static <T> T foldlMinimal(Seekables<?, ?> inputs, AbstractRanges<?> matching, IndexedFold<? super Seekable, T> fold, T initialValue)
+    {
+        return Helper.foldlMinimal(inputs, matching, fold, initialValue);
+    }
+
+    /**
+     * Fold-left over the {@code inputs} that intersect with {@code matching} in ascending order.
+     * Terminate once we hit {@code terminalValue}.
+     */
     @Inline
     static <Input extends RoutableKey, T> T foldl(AbstractKeys<Input, ?> inputs, AbstractRanges<?> matching, IndexedFold<? super Input, T> fold, T initialValue)
     {
         return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, matching, fold, initialValue);
     }
 
+    /**
+     * Fold-left over the {@code inputs} that intersect with {@code matching} in ascending order.
+     * Terminate once we hit {@code terminalValue}.
+     */
+    @Inline
+    static <T> T foldl(AbstractRanges<?> inputs, Routables<?, ?> matching, IndexedFold<? super Range, T> fold, T initialValue)
+    {
+        switch (matching.domain())
+        {
+            default: throw new AssertionError();
+            case Key: return Helper.foldl(AbstractRanges::findNextIntersection, Helper::findLimit, inputs, (AbstractKeys<?,?>)matching, fold, initialValue);
+            case Range: return Helper.foldl(AbstractRanges::findNextIntersection, Helper::findLimit, inputs, (AbstractRanges<?>)matching, fold, initialValue);
+        }
+    }
+
+    /**
+     * Fold-left over the {@code inputs} that intersect with {@code matching} in ascending order.
+     * Terminate once we hit {@code terminalValue}.
+     */
     @Inline
     static <Input extends RoutableKey> long foldl(AbstractKeys<Input, ?> inputs, AbstractRanges<?> matching, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
     {
         return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, matching, fold, param, initialValue, terminalValue);
     }
 
+    /**
+     * Fold-left over the {@code inputs} that intersect with {@code matching} in ascending order.
+     * Terminate once we hit {@code terminalValue}.
+     */
     @Inline
     static <Input extends Routable> long foldl(Routables<Input, ?> inputs, AbstractRanges<?> matching, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
     {
         return Helper.foldl(Routables::findNextIntersection, Helper::findLimit, inputs, matching, fold, param, initialValue, terminalValue);
     }
 
+    /**
+     * Fold-left over the {@code inputs} that intersect with {@code matching} in ascending order.
+     * Terminate once we hit {@code terminalValue}.
+     */
     @Inline
     static <Input extends Routable> long foldl(Routables<Input, ?> inputs, AbstractKeys<?, ?> matching, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
     {
@@ -90,6 +162,10 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 inputs, matching, fold, param, initialValue, terminalValue);
     }
 
+    /**
+     * Fold-left over the {@code inputs} that intersect with {@code matching} in ascending order.
+     * Terminate once we hit {@code terminalValue}.
+     */
     @Inline
     static <Input extends RoutingKey, Matching extends Routable> long foldl(AbstractKeys<Input, ?> inputs, Routables<Matching, ?> matching, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
     {
@@ -97,6 +173,10 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 inputs, matching, fold, param, initialValue, terminalValue);
     }
 
+    /**
+     * Fold-left over the {@code inputs} that intersect with {@code matching} in ascending order, passing the contiguous ranges that intersect to the IndexedRangeFold function.
+     * Terminate once we hit {@code terminalValue}.
+     */
     @Inline
     static <Input extends Routable> long rangeFoldl(Routables<Input, ?> inputs, AbstractRanges<?> matching, IndexedRangeFoldToLong fold, long param, long initialValue, long terminalValue)
     {
@@ -104,6 +184,10 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 inputs, matching, fold, param, initialValue, terminalValue);
     }
 
+    /**
+     * Fold-left over the {@code inputs} that intersect with {@code matching} in ascending order, passing the contiguous ranges that intersect to the IndexedRangeFold function.
+     * Terminate once we hit {@code terminalValue}.
+     */
     @Inline
     static <Input extends Routable> long rangeFoldl(Routables<Input, ?> inputs, AbstractKeys<?, ?> matching, IndexedRangeFoldToLong fold, long param, long initialValue, long terminalValue)
     {
@@ -111,6 +195,10 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 inputs, matching, fold, param, initialValue, terminalValue);
     }
 
+    /**
+     * Fold-left over the {@code inputs} that <b>do not</b> intersect with {@code matching} in ascending order.
+     * Terminate once we hit {@code terminalValue}.
+     */
     @Inline
     static <Input extends Routable> long foldlMissing(Routables<Input, ?> inputs, Routables<Input, ?> notMatching, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
     {
@@ -128,6 +216,31 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
         interface ValueIntersections<L extends Routables<?, ?>, R extends Routables<?, ?>>
         {
             int findLimit(L left, int li, R right, int ri);
+        }
+
+        @Inline
+        static <T> T foldlMinimal(Seekables<?, ?> is, AbstractRanges<?> ms, IndexedFold<? super Seekable, T> fold, T initialValue)
+        {
+            int i = 0, m = 0;
+            while (true)
+            {
+                long im = is.findNextIntersection(i, ms, m);
+                if (im < 0)
+                    break;
+
+                i = (int)(im);
+                m = (int)(im >>> 32);
+
+                Range mv = ms.get(m);
+                int nexti = Helper.findLimit(is, i, ms, m);
+                while (i < nexti)
+                {
+                    initialValue = fold.apply(is.get(i).slice(mv), initialValue, i);
+                    ++i;
+                }
+            }
+
+            return initialValue;
         }
 
         @Inline
@@ -241,6 +354,16 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
             Range range = rs.get(ri);
 
             int nextl = ls.findNext(li + 1, range, FLOOR);
+            if (nextl < 0) nextl = -1 - nextl;
+            else nextl++;
+            return nextl;
+        }
+
+        static int findLimit(AbstractRanges<?> ls, int li, AbstractKeys<?, ?> rs, int ri)
+        {
+            RoutableKey r = rs.get(ri);
+
+            int nextl = ls.findNext(li + 1, r, FLOOR);
             if (nextl < 0) nextl = -1 - nextl;
             else nextl++;
             return nextl;

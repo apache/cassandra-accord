@@ -114,11 +114,11 @@ public class KeysTest
     void mergeTest()
     {
         assertEquals(keys(0, 1, 2, 3, 4),
-                     keys(0, 1, 2, 3, 4).union(keys(0, 1, 2, 3, 4)));
+                     keys(0, 1, 2, 3, 4).with(keys(0, 1, 2, 3, 4)));
         assertEquals(keys(0, 1, 2, 3, 4),
-                     keys(0, 1).union(keys(2, 3, 4)));
+                     keys(0, 1).with(keys(2, 3, 4)));
         assertEquals(keys(0, 1, 2, 3, 4),
-                     keys(0, 2, 4).union(keys(1, 3)));
+                     keys(0, 2, 4).with(keys(1, 3)));
     }
 
     @Test

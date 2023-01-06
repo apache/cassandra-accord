@@ -67,7 +67,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
         super(txnId);
         this.executeAtEpoch = executeAt.epoch();
         int startIndex = latestRelevantEpochIndex(to, topologies, readScope);
-        this.readScope = computeScope(to, topologies, (Seekables)readScope, startIndex, Seekables::slice, Seekables::union);
+        this.readScope = computeScope(to, topologies, (Seekables)readScope, startIndex, Seekables::slice, Seekables::with);
         this.waitForEpoch = computeWaitForEpoch(to, topologies, startIndex);
     }
 
@@ -256,7 +256,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
     @Override
     public Seekables<?, ?> keys()
     {
-        return readScope;
+        return Keys.EMPTY;
     }
 
     @Override

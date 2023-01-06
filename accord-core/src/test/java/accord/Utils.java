@@ -88,6 +88,11 @@ public class Utils
         return new Txn.InMemory(keys, MockStore.read(keys), MockStore.QUERY, MockStore.update(keys));
     }
 
+    public static Txn writeTxn(Ranges ranges)
+    {
+        return new Txn.InMemory(ranges, MockStore.read(ranges), MockStore.QUERY, MockStore.update(ranges));
+    }
+
     public static Txn readTxn(Keys keys)
     {
         return new Txn.InMemory(keys, MockStore.read(keys), MockStore.QUERY);

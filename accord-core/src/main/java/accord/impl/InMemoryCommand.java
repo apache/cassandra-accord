@@ -24,6 +24,8 @@ import accord.local.*;
 import accord.local.Status.Durability;
 import accord.local.Status.Known;
 import accord.primitives.*;
+import accord.primitives.Txn.Kind;
+import accord.utils.Invariants;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -129,7 +131,7 @@ public class InMemoryCommand extends Command
     @Override
     protected void setRoute(Route<?> route)
     {
-        this.route = route;
+        this.route = Invariants.checkArgument(route, !route.isEmpty());
     }
 
     @Override

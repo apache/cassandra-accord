@@ -160,7 +160,7 @@ public abstract class CommandStores<S extends CommandStore>
 
             Ranges result = ranges[i++];
             while (i <= j)
-                result = result.union(ranges[i++]);
+                result = result.with(ranges[i++]);
             return result;
         }
 
@@ -170,7 +170,7 @@ public abstract class CommandStores<S extends CommandStore>
             if (i < 0) i = Math.max(0, -2 -i);
             Ranges result = ranges[i++];
             while (i < ranges.length)
-                result = ranges[i++].union(result);
+                result = ranges[i++].with(result);
             return result;
         }
 

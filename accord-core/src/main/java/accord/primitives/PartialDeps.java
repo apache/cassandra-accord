@@ -43,7 +43,7 @@ public class PartialDeps extends Deps
     public PartialDeps with(PartialDeps that)
     {
         Invariants.checkArgument((this.rangeDeps == null) == (that.rangeDeps == null));
-        return new PartialDeps(that.covering.union(this.covering),
+        return new PartialDeps(that.covering.with(this.covering),
                 this.keyDeps.with(that.keyDeps),
                 this.rangeDeps == null ? null : this.rangeDeps.with(that.rangeDeps));
     }
@@ -55,16 +55,16 @@ public class PartialDeps extends Deps
         return new Deps(keyDeps, rangeDeps);
     }
 
-    // PartialRoute<?>might cover a wider set of ranges, some of which may have no involved keys
-    public PartialDeps reconstitutePartial(PartialRoute<?> route)
+    // covering might cover a wider set of ranges, some of which may have no involved keys
+    public PartialDeps reconstitutePartial(Ranges covering)
     {
-        if (!covers(route))
+        if (!covers(covering))
             throw new IllegalArgumentException();
 
-        if (covers(route.covering()))
+        if (covers(covering))
             return this;
 
-        return new PartialDeps(route.covering(), keyDeps, rangeDeps);
+        return new PartialDeps(covering, keyDeps, rangeDeps);
     }
 
     @Override

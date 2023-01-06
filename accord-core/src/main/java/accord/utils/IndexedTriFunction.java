@@ -20,5 +20,11 @@ package accord.utils;
 
 public interface IndexedTriFunction<P1, P2, P3, V>
 {
+    /**
+     * Apply a function to some object parameters associated with an index in a collection.
+     *
+     * The first parameter is typically used to convey some container the index refer to,
+     * with the others providing other configuration.
+     */
     V apply(P1 p1, P2 p2, P3 p3, int index);
 }

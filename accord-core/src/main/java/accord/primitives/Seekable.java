@@ -9,4 +9,5 @@ public interface Seekable extends Routable
 {
     Key asKey();
     Range asRange();
+    Seekable slice(Range range);
 }

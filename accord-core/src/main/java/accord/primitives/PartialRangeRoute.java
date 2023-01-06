@@ -4,6 +4,7 @@ import accord.api.RoutingKey;
 import accord.utils.Invariants;
 
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_OVERLAPPING;
+import static accord.primitives.Routables.Slice.Overlapping;
 
 /**
  * A slice of a Route that covers
@@ -26,6 +27,11 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
         this.covering = covering;
     }
 
+    public static PartialRangeRoute empty(RoutingKey homeKey)
+    {
+        return new PartialRangeRoute(Ranges.EMPTY, homeKey, NO_RANGES);
+    }
+
     @Override
     public UnseekablesKind kind()
     {
@@ -45,39 +51,18 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
     }
 
     @Override
-    public boolean intersects(AbstractRanges<?> ranges)
-    {
-        return ranges.intersects(covering);
-    }
-
-    @Override
-    public PartialRangeRoute sliceStrict(Ranges newRange)
-    {
-        if (!covering.containsAll(newRange))
-            throw new IllegalArgumentException("Not covered");
-
-        return slice(newRange, this, homeKey, PartialRangeRoute::new);
-    }
-
-    @Override
     public Unseekables<Range, ?> toMaximalUnseekables()
     {
-        throw new UnsupportedOperationException();
+        return with(homeKey);
     }
 
     @Override
-    public PartialRangeRoute slice(Ranges newRanges)
+    public PartialRangeRoute sliceStrict(Ranges newRanges)
     {
-        if (newRanges.containsAll(covering))
-            return this;
+        if (!covering.containsAll(newRanges))
+            throw new IllegalArgumentException("Not covered");
 
-        return slice(newRanges, this, homeKey, PartialRangeRoute::new);
-    }
-
-    @Override
-    public Unseekables<Range, ?> with(RoutingKey withKey)
-    {
-        throw new UnsupportedOperationException();
+        return slice(newRanges);
     }
 
     @Override
@@ -95,7 +80,7 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
 
         PartialRangeRoute that = (PartialRangeRoute) with;
         Invariants.checkState(homeKey.equals(that.homeKey));
-        Ranges covering = this.covering.union(that.covering);
+        Ranges covering = this.covering.with(that.covering);
         if (covering == this.covering) return this;
         else if (covering == that.covering) return that;
 

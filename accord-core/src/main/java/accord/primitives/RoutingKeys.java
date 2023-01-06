@@ -28,16 +28,17 @@ public class RoutingKeys extends AbstractUnseekableKeys<AbstractUnseekableKeys<?
     }
 
     @Override
-    public RoutingKeys union(AbstractUnseekableKeys<?> that)
+    public Unseekables<RoutingKey, ?> with(Unseekables<RoutingKey, ?> with)
     {
+        AbstractKeys<RoutingKey, ?> that = (AbstractKeys<RoutingKey, ?>) with;
         return wrap(SortedArrays.linearUnion(keys, that.keys, cachedRoutingKeys()), that);
     }
 
-    @Override
     public RoutingKeys with(RoutingKey with)
     {
         if (contains(with))
             return this;
+
         return wrap(toRoutingKeysArray(with));
     }
 
@@ -53,6 +54,11 @@ public class RoutingKeys extends AbstractUnseekableKeys<AbstractUnseekableKeys<?
         return wrap(slice(ranges, RoutingKey[]::new));
     }
 
+    public RoutingKeys slice(Ranges ranges, Slice slice)
+    {
+        return slice(ranges);
+    }
+
     private RoutingKeys wrap(RoutingKey[] wrap, AbstractKeys<RoutingKey, ?> that)
     {
         return wrap == keys ? this : wrap == that.keys && that instanceof RoutingKeys ? (RoutingKeys)that : new RoutingKeys(wrap);
@@ -62,5 +68,4 @@ public class RoutingKeys extends AbstractUnseekableKeys<AbstractUnseekableKeys<?
     {
         return wrap == keys ? this : new RoutingKeys(wrap);
     }
-
 }

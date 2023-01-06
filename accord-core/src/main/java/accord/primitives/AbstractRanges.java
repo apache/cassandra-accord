@@ -30,7 +30,6 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import static accord.utils.ArrayBuffers.cachedRanges;
-import static accord.utils.SortedArrays.Search.CEIL;
 import static accord.utils.SortedArrays.Search.FAST;
 import static accord.utils.SortedArrays.swapHighLow32b;
 
@@ -42,6 +41,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
 
     AbstractRanges(@Nonnull Range[] ranges)
     {
+        // TODO (simple, validation): check ranges are non-overlapping (or make sure it's safe for all methods that they aren't)
         this.ranges = Invariants.nonNull(ranges);
     }
 
@@ -65,7 +65,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     @Override
     public boolean containsAll(Routables<?, ?> that)
     {
-        switch (that.kindOfContents())
+        switch (that.domain())
         {
             default: throw new AssertionError();
             case Key: return containsAll((AbstractKeys<?, ?>) that);
@@ -93,6 +93,26 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         return ((int) supersetLinearMerge(this.ranges, that.ranges)) == that.size();
     }
 
+    public boolean intersectsAll(Routables<?, ?> that)
+    {
+        switch (that.domain())
+        {
+            default: throw new AssertionError();
+            case Key: return containsAll((AbstractKeys<?, ?>) that);
+            case Range: return intersectsAll((AbstractRanges<?>) that);
+        }
+    }
+
+    /**
+     * @return true iff {@code that} is a subset of {@code this}
+     */
+    public boolean intersectsAll(AbstractRanges<?> that)
+    {
+        if (this.isEmpty()) return that.isEmpty();
+        if (that.isEmpty()) return true;
+        return Routables.rangeFoldl(that, this, (p, v, from, to) -> v + (to - from), 0, 0, 0) == that.size();
+    }
+
     @Override
     public int size()
     {
@@ -100,7 +120,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     }
 
     @Override
-    public final Routable.Domain kindOfContents()
+    public final Routable.Domain domain()
     {
         return Routable.Domain.Range;
     }
@@ -117,42 +137,33 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         return size() == 0;
     }
 
-    public final boolean intersects(Routables<?, ?> keysOrRanges)
-    {
-        switch (keysOrRanges.kindOfContents())
-        {
-            default: throw new AssertionError();
-            case Key: return intersects((AbstractKeys<?, ?>) keysOrRanges);
-            case Range: return intersects((AbstractRanges<?>) keysOrRanges);
-        }
-    }
-
+    @Override
     public final boolean intersects(AbstractKeys<?, ?> keys)
     {
         return findNextIntersection(0, keys, 0) >= 0;
     }
 
     @Override
-    public boolean intersects(AbstractRanges<?> that)
+    public final boolean intersects(AbstractRanges<?> that)
     {
         return SortedArrays.findNextIntersection(this.ranges, 0, that.ranges, 0, Range::compareIntersecting) >= 0;
     }
 
-    public boolean intersects(Range that)
+    public final boolean intersects(Range that)
     {
-        return SortedArrays.binarySearch(ranges, 0, ranges.length, that, Range::compareIntersecting, SortedArrays.Search.FAST) >= 0;
+        return indexOf(that) >= 0;
     }
 
     // returns ri in low 32 bits, ki in top, or -1 if no match found
     @Override
-    public long findNextIntersection(int ri, AbstractKeys<?, ?> keys, int ki)
+    public final long findNextIntersection(int ri, AbstractKeys<?, ?> keys, int ki)
     {
         return swapHighLow32b(SortedArrays.findNextIntersectionWithMultipleMatches(keys.keys, ki, ranges, ri));
     }
 
     // returns ki in bottom 32 bits, ri in top, or -1 if no match found
     @Override
-    public long findNextIntersection(int thisi, AbstractRanges<?> that, int thati)
+    public final long findNextIntersection(int thisi, AbstractRanges<?> that, int thati)
     {
         return SortedArrays.findNextIntersectionWithMultipleMatches(ranges, thisi, that.ranges, thati, Range::compareIntersecting, Range::compareIntersecting);
     }
@@ -164,9 +175,15 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     }
 
     @Override
-    public int findNext(int thisIndex, Range find, SortedArrays.Search search)
+    public final int findNext(int thisIndex, Range find, SortedArrays.Search search)
     {
         return SortedArrays.exponentialSearch(ranges, thisIndex, size(), find, Range::compareIntersecting, search);
+    }
+
+    @Override
+    public final int findNext(int thisIndex, RoutableKey find, SortedArrays.Search search)
+    {
+        return SortedArrays.exponentialSearch(ranges, thisIndex, size(), find, (k, r) -> -r.compareTo(k), search);
     }
 
     /**
@@ -175,7 +192,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
      */
     static <RS extends AbstractRanges<?>, P> RS intersect(RS input, Unseekables<?, ?> keysOrRanges, P param, BiFunction<P, Range[], RS> constructor)
     {
-        switch (keysOrRanges.kindOfContents())
+        switch (keysOrRanges.domain())
         {
             default: throw new AssertionError();
             case Range:
@@ -198,7 +215,24 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         RS construct(Ranges covering, P param, Range[] ranges);
     }
 
-    static <RS extends AbstractRanges<?>, P> RS slice(Ranges covering, AbstractRanges<?> input, P param, SliceConstructor<P, RS> constructor)
+    @Override
+    public final Ranges slice(Ranges ranges, Slice slice)
+    {
+        return slice(ranges, slice, this, null, (i1, i2, rs) -> new Ranges(rs));
+    }
+
+    static <RS extends AbstractRanges<?>, P> RS slice(Ranges covering, Slice slice, AbstractRanges<?> input, P param, SliceConstructor<P, RS> constructor)
+    {
+        switch (slice)
+        {
+            default: throw new AssertionError();
+            case Overlapping: return sliceOverlapping(covering, input, param, constructor);
+            case Minimal: return sliceMinimal(covering, input, param, constructor);
+            case Maximal: return sliceMaximal(covering, input, param, constructor);
+        }
+    }
+
+    static <RS extends AbstractRanges<?>, P> RS sliceOverlapping(Ranges covering, AbstractRanges<?> input, P param, SliceConstructor<P, RS> constructor)
     {
         ObjectBuffers<Range> cachedRanges = cachedRanges();
 
@@ -217,9 +251,102 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
                 ri = (int) (lri >>> 32);
 
                 Range l = covering.ranges[li], r = input.ranges[ri];
-                buffer[bufferCount++] = Range.slice(l, r);
-                if (l.end().compareTo(r.end()) >= 0) ri++;
-                else li++;
+                buffer[bufferCount++] = r;
+                if (l.end().compareTo(r.end()) <= 0) li++;
+                ri++;
+            }
+            Range[] result = cachedRanges.complete(buffer, bufferCount);
+            cachedRanges.discard(buffer, bufferCount);
+            return constructor.construct(covering, param, result);
+        }
+        catch (Throwable t)
+        {
+            cachedRanges.forceDiscard(buffer, bufferCount);
+            throw t;
+        }
+    }
+
+    static <RS extends AbstractRanges<?>, P> RS sliceMinimal(Ranges covering, AbstractRanges<?> input, P param, SliceConstructor<P, RS> constructor)
+    {
+        ObjectBuffers<Range> cachedRanges = cachedRanges();
+
+        Range[] buffer = cachedRanges.get(covering.ranges.length + input.ranges.length);
+        int bufferCount = 0;
+        try
+        {
+            int li = 0, ri = 0;
+            while (true)
+            {
+                long lri = covering.findNextIntersection(li, input, ri);
+                if (lri < 0)
+                    break;
+
+                if (bufferCount == buffer.length)
+                    buffer = cachedRanges.resize(buffer, bufferCount, bufferCount + 1 + (bufferCount/2));
+
+                li = (int) (lri);
+                ri = (int) (lri >>> 32);
+
+                Range l = covering.ranges[li], r = input.ranges[ri];
+                RoutingKey ls = l.start(), rs = r.start(), le = l.end(), re = r.end();
+                int cs = rs.compareTo(ls), ce = re.compareTo(le);
+                if (cs >= 0 && ce <= 0)
+                {
+                    buffer[bufferCount++] = r;
+                    ++ri;
+                }
+                else
+                {
+                    buffer[bufferCount++] = r.newRange(cs >= 0 ? rs : ls, ce <= 0 ? re : le);
+                    if (ce <= 0) ++ri;
+                }
+                if (ce >= 0) li++; // le <= re
+            }
+            Range[] result = cachedRanges.complete(buffer, bufferCount);
+            cachedRanges.discard(buffer, bufferCount);
+            return constructor.construct(covering, param, result);
+        }
+        catch (Throwable t)
+        {
+            cachedRanges.forceDiscard(buffer, bufferCount);
+            throw t;
+        }
+    }
+
+    static <RS extends AbstractRanges<?>, P> RS sliceMaximal(Ranges covering, AbstractRanges<?> input, P param, SliceConstructor<P, RS> constructor)
+    {
+        ObjectBuffers<Range> cachedRanges = cachedRanges();
+
+        Range[] buffer = cachedRanges.get(covering.ranges.length + input.ranges.length);
+        int bufferCount = 0;
+        try
+        {
+            int li = 0, ri = 0;
+            while (true)
+            {
+                long lri = covering.findNextIntersection(li, input, ri);
+                if (lri < 0)
+                    break;
+
+                if (bufferCount == buffer.length)
+                    buffer = cachedRanges.resize(buffer, bufferCount, bufferCount + 1 + (bufferCount/2));
+
+                li = (int) (lri);
+                ri = (int) (lri >>> 32);
+
+                Range l = covering.ranges[li], r = input.ranges[ri]; // l(eft), r(right)
+                RoutingKey ls = l.start(), rs = r.start(), le = l.end(), re = r.end(); // l(eft),r(ight) s(tart),e(nd)
+                int cs = rs.compareTo(ls), ce = re.compareTo(le); // c(ompare) s(tart),e(nd)
+                if (cs <= 0 && ce >= 0)
+                {
+                    buffer[bufferCount++] = r;
+                }
+                else
+                {
+                    buffer[bufferCount++] = r.newRange(cs <= 0 ? rs : ls, ce >= 0 ? re : le);
+                }
+                ++li;
+                ++ri;
             }
             Range[] result = cachedRanges.complete(buffer, bufferCount);
             cachedRanges.discard(buffer, bufferCount);
@@ -370,7 +497,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
                     if (a == min) ai++;
                     else bi++;
                 }
-                result[resultCount++] = a.subRange(start, end);
+                result[resultCount++] = a.newRange(start, end);
             }
         }
 
@@ -460,7 +587,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
 
     static Range maybeUpdateEnd(Range range, RoutingKey withEnd)
     {
-        return withEnd == range.end() ? range : range.subRange(range.start(), withEnd);
+        return withEnd == range.end() ? range : range.newRange(range.start(), withEnd);
     }
 
     static <RS extends AbstractRanges<?>> RS of(Function<Range[], RS> constructor, Range... ranges)
@@ -484,7 +611,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
             return constructor.apply(Arrays.copyOf(ranges, count));
         }
 
-        Arrays.sort(ranges, 0, count, Comparator.comparing(Range::start));
+        Arrays.sort(ranges, 0, count, Range::compare);
         Range prev = ranges[0];
         int removed = 0;
         for (int i = 1 ; i < count ; ++i)
@@ -492,20 +619,28 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
             Range next = ranges[i];
             if (prev.end().compareTo(next.start()) > 0)
             {
-                prev = prev.subRange(prev.start(), next.start());
                 if (prev.end().compareTo(next.end()) >= 0)
                 {
-                    removed++;
+                    ++removed;
+                    continue;
                 }
-                else if (removed > 0)
+
+                if (prev.start().equals(next.start()))
                 {
-                    ranges[i - removed] = prev = next.subRange(prev.end(), next.end());
+                    ++removed;
+                    ranges[i - removed] = prev = next;
+                    continue;
                 }
+
+                prev = prev.newRange(prev.start(), next.start());
+                ranges[i - (1 + removed)] = prev;
+                prev = next;
+                continue;
             }
-            else if (removed > 0)
-            {
-                ranges[i - removed] = prev = next;
-            }
+
+            if (removed > 0)
+                ranges[i - (1 + removed)] = prev;
+            prev = next;
         }
 
         count -= removed;

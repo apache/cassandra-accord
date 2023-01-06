@@ -20,5 +20,8 @@ package accord.utils;
 
 public interface IndexedConsumer<P1>
 {
+    /**
+     * Apply some consumer to an object parameter and an associated index (usually within a collection).
+     */
     void accept(P1 p1, int index);
 }

@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 
 import accord.impl.IntHashKey;
 import accord.impl.basic.Cluster;
@@ -51,14 +52,14 @@ import accord.impl.list.ListResult;
 import accord.impl.list.ListUpdate;
 import accord.local.Node.Id;
 import accord.api.Key;
-import accord.primitives.Txn;
-import accord.primitives.Keys;
+import accord.primitives.*;
 import accord.verify.StrictSerializabilityVerifier;
 
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static accord.impl.IntHashKey.forHash;
 import static accord.utils.Utils.toArray;
 
 public class BurnTest
@@ -79,26 +80,49 @@ public class BurnTest
             Id client = clients.get(random.nextInt(clients.size()));
             Id node = nodes.get(random.nextInt(clients.size()));
 
-            int readCount = 1 + random.nextInt(2);
-            int writeCount = random.nextInt(3);
-
-            TreeSet<Key> requestKeys = new TreeSet<>();
-            while (readCount-- > 0)
-                requestKeys.add(randomKey(random, keys, requestKeys));
-
-            ListUpdate update = new ListUpdate();
-            while (writeCount-- > 0)
+            boolean isRangeQuery = random.nextBoolean();
+            if (isRangeQuery)
             {
-                int i = randomKeyIndex(random, keys, update.keySet());
-                update.put(keys.get(i), ++next[i]);
-            }
+                int rangeCount = 1 + random.nextInt(2);
+                List<Range> requestRanges = new ArrayList<>();
+                while (--rangeCount >= 0)
+                {
+                    int j = 1 + random.nextInt(0xffff), i = Math.max(0, j - (1 + random.nextInt(0x1ffe)));
+                    requestRanges.add(IntHashKey.range(forHash(i), forHash(j)));
+                }
+                Ranges ranges = Ranges.of(requestRanges.toArray(new Range[0]));
+                ListRead read = new ListRead(ranges, ranges);
+                ListQuery query = new ListQuery(client, count);
+                ListRequest request = new ListRequest(new Txn.InMemory(ranges, read, query, null));
+                packets.add(new Packet(client, node, count, request));
 
-            Keys readKeys = new Keys(requestKeys);
-            requestKeys.addAll(update.keySet());
-            ListRead read = new ListRead(readKeys, new Keys(requestKeys));
-            ListQuery query = new ListQuery(client, count);
-            ListRequest request = new ListRequest(new Txn.InMemory(new Keys(requestKeys), read, query, update));
-            packets.add(new Packet(client, node, count, request));
+
+            }
+            else
+            {
+                boolean isWrite = random.nextBoolean();
+                int readCount = 1 + random.nextInt(2);
+                int writeCount = isWrite ? random.nextInt(3) : 0;
+
+                TreeSet<Key> requestKeys = new TreeSet<>();
+                while (readCount-- > 0)
+                    requestKeys.add(randomKey(random, keys, requestKeys));
+
+                ListUpdate update = isWrite ? new ListUpdate() : null;
+                while (writeCount-- > 0)
+                {
+                    int i = randomKeyIndex(random, keys, update.keySet());
+                    update.put(keys.get(i), ++next[i]);
+                }
+
+                Keys readKeys = new Keys(requestKeys);
+                if (isWrite)
+                    requestKeys.addAll(update.keySet());
+                ListRead read = new ListRead(readKeys, new Keys(requestKeys));
+                ListQuery query = new ListQuery(client, count);
+                ListRequest request = new ListRequest(new Txn.InMemory(new Keys(requestKeys), read, query, update));
+                packets.add(new Packet(client, node, count, request));
+            }
         }
 
         return packets;
@@ -111,8 +135,13 @@ public class BurnTest
 
     private static int randomKeyIndex(Random random, List<Key> keys, Set<Key> notIn)
     {
+        return randomKeyIndex(random, keys, notIn::contains);
+    }
+
+    private static int randomKeyIndex(Random random, List<Key> keys, Predicate<Key> notIn)
+    {
         int i;
-        while (notIn.contains(keys.get(i = random.nextInt(keys.size()))));
+        while (notIn.test(keys.get(i = random.nextInt(keys.size()))));
         return i;
     }
 
@@ -197,14 +226,13 @@ public class BurnTest
 
             try
             {
-
                 int start = starts[(int)packet.replyId];
                 int end = clock.incrementAndGet();
 
                 logger.debug("{} at [{}, {}]", reply, start, end);
 
                 replies[(int)packet.replyId] = packet;
-                if (reply.readKeys == null)
+                if (reply.responseKeys == null)
                 {
                     if (reply.read == null) nacks.incrementAndGet();
                     else lost.incrementAndGet();
@@ -216,11 +244,11 @@ public class BurnTest
 
                 for (int i = 0 ; i < reply.read.length ; ++i)
                 {
-                    Key key = reply.readKeys.get(i);
+                    Key key = reply.responseKeys.get(i);
                     int k = key(key);
 
                     int[] read = reply.read[i];
-                    int write = reply.update.getOrDefault(key, -1);
+                    int write = reply.update == null ? -1 : reply.update.getOrDefault(key, -1);
 
                     if (read != null)
                         strictSerializable.witnessRead(k, read);
@@ -270,7 +298,7 @@ public class BurnTest
     {
 //        Long overrideSeed = null;
         int count = 1;
-        Long overrideSeed = 188057951046487786L;
+        Long overrideSeed = 8602265915508619975L;
         LongSupplier seedGenerator = ThreadLocalRandom.current()::nextLong;
         for (int i = 0 ; i < args.length ; i += 2)
         {

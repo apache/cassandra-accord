@@ -26,6 +26,7 @@ import accord.api.Key;
 import accord.api.DataStore;
 import accord.api.Write;
 import accord.local.SafeCommandStore;
+import accord.primitives.Seekable;
 import accord.primitives.Timestamp;
 import accord.primitives.Writes;
 import accord.utils.Timestamped;
@@ -38,13 +39,13 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
     private static final Logger logger = LoggerFactory.getLogger(ListWrite.class);
 
     @Override
-    public Future<Void> apply(Key key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
+    public Future<Void> apply(Seekable key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
     {
         ListStore s = (ListStore) store;
         if (!containsKey(key))
             return Writes.SUCCESS;
         int[] data = get(key);
-        s.data.merge(key, new Timestamped<>(executeAt, data), Timestamped::merge);
+        s.data.merge((Key)key, new Timestamped<>(executeAt, data), Timestamped::merge);
         logger.trace("WRITE on {} at {} key:{} -> {}", s.node, executeAt, key, data);
         return Writes.SUCCESS;
     }

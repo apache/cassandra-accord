@@ -3,7 +3,7 @@ package accord.primitives;
 import accord.api.RoutingKey;
 
 /**
- * Either a Route or a simple collection of Unseekable
+ * Either a Route or a simple collection of keys or ranges
  */
 public interface Unseekables<K extends Unseekable, U extends Unseekables<K, ?>> extends Iterable<K>, Routables<K, U>
 {
@@ -24,11 +24,22 @@ public interface Unseekables<K extends Unseekable, U extends Unseekables<K, ?>> 
 
     @Override
     U slice(Ranges ranges);
-    @Override
-    Unseekables<K, U> union(U with);
+    Unseekables<K, ?> slice(Ranges ranges, Slice slice);
+
+    /**
+     * Return an object containing any {@code K} present in either of the original collections.
+     *
+     * Differs from {@link Route#union} in that the parameter does not need to be a {@link Route}
+     * and the result may not be a {@link Route}, as the new object would not know the range
+     * covered by the additional keys or ranges.
+     */
+    Unseekables<K, ?> with(Unseekables<K, ?> with);
     Unseekables<K, ?> with(RoutingKey withKey);
     UnseekablesKind kind();
 
+    /**
+     * If both left and right are a Route, invoke {@link Route#union} on them. Otherwise invoke {@link #with}.
+     */
     static <K extends Unseekable> Unseekables<K, ?> merge(Unseekables<K, ?> left, Unseekables<K, ?> right)
     {
         if (left == null) return right;
@@ -47,7 +58,7 @@ public interface Unseekables<K extends Unseekable, U extends Unseekables<K, ?>> 
                     return right;
 
                 // non-route types can always accept route types as input, so just call its union method on the other
-                return leftKind.isRoute() ? ((Unseekables)right).union(left) : ((Unseekables)left).union(right);
+                return left.with(right);
             }
 
             if (leftKind.isFullRoute())
@@ -55,7 +66,10 @@ public interface Unseekables<K extends Unseekable, U extends Unseekables<K, ?>> 
 
             if (rightKind.isFullRoute())
                 return right;
+
+            return ((Route)left).union((Route)right);
         }
-        return ((Unseekables)left).union(right);
+
+        return left.with(right);
     }
 }

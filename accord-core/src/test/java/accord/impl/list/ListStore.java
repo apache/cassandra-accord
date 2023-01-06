@@ -18,18 +18,24 @@
 
 package accord.impl.list;
 
-import java.util.Map;
+import java.util.*;
+import java.util.AbstractMap.SimpleEntry;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 import accord.api.Key;
 import accord.local.Node;
 import accord.api.DataStore;
+import accord.primitives.Range;
+import accord.primitives.RoutableKey;
+import accord.primitives.Seekable;
+import accord.primitives.Timestamp;
 import accord.utils.Timestamped;
 
 public class ListStore implements DataStore
 {
     static final int[] EMPTY = new int[0];
-    final Map<Key, Timestamped<int[]>> data = new ConcurrentHashMap<>();
+    final NavigableMap<RoutableKey, Timestamped<int[]>> data = new TreeMap<>();
 
     // adding here to help trace burn test queries
     public final Node.Id node;
@@ -43,5 +49,18 @@ public class ListStore implements DataStore
     {
         Timestamped<int[]> v = data.get(key);
         return v == null ? EMPTY : v.data;
+    }
+
+    public List<Map.Entry<Key, int[]>> get(Range range)
+    {
+        return data.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive())
+                .entrySet()
+                .stream().map(e -> new SimpleEntry<>((Key)e.getKey(), e.getValue().data))
+                .collect(Collectors.toList());
+    }
+
+    public synchronized void write(Key key, Timestamp executeAt, int[] value)
+    {
+        data.merge(key, new Timestamped<>(executeAt, value), Timestamped::merge);
     }
 }

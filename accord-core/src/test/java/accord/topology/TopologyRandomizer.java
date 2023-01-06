@@ -246,7 +246,7 @@ public class TopologyRandomizer
         {
             Ranges previous = previouslyReplicated.getOrDefault(entry.getKey(), Ranges.EMPTY);
             Ranges added = entry.getValue();
-            Ranges merged = previous.union(added).mergeTouching();
+            Ranges merged = previous.with(added).mergeTouching();
             previouslyReplicated.put(entry.getKey(), merged);
         }
 

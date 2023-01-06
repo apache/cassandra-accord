@@ -237,4 +237,10 @@ public class Deps
     {
         return this.keyDeps.equals(that.keyDeps) && this.rangeDeps.equals(that.rangeDeps);
     }
+
+    @Override
+    public int hashCode()
+    {
+        throw new UnsupportedOperationException();
+    }
 }
