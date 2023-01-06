@@ -297,7 +297,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
 
     private static Deps acceptedStartedBeforeWithoutWitnessing(SafeCommandStore commandStore, TxnId txnId, Ranges ranges, Seekables<?, ?> keys)
     {
-        try (Deps.OrderedBuilder builder = Deps.orderedBuilder(true))
+        try (Deps.Builder builder = Deps.builder())
         {
             commandStore.forEach(keys, ranges, forKey -> {
                 // accepted txns with an earlier txnid that do not have our txnid as a dependency
@@ -312,10 +312,9 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
                  * Which is to say, we expect the previously proposed dependencies (if any) to be used to evaluate this
                  * condition.
                  */
-                builder.nextKey(forKey.key());
                 forKey.uncommitted().before(txnId, RorWs, WITHOUT, txnId, HAS_BEEN, Accepted).forEach((command) -> {
                     if (command.executeAt.compareTo(txnId) > 0)
-                        builder.add(command.txnId);
+                        builder.add(forKey.key(), command.txnId);
                 });
             });
             return builder.build();
@@ -324,7 +323,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
 
     private static Deps committedStartedBeforeAndWitnessed(SafeCommandStore commandStore, TxnId txnId, Ranges ranges, Seekables<?, ?> keys)
     {
-        try (Deps.OrderedBuilder builder = Deps.orderedBuilder(true))
+        try (Deps.Builder builder = Deps.builder())
         {
             commandStore.forEach(keys, ranges, forKey -> {
                 /*
@@ -332,9 +331,8 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
                  * so that we can remove these from the set of acceptedStartedBeforeAndDidNotWitness
                  * on other nodes, to minimise the number of transactions we try to wait for on recovery
                  */
-                builder.nextKey(forKey.key());
                 forKey.committedById().before(txnId, RorWs, WITH, txnId, HAS_BEEN, Committed)
-                        .forEach(builder::add);
+                        .forEach(id -> builder.add(forKey.key(), id));
             });
             return builder.build();
         }

@@ -155,6 +155,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
             }
 
             // exists only on home shard
+            // TODO (expected): should not take any prompt action if we're ourselves already coordinating the transaction
             class CoordinateState extends Monitoring
             {
                 CoordinateStatus status = CoordinateStatus.NotWitnessed;

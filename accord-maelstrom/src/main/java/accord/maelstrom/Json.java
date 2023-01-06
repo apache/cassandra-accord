@@ -21,8 +21,10 @@ package accord.maelstrom;
 import java.io.IOException;
 import java.util.*;
 
+import accord.api.RoutingKey;
 import accord.local.Node;
 import accord.api.Result;
+import accord.primitives.*;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.TypeAdapter;
@@ -31,13 +33,6 @@ import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
 import accord.local.Node.Id;
 import accord.api.Key;
-import accord.primitives.Deps;
-import accord.primitives.Txn;
-import accord.primitives.TxnId;
-import accord.primitives.Writes;
-import accord.primitives.Ballot;
-import accord.primitives.Keys;
-import accord.primitives.Timestamp;
 import accord.messages.ReadData.ReadOk;
 
 public class Json
@@ -320,10 +315,20 @@ public class Json
         public void write(JsonWriter out, Deps value) throws IOException
         {
             out.beginArray();
-            for (Map.Entry<Key, TxnId> e : value)
+            for (Map.Entry<Key, TxnId> e : value.keyDeps)
             {
                 out.beginArray();
                 ((MaelstromKey)e.getKey()).datum.write(out);
+                GSON.toJson(e.getValue(), TxnId.class, out);
+                out.endArray();
+            }
+            out.endArray();
+            out.beginArray();
+            for (Map.Entry<Range, TxnId> e : value.rangeDeps)
+            {
+                out.beginArray();
+                ((MaelstromKey)e.getKey().start()).datum.write(out);
+                ((MaelstromKey)e.getKey().end()).datum.write(out);
                 GSON.toJson(e.getValue(), TxnId.class, out);
                 out.endArray();
             }
@@ -333,32 +338,38 @@ public class Json
         @Override
         public Deps read(JsonReader in) throws IOException
         {
-            in.beginArray();
-            if (!in.hasNext())
-            {
-                in.endArray();
-                return Deps.NONE;
-            }
-
-            TreeMap<Key, List<TxnId>> byKey = new TreeMap<>();
-            while (in.hasNext())
+            KeyDeps keyDeps;
+            try (KeyDeps.Builder builder = KeyDeps.builder())
             {
                 in.beginArray();
-                Key key = MaelstromKey.readKey(in);
-                TxnId txnId = GSON.fromJson(in, TxnId.class);
-                byKey.computeIfAbsent(key, ignore -> new ArrayList<>()).add(txnId);
+                while (in.hasNext())
+                {
+                    in.beginArray();
+                    Key key = MaelstromKey.readKey(in);
+                    TxnId txnId = GSON.fromJson(in, TxnId.class);
+                    builder.add(key, txnId);
+                    in.endArray();
+                }
                 in.endArray();
+                keyDeps = builder.build();
             }
-            in.endArray();
-
-            try (Deps.OrderedBuilder builder = Deps.orderedBuilder(true))
+            RangeDeps rangeDeps;
+            try (RangeDeps.Builder builder = RangeDeps.builder())
             {
-                byKey.forEach((key, txnIds) -> {
-                    builder.nextKey(key);
-                    txnIds.forEach(builder::add);
-                });
-                return builder.build();
+                in.beginArray();
+                while (in.hasNext())
+                {
+                    in.beginArray();
+                    RoutingKey start = MaelstromKey.readRouting(in);
+                    RoutingKey end = MaelstromKey.readRouting(in);
+                    TxnId txnId = GSON.fromJson(in, TxnId.class);
+                    builder.add(new MaelstromKey.Range(start, end), txnId);
+                    in.endArray();
+                }
+                in.endArray();
+                rangeDeps = builder.build();
             }
+            return new Deps(keyDeps, rangeDeps);
         }
     };
 

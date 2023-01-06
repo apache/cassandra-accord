@@ -10,8 +10,11 @@ public interface Route<K extends Unseekable> extends Unseekables<K, Route<K>>
 
     default boolean isRoute() { return true; }
     boolean covers(Ranges ranges);
+    @Override
     boolean intersects(AbstractRanges<?> ranges);
+    @Override
     Route<K> union(Route<K> route);
+    @Override
     PartialRoute<K> slice(Ranges ranges);
     PartialRoute<K> sliceStrict(Ranges ranges);
 

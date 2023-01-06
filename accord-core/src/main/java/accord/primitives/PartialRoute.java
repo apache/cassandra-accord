@@ -2,6 +2,7 @@ package accord.primitives;
 
 public interface PartialRoute<T extends Unseekable> extends Route<T>
 {
+    @Override
     boolean isEmpty();
     Ranges covering();
 

@@ -128,7 +128,7 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
     }
 
     /**
-     * Subtracts the given set of key ranges from this
+     * Subtracts the given set of ranges from this
      */
     public Ranges difference(AbstractRanges<?> that)
     {

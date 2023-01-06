@@ -22,7 +22,9 @@ public interface Unseekables<K extends Unseekable, U extends Unseekables<K, ?>> 
         }
     }
 
+    @Override
     U slice(Ranges ranges);
+    @Override
     Unseekables<K, U> union(U with);
     Unseekables<K, ?> with(RoutingKey withKey);
     UnseekablesKind kind();

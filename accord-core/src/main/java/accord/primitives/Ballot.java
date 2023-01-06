@@ -54,6 +54,7 @@ public class Ballot extends Timestamp
         super(msb, lsb, node);
     }
 
+    @Override
     public Ballot merge(Timestamp that)
     {
         return merge(this, that, Ballot::fromBits);

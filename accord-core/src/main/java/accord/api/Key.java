@@ -18,6 +18,7 @@
 
 package accord.api;
 
+import accord.primitives.Range;
 import accord.primitives.RoutableKey;
 import accord.primitives.Seekable;
 
@@ -26,4 +27,9 @@ import accord.primitives.Seekable;
  */
 public interface Key extends Seekable, RoutableKey
 {
+    @Override
+    default Key asKey() { return this; }
+
+    @Override
+    default Range asRange() { throw new UnsupportedOperationException(); }
 }

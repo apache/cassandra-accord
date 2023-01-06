@@ -82,6 +82,7 @@ public class TxnId extends Timestamp
         return domain(flags());
     }
 
+    @Override
     public TxnId merge(Timestamp that)
     {
         return merge(this, that, TxnId::fromBits);

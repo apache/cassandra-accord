@@ -129,6 +129,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
      * to permit a recipient to process a request before knowing of a topology change if the sender determines it is
      * safe to do so.
      */
+    @Override
     public long waitForEpoch()
     {
         return waitForEpoch;

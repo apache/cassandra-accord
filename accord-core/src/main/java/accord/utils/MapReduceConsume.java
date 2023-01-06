@@ -5,6 +5,7 @@ import java.util.function.Consumer;
 
 public interface MapReduceConsume<I, O> extends MapReduce<I, O>, BiConsumer<O, Throwable>
 {
+    @Override
     void accept(O result, Throwable failure);
 
     static <I> MapReduceConsume<I, Void> forEach(Consumer<I> forEach, BiConsumer<Object, Throwable> consume)

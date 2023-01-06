@@ -50,6 +50,7 @@ public interface PartialTxn extends Txn
             return covering;
         }
 
+        @Override
         public PartialTxn with(PartialTxn add)
         {
             if (!add.kind().equals(kind()))
@@ -78,6 +79,7 @@ public interface PartialTxn extends Txn
             return covering.containsAll(ranges);
         }
 
+        @Override
         public Txn reconstitute(FullRoute<?> route)
         {
             if (!covers(route) || query() == null)
@@ -86,6 +88,7 @@ public interface PartialTxn extends Txn
             return new Txn.InMemory(kind(), keys(), read(), query(), update());
         }
 
+        @Override
         public PartialTxn reconstitutePartial(PartialRoute<?> route)
         {
             if (!covers(route))

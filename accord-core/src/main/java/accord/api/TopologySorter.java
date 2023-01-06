@@ -15,7 +15,9 @@ public interface TopologySorter
 
     interface StaticSorter extends Supplier, TopologySorter
     {
+        @Override
         default TopologySorter get(Topology topologies) { return this; }
+        @Override
         default TopologySorter get(Topologies topologies) { return this; }
     }
 

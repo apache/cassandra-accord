@@ -35,11 +35,18 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
         return Arrays.equals(keys, that.keys);
     }
 
-    public final int indexOf(K key)
+    @Override
+    public int indexOf(K key)
     {
         return Arrays.binarySearch(keys, key);
     }
 
+    public int indexOf(RoutingKey key)
+    {
+        return Arrays.binarySearch(keys, key);
+    }
+
+    @Override
     public final K get(int indexOf)
     {
         return keys[indexOf];
@@ -51,21 +58,25 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
         return Key;
     }
 
+    @Override
     public final boolean isEmpty()
     {
         return keys.length == 0;
     }
 
+    @Override
     public final int size()
     {
         return keys.length;
     }
 
+    @Override
     public final boolean contains(RoutableKey key)
     {
         return Arrays.binarySearch(keys, key) >= 0;
     }
 
+    @Override
     public final boolean containsAll(Routables<?, ?> keysOrRanges)
     {
         return keysOrRanges.size() == Routables.foldl(keysOrRanges, this, (k, p, v, i) -> v + 1, 0, 0, 0);

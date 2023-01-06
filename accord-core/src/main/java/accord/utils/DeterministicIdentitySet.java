@@ -105,6 +105,7 @@ public class DeterministicIdentitySet<T> extends AbstractSet<T>
     }
 
     // we add to the front, and iterate in reverse order, so that we can add and remove while iterating without modifying the set we iterate over
+    @Override
     public boolean add(T item)
     {
         Entry<T> entry = lookup.computeIfAbsent(item, Entry::new);
@@ -117,6 +118,7 @@ public class DeterministicIdentitySet<T> extends AbstractSet<T>
         return true;
     }
 
+    @Override
     public boolean remove(Object item)
     {
         Entry<T> entry = lookup.remove(item);
@@ -129,6 +131,7 @@ public class DeterministicIdentitySet<T> extends AbstractSet<T>
         return true;
     }
 
+    @Override
     public void forEach(Consumer<? super T> consumer)
     {
         Entry<T> cur = head.next;
@@ -151,11 +154,5 @@ public class DeterministicIdentitySet<T> extends AbstractSet<T>
                 cur = cur.prev;
             cur = cur.next;
         }
-    }
-
-    @Override
-    public String toString()
-    {
-        return super.toString();
     }
 }

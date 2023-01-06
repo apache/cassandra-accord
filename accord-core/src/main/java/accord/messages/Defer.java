@@ -18,7 +18,7 @@ class Defer implements CommandListener
 
     final Function<Command, Ready> waitUntil;
     final TxnRequest<?> request;
-    IntHashSet waitingOn = new IntHashSet(); // TODO (easy): use Agrona when available
+    final IntHashSet waitingOn = new IntHashSet(); // TODO (easy): use Agrona when available
     int waitingOnCount;
     boolean isDone;
 

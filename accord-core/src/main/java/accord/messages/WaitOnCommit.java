@@ -65,6 +65,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
         this.scope = scope;
     }
 
+    @Override
     public void process(Node node, Id replyToNode, ReplyContext replyContext)
     {
         this.node = node;

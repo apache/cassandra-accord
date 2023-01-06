@@ -26,6 +26,7 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
         this.covering = covering;
     }
 
+    @Override
     public PartialKeyRoute sliceStrict(Ranges newRanges)
     {
         if (!covering.containsAll(newRanges))
@@ -55,7 +56,7 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
     }
 
     @Override
-    public AbstractRoutableKeys<?> with(RoutingKey withKey)
+    public AbstractUnseekableKeys<?> with(RoutingKey withKey)
     {
         if (contains(withKey))
             return this;
@@ -63,6 +64,7 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
         return new RoutingKeys(toRoutingKeysArray(withKey));
     }
 
+    @Override
     public PartialKeyRoute slice(Ranges newRanges)
     {
         if (newRanges.containsAll(covering))
@@ -78,6 +80,7 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
         return covering;
     }
 
+    @Override
     public PartialKeyRoute union(PartialRoute<RoutingKey> with)
     {
         if (!(with instanceof PartialKeyRoute))

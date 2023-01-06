@@ -114,6 +114,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         node.reply(replyTo, replyContext, reply);
     }
 
+    @Override
     public void process()
     {
         node.mapReduceConsumeLocal(this, minEpoch, executeAt.epoch(), this);
@@ -220,6 +221,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
             this.someKey = someKey;
         }
 
+        @Override
         public void process()
         {
             node.mapReduceConsumeLocal(this, someKey, txnId.epoch(), this);

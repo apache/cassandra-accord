@@ -5,7 +5,7 @@ import accord.utils.SortedArrays;
 
 import static accord.utils.ArrayBuffers.cachedRoutingKeys;
 
-public class RoutingKeys extends AbstractRoutableKeys<AbstractRoutableKeys<?>> implements Unseekables<RoutingKey, AbstractRoutableKeys<?>>
+public class RoutingKeys extends AbstractUnseekableKeys<AbstractUnseekableKeys<?>> implements Unseekables<RoutingKey, AbstractUnseekableKeys<?>>
 {
     public static class SerializationSupport
     {
@@ -27,11 +27,13 @@ public class RoutingKeys extends AbstractRoutableKeys<AbstractRoutableKeys<?>> i
         return new RoutingKeys(sort(keys));
     }
 
-    public RoutingKeys union(AbstractRoutableKeys<?> that)
+    @Override
+    public RoutingKeys union(AbstractUnseekableKeys<?> that)
     {
         return wrap(SortedArrays.linearUnion(keys, that.keys, cachedRoutingKeys()), that);
     }
 
+    @Override
     public RoutingKeys with(RoutingKey with)
     {
         if (contains(with))
@@ -45,6 +47,7 @@ public class RoutingKeys extends AbstractRoutableKeys<AbstractRoutableKeys<?>> i
         return UnseekablesKind.RoutingKeys;
     }
 
+    @Override
     public RoutingKeys slice(Ranges ranges)
     {
         return wrap(slice(ranges, RoutingKey[]::new));

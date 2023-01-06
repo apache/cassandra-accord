@@ -90,13 +90,30 @@ public class ArrayBuffers
     public interface IntBufferAllocator
     {
         /**
-         * Return an {@code int[]} of size at least {@code minSize}, possibly from a pool
+         * Return an {@code int[]} of size at least {@code minSize}, possibly from a pool.
+         * This array may not be zero initialized, and its contents should be treated as random.
          */
         int[] getInts(int minSize);
     }
 
     public interface IntBuffers extends IntBufferAllocator
     {
+        /**
+         * Return an {@code int[]} of size at least {@code minSize}, possibly from a pool,
+         * and copy the contents of {@code copyAndDiscard} into it.
+         *
+         * The remainder of the array may not be zero-initialized, and should be assumed to contain random data.
+         *
+         * The parameter will be returned to the pool, if eligible.
+         */
+        default int[] resize(int[] copyAndDiscard, int usedSize, int minSize)
+        {
+            int[] newBuf = getInts(minSize);
+            System.arraycopy(copyAndDiscard, 0, newBuf, 0, usedSize);
+            forceDiscard(copyAndDiscard);
+            return newBuf;
+        }
+
         /**
          * To be invoked on the result buffer with the number of elements contained;
          * either the buffer will be returned and the size optionally captured, or else the result may be
@@ -134,29 +151,59 @@ public class ArrayBuffers
          * Indicate this buffer is definitely unused, and return it to a pool if possible
          * @return true if the buffer is discarded (and discard-able), false if it was retained
          */
-        boolean forceDiscard(int[] buffer, int usedSize);
+        boolean forceDiscard(int[] buffer);
     }
 
     public interface ObjectBuffers<T>
     {
         /**
-         * Return an {@code T[]} of size at least {@code minSize}, possibly from a pool
+         * Return an {@code T[]} of size at least {@code minSize}, possibly from a pool.
+         * This array will be null-initialized and can be assumed to be empty.
          */
         T[] get(int minSize);
+
+        /**
+         * Return an {@code T[]} of size at least {@code minSize}, possibly from a pool,
+         * and copy the contents of {@code copyAndDiscard} into it.
+         *
+         * The remainder of the array can be assumed to be null initialized.
+         *
+         * The parameter will be returned to the pool, if eligible.
+         */
+        default T[] resize(T[] copyAndDiscard, int usedSize, int minSize)
+        {
+            T[] newBuf = get(minSize);
+            System.arraycopy(copyAndDiscard, 0, newBuf, 0, usedSize);
+            forceDiscard(copyAndDiscard, usedSize);
+            return newBuf;
+        }
 
         /**
          * To be invoked on the result buffer with the number of elements contained;
          * either the buffer will be returned and the size optionally captured, or else the result may be
          * shrunk to the size of the contents, depending on implementation.
          */
-        T[] complete(T[] buffer, int size);
+        T[] complete(T[] buffer, int usedSize);
+
+        /**
+         * Equivalent to
+         *   int[] result = complete(buffer, usedSize);
+         *   discard(buffer, usedSize);
+         *   return result;
+         */
+        default T[] completeAndDiscard(T[] buffer, int usedSize)
+        {
+            T[] result = complete(buffer, usedSize);
+            discard(buffer, usedSize);
+            return result;
+        }
 
         /**
          * To be invoked on an input buffer that constitutes the result, with the number of elements it contained;
          * either the buffer will be returned and the size optionally captured, or else the result may be
          * shrunk to the size of the contents, depending on implementation.
          */
-        T[] completeWithExisting(T[] buffer, int size);
+        T[] completeWithExisting(T[] buffer, int usedSize);
 
         /**
          * The buffer is no longer needed by the caller, which is discarding the array;
@@ -172,7 +219,7 @@ public class ArrayBuffers
          *
          * @return true if the buffer is discarded (and discard-able), false if it was retained or is believed to be in use
          */
-        boolean discard(T[] buffer, int size);
+        boolean discard(T[] buffer, int usedSize);
 
         /**
          * Indicate this buffer is definitely unused, and return it to a pool if possible
@@ -181,7 +228,7 @@ public class ArrayBuffers
          *
          * @return true if the buffer is discarded (and discard-able), false if it was retained
          */
-        boolean forceDiscard(T[] buffer, int size);
+        boolean forceDiscard(T[] buffer, int usedSize);
 
         /**
          * Returns the {@code size} parameter provided to the most recent {@link #complete(Object[], int)} or {@link #completeWithExisting(Object[], int)}
@@ -216,11 +263,11 @@ public class ArrayBuffers
         @Override
         public boolean discard(int[] buffer, int usedSize)
         {
-            return forceDiscard(buffer, usedSize);
+            return forceDiscard(buffer);
         }
 
         @Override
-        public boolean forceDiscard(int[] buffer, int usedSize)
+        public boolean forceDiscard(int[] buffer)
         {
             // if FULLY_UNCACHED we want our caller to also not cache us, so we indicate the buffer has been retained
             return !FULLY_UNCACHED;
@@ -242,18 +289,18 @@ public class ArrayBuffers
         }
 
         @Override
-        public T[] complete(T[] buffer, int size)
+        public T[] complete(T[] buffer, int usedSize)
         {
-            if (size == buffer.length)
+            if (usedSize == buffer.length)
                 return buffer;
 
-            return Arrays.copyOf(buffer, size);
+            return Arrays.copyOf(buffer, usedSize);
         }
 
         @Override
-        public T[] completeWithExisting(T[] buffer, int size)
+        public T[] completeWithExisting(T[] buffer, int usedSize)
         {
-            return checkArgument(buffer, buffer.length == size);
+            return checkArgument(buffer, buffer.length == usedSize);
         }
 
         @Override
@@ -263,13 +310,13 @@ public class ArrayBuffers
         }
 
         @Override
-        public boolean discard(T[] buffer, int size)
+        public boolean discard(T[] buffer, int usedSize)
         {
-            return forceDiscard(buffer, size);
+            return forceDiscard(buffer, usedSize);
         }
 
         @Override
-        public boolean forceDiscard(T[] buffer, int size)
+        public boolean forceDiscard(T[] buffer, int usedSize)
         {
             // if FULLY_UNCACHED we want our caller to also not cache us, so we indicate the buffer has been retained
             return !FULLY_UNCACHED;
@@ -368,9 +415,9 @@ public class ArrayBuffers
         }
 
         @Override
-        public boolean forceDiscard(int[] buffer, int usedSize)
+        public boolean forceDiscard(int[] buffer)
         {
-            return discardInternal(buffer, buffer.length, usedSize, true);
+            return discardInternal(buffer, buffer.length, -1, true);
         }
 
         @Override
@@ -390,34 +437,37 @@ public class ArrayBuffers
             this.allocator = allocator;
         }
 
-        public T[] complete(T[] buffer, int size)
+        @Override
+        public T[] complete(T[] buffer, int usedSize)
         {
-            if (size == buffer.length)
+            if (usedSize == buffer.length)
                 return buffer;
 
-            return Arrays.copyOf(buffer, size);
+            return Arrays.copyOf(buffer, usedSize);
         }
 
         @Override
-        public T[] completeWithExisting(T[] buffer, int size)
+        public T[] completeWithExisting(T[] buffer, int usedSize)
         {
             return buffer;
         }
 
+        @Override
         public int lengthOfLast(T[] buffer)
         {
             return buffer.length;
         }
 
-        public boolean discard(T[] buffer, int size)
+        @Override
+        public boolean discard(T[] buffer, int usedSize)
         {
-            return discardInternal(buffer, buffer.length, size, false);
+            return discardInternal(buffer, buffer.length, usedSize, false);
         }
 
         @Override
-        public boolean forceDiscard(T[] buffer, int size)
+        public boolean forceDiscard(T[] buffer, int usedSize)
         {
-            return discardInternal(buffer, buffer.length, size, true);
+            return discardInternal(buffer, buffer.length, usedSize, true);
         }
 
         @Override
@@ -455,16 +505,16 @@ public class ArrayBuffers
         }
 
         @Override
-        public T[] complete(T[] buffer, int size)
+        public T[] complete(T[] buffer, int usedSize)
         {
-            length = size;
+            length = usedSize;
             return buffer;
         }
 
         @Override
-        public T[] completeWithExisting(T[] buffer, int size)
+        public T[] completeWithExisting(T[] buffer, int usedSize)
         {
-            length = size;
+            length = usedSize;
             return buffer;
         }
 
@@ -477,16 +527,16 @@ public class ArrayBuffers
         }
 
         @Override
-        public boolean discard(T[] buffer, int size)
+        public boolean discard(T[] buffer, int usedSize)
         {
             return true;
         }
 
         @Override
-        public boolean forceDiscard(T[] buffer, int size)
+        public boolean forceDiscard(T[] buffer, int usedSize)
         {
             length = -1;
-            if (!objs.forceDiscard(buffer, size))
+            if (!objs.forceDiscard(buffer, usedSize))
                 return false;
 
             return discardInternal(buffer);
@@ -513,6 +563,7 @@ public class ArrayBuffers
             return true;
         }
 
+        @Override
         public int lengthOfLast(T[] buffer)
         {
             if (length == -1)
@@ -561,9 +612,9 @@ public class ArrayBuffers
         }
 
         @Override
-        public boolean forceDiscard(int[] buffer, int usedSize)
+        public boolean forceDiscard(int[] buffer)
         {
-            if (!ints.forceDiscard(buffer, usedSize))
+            if (!ints.forceDiscard(buffer))
                 return false;
 
             if (savedInts != null && savedInts.length >= buffer.length)

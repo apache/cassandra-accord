@@ -61,7 +61,6 @@ public interface SafeCommandStore
     void forEach(Routables<?, ?> keys, Ranges slice, Consumer<CommandsForKey> forEach);
     void forEach(Routable keyOrRange, Ranges slice, Consumer<CommandsForKey> forEach);
 
-
     CommandStore commandStore();
     DataStore dataStore();
     Agent agent();

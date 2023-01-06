@@ -109,7 +109,8 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, PartialDeps.NONE),
+            PartialDeps expectedDeps = new PartialDeps(Ranges.of(range(0, 12)), KeyDeps.NONE, RangeDeps.NONE);
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
         finally
@@ -168,7 +169,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID3, messageSink.responses.get(0).to);
-            PartialDeps expectedDeps = Deps.NONE.slice(ranges(range(0, 12)));
+            PartialDeps expectedDeps = new PartialDeps(Ranges.of(range(0, 12)), KeyDeps.NONE, RangeDeps.NONE);
             Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId2, Timestamp.fromValues(1, 110, ID1), expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
@@ -199,7 +200,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            PartialDeps expectedDeps = PartialDeps.NONE;
+            PartialDeps expectedDeps = new PartialDeps(Ranges.of(range(0, 12)), KeyDeps.NONE, RangeDeps.NONE);
             Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
@@ -237,7 +238,8 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, Timestamp.fromValues(2, 110, ID1), Deps.NONE.slice(ranges(range(0, 12)))),
+            PartialDeps expectedDeps = new PartialDeps(Ranges.of(range(0, 12)), KeyDeps.NONE, RangeDeps.NONE);
+            Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, Timestamp.fromValues(2, 110, ID1), expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
         finally
