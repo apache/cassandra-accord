@@ -65,7 +65,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
 
     private static class EpochHistory
     {
-        // TODO: move pendingEpochs / FetchTopology into here?
+        // TODO (low priority): move pendingEpochs / FetchTopology into here?
         private final List<EpochState> epochs = new ArrayList<>();
 
         private long lastReceived = 0;

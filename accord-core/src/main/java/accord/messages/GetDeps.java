@@ -50,7 +50,6 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
     @Override
     public PartialDeps apply(SafeCommandStore instance)
     {
-        // TODO: shrink ranges to those that intersect key
         Ranges ranges = instance.ranges().between(minEpoch, executeAt.epoch);
         return calculatePartialDeps(instance, txnId, keys, kind, executeAt, ranges);
     }

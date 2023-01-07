@@ -19,7 +19,7 @@
 package accord.utils;
 
 /**
- * TODO COPIED FROM CASSANDRA
+ * TODO (low priority): COPIED FROM CASSANDRA
  */
 public abstract class IntrusiveLinkedListNode
 {

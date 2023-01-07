@@ -54,6 +54,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+// TODO (low priority): efficiency
 public class InMemoryCommandStore
 {
     public static abstract class State implements SafeCommandStore
@@ -84,7 +85,7 @@ public class InMemoryCommandStore
             return commands.get(txnId);
         }
 
-        // TODO (soon): mimic caching to test C* behaviour
+        // TODO (required): mimic caching to test C* behaviour
         public Command ifLoaded(TxnId txnId)
         {
             return commands.get(txnId);
@@ -227,7 +228,6 @@ public class InMemoryCommandStore
                 default:
                     throw new AssertionError();
                 case Key:
-                    // TODO: efficiency
                     AbstractKeys<Key, ?> keys = (AbstractKeys<Key, ?>) keysOrRanges;
                     return keys.stream()
                             .filter(slice::contains)
@@ -235,7 +235,6 @@ public class InMemoryCommandStore
                             .map(map)
                             .reduce(initialValue, reduce);
                 case Range:
-                    // TODO: efficiency
                     Ranges ranges = (Ranges) keysOrRanges;
                     return ranges.slice(slice).stream().flatMap(range ->
                             commandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive()).values().stream()
@@ -254,7 +253,6 @@ public class InMemoryCommandStore
                     break;
                 case Range:
                     Ranges ranges = (Ranges) keysOrRanges;
-                    // TODO: zero allocation
                     ranges.slice(slice).forEach(range -> {
                         commandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive())
                                 .values().forEach(forEach);
@@ -274,7 +272,6 @@ public class InMemoryCommandStore
                     break;
                 case Range:
                     Range range = (Range) keyOrRange;
-                    // TODO: zero allocation
                     Ranges.of(range).slice(slice).forEach(r -> {
                         commandsForKey.subMap(r.start(), r.startInclusive(), r.end(), r.endInclusive())
                                 .values().forEach(forEach);

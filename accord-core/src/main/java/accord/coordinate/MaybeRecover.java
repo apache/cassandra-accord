@@ -69,7 +69,7 @@ public class MaybeRecover extends CheckShards
 
     public boolean hasMadeProgress(CheckStatusOk ok)
     {
-        return ok != null && (ok.isCoordinating // TODO (now): make this coordinatingSince so can be pre-empted by others if stuck
+        return ok != null && (ok.isCoordinating // TODO (required, liveness): make this coordinatingSince so can be pre-empted by others if stuck
                               || ok.toProgressToken().compareTo(prevProgress) > 0);
     }
 
@@ -106,7 +106,7 @@ public class MaybeRecover extends CheckShards
                     break;
 
                 case InvalidationApplied:
-                    // TODO: we should simply invoke commitInvalidate
+                    // TODO (easy, efficiency): we should simply invoke commitInvalidate
                     Unseekables<?, ?> someKeys = reduceNonNull(Unseekables::merge, (Unseekables)contact, merged.route, route);
                     Invalidate.invalidate(node, txnId, someKeys.with(homeKey), callback);
             }

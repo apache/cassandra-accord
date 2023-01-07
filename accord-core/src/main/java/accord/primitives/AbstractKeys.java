@@ -16,7 +16,7 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 import static accord.primitives.Routable.Kind.Key;
 
 @SuppressWarnings("rawtypes")
-// TODO: check that foldl call-sites are inlined and optimised by HotSpot
+// TODO (desired, efficiency): check that foldl call-sites are inlined and optimised by HotSpot
 public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K, ?>> implements Iterable<K>, Routables<K, KS>
 {
     final K[] keys;
@@ -72,9 +72,8 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     }
 
     @Override
-    public boolean intersects(AbstractRanges<?> ranges)
+    public final boolean intersects(AbstractRanges<?> ranges)
     {
-        // TODO (now): make this final
         return ranges.intersects(this);
     }
 
@@ -144,7 +143,7 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
         return stream().map(Object::toString).collect(Collectors.joining(",", "[", "]"));
     }
 
-    // TODO (now): accept cached buffers
+    // TODO (expected, efficiency): accept cached buffers
     protected K[] slice(Ranges ranges, IntFunction<K[]> factory)
     {
         return SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareTo(k), Range::compareTo);

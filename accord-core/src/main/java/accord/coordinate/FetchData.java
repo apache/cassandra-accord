@@ -18,7 +18,7 @@ import static accord.local.Status.Outcome.OutcomeUnknown;
 /**
  * Find data and persist locally
  *
- * TODO accept lower bound epoch to avoid fetching data we should already have
+ * TODO (desired, efficiency): accept lower bound epoch to avoid fetching data we should already have
  */
 public class FetchData
 {

@@ -64,7 +64,7 @@ public class CheckOn extends CheckShards
 
     CheckOn(Node node, Known sufficient, TxnId txnId, Route<?> route, Unseekables<?, ?> routeWithHomeKey, long srcEpoch, long untilLocalEpoch, BiConsumer<? super CheckStatusOkFull, Throwable> callback)
     {
-        // TODO (soon): restore behaviour of only collecting info if e.g. Committed or Executed
+        // TODO (desired, efficiency): restore behaviour of only collecting info if e.g. Committed or Executed
         super(node, txnId, routeWithHomeKey, srcEpoch, IncludeInfo.All);
         Preconditions.checkArgument(routeWithHomeKey.contains(route.homeKey()));
         this.sufficient = sufficient;
@@ -73,7 +73,7 @@ public class CheckOn extends CheckShards
         this.untilLocalEpoch = untilLocalEpoch;
     }
 
-    // TODO: many callers only need to consult precisely executeAt.epoch remotely
+    // TODO (required, consider): many callers only need to consult precisely executeAt.epoch remotely
     public static CheckOn checkOn(Known sufficientStatus, Node node, TxnId txnId, Route<?> route, long srcEpoch, long untilLocalEpoch, BiConsumer<? super CheckStatusOkFull, Throwable> callback)
     {
         CheckOn checkOn = new CheckOn(node, sufficientStatus, txnId, route, srcEpoch, untilLocalEpoch, callback);

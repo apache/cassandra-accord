@@ -157,16 +157,16 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
         }
     }
 
-    // TODO: abstract the candidate selection process so the implementation may prioritise based on distance/health etc
-    final Set<Id> inflight;    // TODO: use Agrona's IntHashSet as soon as Node.Id switches from long to int
-    final List<Id> candidates; // TODO: use Agrona's IntArrayList as soon as Node.Id switches from long to int
-    private Set<Id> slow;      // TODO: use Agrona's IntHashSet as soon as Node.Id switches from long to int
+    // TODO (required): abstract the candidate selection process so the implementation may prioritise based on distance/health etc
+    final Set<Id> inflight;    // TODO (easy, efficiency): use Agrona's IntHashSet as soon as Node.Id switches from long to int
+    final List<Id> candidates; // TODO (easy, efficiency): use Agrona's IntArrayList as soon as Node.Id switches from long to int
+    private Set<Id> slow;      // TODO (easy, efficiency): use Agrona's IntHashSet as soon as Node.Id switches from long to int
     protected int waitingOnData;
 
     public ReadTracker(Topologies topologies)
     {
         super(topologies, ReadShardTracker[]::new, ReadShardTracker::new);
-        this.candidates = new ArrayList<>(topologies.nodes()); // TODO: copyOfNodesAsList to avoid unnecessary copies
+        this.candidates = new ArrayList<>(topologies.nodes()); // TODO (low priority, efficiency): copyOfNodesAsList to avoid unnecessary copies
         this.inflight = newHashSetWithExpectedSize(maxShardsPerEpoch());
         this.waitingOnData = waitingOnShards;
     }
@@ -256,7 +256,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
 
         Invariants.checkState(toRead != null, "We were asked to read more, but found no shards in need of reading more");
 
-        // TODO: maybe for each additional candidate do one linear compare run to find better secondary match
+        // TODO (desired, consider): maybe for each additional candidate do one linear compare run to find better secondary match
         //       OR at least discount candidates that do not contribute additional knowledge beyond those additional
         //       candidates already contacted, since implementations are likely to sort primarily by health
         candidates.sort((a, b) -> topologies().compare(a, b, toRead));

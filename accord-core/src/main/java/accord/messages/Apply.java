@@ -53,7 +53,6 @@ public class Apply extends TxnRequest<ApplyReply>
     {
         super(to, sendTo, route, txnId);
         this.untilEpoch = untilEpoch;
-        // TODO: we shouldn't send deps unless we need to (but need to implement fetching them if they're not present)
         Ranges slice = applyTo == sendTo ? scope.covering() : applyTo.computeRangesForNode(to);
         this.deps = deps.slice(slice);
         this.executeAt = executeAt;

@@ -166,7 +166,7 @@ public class Invalidate implements Callback<InvalidateReply>
                 case ReadyToExecute:
                 case PreApplied:
                 case Applied:
-                    // TODO: if we see Committed or above, go straight to Execute if we have assembled enough information
+                    // TODO (desired, efficiency): if we see Committed or above, go straight to Execute if we have assembled enough information
                     if (route != null)
                     {
                         // The data we see might have made it only to a minority in the event of PreAccept ONLY.
@@ -218,7 +218,7 @@ public class Invalidate implements Callback<InvalidateReply>
                     return;
 
                 case Invalidated:
-                    // TODO: standardise semantics of async/sync local application prior to callback
+                    // TODO (desired, API consistency): standardise semantics of whether local application of state prior is async or sync to callback
                     isDone = true;
                     commitInvalidate();
                     return;
@@ -227,13 +227,13 @@ public class Invalidate implements Callback<InvalidateReply>
 
         // if we have witnessed the transaction, but are able to invalidate, do we want to proceed?
         // Probably simplest to do so, but perhaps better for user if we don't.
-        // TODO (RangeTxns): This should be a Routable, or we should guarantee it is safe to operate on any key in the range
+        // TODO (now, rangetxns): This should be a Routable, or we should guarantee it is safe to operate on any key in the range
         RoutingKey invalidateWithKey = invalidateWith.slice(Ranges.of(tracker.promisedShard().range)).get(0).someIntersectingRoutingKey();
         proposeInvalidate(node, ballot, txnId, invalidateWithKey, (success, fail) -> {
-            /**
-             * We're now inside our *exactly once* callback we registered with proposeInvalidate, and we need to
-             * make sure we honour our own exactly once semantics with {@code callback}.
-             * So we are responsible for all exception handling.
+            /*
+              We're now inside our *exactly once* callback we registered with proposeInvalidate, and we need to
+              make sure we honour our own exactly once semantics with {@code callback}.
+              So we are responsible for all exception handling.
              */
             isDone = true;
             if (fail != null)
@@ -257,15 +257,15 @@ public class Invalidate implements Callback<InvalidateReply>
     private void commitInvalidate()
     {
         @Nullable Route<?> route = InvalidateReply.mergeRoutes(replies);
-        // TODO: commitInvalidate (and others) should skip the network for local applications,
+        // TODO (desired, efficiency): commitInvalidate (and others) should skip the network for local applications,
         //  so we do not need to explicitly do so here before notifying the waiter
         Commit.Invalidate.commitInvalidate(node, txnId, route != null ? Unseekables.merge(route, (Unseekables)invalidateWith) : invalidateWith, txnId);
-        // TODO: pick a reasonable upper bound, so we don't invalidate into an epoch/commandStore that no longer cares about this command
+        // TODO (required, consider): pick a reasonable upper bound, so we don't invalidate into an epoch/commandStore that no longer cares about this command
         node.forEachLocalSince(contextFor(txnId), invalidateWith, txnId, safeStore -> {
             safeStore.command(txnId).commitInvalidate(safeStore);
         }).addCallback((s, f) -> {
             callback.accept(INVALIDATED, null);
-            if (f != null) // TODO: consider exception handling more carefully: should we catch these prior to passing to callbacks?
+            if (f != null) // TODO (required): consider exception handling more carefully: should we catch these prior to passing to callbacks?
                 node.agent().onUncaughtException(f);
         });
     }

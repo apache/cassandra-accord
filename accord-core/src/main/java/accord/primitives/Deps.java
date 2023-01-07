@@ -40,7 +40,7 @@ import static accord.utils.SortedArrays.Search.FAST;
  * A collection of dependencies for a transaction, organised by the key the dependency is adopted via.
  * An inverse map from TxnId to Key may also be constructed and stored in this collection.
  */
-// TODO: switch to RoutingKey? Would mean adopting execution dependencies less precisely
+// TODO (desired, consider): switch to RoutingKey? Would mean adopting execution dependencies less precisely, but saving ser/deser of large keys
 public class Deps implements Iterable<Map.Entry<Key, TxnId>>
 {
     private static final boolean DEBUG_CHECKS = true;
@@ -84,7 +84,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         return new OrderedBuilder(hasOrderedTxnId);
     }
 
-    // TODO: cache this object to reduce setup/teardown and allocation
+    // TODO (expected, efficiency): cache this object per thread
     public static abstract class AbstractOrderedBuilder<T extends Deps> implements AutoCloseable
     {
         final ObjectBuffers<TxnId> cachedTxnIds = cachedTxnIds();
@@ -152,7 +152,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
 
             if (totalCount != keyOffset && !hasOrderedTxnId)
             {
-                // TODO: this allocates a significant amount of memory: would be preferable to be able to sort using a pre-defined scratch buffer
+                // TODO (low priority, efficiency): this allocates a significant amount of memory: would be preferable to be able to sort using a pre-defined scratch buffer
                 Arrays.sort(keyToTxnId, keyOffset, totalCount);
                 for (int i = keyOffset + 1 ; i < totalCount ; ++i)
                 {
@@ -411,7 +411,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
     }
 
     final Keys keys; // unique Keys
-    final TxnId[] txnIds; // unique TxnId TODO: this should perhaps be a BTree?
+    final TxnId[] txnIds; // unique TxnId TODO (low priority, efficiency): this could be a BTree?
 
     /**
      * This represents a map of {@code Key -> [TxnId] } where each TxnId is actually a pointer into the txnIds array.
@@ -445,7 +445,6 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
             checkValid();
     }
 
-    // TODO: offer option of computing the maximal KeyRanges that covers the same set of keys as covered by the parameter
     public PartialDeps slice(Ranges ranges)
     {
         if (isEmpty())
@@ -594,9 +593,9 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         return true;
     }
 
-    // TODO: this method supports merging keyToTxnId OR txnIdToKey; we can perhaps save time and effort when constructing
-    //       Deps on remote hosts by only producing txnIdToKey with OrderedCollector and serializing only this,
-    //       and merging on the recipient before inverting, so that we only have to invert the final assembled deps
+    // TODO (low priority, efficiency): this method supports merging keyToTxnId OR txnIdToKey; we can perhaps save time
+    //  and effort when constructing Deps on remote hosts by only producing txnIdToKey with OrderedCollector and serializing
+    //  only this, and merging on the recipient before inverting, so that we only have to invert the final assembled deps
     private static <K extends Comparable<? super K>, V extends Comparable<? super V>, T>
     T linearUnion(K[] leftKeys, int leftKeysLength, V[] leftValues, int leftValuesLength, int[] left, int leftLength,
                   K[] rightKeys, int rightKeysLength, V[] rightValues, int rightValuesLength, int[] right, int rightLength,
@@ -609,7 +608,6 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
 
         try
         {
-            // TODO: this is a little clunky for getting back the buffer and its length
             outKeys = SortedArrays.linearUnion(leftKeys, leftKeysLength, rightKeys, rightKeysLength, keyBuffers);
             outKeysLength = keyBuffers.lengthOfLast(outKeys);
             outValues = SortedArrays.linearUnion(leftValues, leftValuesLength, rightValues, rightValuesLength, valueBuffers);
@@ -878,7 +876,6 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         return result;
     }
 
-    // TODO: optimise for case where none removed
     public Deps without(Predicate<TxnId> remove)
     {
         if (isEmpty())
@@ -1077,8 +1074,8 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
         // Find all keys within the ranges, but record existence within an int64 bitset.  Since the bitset is limited
         // to 64, this search must be called multiple times searching for different TxnIds in txnIds; this also has
         // the property that forEach is called in TxnId order.
-        //TODO Should TxnId order be part of the public docs or just a hidden implementation detail?  The only caller
-        // does not rely on this ordering.
+        //TODO (expected, efficiency): reconsider this, probably not worth trying to save allocations at cost of multiple loop
+        //                             use BitSet, or perhaps extend so we can have no nested allocations when few bits
         for (int offset = 0 ; offset < txnIds.length ; offset += 64)
         {
             long bitset = Routables.foldl(keys, ranges, (key, off, value, keyIndex) -> {
@@ -1086,7 +1083,7 @@ public class Deps implements Iterable<Map.Entry<Key, TxnId>>
                 int end = endOffset(keyIndex);
                 if (off > 0)
                 {
-                    // TODO: interpolation search probably great here
+                    // TODO (low priority, efficiency): interpolation search probably great here
                     index = Arrays.binarySearch(keyToTxnId, index, end, (int)off);
                     if (index < 0)
                         index = -1 - index;

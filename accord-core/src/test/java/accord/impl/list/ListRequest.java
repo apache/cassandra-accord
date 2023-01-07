@@ -102,7 +102,7 @@ public class ListRequest implements Request
         @Override
         public void accept(Result success, Throwable fail)
         {
-            // TODO: error handling
+            // TODO (desired, testing): error handling
             if (success != null)
             {
                 node.reply(client, replyContext, (ListResult) success);

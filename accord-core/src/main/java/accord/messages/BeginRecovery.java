@@ -123,7 +123,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
             if (!rejectsFastPath)
                 rejectsFastPath = committedExecutesAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys()).anyMatch(ignore -> true);
 
-            // TODO: introduce some good unit tests for verifying these two functions in a real repair scenario
+            // TODO (expected, testing): introduce some good unit tests for verifying these two functions in a real repair scenario
             // committed txns with an earlier txnid and have our txnid as a dependency
             earlierCommittedWitness = committedStartedBeforeAndWitnessed(safeStore, txnId, ranges, partialTxn.keys());
 
@@ -136,8 +136,8 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
     @Override
     public RecoverReply reduce(RecoverReply r1, RecoverReply r2)
     {
-        // TODO: should not operate on dependencies directly here, as we only merge them;
-        //       should have a cheaply mergeable variant (or should collect them before merging)
+        // TODO (low priority, efficiency): should not operate on dependencies directly here, as we only merge them;
+        //                                  want a cheaply mergeable variant (or should collect them before merging)
 
         if (!r1.isOk()) return r1;
         if (!r2.isOk()) return r2;
@@ -213,7 +213,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
 
     public static class RecoverOk extends RecoverReply
     {
-        public final TxnId txnId; // TODO for debugging?
+        public final TxnId txnId; // for debugging
         public final Status status;
         public final Ballot accepted;
         public final Timestamp executeAt;

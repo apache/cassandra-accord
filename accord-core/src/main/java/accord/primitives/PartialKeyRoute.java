@@ -55,13 +55,6 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
     }
 
     @Override
-    public boolean intersects(AbstractRanges<?> ranges)
-    {
-        // TODO (now): remove this in favour of parent implementation - ambiguous at present
-        return ranges.intersects(covering);
-    }
-
-    @Override
     public AbstractRoutableKeys<?> with(RoutingKey withKey)
     {
         if (contains(withKey))

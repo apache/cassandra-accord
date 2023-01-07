@@ -31,7 +31,6 @@ import com.google.gson.stream.JsonWriter;
 
 import static accord.utils.Utils.toArray;
 
-// TODO: abstract
 public class Value
 {
     public static final Value EMPTY = new Value();

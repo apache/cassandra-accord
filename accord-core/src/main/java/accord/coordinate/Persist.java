@@ -92,7 +92,7 @@ public class Persist implements Callback<ApplyReply>
                 {
                     if (!isDone)
                     {
-                        // TODO: send to non-home replicas also, so they may clear their log more easily?
+                        // TODO (low priority, consider, efficiency): send to non-home replicas also, so they may clear their log more easily?
                         Shard homeShard = node.topology().forEpochIfKnown(route.homeKey(), txnId.epoch);
                         node.send(homeShard, new InformHomeDurable(txnId, route.homeKey(), executeAt, Durable, persistedOn));
                         isDone = true;
@@ -106,7 +106,7 @@ public class Persist implements Callback<ApplyReply>
                 break;
             case Insufficient:
                 Topologies topologies = node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
-                // TODO (review with Ariel): use static method in Commit
+                // TODO (easy, cleanup): use static method in Commit
                 node.send(from, new Commit(Kind.Maximal, from, topologies.forEpoch(txnId.epoch), topologies, txnId, txn, route, null, executeAt, deps, false));
         }
     }
@@ -114,7 +114,7 @@ public class Persist implements Callback<ApplyReply>
     @Override
     public void onFailure(Id from, Throwable failure)
     {
-        // TODO: send knowledge of partial persistence?
+        // TODO (desired, consider): send knowledge of partial persistence?
     }
 
     @Override

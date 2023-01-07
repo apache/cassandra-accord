@@ -58,7 +58,7 @@ public interface PreLoadContext
         switch (keysOrRanges.kindOfContents())
         {
             default: throw new AssertionError();
-            case Range: return contextFor(txnId); // TODO (soon): this won't work for actual range queries
+            case Range: return contextFor(txnId); // TODO (required, correctness): this won't work for actual range queries
             case Key: return contextFor(Collections.singleton(txnId), keysOrRanges);
         }
     }

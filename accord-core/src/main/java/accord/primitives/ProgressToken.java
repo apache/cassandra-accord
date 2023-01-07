@@ -50,7 +50,6 @@ public class ProgressToken implements Comparable<ProgressToken>, Outcome
     {
         Durability durability = this.durability.compareTo(that.durability) >= 0 ? this.durability : that.durability;
         Status status = this.status.compareTo(that.status) >= 0 ? this.status : that.status;
-        // TODO: slightly inefficient
         Ballot promised = this.promised.compareTo(that.promised) >= 0 ? this.promised : that.promised;
         boolean isAccepted = (this.isAccepted && this.promised.equals(promised)) || (that.isAccepted && that.promised.equals(promised));
         if (isSame(durability, status, promised, isAccepted))

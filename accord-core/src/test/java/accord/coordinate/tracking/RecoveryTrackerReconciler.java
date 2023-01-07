@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Assertions;
 import java.util.ArrayList;
 import java.util.Random;
 
-// TODO: check fast path accounting
+// TODO (required, testing): check fast path accounting
 public class RecoveryTrackerReconciler extends TrackerReconciler<RecoveryShardTracker, RecoveryTracker, RecoveryTrackerReconciler.Rsp>
 {
     enum Rsp { FAST, SLOW, FAIL }

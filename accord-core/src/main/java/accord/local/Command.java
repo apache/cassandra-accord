@@ -72,11 +72,10 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
     public abstract TxnId txnId();
 
-    // TODO (now): pack this into TxnId
     public abstract Kind kind();
     public abstract void setKind(Kind kind);
 
-    // TODO (now): should any of these calls be replaced by corresponding known() registers?
+    // TODO (desirable, API consistency): should any of these calls be replaced by corresponding known() registers?
     public boolean hasBeen(Status status)
     {
         return status().hasBeen(status);
@@ -120,9 +119,6 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
      * so that there is only one copy per node that can be consulted to construct the full set of involved keys.
      *
      * If hasBeen(Committed) this must contain the keys for both txnId.epoch and executeAt.epoch
-     *
-     * TODO: maybe set this for all local shards, but slice to only those participating keys
-     * (would probably need to remove hashIntersects)
      */
     public abstract @Nullable Route<?> route();
     protected abstract void setRoute(Route<?> route);
@@ -193,7 +189,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     @Override
     public Seekables<?, ?> keys()
     {
-        // TODO (now): when do we need this, and will it always be sufficient?
+        // TODO (expected, consider): when do we need this, and will it always be sufficient?
         return partialTxn().keys();
     }
 
@@ -265,7 +261,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         }
         else
         {
-            // TODO: in the case that we are pre-committed but had not been preaccepted/accepted, should we inform progressLog?
+            // TODO (expected, ?): in the case that we are pre-committed but had not been preaccepted/accepted, should we inform progressLog?
             setSaveStatus(SaveStatus.enrich(saveStatus(), DefinitionOnly));
         }
         set(safeStore, Ranges.EMPTY, coordinateRanges, shard, route, partialTxn, Set, null, Ignore);
@@ -373,7 +369,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         }
 
         Ranges coordinateRanges = coordinateRanges(safeStore);
-        // TODO (now): consider ranges between coordinateRanges and executeRanges? Perhaps don't need them
+        // TODO (expected, consider): consider ranges between coordinateRanges and executeRanges? Perhaps don't need them
         Ranges executeRanges = executeRanges(safeStore, executeAt);
         ProgressShard shard = progressShard(safeStore, route, progressKey, coordinateRanges);
 
@@ -389,7 +385,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
         safeStore.progressLog().committed(this, shard);
 
-        // TODO (now): introduce intermediate status to avoid reentry when notifying listeners (which might notify us)
+        // TODO (expected, safety): introduce intermediate status to avoid reentry when notifying listeners (which might notify us)
         maybeExecute(safeStore, shard, true, true);
         return CommitOutcome.Success;
     }
@@ -438,9 +434,10 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                             break;
                         case PreCommitted:
                         case Committed:
-                            // TODO: split into ReadyToRead and ReadyToWrite;
-                            //       the distributed read can be performed as soon as those keys are ready, and in parallel with any other reads
-                            //       the client can even ACK immediately after; only the write needs to be postponed until other in-progress reads complete
+                            // TODO (desired, efficiency): split into ReadyToRead and ReadyToWrite;
+                            //                             the distributed read can be performed as soon as those keys are ready,
+                            //                             and in parallel with any other reads. the client can even ACK immediately after;
+                            //                             only the write needs to be postponed until other in-progress reads complete
                         case ReadyToExecute:
                         case PreApplied:
                         case Applied:
@@ -454,7 +451,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         }
     }
 
-    // TODO (now): commitInvalidate may need to update cfks _if_ possible
+    // TODO (expected, ?): commitInvalidate may need to update cfks _if_ possible
     public void commitInvalidate(SafeCommandStore safeStore)
     {
         if (hasBeen(PreCommitted))
@@ -501,7 +498,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         ProgressShard shard = progressShard(safeStore, route, coordinateRanges);
 
         if (!validate(coordinateRanges, executeRanges, shard, route, Check, null, Check, partialDeps, hasBeen(Committed) ? Add : TrySet))
-            return ApplyOutcome.Insufficient; // TODO: this should probably be an assertion failure if !TrySet
+            return ApplyOutcome.Insufficient; // TODO (expected, consider): this should probably be an assertion failure if !TrySet
 
         setWrites(writes);
         setResult(result);
@@ -582,9 +579,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         return partialTxn().read(safeStore, this);
     }
 
-    // TODO: maybe split into maybeExecute and maybeApply?
-    // TODO (performance): If we are a no-op on this shard, just immediately apply.
-    //      NOTE: if we ever do transitive dependency elision this could be dangerous
+    // TODO (expected, API consistency): maybe split into maybeExecute and maybeApply?
     private boolean maybeExecute(SafeCommandStore safeStore, ProgressShard shard, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
     {
         if (logger.isTraceEnabled())
@@ -610,7 +605,6 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         switch (status())
         {
             case Committed:
-                // TODO: maintain distinct ReadyToRead and ReadyToWrite states
                 setStatus(ReadyToExecute);
                 logger.trace("{}: set to ReadyToExecute", txnId());
                 safeStore.progressLog().readyToExecute(this, shard);
@@ -625,6 +619,8 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                 }
                 else
                 {
+                    // TODO (desirable, performance): This could be performed immediately upon Committed
+                    //      but: if we later support transitive dependency elision this could be dangerous
                     logger.trace("{}: applying no-op", txnId());
                     setStatus(Applied);
                     notifyListeners(safeStore);
@@ -644,7 +640,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         {
             logger.trace("{}: {} is invalidated. Stop listening and removing from waiting on commit set.", txnId(), dependency.txnId());
             dependency.removeListener(this);
-            removeWaitingOnCommit(dependency.txnId()); // TODO (now): this was missing in partial-replication; might be redundant?
+            removeWaitingOnCommit(dependency.txnId());
             return true;
         }
         else if (dependency.executeAt().compareTo(executeAt()) > 0)
@@ -819,10 +815,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
      *
      * Note that for ProgressLog purposes the "home shard" is the shard as of txnId.epoch.
      * For recovery purposes the "home shard" is as of txnId.epoch until Committed, and executeAt.epoch once Executed
-     *
-     * TODO: Markdown documentation explaining the home shard and local shard concepts
      */
-
     public final void homeKey(RoutingKey homeKey)
     {
         RoutingKey current = homeKey();
@@ -1007,7 +1000,6 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         if (shard.isProgress()) setRoute(Route.merge(route(), (Route)route));
         else setRoute(Route.merge(route(), (Route)route.slice(allRanges)));
 
-        // TODO (soon): stop round-robin hashing; partition only on ranges
         switch (ensurePartialTxn)
         {
             case Add:
@@ -1018,7 +1010,6 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                 {
                     partialTxn = partialTxn.slice(allRanges, shard.isHome());
                     Routables.foldlMissing((Seekables)partialTxn.keys(), partialTxn().keys(), (keyOrRange, p, v, i) -> {
-                        // TODO: duplicate application of ranges
                         safeStore.forEach(keyOrRange, allRanges, forKey -> forKey.register(this));
                         return v;
                     }, 0, 0, 1);
@@ -1030,9 +1021,9 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             case TrySet:
                 setKind(partialTxn.kind());
                 setPartialTxn(partialTxn = partialTxn.slice(allRanges, shard.isHome()));
-                // TODO: duplicate application of ranges
+                // TODO (expected, efficiency): we may register the same ranges more than once
                 safeStore.forEach(partialTxn.keys(), allRanges, forKey -> {
-                    // TODO: no need to register on PreAccept if already Accepted
+                    // TODO (desirable, efficiency): no need to register on PreAccept if already Accepted
                     forKey.register(this);
                 });
                 break;
@@ -1134,7 +1125,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         return true;
     }
 
-    // TODO: callers should try to consult the local progress shard (if any) to obtain the full set of keys owned locally
+    // TODO (low priority, progress): callers should try to consult the local progress shard (if any) to obtain the full set of keys owned locally
     public Route<?> someRoute()
     {
         if (route() != null)
@@ -1196,8 +1187,8 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         return txn != null && txn.query() != null;
     }
 
-    // TODO: this is an ugly hack, need to encode progress/homeKey/Route state combinations much more clearly
-    //  (perhaps introduce encapsulating class representing each possible arrangement)
+    // TODO (low priority, API): this is an ugly hack, need to encode progress/homeKey/Route state combinations much more clearly
+    //                           (perhaps introduce encapsulating class representing each possible arrangement)
     static class NoProgressKey implements RoutingKey
     {
         @Override
@@ -1205,7 +1196,6 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         {
             throw new UnsupportedOperationException();
         }
-
     }
 
     private static final NoProgressKey NO_PROGRESS_KEY = new NoProgressKey();

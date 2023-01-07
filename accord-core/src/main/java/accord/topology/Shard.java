@@ -33,11 +33,11 @@ import com.google.common.collect.Iterables;
 
 import static accord.utils.Invariants.checkArgument;
 
-// TODO: concept of region/locality
+// TODO (expected, efficiency): concept of region/locality
 public class Shard
 {
     public final Range range;
-    // TODO: use BTreeSet to combine these two (or introduce version that operates over long values)
+    // TODO (desired, clarity): use BTreeSet to combine these two (or introduce version that operates over long values)
     public final List<Id> nodes;
     public final Set<Id> nodeSet;
     public final Set<Id> fastPathElectorate;

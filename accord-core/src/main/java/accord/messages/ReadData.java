@@ -29,7 +29,6 @@ import accord.local.*;
 import accord.api.Data;
 import accord.topology.Topologies;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,7 +41,7 @@ import static accord.messages.ReadData.ReadNack.Redundant;
 import static accord.messages.TxnRequest.*;
 import static accord.utils.MapReduceConsume.forEach;
 
-// TODO (soon): dedup - can currently have infinite pending reads that will be executed independently
+// TODO (required, efficiency): dedup - can currently have infinite pending reads that will be executed independently
 public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements CommandListener
 {
     private static final Logger logger = LoggerFactory.getLogger(ReadData.class);
@@ -56,10 +55,10 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
     }
 
     public final long executeAtEpoch;
-    public final Seekables<?, ?> readScope; // TODO: this should be RoutingKeys as we have the Keys locally - but for simplicity for now we use Keys to implement keys()
+    public final Seekables<?, ?> readScope; // TODO (low priority, efficiency): this should be RoutingKeys, as we have the Keys locally, but for simplicity we use this to implement keys()
     private final long waitForEpoch;
     private Data data;
-    private transient boolean isObsolete; // TODO: respond with the Executed result we have stored?
+    private transient boolean isObsolete; // TODO (low priority, semantics): respond with the Executed result we have stored?
     private transient BitSet waitingOn;
     private transient int waitingOnCount;
 
@@ -193,10 +192,11 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
         }
         else if (failure != null)
         {
-            // TODO (soon): test
+            // TODO (expected, testing): test
             node.reply(replyTo, replyContext, ReadNack.Error);
             data = null;
-            node.agent().onUncaughtException(failure); // TODO: probably a better way to handle this, as might not be uncaught
+            // TODO (expected, exceptions): probably a better way to handle this, as might not be uncaught
+            node.agent().onUncaughtException(failure);
             node.commandStores().mapReduceConsume(this, waitingOn.stream(), forEach(in -> in.command(txnId).removeListener(this), node.agent()));
         }
         else
@@ -229,7 +229,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
         command.read(safeStore).addCallback((next, throwable) -> {
             if (throwable != null)
             {
-                // TODO (now): exception integration (non-trivial, as might be handled)
+                // TODO (expected, exceptions): should send exception to client, and consistency handle/propagate locally
                 logger.trace("{}: read failed for {}: {}", txnId, unsafeStore, throwable);
                 node.reply(replyTo, replyContext, ReadNack.Error);
             }
