@@ -29,10 +29,11 @@ import java.util.function.BiConsumer;
 
 import javax.annotation.Nullable;
 
+import accord.utils.IntrusiveLinkedList;
+import accord.utils.IntrusiveLinkedListNode;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
 import accord.coordinate.*;
-import accord.impl.SimpleProgressLog.Instance.State.Monitoring;
 import accord.local.*;
 import accord.local.Node.Id;
 import accord.local.Status.Known;
@@ -41,8 +42,6 @@ import accord.messages.InformDurable;
 import accord.messages.SimpleReply;
 import accord.primitives.*;
 import accord.topology.Topologies;
-import accord.utils.IntrusiveLinkedList;
-import accord.utils.IntrusiveLinkedListNode;
 import accord.utils.Invariants;
 import org.apache.cassandra.utils.concurrent.Future;
 
@@ -94,7 +93,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
         this.node = node;
     }
 
-    class Instance extends IntrusiveLinkedList<Monitoring> implements ProgressLog, Runnable
+    class Instance extends IntrusiveLinkedList<Instance.State.Monitoring> implements ProgressLog, Runnable
     {
         class State
         {
@@ -272,7 +271,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
             }
 
             // exists only on home shard
-            class DisseminateState extends Monitoring
+            class DisseminateState extends State.Monitoring
             {
                 class CoordinateAwareness implements Callback<SimpleReply>
                 {
@@ -436,7 +435,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 }
             }
 
-            class BlockingState extends Monitoring
+            class BlockingState extends State.Monitoring
             {
                 Known blockedUntil = Nothing;
 
@@ -524,7 +523,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 }
             }
 
-            class NonHomeState extends Monitoring
+            class NonHomeState extends State.Monitoring
             {
                 NonHomeState()
                 {
@@ -778,14 +777,14 @@ public class SimpleProgressLog implements ProgressLog.Factory
         }
 
         @Override
-        public void addFirst(Monitoring add)
+        public void addFirst(State.Monitoring add)
         {
             super.addFirst(add);
             ensureScheduled();
         }
 
         @Override
-        public void addLast(Monitoring add)
+        public void addLast(State.Monitoring add)
         {
             throw new UnsupportedOperationException();
         }
@@ -805,7 +804,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
             isScheduled = false;
             try
             {
-                for (Monitoring run : this)
+                for (State.Monitoring run : this)
                 {
                     if (run.shouldRun())
                     {

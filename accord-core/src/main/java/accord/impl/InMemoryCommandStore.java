@@ -18,14 +18,14 @@
 
 package accord.impl;
 
+import accord.local.CommandStore; // java8 fails compilation if this is in correct position
+import accord.local.SyncCommandStores.SyncCommandStore; // java8 fails compilation if this is in correct position
 import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.impl.InMemoryCommandStore.SingleThread.AsyncState;
 import accord.impl.InMemoryCommandStore.Synchronized.SynchronizedState;
-import accord.local.CommandStore; // java8 fails compilation if this is in correct position
-import accord.local.SyncCommandStores.SyncCommandStore; // java8 fails compilation if this is in correct position
 import accord.local.Command;
 import accord.local.CommandStore.RangesForEpoch;
 import accord.local.CommandsForKey;
