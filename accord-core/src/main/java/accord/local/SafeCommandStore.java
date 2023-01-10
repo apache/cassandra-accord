@@ -67,7 +67,7 @@ public interface SafeCommandStore
     Agent agent();
     ProgressLog progressLog();
     NodeTimeService time();
-    CommandStore.RangesForEpoch ranges();
+    CommandStores.RangesForEpoch ranges();
     long latestEpoch();
     Timestamp preaccept(TxnId txnId, Seekables<?, ?> keys);
 

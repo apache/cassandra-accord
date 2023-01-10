@@ -97,7 +97,7 @@ public class Shard
 
     public boolean contains(Key key)
     {
-        return range.containsKey(key);
+        return range.contains(key);
     }
 
     public String toString(boolean extendedInfo)

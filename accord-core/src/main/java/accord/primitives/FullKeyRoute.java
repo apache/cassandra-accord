@@ -46,9 +46,9 @@ public class FullKeyRoute extends KeyRoute implements FullRoute<RoutingKey>
     }
 
     @Override
-    public PartialKeyRoute slice(Ranges ranges)
+    public PartialKeyRoute slice(Ranges newRanges)
     {
-        return new PartialKeyRoute(ranges, homeKey, slice(ranges, RoutingKey[]::new));
+        return new PartialKeyRoute(newRanges, homeKey, slice(newRanges, RoutingKey[]::new));
     }
 
     @Override

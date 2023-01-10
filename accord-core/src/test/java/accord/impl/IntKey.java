@@ -23,9 +23,11 @@ import java.util.List;
 import java.util.Objects;
 
 import accord.api.RoutingKey;
+import accord.local.ShardDistributor;
 import accord.primitives.RoutableKey;
 import accord.primitives.Keys;
 import accord.primitives.RoutingKeys;
+import accord.utils.Invariants;
 
 import javax.annotation.Nonnull;
 
@@ -33,6 +35,67 @@ import static accord.utils.Utils.toArray;
 
 public class IntKey implements RoutableKey
 {
+    public static class Splitter implements ShardDistributor.EvenSplit.Splitter<Long>
+    {
+        @Override
+        public Long sizeOf(accord.primitives.Range range)
+        {
+            return ((IntKey)range.end()).key - (long)((IntKey)range.start()).key;
+        }
+
+        @Override
+        public accord.primitives.Range subRange(accord.primitives.Range range, Long start, Long end)
+        {
+            Invariants.checkArgument(((IntKey)range.start()).key + end.intValue() <= ((IntKey)range.end()).key);
+            return range.subRange(
+                    routing(((IntKey)range.start()).key + start.intValue()),
+                    routing(((IntKey)range.start()).key + end.intValue())
+                    );
+        }
+
+        @Override
+        public Long zero()
+        {
+            return 0L;
+        }
+
+        @Override
+        public Long add(Long a, Long b)
+        {
+            return a + b;
+        }
+
+        @Override
+        public Long subtract(Long a, Long b)
+        {
+            return a - b;
+        }
+
+        @Override
+        public Long divide(Long a, int i)
+        {
+            return a / i;
+        }
+
+        @Override
+        public Long multiply(Long a, int i)
+        {
+            return a * i;
+        }
+
+        @Override
+        public int min(Long v, int i)
+        {
+            return (int)Math.min(v, i);
+        }
+
+        @Override
+        public int compare(Long a, Long b)
+        {
+            return a.compareTo(b);
+        }
+    }
+
     public static class Raw extends IntKey implements accord.api.Key
     {
         public Raw(int key)
@@ -155,12 +218,6 @@ public class IntKey implements RoutableKey
     public int hashCode()
     {
         return Objects.hash(key);
-    }
-
-    @Override
-    public int routingHash()
-    {
-        return hashCode();
     }
 
     @Override

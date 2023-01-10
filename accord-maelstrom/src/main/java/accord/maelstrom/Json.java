@@ -124,6 +124,11 @@ public class Json
 
     private static <T> T readTimestamp(JsonReader in, TimestampFactory<T> factory) throws IOException
     {
+        if (in.peek() == JsonToken.NULL)
+        {
+            in.nextNull();
+            return null;
+        }
         in.beginArray();
         long epoch = in.nextLong();
         long real = in.nextLong();
@@ -135,6 +140,11 @@ public class Json
 
     private static void writeTimestamp(JsonWriter out, Timestamp timestamp) throws IOException
     {
+        if (timestamp == null)
+        {
+            out.nullValue();
+            return;
+        }
         out.beginArray();
         out.value(timestamp.epoch);
         out.value(timestamp.real);

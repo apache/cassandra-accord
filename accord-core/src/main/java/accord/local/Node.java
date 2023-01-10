@@ -127,7 +127,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private final Map<TxnId, Future<? extends Outcome>> coordinating = new ConcurrentHashMap<>();
 
     public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier,
-                Supplier<DataStore> dataSupplier, Agent agent, Random random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
+                Supplier<DataStore> dataSupplier, ShardDistributor shardDistributor, Agent agent, Random random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
                 Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory)
     {
         this.id = id;
@@ -140,7 +140,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.agent = agent;
         this.random = random;
         this.scheduler = scheduler;
-        this.commandStores = factory.create(numCommandShards(), this, agent, dataSupplier.get(), progressLogFactory.apply(this));
+        this.commandStores = factory.create(this, agent, dataSupplier.get(), shardDistributor, progressLogFactory.apply(this));
 
         configService.registerListener(this);
         onTopologyUpdate(topology, false);
@@ -530,7 +530,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public CommandStore unsafeByIndex(int index)
     {
-        return commandStores.current.ranges[0].shards[index];
+        return commandStores.current.shards[index].store;
     }
 
     public LongSupplier unsafeGetNowSupplier()

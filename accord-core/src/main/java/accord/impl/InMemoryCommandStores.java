@@ -23,7 +23,6 @@ import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.ProgressLog;
 import accord.local.CommandStore;
-import accord.local.Node;
 import accord.primitives.Routables;
 import accord.utils.MapReduce;
 
@@ -34,9 +33,9 @@ public class InMemoryCommandStores
 {
     public static class Synchronized extends SyncCommandStores
     {
-        public Synchronized(int num, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory)
+        public Synchronized(NodeTimeService time, Agent agent, DataStore store, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory)
         {
-            super(num, node, agent, store, progressLogFactory, InMemoryCommandStore.Synchronized::new);
+            super(time, agent, store, shardDistributor, progressLogFactory, InMemoryCommandStore.Synchronized::new);
         }
 
         public <T> T mapReduce(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduce<? super SafeCommandStore, T> map)
@@ -64,22 +63,22 @@ public class InMemoryCommandStores
 
     public static class SingleThread extends AsyncCommandStores
     {
-        public SingleThread(int num, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory)
+        public SingleThread(NodeTimeService time, Agent agent, DataStore store, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory)
         {
-            super(num, time, agent, store, progressLogFactory, InMemoryCommandStore.SingleThread::new);
+            super(time, agent, store, shardDistributor, progressLogFactory, InMemoryCommandStore.SingleThread::new);
         }
 
-        public SingleThread(int num, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
+        public SingleThread(NodeTimeService time, Agent agent, DataStore store, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
         {
-            super(num, time, agent, store, progressLogFactory, shardFactory);
+            super(time, agent, store, shardDistributor, progressLogFactory, shardFactory);
         }
     }
 
     public static class Debug extends InMemoryCommandStores.SingleThread
     {
-        public Debug(int num, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory)
+        public Debug(NodeTimeService time, Agent agent, DataStore store, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory)
         {
-            super(num, time, agent, store, progressLogFactory, InMemoryCommandStore.Debug::new);
+            super(time, agent, store, shardDistributor, progressLogFactory, InMemoryCommandStore.Debug::new);
         }
     }
 }

@@ -47,7 +47,7 @@ public class RoutingKeys extends AbstractRoutableKeys<AbstractRoutableKeys<?>> i
 
     public RoutingKeys slice(Ranges ranges)
     {
-        return wrap(SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, RoutingKey[]::new, (k, r) -> -r.compareTo(k), Range::compareTo));
+        return wrap(slice(ranges, RoutingKey[]::new));
     }
 
     private RoutingKeys wrap(RoutingKey[] wrap, AbstractKeys<RoutingKey, ?> that)

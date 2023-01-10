@@ -28,9 +28,9 @@ import javax.annotation.Nonnull;
 import java.util.*;
 import java.util.function.BiFunction;
 import java.util.function.Function;
-import java.util.function.Predicate;
 
 import static accord.utils.ArrayBuffers.cachedRanges;
+import static accord.utils.SortedArrays.Search.CEIL;
 import static accord.utils.SortedArrays.Search.FAST;
 import static accord.utils.SortedArrays.swapHighLow32b;
 
@@ -113,28 +113,19 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         return size() == 0;
     }
 
+    public final boolean intersects(Routables<?, ?> keysOrRanges)
+    {
+        switch (keysOrRanges.kindOfContents())
+        {
+            default: throw new AssertionError();
+            case Key: return intersects((AbstractKeys<?, ?>) keysOrRanges);
+            case Range: return intersects((AbstractRanges<?>) keysOrRanges);
+        }
+    }
+
     public final boolean intersects(AbstractKeys<?, ?> keys)
     {
         return findNextIntersection(0, keys, 0) >= 0;
-    }
-
-    public final <K extends RoutableKey> boolean intersects(AbstractKeys<K, ?> keys, Predicate<? super K> matches)
-    {
-        int ri = 0, ki = 0;
-        while (true)
-        {
-            long rki = findNextIntersection(ri, keys, ki);
-            if (rki < 0)
-                return false;
-
-            ri = (int) (rki);
-            ki = (int) (rki >>> 32);
-
-            if (matches.test(keys.get(ki)))
-                return true;
-
-            ki++;
-        }
     }
 
     public boolean intersects(AbstractRanges<?> that)

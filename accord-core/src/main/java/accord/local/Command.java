@@ -416,7 +416,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     {
         Ranges ranges = safeStore.ranges().since(executeAt().epoch);
         if (ranges != null) {
-            partialDeps().forEachOn(ranges, safeStore.commandStore()::hashIntersects, txnId -> {
+            partialDeps().forEachOn(ranges, txnId -> {
                 Command command = safeStore.ifLoaded(txnId);
                 if (command == null)
                 {
@@ -618,7 +618,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                 break;
 
             case PreApplied:
-                if (executeRanges(safeStore, executeAt()).intersects(writes().keys, safeStore.commandStore()::hashIntersects))
+                if (executeRanges(safeStore, executeAt()).intersects(writes().keys))
                 {
                     logger.trace("{}: applying", txnId());
                     apply(safeStore);
@@ -835,6 +835,8 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         if (homeKey() == null)
         {
             setHomeKey(homeKey);
+            // TODO (low priority, safety): if we're processed on a node that does not know the latest epoch,
+            //      do we guarantee the home key calculation is unchanged since the prior epoch?
             if (progressKey() == null && owns(safeStore, txnId().epoch, homeKey))
                 progressKey(homeKey);
         }
@@ -860,9 +862,6 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         else if (!this.progressKey().equals(progressKey)) throw new AssertionError();
 
         if (!coordinateRanges.contains(progressKey))
-            return No;
-
-        if (!safeStore.commandStore().hashIntersects(progressKey))
             return No;
 
         return progressKey.equals(homeKey()) ? Home : Local;
@@ -902,9 +901,6 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
         Ranges coordinateRanges = safeStore.ranges().at(txnId().epoch);
         if (!coordinateRanges.contains(progressKey))
-            return No;
-
-        if (!safeStore.commandStore().hashIntersects(progressKey))
             return No;
 
         return progressKey.equals(homeKey()) ? Home : Local;
@@ -1164,9 +1160,6 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
      */
     public boolean owns(SafeCommandStore safeStore, long epoch, RoutingKey someKey)
     {
-        if (!safeStore.commandStore().hashIntersects(someKey))
-            return false;
-
         return safeStore.ranges().at(epoch).contains(someKey);
     }
 
@@ -1213,11 +1206,6 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
             throw new UnsupportedOperationException();
         }
 
-        @Override
-        public int routingHash()
-        {
-            throw new UnsupportedOperationException();
-        }
     }
 
     private static final NoProgressKey NO_PROGRESS_KEY = new NoProgressKey();

@@ -67,6 +67,7 @@ public class PreAcceptTest
                         new MockConfigurationService(messageSink, EpochFunction.noop(), TOPOLOGY),
                         clock,
                         () -> store,
+                        new ShardDistributor.EvenSplit(8, new IntKey.Splitter()),
                         new TestAgent(),
                         new Random(),
                         scheduler,
