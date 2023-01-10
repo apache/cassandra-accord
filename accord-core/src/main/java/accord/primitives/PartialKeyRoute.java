@@ -26,13 +26,13 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
         this.covering = covering;
     }
 
-    public PartialKeyRoute sliceStrict(Ranges newRange)
+    public PartialKeyRoute sliceStrict(Ranges newRanges)
     {
-        if (!covering.containsAll(newRange))
+        if (!covering.containsAll(newRanges))
             throw new IllegalArgumentException("Not covered");
 
-        RoutingKey[] keys = slice(newRange, RoutingKey[]::new);
-        return new PartialKeyRoute(newRange, homeKey, keys);
+        RoutingKey[] keys = slice(newRanges, RoutingKey[]::new);
+        return new PartialKeyRoute(newRanges, homeKey, keys);
     }
 
     @Override
@@ -70,9 +70,9 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
         return new RoutingKeys(toRoutingKeysArray(withKey));
     }
 
-    public PartialKeyRoute slice(Ranges newRange)
+    public PartialKeyRoute slice(Ranges newRanges)
     {
-        if (newRange.containsAll(covering))
+        if (newRanges.containsAll(covering))
             return this;
 
         RoutingKey[] keys = slice(covering, RoutingKey[]::new);

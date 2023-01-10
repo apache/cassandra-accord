@@ -104,6 +104,9 @@ class Execute extends ReadCoordinator<ReadReply>
         switch (nack)
         {
             default: throw new IllegalStateException();
+            case Error:
+                // TODO (expected): report content of error
+                return Action.Reject;
             case Redundant:
                 callback.accept(null, new Preempted(txnId, route.homeKey()));
                 return Action.Abort;

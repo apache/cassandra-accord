@@ -72,8 +72,7 @@ public class Writes
             return SUCCESS;
 
         List<Future<Void>> futures = keys.foldl(ranges, (key, accumulate, index) -> {
-            if (safeStore.commandStore().hashIntersects(key))
-                accumulate.add(write.apply(key, safeStore, executeAt, safeStore.dataStore()));
+            accumulate.add(write.apply(key, safeStore, executeAt, safeStore.dataStore()));
             return accumulate;
         }, new ArrayList<>());
         return ReducingFuture.reduce(futures, (l, r) -> null);

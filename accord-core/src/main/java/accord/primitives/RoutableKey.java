@@ -33,9 +33,6 @@ public interface RoutableKey extends Routable, Comparable<RoutableKey>
         }
 
         @Override
-        public int routingHash() { throw new UnsupportedOperationException(); }
-
-        @Override
         public RoutingKey toUnseekable() { throw new UnsupportedOperationException(); }
 
         @Override
@@ -48,13 +45,6 @@ public interface RoutableKey extends Routable, Comparable<RoutableKey>
      * @return
      */
     int compareTo(@Nonnull RoutableKey that);
-
-    /**
-     * Returns a hash code of a key to support accord internal sharding. Hash values for equal keys must be equal.
-     *
-     * TODO (now): can we remove this if we remove hashIntersects et al?
-     */
-    int routingHash();
 
     default Kind kind() { return Kind.Key; }
 

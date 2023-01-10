@@ -19,16 +19,13 @@
 package accord.local;
 
 import accord.api.*;
-import accord.local.CommandStores.ShardedRanges;
 import accord.api.ProgressLog;
-import accord.primitives.*;
 import accord.api.DataStore;
+import accord.local.CommandStores.RangesForEpochHolder;
 import org.apache.cassandra.utils.concurrent.Future;
 
 import java.util.function.Consumer;
 import java.util.function.Function;
-
-import static accord.utils.Invariants.checkArgument;
 
 /**
  * Single threaded internal shard of accord transaction metadata
@@ -38,65 +35,23 @@ public abstract class CommandStore
     public interface Factory
     {
         CommandStore create(int id,
-                            int generation,
-                            int shardIndex,
-                            int numShards,
                             NodeTimeService time,
                             Agent agent,
                             DataStore store,
                             ProgressLog.Factory progressLogFactory,
-                            RangesForEpoch rangesForEpoch);
-    }
-
-    public interface RangesForEpoch
-    {
-        Ranges at(long epoch);
-        Ranges between(long fromInclusive, long toInclusive);
-        Ranges since(long epoch);
-        boolean owns(long epoch, RoutingKey key);
+                            RangesForEpochHolder rangesForEpoch);
     }
 
     private final int id; // unique id
-    private final int generation;
-    private final int shardIndex;
-    private final int numShards;
 
-    public CommandStore(int id,
-                        int generation,
-                        int shardIndex,
-                        int numShards)
+    public CommandStore(int id)
     {
         this.id = id;
-        this.generation = generation;
-        this.shardIndex = checkArgument(shardIndex, shardIndex < numShards);
-        this.numShards = numShards;
     }
 
     public int id()
     {
         return id;
-    }
-
-    // TODO (now): rename to shardIndex
-    public int index()
-    {
-        return shardIndex;
-    }
-
-    // TODO (now): rename to shardGeneration
-    public int generation()
-    {
-        return generation;
-    }
-
-    public boolean hashIntersects(RoutableKey key)
-    {
-        return ShardedRanges.keyIndex(key, numShards) == shardIndex;
-    }
-
-    public boolean hashIntersects(Routable routable)
-    {
-        return routable instanceof Range || hashIntersects((RoutableKey) routable);
     }
 
     public abstract Agent agent();

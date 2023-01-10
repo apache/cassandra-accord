@@ -19,7 +19,6 @@
 package accord.local;
 
 import accord.api.*;
-import accord.local.CommandStore.RangesForEpoch;
 import accord.primitives.*;
 import accord.api.RoutingKey;
 import accord.topology.Topology;
@@ -27,17 +26,19 @@ import accord.utils.MapReduce;
 import accord.utils.MapReduceConsume;
 
 import accord.utils.ReducingFuture;
+import com.carrotsearch.hppc.IntObjectMap;
+import com.carrotsearch.hppc.IntObjectScatterMap;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.utils.concurrent.Future;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
 import static accord.local.PreLoadContext.empty;
-
 import static accord.utils.Invariants.checkArgument;
 
 /**
@@ -47,10 +48,10 @@ public abstract class CommandStores<S extends CommandStore>
 {
     public interface Factory
     {
-        CommandStores<?> create(int num,
-                                Node node,
+        CommandStores<?> create(NodeTimeService time,
                                 Agent agent,
                                 DataStore store,
+                                ShardDistributor shardDistributor,
                                 ProgressLog.Factory progressLogFactory);
     }
 
@@ -61,63 +62,79 @@ public abstract class CommandStores<S extends CommandStore>
         private final DataStore store;
         private final ProgressLog.Factory progressLogFactory;
         private final CommandStore.Factory shardFactory;
-        private final int numShards;
 
-        Supplier(NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory, int numShards)
+        Supplier(NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
         {
             this.time = time;
             this.agent = agent;
             this.store = store;
             this.progressLogFactory = progressLogFactory;
             this.shardFactory = shardFactory;
-            this.numShards = numShards;
         }
 
-        CommandStore create(int id, int generation, int shardIndex, RangesForEpoch rangesForEpoch)
+        CommandStore create(int id, RangesForEpochHolder rangesForEpoch)
         {
-            return shardFactory.create(id, generation, shardIndex, numShards, time, agent, store, progressLogFactory, rangesForEpoch);
-        }
-
-        ShardedRanges createShardedRanges(int generation, long epoch, Ranges ranges, RangesForEpoch rangesForEpoch)
-        {
-            CommandStore[] newStores = new CommandStore[numShards];
-            for (int i=0; i<numShards; i++)
-                newStores[i] = create(generation * numShards + i, generation, i, rangesForEpoch);
-
-            return new ShardedRanges(newStores, epoch, ranges);
+            return shardFactory.create(id, time, agent, store, progressLogFactory, rangesForEpoch);
         }
     }
 
-    protected static class ShardedRanges
+    public static class RangesForEpochHolder
     {
-        final CommandStore[] shards;
+        // no need for safe publication; RangesForEpoch members are final, and will be guarded by other synchronization actions
+        protected RangesForEpoch current;
+
+        /**
+         * This is updated asynchronously, so should only be fetched between executing tasks;
+         * otherwise the contents may differ between invocations for the same task
+         * @return the current RangesForEpoch
+         */
+        public RangesForEpoch get() { return current; }
+    }
+
+    static class ShardHolder
+    {
+        final CommandStore store;
+        final RangesForEpochHolder ranges;
+
+        ShardHolder(CommandStore store, RangesForEpochHolder ranges)
+        {
+            this.store = store;
+            this.ranges = ranges;
+        }
+
+        RangesForEpoch ranges()
+        {
+            return ranges.current;
+        }
+    }
+
+    public static class RangesForEpoch
+    {
         final long[] epochs;
         final Ranges[] ranges;
 
-        protected ShardedRanges(CommandStore[] shards, long epoch, Ranges ranges)
+        public RangesForEpoch(long epoch, Ranges ranges)
         {
-            this.shards = checkArgument(shards, shards.length <= 64);
             this.epochs = new long[] { epoch };
             this.ranges = new Ranges[] { ranges };
         }
 
-        private ShardedRanges(CommandStore[] shards, long[] epochs, Ranges[] ranges)
+        public RangesForEpoch(long[] epochs, Ranges[] ranges)
         {
-            this.shards = checkArgument(shards, shards.length <= 64);
             this.epochs = epochs;
             this.ranges = ranges;
         }
 
-        ShardedRanges withRanges(long epoch, Ranges ranges)
+        public RangesForEpoch withRanges(long epoch, Ranges ranges)
         {
             long[] newEpochs = Arrays.copyOf(this.epochs, this.epochs.length + 1);
             Ranges[] newRanges = Arrays.copyOf(this.ranges, this.ranges.length + 1);
             newEpochs[this.epochs.length] = epoch;
             newRanges[this.ranges.length] = ranges;
-            return new ShardedRanges(shards, newEpochs, newRanges);
+            return new RangesForEpoch(newEpochs, newRanges);
         }
 
-        Ranges rangesForEpoch(long epoch)
+        public Ranges at(long epoch)
         {
             int i = Arrays.binarySearch(epochs, epoch);
             if (i < 0) i = -2 -i;
@@ -125,13 +142,13 @@ public abstract class CommandStores<S extends CommandStore>
             return ranges[i];
         }
 
-        Ranges rangesBetweenEpochs(long fromInclusive, long toInclusive)
+        public Ranges between(long fromInclusive, long toInclusive)
         {
             if (fromInclusive > toInclusive)
                 throw new IndexOutOfBoundsException();
 
             if (fromInclusive == toInclusive)
-                return rangesForEpoch(fromInclusive);
+                return at(fromInclusive);
 
             int i = Arrays.binarySearch(epochs, fromInclusive);
             if (i < 0) i = -2 - i;
@@ -147,7 +164,7 @@ public abstract class CommandStores<S extends CommandStore>
             return result;
         }
 
-        Ranges rangesSinceEpoch(long epoch)
+        public Ranges since(long epoch)
         {
             int i = Arrays.binarySearch(epochs, epoch);
             if (i < 0) i = Math.max(0, -2 -i);
@@ -164,88 +181,56 @@ public abstract class CommandStores<S extends CommandStore>
             return i;
         }
 
-        public long all()
+        public boolean intersects(long epoch, AbstractKeys<?, ?> keys)
         {
-            return -1L >>> (64 - shards.length);
+            return at(epoch).intersects(keys);
         }
 
-        public <T extends Routable> long shards(Routables<T, ?> keysOrRanges, long minEpoch, long maxEpoch)
-        {
-            long terminalValue = -1L >>> (32 - shards.length);
-            switch (keysOrRanges.kindOfContents())
-            {
-                default: throw new AssertionError();
-                case Key:
-                {
-                    long accumulate = 0L;
-                    for (int i = Math.max(0, indexForEpoch(minEpoch)), maxi = indexForEpoch(maxEpoch); i <= maxi ; ++i)
-                    {
-                        accumulate = Routables.foldl((AbstractKeys<?, ?>)keysOrRanges, ranges[i], ShardedRanges::addKeyIndex, shards.length, accumulate, terminalValue);
-                    }
-                    return accumulate;
-                }
-
-                case Range:
-                {
-                    long accumulate = 0L;
-                    for (int i = Math.max(0, indexForEpoch(minEpoch)), maxi = indexForEpoch(maxEpoch); i <= maxi ; ++i)
-                    {
-                        // include every shard if we match a range
-                        accumulate = Routables.foldl((Ranges)keysOrRanges, ranges[i], (k, p, a, idx) -> p, terminalValue, accumulate, terminalValue);
-                    }
-                    return accumulate;
-                }
-            }
-        }
-
-        Ranges currentRanges()
+        public Ranges currentRanges()
         {
             return ranges[ranges.length - 1];
         }
 
-        static long keyIndex(RoutableKey key, long numShards)
+        public Ranges maximalRanges()
         {
-            return Integer.toUnsignedLong(key.routingHash()) % numShards;
-        }
-
-        private static long addKeyIndex(RoutableKey key, long numShards, long accumulate, int i)
-        {
-            return accumulate | (1L << keyIndex(key, numShards));
+            return ranges[0];
         }
     }
 
     static class Snapshot
     {
-        final ShardedRanges[] ranges;
-        final Topology global;
+        final ShardHolder[] shards;
+        final IntObjectMap<CommandStore> byId;
         final Topology local;
-        final int size;
+        final Topology global;
 
-        Snapshot(ShardedRanges[] ranges, Topology global, Topology local)
+        Snapshot(ShardHolder[] shards, Topology local, Topology global)
         {
-            this.ranges = ranges;
-            this.global = global;
+            this.shards = shards;
+            this.byId = new IntObjectScatterMap<>(shards.length);
+            for (ShardHolder shard : shards)
+                byId.put(shard.store.id(), shard.store);
             this.local = local;
-            int size = 0;
-            for (ShardedRanges group : ranges)
-                size += group.shards.length;
-            this.size = size;
+            this.global = global;
         }
     }
 
     final Supplier supplier;
+    final ShardDistributor shardDistributor;
     volatile Snapshot current;
+    int nextId;
 
-    private CommandStores(Supplier supplier)
+    private CommandStores(Supplier supplier, ShardDistributor shardDistributor)
     {
         this.supplier = supplier;
-        this.current = new Snapshot(new ShardedRanges[0], Topology.EMPTY, Topology.EMPTY);
+        this.shardDistributor = shardDistributor;
+        this.current = new Snapshot(new ShardHolder[0], Topology.EMPTY, Topology.EMPTY);
     }
 
-    public CommandStores(int num, NodeTimeService time, Agent agent, DataStore store,
+    public CommandStores(NodeTimeService time, Agent agent, DataStore store, ShardDistributor shardDistributor,
                          ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
     {
-        this(new Supplier(time, agent, store, progressLogFactory, shardFactory, num));
+        this(new Supplier(time, agent, store, progressLogFactory, shardFactory), shardDistributor);
     }
 
     public Topology local()
@@ -258,7 +243,7 @@ public abstract class CommandStores<S extends CommandStore>
         return current.global;
     }
 
-    private Snapshot updateTopology(Snapshot prev, Topology newTopology)
+    private synchronized Snapshot updateTopology(Snapshot prev, Topology newTopology)
     {
         checkArgument(!newTopology.isSubset(), "Use full topology for CommandStores.updateTopology");
 
@@ -269,70 +254,37 @@ public abstract class CommandStores<S extends CommandStore>
         Topology newLocalTopology = newTopology.forNode(supplier.time.id()).trim();
         Ranges added = newLocalTopology.ranges().difference(prev.local.ranges());
         Ranges subtracted = prev.local.ranges().difference(newLocalTopology.ranges());
-//            for (ShardedRanges range : stores.ranges)
-//            {
-//                // FIXME: remove this (and the corresponding check in TopologyRandomizer) once lower bounds are implemented.
-//                //  In the meantime, the logic needed to support acquiring ranges that we previously replicated is pretty
-//                //  convoluted without the ability to jettison epochs.
-//                Invariants.checkState(!range.ranges.intersects(added));
-//            }
 
         if (added.isEmpty() && subtracted.isEmpty())
-            return new Snapshot(prev.ranges, newTopology, newLocalTopology);
+            return new Snapshot(prev.shards, newLocalTopology, newTopology);
 
-        ShardedRanges[] result = new ShardedRanges[prev.ranges.length + (added.isEmpty() ? 0 : 1)];
+        List<ShardHolder> result = new ArrayList<>(prev.shards.length + added.size());
         if (subtracted.isEmpty())
         {
-            int newGeneration = prev.ranges.length;
-            System.arraycopy(prev.ranges, 0, result, 0, newGeneration);
-            result[newGeneration] = supplier.createShardedRanges(newGeneration, epoch, added, rangesForEpochFunction(newGeneration));
+            Collections.addAll(result, prev.shards);
         }
         else
         {
-            int i = 0;
-            while (i < prev.ranges.length)
+            for (ShardHolder shard : prev.shards)
             {
-                ShardedRanges ranges = prev.ranges[i];
-                if (ranges.currentRanges().intersects(subtracted))
-                    ranges = ranges.withRanges(newTopology.epoch(), ranges.currentRanges().difference(subtracted));
-                result[i++] = ranges;
+                if (subtracted.intersects(shard.ranges().currentRanges()))
+                    shard.ranges.current = shard.ranges().withRanges(newTopology.epoch(), shard.ranges().currentRanges().difference(subtracted));
+                result.add(shard);
             }
-            if (i < result.length)
-                result[i] = supplier.createShardedRanges(i, epoch, added, rangesForEpochFunction(i));
         }
 
-        return new Snapshot(result, newTopology, newLocalTopology);
-    }
-
-    private RangesForEpoch rangesForEpochFunction(int generation)
-    {
-        return new RangesForEpoch()
+        if (!added.isEmpty())
         {
-            @Override
-            public Ranges at(long epoch)
+            // TODO (required): shards must rebalance
+            for (Ranges add : shardDistributor.split(added))
             {
-                return current.ranges[generation].rangesForEpoch(epoch);
+                RangesForEpochHolder rangesHolder = new RangesForEpochHolder();
+                rangesHolder.current = new RangesForEpoch(epoch, add);
+                result.add(new ShardHolder(supplier.create(nextId++, rangesHolder), rangesHolder));
             }
+        }
 
-            @Override
-            public Ranges between(long fromInclusive, long toInclusive)
-            {
-                return current.ranges[generation].rangesBetweenEpochs(fromInclusive, toInclusive);
-            }
-
-            @Override
-            public Ranges since(long epoch)
-            {
-                return current.ranges[generation].rangesSinceEpoch(epoch);
-            }
-
-            @Override
-            public boolean owns(long epoch, RoutingKey key)
-            {
-                return current.ranges[generation].rangesForEpoch(epoch).contains(key);
-            }
-
-        };
+        return new Snapshot(result.toArray(new ShardHolder[0]), newLocalTopology, newTopology);
     }
 
     interface MapReduceAdapter<S extends CommandStore, Intermediate, Accumulator, O>
@@ -348,12 +300,9 @@ public abstract class CommandStores<S extends CommandStore>
     {
         List<Future<Void>> list = new ArrayList<>();
         Snapshot snapshot = current;
-        for (ShardedRanges ranges : snapshot.ranges)
+        for (ShardHolder shard : snapshot.shards)
         {
-            for (CommandStore store : ranges.shards)
-            {
-                list.add(store.execute(empty(), forEach));
-            }
+            list.add(shard.store.execute(empty(), forEach));
         }
         return ReducingFuture.reduce(list, (a, b) -> null);
     }
@@ -433,16 +382,17 @@ public abstract class CommandStores<S extends CommandStore>
                                        MapReduceAdapter<? super S, T1, T2, O> adapter)
     {
         T2 accumulator = adapter.allocate();
-        for (ShardedRanges ranges : current.ranges)
+        Snapshot snapshot = current;
+        ShardHolder[] shards = snapshot.shards;
+        for (ShardHolder shard : shards)
         {
-            long bits = ranges.shards(keys, minEpoch, maxEpoch);
-            while (bits != 0)
-            {
-                int i = Long.numberOfTrailingZeros(bits);
-                T1 next = adapter.apply(mapReduce, (S)ranges.shards[i], context);
-                accumulator = adapter.reduce(mapReduce, accumulator, next);
-                bits ^= Long.lowestOneBit(bits);
-            }
+            // TODO (urgent, efficiency): range map for intersecting ranges (e.g. that to be introduced for range dependencies)
+            Ranges shardRanges = shard.ranges().between(minEpoch, maxEpoch);
+            if (!shardRanges.intersects(keys))
+                continue;
+
+            T1 next = adapter.apply(mapReduce, (S)shard.store, context);
+            accumulator = adapter.reduce(mapReduce, accumulator, next);
         }
         return adapter.reduce(mapReduce, accumulator);
     }
@@ -450,7 +400,7 @@ public abstract class CommandStores<S extends CommandStore>
     protected <T1, T2, O> T1 mapReduce(PreLoadContext context, IntStream commandStoreIds, MapReduce<? super SafeCommandStore, O> mapReduce,
                                        MapReduceAdapter<? super S, T1, T2, O> adapter)
     {
-        // TODO: efficiency
+        // TODO (low priority, efficiency): avoid using an array, or use a scratch buffer
         int[] ids = commandStoreIds.toArray();
         T2 accumulator = adapter.allocate();
         for (int id : ids)
@@ -468,33 +418,30 @@ public abstract class CommandStores<S extends CommandStore>
 
     public synchronized void shutdown()
     {
-        for (ShardedRanges group : current.ranges)
-            for (CommandStore commandStore : group.shards)
-                commandStore.shutdown();
+        for (ShardHolder shard : current.shards)
+            shard.store.shutdown();
     }
 
-    CommandStore forId(int id)
+    public CommandStore forId(int id)
     {
-        ShardedRanges[] ranges = current.ranges;
-        return ranges[id / supplier.numShards].shards[id % supplier.numShards];
+        Snapshot snapshot = current;
+        return snapshot.byId.get(id);
+    }
+
+    public int count()
+    {
+        return current.shards.length;
     }
 
     @VisibleForTesting
     public CommandStore unsafeForKey(Key key)
     {
-        ShardedRanges[] ranges = current.ranges;
-        for (ShardedRanges group : ranges)
+        ShardHolder[] shards = current.shards;
+        for (ShardHolder shard : shards)
         {
-            if (group.currentRanges().contains(key))
-            {
-                for (CommandStore store : group.shards)
-                {
-                    if (store.hashIntersects(key))
-                        return store;
-                }
-            }
+            if (shard.ranges().currentRanges().contains(key))
+                return shard.store;
         }
         throw new IllegalArgumentException();
     }
-
 }

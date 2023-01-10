@@ -38,6 +38,7 @@ import accord.impl.SizeOfIntersectionSorter;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Scheduler;
+import accord.local.ShardDistributor;
 import accord.messages.ReplyContext;
 import accord.topology.Topology;
 import accord.utils.ThreadPoolScheduler;
@@ -160,8 +161,9 @@ public class Main
             topology = topologyFactory.toTopology(init.cluster);
             sink = new StdoutSink(System::currentTimeMillis, scheduler, start, init.self, out, err);
             on = new Node(init.self, sink, new SimpleConfigService(topology), System::currentTimeMillis,
-                          MaelstromStore::new, MaelstromAgent.INSTANCE, new Random(), scheduler,
-                          SizeOfIntersectionSorter.SUPPLIER, SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new);
+                          MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
+                          MaelstromAgent.INSTANCE, new Random(), scheduler, SizeOfIntersectionSorter.SUPPLIER,
+                          SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new);
             err.println("Initialized node " + init.self);
             err.flush();
             sink.send(packet.src, new Body(Type.init_ok, Body.SENTINEL_MSG_ID, init.msg_id));

@@ -216,10 +216,7 @@ public class CheckOn extends CheckShards
             if (!merged.durability.isDurable() || homeKey == null)
                 return null;
 
-            if (!safeStore.ranges().owns(txnId.epoch, homeKey))
-                return null;
-
-            if (!safeStore.commandStore().hashIntersects(homeKey))
+            if (!safeStore.ranges().at(txnId.epoch).contains(homeKey))
                 return null;
 
             Timestamp executeAt = merged.saveStatus.known.executeAt.isDecisionKnown() ? merged.executeAt : null;

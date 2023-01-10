@@ -176,9 +176,6 @@ public interface Txn
     {
         Ranges ranges = safeStore.ranges().at(command.executeAt().epoch);
         List<Future<Data>> futures = read().keys().foldl(ranges, (key, accumulate, index) -> {
-            if (!safeStore.commandStore().hashIntersects(key))
-                return accumulate;
-
             Future<Data> result = read().read(key, kind(), safeStore, command.executeAt(), safeStore.dataStore());
             accumulate.add(result);
             return accumulate;

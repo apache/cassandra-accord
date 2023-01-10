@@ -103,7 +103,9 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                 void setProgress(Progress newProgress)
                 {
-                    this.progress = newProgress;
+                    Invariants.checkState(progress != Done);
+
+                    progress = newProgress;
                     switch (newProgress)
                     {
                         default: throw new AssertionError();
@@ -111,6 +113,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                         case Done:
                         case Investigating:
                             remove();
+                            Invariants.paranoid(isFree());
                             break;
                         case Expected:
                         case NoProgress:
@@ -129,8 +132,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                         case Investigating:
                             throw new IllegalStateException();
                         case Expected:
-                            if (isFree())
-                                throw new IllegalStateException();
+                            Invariants.paranoid(!isFree());
                             progress = NoProgress;
                             return false;
                         case NoProgress:
@@ -196,7 +198,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                         case Committed:
                         case ReadyToExecute:
                             status = CoordinateStatus.Done;
-                            setProgress(NoneExpected);
+                            setProgress(Done);
                         case Done:
                     }
                 }
@@ -223,9 +225,11 @@ public class SimpleProgressLog implements ProgressLog.Factory
                                 // if the home shard is at an earlier phase, it must run recovery
                                 long epoch = command.executeAt().epoch;
                                 node.withEpoch(epoch, () -> debugInvestigating = FetchData.fetch(PreApplied.minKnown, node, txnId, command.route(), epoch, (success, fail) -> {
-                                    // should have found enough information to apply the result, but in case we did not reset progress
-                                    if (progress() == Investigating)
-                                        setProgress(Expected);
+                                    commandStore.execute(PreLoadContext.empty(), ignore -> {
+                                        // should have found enough information to apply the result, but in case we did not reset progress
+                                        if (progress() == Investigating)
+                                            setProgress(Expected);
+                                    });
                                 }));
                             }
                             else
@@ -235,25 +239,27 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                                     Future<? extends Outcome> recover = node.maybeRecover(txnId, homeKey, command.route(), token);
                                     recover.addCallback((success, fail) -> {
-                                        if (status.isAtMostReadyToExecute() && progress() == Investigating)
-                                        {
-                                            setProgress(Expected);
-                                            if (fail != null)
-                                                return;
-
-                                            ProgressToken token = success.asProgressToken();
-                                            // TODO: avoid returning null (need to change semantics here in this case, though, as Recover doesn't return CheckStatusOk)
-                                            if (token.durability.isDurable())
+                                        commandStore.execute(PreLoadContext.empty(), ignore -> {
+                                            if (status.isAtMostReadyToExecute() && progress() == Investigating)
                                             {
-                                                commandStore.execute(contextFor(txnId), safeStore -> {
-                                                    Command cmd = safeStore.command(txnId);
-                                                    cmd.setDurability(safeStore, token.durability, homeKey, null);
-                                                    safeStore.progressLog().durable(txnId, cmd.maxUnseekables(), null);
-                                                }).addCallback(commandStore.agent());
-                                            }
+                                                setProgress(Expected);
+                                                if (fail != null)
+                                                    return;
 
-                                            updateMax(token);
-                                        }
+                                                ProgressToken token = success.asProgressToken();
+                                                // TODO: avoid returning null (need to change semantics here in this case, though, as Recover doesn't return CheckStatusOk)
+                                                if (token.durability.isDurable())
+                                                {
+                                                    commandStore.execute(contextFor(txnId), safeStore -> {
+                                                        Command cmd = safeStore.command(txnId);
+                                                        cmd.setDurability(safeStore, token.durability, homeKey, null);
+                                                        safeStore.progressLog().durable(txnId, cmd.maxUnseekables(), null);
+                                                    }).addCallback(commandStore.agent());
+                                                }
+
+                                                updateMax(token);
+                                            }
+                                        });
                                     });
 
                                     debugInvestigating = recover;
@@ -280,6 +286,9 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     {
                         // TODO: callbacks should be associated with a commandStore for processing to avoid this
                         commandStore.execute(PreLoadContext.empty(), ignore -> {
+                            if (progress() == Done)
+                                return;
+
                             notAwareOfDurability.remove(from);
                             maybeDone();
                         });
@@ -358,7 +367,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                 private void maybeDone()
                 {
-                    if (notAwareOfDurability.isEmpty())
+                    if (progress() != Done && notAwareOfDurability.isEmpty())
                     {
                         status = DisseminateStatus.Done;
                         setProgress(Done);
@@ -479,15 +488,17 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     Unseekables<?, ?> someKeys = unseekables(command);
 
                     BiConsumer<Known, Throwable> callback = (success, fail) -> {
-                        if (progress() != Investigating)
-                            return;
+                        commandStore.execute(PreLoadContext.empty(), ignore -> {
+                            if (progress() != Investigating)
+                                return;
 
-                        setProgress(Expected);
-                        if (fail == null)
-                        {
-                            if (!success.isDefinitionKnown()) invalidate(node, txnId, someKeys);
-                            else record(success);
-                        }
+                            setProgress(Expected);
+                            if (fail == null)
+                            {
+                                if (!success.isDefinitionKnown()) invalidate(node, txnId, someKeys);
+                                else record(success);
+                            }
+                        });
                     };
 
                     node.withEpoch(toEpoch, () -> {
@@ -507,12 +518,14 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     RoutingKey someKey = Route.isRoute(someKeys) ? (Route.castToRoute(someKeys)).homeKey() : someKeys.get(0).someIntersectingRoutingKey();
                     someKeys = someKeys.with(someKey);
                     debugInvestigating = Invalidate.invalidate(node, txnId, someKeys, (success, fail) -> {
-                        if (progress() != Investigating)
-                            return;
+                        commandStore.execute(PreLoadContext.empty(), ignore -> {
+                            if (progress() != Investigating)
+                                return;
 
-                        setProgress(Expected);
-                        if (fail == null && success.asProgressToken().durability.isDurable())
-                            setProgress(Done);
+                            setProgress(Expected);
+                            if (fail == null && success.asProgressToken().durability.isDurable())
+                                setProgress(Done);
+                        });
                     });
                 }
 
@@ -532,7 +545,8 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                 void setSafe()
                 {
-                    setProgress(Done);
+                    if (progress() != Done)
+                        setProgress(Done);
                 }
 
                 @Override
@@ -541,10 +555,12 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     // make sure a quorum of the home shard is aware of the transaction, so we can rely on it to ensure progress
                     Future<Void> inform = inform(node, txnId, command.homeKey());
                     inform.addCallback((success, fail) -> {
-                        if (progress() == Done)
-                            return;
+                        commandStore.execute(PreLoadContext.empty(), ignore -> {
+                            if (progress() == Done)
+                                return;
 
-                        setProgress(fail != null ? Expected : Done);
+                            setProgress(fail != null ? Expected : Done);
+                        });
                     });
                 }
 
@@ -809,7 +825,8 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     if (run.shouldRun())
                     {
                         commandStore.execute(contextFor(run.txnId()), safeStore -> {
-                            run.run(safeStore.command(run.txnId()));
+                            if (run.shouldRun()) // could have been completed by a callback
+                                run.run(safeStore.command(run.txnId()));
                         });
                     }
                 }

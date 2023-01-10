@@ -138,7 +138,7 @@ public class CommandTest
     private static Node createNode(Id id, CommandStoreSupport storeSupport)
     {
         return new Node(id, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
-                        new MockCluster.Clock(100), () -> storeSupport.data, new TestAgent(), new Random(), null,
+                        new MockCluster.Clock(100), () -> storeSupport.data, new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), new TestAgent(), new Random(), null,
                         SizeOfIntersectionSorter.SUPPLIER, ignore -> ignore2 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new);
     }
 

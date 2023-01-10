@@ -181,7 +181,7 @@ public class DepsTest
                 throw new AssertionError(start + " == " + end);
 
             TreeSet<TxnId> seen = new TreeSet<>();
-            deps.test.forEachOn(Ranges.of(Range.range(start.toUnseekable(), end.toUnseekable(), false, true)), ignore -> true, txnId -> {
+            deps.test.forEachOn(Ranges.of(Range.range(start.toUnseekable(), end.toUnseekable(), false, true)), txnId -> {
                 if (!seen.add(txnId))
                     throw new AssertionError("Seen " + txnId + " multiple times");
             });
@@ -205,7 +205,7 @@ public class DepsTest
             Key end = keys.get(keys.size() - 1);
 
             TreeSet<TxnId> seen = new TreeSet<>();
-            deps.test.forEachOn(Ranges.of(Range.range(start.toUnseekable(), end.toUnseekable(), true, false)), ignore -> true, txnId -> {
+            deps.test.forEachOn(Ranges.of(Range.range(start.toUnseekable(), end.toUnseekable(), true, false)), txnId -> {
                 if (!seen.add(txnId))
                     throw new AssertionError("Seen " + txnId + " multiple times");
             });
@@ -229,7 +229,7 @@ public class DepsTest
             Key end = keys.get(0);
 
             TreeSet<TxnId> seen = new TreeSet<>();
-            deps.test.forEachOn(Ranges.of(Range.range(start.toUnseekable(), end.toUnseekable(), true, false)), ignore -> true, txnId -> {
+            deps.test.forEachOn(Ranges.of(Range.range(start.toUnseekable(), end.toUnseekable(), true, false)), txnId -> {
                 if (!seen.add(txnId))
                     throw new AssertionError("Seen " + txnId + " multiple times");
             });
@@ -542,7 +542,7 @@ public class DepsTest
                         if (ranges.contains(key))
                             canonical.addAll(deps.canonical.get(key));
                     }
-                    deps.test.forEachOn(ranges, ignore -> true, txnId -> test.add(txnId));
+                    deps.test.forEachOn(ranges, test::add);
                     test.sort(Timestamp::compareTo);
                     Assertions.assertEquals(new ArrayList<>(canonical), test);
                 }

@@ -38,15 +38,13 @@ import java.util.function.Supplier;
 import accord.api.MessageSink;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
-import accord.impl.SimpleProgressLog;
-import accord.impl.InMemoryCommandStores;
-import accord.impl.SizeOfIntersectionSorter;
+import accord.impl.*;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Scheduler;
-import accord.impl.TopologyFactory;
 import accord.impl.list.ListAgent;
 import accord.impl.list.ListStore;
+import accord.local.ShardDistributor;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.Request;
@@ -224,8 +222,9 @@ public class Cluster implements Scheduler
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(node, messageSink, randomSupplier, topology, lookup::get, topologyUpdates);
-                lookup.put(node, new Node(node, messageSink, configService,
-                                          nowSupplier.get(), () -> new ListStore(node), new ListAgent(30L, onFailure),
+                lookup.put(node, new Node(node, messageSink, configService, nowSupplier.get(),
+                                          () -> new ListStore(node), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
+                                          new ListAgent(30L, onFailure),
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
                                           SimpleProgressLog::new, InMemoryCommandStores.Synchronized::new));
             }

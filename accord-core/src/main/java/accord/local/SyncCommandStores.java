@@ -19,16 +19,16 @@ public class SyncCommandStores extends CommandStores<SyncCommandStores.SyncComma
 
     public static abstract class SyncCommandStore extends CommandStore
     {
-        public SyncCommandStore(int id, int generation, int shardIndex, int numShards)
+        public SyncCommandStore(int id)
         {
-            super(id, generation, shardIndex, numShards);
+            super(id);
         }
         protected abstract <T> T executeSync(PreLoadContext context, Function<? super SafeCommandStore, T> function);
     }
 
-    public SyncCommandStores(int num, Node node, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
+    public SyncCommandStores(NodeTimeService time, Agent agent, DataStore store, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
     {
-        super(num, node, agent, store, progressLogFactory, shardFactory);
+        super(time, agent, store, shardDistributor, progressLogFactory, shardFactory);
     }
 
     protected static class SyncMapReduceAdapter<O> implements MapReduceAdapter<SyncCommandStore, O, O, O>
