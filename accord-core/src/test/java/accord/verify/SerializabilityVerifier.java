@@ -43,8 +43,7 @@ import java.util.stream.IntStream;
  * That is, we maintain links to the maximum predecessor step for each key, at each step for each key.
  * In combination with a linearizability verifier for each register/partition, we verify strict-serializability.
  *
- * TODO: session serializability, i.e. use each client's sequence of events as additional happens-before relations
- * TODO: find and report a path when we encounter a violation
+ * TODO (low priority): session serializability, i.e. use each client's sequence of events as additional happens-before relations
  */
 public class SerializabilityVerifier
 {
@@ -77,7 +76,6 @@ public class SerializabilityVerifier
         final int ofKey;
         final int ofStepIndex;
 
-        // TODO: we probably don't need this field, as it's implied by the node we point to, that we have when we enqueue refresh
         final int predecessorKey;
         int predecessorStepIndex;
 
@@ -187,8 +185,6 @@ public class SerializabilityVerifier
 
     /**
      *  The history of observations for a given key, or the set of nodes in the graph of observations for this key.
-     *
-     *  TODO: extend LinearizabilityVerifier
      */
     class Register
     {
@@ -409,7 +405,6 @@ public class SerializabilityVerifier
     final int keyCount;
     final Register[] registers;
 
-    // TODO: use another intrusive list or intrusive tree
     final TreeSet<MaxPredecessor> refresh = new TreeSet<>();
 
     // [key]->the sequence returned by any read performed in this transaction

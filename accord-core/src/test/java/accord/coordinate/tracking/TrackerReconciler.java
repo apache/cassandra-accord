@@ -76,8 +76,8 @@ public abstract class TrackerReconciler<ST extends ShardTracker, T extends Abstr
                 .collect(Collectors.toList());
     }
 
-    // TODO: generalise and parameterise topology generation a bit more
-    // TODO: select a subset of the generated topologies to correctly simulate topology consumption logic
+    // TODO (required, testing): generalise and parameterise topology generation a bit more
+    //                           also, select a subset of the generated topologies to correctly simulate topology consumption logic
     private static Stream<Topologies> topologies(Random random)
     {
         TopologyFactory factory = new TopologyFactory(2 + random.nextInt(3), IntHashKey.ranges(4 + random.nextInt(12)));

@@ -47,7 +47,6 @@ public class MaelstromRequest extends Body implements Request
 
     public void process(Node node, Id client, ReplyContext replyContext)
     {
-        // TODO: error handling
         node.coordinate(txn).addCallback((success, fail) -> {
             if (success != null) node.reply(client, replyContext, new MaelstromReply(MaelstromReplyContext.messageIdFor(replyContext), (MaelstromResult) success));
 //            else node.reply(client, messageId, new Error(messageId, 13, fail.getMessage()));

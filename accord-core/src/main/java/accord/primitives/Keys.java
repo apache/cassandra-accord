@@ -27,8 +27,7 @@ import accord.utils.ArrayBuffers.ObjectBuffers;
 
 import static accord.utils.ArrayBuffers.cachedKeys;
 
-// TODO: this should probably be a BTree
-// TODO: check that foldl call-sites are inlined and optimised by HotSpot
+// TODO (low priority, efficiency): this should probably be a BTree
 public class Keys extends AbstractKeys<Key, Keys> implements Seekables<Key, Keys>
 {
     public static class SerializationSupport

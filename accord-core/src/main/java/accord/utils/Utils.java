@@ -21,7 +21,7 @@ package accord.utils;
 import java.util.*;
 import java.util.function.IntFunction;
 
-// TODO: remove when jdk8 support is dropped
+// TODO (low priority): remove when jdk8 support is dropped
 public class Utils
 {
     // reimplements Collection#toArray

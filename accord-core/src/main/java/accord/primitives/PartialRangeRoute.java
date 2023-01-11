@@ -61,7 +61,6 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
     @Override
     public Unseekables<Range, ?> toMaximalUnseekables()
     {
-        // TODO (now)
         throw new UnsupportedOperationException();
     }
 
@@ -75,7 +74,6 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
 
     public Unseekables<Range, ?> with(RoutingKey withKey)
     {
-        // TODO: this is left unimplemented until we actually have a range transaction to decide how best to address it
         throw new UnsupportedOperationException();
     }
 

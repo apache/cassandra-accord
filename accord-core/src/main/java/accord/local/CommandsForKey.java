@@ -62,11 +62,7 @@ public abstract class CommandsForKey implements CommandListener
          * Note that {@code testDep} applies only to commands that know at least proposed deps; if specified any
          * commands that do not know any deps will be ignored.
          *
-         * TODO (soon): TestDep should be asynchronous; data should not be kept memory-resident as only used for recovery
-         *
-         * TODO: we don't really need TestStatus anymore, but for clarity it might be nice to retain it to declare intent.
-         *       This is because we only use it in places where TestDep is specified, and the statuses we want to rule-out
-         *       do not have any deps.
+         * TODO (expected, efficiency): TestDep should be asynchronous; data should not be kept memory-resident as only used for recovery
          */
         Stream<T> before(Timestamp timestamp, TestKind testKind, TestDep testDep, @Nullable TxnId depId, TestStatus testStatus, @Nullable Status status);
 

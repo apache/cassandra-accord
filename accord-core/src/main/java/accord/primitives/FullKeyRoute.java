@@ -31,17 +31,9 @@ public class FullKeyRoute extends KeyRoute implements FullRoute<RoutingKey>
     }
 
     @Override
-    public boolean intersects(AbstractRanges<?> ranges)
-    {
-        // TODO (now): remove this in favour of parent implementation - ambiguous at present
-        return true;
-    }
-
-    @Override
     public FullKeyRoute with(RoutingKey withKey)
     {
         Invariants.checkArgument(contains(withKey));
-        // TODO (now): remove this in favour of parent implementation - ambiguous at present
         return this;
     }
 

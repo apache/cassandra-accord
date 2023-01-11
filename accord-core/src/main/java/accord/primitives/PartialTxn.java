@@ -9,7 +9,7 @@ import accord.api.Update;
 public interface PartialTxn extends Txn
 {
     Ranges covering();
-    // TODO: merge efficient merge when more than one input
+    // TODO (low priority, efficiency): efficient merge when more than one input
     PartialTxn with(PartialTxn add);
     Txn reconstitute(FullRoute<?> route);
     PartialTxn reconstitutePartial(PartialRoute<?> route);
@@ -28,12 +28,12 @@ public interface PartialTxn extends Txn
         return covering().containsAll(unseekables);
     }
 
-    // TODO: override toString
     static PartialTxn merge(@Nullable PartialTxn a, @Nullable PartialTxn b)
     {
         return a == null ? b : b == null ? a : a.with(b);
     }
 
+    // TODO (low priority, clarity): override toString
     class InMemory extends Txn.InMemory implements PartialTxn
     {
         public final Ranges covering;
@@ -50,7 +50,6 @@ public interface PartialTxn extends Txn
             return covering;
         }
 
-        // TODO: merge efficient merge when more than one input
         public PartialTxn with(PartialTxn add)
         {
             if (!add.kind().equals(kind()))
@@ -73,8 +72,6 @@ public interface PartialTxn extends Txn
             }
             return new PartialTxn.InMemory(covering, kind(), keys, read, query, update);
         }
-
-        // TODO: override toString
 
         public boolean covers(Ranges ranges)
         {

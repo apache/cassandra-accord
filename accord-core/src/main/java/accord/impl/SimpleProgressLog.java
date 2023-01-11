@@ -63,7 +63,7 @@ import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
 import static accord.primitives.Route.isFullRoute;
 
-// TODO: consider propagating invalidations in the same way as we do applied
+// TODO (desired, consider): consider propagating invalidations in the same way as we do applied
 public class SimpleProgressLog implements ProgressLog.Factory
 {
     enum Progress { NoneExpected, Expected, NoProgress, Investigating, Done }
@@ -184,7 +184,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                 void updateMax(ProgressToken ok)
                 {
-                    // TODO: perhaps set localProgress back to Waiting if Investigating and we update anything?
+                    // TODO (low priority): perhaps set localProgress back to Waiting if Investigating and we update anything?
                     token = token.merge(ok);
                 }
 
@@ -247,7 +247,6 @@ public class SimpleProgressLog implements ProgressLog.Factory
                                                     return;
 
                                                 ProgressToken token = success.asProgressToken();
-                                                // TODO: avoid returning null (need to change semantics here in this case, though, as Recover doesn't return CheckStatusOk)
                                                 if (token.durability.isDurable())
                                                 {
                                                     commandStore.execute(contextFor(txnId), safeStore -> {
@@ -284,7 +283,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     @Override
                     public void onSuccess(Id from, SimpleReply reply)
                     {
-                        // TODO: callbacks should be associated with a commandStore for processing to avoid this
+                        // TODO (required, efficiency): callbacks should be associated with a commandStore for processing to avoid this
                         commandStore.execute(PreLoadContext.empty(), ignore -> {
                             if (progress() == Done)
                                 return;
@@ -306,8 +305,8 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 }
 
                 DisseminateStatus status = NotExecuted;
-                Set<Id> notAwareOfDurability; // TODO: use Agrona's IntHashSet as soon as Node.Id switches from long to int
-                Set<Id> notPersisted;         // TODO: use Agrona's IntHashSet as soon as Node.Id switches from long to int
+                Set<Id> notAwareOfDurability; // TODO (easy, efficiency): use Agrona's IntHashSet as soon as Node.Id switches from long to int
+                Set<Id> notPersisted;         // TODO (easy, efficiency): use Agrona's IntHashSet as soon as Node.Id switches from long to int
 
                 List<Runnable> whenReady;
 
@@ -424,7 +423,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     setProgress(Investigating);
                     if (notAwareOfDurability.isEmpty())
                     {
-                        // TODO: also track actual durability
+                        // TODO (required, consider): also track actual durability
                         status = DisseminateStatus.Done;
                         setProgress(Done);
                         return;
@@ -483,7 +482,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     // first make sure we have enough information to obtain the command locally
                     Timestamp executeAt = command.hasBeen(PreCommitted) ? command.executeAt() : null;
                     long srcEpoch = (executeAt != null ? executeAt : txnId).epoch;
-                    // TODO: compute fromEpoch, the epoch we already have this txn replicated until
+                    // TODO (desired, consider): compute fromEpoch, the epoch we already have this txn replicated until
                     long toEpoch = Math.max(srcEpoch, node.topology().epoch());
                     Unseekables<?, ?> someKeys = unseekables(command);
 
@@ -514,7 +513,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 private void invalidate(Node node, TxnId txnId, Unseekables<?, ?> someKeys)
                 {
                     setProgress(Investigating);
-                    // TODO (RangeTxns): This should be a Routable, or we should guarantee it is safe to operate on any key in the range
+                    // TODO (now, rangetxns): This should be a Routable, or we should guarantee it is safe to operate on any key in the range
                     RoutingKey someKey = Route.isRoute(someKeys) ? (Route.castToRoute(someKeys)).homeKey() : someKeys.get(0).someIntersectingRoutingKey();
                     someKeys = someKeys.with(someKey);
                     debugInvestigating = Invalidate.invalidate(node, txnId, someKeys, (success, fail) -> {
@@ -775,20 +774,20 @@ public class SimpleProgressLog implements ProgressLog.Factory
         public void durable(TxnId txnId, Unseekables<?, ?> unseekables, ProgressShard shard)
         {
             State state = ensure(txnId);
-            // TODO (progress consider-prerelease): we can probably simplify things by requiring (empty) Apply messages to be sent also to the coordinating topology
+            // TODO (desirable, efficiency): we can probably simplify things by requiring (empty) Apply messages to be sent also to the coordinating topology
             state.recordBlocking(txnId, PreApplied.minKnown, unseekables);
         }
 
         @Override
         public void waiting(TxnId blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn)
         {
-            // TODO (perf+ consider-prerelease): consider triggering a preemption of existing coordinator (if any) in some circumstances;
-            //     today, an LWT can pre-empt more efficiently (i.e. instantly) a failed operation whereas Accord will
-            //     wait for some progress interval before taking over; there is probably some middle ground where we trigger
-            //     faster preemption once we're blocked on a transaction, while still offering some amount of time to complete.
-            // TODO (soon): forward to local progress shard for processing (if known)
-            // TODO (soon): if we are co-located with the home shard, don't need to do anything unless we're in a
-            //              later topology that wasn't covered by its coordination
+            // TODO (consider): consider triggering a preemption of existing coordinator (if any) in some circumstances;
+            //                  today, an LWT can pre-empt more efficiently (i.e. instantly) a failed operation whereas Accord will
+            //                  wait for some progress interval before taking over; there is probably some middle ground where we trigger
+            //                  faster preemption once we're blocked on a transaction, while still offering some amount of time to complete.
+            // TODO (desirable, efficiency): forward to local progress shard for processing (if known)
+            // TODO (desirable, efficiency): if we are co-located with the home shard, don't need to do anything unless we're in a
+            //                               later topology that wasn't covered by its coordination
             ensure(blockedBy).recordBlocking(blockedBy, blockedUntil, blockedOn);
         }
 

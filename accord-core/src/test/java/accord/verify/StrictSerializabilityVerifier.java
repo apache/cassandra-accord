@@ -48,7 +48,7 @@ import accord.utils.Invariants;
  * That is, we maintain links to the maximum predecessor step for each key, at each step for each key, and see if we can
  * find a path of predecessors that would witness us.
  *
- * TODO: find and report a path when we encounter a violation
+ * TODO (low priority): find and report a path when we encounter a violation
  */
 public class StrictSerializabilityVerifier
 {
@@ -83,7 +83,7 @@ public class StrictSerializabilityVerifier
         // the step index we are tracking predecessors for
         Step ofStep;
 
-        // TODO: we probably don't need this field, as it's implied by the node we point to, that we have when we enqueue refresh
+        // TODO (low priority): we probably don't need this field, as it's implied by the node we point to, that we have when we enqueue refresh
         // the key we are tracking the maximum predecessor for
         final int predecessorKey;
 
@@ -223,7 +223,7 @@ public class StrictSerializabilityVerifier
          */
         final MaxPredecessor[] maxPredecessors;
 
-        // TODO: cleanup
+        // TODO (low priority): cleanup
         List<UnknownStepHolder> unknownStepPeers;
         Map<Step, UnknownStepPredecessor> unknownStepPredecessors;
         Runnable onChange;
@@ -288,7 +288,7 @@ public class StrictSerializabilityVerifier
                 {
                     updated = true;
                     writtenAfter = start;
-                    // TODO: double check this will trigger an update of maxPredecessorX properties on each node with us as a maxPredecessor
+                    // TODO (low priority): double check this will trigger an update of maxPredecessorX properties on each node with us as a maxPredecessor
                 }
                 if (writtenAfter > writtenBefore)
                     throw new HistoryViolation(ofKey, "Write operation time conflicts with earlier read");
@@ -459,10 +459,7 @@ public class StrictSerializabilityVerifier
          * Any write value we don't know the step index for because we did not perform a coincident read;
          * we wait until we witness a read containing the
          *
-         * TODO: report a violation if we have witnessed a sequence missing any of these deferred operations
-         *       that started after they finished
-         *
-         * TODO: handle writes with unknown outcome
+         * TODO (desired, testing): handle writes with unknown outcome
          */
 
         final Map<Integer, UnknownStepHolder> byWriteValue = new HashMap<>();
@@ -530,7 +527,7 @@ public class StrictSerializabilityVerifier
                 throw new AssertionError();
             if (null != byTimestamp.putIfAbsent(end, unknownStep))
                 throw new AssertionError();
-            // TODO: verify this propagation by unit test
+            // TODO (desired, testing): verify this propagation by unit test
             unknownSteps[ofKey].step.receiveKnowledgePhasedPredecessors(this, StrictSerializabilityVerifier.this);
         }
 
@@ -701,7 +698,7 @@ public class StrictSerializabilityVerifier
     final int keyCount;
     final Register[] registers;
 
-    // TODO: use another intrusive list or intrusive tree
+    // TODO (low priority): use another intrusive list or intrusive tree
     final TreeSet<MaxPredecessor> refresh = new TreeSet<>();
 
     // [key]->the sequence returned by any read performed in this transaction
@@ -712,7 +709,7 @@ public class StrictSerializabilityVerifier
     final int[] bufNewPeerSteps;
     final UnknownStepHolder[] bufUnknownSteps;
 
-    // TODO (soon): verify operations with unknown outcomes are finalised by the first operation that starts after the coordinator abandons the txn
+    // TODO (desired, testing): verify operations with unknown outcomes are finalised by the first operation that starts after the coordinator abandons the txn
     public StrictSerializabilityVerifier(int keyCount)
     {
         this.keyCount = keyCount;

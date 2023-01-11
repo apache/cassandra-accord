@@ -1,25 +1,24 @@
 package accord.messages;
 
-import java.util.BitSet;
 import java.util.function.Function;
 
 import accord.local.*;
 import accord.local.Status.Known;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
+import com.carrotsearch.hppc.IntHashSet;
 
 import static accord.messages.Defer.Ready.Expired;
 import static accord.messages.Defer.Ready.No;
 import static accord.messages.Defer.Ready.Yes;
 
-// TODO: use something more efficient? could probably assign each CommandStore a unique ascending integer and use an int[]
 class Defer implements CommandListener
 {
     public enum Ready { No, Yes, Expired }
 
     final Function<Command, Ready> waitUntil;
     final TxnRequest<?> request;
-    BitSet waitingOn = new BitSet(); // TODO: move to compressed integer hash map to permit easier reclamation of ids
+    IntHashSet waitingOn = new IntHashSet(); // TODO (easy): use Agrona when available
     int waitingOnCount;
     boolean isDone;
 
@@ -45,7 +44,7 @@ class Defer implements CommandListener
         if (isDone)
             throw new IllegalStateException("Recurrent retry of " + request);
 
-        waitingOn.set(commandStore.id());
+        waitingOn.add(commandStore.id());
         ++waitingOnCount;
         command.addListener(this);
     }
@@ -59,9 +58,9 @@ class Defer implements CommandListener
         if (ready == Expired) return;
 
         int id = safeStore.commandStore().id();
-        if (!waitingOn.get(id))
+        if (!waitingOn.contains(id))
             throw new IllegalStateException();
-        waitingOn.clear(id);
+        waitingOn.remove(id);
 
         if (0 == --waitingOnCount)
         {

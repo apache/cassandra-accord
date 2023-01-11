@@ -56,8 +56,8 @@ import static accord.utils.Gens.lists;
 import static accord.utils.Property.qt;
 import static accord.utils.Utils.toArray;
 
-// TODO: test Keys with no contents
-// TODO: test #without
+// TODO (expected, testing): test Keys with no contents, "without", "with" where TxnId and Keys are the same, but Key -> [TxnId] does not match;
+//  ensure high code coverage
 public class DepsTest
 {
     private static final Logger logger = LoggerFactory.getLogger(DepsTest.class);
@@ -268,13 +268,6 @@ public class DepsTest
             }
         }
         executor.shutdown();
-    }
-
-    //TODO test "with" where TxnId and Keys are the same, but Key -> [TxnId] does not match
-
-    private static Keys keys(List<Deps> list)
-    {
-        return list.stream().map(d -> (Keys)d.test.keys()).reduce(Keys.EMPTY, Keys::union);
     }
 
     private static void testMergedProperty(List<Deps> list)

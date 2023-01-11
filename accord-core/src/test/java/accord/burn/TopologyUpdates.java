@@ -89,7 +89,7 @@ public class TopologyUpdates
 
             if (minStatus == null || minStatus.phase.compareTo(status.phase) >= 0)
             {
-                // TODO: minStatus == null means we're sending redundant messages
+                // TODO (low priority): minStatus == null means we're sending redundant messages
                 onDone.accept(true);
                 return;
             }

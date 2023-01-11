@@ -42,7 +42,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
 {
     public static abstract class WithUnsynced<R> extends TxnRequest<R>
     {
-        public final long minEpoch; // TODO: can this just always be TxnId.epoch?
+        public final long minEpoch; // TODO (low priority, clarity): can this just always be TxnId.epoch?
         public final boolean doNotComputeProgressKey;
 
         public WithUnsynced(Id to, Topologies topologies, TxnId txnId, FullRoute<?> route)
@@ -56,20 +56,20 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
             this.minEpoch = topologies.oldestEpoch();
             this.doNotComputeProgressKey = doNotComputeProgressKey(topologies, startIndex, txnId, waitForEpoch());
 
-            // TODO (now): alongside Invariants class, introduce PARANOID mode for checking extra invariants
             Ranges ranges = topologies.forEpoch(txnId.epoch).rangesForNode(to);
             if (doNotComputeProgressKey)
             {
                 Invariants.checkState(!route.intersects(ranges)); // confirm dest is not a replica on txnId.epoch
             }
-            else
+            else if (Invariants.isParanoid())
             {
-                boolean intersects = route.intersects(ranges);
+                // check that the destination's newer topology does not yield different ranges
                 long progressEpoch = Math.min(waitForEpoch(), txnId.epoch);
                 Ranges computesRangesOn = topologies.forEpoch(progressEpoch).rangesForNode(to);
-                boolean check = computesRangesOn != null && route.intersects(computesRangesOn);
-                if (check != intersects)
-                    throw new IllegalStateException();
+                if (computesRangesOn == null)
+                    Invariants.checkState(!route.intersects(ranges));
+                else
+                    Invariants.checkState(route.slice(computesRangesOn).equals(route.slice(ranges)));
             }
         }
 
@@ -140,7 +140,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
         this.node = on;
         this.replyTo = replyTo;
         this.replyContext = replyContext;
-        this.progressKey = progressKey(node); // TODO: not every class that extends TxnRequest needs this set
+        this.progressKey = progressKey(node); // TODO (low priority, clarity): not every class that extends TxnRequest needs this set
         process();
     }
 
@@ -231,7 +231,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
         return computeScope(node, topologies, route, startIndex, Route::slice, PartialRoute::union);
     }
 
-    // TODO: move to Topologies
+    // TODO (low priority, clarity): move to Topologies
     public static <I, O> O computeScope(Node.Id node, Topologies topologies, I keys, int startIndex, BiFunction<I, Ranges, O> slice, BiFunction<O, O, O> merge)
     {
         O scope = computeScopeInternal(node, topologies, keys, startIndex, slice, merge);
@@ -275,7 +275,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
         // So in these cases we send a special flag indicating that the progress key should not be computed
         // (as it might be done so with stale ring information)
 
-        // TODO (soon): this would be better defined as "hasProgressKey"
+        // TODO (low priority, clarity): this would be better defined as "hasProgressKey"
         return waitForEpoch < txnId.epoch && startIndex > 0
                 && topologies.get(startIndex).epoch() < txnId.epoch;
     }

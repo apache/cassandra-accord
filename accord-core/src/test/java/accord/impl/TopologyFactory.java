@@ -31,7 +31,6 @@ import static accord.utils.Utils.toArray;
 public class TopologyFactory
 {
     public final int rf;
-    // TODO: convert to KeyRanges
     public final Range[] shardRanges;
 
     public TopologyFactory(int rf, Range... shardRanges)

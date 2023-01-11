@@ -54,13 +54,13 @@ public interface Network
         @Override
         public void send(Id from, Id to, Request request, Callback callback)
         {
-            // TODO: log
+            // TODO (easy, testing): log
         }
 
         @Override
         public void reply(Id from, Id replyingToNode, long replyingToMessage, Reply reply)
         {
-            // TODO: log
+            // TODO (easy, testing): log
         }
     };
 }

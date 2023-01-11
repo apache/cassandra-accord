@@ -12,7 +12,7 @@ public interface RoutableKey extends Routable, Comparable<RoutableKey>
      *
      * All RoutingKey implementations must sort correctly with this type.
      *
-     * TODO: need to partition range from/to -/+ infinity as otherwise we exclude at least one key
+     * TODO (expected, testing): need to partition range from/to -/+ infinity as otherwise we exclude at least one key
      */
     class InfiniteRoutableKey implements RoutableKey
     {

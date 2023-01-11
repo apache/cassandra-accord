@@ -56,9 +56,9 @@ public class SortedArrays
      *
      * Otherwise, depending on {@code buffers}, a result buffer may itself be returned or a new array.
      *
-     * TODO: introduce exponential search optimised version
-     * TODO: also compare with Hwang and Lin algorithm
-     * TODO: could also compare with a recursive partitioning scheme like quicksort
+     * TODO (low priority, efficiency): introduce exponential search optimised version
+     *                                  also compare with Hwang and Lin algorithm
+     *                                  could also compare with a recursive partitioning scheme like quicksort
      * (note that dual exponential search is also an optimal algorithm, just seemingly ignored by the literature,
      * and may be in practice faster for lists that are more often similar in size, and only occasionally very different.
      * Without performing extensive analysis, exponential search likely has higher constant factors in terms of the
@@ -218,7 +218,7 @@ public class SortedArrays
      *
      * Otherwise, depending on {@code buffers}, a result buffer may itself be returned or a new array.
      *
-     * TODO: introduce exponential search optimised version
+     * TODO (low priority, efficiency): introduce exponential search optimised version
      */
     public static <T> T[] linearIntersection(T[] left, int leftLength, T[] right, int rightLength, Comparator<T> comparator, ObjectBuffers<T> buffers)
     {
@@ -321,7 +321,7 @@ public class SortedArrays
      *
      * Otherwise, depending on {@code buffers}, a result buffer may itself be returned or a new array.
      *
-     * TODO: introduce exponential search optimised version
+     * TODO (low priority, efficiency): introduce exponential search optimised version
      */
     public static <T2, T1 extends Comparable<? super T2>> T1[] linearIntersection(T1[] left, int leftLength, T2[] right, int rightLength, ObjectBuffers<T1> buffers)
     {

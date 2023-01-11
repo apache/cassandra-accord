@@ -69,7 +69,7 @@ public class InformHomeOfTxn extends AsyncFuture<Void> implements Callback<Simpl
                 break;
 
             case Nack:
-                // TODO: stale topology should be impossible right now
+                // TODO (required, consider): stale topology should be impossible right now
                 onFailure(from, new StaleTopology());
         }
     }
@@ -80,7 +80,7 @@ public class InformHomeOfTxn extends AsyncFuture<Void> implements Callback<Simpl
         if (this.failure == null) this.failure = failure;
         else this.failure.addSuppressed(failure);
 
-        // TODO: if we fail and have an incorrect topology, trigger refresh
+        // TODO (required, consider): if we fail and have an incorrect topology, trigger refresh
         if (tracker.onFailure(null) == Fail)
             tryFailure(this.failure);
     }

@@ -489,7 +489,6 @@ public class Json
 
     static
     {
-        // TODO: Maelstrom hooks should be registered at run-time to permit separate tree
         GSON = new GsonBuilder().registerTypeAdapter(Packet.class, Packet.GSON_ADAPTER)
                                 .registerTypeAdapter(Id.class, ID_ADAPTER)
                                 .registerTypeAdapter(Txn.class, TXN_ADAPTER)

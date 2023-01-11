@@ -38,7 +38,7 @@ public class DeterministicIdentitySet<T> extends AbstractSet<T>
         }
     }
 
-    // TODO: an identity hash map that doesn't mind concurrent modification / iteration
+    // TODO (low priority): an identity hash map that doesn't mind concurrent modification / iteration
     final IdentityHashMap<T, Entry<T>> lookup;
     final Entry<T> head = new Entry<T>(null);
 

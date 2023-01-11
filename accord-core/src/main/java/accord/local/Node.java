@@ -104,11 +104,6 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return promised.node.equals(id) && coordinating.containsKey(txnId);
     }
 
-    public static int numCommandShards()
-    {
-        return 8; // TODO: make configurable
-    }
-
     private final Id id;
     private final MessageSink messageSink;
     private final ConfigurationService configService;
@@ -120,10 +115,10 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private final Agent agent;
     private final Random random;
 
-    // TODO: this really needs to be thought through some more, as it needs to be per-instance in some cases, and per-node in others
+    // TODO (expected, consider): this really needs to be thought through some more, as it needs to be per-instance in some cases, and per-node in others
     private final Scheduler scheduler;
 
-    // TODO (soon): monitor the contents of this collection for stalled coordination, and excise them
+    // TODO (expected, liveness): monitor the contents of this collection for stalled coordination, and excise them
     private final Map<TxnId, Future<? extends Outcome>> coordinating = new ConcurrentHashMap<>();
 
     public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier,
@@ -228,7 +223,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     public Timestamp uniqueNow()
     {
         return now.updateAndGet(cur -> {
-            // TODO: this diverges from proof; either show isomorphism or make consistent
+            // TODO (low priority, proof): this diverges from proof; either show isomorphism or make consistent
             long now = nowSupplier.getAsLong();
             long epoch = Math.max(cur.epoch, topology.epoch());
             return (now > cur.real)
@@ -370,12 +365,11 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public Future<Result> coordinate(TxnId txnId, Txn txn)
     {
-        // TODO: The combination of updating the epoch of the next timestamp with epochs we don't have topologies for,
+        // TODO (desirable, consider): The combination of updating the epoch of the next timestamp with epochs we don't have topologies for,
         //  and requiring preaccept to talk to its topology epoch means that learning of a new epoch via timestamp
         //  (ie not via config service) will halt any new txns from a node until it receives this topology
         Future<Result> result = withEpoch(txnId.epoch, () -> initiateCoordination(txnId, txn));
         coordinating.putIfAbsent(txnId, result);
-        // TODO: if we fail, nominate another node to try instead
         result.addCallback((success, fail) -> coordinating.remove(txnId, result));
         return result;
     }
@@ -470,14 +464,11 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
             return future;
         });
         coordinating.putIfAbsent(txnId, result);
-        result.addCallback((success, fail) -> {
-            coordinating.remove(txnId, result);
-            // TODO: if we fail, nominate another node to try instead
-        });
+        result.addCallback((success, fail) -> coordinating.remove(txnId, result));
         return result;
     }
 
-    // TODO: coalesce other maybeRecover calls also? perhaps have mutable knownStatuses so we can inject newer ones?
+    // TODO (low priority, API/efficiency): coalesce maybeRecover calls? perhaps have mutable knownStatuses so we can inject newer ones?
     public Future<? extends Outcome> maybeRecover(TxnId txnId, RoutingKey homeKey, @Nullable Route<?> route, ProgressToken prevProgress)
     {
         Future<? extends Outcome> result = coordinating.get(txnId);

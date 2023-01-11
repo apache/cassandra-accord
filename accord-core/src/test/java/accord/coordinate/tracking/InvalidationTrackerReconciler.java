@@ -8,7 +8,6 @@ import org.junit.jupiter.api.Assertions;
 import java.util.ArrayList;
 import java.util.Random;
 
-// TODO: check fast path accounting
 public class InvalidationTrackerReconciler extends TrackerReconciler<InvalidationShardTracker, InvalidationTracker, InvalidationTrackerReconciler.Rsp>
 {
     enum Rsp { PROMISED_FAST, NOT_PROMISED_FAST, PROMISED_SLOW, NOT_PROMISED_SLOW, FAIL }
@@ -59,7 +58,7 @@ public class InvalidationTrackerReconciler extends TrackerReconciler<Invalidatio
             case NoChange:
                 Assertions.assertFalse(tracker.any(InvalidationShardTracker::isPromised)
                         && tracker.any(InvalidationShardTracker::isFastPathRejected));
-                // TODO: it would be nice for InvalidationShardTracker to respond as soon as no shards are able to promise, but would require significant refactoring
+                // TODO (low priority): it would be nice for InvalidationShardTracker to respond as soon as no shards are able to promise, but would require significant refactoring
 //                Assertions.assertTrue(tracker.any(InvalidationShardTracker::canPromise));
                 Assertions.assertFalse(tracker.all(InvalidationShardTracker::isDecided));
         }

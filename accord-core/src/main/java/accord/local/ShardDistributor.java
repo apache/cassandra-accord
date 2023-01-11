@@ -10,8 +10,8 @@ import java.util.List;
 
 public interface ShardDistributor
 {
-    // TODO: this is overly simplistic: need to supply existing distribution,
-    //  and support gradual local redistribution to keep number of shards eventually the same
+    // TODO (expected, topology): this is overly simplistic: need to supply existing distribution, and support
+    //                            gradual local redistribution to keep number of shards eventually the same
     List<Ranges> split(Ranges ranges);
 
     class EvenSplit<T> implements ShardDistributor

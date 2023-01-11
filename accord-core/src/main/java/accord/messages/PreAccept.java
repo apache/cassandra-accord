@@ -123,7 +123,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     @Override
     public void accept(PreAcceptReply reply, Throwable failure)
     {
-        // TODO: communicate back the failure
+        // TODO (required, error handling): communicate back the failure
         node.reply(replyTo, replyContext, reply);
     }
 

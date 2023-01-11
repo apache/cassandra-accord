@@ -48,8 +48,8 @@ import static accord.utils.Invariants.checkArgument;
  *
  * Assumes a topology service that won't report epoch n without having n-1 etc also available
  *
- * TODO: make TopologyManager a Topologies and copy-on-write update to it, so we can always just take a reference for
- *       transactions instead of copying every time (and index into it by the txnId.epoch)
+ * TODO (desired, efficiency/clarity): make TopologyManager a Topologies and copy-on-write update to it,
+ *  so we can always just take a reference for transactions instead of copying every time (and index into it by the txnId.epoch)
  */
 public class TopologyManager implements ConfigurationService.Listener
 {

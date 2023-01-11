@@ -230,7 +230,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
      * terminating at the first indexes where this ceases to be true
      * @return index of {@code as} in upper 32bits, {@code bs} in lower 32bits
      *
-     * TODO: better support for merging runs of overlapping or adjacent ranges
+     * TODO (low priority, efficiency): better support for merging runs of overlapping or adjacent ranges
      */
     static long supersetLinearMerge(Range[] as, Range[] bs)
     {
@@ -262,7 +262,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
             {
                 // use a temporary counter, so that if we don't find a run of ranges that enforce the superset
                 // condition we exit at the start of the mismatch run (and permit it to be merged)
-                // TODO: use exponentialSearch
+                // TODO (easy, efficiency): use exponentialSearch
                 int tmpai = ai;
                 do
                 {
@@ -313,7 +313,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         if (bi == bs.length)
             return constructor.construct(param1, param2, (as == left.ranges ? left : right).ranges);
 
-        // TODO (now): caching
+        // TODO (expected, efficiency): ArrayBuffers caching
         Range[] result = new Range[as.length + (bs.length - bi)];
         int resultCount;
         switch (mode)
@@ -345,7 +345,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
             }
             else
             {
-                // TODO: we don't seem to currently merge adjacent (but non-overlapping)
+                // TODO (desired, efficiency/semantics): we don't seem to currently merge adjacent (but non-overlapping)
                 RoutingKey start = a.start().compareTo(b.start()) <= 0 ? a.start() : b.start();
                 RoutingKey end = a.end().compareTo(b.end()) >= 0 ? a.end() : b.end();
                 ai++;
@@ -411,7 +411,6 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         if (ranges.length == 0)
             return input;
 
-        // TODO: use cache
         ObjectBuffers<Range> cachedKeyRanges = cachedRanges();
         Range[] buffer = cachedKeyRanges.get(ranges.length);
         try
