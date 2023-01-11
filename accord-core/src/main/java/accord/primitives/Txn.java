@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.Objects;
 
 import accord.local.Command;
-import accord.local.CommandStore;
 
 import accord.api.*;
 import accord.local.SafeCommandStore;
@@ -37,11 +36,24 @@ public interface Txn
 {
     enum Kind
     {
-        READ, WRITE;
+        Read, Write;
+        // in future: BlindWrite, Interactive?
+
+        private static final Kind[] VALUES = Kind.values();
 
         public boolean isWrite()
         {
-            return this == WRITE;
+            return this == Write;
+        }
+
+        public boolean isRead()
+        {
+            return this == Read;
+        }
+
+        public static Kind ofOrdinal(int ordinal)
+        {
+            return VALUES[ordinal];
         }
     }
 
@@ -55,7 +67,7 @@ public interface Txn
 
         public InMemory(@Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nonnull Query query)
         {
-            this.kind = Kind.READ;
+            this.kind = Kind.Read;
             this.keys = keys;
             this.read = read;
             this.query = query;
@@ -64,7 +76,7 @@ public interface Txn
 
         public InMemory(@Nonnull Keys keys, @Nonnull Read read, @Nonnull Query query, @Nullable Update update)
         {
-            this.kind = Kind.WRITE;
+            this.kind = Kind.Write;
             this.keys = keys;
             this.read = read;
             this.update = update;
@@ -174,7 +186,7 @@ public interface Txn
 
     default Future<Data> read(SafeCommandStore safeStore, Command command)
     {
-        Ranges ranges = safeStore.ranges().at(command.executeAt().epoch);
+        Ranges ranges = safeStore.ranges().at(command.executeAt().epoch());
         List<Future<Data>> futures = read().keys().foldl(ranges, (key, accumulate, index) -> {
             Future<Data> result = read().read(key, kind(), safeStore, command.executeAt(), safeStore.dataStore());
             accumulate.add(result);

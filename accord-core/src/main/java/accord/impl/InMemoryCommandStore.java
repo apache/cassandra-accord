@@ -29,7 +29,6 @@ import accord.impl.InMemoryCommandStore.Synchronized.SynchronizedState;
 import accord.local.Command;
 import accord.local.CommandsForKey;
 import accord.local.CommandListener;
-import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
@@ -161,9 +160,9 @@ public class InMemoryCommandStore
         @Override
         public Timestamp preaccept(TxnId txnId, Seekables<?, ?> keys)
         {
-            Timestamp max = maxConflict(keys, ranges().at(txnId.epoch));
+            Timestamp max = maxConflict(keys, ranges().at(txnId.epoch()));
             long epoch = latestEpoch();
-            if (txnId.compareTo(max) > 0 && txnId.epoch >= epoch && !agent.isExpired(txnId, time.now()))
+            if (txnId.compareTo(max) > 0 && txnId.epoch() >= epoch && !agent.isExpired(txnId, time.now()))
                 return txnId;
 
             return time.uniqueNow(max);
@@ -187,8 +186,8 @@ public class InMemoryCommandStore
 
         public void forEpochCommands(Ranges ranges, long epoch, Consumer<Command> consumer)
         {
-            Timestamp minTimestamp = new Timestamp(epoch, Long.MIN_VALUE, Integer.MIN_VALUE, Node.Id.NONE);
-            Timestamp maxTimestamp = new Timestamp(epoch, Long.MAX_VALUE, Integer.MAX_VALUE, Node.Id.MAX);
+            Timestamp minTimestamp = Timestamp.minForEpoch(epoch);
+            Timestamp maxTimestamp = Timestamp.maxForEpoch(epoch);
             for (Range range : ranges)
             {
                 Iterable<InMemoryCommandsForKey> rangeCommands = commandsForKey.subMap(
@@ -205,8 +204,8 @@ public class InMemoryCommandStore
 
         public void forCommittedInEpoch(Ranges ranges, long epoch, Consumer<Command> consumer)
         {
-            Timestamp minTimestamp = new Timestamp(epoch, Long.MIN_VALUE, Integer.MIN_VALUE, Node.Id.NONE);
-            Timestamp maxTimestamp = new Timestamp(epoch, Long.MAX_VALUE, Integer.MAX_VALUE, Node.Id.MAX);
+            Timestamp minTimestamp = Timestamp.minForEpoch(epoch);
+            Timestamp maxTimestamp = Timestamp.maxForEpoch(epoch);
             for (Range range : ranges)
             {
                 Iterable<InMemoryCommandsForKey> rangeCommands = commandsForKey.subMap(range.start(),
@@ -262,7 +261,7 @@ public class InMemoryCommandStore
 
         public void forEach(Routable keyOrRange, Ranges slice, Consumer<CommandsForKey> forEach)
         {
-            switch (keyOrRange.kind())
+            switch (keyOrRange.domain())
             {
                 default: throw new AssertionError();
                 case Key:

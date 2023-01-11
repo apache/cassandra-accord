@@ -178,7 +178,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         return end;
     }
 
-    public final Kind kind() { return Kind.Range; }
+    public final Domain domain() { return Domain.Range; }
 
     public abstract boolean startInclusive();
     public abstract boolean endInclusive();

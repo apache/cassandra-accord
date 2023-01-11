@@ -33,6 +33,8 @@ import static accord.Utils.id;
 import static accord.Utils.ids;
 import static accord.Utils.writeTxn;
 import static accord.impl.IntKey.keys;
+import static accord.primitives.Routable.Domain.Key;
+import static accord.primitives.Txn.Kind.Write;
 
 public class CoordinateTest
 {
@@ -44,7 +46,7 @@ public class CoordinateTest
             Node node = cluster.get(1);
             Assertions.assertNotNull(node);
 
-            TxnId txnId = node.nextTxnId();
+            TxnId txnId = node.nextTxnId(Write, Key);
             Keys keys = keys(10);
             Txn txn = writeTxn(keys);
             FullKeyRoute route = keys.toRoute(keys.get(0).toUnseekable());
@@ -71,8 +73,8 @@ public class CoordinateTest
 
     private TxnId coordinate(Node node, long clock, Keys keys) throws Throwable
     {
-        TxnId txnId = node.nextTxnId();
-        txnId = new TxnId(txnId.epoch, txnId.real + clock, 0, txnId.node);
+        TxnId txnId = node.nextTxnId(Write, Key);
+        txnId = new TxnId(txnId.epoch(), txnId.hlc() + clock, Write, Key, txnId.node);
         Txn txn = writeTxn(keys);
         Result result = Coordinate.coordinate(node, txnId, txn, node.computeRoute(txnId, txn.keys())).get();
         Assertions.assertEquals(MockStore.RESULT, result);
@@ -135,7 +137,7 @@ public class CoordinateTest
             Node node = cluster.get(1);
             Assertions.assertNotNull(node);
 
-            TxnId txnId = node.nextTxnId();
+            TxnId txnId = node.nextTxnId(Write, Key);
             Keys oneKey = keys(10);
             Keys twoKeys = keys(10, 20);
             Txn txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.QUERY, MockStore.update(twoKeys));

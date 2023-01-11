@@ -73,7 +73,7 @@ public class Apply extends TxnRequest<ApplyReply>
     public void process()
     {
         // note, we do not also commit here if txnId.epoch != executeAt.epoch, as the scope() for a commit would be different
-        node.mapReduceConsumeLocal(this, txnId.epoch, untilEpoch, this);
+        node.mapReduceConsumeLocal(this, txnId.epoch(), untilEpoch, this);
     }
 
     public ApplyReply apply(SafeCommandStore safeStore)
@@ -101,8 +101,8 @@ public class Apply extends TxnRequest<ApplyReply>
     {
         if (reply == ApplyReply.Applied)
         {
-            node.ifLocal(empty(), scope.homeKey(), txnId.epoch, instance -> {
-                node.withEpoch(executeAt.epoch, () -> instance.progressLog().durableLocal(txnId));
+            node.ifLocal(empty(), scope.homeKey(), txnId.epoch(), instance -> {
+                node.withEpoch(executeAt.epoch(), () -> instance.progressLog().durableLocal(txnId));
             }).addCallback(node.agent());
         }
         node.reply(replyTo, replyContext, reply);

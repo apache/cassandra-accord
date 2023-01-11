@@ -68,7 +68,7 @@ public class Invalidate implements Callback<InvalidateReply>
         this.txnId = txnId;
         this.transitivelyInvokedByPriorInvalidation = transitivelyInvokedByPriorInvalidation;
         this.invalidateWith = invalidateWith;
-        Topologies topologies = node.topology().forEpoch(invalidateWith, txnId.epoch);
+        Topologies topologies = node.topology().forEpoch(invalidateWith, txnId.epoch());
         this.tracker = new InvalidationTracker(topologies);
     }
 
@@ -195,7 +195,7 @@ public class Invalidate implements Callback<InvalidateReply>
                         Preconditions.checkState(maxReply.status.hasBeen(Accepted) || tracker.all(InvalidationShardTracker::isPromised));
                         // if we included the home shard, and we have either a recoverable status OR have not rejected the fast path,
                         // we must have at least one response that should contain the Route
-                        if (invalidateWith.contains(homeKey) && tracker.isPromisedForKey(homeKey, txnId.epoch))
+                        if (invalidateWith.contains(homeKey) && tracker.isPromisedForKey(homeKey, txnId.epoch()))
                             throw new IllegalStateException("Received replies from a node that must have known the route, but that did not include it");
 
                         // if < Accepted, we should have short-circuited to invalidation above. This guarantees no Invaldate/Recover loop, as any later status will forbid invoking Invalidate

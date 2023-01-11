@@ -70,6 +70,6 @@ public class ListAgent implements Agent
     @Override
     public boolean isExpired(TxnId initiated, long now)
     {
-        return now - initiated.real >= timeout;
+        return now - initiated.hlc() >= timeout;
     }
 }

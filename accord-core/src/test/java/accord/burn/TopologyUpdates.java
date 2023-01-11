@@ -118,12 +118,12 @@ public class TopologyUpdates
                     break;
                 case PreApplied:
                 case Applied:
-                    node.withEpoch(Math.max(executeAt.epoch, toEpoch), () -> {
+                    node.withEpoch(Math.max(executeAt.epoch(), toEpoch), () -> {
                         FetchData.fetch(PreApplied.minKnown, node, txnId, route, executeAt, toEpoch, callback);
                     });
                     break;
                 case Invalidated:
-                    node.forEachLocal(contextFor(txnId), route, txnId.epoch, toEpoch, safeStore -> {
+                    node.forEachLocal(contextFor(txnId), route, txnId.epoch(), toEpoch, safeStore -> {
                         safeStore.command(txnId).commitInvalidate(safeStore);
                     });
             }

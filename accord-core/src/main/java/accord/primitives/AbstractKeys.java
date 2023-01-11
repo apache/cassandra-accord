@@ -13,7 +13,7 @@ import accord.api.RoutingKey;
 import accord.utils.*;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
-import static accord.primitives.Routable.Kind.Key;
+import static accord.primitives.Routable.Domain.Key;
 
 @SuppressWarnings("rawtypes")
 // TODO (desired, efficiency): check that foldl call-sites are inlined and optimised by HotSpot
@@ -46,7 +46,7 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     }
 
     @Override
-    public final Unseekable.Kind kindOfContents()
+    public final Routable.Domain kindOfContents()
     {
         return Key;
     }

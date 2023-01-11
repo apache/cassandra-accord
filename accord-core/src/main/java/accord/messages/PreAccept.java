@@ -99,7 +99,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
             default:
             case Success:
             case Redundant:
-                return new PreAcceptOk(txnId, command.executeAt(), calculatePartialDeps(safeStore, txnId, partialTxn.keys(), partialTxn.kind(), txnId, safeStore.ranges().between(minEpoch, txnId.epoch)));
+                return new PreAcceptOk(txnId, command.executeAt(), calculatePartialDeps(safeStore, txnId, partialTxn.keys(), partialTxn.kind(), txnId, safeStore.ranges().between(minEpoch, txnId.epoch())));
 
             case RejectedBallot:
                 return PreAcceptNack.INSTANCE;

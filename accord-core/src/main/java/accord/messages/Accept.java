@@ -92,7 +92,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
                 return new AcceptReply(command.promised());
             case Success:
                 // TODO (desirable, efficiency): we don't need to calculate deps if executeAt == txnId
-                return new AcceptReply(calculatePartialDeps(safeStore, txnId, keys, kind, executeAt, safeStore.ranges().between(minEpoch, executeAt.epoch)));
+                return new AcceptReply(calculatePartialDeps(safeStore, txnId, keys, kind, executeAt, safeStore.ranges().between(minEpoch, executeAt.epoch())));
         }
     }
 
@@ -116,7 +116,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
 
     public void process()
     {
-        node.mapReduceConsumeLocal(this, minEpoch, executeAt.epoch, this);
+        node.mapReduceConsumeLocal(this, minEpoch, executeAt.epoch(), this);
     }
 
     @Override
@@ -222,7 +222,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
 
         public void process()
         {
-            node.mapReduceConsumeLocal(this, someKey, txnId.epoch, this);
+            node.mapReduceConsumeLocal(this, someKey, txnId.epoch(), this);
         }
 
         @Override
@@ -256,7 +256,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         @Override
         public long waitForEpoch()
         {
-            return txnId.epoch;
+            return txnId.epoch();
         }
     }
 }

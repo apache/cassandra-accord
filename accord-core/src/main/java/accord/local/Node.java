@@ -30,6 +30,7 @@ import java.util.function.Supplier;
 import accord.coordinate.*;
 import accord.messages.*;
 import accord.primitives.*;
+import accord.primitives.Routable.Domain;
 import accord.utils.MapReduceConsume;
 import com.google.common.annotations.VisibleForTesting;
 
@@ -55,6 +56,8 @@ import accord.topology.TopologyManager;
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.utils.concurrent.AsyncFuture;
 import org.apache.cassandra.utils.concurrent.Future;
+
+import static accord.primitives.Routable.Domain.Key;
 
 public class Node implements ConfigurationService.Listener, NodeTimeService
 {
@@ -131,7 +134,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.topology = new TopologyManager(topologySorter, id);
         this.nowSupplier = nowSupplier;
         Topology topology = configService.currentTopology();
-        this.now = new AtomicReference<>(new Timestamp(topology.epoch(), nowSupplier.getAsLong(), 0, id));
+        this.now = new AtomicReference<>(Timestamp.fromValues(topology.epoch(), nowSupplier.getAsLong(), id));
         this.agent = agent;
         this.random = random;
         this.scheduler = scheduler;
@@ -225,10 +228,10 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return now.updateAndGet(cur -> {
             // TODO (low priority, proof): this diverges from proof; either show isomorphism or make consistent
             long now = nowSupplier.getAsLong();
-            long epoch = Math.max(cur.epoch, topology.epoch());
-            return (now > cur.real)
-                 ? new Timestamp(epoch, now, 0, id)
-                 : new Timestamp(epoch, cur.real, cur.logical + 1, id);
+            long epoch = Math.max(cur.epoch(), topology.epoch());
+            return now > cur.hlc()
+                 ? Timestamp.fromValues(epoch, now, id)
+                 : Timestamp.fromValues(epoch, cur.hlc() + 1, id);
         });
     }
 
@@ -237,8 +240,8 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         if (now.get().compareTo(atLeast) < 0)
             now.accumulateAndGet(atLeast, (current, proposed) -> {
                 long minEpoch = topology.epoch();
-                current = current.withMinEpoch(minEpoch);
-                proposed = proposed.withMinEpoch(minEpoch);
+                current = current.withEpochAtLeast(minEpoch);
+                proposed = proposed.withEpochAtLeast(minEpoch);
                 return proposed.compareTo(current) <= 0 ? current.logicalNext(id) : proposed;
             });
         return uniqueNow();
@@ -256,7 +259,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public Future<Void> forEachLocalSince(PreLoadContext context, Unseekables<?, ?> unseekables, Timestamp since, Consumer<SafeCommandStore> forEach)
     {
-        return commandStores.forEach(context, unseekables, since.epoch, Long.MAX_VALUE, forEach);
+        return commandStores.forEach(context, unseekables, since.epoch(), Long.MAX_VALUE, forEach);
     }
 
     public Future<Void> ifLocal(PreLoadContext context, RoutingKey key, long epoch, Consumer<SafeCommandStore> ifLocal)
@@ -266,7 +269,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public Future<Void> ifLocalSince(PreLoadContext context, RoutingKey key, Timestamp since, Consumer<SafeCommandStore> ifLocal)
     {
-        return commandStores.ifLocal(context, key, since.epoch, Long.MAX_VALUE, ifLocal);
+        return commandStores.ifLocal(context, key, since.epoch(), Long.MAX_VALUE, ifLocal);
     }
 
     public <T> void mapReduceConsumeLocal(TxnRequest<?> request, long minEpoch, long maxEpoch, MapReduceConsume<SafeCommandStore, T> mapReduceConsume)
@@ -353,14 +356,14 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         messageSink.reply(replyingToNode, replyContext, send);
     }
 
-    public TxnId nextTxnId()
+    public TxnId nextTxnId(Txn.Kind rw, Domain domain)
     {
-        return new TxnId(uniqueNow());
+        return new TxnId(uniqueNow(), rw, domain);
     }
 
     public Future<Result> coordinate(Txn txn)
     {
-        return coordinate(nextTxnId(), txn);
+        return coordinate(nextTxnId(txn.kind(), Key), txn);
     }
 
     public Future<Result> coordinate(TxnId txnId, Txn txn)
@@ -368,7 +371,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         // TODO (desirable, consider): The combination of updating the epoch of the next timestamp with epochs we don't have topologies for,
         //  and requiring preaccept to talk to its topology epoch means that learning of a new epoch via timestamp
         //  (ie not via config service) will halt any new txns from a node until it receives this topology
-        Future<Result> result = withEpoch(txnId.epoch, () -> initiateCoordination(txnId, txn));
+        Future<Result> result = withEpoch(txnId.epoch(), () -> initiateCoordination(txnId, txn));
         coordinating.putIfAbsent(txnId, result);
         result.addCallback((success, fail) -> coordinating.remove(txnId, result));
         return result;
@@ -390,13 +393,13 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     private @Nullable RoutingKey trySelectHomeKey(TxnId txnId, Seekables<?, ?> keysOrRanges)
     {
-        int i = (int)keysOrRanges.findNextIntersection(0, topology().localForEpoch(txnId.epoch).ranges(), 0);
+        int i = (int)keysOrRanges.findNextIntersection(0, topology().localForEpoch(txnId.epoch()).ranges(), 0);
         return i >= 0 ? keysOrRanges.get(i).someIntersectingRoutingKey() : null;
     }
 
     public RoutingKey selectProgressKey(TxnId txnId, Route<?> route, RoutingKey homeKey)
     {
-        return selectProgressKey(txnId.epoch, route, homeKey);
+        return selectProgressKey(txnId.epoch(), route, homeKey);
     }
 
     public RoutingKey selectProgressKey(long epoch, Route<?> route, RoutingKey homeKey)
@@ -414,7 +417,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public RoutingKey trySelectProgressKey(TxnId txnId, Route<?> route, RoutingKey homeKey)
     {
-        return trySelectProgressKey(txnId.epoch, route, homeKey);
+        return trySelectProgressKey(txnId.epoch(), route, homeKey);
     }
 
     public RoutingKey trySelectProgressKey(long epoch, Route<?> route, RoutingKey homeKey)
@@ -435,7 +438,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public RoutingKey selectRandomHomeKey(TxnId txnId)
     {
-        Ranges ranges = topology().localForEpoch(txnId.epoch).ranges();
+        Ranges ranges = topology().localForEpoch(txnId.epoch()).ranges();
         Range range = ranges.get(ranges.size() == 1 ? 0 : random.nextInt(ranges.size()));
         return range.someIntersectingRoutingKey();
     }
@@ -458,7 +461,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
                 return result;
         }
 
-        Future<Outcome> result = withEpoch(txnId.epoch, () -> {
+        Future<Outcome> result = withEpoch(txnId.epoch(), () -> {
             RecoverFuture<Outcome> future = new RecoverFuture<>();
             RecoverWithRoute.recover(this, txnId, route, null, future);
             return future;

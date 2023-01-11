@@ -46,7 +46,7 @@ public interface RoutableKey extends Routable, Comparable<RoutableKey>
      */
     int compareTo(@Nonnull RoutableKey that);
 
-    default Kind kind() { return Kind.Key; }
+    default Domain domain() { return Domain.Key; }
 
     RoutingKey toUnseekable();
 

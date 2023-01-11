@@ -18,14 +18,11 @@
 
 package accord.coordinate;
 
-import accord.impl.mock.EpochSync;
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
-import accord.impl.mock.RecordingMessageSink;
 import accord.local.Command;
 import accord.local.Node;
 import accord.local.Status;
-import accord.messages.Accept;
 import accord.primitives.Range;
 import accord.topology.Topology;
 import accord.primitives.Keys;
@@ -35,25 +32,15 @@ import accord.utils.EpochFunction;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
-import java.util.Set;
-import java.util.stream.Collectors;
-
 import static accord.Utils.*;
 import static accord.impl.IntKey.keys;
 import static accord.impl.IntKey.range;
 import static accord.local.PreLoadContext.empty;
+import static accord.primitives.Routable.Domain.Key;
+import static accord.primitives.Txn.Kind.Write;
 
 public class TopologyChangeTest
 {
-    private static TxnId coordinate(Node node, Keys keys) throws Throwable
-    {
-        TxnId txnId = node.nextTxnId();
-        Txn txn = writeTxn(keys);
-        node.coordinate(txnId, txn).get();
-        return txnId;
-    }
-
     @Test
     void disjointElectorate() throws Throwable
     {
@@ -72,7 +59,7 @@ public class TopologyChangeTest
                                               .build())
         {
             Node node1 = cluster.get(1);
-            TxnId txnId1 = node1.nextTxnId();
+            TxnId txnId1 = node1.nextTxnId(Write, Key);
             Txn txn1 = writeTxn(keys);
             node1.coordinate(txnId1, txn1).get();
             node1.commandStores().forEach(empty(), keys, 1, 1, commands -> {
@@ -83,7 +70,7 @@ public class TopologyChangeTest
             cluster.configServices(4, 5, 6).forEach(config -> config.reportTopology(topology2));
 
             Node node4 = cluster.get(4);
-            TxnId txnId2 = node4.nextTxnId();
+            TxnId txnId2 = node4.nextTxnId(Write, Key);
             Txn txn2 = writeTxn(keys);
             node4.coordinate(txnId2, txn2).get();
 

@@ -26,6 +26,8 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.ShardDistributor;
 import accord.primitives.Ranges;
+import accord.primitives.Routable;
+import accord.primitives.Txn;
 import accord.utils.EpochFunction;
 import accord.utils.ThreadPoolScheduler;
 import accord.primitives.TxnId;
@@ -45,6 +47,8 @@ import java.util.function.BiFunction;
 import java.util.function.LongSupplier;
 
 import static accord.Utils.*;
+import static accord.primitives.Routable.Domain.Key;
+import static accord.primitives.Txn.Kind.Write;
 
 public class MockCluster implements Network, AutoCloseable, Iterable<Node>
 {
@@ -382,7 +386,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
 
         public TxnId idForNode(long epoch, Id id)
         {
-            return new TxnId(epoch, now.get(), 0, id);
+            return new TxnId(epoch, now.get(), Write, Key, id);
         }
 
         public TxnId idForNode(long epoch, int id)

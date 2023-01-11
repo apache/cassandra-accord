@@ -37,7 +37,6 @@ import static accord.local.CommandsForKey.CommandTimeseries.TestDep.*;
 import static accord.local.CommandsForKey.CommandTimeseries.TestKind.RorWs;
 import static accord.local.Status.KnownDeps.DepsUnknown;
 import static accord.local.Status.PreAccepted;
-import static accord.primitives.Txn.Kind.WRITE;
 
 public class InMemoryCommandsForKey extends CommandsForKey
 {
@@ -78,7 +77,7 @@ public class InMemoryCommandsForKey extends CommandsForKey
         public Stream<T> before(@Nonnull Timestamp timestamp, @Nonnull TestKind testKind, @Nonnull TestDep testDep, @Nullable TxnId depId, @Nonnull TestStatus testStatus, @Nullable Status status)
         {
             return commands.headMap(timestamp, false).values().stream()
-                    .filter(cmd -> testKind == RorWs || cmd.kind() == WRITE)
+                    .filter(cmd -> testKind == RorWs || cmd.txnId().isWrite())
                     // If we don't have any dependencies, we treat a dependency filter as a mismatch
                     .filter(cmd -> testDep == ANY_DEPS || (cmd.known().deps != DepsUnknown && (cmd.partialDeps().contains(depId) ^ (testDep == WITHOUT))))
                     .filter(cmd -> TestStatus.test(cmd.status(), testStatus, status))
@@ -89,7 +88,7 @@ public class InMemoryCommandsForKey extends CommandsForKey
         public Stream<T> after(@Nonnull Timestamp timestamp, @Nonnull TestKind testKind, @Nonnull TestDep testDep, @Nullable TxnId depId, @Nonnull TestStatus testStatus, @Nullable Status status)
         {
             return commands.tailMap(timestamp, false).values().stream()
-                    .filter(cmd -> testKind == RorWs || cmd.kind() == WRITE)
+                    .filter(cmd -> testKind == RorWs || cmd.txnId().isWrite())
                     // If we don't have any dependencies, we treat a dependency filter as a mismatch
                     .filter(cmd -> testDep == ANY_DEPS || (cmd.known().deps != DepsUnknown && (cmd.partialDeps().contains(depId) ^ (testDep == WITHOUT))))
                     .filter(cmd -> TestStatus.test(cmd.status(), testStatus, status))

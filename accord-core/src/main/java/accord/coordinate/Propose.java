@@ -152,7 +152,7 @@ class Propose implements Callback<AcceptReply>
 
         public static Invalidate proposeInvalidate(Node node, Ballot ballot, TxnId txnId, RoutingKey invalidateWithKey, BiConsumer<Void, Throwable> callback)
         {
-            Shard shard = node.topology().forEpochIfKnown(invalidateWithKey, txnId.epoch);
+            Shard shard = node.topology().forEpochIfKnown(invalidateWithKey, txnId.epoch());
             Invalidate invalidate = new Invalidate(node, shard, ballot, txnId, invalidateWithKey, callback);
             node.send(shard.nodes, to -> new Accept.Invalidate(ballot, txnId, invalidateWithKey), invalidate);
             return invalidate;

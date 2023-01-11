@@ -7,8 +7,28 @@ import accord.api.RoutingKey;
  */
 public interface Routable
 {
-    enum Kind { Key, Range }
-    Kind kind();
+    enum Domain
+    {
+        Key, Range;
+        private static final Domain[] VALUES = Domain.values();
+
+        public boolean isKey()
+        {
+            return this == Key;
+        }
+
+        public boolean isRange()
+        {
+            return this == Range;
+        }
+
+        public static Routable.Domain ofOrdinal(int ordinal)
+        {
+            return VALUES[ordinal];
+        }
+    }
+
+    Domain domain();
     Unseekable toUnseekable();
     RoutingKey someIntersectingRoutingKey();
 }

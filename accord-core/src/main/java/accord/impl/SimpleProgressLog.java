@@ -223,7 +223,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                                 // must also be committed, as at the time of writing we do not guarantee dissemination of Commit
                                 // records to the home shard, so we only know the executeAt shards will have witnessed this
                                 // if the home shard is at an earlier phase, it must run recovery
-                                long epoch = command.executeAt().epoch;
+                                long epoch = command.executeAt().epoch();
                                 node.withEpoch(epoch, () -> debugInvestigating = FetchData.fetch(PreApplied.minKnown, node, txnId, command.route(), epoch, (success, fail) -> {
                                     commandStore.execute(PreLoadContext.empty(), ignore -> {
                                         // should have found enough information to apply the result, but in case we did not reset progress
@@ -235,7 +235,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                             else
                             {
                                 RoutingKey homeKey = command.homeKey();
-                                node.withEpoch(txnId.epoch, () -> {
+                                node.withEpoch(txnId.epoch(), () -> {
 
                                     Future<? extends Outcome> recover = node.maybeRecover(txnId, homeKey, command.route(), token);
                                     recover.addCallback((success, fail) -> {
@@ -349,10 +349,10 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     if (!isFullRoute(command.route()))
                         return false;
 
-                    if (!node.topology().hasEpoch(command.executeAt().epoch))
+                    if (!node.topology().hasEpoch(command.executeAt().epoch()))
                         return false;
 
-                    Topologies topology = node.topology().preciseEpochs(command.route(), command.txnId().epoch, command.executeAt().epoch);
+                    Topologies topology = node.topology().preciseEpochs(command.route(), command.txnId().epoch(), command.executeAt().epoch());
                     notAwareOfDurability = topology.copyOfNodes();
                     notPersisted = topology.copyOfNodes();
                     if (whenReady != null)
@@ -432,7 +432,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     FullRoute<?> route = Route.castToFullRoute(command.route());
                     Timestamp executeAt = command.executeAt();
                     investigating = new CoordinateAwareness();
-                    Topologies topologies = node.topology().preciseEpochs(route, txnId.epoch, executeAt.epoch);
+                    Topologies topologies = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
                     node.send(notAwareOfDurability, to -> new InformDurable(to, topologies, route, txnId, executeAt, Durable), investigating);
                 }
 
@@ -481,7 +481,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     setProgress(Investigating);
                     // first make sure we have enough information to obtain the command locally
                     Timestamp executeAt = command.hasBeen(PreCommitted) ? command.executeAt() : null;
-                    long srcEpoch = (executeAt != null ? executeAt : txnId).epoch;
+                    long srcEpoch = (executeAt != null ? executeAt : txnId).epoch();
                     // TODO (desired, consider): compute fromEpoch, the epoch we already have this txn replicated until
                     long toEpoch = Math.max(srcEpoch, node.topology().epoch());
                     Unseekables<?, ?> someKeys = unseekables(command);

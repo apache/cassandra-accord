@@ -47,6 +47,8 @@ import java.util.function.Consumer;
 import static accord.Utils.id;
 import static accord.Utils.writeTxn;
 import static accord.impl.InMemoryCommandStore.inMemory;
+import static accord.primitives.Routable.Domain.Key;
+import static accord.primitives.Txn.Kind.Write;
 
 public class CommandTest
 {
@@ -166,7 +168,7 @@ public class CommandTest
         CommandStoreSupport support = new CommandStoreSupport();
         Node node = createNode(ID1, support);
         CommandStore commands = node.unsafeByIndex(0);
-        TxnId txnId = node.nextTxnId();
+        TxnId txnId = node.nextTxnId(Write, Key);
         ((MockCluster.Clock)node.unsafeGetNowSupplier()).increment(10);
         Txn txn = writeTxn(Keys.of(KEY));
 
@@ -176,7 +178,7 @@ public class CommandTest
 
         setTopologyEpoch(support.local, 2);
         ((TestableConfigurationService)node.configService()).reportTopology(support.local.get().withEpoch(2));
-        Timestamp expectedTimestamp = new Timestamp(2, 110, 0, ID1);
+        Timestamp expectedTimestamp = Timestamp.fromValues(2, 110, ID1);
         commands.execute(null, (Consumer<? super SafeCommandStore>) store -> command.preaccept(store, txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY)).syncUninterruptibly();
         Assertions.assertEquals(Status.PreAccepted, command.status());
         Assertions.assertEquals(expectedTimestamp, command.executeAt());

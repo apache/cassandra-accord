@@ -36,13 +36,13 @@ public abstract class CheckShards extends ReadCoordinator<CheckStatusReply>
 
     private static Topologies topologyFor(Node node, TxnId txnId, Unseekables<?, ?> contact, long epoch)
     {
-        return node.topology().preciseEpochs(contact, txnId.epoch, epoch);
+        return node.topology().preciseEpochs(contact, txnId.epoch(), epoch);
     }
 
     @Override
     protected void contact(Id id)
     {
-        node.send(id, new CheckStatus(txnId, contact.slice(topologies().computeRangesForNode(id)), txnId.epoch, untilRemoteEpoch, includeInfo), this);
+        node.send(id, new CheckStatus(txnId, contact.slice(topologies().computeRangesForNode(id)), txnId.epoch(), untilRemoteEpoch, includeInfo), this);
     }
 
     protected boolean isSufficient(Id from, CheckStatusOk ok) { return isSufficient(ok); }

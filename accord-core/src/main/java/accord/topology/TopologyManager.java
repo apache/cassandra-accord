@@ -294,7 +294,7 @@ public class TopologyManager implements ConfigurationService.Listener
 
     public Topologies withUnsyncedEpochs(Unseekables<?, ?> select, Timestamp at)
     {
-        return withUnsyncedEpochs(select, at.epoch);
+        return withUnsyncedEpochs(select, at.epoch());
     }
 
     public Topologies withUnsyncedEpochs(Unseekables<?, ?> select, long epoch)
@@ -304,7 +304,7 @@ public class TopologyManager implements ConfigurationService.Listener
 
     public Topologies withUnsyncedEpochs(Unseekables<?, ?> select, Timestamp min, Timestamp max)
     {
-        return withUnsyncedEpochs(select, min.epoch, max.epoch);
+        return withUnsyncedEpochs(select, min.epoch(), max.epoch());
     }
 
     public Topologies withUnsyncedEpochs(Unseekables<?, ?> select, long minEpoch, long maxEpoch)

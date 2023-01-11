@@ -33,9 +33,10 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
         this.ballot = ballot;
     }
 
+    @Override
     public void process()
     {
-        node.mapReduceConsumeLocal(this, someUnseekables, txnId.epoch, txnId.epoch, this);
+        node.mapReduceConsumeLocal(this, someUnseekables, txnId.epoch(), txnId.epoch(), this);
     }
 
     @Override
@@ -79,7 +80,7 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
     @Override
     public long waitForEpoch()
     {
-        return txnId.epoch;
+        return txnId.epoch();
     }
 
     @Override

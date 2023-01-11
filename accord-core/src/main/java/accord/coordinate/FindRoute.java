@@ -37,7 +37,7 @@ public class FindRoute extends CheckShards
     final BiConsumer<Result, Throwable> callback;
     FindRoute(Node node, TxnId txnId, RoutingKey homeKey, BiConsumer<Result, Throwable> callback)
     {
-        super(node, txnId, RoutingKeys.of(homeKey), txnId.epoch, IncludeInfo.Route);
+        super(node, txnId, RoutingKeys.of(homeKey), txnId.epoch(), IncludeInfo.Route);
         this.callback = callback;
     }
 

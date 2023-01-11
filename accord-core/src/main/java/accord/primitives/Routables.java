@@ -57,7 +57,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
      */
     int findNext(int thisIndex, K find, SortedArrays.Search search);
 
-    Routable.Kind kindOfContents();
+    Routable.Domain kindOfContents();
 
     @Inline
     static <Input extends Routable, T> T foldl(Routables<Input, ?> inputs, AbstractRanges<?> matching, IndexedFold<? super Input, T> fold, T initialValue)
