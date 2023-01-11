@@ -30,7 +30,7 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.function.*;
 
-// TODO: add change replication factor
+// TODO (required, testing): add change replication factor
 public class TopologyRandomizer
 {
     private static final Logger logger = LoggerFactory.getLogger(TopologyRandomizer.class);
@@ -235,7 +235,7 @@ public class TopologyRandomizer
 
         Topology nextTopology = new Topology(current.epoch + 1, shards);
 
-        // FIXME: remove this (and the corresponding check in CommandStores) once lower bounds are implemented.
+        // TODO (expected, testing): remove this (and the corresponding check in CommandStores) once lower bounds are implemented.
         //  In the meantime, the logic needed to support acquiring ranges that we previously replicated is pretty
         //  convoluted without the ability to jettison epochs.
         if (reassignsRanges(current, shards, previouslyReplicated))

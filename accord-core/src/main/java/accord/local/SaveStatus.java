@@ -53,7 +53,7 @@ public enum SaveStatus
     
     public final Status status;
     public final Phase phase;
-    public final Known known; // TODO: duplicate contents here to reduce indirection for majority of cases
+    public final Known known; // TODO (easy, API/efficiency): duplicate contents here to reduce indirection for majority of cases
 
     SaveStatus(Status status)
     {
@@ -74,7 +74,7 @@ public enum SaveStatus
         return this.status.compareTo(status) >= 0;
     }
 
-    // TODO: exhaustive testing, particularly around PreCommitted
+    // TODO (expected, testing): exhaustive testing, particularly around PreCommitted
     public static SaveStatus get(Status status, Known known)
     {
         switch (status)
@@ -88,7 +88,7 @@ public enum SaveStatus
                     return known.isDefinitionKnown() ? AcceptedInvalidateWithDefinition : AcceptedInvalidate;
                 // If we know the executeAt decision then we do not clear it, and fall-through to PreCommitted
                 // however, we still clear the deps, as any deps we might have previously seen proposed are now expired
-                // TODO: consider clearing Command.partialDeps in this case also
+                // TODO (expected, consider): consider clearing Command.partialDeps in this case also
                 known = known.with(DepsUnknown);
             case Accepted:
                 if (!known.executeAt.isDecisionKnown())

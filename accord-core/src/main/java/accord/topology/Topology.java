@@ -38,12 +38,14 @@ public class Topology
     final long epoch;
     final Shard[] shards;
     final Ranges ranges;
+    /**
+     * TODO (desired, efficiency): do not recompute nodeLookup for sub-topologies
+     */
     final Map<Id, NodeInfo> nodeLookup;
     /**
      * This array is used to permit cheaper sharing of Topology objects between requests, as we must only specify
      * the indexes within the parent Topology that we contain. This also permits us to perform efficient merges with
      * {@code NodeInfo.supersetIndexes} to find the shards that intersect a given node without recomputing the NodeInfo.
-     * TODO: do not recompute nodeLookup
      */
     final Ranges subsetOfRanges;
     final int[] supersetIndexes;
@@ -215,7 +217,6 @@ public class Topology
     {
         Ranges rangeSubset = ranges.select(newSubset);
 
-        // TODO: more efficient sharing of nodeLookup state
         Map<Id, NodeInfo> nodeLookup = new HashMap<>();
         for (int shardIndex : newSubset)
         {
@@ -229,8 +230,6 @@ public class Topology
     private Topology forSubset(int[] newSubset, Collection<Id> nodes)
     {
         Ranges rangeSubset = ranges.select(newSubset);
-
-        // TODO: more efficient sharing of nodeLookup state
         Map<Id, NodeInfo> nodeLookup = new HashMap<>();
         for (Id id : nodes)
             nodeLookup.put(id, this.nodeLookup.get(id));
@@ -395,40 +394,9 @@ public class Topology
         return initialValue;
     }
 
-    public int matchesOn(Id on, IndexedPredicate<Shard> consumer)
-    {
-        // TODO: this can be done by divide-and-conquer splitting of the lists and recursion, which should be more efficient
-        int count = 0;
-        NodeInfo info = nodeLookup.get(on);
-        if (info == null)
-            return 0;
-        int[] a = supersetIndexes, b = info.supersetIndexes;
-        int ai = 0, bi = 0;
-        while (ai < a.length && bi < b.length)
-        {
-            if (a[ai] == b[bi])
-            {
-                if (consumer.test(shards[a[ai]], ai))
-                    ++count;
-                ++ai; ++bi;
-            }
-            else if (a[ai] < b[bi])
-            {
-                ai = exponentialSearch(a, ai + 1, a.length, b[bi]);
-                if (ai < 0) ai = -1 -ai;
-            }
-            else
-            {
-                bi = exponentialSearch(b, bi + 1, b.length, a[ai]);
-                if (bi < 0) bi = -1 -bi;
-            }
-        }
-        return count;
-    }
-
     public <P> int foldlIntOn(Id on, IndexedIntFunction<P> consumer, P param, int offset, int initialValue, int terminalValue)
     {
-        // TODO: this can be done by divide-and-conquer splitting of the lists and recursion, which should be more efficient
+        // TODO (low priority, efficiency/clarity): use findNextIntersection?
         NodeInfo info = nodeLookup.get(on);
         if (info == null)
             return initialValue;

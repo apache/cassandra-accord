@@ -28,8 +28,8 @@ import accord.utils.Invariants;
 
 import java.util.*;
 
-// TODO: we can probably most efficiently create a new synthetic Topology that applies for a range of epochs
-//       and permit Topology to implement it, so that
+// TODO (desired, efficiency/clarity): since Topologies are rarely needed, should optimise API for single topology case
+//  (e.g. at least implementing Topologies by Topology)
 public interface Topologies extends TopologySorter
 {
     Topology current();

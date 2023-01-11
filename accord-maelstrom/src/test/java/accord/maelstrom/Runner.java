@@ -249,7 +249,7 @@ public class Runner
         Main.listen(factory, parseOutput(delay, output, Function.identity()), System.out, System.err);
     }
 
-    // TODO: we need to align response ids with the input; for now replies are broken
+    // TODO (low priority, maelstrom): we need to align response ids with the input; for now replies are broken
     static void replay(int nodeCount, TopologyFactory factory, boolean delay, Supplier<Packet> input) throws IOException
     {
         run(nodeCount, new QueueSupplier()

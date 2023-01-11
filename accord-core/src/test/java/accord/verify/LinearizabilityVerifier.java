@@ -34,7 +34,7 @@ import static accord.verify.LinearizabilityVerifier.Witness.Type.UPDATE_UNKNOWN;
  * We simply verify that there is no viewing of histories backwards or forwards in time (i.e. that the time periods each
  * unique list is witnessable for is disjoint) and that each list is a prefix of any lists witnessed later
  *
- * TODO: merge with SerializabilityVerifier.
+ * TODO (low priority): merge with SerializabilityVerifier.
  */
 public class LinearizabilityVerifier
 {

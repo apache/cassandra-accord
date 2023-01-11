@@ -8,6 +8,11 @@ public class Invariants
 {
     private static final boolean PARANOID = true;
 
+    public static boolean isParanoid()
+    {
+        return PARANOID;
+    }
+
     public static <T1, T2 extends T1> T2 checkType(T1 cast)
     {
         return (T2)cast;

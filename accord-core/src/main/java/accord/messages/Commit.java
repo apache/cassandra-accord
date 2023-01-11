@@ -37,7 +37,6 @@ import accord.topology.Topology;
 import static accord.local.Status.Committed;
 import static accord.local.Status.Known.DefinitionOnly;
 
-// TODO: CommitOk responses, so we can send again if no reply received? Or leave to recovery?
 public class Commit extends TxnRequest<ReadNack>
 {
     public static class SerializerSupport
@@ -59,8 +58,8 @@ public class Commit extends TxnRequest<ReadNack>
 
     public enum Kind { Minimal, Maximal }
 
-    // TODO: cleanup passing of topologies here - maybe fetch them afresh from Node? Or perhaps introduce well-named
-    //       classes to represent different topology combinations
+    // TODO (low priority, clarity): cleanup passing of topologies here - maybe fetch them afresh from Node?
+    //                               Or perhaps introduce well-named classes to represent different topology combinations
     public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, @Nullable Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, boolean read)
     {
         super(to, topologies, route, txnId);
@@ -100,8 +99,8 @@ public class Commit extends TxnRequest<ReadNack>
         this.read = read;
     }
 
-    // TODO (soon): accept Topology not Topologies
-    // TODO: do not commit if we're already ready to execute (requires extra info in Accept responses)
+    // TODO (low priority, clarity): accept Topology not Topologies
+    // TODO (desired, efficiency): do not commit if we're already ready to execute (requires extra info in Accept responses)
     public static void commitMinimalAndRead(Node node, Topologies executeTopologies, TxnId txnId, Txn txn, FullRoute<?> route, Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, Set<Id> readSet, Callback<ReadReply> callback)
     {
         Topologies allTopologies = executeTopologies;
@@ -144,7 +143,7 @@ public class Commit extends TxnRequest<ReadNack>
         node.mapReduceConsumeLocal(this, txnId.epoch, executeAt.epoch, this);
     }
 
-    // TODO (soon): do not guard with synchronized; let mapReduceLocal decide how to enforce mutual exclusivity
+    // TODO (expected, efficiency, clarity): do not guard with synchronized; let mapReduceLocal decide how to enforce mutual exclusivity
     @Override
     public synchronized ReadNack apply(SafeCommandStore safeStore)
     {
@@ -213,7 +212,7 @@ public class Commit extends TxnRequest<ReadNack>
 
         public static void commitInvalidate(Node node, TxnId txnId, Unseekables<?, ?> inform, long untilEpoch)
         {
-            // TODO: this kind of check needs to be inserted in all equivalent methods
+            // TODO (expected, safety): this kind of check needs to be inserted in all equivalent methods
             Invariants.checkState(untilEpoch >= txnId.epoch);
             Invariants.checkState(node.topology().hasEpoch(untilEpoch));
             Topologies commitTo = node.topology().preciseEpochs(inform, txnId.epoch, untilEpoch);

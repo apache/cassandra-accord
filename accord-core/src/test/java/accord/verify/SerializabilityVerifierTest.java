@@ -151,7 +151,7 @@ public class SerializabilityVerifierTest
         Observation[][] permuted = new Observation[permute.length][];
         for (int offset = 0 ; offset < permute.length ; ++offset)
         {
-            // TODO: more permutations
+            // TODO (low priority): more permutations
             for (int i = 0 ; i < permute.length ; ++i)
                 permuted[i] = permute[(offset + i) % permute.length];
 

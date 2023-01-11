@@ -29,7 +29,7 @@ import static java.util.Spliterators.spliteratorUnknownSize;
  * A simple intrusive double-linked list for maintaining a list of tasks,
  * useful for invalidating queued ordered tasks
  *
- * TODO COPIED FROM CASSANDRA
+ * TODO (low priority): COPIED FROM CASSANDRA
  */
 
 @SuppressWarnings("unchecked")

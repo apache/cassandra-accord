@@ -132,7 +132,7 @@ public class Cluster implements Scheduler
             Packet deliver = (Packet) next;
             Node on = lookup.apply(deliver.dst);
 
-            // TODO (soon): random drop chance independent of partition; also port flaky connections etc. from simulator
+            // TODO (required, testing): random drop chance independent of partition; also port flaky connections etc. from simulator
             // Drop the message if it goes across the partition
             boolean drop = ((Packet) next).src.id >= 0 &&
                            !(partitionSet.contains(deliver.src) && partitionSet.contains(deliver.dst)
@@ -206,9 +206,6 @@ public class Cluster implements Scheduler
         run.run();
     }
 
-    // TODO: there may remain some inconsistency of execution, at least causing different partitions if prior runs have happened;
-    //       unclear what source is, but less frequence now we split cluster partitioning recurring task to its own random
-    //       might be deterministic based on prior runs (some evidence of this), or non-deterministic
     public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, Consumer<Throwable> onFailure, Supplier<Random> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in)
     {
         TopologyUpdates topologyUpdates = new TopologyUpdates();
@@ -249,7 +246,7 @@ public class Cluster implements Scheduler
             sinks.partitionSet = Collections.emptySet();
 
             // give progress log et al a chance to finish
-            // TODO: would be nice to make this more certain than an arbitrary number of additional rounds
+            // TODO (desired, testing): would be nice to make this more certain than an arbitrary number of additional rounds
             for (int i = 0 ; i < 10 ; ++i)
             {
                 sinks.processAll();

@@ -250,8 +250,6 @@ public class KeysTest
         });
     }
 
-    //TODO test foldlIntersect
-
     private static Gen<List<Raw>> keysGen() {
         return Gens.lists(Gens.ints().between(-1000, 1000).map(IntKey::key))
                 .unique()

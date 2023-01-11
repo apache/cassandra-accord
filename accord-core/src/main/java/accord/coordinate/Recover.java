@@ -51,14 +51,14 @@ import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.messages.BeginRecovery.RecoverOk.maxAcceptedOrLater;
 
-// TODO: rename to Recover (verb); rename Recover message to not clash
+// TODO (low priority, cleanup): rename to Recover (verb); rename Recover message to not clash
 public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throwable>
 {
     class AwaitCommit extends AsyncFuture<Timestamp> implements Callback<WaitOnCommitOk>
     {
-        // TODO: this should collect the executeAt of any commit, and terminate as soon as one is found
-        //       that is earlier than TxnId for the Txn we are recovering; if all commits we wait for
-        //       are given earlier timestamps we can retry without restarting.
+        // TODO (desired, efficiency): this should collect the executeAt of any commit, and terminate as soon as one is found
+        //                             that is earlier than TxnId for the Txn we are recovering; if all commits we wait for
+        //                             are given earlier timestamps we can retry without restarting.
         final QuorumTracker tracker;
 
         AwaitCommit(Node node, TxnId txnId, Unseekables<?, ?> unseekables)
@@ -100,7 +100,6 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         for (int i = 0 ; i < waitOn.txnIdCount() ; ++i)
         {
             TxnId txnId = waitOn.txnId(i);
-            // TODO (now): this should perhaps use RouteFragment as we might need to handle txns that are range-only
             new AwaitCommit(node, txnId, waitOn.someRoutables(txnId)).addCallback((success, failure) -> {
                 if (future.isDone())
                     return;
@@ -212,7 +211,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
                 case Applied:
                 case PreApplied:
-                    // TODO: in some cases we can use the deps we already have (e.g. if we have a quorum of Committed responses)
+                    // TODO (desired, efficiency): in some cases we can use the deps we already have (e.g. if we have a quorum of Committed responses)
                     node.withEpoch(executeAt.epoch, () -> {
                         CollectDeps.withDeps(node, txnId, route, txn, acceptOrCommit.executeAt, (deps, fail) -> {
                             if (fail != null)
@@ -221,7 +220,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                             }
                             else
                             {
-                                // TODO: when writes/result are partially replicated, need to confirm we have quorum of these
+                                // TODO (required, consider): when writes/result are partially replicated, need to confirm we have quorum of these
                                 Persist.persistAndCommit(node, txnId, route, txn, executeAt, deps, acceptOrCommit.writes, acceptOrCommit.result);
                                 accept(acceptOrCommit.result, null);
                             }
@@ -232,7 +231,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 case ReadyToExecute:
                 case PreCommitted:
                 case Committed:
-                    // TODO: in some cases we can use the deps we already have (e.g. if we have a quorum of Committed responses)
+                    // TODO (desired, efficiency): in some cases we can use the deps we already have (e.g. if we have a quorum of Committed responses)
                     node.withEpoch(executeAt.epoch, () -> {
                         CollectDeps.withDeps(node, txnId, route, txn, executeAt, (deps, fail) -> {
                             if (fail != null) accept(null, fail);
@@ -273,7 +272,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             // we have to be certain these commands have not successfully committed without witnessing us (thereby
             // ruling out a fast path decision for us and changing our recovery decision).
             // So, we wait for these commands to finish committing before retrying recovery.
-            // TODO: check paper: do we assume that witnessing in PreAccept implies witnessing in Accept? Not guaranteed.
+            // TODO (required): check paper: do we assume that witnessing in PreAccept implies witnessing in Accept? Not guaranteed.
             // See whitepaper for more details
             awaitCommits(node, earlierAcceptedNoWitness).addCallback((success, failure) -> {
                 if (failure != null) accept(null, failure);

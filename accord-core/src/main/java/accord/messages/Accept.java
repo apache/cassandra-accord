@@ -41,7 +41,8 @@ import javax.annotation.Nullable;
 import static accord.local.Command.AcceptOutcome.*;
 import static accord.messages.PreAccept.calculatePartialDeps;
 
-// TODO: use different objects for send and receive, so can be more efficient (e.g. serialize without slicing, and without unnecessary fields)
+// TODO (low priority, efficiency): use different objects for send and receive, so can be more efficient
+//                                  (e.g. serialize without slicing, and without unnecessary fields)
 public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
 {
     public static class SerializerSupport
@@ -90,7 +91,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
             case RejectedBallot:
                 return new AcceptReply(command.promised());
             case Success:
-                // TODO: we don't need to calculate deps if executeAt == txnId
+                // TODO (desirable, efficiency): we don't need to calculate deps if executeAt == txnId
                 return new AcceptReply(calculatePartialDeps(safeStore, txnId, keys, kind, executeAt, safeStore.ranges().between(minEpoch, executeAt.epoch)));
         }
     }

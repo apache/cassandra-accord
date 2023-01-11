@@ -370,8 +370,9 @@ public enum Status
         this.minKnown = new Known(definition, executeAt, deps, outcome);
     }
 
-    // TODO: investigate all uses of hasBeen, and migrate as many as possible to testing Phase, ReplicationPhase and ExecutionStatus
-    //       where these concepts are inadequate, see if additional concepts can be introduced
+    // TODO (desired, clarity): investigate all uses of hasBeen, and migrate as many as possible to testing
+    //                          Phase, ReplicationPhase and ExecutionStatus where these concepts are inadequate,
+    //                          see if additional concepts can be introduced
     public boolean hasBeen(Status equalOrGreaterThan)
     {
         return compareTo(equalOrGreaterThan) >= 0;

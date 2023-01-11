@@ -19,7 +19,7 @@ public abstract class CheckShards extends ReadCoordinator<CheckStatusReply>
 
     /**
      * The epoch until which we want to fetch data from remotely
-     * TODO: configure the epoch we want to start with
+     * TODO (required, consider): configure the epoch we want to start with
      */
     final long untilRemoteEpoch;
     final IncludeInfo includeInfo;

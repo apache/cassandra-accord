@@ -147,7 +147,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
 
         if (networkFilter.shouldDiscard(from, to, request))
         {
-            // TODO: more flexible timeouts
+            // TODO (desired, testing): more flexible timeouts
             if (callback != null)
                 callback.onFailure(to, new Timeout(null, null));
             logger.info("discarding filtered message from {} to {}: {}", from, to, request);

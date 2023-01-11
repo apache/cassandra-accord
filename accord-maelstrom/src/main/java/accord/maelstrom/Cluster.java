@@ -47,7 +47,7 @@ import accord.messages.Request;
 import accord.api.Scheduler;
 import accord.topology.Topology;
 
-// TODO: merge with accord.impl.basic.Cluster
+// TODO (low priority, testing): merge with accord.impl.basic.Cluster
 public class Cluster implements Scheduler
 {
     public interface Queue<T>

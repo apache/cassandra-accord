@@ -179,10 +179,10 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
     @Override
     protected RequestStatus trySendMore()
     {
-        // TODO: due to potential re-entrancy into this method, if the node we are contacting is unavailable
-        //  so onFailure is invoked immediately, for the moment we copy nodes to an intermediate list.
-        //  would be better to prevent reentrancy either by detecting this inside trySendMore or else queueing
-        //  callbacks externally, so two may not be in-flight at once
+        // TODO (low priority): due to potential re-entrancy into this method, if the node we are contacting is unavailable
+        //                      so onFailure is invoked immediately, for the moment we copy nodes to an intermediate list.
+        //                      would be better to prevent reentrancy either by detecting this inside trySendMore or else
+        //                      queueing callbacks externally, so two may not be in-flight at once
         List<Id> contact = new ArrayList<>(1);
         RequestStatus status = trySendMore(List::add, contact);
         contact.forEach(this::contact);

@@ -44,7 +44,7 @@ import static accord.messages.Commit.Invalidate.commitInvalidate;
  * Perform initial rounds of PreAccept and Accept until we have reached agreement about when we should execute.
  * If we are preempted by a recovery coordinator, we abort and let them complete (and notify us about the execution result)
  *
- * TODO: dedicated burn test to validate outcomes
+ * TODO (desired, testing): dedicated burn test to validate outcomes
  */
 public class Coordinate extends AsyncFuture<Result> implements Callback<PreAcceptReply>, BiConsumer<Result, Throwable>
 {
@@ -70,7 +70,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
 
     private void start()
     {
-        // TODO: consider sending only to electorate of most recent topology (as only these PreAccept votes matter)
+        // TODO (desired, efficiency): consider sending only to electorate of most recent topology (as only these PreAccept votes matter)
         // note that we must send to all replicas of old topology, as electorate may not be reachable
         node.send(tracker.nodes(), to -> new PreAccept(to, tracker.topologies(), txnId, txn, route), this);
     }
@@ -124,9 +124,9 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
         successes.add(ok);
 
         boolean fastPath = ok.witnessedAt.compareTo(txnId) == 0;
-        // TODO: update formalisation (and proof), as we do not seek additional pre-accepts from later epochs.
-        //       instead we rely on accept to do our work: a quorum of accept in the later epoch
-        //       and its effect on preaccepted timestamps and the deps it returns create our sync point.
+        // TODO (desired, safety): update formalisation (and proof), as we do not seek additional pre-accepts from later epochs.
+        //                         instead we rely on accept to do our work: a quorum of accept in the later epoch
+        //                         and its effect on preaccepted timestamps and the deps it returns create our sync point.
         if (tracker.recordSuccess(from, fastPath) == RequestStatus.Success)
             onPreAccepted();
     }
@@ -151,9 +151,10 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
                 executeAt = accumulate;
             }
 
-            // TODO: perhaps don't submit Accept immediately if we almost have enough for fast-path,
-            //       but by sending accept we rule out hybrid fast-path
-            // TODO: if we receive a MAX response, perhaps defer to permit at least one other node to respond before invalidating
+            // TODO (low priority, efficiency): perhaps don't submit Accept immediately if we almost have enough for fast-path,
+            //                                  but by sending accept we rule out hybrid fast-path
+            // TODO (low priority, efficiency): if we receive an expired response, perhaps defer to permit at least one other
+            //                                  node to respond before invalidating
             if (node.agent().isExpired(txnId, executeAt.real))
             {
                 proposeInvalidate(node, Ballot.ZERO, txnId, route.homeKey(), (success, fail) -> {
@@ -165,7 +166,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
                     {
                         node.withEpoch(executeAt.epoch, () -> {
                             commitInvalidate(node, txnId, route, executeAt);
-                            // TODO: this should be Invalidated rather than Timeout?
+                            // TODO (required, API consistency): this should be Invalidated rather than Timeout?
                             accept(null, new Timeout(txnId, route.homeKey()));
                         });
                     }
