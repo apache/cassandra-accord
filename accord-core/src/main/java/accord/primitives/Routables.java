@@ -36,6 +36,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
     boolean isEmpty();
     boolean intersects(AbstractRanges<?> ranges);
     boolean intersects(AbstractKeys<?, ?> keys);
+    boolean intersects(Range range);
     default boolean intersects(Routables<?, ?> routables)
     {
         switch (routables.domain())

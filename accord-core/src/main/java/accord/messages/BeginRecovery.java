@@ -20,6 +20,7 @@ package accord.messages;
 
 import accord.api.Result;
 import accord.local.SafeCommandStore;
+import accord.local.SafeCommandStore.SlowSearcher;
 import accord.local.Status.Phase;
 import accord.primitives.*;
 import accord.topology.Topologies;
@@ -29,11 +30,14 @@ import java.util.List;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import accord.utils.AsyncMapReduceConsume;
 import accord.utils.Invariants;
 
 import accord.local.Node.Id;
 import accord.local.Command;
 import accord.local.Status;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 import java.util.Collections;
 
@@ -42,9 +46,9 @@ import static accord.local.SafeCommandStore.TestDep.WITHOUT;
 import static accord.local.SafeCommandStore.TestKind.RorWs;
 import static accord.local.SafeCommandStore.TestTimestamp.*;
 import static accord.local.Status.*;
-import static accord.messages.PreAccept.calculatePartialDeps;
+import static accord.messages.PreAccept.addDeps;
 
-public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
+public class BeginRecovery extends TxnRequest implements AsyncMapReduceConsume<SafeCommandStore, BeginRecovery.RecoverReply>
 {
     public static class SerializationSupport
     {
@@ -81,8 +85,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
     }
 
     @Override
-
-    public RecoverReply apply(SafeCommandStore safeStore)
+    public Future<RecoverReply> apply(SafeCommandStore safeStore)
     {
         Command command = safeStore.command(txnId);
 
@@ -95,40 +98,70 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
                 throw new IllegalStateException("Invalid Outcome");
 
             case RejectedBallot:
-                return new RecoverNack(command.promised());
+                return ImmediateFuture.success(new RecoverNack(command.promised()));
 
             case Success:
         }
 
-        PartialDeps deps = command.partialDeps();
+        Ranges ranges = safeStore.ranges().at(txnId.epoch());
+        RecoverOk basic = new RecoverOk(txnId, command.status(), command.accepted(), command.executeAt(),
+                command.partialDeps() == null ? PartialDeps.NONE : command.partialDeps(), Deps.NONE, Deps.NONE,
+                false, command.writes(), command.result());
+
+        if (command.hasBeen(Committed))
+            return ImmediateFuture.success(basic);
+
+        class Collector implements AutoCloseable
+        {
+            PartialDeps.Builder deps;
+            Deps.Builder earlierAcceptedNoWitness;
+            Deps.Builder earlierCommittedWitness;
+            boolean rejectsFastPath;
+
+            @Override
+            public void close()
+            {
+                if (deps != null) deps.close();
+                if (earlierAcceptedNoWitness != null) earlierAcceptedNoWitness.close();
+                if (earlierCommittedWitness != null) earlierCommittedWitness.close();
+            }
+        }
+
+        Collector collector = new Collector();
         if (!command.known().deps.hasProposedOrDecidedDeps())
         {
-            deps = calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().at(txnId.epoch()));
+            collector.deps = PartialDeps.builder(ranges);
         }
 
-        boolean rejectsFastPath;
-        Deps earlierCommittedWitness, earlierAcceptedNoWitness;
-
-        if (command.hasBeen(PreCommitted))
+        if (!basic.status.hasBeen(PreCommitted))
         {
-            rejectsFastPath = false;
-            earlierCommittedWitness = earlierAcceptedNoWitness = Deps.NONE;
+            collector.earlierCommittedWitness = Deps.builder();
+            collector.earlierAcceptedNoWitness = Deps.builder();
         }
-        else
-        {
-            Ranges ranges = safeStore.ranges().at(txnId.epoch());
-            rejectsFastPath = hasAcceptedStartedAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
-            if (!rejectsFastPath)
-                rejectsFastPath = hasCommittedExecutesAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
 
-            // TODO (expected, testing): introduce some good unit tests for verifying these two functions in a real repair scenario
-            // committed txns with an earlier txnid and have our txnid as a dependency
-            earlierCommittedWitness = committedStartedBeforeAndWitnessed(safeStore, txnId, ranges, partialTxn.keys());
+        Future<Collector> collected = safeStore.slowFold(partialTxn.keys(), ranges, (searcher, keyOrRange, c) -> {
+            if (c.deps != null)
+                addDeps(searcher, txnId, txnId, c.deps);
 
-            // accepted txns with an earlier txnid that don't have our txnid as a dependency
-            earlierAcceptedNoWitness = acceptedStartedBeforeWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
-        }
-        return new RecoverOk(txnId, command.status(), command.accepted(), command.executeAt(), deps, earlierCommittedWitness, earlierAcceptedNoWitness, rejectsFastPath, command.writes(), command.result());
+            if (!basic.status.hasBeen(PreCommitted))
+            {
+                addAcceptedStartedBeforeWithoutWitnessing(searcher, txnId, c.earlierAcceptedNoWitness);
+                addCommittedStartedBeforeAndWitnessed(searcher, txnId, c.earlierCommittedWitness);
+                if (!c.rejectsFastPath)
+                {
+                    c.rejectsFastPath = hasAcceptedStartedAfterWithoutWitnessing(searcher, txnId);
+                    if (!c.rejectsFastPath)
+                        c.rejectsFastPath = hasCommittedExecutesAfterWithoutWitnessing(searcher, txnId);
+                }
+            }
+            return c;
+        }, collector, null);
+
+        return collected.map(c -> {
+            RecoverOk ok = basic.merge(c.deps, c.earlierCommittedWitness, c.earlierAcceptedNoWitness, c.rejectsFastPath);
+            c.close();
+            return ok;
+        });
     }
 
     @Override
@@ -179,6 +212,8 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
     @Override
     public Seekables<?, ?> keys()
     {
+        // TODO (expected): we shouldn't need this; it's currently used only for maxConflict IF we haven't preaccepted,
+        //  which we can always answer pessimistically, so should always be answered from cache
         return partialTxn.keys();
     }
 
@@ -268,6 +303,16 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         {
             return Status.max(recoverOks, r -> r.status, r -> r.accepted, r -> r.status.phase.compareTo(Phase.Accept) >= 0);
         }
+
+        RecoverOk merge(@Nullable PartialDeps.Builder deps, @Nullable Deps.Builder earlierCommittedWitness, @Nullable Deps.Builder earlierAcceptedNoWitness, boolean rejectsFastPath)
+        {
+            return new RecoverOk(txnId, status, accepted, executeAt,
+                    deps != null ? deps.build() : this.deps,
+                    earlierCommittedWitness != null ? earlierCommittedWitness.build() : this.earlierCommittedWitness,
+                    earlierAcceptedNoWitness != null ? earlierAcceptedNoWitness.build() : this.earlierAcceptedNoWitness,
+                    rejectsFastPath | this.rejectsFastPath,
+                    writes, result);
+        }
     }
 
     public static class RecoverNack extends RecoverReply
@@ -293,31 +338,23 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         }
     }
 
-    private static Deps acceptedStartedBeforeWithoutWitnessing(SafeCommandStore commandStore, TxnId startedBefore, Ranges ranges, Seekables<?, ?> keys)
+    private static void addAcceptedStartedBeforeWithoutWitnessing(SlowSearcher searcher, TxnId startedBefore, Deps.Builder builder)
     {
-        try (Deps.Builder builder = Deps.builder())
-        {
-            commandStore.mapReduce(keys, ranges, RorWs, STARTED_BEFORE, startedBefore, WITHOUT, startedBefore, Accepted, PreCommitted,
-                    (keyOrRange, txnId, executeAt, prev) -> {
-                        if (executeAt.compareTo(startedBefore) > 0)
-                            builder.add(keyOrRange, txnId);
-                        return builder;
-                    }, builder, null);
-            return builder.build();
-        }
+        searcher.fold(RorWs, STARTED_BEFORE, startedBefore, WITHOUT, startedBefore, Accepted, PreCommitted,
+                (keyOrRange, txnId, executeAt, prev) -> {
+                    if (executeAt.compareTo(startedBefore) > 0)
+                        builder.add(keyOrRange, txnId);
+                    return builder;
+                }, builder, null);
     }
 
-    private static Deps committedStartedBeforeAndWitnessed(SafeCommandStore commandStore, TxnId startedBefore, Ranges ranges, Seekables<?, ?> keys)
+    private static void addCommittedStartedBeforeAndWitnessed(SlowSearcher searcher, TxnId startedBefore, Deps.Builder builder)
     {
-        try (Deps.Builder builder = Deps.builder())
-        {
-            commandStore.mapReduce(keys, ranges, RorWs, STARTED_BEFORE, startedBefore, WITH, startedBefore, Committed, null,
-                    (keyOrRange, txnId, executeAt, prev) -> builder.add(keyOrRange, txnId), (Deps.AbstractBuilder<Deps>)builder, null);
-            return builder.build();
-        }
+        searcher.fold(RorWs, STARTED_BEFORE, startedBefore, WITH, startedBefore, Committed, null,
+                (keyOrRange, txnId, executeAt, prev) -> builder.add(keyOrRange, txnId), (Deps.AbstractBuilder<Deps>)builder, null);
     }
 
-    private static boolean hasAcceptedStartedAfterWithoutWitnessing(SafeCommandStore commandStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
+    private static boolean hasAcceptedStartedAfterWithoutWitnessing(SlowSearcher searcher, TxnId startedAfter)
     {
         /*
          * The idea here is to discover those transactions that were started after us and have been Accepted
@@ -326,11 +363,11 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
          * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
          * has not witnessed us we can safely invalidate (us).
          */
-        return commandStore.mapReduce(keys, ranges, RorWs, STARTED_AFTER, startedAfter, WITHOUT, startedAfter, Accepted, PreCommitted,
+        return searcher.fold(RorWs, STARTED_AFTER, startedAfter, WITHOUT, startedAfter, Accepted, PreCommitted,
                 (keyOrRange, txnId, executeAt, prev) -> true, false, true);
     }
 
-    private static boolean hasCommittedExecutesAfterWithoutWitnessing(SafeCommandStore commandStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
+    private static boolean hasCommittedExecutesAfterWithoutWitnessing(SlowSearcher searcher, TxnId startedAfter)
     {
         /*
          * The idea here is to discover those transactions that have been decided to execute after us
@@ -339,7 +376,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
          * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
          * has not witnessed us we can safely invalidate it.
          */
-        return commandStore.mapReduce(keys, ranges, RorWs, EXECUTES_AFTER, startedAfter, WITHOUT, startedAfter, Committed, null,
+        return searcher.fold(RorWs, EXECUTES_AFTER, startedAfter, WITHOUT, startedAfter, Committed, null,
                 (keyOrRange, txnId, executeAt, prev) -> true,false, true);
     }
 }

@@ -20,7 +20,7 @@ package accord.impl;
 
 import accord.api.Key;
 import accord.local.*;
-import accord.local.SafeCommandStore.CommandFunction;
+import accord.local.SafeCommandStore.SearchFunction;
 import accord.local.SafeCommandStore.TestDep;
 import accord.local.SafeCommandStore.TestKind;
 import accord.primitives.Keys;
@@ -55,7 +55,7 @@ public abstract class CommandsForKey implements CommandListener
         <T> T mapReduce(TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp,
                         TestDep testDep, @Nullable TxnId depId,
                         @Nullable Status minStatus, @Nullable Status maxStatus,
-                        CommandFunction<T, T> map, T initialValue, T terminalValue);
+                        SearchFunction<T, T> map, T initialValue, T terminalValue);
     }
 
     public abstract Key key();

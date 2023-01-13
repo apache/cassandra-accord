@@ -12,10 +12,10 @@ public class ReducingFuture<V> extends AsyncPromise<V>
 {
     private static final AtomicIntegerFieldUpdater<ReducingFuture> PENDING_UPDATER = AtomicIntegerFieldUpdater.newUpdater(ReducingFuture.class, "pending");
     private final List<? extends Future<V>> futures;
-    private final BiFunction<V, V, V> reducer;
+    private final Reduce<V> reducer;
     private volatile int pending;
 
-    private ReducingFuture(List<? extends Future<V>> futures, BiFunction<V, V, V> reducer)
+    private ReducingFuture(List<? extends Future<V>> futures, Reduce<V> reducer)
     {
         this.futures = futures;
         this.reducer = reducer;
@@ -36,13 +36,13 @@ public class ReducingFuture<V> extends AsyncPromise<V>
         {
             V result = futures.get(0).getNow();
             for (int i=1, mi=futures.size(); i<mi; i++)
-                result = reducer.apply(result, futures.get(i).getNow());
+                result = reducer.reduce(result, futures.get(i).getNow());
 
             trySuccess(result);
         }
     }
 
-    public static <T> Future<T> reduce(List<? extends Future<T>> futures, BiFunction<T, T, T> reducer)
+    public static <T> Future<T> reduce(List<? extends Future<T>> futures, Reduce<T> reducer)
     {
         Preconditions.checkArgument(!futures.isEmpty(), "future list is empty");
 

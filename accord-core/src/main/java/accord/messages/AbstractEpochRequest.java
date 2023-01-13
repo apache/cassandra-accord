@@ -50,10 +50,4 @@ public abstract class AbstractEpochRequest<R extends Reply> implements PreLoadCo
     {
         return Collections.singleton(txnId);
     }
-
-    @Override
-    public Seekables<?, ?> keys()
-    {
-        return Keys.EMPTY;
-    }
 }

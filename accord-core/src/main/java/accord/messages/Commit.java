@@ -33,11 +33,12 @@ import javax.annotation.Nullable;
 import accord.utils.Invariants;
 
 import accord.topology.Topology;
+import accord.utils.MapReduceConsume;
 
 import static accord.local.Status.Committed;
 import static accord.local.Status.Known.DefinitionOnly;
 
-public class Commit extends TxnRequest<ReadNack>
+public class Commit extends TxnRequest implements MapReduceConsume<SafeCommandStore, ReadNack>
 {
     public static class SerializerSupport
     {
@@ -130,12 +131,6 @@ public class Commit extends TxnRequest<ReadNack>
     public Iterable<TxnId> txnIds()
     {
         return Collections.singleton(txnId);
-    }
-
-    @Override
-    public Seekables<?, ?> keys()
-    {
-        return Keys.EMPTY;
     }
 
     @Override
@@ -255,12 +250,6 @@ public class Commit extends TxnRequest<ReadNack>
         public Iterable<TxnId> txnIds()
         {
             return Collections.singleton(txnId);
-        }
-
-        @Override
-        public Seekables<?, ?> keys()
-        {
-            return Keys.EMPTY;
         }
 
         @Override

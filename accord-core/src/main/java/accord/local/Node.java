@@ -31,6 +31,7 @@ import accord.coordinate.*;
 import accord.messages.*;
 import accord.primitives.*;
 import accord.primitives.Routable.Domain;
+import accord.utils.AsyncMapReduceConsume;
 import accord.utils.MapReduceConsume;
 import com.google.common.annotations.VisibleForTesting;
 
@@ -275,7 +276,12 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return commandStores.ifLocal(context, key, since.epoch(), Long.MAX_VALUE, ifLocal);
     }
 
-    public <T> void mapReduceConsumeLocal(TxnRequest<?> request, long minEpoch, long maxEpoch, MapReduceConsume<SafeCommandStore, T> mapReduceConsume)
+    public <T> void mapReduceConsumeLocal(TxnRequest request, long minEpoch, long maxEpoch, MapReduceConsume<SafeCommandStore, T> mapReduceConsume)
+    {
+        commandStores.mapReduceConsume(request, request.scope(), minEpoch, maxEpoch, mapReduceConsume);
+    }
+
+    public <T> void mapReduceConsumeLocal(TxnRequest request, long minEpoch, long maxEpoch, AsyncMapReduceConsume<SafeCommandStore, T> mapReduceConsume)
     {
         commandStores.mapReduceConsume(request, request.scope(), minEpoch, maxEpoch, mapReduceConsume);
     }

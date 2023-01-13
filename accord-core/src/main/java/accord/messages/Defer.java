@@ -17,12 +17,12 @@ class Defer implements CommandListener
     public enum Ready { No, Yes, Expired }
 
     final Function<Command, Ready> waitUntil;
-    final TxnRequest<?> request;
+    final TxnRequest request;
     final IntHashSet waitingOn = new IntHashSet(); // TODO (easy): use Agrona when available
     int waitingOnCount;
     boolean isDone;
 
-    Defer(Known waitUntil, Known expireAt, TxnRequest<?> request)
+    Defer(Known waitUntil, Known expireAt, TxnRequest request)
     {
         this(command -> {
             if (!waitUntil.isSatisfiedBy(command.known()))
@@ -33,7 +33,7 @@ class Defer implements CommandListener
         }, request);
     }
 
-    Defer(Function<Command, Ready> waitUntil, TxnRequest<?> request)
+    Defer(Function<Command, Ready> waitUntil, TxnRequest request)
     {
         this.waitUntil = waitUntil;
         this.request = request;

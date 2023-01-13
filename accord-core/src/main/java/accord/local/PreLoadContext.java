@@ -50,7 +50,7 @@ public interface PreLoadContext
      *  Both can be done without. For range transactions calculateDeps needs to be asynchronous anyway to support
      *  potentially large scans, and for register we do not need to load into memory, we can perform a blind write.
      */
-    Seekables<?, ?> keys();
+    default Seekables<?, ?> keys() { return Keys.EMPTY; }
 
     static PreLoadContext contextFor(Iterable<TxnId> txnIds, Seekables<?, ?> keys)
     {
@@ -87,6 +87,11 @@ public interface PreLoadContext
     static PreLoadContext contextFor(Key key)
     {
         return contextFor(Collections.emptyList(), Keys.of(key));
+    }
+
+    static PreLoadContext contextFor(Seekables<?, ?> keys)
+    {
+        return contextFor(Collections.emptyList(), keys);
     }
 
     static PreLoadContext empty()

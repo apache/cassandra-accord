@@ -254,12 +254,6 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
     }
 
     @Override
-    public Seekables<?, ?> keys()
-    {
-        return Keys.EMPTY;
-    }
-
-    @Override
     public MessageType type()
     {
         return MessageType.READ_REQ;

@@ -2,17 +2,19 @@ package accord.messages;
 
 import accord.local.SafeCommandStore;
 import accord.primitives.*;
+import accord.utils.AsyncMapReduceConsume;
 import accord.utils.Invariants;
 
 import accord.local.Node.Id;
 import accord.topology.Topologies;
+import org.apache.cassandra.utils.concurrent.Future;
 
 import javax.annotation.Nonnull;
 import java.util.Collections;
 
 import static accord.messages.PreAccept.calculatePartialDeps;
 
-public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
+public class GetDeps extends TxnRequest.WithUnsynced implements AsyncMapReduceConsume<SafeCommandStore, PartialDeps>
 {
     public static final class SerializationSupport
     {
@@ -49,7 +51,7 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
     }
 
     @Override
-    public PartialDeps apply(SafeCommandStore instance)
+    public Future<PartialDeps> apply(SafeCommandStore instance)
     {
         Ranges ranges = instance.ranges().between(minUnsyncedEpoch, executeAt.epoch());
         return calculatePartialDeps(instance, txnId, keys, executeAt, ranges);
@@ -87,12 +89,6 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
     public Iterable<TxnId> txnIds()
     {
         return Collections.singleton(txnId);
-    }
-
-    @Override
-    public Seekables<?, ?> keys()
-    {
-        return keys;
     }
 
     public static class GetDepsOk implements Reply

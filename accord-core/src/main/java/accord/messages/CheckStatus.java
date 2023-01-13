@@ -85,12 +85,6 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
         return Collections.singleton(txnId);
     }
 
-    @Override
-    public Seekables<?, ?> keys()
-    {
-        return Keys.EMPTY;
-    }
-
     public CheckStatus(Id to, Topologies topologies, TxnId txnId, Unseekables<?, ?> query, IncludeInfo includeInfo)
     {
         super(txnId);
