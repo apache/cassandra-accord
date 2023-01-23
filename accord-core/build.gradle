@@ -48,6 +48,10 @@ task burn(type: JavaExec) {
 
 // the team is used to 'install' so make sure that still publishes locally
 task install(dependsOn: publishToMavenLocal)
+task testJar(type: Jar, dependsOn: testClasses) {
+  archiveClassifier = 'tests'
+  from sourceSets.test.output
+}
 
 publishing {
   publications {
@@ -57,6 +61,11 @@ publishing {
         inceptionYear = '2021'
       }
       from components.java
+    }
+
+    test(MavenPublication) {
+      artifactId = 'accord'
+      artifact testJar
     }
   }
 }
