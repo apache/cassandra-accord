@@ -60,6 +60,12 @@ publishing {
       pom {
         inceptionYear = '2021'
       }
+      // This is a hack to remove accord from the dependency list as this breaks Apache Cassandra
+      // This is a bug with Gradle that is fixed in 8.0 but not yet released
+      // see https://github.com/gradle/gradle/commit/6e596c638dff59dfa06032a7e7a3974275ddb3e1
+      pom.withXml {
+        asNode().dependencies.'*'.findAll() { it.artifactId.text() == 'accord' }.each() { it.parent().remove(it) }
+      }
       from components.java
     }
 
