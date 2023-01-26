@@ -19,15 +19,17 @@
 package accord.maelstrom;
 
 import java.util.Map;
+import javax.annotation.Nonnull;
 
-import accord.api.Read;
-import accord.api.Update;
-import accord.local.Node;
-import accord.local.Node.Id;
 import accord.api.Data;
 import accord.api.Key;
 import accord.api.Query;
+import accord.api.Read;
 import accord.api.Result;
+import accord.api.Update;
+import accord.local.Node;
+import accord.local.Node.Id;
+import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
@@ -43,7 +45,7 @@ public class MaelstromQuery implements Query
     }
 
     @Override
-    public Result compute(TxnId txnId, Timestamp executeAt, Data data, Read untypedRead, Update update)
+    public Result compute(@Nonnull TxnId txnId, @Nonnull Timestamp executeAt, @Nonnull Seekables<?, ?> keys,  Data data, Read untypedRead, Update update)
     {
         MaelstromRead read = (MaelstromRead) untypedRead;
         Value[] values = new Value[read.readKeys.size()];

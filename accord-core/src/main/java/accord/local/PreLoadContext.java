@@ -185,6 +185,8 @@ public interface PreLoadContext
 
     static PreLoadContext empty()
     {
-        return contextFor(null, Collections.emptyList(), Keys.EMPTY);
+        return EMPTY_PRELOADCONTEXT;
     }
+
+    PreLoadContext EMPTY_PRELOADCONTEXT = contextFor(null, Collections.emptyList(), Keys.EMPTY);
 }

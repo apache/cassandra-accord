@@ -18,7 +18,6 @@
 package accord.messages;
 
 import java.util.Set;
-
 import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
@@ -49,6 +48,9 @@ import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.utils.Invariants;
+import accord.utils.TriFunction;
+
+import static accord.utils.Invariants.checkArgument;
 
 public class Commit extends TxnRequest<ReadNack>
 {
@@ -56,9 +58,9 @@ public class Commit extends TxnRequest<ReadNack>
 
     public static class SerializerSupport
     {
-        public static Commit create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Kind kind, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadTxnData read)
+        public static Commit create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Kind kind, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
         {
-            return new Commit(kind, txnId, scope, waitForEpoch, executeAt, partialTxn, partialDeps, fullRoute, read);
+            return new Commit(kind, txnId, scope, waitForEpoch, executeAt, partialTxn, partialDeps, fullRoute, readData);
         }
     }
 
@@ -67,13 +69,24 @@ public class Commit extends TxnRequest<ReadNack>
     public final @Nullable PartialTxn partialTxn;
     public final PartialDeps partialDeps;
     public final @Nullable FullRoute<?> route;
-    public final ReadTxnData read;
+    public final ReadData readData;
 
     public enum Kind { Minimal, Maximal }
 
     // TODO (low priority, clarity): cleanup passing of topologies here - maybe fetch them afresh from Node?
     //                               Or perhaps introduce well-named classes to represent different topology combinations
+
+    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, ReadTxnData read)
+    {
+        this(kind, to, coordinateTopology, topologies, txnId, txn, route, executeAt, deps, (u1, u2, u3) -> read);
+    }
+
     public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, @Nullable Participants<?> readScope, Timestamp executeAt, Deps deps, boolean read)
+    {
+        this(kind, to, coordinateTopology, topologies, txnId, txn, route, executeAt, deps, read ? new ReadTxnData(to, topologies, txnId, readScope, executeAt) : null);
+    }
+
+    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, TriFunction<Txn, PartialRoute<?>, PartialDeps, ReadData> toExecuteFactory)
     {
         super(to, topologies, route, txnId);
 
@@ -100,10 +113,10 @@ public class Commit extends TxnRequest<ReadNack>
         this.partialTxn = partialTxn;
         this.partialDeps = deps.slice(scope.covering());
         this.route = sendRoute;
-        this.read = read ? new ReadTxnData(to, topologies, txnId, readScope, executeAt) : null;
+        this.readData = toExecuteFactory.apply(partialTxn != null ? partialTxn : txn, scope, partialDeps);
     }
 
-    Commit(Kind kind, TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadTxnData read)
+    Commit(Kind kind, TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
     {
         super(txnId, scope, waitForEpoch);
         this.kind = kind;
@@ -111,7 +124,7 @@ public class Commit extends TxnRequest<ReadNack>
         this.partialTxn = partialTxn;
         this.partialDeps = partialDeps;
         this.route = fullRoute;
-        this.read = read;
+        this.readData = readData;
     }
 
     // TODO (low priority, clarity): accept Topology not Topologies
@@ -138,6 +151,25 @@ public class Commit extends TxnRequest<ReadNack>
                 if (!executeTopology.contains(to))
                     node.send(to, new Commit(Kind.Minimal, to, coordinateTopology, allTopologies, txnId, txn, route, readScope, executeAt, deps, false));
             }
+        }
+    }
+
+    public static void commitMaximalAndBlockOnDeps(Node node, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Deps deps, Callback<ReadReply> callback)
+    {
+        checkArgument(topologies.size() == 1);
+        Topology topology = topologies.get(0);
+        for (Node.Id to : topology.nodes())
+        {
+            // To simplify making sure the agent is notified once and is notified before the barrier coordination
+            // returns a result; we never notify the agent on the coordinator as part of WaitForDependenciesThenApply execution
+            // Also always send a maximal commit since we don't block on deps often and that saves having to have an Insufficient code path
+            // going back for the Apply in `ApplyThenWaitUntilApplied
+            boolean notifyAgent = !to.equals(node.id());
+            Commit commit = new Commit(
+                    Kind.Maximal, to, topology, topologies, txnId,
+                    txn, route, txnId, deps,
+                    (maybePartialTransaction, partialRoute, partialDeps) -> new ApplyThenWaitUntilApplied(txnId, partialRoute, partialDeps, maybePartialTransaction.keys().slice(partialDeps.covering), txn.execute(txnId, txnId, null), txn.result(txnId, txnId, null), notifyAgent));
+            node.send(to, commit, callback);
         }
     }
 
@@ -188,8 +220,8 @@ public class Commit extends TxnRequest<ReadNack>
     {
         if (reply != null || failure != null)
             node.reply(replyTo, replyContext, reply, failure);
-        else if (read != null)
-            read.process(node, replyTo, replyContext);
+        else if (readData != null)
+            readData.process(node, replyTo, replyContext);
     }
 
     @Override
@@ -210,7 +242,7 @@ public class Commit extends TxnRequest<ReadNack>
                ", txnId: " + txnId +
                ", executeAt: " + executeAt +
                ", deps: " + partialDeps +
-               ", read: " + read +
+               ", toExecute: " + readData +
                '}';
     }
 

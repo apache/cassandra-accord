@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,7 +34,9 @@ import accord.local.CommandStore;
 import accord.local.Node;
 import accord.messages.Callback;
 import accord.messages.MessageType;
-import accord.messages.ReadData;
+import accord.messages.ReadData.ReadNack;
+import accord.messages.ReadData.ReadOk;
+import accord.messages.ReadData.ReadReply;
 import accord.messages.WaitAndReadData;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
@@ -47,6 +48,7 @@ import accord.utils.Invariants;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
+import javax.annotation.Nullable;
 
 import static accord.messages.ReadData.ReadNack.NotCommitted;
 import static accord.primitives.Routables.Slice.Minimal;
@@ -133,10 +135,10 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         Ranges ownedRanges = ownedRangesForNode(to);
         Invariants.checkArgument(ownedRanges.containsAll(ranges), "Got a reply from %s for ranges %s, but owned ranges %s does not contain all the ranges", to, ranges, ownedRanges);
         PartialDeps partialDeps = syncPoint.waitFor.slice(ownedRanges, ranges);
-        node.send(to, new FetchRequest(syncPoint.sourceEpoch(), syncPoint.syncId, ranges, partialDeps, rangeReadTxn(ranges), collectMaxApplied()), new Callback<ReadData.ReadReply>()
+        node.send(to, new FetchRequest(syncPoint.sourceEpoch(), syncPoint.syncId, ranges, partialDeps, rangeReadTxn(ranges), collectMaxApplied()), new Callback<ReadReply>()
         {
             @Override
-            public void onSuccess(Node.Id from, ReadData.ReadReply reply)
+            public void onSuccess(Node.Id from, ReadReply reply)
             {
                 if (!reply.isOk())
                 {
@@ -148,7 +150,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
                     {
                         fail(to, new RuntimeException(reply.toString()));
                         inflight.remove(key).cancel();
-                        switch ((ReadData.ReadNack) reply)
+                        switch ((ReadNack) reply)
                         {
                             default: throw new AssertionError("Unhandled enum: " + reply);
                             case Invalid:
@@ -285,7 +287,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         }
     }
 
-    public static class FetchResponse extends ReadData.ReadOk
+    public static class FetchResponse extends ReadOk
     {
         public final @Nullable Timestamp maxApplied;
         public FetchResponse(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Timestamp maxApplied)

@@ -18,8 +18,6 @@
 
 package accord.messages;
 
-import javax.annotation.Nullable;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,6 +35,7 @@ import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
+import javax.annotation.Nullable;
 
 import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
 import static accord.local.Status.Committed;
@@ -96,6 +95,12 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
     {
         super(txnId, readScope, waitForEpoch);
         this.executeAtEpoch = executeAtEpoch;
+    }
+
+    @Override
+    public ReadType kind()
+    {
+        return ReadType.readTxnData;
     }
 
     @Override

@@ -25,6 +25,8 @@ import accord.utils.DeterministicSet;
 
 public class Listeners<L extends Command.Listener> extends DeterministicSet<L>
 {
+    public static Listeners EMPTY = new Listeners<>();
+
     public Listeners()
     {
     }
@@ -34,7 +36,7 @@ public class Listeners<L extends Command.Listener> extends DeterministicSet<L>
         super(copy);
     }
 
-    public static class Immutable extends Listeners<Command.DurableAndIdempotentListener>
+    public static class Immutable<L extends Command.Listener> extends Listeners<L>
     {
         public static final Immutable EMPTY = new Immutable();
 
@@ -43,18 +45,18 @@ public class Listeners<L extends Command.Listener> extends DeterministicSet<L>
             super();
         }
 
-        public Immutable(Listeners<Command.DurableAndIdempotentListener> listeners)
+        public Immutable(Listeners<L> listeners)
         {
             super(listeners);
         }
 
-        Listeners<Command.DurableAndIdempotentListener> mutable()
+        Listeners<L> mutable()
         {
             return new Listeners<>(this);
         }
 
         @Override
-        public boolean add(Command.DurableAndIdempotentListener item)
+        public boolean add(L item)
         {
             throw new UnsupportedOperationException("Cannot modify immutable set");
         }
@@ -72,7 +74,7 @@ public class Listeners<L extends Command.Listener> extends DeterministicSet<L>
         }
 
         @Override
-        public boolean addAll(Collection<? extends Command.DurableAndIdempotentListener> c)
+        public boolean addAll(Collection<? extends L> c)
         {
             throw new UnsupportedOperationException("Cannot modify immutable set");
         }
@@ -84,7 +86,7 @@ public class Listeners<L extends Command.Listener> extends DeterministicSet<L>
         }
 
         @Override
-        public boolean removeIf(Predicate<? super Command.DurableAndIdempotentListener> filter)
+        public boolean removeIf(Predicate<? super L> filter)
         {
             throw new UnsupportedOperationException("Cannot modify immutable set");
         }

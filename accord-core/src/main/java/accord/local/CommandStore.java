@@ -40,7 +40,6 @@ import accord.api.DataStore;
 import accord.api.ProgressLog;
 import accord.coordinate.CollectDeps;
 import accord.local.Command.WaitingOn;
-import accord.local.CommandStores.RangesForEpoch;
 import accord.primitives.FullRoute;
 import accord.primitives.KeyDeps;
 import accord.primitives.Participants;
@@ -57,6 +56,7 @@ import accord.utils.RelationMultiMap.SortedRelationList;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
+import accord.local.CommandStores.RangesForEpoch;
 
 import static accord.api.ConfigurationService.EpochReady.DONE;
 import static accord.local.PreLoadContext.contextFor;
@@ -205,7 +205,7 @@ public abstract class CommandStore implements AgentExecutor
                                    SafeCommandStore.TestTimestamp.STARTED_AFTER, Timestamp.NONE,
                                    SafeCommandStore.TestDep.ANY_DEPS, null,
                                    Status.Applied, Status.Applied,
-                                   (key, txnId, executeAt, max) -> Timestamp.max(max, executeAt),
+                                   (key, txnId, executeAt, status, max) -> Timestamp.max(max, executeAt),
                                    Timestamp.NONE, Timestamp.MAX);
     }
 

@@ -43,7 +43,7 @@ public class MockStore implements DataStore
     };
 
     public static final Result RESULT = new Result() {};
-    public static final Query QUERY = (txnId, executeAt, data, read, update) -> RESULT;
+    public static final Query QUERY = (txnId, executeAt, keys, data, read, update) -> RESULT;
     public static final Write WRITE = (key, commandStore, executeAt, store, command) -> Writes.SUCCESS;
 
     public static Read read(Seekables<?, ?> keys)

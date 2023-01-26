@@ -21,6 +21,7 @@ package accord.messages;
 import javax.annotation.Nullable;
 
 import accord.api.Result;
+import accord.api.RoutingKey;
 import accord.local.Commands;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -130,8 +131,14 @@ public class Apply extends TxnRequest<ApplyReply>
         node.mapReduceConsumeLocal(this, txnId.epoch(), executeAt.epoch(), this);
     }
 
+
     @Override
     public ApplyReply apply(SafeCommandStore safeStore)
+    {
+        return apply(safeStore, txn, txnId, executeAt, deps, scope, writes, result, progressKey);
+    }
+
+    public static ApplyReply apply(SafeCommandStore safeStore, PartialTxn txn, TxnId txnId, Timestamp executeAt, PartialDeps deps, PartialRoute<?> scope, Writes writes, Result result, RoutingKey progressKey)
     {
         SafeCommand safeCommand = safeStore.get(txnId, executeAt, scope);
         switch (Commands.apply(safeStore, safeCommand, txnId, scope, progressKey, executeAt, deps, txn, writes, result))

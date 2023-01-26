@@ -25,6 +25,8 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Sets;
 
+import java.time.Duration;
+
 import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.config.LocalConfig;
@@ -52,6 +54,9 @@ import accord.utils.DefaultRandom;
 import accord.utils.EpochFunction;
 import accord.utils.Invariants;
 import accord.utils.ThreadPoolScheduler;
+
+import org.awaitility.Awaitility;
+import org.awaitility.core.ThrowingRunnable;
 
 import static accord.utils.async.AsyncChains.awaitUninterruptibly;
 
@@ -160,5 +165,20 @@ public class Utils
                              localConfig);
         awaitUninterruptibly(node.unsafeStart());
         return node;
+    }
+
+    public static void spinUntilSuccess(ThrowingRunnable runnable)
+    {
+        spinUntilSuccess(runnable, 10);
+    }
+
+    public static void spinUntilSuccess(ThrowingRunnable runnable, int timeoutInSeconds)
+    {
+        Awaitility.await()
+                  .pollInterval(Duration.ofMillis(100))
+                  .pollDelay(0, TimeUnit.MILLISECONDS)
+                  .atMost(timeoutInSeconds, TimeUnit.SECONDS)
+                  .ignoreExceptions()
+                  .untilAsserted(runnable);
     }
 }

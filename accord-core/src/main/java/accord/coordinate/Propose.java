@@ -62,10 +62,10 @@ abstract class Propose<R> implements Callback<AcceptReply>
     private final Map<Id, AcceptReply> debug = debug() ? new HashMap<>() : null;
     final Timestamp executeAt;
     final QuorumTracker acceptTracker;
-    final BiConsumer<? super R, Throwable> callback;
+    final BiConsumer<R, Throwable> callback;
     private boolean isDone;
 
-    Propose(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback)
+    Propose(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, BiConsumer<R, Throwable> callback)
     {
         this.node = node;
         this.ballot = ballot;

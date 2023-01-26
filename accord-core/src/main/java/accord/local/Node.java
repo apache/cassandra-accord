@@ -40,6 +40,8 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.Agent;
 import accord.api.ConfigurationService;
+
+import accord.api.BarrierType;
 import accord.api.ConfigurationService.EpochReady;
 import accord.api.DataStore;
 import accord.api.Key;
@@ -66,6 +68,7 @@ import accord.primitives.FullRoute;
 import accord.primitives.ProgressToken;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
+import accord.coordinate.Barrier;
 import accord.primitives.Routable.Domain;
 import accord.primitives.Routables;
 import accord.primitives.Route;
@@ -524,6 +527,26 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return new TxnId(uniqueNow(), rw, domain);
     }
 
+    /**
+     * Trigger one of several different kinds of barrier transactions on a key or range with different properties. Barriers ensure that all prior transactions
+     * have their side effects visible up to some point.
+     *
+     * Local barriers will look for a local transaction that was applied in minEpoch or later and returns when one exists or completes.
+     * It may, but it is not guaranteed to, trigger a global barrier transaction that effects the barrier at all replicas.
+     *
+     * A global barrier is guaranteed to create a distributed barrier transaction, and if it is synchronous will not return until the
+     * transaction has applied at a quorum globally (meaning all dependencies and their side effects are already visible). If it is asynchronous
+     * it will return once the barrier has been applied locally.
+     *
+     * Ranges are only supported for global barriers.
+     *
+     * Returns the Timestamp the barrier actually ended up occurring at. Keep in mind for local barriers it doesn't mean a new transaction was created.
+     */
+    public AsyncResult<Timestamp> barrier(Seekables keysOrRanges, long minEpoch, BarrierType barrierType)
+    {
+        return Barrier.barrier(this, keysOrRanges, minEpoch, barrierType);
+    }
+
     public AsyncResult<Result> coordinate(Txn txn)
     {
         return coordinate(nextTxnId(txn.kind(), txn.keys().domain()), txn);
@@ -652,7 +675,12 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return future;
     }
 
-    public void receive(Request request, Id from, ReplyContext replyContext)
+    public void receive (Request request, Id from, ReplyContext replyContext)
+    {
+        receive(request, from, replyContext, 0);
+    }
+
+    public void receive (Request request, Id from, ReplyContext replyContext, long delayNanos)
     {
         long knownEpoch = request.knownEpoch();
         if (knownEpoch > topology.epoch())
@@ -665,7 +693,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
                 return;
             }
         }
-        scheduler.now(() -> {
+        Runnable processMsg = () -> {
             try
             {
                 request.process(this, from, replyContext);
@@ -674,7 +702,11 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
             {
                 reply(from, replyContext, null, t);
             }
-        });
+        };
+        if (delayNanos > 0)
+            scheduler.once(processMsg, delayNanos, TimeUnit.NANOSECONDS);
+        else
+            scheduler.now(processMsg);
     }
 
     public Scheduler scheduler()

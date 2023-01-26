@@ -593,30 +593,14 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
 
     public static <V> V getBlocking(AsyncChain<V> chain) throws InterruptedException, ExecutionException
     {
-        class Result
+        try
         {
-            final V result;
-            final Throwable failure;
-
-            public Result(V result, Throwable failure)
-            {
-                this.result = result;
-                this.failure = failure;
-            }
+            return getBlocking(chain, 0, TimeUnit.DAYS);
         }
-
-        AtomicReference<Result> callbackResult = new AtomicReference<>();
-        CountDownLatch latch = new CountDownLatch(1);
-
-        chain.begin((result, failure) -> {
-            callbackResult.set(new Result(result, failure));
-            latch.countDown();
-        });
-
-        latch.await();
-        Result result = callbackResult.get();
-        if (result.failure == null) return result.result;
-        else throw new ExecutionException(result.failure);
+        catch (TimeoutException e)
+        {
+            throw new IllegalStateException("Should not throw timeout exception e");
+        }
     }
 
     public static <V> V getBlockingAndRethrow(AsyncChain<V> chain)
@@ -677,14 +661,32 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
             latch.countDown();
         });
 
-        if (!latch.await(timeout, unit))
-            throw new TimeoutException();
+        if (timeout > 0)
+        {
+            if (!latch.await(timeout, unit))
+                throw new TimeoutException();
+        }
+        else
+            latch.await();
+
         Result result = callbackResult.get();
         if (result.failure == null) return result.result;
         else throw new ExecutionException(result.failure);
     }
 
     public static <V> V getUninterruptibly(AsyncChain<V> chain) throws ExecutionException
+    {
+        try
+        {
+            return getUninterruptibly(chain, 0, TimeUnit.DAYS);
+        }
+        catch (TimeoutException e)
+        {
+            throw new IllegalStateException("Should not throw timeout exception e");
+        }
+    }
+
+    public static <V> V getUninterruptibly(AsyncChain<V> chain, long time, TimeUnit unit) throws ExecutionException, TimeoutException
     {
         boolean interrupted = false;
         try
@@ -693,7 +695,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
             {
                 try
                 {
-                    return getBlocking(chain);
+                    return getBlocking(chain, time, unit);
                 }
                 catch (InterruptedException e)
                 {

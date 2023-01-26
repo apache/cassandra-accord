@@ -20,10 +20,9 @@ package accord.primitives;
 
 import accord.local.Node.Id;
 import accord.utils.Invariants;
+import javax.annotation.Nonnull;
 
 import static accord.utils.Invariants.checkArgument;
-
-import javax.annotation.Nonnull;
 
 public class Timestamp implements Comparable<Timestamp>, EpochSupplier
 {

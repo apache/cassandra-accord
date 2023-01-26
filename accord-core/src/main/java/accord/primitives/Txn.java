@@ -253,7 +253,7 @@ public interface Txn
 
     default Result result(TxnId txnId, Timestamp executeAt, @Nullable Data data)
     {
-        return query().compute(txnId, executeAt, data, read(), update());
+        return query().compute(txnId, executeAt, keys(), data, read(), update());
     }
 
     default Writes execute(TxnId txnId, Timestamp executeAt, @Nullable Data data)

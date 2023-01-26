@@ -35,8 +35,9 @@ import static accord.utils.SortedArrays.exponentialSearch;
 
 public class Topology
 {
-    public static final Topology EMPTY = new Topology(0, new Shard[0], Ranges.EMPTY, Collections.emptyMap(), Ranges.EMPTY, new int[0]);
+    public static final long EMPTY_EPOCH = 0;
     private static final int[] EMPTY_SUBSET = new int[0];
+    public static final Topology EMPTY = new Topology(EMPTY_EPOCH, new Shard[0], Ranges.EMPTY, Collections.emptyMap(), Ranges.EMPTY, EMPTY_SUBSET);
     final long epoch;
     final Shard[] shards;
     final Ranges ranges;

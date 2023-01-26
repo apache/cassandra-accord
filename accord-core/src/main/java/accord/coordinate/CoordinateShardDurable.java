@@ -25,6 +25,7 @@ import accord.messages.Callback;
 import accord.messages.ReadData;
 import accord.messages.SetShardDurable;
 import accord.messages.WaitUntilApplied;
+import accord.primitives.Ranges;
 import accord.primitives.SyncPoint;
 import accord.topology.Topologies;
 import accord.utils.async.AsyncResult;
@@ -37,18 +38,18 @@ public class CoordinateShardDurable extends SettableResult<Void> implements Call
 {
     final Node node;
     final AppliedTracker tracker;
-    final SyncPoint exclusiveSyncPoint;
+    final SyncPoint<Ranges> exclusiveSyncPoint;
 
-    private CoordinateShardDurable(Node node, SyncPoint exclusiveSyncPoint)
+    private CoordinateShardDurable(Node node, SyncPoint<Ranges> exclusiveSyncPoint)
     {
         // TODO (required): this isn't correct, we need to potentially perform a second round if a dependency executes in a future epoch and we have lost ownership of that epoch
-        Topologies topologies = node.topology().forEpoch(exclusiveSyncPoint.ranges, exclusiveSyncPoint.sourceEpoch());
+        Topologies topologies = node.topology().forEpoch(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.sourceEpoch());
         this.node = node;
         this.tracker = new AppliedTracker(topologies);
         this.exclusiveSyncPoint = exclusiveSyncPoint;
     }
 
-    public static AsyncResult<Void> coordinate(Node node, SyncPoint exclusiveSyncPoint)
+    public static AsyncResult<Void> coordinate(Node node, SyncPoint<Ranges> exclusiveSyncPoint)
     {
         CoordinateShardDurable coordinate = new CoordinateShardDurable(node, exclusiveSyncPoint);
         coordinate.start();
@@ -57,7 +58,7 @@ public class CoordinateShardDurable extends SettableResult<Void> implements Call
 
     private void start()
     {
-        node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), exclusiveSyncPoint.syncId, exclusiveSyncPoint.ranges, exclusiveSyncPoint.syncId), this);
+        node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), exclusiveSyncPoint.syncId, exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.syncId), this);
     }
 
     @Override
@@ -87,7 +88,7 @@ public class CoordinateShardDurable extends SettableResult<Void> implements Call
             // TODO (required): we also need to handle ranges not being safe to read
             if (tracker.recordSuccess(from) == RequestStatus.Success)
             {
-                node.configService().reportEpochRedundant(exclusiveSyncPoint.ranges, exclusiveSyncPoint.syncId.epoch());
+                node.configService().reportEpochRedundant(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.syncId.epoch());
                 node.send(tracker.nodes(), new SetShardDurable(exclusiveSyncPoint));
                 trySuccess(null);
             }

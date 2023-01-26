@@ -23,13 +23,11 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.BiConsumer;
 
-import javax.annotation.Nullable;
-
 import accord.api.Agent;
 import accord.api.DataStore;
+import accord.api.DataStore.FetchRanges;
 import accord.api.DataStore.FetchResult;
 import accord.api.DataStore.StartingRangeFetch;
-import accord.api.DataStore.FetchRanges;
 import accord.coordinate.CoordinateNoOp;
 import accord.coordinate.CoordinateSyncPoint;
 import accord.primitives.Ranges;
@@ -40,6 +38,7 @@ import accord.utils.DeterministicIdentitySet;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
+import javax.annotation.Nullable;
 
 import static accord.local.PreLoadContext.contextFor;
 import static accord.local.PreLoadContext.empty;
@@ -133,7 +132,7 @@ class Bootstrap
             // of these ranges as part of this attempt
             Ranges commitRanges = valid;
             store.markBootstrapping(safeStore0, globalSyncId, valid);
-            CoordinateSyncPoint.coordinate(node, globalSyncId, commitRanges)
+            CoordinateSyncPoint.exclusive(node, globalSyncId, commitRanges)
                // TODO (correcness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
                // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
                .flatMap(syncPoint -> node.withEpoch(epoch, () -> store.submit(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys()), safeStore1 -> {

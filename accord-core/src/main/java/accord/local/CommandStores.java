@@ -56,6 +56,9 @@ import javax.annotation.Nonnull;
 import org.agrona.collections.Hashing;
 import org.agrona.collections.Int2ObjectHashMap;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import static accord.api.ConfigurationService.EpochReady.done;
 import static accord.local.PreLoadContext.empty;
 import static accord.primitives.Routables.Slice.Minimal;
@@ -67,6 +70,9 @@ import static java.util.stream.Collectors.toList;
  */
 public abstract class CommandStores
 {
+    @SuppressWarnings("unused")
+    private static final Logger logger = LoggerFactory.getLogger(CommandStores.class);
+
     public interface Factory
     {
         CommandStores create(NodeTimeService time,
@@ -213,6 +219,11 @@ public abstract class CommandStores
         public @Nonnull Ranges allBefore(long toExclusive)
         {
             return allInternal(0, ceilIndex(toExclusive));
+        }
+
+        public @Nonnull Ranges allAfter(long fromInclusive)
+        {
+            return allInternal(floorIndex(fromInclusive), ranges.length);
         }
 
         public @Nonnull Ranges allUntil(long toInclusive)
@@ -455,6 +466,12 @@ public abstract class CommandStores
                     throw new IllegalStateException();
 
                 return null;
+            }
+
+            @Override
+            public String toString()
+            {
+                return forEach.getClass().getName();
             }
         });
     }

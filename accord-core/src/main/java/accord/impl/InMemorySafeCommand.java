@@ -18,11 +18,11 @@
 
 package accord.impl;
 
-import java.util.Collection;
 import java.util.function.Supplier;
 
 import accord.impl.InMemoryCommandStore.GlobalCommand;
 import accord.local.Command;
+import accord.local.Listeners;
 import accord.local.SafeCommand;
 import accord.primitives.TxnId;
 
@@ -72,7 +72,7 @@ public class InMemorySafeCommand extends SafeCommand implements SafeState<Comman
     }
 
     @Override
-    public Collection<Command.TransientListener> transientListeners()
+    public Listeners<Command.TransientListener> transientListeners()
     {
         return global.transientListeners();
     }

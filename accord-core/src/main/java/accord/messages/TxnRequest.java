@@ -20,17 +20,22 @@ package accord.messages;
 
 import java.util.function.BiFunction;
 
-import accord.local.SafeCommandStore;
-import accord.utils.MapReduceConsume;
-import accord.primitives.*;
-import accord.utils.Invariants;
-
 import accord.api.RoutingKey;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.PreLoadContext;
+import accord.local.SafeCommandStore;
+import accord.primitives.FullRoute;
+import accord.primitives.PartialRoute;
+import accord.primitives.Ranges;
+import accord.primitives.Routables;
+import accord.primitives.Route;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.topology.Topology;
+import accord.utils.Invariants;
+import accord.utils.MapReduceConsume;
 
 import static java.lang.Long.min;
 
@@ -76,11 +81,11 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
         }
 
         @Override
-        RoutingKey progressKey(Node node)
+        RoutingKey progressKey()
         {
             if (doNotComputeProgressKey)
                 return null;
-            return super.progressKey(node);
+            return super.progressKey();
         }
     }
 
@@ -136,14 +141,19 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
         this.node = on;
         this.replyTo = replyTo;
         this.replyContext = replyContext;
-        this.progressKey = progressKey(node); // TODO (low priority, clarity): not every class that extends TxnRequest needs this set
+        this.progressKey = progressKey(); // TODO (low priority, clarity): not every class that extends TxnRequest needs this set
         process();
     }
 
-    RoutingKey progressKey(Node node)
+    RoutingKey progressKey()
+    {
+        return progressKey(node, waitForEpoch, txnId, scope);
+    }
+
+    public static RoutingKey progressKey(Node node, long waitForEpoch, TxnId txnId, PartialRoute<?> scope)
     {
         // if waitForEpoch < txnId.epoch, then this replica's ownership is unchanged
-        long progressEpoch = min(waitForEpoch(), txnId.epoch());
+        long progressEpoch = min(waitForEpoch, txnId.epoch());
         return node.trySelectProgressKey(progressEpoch, scope, scope.homeKey());
     }
 

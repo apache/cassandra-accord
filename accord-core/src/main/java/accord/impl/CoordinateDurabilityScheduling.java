@@ -224,7 +224,7 @@ public class CoordinateDurabilityScheduling
     {
         TxnId at = node.nextTxnId(ExclusiveSyncPoint, Domain.Range);
         node.scheduler().once(() -> node.withEpoch(at.epoch(), () -> {
-                           CoordinateSyncPoint.coordinate(node, at, ranges)
+                           CoordinateSyncPoint.exclusive(node, at, ranges)
                                .addCallback((success, fail) -> {
                                    if (fail != null) logger.trace("Exception coordinating exclusive sync point for local shard durability of {}", ranges, fail);
                                    else coordinateShardDurableAfterExclusiveSyncPoint(node, success);

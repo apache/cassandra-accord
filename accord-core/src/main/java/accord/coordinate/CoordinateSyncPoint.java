@@ -19,28 +19,32 @@
 package accord.coordinate;
 
 import java.util.List;
+import java.util.function.BiConsumer;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import accord.local.Node;
 import accord.messages.Apply;
 import accord.messages.PreAccept.PreAcceptOk;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
-import accord.primitives.FullRangeRoute;
 import accord.primitives.FullRoute;
-import accord.primitives.Ranges;
+import accord.primitives.Seekables;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.Txn.Kind;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
+import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
-import accord.utils.Invariants;
 
 import static accord.coordinate.Propose.Invalidate.proposeAndCommitInvalidate;
 import static accord.primitives.Timestamp.mergeMax;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.utils.Functions.foldl;
+import static accord.utils.Invariants.checkArgument;
 
 /**
  * Perform initial rounds of PreAccept and Accept until we have reached agreement about when we should execute.
@@ -48,43 +52,78 @@ import static accord.utils.Functions.foldl;
  *
  * TODO (desired, testing): dedicated burn test to validate outcomes
  */
-public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
+public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePreAccept<SyncPoint<S>>
 {
-    final Ranges ranges;
-    private CoordinateSyncPoint(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Ranges ranges)
+    @SuppressWarnings("unused")
+    private static final Logger logger = LoggerFactory.getLogger(CoordinateSyncPoint.class);
+
+    final S keysOrRanges;
+    // Whether to wait on the dependencies applying globally before returning a result
+    final boolean async;
+
+    private CoordinateSyncPoint(Node node, TxnId txnId, Txn txn, FullRoute<?> route, S keysOrRanges, boolean async)
     {
         super(node, txnId, txn, route, node.topology().withOpenEpochs(route, txnId, txnId));
-        this.ranges = ranges;
+        checkArgument(txnId.rw() == Kind.SyncPoint || async, "Exclusive sync points only support async application");
+        this.keysOrRanges = keysOrRanges;
+        this.async = async;
     }
 
-    public static AsyncResult<SyncPoint> exclusive(Node node, Ranges keysOrRanges)
+    public static <S extends Seekables<?, ?>> AsyncResult<CoordinateSyncPoint<S>> exclusive(Node node, S keysOrRanges)
     {
-        return coordinate(node, ExclusiveSyncPoint, keysOrRanges);
+        return coordinate(node, ExclusiveSyncPoint, keysOrRanges, true);
     }
 
-    public static AsyncResult<SyncPoint> inclusive(Node node, Ranges keysOrRanges)
+    public static <S extends Seekables<?, ?>> CoordinateSyncPoint<S> exclusive(Node node, TxnId txnId, S keysOrRanges)
     {
-        return coordinate(node, Kind.SyncPoint, keysOrRanges);
+        return coordinate(node, txnId, keysOrRanges, true);
     }
 
-    private static AsyncResult<SyncPoint> coordinate(Node node, Kind kind, Ranges ranges)
+    public static <S extends Seekables<?, ?>> AsyncResult<CoordinateSyncPoint<S>> inclusive(Node node, S keysOrRanges, boolean async)
     {
-        TxnId txnId = node.nextTxnId(kind, ranges.domain());
-        return node.withEpoch(txnId.epoch(), () -> {
-            FullRangeRoute route = (FullRangeRoute) node.computeRoute(txnId, ranges);
-            CoordinateSyncPoint coordinate = new CoordinateSyncPoint(node, txnId, node.agent().emptyTxn(kind, ranges), route, ranges);
-            coordinate.start();
-            return coordinate;
-        }).beginAsResult();
+        return coordinate(node, Kind.SyncPoint, keysOrRanges, async);
     }
 
-    public static AsyncResult<SyncPoint> coordinate(Node node, TxnId txnId, Ranges ranges)
+    private static <S extends Seekables<?, ?>> AsyncResult<CoordinateSyncPoint<S>> coordinate(Node node, Kind kind, S keysOrRanges, boolean async)
     {
-        Invariants.checkState(txnId.rw() == Kind.SyncPoint || txnId.rw() == ExclusiveSyncPoint);
-        FullRangeRoute route = (FullRangeRoute) node.computeRoute(txnId, ranges);
-        CoordinateSyncPoint coordinate = new CoordinateSyncPoint(node, txnId, node.agent().emptyTxn(txnId.rw(), ranges), route, ranges);
+        checkArgument(kind == Kind.SyncPoint || kind == ExclusiveSyncPoint);
+        node.nextTxnId(Kind.SyncPoint, keysOrRanges.domain());
+        TxnId txnId = node.nextTxnId(kind, keysOrRanges.domain());
+        return node.withEpoch(txnId.epoch(), () ->
+                AsyncChains.success(coordinate(node, txnId, keysOrRanges, async))
+        ).beginAsResult();
+    }
+
+    private static <S extends Seekables<?, ?>> CoordinateSyncPoint<S> coordinate(Node node, TxnId txnId, S keysOrRanges, boolean async)
+    {
+        checkArgument(txnId.rw() == Kind.SyncPoint || txnId.rw() == ExclusiveSyncPoint);
+        FullRoute route = node.computeRoute(txnId, keysOrRanges);
+        CoordinateSyncPoint<S> coordinate = new CoordinateSyncPoint(node, txnId, node.agent().emptyTxn(txnId.rw(), keysOrRanges), route, keysOrRanges, async);
         coordinate.start();
         return coordinate;
+    }
+
+    static <S extends Seekables<?, ?>> void blockOnDeps(Node node, Txn txn, TxnId txnId, FullRoute<?> route, S keysOrRanges, Deps deps, BiConsumer<SyncPoint<S>, Throwable> callback, boolean async)
+    {
+        // If deps are empty there is nothing to wait on application for so we can return immediately
+        boolean processAsyncCompletion = deps.isEmpty() || async;
+        BlockOnDeps.blockOnDeps(node, txnId, txn, route, deps, (result, throwable) -> {
+            // Don't want to process completion twice
+            if (processAsyncCompletion)
+            {
+                // Don't lose the error
+                if (throwable != null)
+                    node.agent().onUncaughtException(throwable);
+                return;
+            }
+            if (throwable != null)
+                callback.accept(null, throwable);
+            else
+                callback.accept(new SyncPoint<S>(txnId, deps, keysOrRanges, route, false), null);
+        });
+        // Notify immediately and the caller can add a listener to command completion to track local application
+        if (processAsyncCompletion)
+            callback.accept(new SyncPoint<S>(txnId, deps, keysOrRanges, route, true), null);
     }
 
     @Override
@@ -112,16 +151,10 @@ public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
             executeAt = txnId;
             // we don't need to fetch deps from Accept replies, so we don't need to contact unsynced epochs
             topologies = node.topology().forEpoch(route, txnId.epoch());
-            new Propose<SyncPoint>(node, topologies, Ballot.ZERO, txnId, txn, route, executeAt, deps, this)
-            {
-                @Override
-                void onAccepted()
-                {
-                    Apply.sendMaximal(node, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null));
-                    node.configService().reportEpochClosed(ranges, txnId.epoch());
-                    accept(new SyncPoint(txnId, deps, ranges, (FullRangeRoute) route), null);
-                }
-            }.start();
+            if (tracker.hasFastPathAccepted() && txnId.rw() == Kind.SyncPoint)
+                blockOnDeps(node, txn, txnId, route, keysOrRanges, deps, this, async);
+            else
+                ProposeSyncPoint.proposeSyncPoint(node, topologies, Ballot.ZERO, txnId, txn, route, deps, executeAt, this, async, tracker.nodes(), keysOrRanges);
         }
     }
 
@@ -129,7 +162,7 @@ public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
     {
         TxnId txnId = syncPoint.syncId;
         Timestamp executeAt = txnId;
-        Txn txn = node.agent().emptyTxn(txnId.rw(), syncPoint.ranges);
+        Txn txn = node.agent().emptyTxn(txnId.rw(), syncPoint.keysOrRanges);
         Deps deps = syncPoint.waitFor;
         Apply.sendMaximal(node, to, txnId, syncPoint.route(), txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null));
     }

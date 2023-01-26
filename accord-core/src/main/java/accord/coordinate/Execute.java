@@ -36,6 +36,7 @@ import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
+import accord.primitives.Txn.Kind;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.topology.Topology;
@@ -43,6 +44,7 @@ import accord.topology.Topology;
 import static accord.coordinate.ReadCoordinator.Action.Approve;
 import static accord.coordinate.ReadCoordinator.Action.ApprovePartial;
 import static accord.messages.Commit.Kind.Maximal;
+import static accord.utils.Invariants.checkArgument;
 
 class Execute extends ReadCoordinator<ReadReply>
 {
@@ -69,7 +71,14 @@ class Execute extends ReadCoordinator<ReadReply>
 
     public static void execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
     {
-        if (txn.read().keys().isEmpty())
+        // Recovery calls execute and we would like execute to run BlockOnDeps because that will notify the agent
+        // of the local barrier
+        if (txn.kind() == Kind.SyncPoint)
+        {
+            checkArgument(txnId.equals(executeAt));
+            BlockOnDeps.blockOnDeps(node, txnId, txn, route, deps, callback);
+        }
+        else if (txn.read().keys().isEmpty())
         {
             Result result = txn.result(txnId, executeAt, null);
             Persist.persist(node, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, null), result);
@@ -105,7 +114,7 @@ class Execute extends ReadCoordinator<ReadReply>
     {
         if (reply.isOk())
         {
-            ReadOk ok = (ReadOk) reply;
+            ReadOk ok = ((ReadOk) reply);
             Data next = ok.data;
             if (next != null)
                 data = data == null ? next : data.merge(next);

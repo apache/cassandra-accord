@@ -363,7 +363,7 @@ public abstract class Command implements CommonAttributes
     @Override
     public abstract Status.Durability durability();
     @Override
-    public abstract Listeners.Immutable durableListeners();
+    public abstract Listeners.Immutable<DurableAndIdempotentListener> durableListeners();
     public abstract SaveStatus saveStatus();
 
     static boolean isSameClass(Command command, Class<? extends Command> klass)

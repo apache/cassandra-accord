@@ -18,10 +18,9 @@
 
 package accord.impl;
 
-import java.util.Collection;
-import java.util.Collections;
-
 import accord.local.Command;
+import accord.local.Command.TransientListener;
+import accord.local.Listeners;
 import accord.local.SafeCommand;
 import accord.local.SaveStatus;
 import accord.primitives.TxnId;
@@ -70,9 +69,9 @@ public class ErasedSafeCommand extends SafeCommand
     }
 
     @Override
-    public Collection<Command.TransientListener> transientListeners()
+    public Listeners<TransientListener> transientListeners()
     {
-        return Collections.emptyList();
+        return Listeners.EMPTY;
     }
 
     @Override

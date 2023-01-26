@@ -18,17 +18,33 @@
 
 package accord.impl;
 
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import javax.annotation.Nonnull;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import accord.api.Agent;
+import accord.api.Result;
 import accord.impl.mock.MockStore;
 import accord.local.Command;
 import accord.local.Node;
-import accord.api.Agent;
-import accord.api.Result;
-import accord.primitives.*;
-
-import java.util.concurrent.TimeUnit;
+import accord.primitives.Keys;
+import accord.primitives.Ranges;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
 
 public class TestAgent implements Agent
 {
+    private static final Logger logger = LoggerFactory.getLogger(TestAgent.class);
+
+    public static final ConcurrentMap<Timestamp, AtomicInteger> completedLocalBarriers = new ConcurrentHashMap<>();
+
     public static class RethrowAgent extends TestAgent
     {
         @Override
@@ -82,6 +98,7 @@ public class TestAgent implements Agent
     @Override
     public void onUncaughtException(Throwable t)
     {
+        logger.error("Uncaught exception", t);
     }
 
     @Override
@@ -99,5 +116,10 @@ public class TestAgent implements Agent
     public Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
     {
         return new Txn.InMemory(kind, keysOrRanges, MockStore.read(Keys.EMPTY), MockStore.QUERY, null);
+    }
+
+    @Override
+    public void onLocalBarrier(@Nonnull Seekables<?, ?> keysOrRanges, @Nonnull Timestamp executeAt) {
+        completedLocalBarriers.computeIfAbsent(executeAt, ignored -> new AtomicInteger()).incrementAndGet();
     }
 }

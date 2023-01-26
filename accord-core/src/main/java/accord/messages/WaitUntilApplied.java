@@ -238,6 +238,12 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
     }
 
     @Override
+    public ReadType kind()
+    {
+        return ReadType.waitUntilApplied;
+    }
+
+    @Override
     protected void cancel()
     {
         node.commandStores().mapReduceConsume(this, waitingOn.stream(), forEach(in -> removeListener(in, txnId), node.agent()));
@@ -246,7 +252,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
     @Override
     public MessageType type()
     {
-        return MessageType.WAIT_ON_APPLY_REQ;
+        return MessageType.WAIT_UNTIL_APPLIED_REQ;
     }
 
     @Override

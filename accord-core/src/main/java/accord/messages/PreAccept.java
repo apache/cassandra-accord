@@ -22,6 +22,9 @@ import java.util.List;
 import java.util.Objects;
 import javax.annotation.Nullable;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import accord.local.Command;
 import accord.local.Commands;
 import accord.local.Node.Id;
@@ -49,6 +52,9 @@ import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 
 public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements EpochSupplier
 {
+    @SuppressWarnings("unused")
+    private static final Logger logger = LoggerFactory.getLogger(PreAccept.class);
+
     public static class SerializerSupport
     {
         public static PreAccept create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, long maxEpoch, PartialTxn partialTxn, @Nullable FullRoute<?> fullRoute)
@@ -257,7 +263,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
         //       This is necessary for reporting to a bootstrapping replica which TxnId it must not prune from dependencies
         //       i.e. the source replica reports to the target replica those TxnId that STARTED_BEFORE and EXECUTES_AFTER.
         commandStore.mapReduce(keys, ranges, testKind, STARTED_BEFORE, executeAt, ANY_DEPS, null, null, null,
-                (keyOrRange, testTxnId, testExecuteAt, in) -> {
+                (keyOrRange, testTxnId, testExecuteAt, saveStatus, in) -> {
                     // TODO (easy, efficiency): either pass txnId as parameter or encode this behaviour in a specialised builder to avoid extra allocations
                     if (!testTxnId.equals(txnId))
                         in.add(keyOrRange, testTxnId);

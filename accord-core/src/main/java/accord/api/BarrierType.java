@@ -16,31 +16,25 @@
  * limitations under the License.
  */
 
-package accord.primitives;
+package accord.api;
 
-import accord.api.RoutingKey;
-import accord.primitives.Routable.Domain;
-
-import static accord.primitives.Routables.Slice.Overlapping;
-
-/**
- * Either a Route or a collection of Routable
- */
-public interface Seekables<K extends Seekable, U extends Seekables<K, ?>> extends Routables<K>
+public enum BarrierType
 {
-    @Override
-    default U slice(Ranges ranges) { return slice(ranges, Overlapping); }
+    // Only wait until the barrier is achieved locally, and possibly don't trigger the barrier remotely.
+    // Local barriers are only on the `minEpoch` provided and have utility limited to establishing
+    // no more transactions will occur in an earlier before minEpoch
+    local(false, true),
+    // Wait until the barrier has been achieved at a quorum globally
+    global_sync(true, false),
+    // Trigger the global barrier, but only block on creation of the barrier and local application
+    global_async(true, true);
 
-    @Override
-    U slice(Ranges ranges, Slice slice);
-    Seekables<K, U> with(U with);
+    public final boolean global;
+    public final boolean async;
 
-    Participants<?> toParticipants();
-
-    FullRoute<?> toRoute(RoutingKey homeKey);
-    
-    static Seekables<?, ?> of(Seekable seekable)
+    BarrierType(boolean global, boolean async)
     {
-        return seekable.domain() == Domain.Range ? Ranges.of(seekable.asRange()) : Keys.of(seekable.asKey());
+        this.global = global;
+        this.async = async;
     }
 }

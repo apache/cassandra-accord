@@ -104,6 +104,29 @@ public class DeterministicSet<T> extends AbstractSet<T>
         };
     }
 
+    public Iterator<T> reverseIterator()
+    {
+        return new Iterator<T>()
+        {
+            Entry<T> previous = head.prev;
+            @Override
+            public boolean hasNext()
+            {
+                return previous != head;
+            }
+
+            @Override
+            public T next()
+            {
+                if (!hasNext())
+                    throw new NoSuchElementException();
+                T result = previous.item;
+                previous = previous.prev;
+                return result;
+            }
+        };
+    }
+
     @Override
     public boolean equals(Object o)
     {

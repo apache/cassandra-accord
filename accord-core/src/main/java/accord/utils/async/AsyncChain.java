@@ -19,6 +19,7 @@
 package accord.utils.async;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -83,14 +84,14 @@ public interface AsyncChain<V>
         return addCallback(AsyncCallbacks.toCallback(runnable));
     }
 
-    default AsyncChain<V> addCallback(BiConsumer<? super V, Throwable> callback, Executor executor)
+    default AsyncChain<V> addCallback(BiConsumer<? super V, Throwable> callback, ExecutorService es)
     {
-        return addCallback(AsyncCallbacks.inExecutor(callback, executor));
+        return addCallback(AsyncCallbacks.inExecutorService(callback, es));
     }
 
-    default AsyncChain<V> addCallback(Runnable runnable, Executor executor)
+    default AsyncChain<V> addCallback(Runnable runnable, ExecutorService es)
     {
-        return addCallback(AsyncCallbacks.inExecutor(runnable, executor));
+        return addCallback(AsyncCallbacks.inExecutorService(runnable, es));
     }
 
     /**
