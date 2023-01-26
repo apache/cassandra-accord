@@ -20,12 +20,11 @@ package accord.local;
 
 import accord.api.Agent;
 import accord.api.DataStore;
-import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.primitives.*;
 import org.apache.cassandra.utils.concurrent.Future;
 
-import java.util.function.BinaryOperator;
+import javax.annotation.Nullable;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -48,18 +47,39 @@ public interface SafeCommandStore
     Command ifLoaded(TxnId txnId);
     Command command(TxnId txnId);
 
-    CommandsForKey commandsForKey(Key key);
-    CommandsForKey maybeCommandsForKey(Key key);
-
     /**
      * Register a listener against the given TxnId, then load the associated transaction and invoke the listener
      * with its current state.
      */
     void addAndInvokeListener(TxnId txnId, CommandListener listener);
 
-    <T> T mapReduce(Routables<?, ?> keys, Ranges slice, Function<CommandsForKey, T> map, BinaryOperator<T> reduce, T initialValue);
-    void forEach(Routables<?, ?> keys, Ranges slice, Consumer<CommandsForKey> forEach);
-    void forEach(Routable keyOrRange, Ranges slice, Consumer<CommandsForKey> forEach);
+    interface CommandFunction<I, O>
+    {
+        O apply(Seekable keyOrRange, TxnId txnId, Timestamp executeAt, I in);
+    }
+
+    enum TestTimestamp
+    {
+        STARTED_BEFORE,
+        STARTED_AFTER,
+        MAY_EXECUTE_BEFORE, // started before and uncommitted, or committed and executes before
+        EXECUTES_AFTER
+    }
+    enum TestDep { WITH, WITHOUT, ANY_DEPS }
+    enum TestKind { Ws, RorWs }
+
+    /**
+     * Visits keys first and then ranges, both in ascending order.
+     * Within each key or range visits TxnId in ascending order of queried timestamp.
+     */
+    <T> T mapReduce(Seekables<?, ?> keys, Ranges slice,
+                       TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp,
+                       TestDep testDep, @Nullable TxnId depId,
+                       @Nullable Status minStatus, @Nullable Status maxStatus,
+                       CommandFunction<T, T> map, T initialValue, T terminalValue);
+
+    void register(Seekables<?, ?> keysOrRanges, Ranges slice, Command command);
+    void register(Seekable keyOrRange, Ranges slice, Command command);
 
     CommandStore commandStore();
     DataStore dataStore();

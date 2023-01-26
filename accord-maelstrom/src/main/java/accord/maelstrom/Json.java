@@ -387,7 +387,7 @@ public class Json
             out.name("executeAt");
             GSON.toJson(value.executeAt, Timestamp.class, out);
             out.name("keys");
-            Keys keys = value.keys;
+            Keys keys = (Keys) value.keys;
             KEYS_ADAPTER.write(out, keys);
             out.name("writes");
             MaelstromWrite write = (MaelstromWrite) value.write;

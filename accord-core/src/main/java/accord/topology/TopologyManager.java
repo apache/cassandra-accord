@@ -413,7 +413,7 @@ public class TopologyManager implements ConfigurationService.Listener
         if (end < start) throw new IllegalArgumentException();
         Ranges ranges = localRangesForEpoch(start);
         for (long i = start + 1; i <= end ; ++i)
-            ranges = ranges.union(localRangesForEpoch(i));
+            ranges = ranges.with(localRangesForEpoch(i));
         return ranges;
     }
 

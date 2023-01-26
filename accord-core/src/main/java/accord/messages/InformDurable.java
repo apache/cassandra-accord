@@ -86,7 +86,13 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     @Override
     public void accept(Reply reply, Throwable failure)
     {
-        if (reply == null) throw new IllegalStateException();
+        // TODO: respond with failure
+        if (reply == null)
+        {
+            if (failure == null)
+                throw new IllegalStateException("Processed nothing on this node");
+            throw new IllegalStateException(failure);
+        }
         node.reply(replyTo, replyContext, reply);
     }
 

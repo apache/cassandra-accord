@@ -1,8 +1,10 @@
 package accord.primitives;
 
 import accord.api.RoutingKey;
+import accord.utils.Invariants;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 public interface RoutableKey extends Routable, Comparable<RoutableKey>
 {
@@ -36,7 +38,7 @@ public interface RoutableKey extends Routable, Comparable<RoutableKey>
         public RoutingKey toUnseekable() { throw new UnsupportedOperationException(); }
 
         @Override
-        public RoutingKey someIntersectingRoutingKey() { throw new UnsupportedOperationException(); }
+        public RoutingKey someIntersectingRoutingKey(@Nullable Ranges ranges) { throw new UnsupportedOperationException(); }
     }
 
     /**
@@ -53,5 +55,9 @@ public interface RoutableKey extends Routable, Comparable<RoutableKey>
     @Override
     RoutingKey toUnseekable();
 
-    @Override default RoutingKey someIntersectingRoutingKey() { return toUnseekable(); }
+    @Override default RoutingKey someIntersectingRoutingKey(@Nullable Ranges ranges)
+    {
+        Invariants.paranoid(ranges == null || ranges.contains(this));
+        return toUnseekable();
+    }
 }

@@ -20,5 +20,8 @@ package accord.utils;
 
 public interface IndexedBiFunction<P1, P2, O>
 {
+    /**
+     * Apply some function to two object parameters and an associated index (usually within a collection).
+     */
     O apply(P1 p1, P2 p2, int index);
 }

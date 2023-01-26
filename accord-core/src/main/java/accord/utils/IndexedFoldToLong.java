@@ -20,5 +20,12 @@ package accord.utils;
 
 public interface IndexedFoldToLong<P1>
 {
+    /**
+     * Apply some long->long merge function accepting a constant object parameter p1, a constant long parameter p2,
+     * and the prior output of this function or the initial value, to some element of a collection,
+     * with the index of the element provided.
+     *
+     * This function is used for efficiently folding over some subset of a collection.
+     */
     long apply(P1 p1, long p2, long accumulate, int index);
 }

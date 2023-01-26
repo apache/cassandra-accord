@@ -19,12 +19,15 @@
 package accord.coordinate;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BiConsumer;
 
 import accord.coordinate.tracking.InvalidationTracker;
 import accord.coordinate.tracking.InvalidationTracker.InvalidationShardTracker;
 import accord.coordinate.tracking.RequestStatus;
+import accord.local.Node.Id;
 import accord.local.Status;
 import accord.messages.Commit;
 import accord.primitives.*;
@@ -59,6 +62,7 @@ public class Invalidate implements Callback<InvalidateReply>
     private final List<InvalidateReply> replies = new ArrayList<>();
     private final InvalidationTracker tracker;
     private Throwable failure;
+    private final Map<Id, InvalidateReply> debug = Invariants.debug() ? new HashMap<>() : null;
 
     private Invalidate(Node node, Ballot ballot, TxnId txnId, Unseekables<?, ?> invalidateWith, boolean transitivelyInvokedByPriorInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
@@ -91,17 +95,18 @@ public class Invalidate implements Callback<InvalidateReply>
     }
 
     @Override
-    public synchronized void onSuccess(Node.Id from, InvalidateReply reply)
+    public synchronized void onSuccess(Id from, InvalidateReply reply)
     {
         if (isDone || isPrepareDone)
             return;
 
+        if (debug != null) debug.put(from, reply);
         replies.add(reply);
         handle(tracker.recordSuccess(from, reply.isPromised(), reply.acceptedFastPath));
     }
 
     @Override
-    public void onFailure(Node.Id from, Throwable failure)
+    public void onFailure(Id from, Throwable failure)
     {
         if (isDone || isPrepareDone)
             return;
@@ -227,8 +232,9 @@ public class Invalidate implements Callback<InvalidateReply>
 
         // if we have witnessed the transaction, but are able to invalidate, do we want to proceed?
         // Probably simplest to do so, but perhaps better for user if we don't.
-        // TODO (now, rangetxns): This should be a Routable, or we should guarantee it is safe to operate on any key in the range
-        RoutingKey invalidateWithKey = invalidateWith.slice(Ranges.of(tracker.promisedShard().range)).get(0).someIntersectingRoutingKey();
+        Ranges ranges = Ranges.of(tracker.promisedShard().range);
+        // we look up by TxnId at the target node, so it's fine to pick a RoutingKey even if it's a range transaction
+        RoutingKey invalidateWithKey = invalidateWith.slice(ranges).get(0).someIntersectingRoutingKey(ranges);
         proposeInvalidate(node, ballot, txnId, invalidateWithKey, (success, fail) -> {
             /*
               We're now inside our *exactly once* callback we registered with proposeInvalidate, and we need to
@@ -271,7 +277,7 @@ public class Invalidate implements Callback<InvalidateReply>
     }
 
     @Override
-    public void onCallbackFailure(Node.Id from, Throwable failure)
+    public void onCallbackFailure(Id from, Throwable failure)
     {
         if (isDone)
             return;

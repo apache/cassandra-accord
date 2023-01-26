@@ -31,5 +31,8 @@ public interface Key extends Seekable, RoutableKey
     default Key asKey() { return this; }
 
     @Override
+    default Key slice(Range range) { return this; }
+
+    @Override
     default Range asRange() { throw new UnsupportedOperationException(); }
 }

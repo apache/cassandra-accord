@@ -16,11 +16,13 @@
  * limitations under the License.
  */
 
-package accord.local;
-
-import java.util.stream.Stream;
+package accord.impl;
 
 import accord.api.Key;
+import accord.local.*;
+import accord.local.SafeCommandStore.CommandFunction;
+import accord.local.SafeCommandStore.TestDep;
+import accord.local.SafeCommandStore.TestKind;
 import accord.primitives.Keys;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -33,64 +35,32 @@ public abstract class CommandsForKey implements CommandListener
 {
     private static final Logger logger = LoggerFactory.getLogger(CommandsForKey.class);
 
-    public interface CommandTimeseries<T>
+    public interface CommandTimeseries
     {
         void add(Timestamp timestamp, Command command);
         void remove(Timestamp timestamp);
 
         boolean isEmpty();
 
-        /**
-         * Test whether or not the dependencies of a command contain a given transaction id.
-         * NOTE that this applies only to commands that have at least proposed dependencies;
-         * if no dependencies are known the command will not be tested.
-         */
-        enum TestDep { WITH, WITHOUT, ANY_DEPS }
-        enum TestStatus
-        {
-            IS, HAS_BEEN, ANY_STATUS;
-            public static boolean test(Status test, TestStatus predicate, Status param)
-            {
-                return predicate == ANY_STATUS || (predicate == IS ? test == param : test.hasBeen(param));
-            }
-        }
-        enum TestKind { Ws, RorWs}
+        enum TestTimestamp { BEFORE, AFTER }
 
         /**
-         * All commands before (exclusive of) the given timestamp
+         * All commands before/after (exclusive of) the given timestamp
          *
          * Note that {@code testDep} applies only to commands that know at least proposed deps; if specified any
          * commands that do not know any deps will be ignored.
          *
          * TODO (expected, efficiency): TestDep should be asynchronous; data should not be kept memory-resident as only used for recovery
          */
-        Stream<T> before(Timestamp timestamp, TestKind testKind, TestDep testDep, @Nullable TxnId depId, TestStatus testStatus, @Nullable Status status);
-
-        /**
-         * All commands after (exclusive of) the given timestamp.
-         *
-         * Note that {@code testDep} applies only to commands that know at least proposed deps; if specified any
-         * commands that do not know any deps will be ignored.
-         */
-        Stream<T> after(Timestamp timestamp, TestKind testKind, TestDep testDep, @Nullable TxnId depId, TestStatus testStatus, @Nullable Status status);
-    }
-
-    public static class TxnIdWithExecuteAt
-    {
-        public final TxnId txnId;
-        public final Timestamp executeAt;
-
-        public TxnIdWithExecuteAt(TxnId txnId, Timestamp executeAt)
-        {
-            this.txnId = txnId;
-            this.executeAt = executeAt;
-        }
+        <T> T mapReduce(TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp,
+                        TestDep testDep, @Nullable TxnId depId,
+                        @Nullable Status minStatus, @Nullable Status maxStatus,
+                        CommandFunction<T, T> map, T initialValue, T terminalValue);
     }
 
     public abstract Key key();
-    public abstract CommandTimeseries<? extends TxnIdWithExecuteAt> uncommitted();
-    public abstract CommandTimeseries<TxnId> committedById();
-    public abstract CommandTimeseries<TxnId> committedByExecuteAt();
+    public abstract CommandTimeseries byId();
+    public abstract CommandTimeseries byExecuteAt();
 
     public abstract Timestamp max();
     protected abstract void updateMax(Timestamp timestamp);
@@ -120,10 +90,12 @@ public abstract class CommandsForKey implements CommandListener
             case PreApplied:
             case Committed:
             case ReadyToExecute:
-                committedById().add(command.txnId(), command);
-                committedByExecuteAt().add(command.executeAt(), command);
+                byExecuteAt().remove(command.txnId());
+                byExecuteAt().add(command.executeAt(), command);
+                break;
             case Invalidated:
-                uncommitted().remove(command.txnId());
+                byId().remove(command.txnId());
+                byExecuteAt().remove(command.txnId());
                 command.removeListener(this);
                 break;
         }
@@ -132,12 +104,13 @@ public abstract class CommandsForKey implements CommandListener
     public void register(Command command)
     {
         updateMax(command.executeAt());
-        uncommitted().add(command.txnId(), command);
+        byId().add(command.txnId(), command);
+        byExecuteAt().add(command.txnId(), command);
         command.addListener(this);
     }
 
     public boolean isEmpty()
     {
-        return uncommitted().isEmpty() && committedById().isEmpty();
+        return byId().isEmpty();
     }
 }

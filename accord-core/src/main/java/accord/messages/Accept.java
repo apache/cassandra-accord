@@ -27,7 +27,6 @@ import accord.api.RoutingKey;
 import accord.local.Command.AcceptOutcome;
 import accord.primitives.PartialDeps;
 import accord.primitives.FullRoute;
-import accord.primitives.Txn;
 import accord.primitives.Ballot;
 import accord.local.Command;
 
@@ -39,7 +38,6 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import static accord.local.Command.AcceptOutcome.*;
-import static accord.messages.PreAccept.calculatePartialDeps;
 
 // TODO (low priority, efficiency): use different objects for send and receive, so can be more efficient
 //                                  (e.g. serialize without slicing, and without unnecessary fields)
@@ -47,9 +45,9 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
 {
     public static class SerializerSupport
     {
-        public static Accept create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, PartialDeps partialDeps, Txn.Kind kind)
+        public static Accept create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, PartialDeps partialDeps)
         {
-            return new Accept(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey, ballot, executeAt, keys, partialDeps, kind);
+            return new Accept(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey, ballot, executeAt, keys, partialDeps);
         }
     }
 
@@ -57,33 +55,40 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     public final Timestamp executeAt;
     public final Seekables<?, ?> keys;
     public final PartialDeps partialDeps;
-    public final Txn.Kind kind;
 
-    public Accept(Id to, Topologies topologies, Ballot ballot, TxnId txnId, FullRoute<?> route, Timestamp executeAt, Seekables<?, ?> keys, Deps deps, Txn.Kind kind)
+    public Accept(Id to, Topologies topologies, Ballot ballot, TxnId txnId, FullRoute<?> route, Timestamp executeAt, Seekables<?, ?> keys, Deps deps)
     {
         super(to, topologies, txnId, route);
         this.ballot = ballot;
         this.executeAt = executeAt;
         this.keys = keys.slice(scope.covering());
         this.partialDeps = deps.slice(scope.covering());
-        this.kind = kind;
     }
 
-    private Accept(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, PartialDeps partialDeps, Txn.Kind kind)
+    private Accept(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, PartialDeps partialDeps)
     {
         super(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey);
         this.ballot = ballot;
         this.executeAt = executeAt;
         this.keys = keys;
         this.partialDeps = partialDeps;
-        this.kind = kind;
     }
 
     @Override
     public synchronized AcceptReply apply(SafeCommandStore safeStore)
     {
+        if (minUnsyncedEpoch < txnId.epoch())
+        {
+            // if we include unsync'd epochs, check if we intersect the ranges for coordination or execution;
+            // if not, we're just providing dependencies, and we can do that without updating our state
+            Ranges acceptRanges = safeStore.ranges().between(txnId.epoch(), executeAt.epoch());
+            if (!acceptRanges.intersects(scope))
+                return new AcceptReply(calculatePartialDeps(safeStore));
+        }
+
+        // only accept if we actually participate in the ranges - otherwise we're just looking
         Command command = safeStore.command(txnId);
-        switch (command.accept(safeStore, ballot, kind, scope, keys, progressKey, executeAt, partialDeps))
+        switch (command.accept(safeStore, ballot, scope, keys, progressKey, executeAt, partialDeps))
         {
             default: throw new IllegalStateException();
             case Redundant:
@@ -92,8 +97,13 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
                 return new AcceptReply(command.promised());
             case Success:
                 // TODO (desirable, efficiency): we don't need to calculate deps if executeAt == txnId
-                return new AcceptReply(calculatePartialDeps(safeStore, txnId, keys, kind, executeAt, safeStore.ranges().between(minEpoch, executeAt.epoch())));
+                return new AcceptReply(calculatePartialDeps(safeStore));
         }
+    }
+
+    private PartialDeps calculatePartialDeps(SafeCommandStore safeStore)
+    {
+        return PreAccept.calculatePartialDeps(safeStore, txnId, keys, executeAt, safeStore.ranges().between(minUnsyncedEpoch, executeAt.epoch()));
     }
 
     @Override
@@ -117,7 +127,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     @Override
     public void process()
     {
-        node.mapReduceConsumeLocal(this, minEpoch, executeAt.epoch(), this);
+        node.mapReduceConsumeLocal(this, minUnsyncedEpoch, executeAt.epoch(), this);
     }
 
     @Override

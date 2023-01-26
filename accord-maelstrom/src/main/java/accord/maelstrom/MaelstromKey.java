@@ -55,9 +55,9 @@ public class MaelstromKey implements RoutableKey
             Invariants.checkState(end - start <= Integer.MAX_VALUE);
             long startHash = hash(range.start());
             Invariants.checkArgument(startHash + end <= hash(range.end()));
-            return range.subRange(
-                    new Routing(Datum.Kind.HASH, new Datum.Hash((int) (startHash + start))),
-                    new Routing(Datum.Kind.HASH, new Datum.Hash((int) (startHash + end)))
+            return range.newRange(
+                    new Routing((int) (startHash + start)),
+                    new Routing((int) (startHash + end))
             );
         }
 
@@ -119,14 +119,22 @@ public class MaelstromKey implements RoutableKey
 
     public static class Routing extends MaelstromKey implements accord.api.RoutingKey
     {
-        public Routing(Datum.Kind kind, Object value)
+        public Routing(Datum.Kind kind, Object hash)
         {
-            super(kind, value);
+            super(kind, hash);
+            Invariants.checkArgument(kind == Datum.Kind.HASH);
         }
 
-        public Routing(Double value)
+        public Routing(int hash)
         {
-            super(value);
+            super(new Datum(new Datum.Hash(hash)));
+        }
+
+        @Override
+        public accord.primitives.Range asRange()
+        {
+            return new Range(new Routing(datum.hashCode() - 1),
+                             new Routing(datum.hashCode()));
         }
     }
 
@@ -138,7 +146,7 @@ public class MaelstromKey implements RoutableKey
         }
 
         @Override
-        public accord.primitives.Range subRange(RoutingKey start, RoutingKey end)
+        public accord.primitives.Range newRange(RoutingKey start, RoutingKey end)
         {
             return new Range(start, end);
         }
@@ -154,6 +162,11 @@ public class MaelstromKey implements RoutableKey
     public MaelstromKey(Double value)
     {
         datum = new Datum(value);
+    }
+
+    MaelstromKey(Datum value)
+    {
+        datum = value;
     }
 
     @Override
@@ -207,7 +220,7 @@ public class MaelstromKey implements RoutableKey
     {
         if (this instanceof Routing)
             return (Routing)this;
-        return new Routing(datum.kind, datum.value);
+        return new Routing(datum.value.hashCode());
     }
 
     @Override

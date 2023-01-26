@@ -2,6 +2,8 @@ package accord.primitives;
 
 import accord.api.RoutingKey;
 
+import javax.annotation.Nullable;
+
 /**
  * Something that can be found in the cluster, and MAYBE found on disk (if Seekable)
  */
@@ -30,5 +32,9 @@ public interface Routable
 
     Domain domain();
     Unseekable toUnseekable();
-    RoutingKey someIntersectingRoutingKey();
+
+    /**
+     * Deterministically select a key that intersects this Routable and the provided Ranges
+     */
+    RoutingKey someIntersectingRoutingKey(@Nullable Ranges ranges);
 }

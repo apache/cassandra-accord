@@ -32,6 +32,8 @@ import org.apache.cassandra.utils.concurrent.Future;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import static accord.primitives.Routables.Slice.Overlapping;
+
 public interface Txn
 {
     enum Kind
@@ -74,7 +76,7 @@ public interface Txn
             this.update = null;
         }
 
-        public InMemory(@Nonnull Keys keys, @Nonnull Read read, @Nonnull Query query, @Nullable Update update)
+        public InMemory(@Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nonnull Query query, @Nullable Update update)
         {
             this.kind = Kind.Write;
             this.keys = keys;
@@ -187,7 +189,7 @@ public interface Txn
     default Future<Data> read(SafeCommandStore safeStore, Command command)
     {
         Ranges ranges = safeStore.ranges().at(command.executeAt().epoch());
-        List<Future<Data>> futures = read().keys().foldl(ranges, (key, accumulate, index) -> {
+        List<Future<Data>> futures = Routables.foldlMinimal(keys(), ranges, (key, accumulate, index) -> {
             Future<Data> result = read().read(key, kind(), safeStore, command.executeAt(), safeStore.dataStore());
             accumulate.add(result);
             return accumulate;

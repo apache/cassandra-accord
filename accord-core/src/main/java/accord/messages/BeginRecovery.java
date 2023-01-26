@@ -19,14 +19,12 @@
 package accord.messages;
 
 import accord.api.Result;
-import accord.local.CommandsForKey.TxnIdWithExecuteAt;
 import accord.local.SafeCommandStore;
 import accord.local.Status.Phase;
 import accord.primitives.*;
 import accord.topology.Topologies;
 
 import java.util.List;
-import java.util.stream.Stream;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -39,10 +37,10 @@ import accord.local.Status;
 
 import java.util.Collections;
 
-import static accord.local.CommandsForKey.CommandTimeseries.TestDep.WITH;
-import static accord.local.CommandsForKey.CommandTimeseries.TestDep.WITHOUT;
-import static accord.local.CommandsForKey.CommandTimeseries.TestKind.RorWs;
-import static accord.local.CommandsForKey.CommandTimeseries.TestStatus.*;
+import static accord.local.SafeCommandStore.TestDep.WITH;
+import static accord.local.SafeCommandStore.TestDep.WITHOUT;
+import static accord.local.SafeCommandStore.TestKind.RorWs;
+import static accord.local.SafeCommandStore.TestTimestamp.*;
 import static accord.local.Status.*;
 import static accord.messages.PreAccept.calculatePartialDeps;
 
@@ -103,9 +101,9 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         }
 
         PartialDeps deps = command.partialDeps();
-        if (!command.known().deps.isProposalKnown())
+        if (!command.known().deps.hasProposedOrDecidedDeps())
         {
-            deps = calculatePartialDeps(safeStore, txnId, partialTxn.keys(), partialTxn.kind(), txnId, safeStore.ranges().at(txnId.epoch()));
+            deps = calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().at(txnId.epoch()));
         }
 
         boolean rejectsFastPath;
@@ -119,9 +117,9 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         else
         {
             Ranges ranges = safeStore.ranges().at(txnId.epoch());
-            rejectsFastPath = acceptedStartedAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys()).anyMatch(ignore -> true);
+            rejectsFastPath = hasAcceptedStartedAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
             if (!rejectsFastPath)
-                rejectsFastPath = committedExecutesAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys()).anyMatch(ignore -> true);
+                rejectsFastPath = hasCommittedExecutesAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
 
             // TODO (expected, testing): introduce some good unit tests for verifying these two functions in a real repair scenario
             // committed txns with an earlier txnid and have our txnid as a dependency
@@ -145,7 +143,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         RecoverOk ok2 = (RecoverOk) r2;
 
         // set ok1 to the most recent of the two
-        if (ok1.status.compareTo(ok2.status) < 0 || (ok1.status == ok2.status && ok1.accepted.compareTo(ok2.accepted) < 0))
+        if (ok1 != Status.max(ok1, ok1.status, ok1.accepted, ok2, ok2.status, ok2.accepted))
         {
             RecoverOk tmp = ok1;
             ok1 = ok2;
@@ -160,7 +158,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         Timestamp timestamp = ok1.status == PreAccepted ? Timestamp.max(ok1.executeAt, ok2.executeAt) : ok1.executeAt;
 
         return new RecoverOk(
-                txnId, ok1.status, Ballot.max(ok1.accepted, ok2.accepted), timestamp, deps,
+                txnId, ok1.status, ok1.accepted, timestamp, deps,
                 earlierCommittedWitness, earlierAcceptedNoWitness,
                 ok1.rejectsFastPath | ok2.rejectsFastPath,
                 ok1.writes, ok1.result);
@@ -295,64 +293,44 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         }
     }
 
-    private static Deps acceptedStartedBeforeWithoutWitnessing(SafeCommandStore commandStore, TxnId txnId, Ranges ranges, Seekables<?, ?> keys)
+    private static Deps acceptedStartedBeforeWithoutWitnessing(SafeCommandStore commandStore, TxnId startedBefore, Ranges ranges, Seekables<?, ?> keys)
     {
         try (Deps.Builder builder = Deps.builder())
         {
-            commandStore.forEach(keys, ranges, forKey -> {
-                // accepted txns with an earlier txnid that do not have our txnid as a dependency
-                /*
-                 * The idea here is to discover those transactions that have been Accepted without witnessing us
-                 * and whom may not have adopted us as dependencies as responses to the Accept. Once we have
-                 * reached a quorum for recovery any re-proposals will discover us. So we do not need to look
-                 * at AcceptedInvalidate, as these will either be invalidated OR will witness us when they propose
-                 * to Accept.
-                 *
-                 * Note that we treat PreCommitted as whatever status it held previously.
-                 * Which is to say, we expect the previously proposed dependencies (if any) to be used to evaluate this
-                 * condition.
-                 */
-                forKey.uncommitted().before(txnId, RorWs, WITHOUT, txnId, HAS_BEEN, Accepted).forEach((command) -> {
-                    if (command.executeAt.compareTo(txnId) > 0)
-                        builder.add(forKey.key(), command.txnId);
-                });
-            });
+            commandStore.mapReduce(keys, ranges, RorWs, STARTED_BEFORE, startedBefore, WITHOUT, startedBefore, Accepted, PreCommitted,
+                    (keyOrRange, txnId, executeAt, prev) -> {
+                        if (executeAt.compareTo(startedBefore) > 0)
+                            builder.add(keyOrRange, txnId);
+                        return builder;
+                    }, builder, null);
             return builder.build();
         }
     }
 
-    private static Deps committedStartedBeforeAndWitnessed(SafeCommandStore commandStore, TxnId txnId, Ranges ranges, Seekables<?, ?> keys)
+    private static Deps committedStartedBeforeAndWitnessed(SafeCommandStore commandStore, TxnId startedBefore, Ranges ranges, Seekables<?, ?> keys)
     {
         try (Deps.Builder builder = Deps.builder())
         {
-            commandStore.forEach(keys, ranges, forKey -> {
-                /*
-                 * The idea here is to discover those transactions that have been Committed and DID witness us
-                 * so that we can remove these from the set of acceptedStartedBeforeAndDidNotWitness
-                 * on other nodes, to minimise the number of transactions we try to wait for on recovery
-                 */
-                forKey.committedById().before(txnId, RorWs, WITH, txnId, HAS_BEEN, Committed)
-                        .forEach(id -> builder.add(forKey.key(), id));
-            });
+            commandStore.mapReduce(keys, ranges, RorWs, STARTED_BEFORE, startedBefore, WITH, startedBefore, Committed, null,
+                    (keyOrRange, txnId, executeAt, prev) -> builder.add(keyOrRange, txnId), (Deps.AbstractBuilder<Deps>)builder, null);
             return builder.build();
         }
     }
 
-    private static Stream<? extends TxnIdWithExecuteAt> acceptedStartedAfterWithoutWitnessing(SafeCommandStore commandStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
+    private static boolean hasAcceptedStartedAfterWithoutWitnessing(SafeCommandStore commandStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
     {
         /*
          * The idea here is to discover those transactions that were started after us and have been Accepted
          * and did not witness us as part of their pre-accept round, as this means that we CANNOT have taken
          * the fast path. This is central to safe recovery, as if every transaction that executes later has
          * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
-         * has not witnessed us we can safely invalidate it.
+         * has not witnessed us we can safely invalidate (us).
          */
-        return commandStore.mapReduce(keys, ranges, forKey ->
-            forKey.uncommitted().after(startedAfter, RorWs, WITHOUT, startedAfter, HAS_BEEN, Accepted)
-        , Stream::concat, Stream.empty());
+        return commandStore.mapReduce(keys, ranges, RorWs, STARTED_AFTER, startedAfter, WITHOUT, startedAfter, Accepted, PreCommitted,
+                (keyOrRange, txnId, executeAt, prev) -> true, false, true);
     }
 
-    private static Stream<TxnId> committedExecutesAfterWithoutWitnessing(SafeCommandStore commandStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
+    private static boolean hasCommittedExecutesAfterWithoutWitnessing(SafeCommandStore commandStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
     {
         /*
          * The idea here is to discover those transactions that have been decided to execute after us
@@ -361,7 +339,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
          * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
          * has not witnessed us we can safely invalidate it.
          */
-        return commandStore.mapReduce(keys, ranges, forKey -> forKey.committedByExecuteAt().after(startedAfter, RorWs, WITHOUT, startedAfter, HAS_BEEN, Committed),
-                Stream::concat, Stream.empty());
+        return commandStore.mapReduce(keys, ranges, RorWs, EXECUTES_AFTER, startedAfter, WITHOUT, startedAfter, Committed, null,
+                (keyOrRange, txnId, executeAt, prev) -> true,false, true);
     }
 }

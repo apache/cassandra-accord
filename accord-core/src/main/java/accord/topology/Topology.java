@@ -268,7 +268,11 @@ public class Topology
 
                     bi = (int)(abi >>> 32);
                     if (predicate.test(param, bi))
+                    {
+                        if (count == newSubset.length)
+                            newSubset = cachedInts.resize(newSubset, count, count * 2);
                         newSubset[count++] = bi;
+                    }
 
                     ailim = as.findNext(ai + 1, bs.get(bi), FLOOR);
                     if (ailim < 0) ailim = -1 - ailim;

@@ -1,7 +1,6 @@
 package accord.primitives;
 
 import accord.api.RoutingKey;
-import accord.utils.Invariants;
 
 public class FullRangeRoute extends RangeRoute implements FullRoute<Range>
 {
@@ -28,26 +27,6 @@ public class FullRangeRoute extends RangeRoute implements FullRoute<Range>
     public boolean covers(Ranges ranges)
     {
         return true;
-    }
-
-    @Override
-    public boolean intersects(AbstractRanges<?> ranges)
-    {
-        return true;
-    }
-
-    @Override
-    public FullRangeRoute with(RoutingKey withKey)
-    {
-        Invariants.checkArgument(contains(withKey));
-        // TODO (now): remove this in favour of parent implementation - ambiguous at present
-        return this;
-    }
-
-    @Override
-    public PartialRangeRoute slice(Ranges ranges)
-    {
-        return slice(ranges, this, homeKey, PartialRangeRoute::new);
     }
 
     @Override

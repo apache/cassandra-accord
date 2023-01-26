@@ -333,7 +333,7 @@ public interface Topologies extends TopologySorter
         {
             Ranges ranges = Ranges.EMPTY;
             for (int i = 0, mi = size() ; i < mi ; i++)
-                ranges = ranges.union(get(i).rangesForNode(node));
+                ranges = ranges.with(get(i).rangesForNode(node));
             return ranges;
         }
 

@@ -45,14 +45,14 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
     @Override
     public void process()
     {
-        node.mapReduceConsumeLocal(this, minEpoch, executeAt.epoch(), this);
+        node.mapReduceConsumeLocal(this, minUnsyncedEpoch, executeAt.epoch(), this);
     }
 
     @Override
     public PartialDeps apply(SafeCommandStore instance)
     {
-        Ranges ranges = instance.ranges().between(minEpoch, executeAt.epoch());
-        return calculatePartialDeps(instance, txnId, keys, kind, executeAt, ranges);
+        Ranges ranges = instance.ranges().between(minUnsyncedEpoch, executeAt.epoch());
+        return calculatePartialDeps(instance, txnId, keys, executeAt, ranges);
     }
 
     @Override

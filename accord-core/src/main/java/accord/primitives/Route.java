@@ -9,14 +9,22 @@ public interface Route<K extends Unseekable> extends Unseekables<K, Route<K>>
     RoutingKey homeKey();
 
     default boolean isRoute() { return true; }
+
     boolean covers(Ranges ranges);
-    @Override
-    boolean intersects(AbstractRanges<?> ranges);
-    @Override
+
+    /**
+     * Return an object containing any {@code K} present in either of the original collections,
+     * and covering the union of the ranges.
+     *
+     * Differs from {@link Unseekables#with} in that the parameter must be a {@link Route}
+     * and the result will be a {@link Route}.
+     */
     Route<K> union(Route<K> route);
+
     @Override
     PartialRoute<K> slice(Ranges ranges);
     PartialRoute<K> sliceStrict(Ranges ranges);
+    Ranges sliceCovering(Ranges ranges, Slice slice);
 
     /**
      * @return a PureRoutables that includes every shard we know of, not just those we contact
@@ -36,7 +44,7 @@ public interface Route<K extends Unseekable> extends Unseekables<K, Route<K>>
         if (unseekables == null)
             return null;
 
-        switch (unseekables.kindOfContents())
+        switch (unseekables.domain())
         {
             default: throw new AssertionError();
             case Key: return (FullKeyRoute) unseekables;
@@ -49,7 +57,7 @@ public interface Route<K extends Unseekable> extends Unseekables<K, Route<K>>
         if (unseekables == null)
             return null;
 
-        switch (unseekables.kindOfContents())
+        switch (unseekables.domain())
         {
             default: throw new AssertionError();
             case Key: return (KeyRoute) unseekables;
@@ -86,7 +94,7 @@ public interface Route<K extends Unseekable> extends Unseekables<K, Route<K>>
         if (unseekables == null)
             return null;
 
-        switch (unseekables.kindOfContents())
+        switch (unseekables.domain())
         {
             default: throw new AssertionError();
             case Key: return (PartialKeyRoute) unseekables;

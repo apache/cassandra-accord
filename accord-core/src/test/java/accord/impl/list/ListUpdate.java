@@ -28,11 +28,12 @@ import accord.api.Data;
 import accord.api.Update;
 import accord.primitives.Ranges;
 import accord.primitives.Keys;
+import accord.primitives.Seekables;
 
 public class ListUpdate extends TreeMap<Key, Integer> implements Update
 {
     @Override
-    public Keys keys()
+    public Seekables<?, ?> keys()
     {
         return new Keys(navigableKeySet());
     }

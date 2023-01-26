@@ -25,6 +25,7 @@ import java.util.*;
 import java.util.stream.Stream;
 
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_OVERLAPPING;
+import static accord.primitives.Routables.Slice.Overlapping;
 import static accord.utils.Utils.toArray;
 
 public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, Seekables<Range, Ranges>, Unseekables<Range, Ranges>
@@ -80,11 +81,21 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
     @Override
     public Ranges slice(Ranges ranges)
     {
-        return slice(ranges, this, null, (i1, i2, rs) -> new Ranges(rs));
+        return slice(ranges, Overlapping);
     }
 
     @Override
-    public Ranges union(Ranges that)
+    public Ranges with(Unseekables<Range, ?> that)
+    {
+        return with((AbstractRanges<?>) that);
+    }
+
+    public Ranges with(Ranges that)
+    {
+        return union(MERGE_OVERLAPPING, that);
+    }
+
+    public Ranges with(AbstractRanges<?> that)
     {
         return union(MERGE_OVERLAPPING, that);
     }
@@ -92,7 +103,10 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
     @Override
     public Unseekables<Range, ?> with(RoutingKey withKey)
     {
-        throw new UnsupportedOperationException();
+        if (contains(withKey))
+            return this;
+
+        return with(Ranges.of(withKey.asRange()));
     }
 
     @Override
@@ -108,8 +122,10 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
     }
 
     @Override
-    public FullRoute<Range> toRoute(RoutingKey homeKey)
+    public FullRangeRoute toRoute(RoutingKey homeKey)
     {
+        if (!contains(homeKey))
+            return with(Ranges.of(homeKey.asRange())).toRoute(homeKey);
         return new FullRangeRoute(homeKey, ranges);
     }
 
@@ -118,6 +134,14 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
         return union(mode, this, that, this, that, (left, right, ranges) -> {
             if (ranges == left.ranges) return left;
             if (ranges == right.ranges) return right;
+            return new Ranges(ranges);
+        });
+    }
+
+    public Ranges union(UnionMode mode, AbstractRanges<?> that)
+    {
+        return union(mode, this, that, this, that, (left, right, ranges) -> {
+            if (ranges == left.ranges) return left;
             return new Ranges(ranges);
         });
     }
@@ -157,7 +181,7 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
                 int ecmp = thisRange.end().compareTo(thatRange.end());
 
                 if (scmp < 0)
-                    result.add(thisRange.subRange(thisRange.start(), thatRange.start()));
+                    result.add(thisRange.newRange(thisRange.start(), thatRange.start()));
 
                 if (ecmp <= 0)
                 {
@@ -166,7 +190,7 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
                 }
                 else
                 {
-                    thisRange = thisRange.subRange(thatRange.end(), thisRange.end());
+                    thisRange = thisRange.newRange(thatRange.end(), thisRange.end());
                     thatIdx++;
                 }
             }

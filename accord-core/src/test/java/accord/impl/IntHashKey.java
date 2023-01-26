@@ -47,7 +47,7 @@ public abstract class IntHashKey implements RoutableKey
         public accord.primitives.Range subRange(accord.primitives.Range range, Long start, Long end)
         {
             Invariants.checkArgument(((IntHashKey)range.start()).hash + end.intValue() <= ((IntHashKey)range.end()).hash);
-            return range.subRange(
+            return range.newRange(
                     new Hash(((IntHashKey)range.start()).hash + start.intValue()),
                     new Hash(((IntHashKey)range.start()).hash + end.intValue())
             );
@@ -110,6 +110,12 @@ public abstract class IntHashKey implements RoutableKey
         {
             super(Integer.MIN_VALUE, hash);
         }
+
+        @Override
+        public accord.primitives.Range asRange()
+        {
+            return new Range(new Hash(hash - 1), new Hash(hash));
+        }
     }
 
     public static class Range extends accord.primitives.Range.EndInclusive
@@ -120,7 +126,7 @@ public abstract class IntHashKey implements RoutableKey
         }
 
         @Override
-        public accord.primitives.Range subRange(RoutingKey start, RoutingKey end)
+        public accord.primitives.Range newRange(RoutingKey start, RoutingKey end)
         {
             return new Range((Hash) start, (Hash) end);
         }
@@ -140,8 +146,7 @@ public abstract class IntHashKey implements RoutableKey
             {
                 int subStart = i > 0 ? last : startHash;
                 int subEnd = i < count - 1 ? subStart + interval : endHash;
-                ranges[i] = new Range(new Hash(subStart),
-                                      new Hash(subEnd));
+                ranges[i] = new Range(new Hash(subStart), new Hash(subEnd));
                 last = subEnd;
             }
             return Ranges.ofSortedAndDeoverlapped(ranges);
@@ -159,7 +164,7 @@ public abstract class IntHashKey implements RoutableKey
 
     private IntHashKey(int key, int hash)
     {
-        assert hash != hash(key);
+        assert key == Integer.MIN_VALUE || hash != hash(key);
         this.key = key;
         this.hash = hash;
     }
@@ -187,16 +192,16 @@ public abstract class IntHashKey implements RoutableKey
     public static accord.primitives.Range[] ranges(int count)
     {
         List<accord.primitives.Range> result = new ArrayList<>();
-        long delta = (Integer.MAX_VALUE - (long)Integer.MIN_VALUE) / count;
-        long start = Integer.MIN_VALUE;
+        long delta = 0xffff / count;
+        long start = 0;
         Hash prev = new Hash((int)start);
         for (int i = 1 ; i < count ; ++i)
         {
-            Hash next = new Hash((int)Math.min(Integer.MAX_VALUE, start + i * delta));
+            Hash next = new Hash((int)Math.min(0xffff, start + i * delta));
             result.add(new Range(prev, next));
             prev = next;
         }
-        result.add(new Range(prev, new Hash(Integer.MAX_VALUE)));
+        result.add(new Range(prev, new Hash(0xffff)));
         return toArray(result, accord.primitives.Range[]::new);
     }
 
@@ -234,7 +239,7 @@ public abstract class IntHashKey implements RoutableKey
         crc32c.update(key >> 8);
         crc32c.update(key >> 16);
         crc32c.update(key >> 24);
-        return (int)crc32c.getValue();
+        return (int)crc32c.getValue() & 0xffff;
     }
 
     @Override

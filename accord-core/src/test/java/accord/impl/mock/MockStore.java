@@ -19,7 +19,6 @@
 package accord.impl.mock;
 
 import accord.api.Data;
-import accord.api.Key;
 import accord.api.Query;
 import accord.api.Read;
 import accord.api.Result;
@@ -27,10 +26,7 @@ import accord.api.DataStore;
 import accord.api.Update;
 import accord.api.Write;
 import accord.local.SafeCommandStore;
-import accord.primitives.Ranges;
-import accord.primitives.Keys;
-import accord.primitives.Timestamp;
-import accord.primitives.Txn;
+import accord.primitives.*;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
@@ -48,18 +44,18 @@ public class MockStore implements DataStore
     public static final Query QUERY = (txnId, data, read, update) -> RESULT;
     public static final Write WRITE = (key, commandStore, executeAt, store) -> ImmediateFuture.success(null);
 
-    public static Read read(Keys keys)
+    public static Read read(Seekables<?, ?> keys)
     {
         return new Read()
         {
             @Override
-            public Keys keys()
+            public Seekables<?, ?> keys()
             {
                 return keys;
             }
 
             @Override
-            public Future<Data> read(Key key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
+            public Future<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
             {
                 return ImmediateFuture.success(DATA);
             }
@@ -73,7 +69,7 @@ public class MockStore implements DataStore
             @Override
             public Read merge(Read other)
             {
-                return MockStore.read(keys.union(other.keys()));
+                return MockStore.read(((Seekables)keys).with(other.keys()));
             }
 
             @Override
@@ -84,12 +80,12 @@ public class MockStore implements DataStore
         };
     }
 
-    public static Update update(Keys keys)
+    public static Update update(Seekables<?, ?> keys)
     {
         return new Update()
         {
             @Override
-            public Keys keys()
+            public Seekables<?, ?> keys()
             {
                 return keys;
             }
@@ -109,7 +105,7 @@ public class MockStore implements DataStore
             @Override
             public Update merge(Update other)
             {
-                return MockStore.update(keys.union(other.keys()));
+                return MockStore.update(((Seekables)keys).with(other.keys()));
             }
 
             @Override

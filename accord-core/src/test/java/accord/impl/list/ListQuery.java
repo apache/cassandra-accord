@@ -27,6 +27,7 @@ import accord.api.Data;
 import accord.api.Key;
 import accord.api.Query;
 import accord.api.Result;
+import accord.primitives.Keys;
 import accord.primitives.TxnId;
 
 public class ListQuery implements Query
@@ -44,13 +45,14 @@ public class ListQuery implements Query
     public Result compute(TxnId txnId, Data data, Read untypedRead, Update update)
     {
         ListRead read = (ListRead) untypedRead;
-        int[][] values = new int[read.readKeys.size()][];
+        Keys responseKeys = Keys.ofSorted(((ListData)data).keySet());
+        int[][] values = new int[responseKeys.size()][];
         for (Map.Entry<Key, int[]> e : ((ListData)data).entrySet())
         {
-            int i = read.readKeys.indexOf(e.getKey());
+            int i = responseKeys.indexOf(e.getKey());
             if (i >= 0)
                 values[i] = e.getValue();
         }
-        return new ListResult(client, requestId, txnId, read.readKeys, values, (ListUpdate) update);
+        return new ListResult(client, requestId, txnId, read.readKeys, responseKeys, values, (ListUpdate) update);
     }
 }

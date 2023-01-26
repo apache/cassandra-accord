@@ -509,7 +509,7 @@ public class KeyDepsTest
                         if (ranges.contains(key))
                             deps.canonical.get(key).forEach(txnId -> canonical.add(new Entry<>(key, txnId)));
                     }
-                    deps.test.forEach(ranges, new BiConsumer<>()
+                    deps.test.forEach(ranges, new BiConsumer<Key, TxnId>()
                     {
                         int i = 0;
                         @Override

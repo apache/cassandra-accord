@@ -89,7 +89,7 @@ public class FetchData
                 // information to fulfil that phase locally we should downgrade the response we give to the callback
                 Known sufficientFor = ok.sufficientFor(fetch);
                 // if we discover the executeAt as part of this action, use that to decide if we requested enough info
-                Timestamp exec = executeAt != null ? executeAt : ok.saveStatus.known.executeAt.isDecisionKnown() ? ok.executeAt : null;
+                Timestamp exec = executeAt != null ? executeAt : ok.saveStatus.known.executeAt.hasDecidedExecuteAt() ? ok.executeAt : null;
                 if (sufficientFor.outcome == OutcomeKnown && (exec == null || untilLocalEpoch < exec.epoch()))
                     sufficientFor = sufficientFor.with(OutcomeUnknown);
                 callback.accept(sufficientFor, null);

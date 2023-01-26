@@ -20,5 +20,8 @@ package accord.utils;
 
 public interface IndexedIntFunction<P1>
 {
+    /**
+     * Apply some function to an int parameter and an associated index (usually within a collection).
+     */
     int apply(P1 p1, int p2, int index);
 }

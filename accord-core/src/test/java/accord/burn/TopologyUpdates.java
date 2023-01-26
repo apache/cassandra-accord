@@ -65,7 +65,7 @@ public class TopologyUpdates
         public CommandSync(TxnId txnId, CheckStatusOk status, long srcEpoch, long trgEpoch)
         {
             Invariants.checkArgument(status.saveStatus.hasBeen(Status.PreAccepted));
-            Invariants.checkState(status.route != null);
+            Invariants.checkState(status.route != null && !status.route.isEmpty());
             this.txnId = txnId;
             this.status = status.saveStatus.status;
             this.route = status.route;

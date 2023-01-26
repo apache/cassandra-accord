@@ -117,10 +117,10 @@ public class ListRequest implements Request
                         switch (s)
                         {
                             case Invalidated:
-                                node.reply(client, replyContext, new ListResult(client, ((Packet)replyContext).requestId, txnId, null, null, null));
+                                node.reply(client, replyContext, new ListResult(client, ((Packet)replyContext).requestId, txnId, null, null, null, null));
                                 break;
                             case Lost:
-                                node.reply(client, replyContext, new ListResult(client, ((Packet)replyContext).requestId, txnId, null, new int[0][], null));
+                                node.reply(client, replyContext, new ListResult(client, ((Packet)replyContext).requestId, txnId, null, null, new int[0][], null));
                                 break;
                             case Neither:
                                 // currently caught elsewhere in response tracking, but might help to throw an exception here

@@ -26,6 +26,7 @@ import accord.utils.*;
 import accord.utils.ArrayBuffers.ObjectBuffers;
 
 import static accord.utils.ArrayBuffers.cachedKeys;
+import static accord.utils.SortedArrays.isSortedUnique;
 
 // TODO (low priority, efficiency): this should probably be a BTree
 public class Keys extends AbstractKeys<Key, Keys> implements Seekables<Key, Keys>
@@ -64,14 +65,13 @@ public class Keys extends AbstractKeys<Key, Keys> implements Seekables<Key, Keys
         return Arrays.equals(keys, keys1.keys);
     }
 
-    @Override
-    public Keys union(Keys that)
+    public Keys with(Keys that)
     {
         return wrap(SortedArrays.linearUnion(keys, that.keys, cachedKeys()), that);
     }
 
     @Override
-    public Keys slice(Ranges ranges)
+    public Keys slice(Ranges ranges, Slice slice)
     {
         return wrap(slice(ranges, Key[]::new));
     }
@@ -188,11 +188,8 @@ public class Keys extends AbstractKeys<Key, Keys> implements Seekables<Key, Keys
 
     public static Keys ofSorted(Key ... keys)
     {
-        for (int i = 1 ; i < keys.length ; ++i)
-        {
-            if (keys[i - 1].compareTo(keys[i]) >= 0)
-                throw new IllegalArgumentException(Arrays.toString(keys) + " is not sorted");
-        }
+        if (!isSortedUnique(keys))
+            throw new IllegalArgumentException(Arrays.toString(keys) + " is not sorted");
         return new Keys(keys);
     }
 

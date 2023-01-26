@@ -22,7 +22,7 @@ import java.util.Collections;
 import java.util.Objects;
 
 import accord.local.*;
-import accord.local.CommandsForKey.CommandTimeseries.TestKind;
+import accord.local.SafeCommandStore.TestKind;
 
 import accord.local.Node.Id;
 import accord.messages.TxnRequest.WithUnsynced;
@@ -32,13 +32,12 @@ import javax.annotation.Nullable;
 
 import accord.primitives.*;
 
-import accord.primitives.Deps;
 import accord.primitives.TxnId;
 
-import static accord.local.CommandsForKey.CommandTimeseries.TestDep.ANY_DEPS;
-import static accord.local.CommandsForKey.CommandTimeseries.TestKind.RorWs;
-import static accord.local.CommandsForKey.CommandTimeseries.TestKind.Ws;
-import static accord.local.CommandsForKey.CommandTimeseries.TestStatus.ANY_STATUS;
+import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
+import static accord.local.SafeCommandStore.TestKind.RorWs;
+import static accord.local.SafeCommandStore.TestKind.Ws;
+import static accord.local.SafeCommandStore.TestTimestamp.STARTED_BEFORE;
 
 public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
 {
@@ -85,7 +84,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     @Override
     protected void process()
     {
-        node.mapReduceConsumeLocal(this, minEpoch, maxEpoch, this);
+        node.mapReduceConsumeLocal(this, minUnsyncedEpoch, maxEpoch, this);
     }
 
     @Override
@@ -94,13 +93,21 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         // note: this diverges from the paper, in that instead of waiting for JoinShard,
         //       we PreAccept to both old and new topologies and require quorums in both.
         //       This necessitates sending to ALL replicas of old topology, not only electorate (as fast path may be unreachable).
+        if (minUnsyncedEpoch < txnId.epoch() && !safeStore.ranges().at(txnId.epoch()).intersects(scope))
+        {
+            // we only preaccept in the coordination epoch, but we might contact other epochs for dependencies
+            return new PreAcceptOk(txnId, txnId,
+                    calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().between(minUnsyncedEpoch, txnId.epoch())));
+        }
+
         Command command = safeStore.command(txnId);
         switch (command.preaccept(safeStore, partialTxn, route != null ? route : scope, progressKey))
         {
             default:
             case Success:
             case Redundant:
-                return new PreAcceptOk(txnId, command.executeAt(), calculatePartialDeps(safeStore, txnId, partialTxn.keys(), partialTxn.kind(), txnId, safeStore.ranges().between(minEpoch, txnId.epoch())));
+                return new PreAcceptOk(txnId, command.executeAt(),
+                        calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().between(minUnsyncedEpoch, txnId.epoch())));
 
             case RejectedBallot:
                 return PreAcceptNack.INSTANCE;
@@ -209,28 +216,26 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         }
     }
 
-    static PartialDeps calculatePartialDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Txn.Kind kindOfTxn, Timestamp executeAt, Ranges ranges)
+    static PartialDeps calculatePartialDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Timestamp executeAt, Ranges ranges)
     {
         try (PartialDeps.Builder builder = PartialDeps.builder(ranges))
         {
-            return calculateDeps(commandStore, txnId, keys, kindOfTxn, executeAt, ranges, builder);
+            return calculateDeps(commandStore, txnId, keys, executeAt, ranges, builder);
         }
     }
 
-    private static <T extends Deps> T calculateDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Txn.Kind kindOfTxn, Timestamp executeAt, Ranges ranges, Deps.AbstractBuilder<T> builder)
+    private static <T extends Deps> T calculateDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Timestamp executeAt, Ranges ranges, Deps.AbstractBuilder<T> builder)
     {
-        TestKind testKind = kindOfTxn.isWrite() ? RorWs : Ws;
-        commandStore.forEach(keys, ranges, forKey -> {
-            forKey.uncommitted().before(executeAt, testKind, ANY_DEPS, null, ANY_STATUS, null)
-                    .forEach(info -> {
-                        if (!info.txnId.equals(txnId)) builder.add(forKey.key(), info.txnId);
-                    });
-            forKey.committedByExecuteAt().before(executeAt, testKind, ANY_DEPS, null, ANY_STATUS, null)
-                    .forEach(id -> {
-                        if (!id.equals(txnId)) builder.add(forKey.key(), id);
-                    });
-        });
-
+        TestKind testKind = txnId.rw().isWrite() ? RorWs : Ws;
+        // could use MAY_EXECUTE_BEFORE to prune those we know execute later, but shouldn't usually be of much help
+        // and would need to supply !hasOrderedTxnId
+        commandStore.mapReduce(keys, ranges, testKind, STARTED_BEFORE, executeAt, ANY_DEPS, null, null, null,
+                (keyOrRange, testTxnId, testExecuteAt, in) -> {
+                    // TODO (easy, efficiency): either pass txnId as parameter or encode this behaviour in a specialised builder to avoid extra allocations
+                    if (testTxnId != txnId)
+                        in.add(keyOrRange, testTxnId);
+                    return in;
+                }, builder, null);
         return builder.build();
     }
 

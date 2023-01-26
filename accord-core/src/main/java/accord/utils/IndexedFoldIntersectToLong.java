@@ -20,5 +20,12 @@ package accord.utils;
 
 public interface IndexedFoldIntersectToLong<P1>
 {
+    /**
+     * Apply some long->long merge function accepting a constant object parameter p1, a long parameter p2, and the prior
+     * output of this function or the initial value, to some element occurring in two collections, with each collection's
+     * index for the element provided as the final parameters.
+     *
+     * This function is used for folding over the common elements of two sorted collections.
+     */
     long apply(P1 p1, long p2, long accumulate, int leftIndex, int rightIndex);
 }

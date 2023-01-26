@@ -238,7 +238,7 @@ public class Commit extends TxnRequest<ReadNack>
         {
             this.txnId = txnId;
             int latestRelevantIndex = latestRelevantEpochIndex(to, topologies, scope);
-            this.scope = computeScope(to, topologies, (Unseekables)scope, latestRelevantIndex, Unseekables::slice, Unseekables::union);
+            this.scope = computeScope(to, topologies, (Unseekables)scope, latestRelevantIndex, Unseekables::slice, Unseekables::with);
             this.waitForEpoch = computeWaitForEpoch(to, topologies, latestRelevantIndex);
             this.invalidateUntilEpoch = topologies.currentEpoch();
         }

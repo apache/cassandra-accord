@@ -53,7 +53,7 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     }
 
     @Override
-    public final Routable.Domain kindOfContents()
+    public final Routable.Domain domain()
     {
         return Key;
     }
@@ -83,26 +83,27 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     }
 
     @Override
-    public final boolean intersects(AbstractRanges<?> ranges)
+    public final boolean intersects(AbstractKeys<?, ?> keys)
     {
-        return ranges.intersects(this);
+        return findNextIntersection(0, keys, 0) >= 0;
     }
 
-    public final int findNext(K key, int startIndex)
+    @Override
+    public final boolean intersects(AbstractRanges<?> ranges)
     {
-        return SortedArrays.exponentialSearch(keys, startIndex, keys.length, key);
+        return findNextIntersection(0, ranges, 0) >= 0;
+    }
+
+    @Override
+    public final int findNext(int thisIndex, RoutableKey key, SortedArrays.Search search)
+    {
+        return SortedArrays.exponentialSearch(keys, thisIndex, keys.length, key, RoutableKey::compareTo, search);
     }
 
     @Override
     public final int findNext(int thisIndex, Range find, SortedArrays.Search search)
     {
         return SortedArrays.exponentialSearch(keys, thisIndex, size(), find, Range::compareTo, search);
-    }
-
-    @Override
-    public final int findNext(int thisIndex, K find, SortedArrays.Search search)
-    {
-        return SortedArrays.exponentialSearch(keys, thisIndex, size(), find, RoutableKey::compareTo, search);
     }
 
     @Override
@@ -153,6 +154,8 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     {
         return stream().map(Object::toString).collect(Collectors.joining(",", "[", "]"));
     }
+
+
 
     // TODO (expected, efficiency): accept cached buffers
     protected K[] slice(Ranges ranges, IntFunction<K[]> factory)

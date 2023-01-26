@@ -20,5 +20,12 @@ package accord.utils;
 
 public interface IndexedRangeFoldToLong
 {
-    long apply(long p1, long p2, int fromIndex, int toIndex);
+    /**
+     * Apply some long->long merge function accepting a constant parameter p1 and the prior output of this
+     * function or an initial value, to some range of indexes referencing some other indexed collection.
+     *
+     * This function is used for folding over a filtered collection, where contiguous ranges are expected
+     * and can be handled batch-wise.
+     */
+    long apply(long p1, long accumulator, int fromIndex, int toIndex);
 }

@@ -20,42 +20,50 @@ package accord.impl.list;
 
 import accord.api.*;
 import accord.local.SafeCommandStore;
-import accord.primitives.Ranges;
-import accord.primitives.Keys;
-import accord.primitives.Timestamp;
-import accord.primitives.Txn;
+import accord.primitives.*;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Map;
+
 public class ListRead implements Read
 {
     private static final Logger logger = LoggerFactory.getLogger(ListRead.class);
 
-    public final Keys readKeys;
-    public final Keys keys;
+    public final Seekables<?, ?> readKeys;
+    public final Seekables<?, ?> keys;
 
-    public ListRead(Keys readKeys, Keys keys)
+    public ListRead(Seekables<?, ?> readKeys, Seekables<?, ?> keys)
     {
         this.readKeys = readKeys;
         this.keys = keys;
     }
 
     @Override
-    public Keys keys()
+    public Seekables keys()
     {
         return keys;
     }
 
     @Override
-    public Future<Data> read(Key key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
+    public Future<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
     {
         ListStore s = (ListStore)store;
         ListData result = new ListData();
-        int[] data = s.get(key);
-        logger.trace("READ on {} at {} key:{} -> {}", s.node, executeAt, key, data);
-        result.put(key, data);
+        switch (key.domain())
+        {
+            default: throw new AssertionError();
+            case Key:
+                int[] data = s.get((Key)key);
+                logger.trace("READ on {} at {} key:{} -> {}", s.node, executeAt, key, data);
+                result.put((Key)key, data);
+                break;
+            case Range:
+                for (Map.Entry<Key, int[]> e : s.get((Range)key))
+                    result.put(e.getKey(), e.getValue());
+        }
         return ImmediateFuture.success(result);
     }
 
@@ -68,7 +76,7 @@ public class ListRead implements Read
     @Override
     public Read merge(Read other)
     {
-        return new ListRead(readKeys.union(((ListRead)other).readKeys), keys.union(((ListRead)other).keys));
+        return new ListRead(((Seekables)readKeys).with(((ListRead)other).readKeys), ((Seekables)keys).with(((ListRead)other).keys));
     }
 
     @Override

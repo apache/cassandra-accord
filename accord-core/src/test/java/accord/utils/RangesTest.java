@@ -79,13 +79,13 @@ public class RangesTest
     void addTest()
     {
         Assertions.assertEquals(ranges(r(0, 50), r(50, 100), r(100, 150), r(150, 200)),
-                                ranges(r(0, 50), r(100, 150)).union(ranges(r(50, 100), r(150, 200))));
+                                ranges(r(0, 50), r(100, 150)).with(ranges(r(50, 100), r(150, 200))));
     }
 
     private static void assertMergeResult(Ranges expected, Ranges input1, Ranges input2)
     {
-        Assertions.assertEquals(expected, input1.union(input2));
-        Assertions.assertEquals(expected, input2.union(input1));
+        Assertions.assertEquals(expected, input1.with(input2));
+        Assertions.assertEquals(expected, input2.with(input1));
     }
 
     @Test
