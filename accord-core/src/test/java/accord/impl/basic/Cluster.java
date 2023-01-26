@@ -27,7 +27,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -50,6 +49,7 @@ import accord.messages.Reply;
 import accord.messages.Request;
 import accord.topology.TopologyRandomizer;
 import accord.topology.Topology;
+import accord.utils.RandomSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -76,7 +76,7 @@ public class Cluster implements Scheduler
         this.partitionSet = new HashSet<>();
     }
 
-    NodeSink create(Id self, Random random)
+    NodeSink create(Id self, RandomSource random)
     {
         NodeSink sink = new NodeSink(self, lookup, this, random);
         sinks.put(self, sink);
@@ -206,7 +206,7 @@ public class Cluster implements Scheduler
         run.run();
     }
 
-    public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, Consumer<Throwable> onFailure, Supplier<Random> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in)
+    public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, Consumer<Throwable> onFailure, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in)
     {
         TopologyUpdates topologyUpdates = new TopologyUpdates();
         Topology topology = topologyFactory.toTopology(nodes);
@@ -227,9 +227,9 @@ public class Cluster implements Scheduler
             }
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));
-            Random shuffleRandom = randomSupplier.get();
+            RandomSource shuffleRandom = randomSupplier.get();
             Scheduled chaos = sinks.recurring(() -> {
-                Collections.shuffle(nodesList, shuffleRandom);
+                Collections.shuffle(nodesList, shuffleRandom.asJdkRandom());
                 int partitionSize = shuffleRandom.nextInt((topologyFactory.rf+1)/2);
                 sinks.partitionSet = new LinkedHashSet<>(nodesList.subList(0, partitionSize));
             }, 5L, SECONDS);

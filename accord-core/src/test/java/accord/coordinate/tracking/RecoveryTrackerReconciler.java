@@ -18,25 +18,25 @@
 
 package accord.coordinate.tracking;
 
+import accord.utils.RandomSource;
 import accord.coordinate.tracking.RecoveryTracker.RecoveryShardTracker;
 import accord.local.Node;
 import accord.topology.Topologies;
 import org.junit.jupiter.api.Assertions;
 
 import java.util.ArrayList;
-import java.util.Random;
 
 // TODO (required, testing): check fast path accounting
 public class RecoveryTrackerReconciler extends TrackerReconciler<RecoveryShardTracker, RecoveryTracker, RecoveryTrackerReconciler.Rsp>
 {
     enum Rsp { FAST, SLOW, FAIL }
 
-    RecoveryTrackerReconciler(Random random, Topologies topologies)
+    RecoveryTrackerReconciler(RandomSource random, Topologies topologies)
     {
         this(random, new RecoveryTracker(topologies));
     }
 
-    private RecoveryTrackerReconciler(Random random, RecoveryTracker tracker)
+    private RecoveryTrackerReconciler(RandomSource random, RecoveryTracker tracker)
     {
         super(random, Rsp.class, tracker, new ArrayList<>(tracker.nodes()));
     }

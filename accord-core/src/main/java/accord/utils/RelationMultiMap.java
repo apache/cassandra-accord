@@ -221,7 +221,7 @@ public class RelationMultiMap
             {
                 sortedKeyIndexes = new int[keyCount];
                 sortedKeys = Arrays.copyOf(keys, keyCount);
-                Arrays.sort(sortedKeys);
+                Arrays.sort(sortedKeys, adapter.keyComparator());
 
                 for (int i = 1 ; i < keyCount ; ++i)
                 {
@@ -230,7 +230,7 @@ public class RelationMultiMap
                                 + Arrays.toString(Arrays.copyOf(keys, keyCount)) + ")");
                 }
                 for (int i = 0 ; i < keyCount ; ++i)
-                    sortedKeyIndexes[Arrays.binarySearch(sortedKeys, keys[i])] = i;
+                    sortedKeyIndexes[Arrays.binarySearch(sortedKeys, keys[i], adapter.keyComparator())] = i;
                 cachedKeys.forceDiscard(keys, keyCount);
             }
 

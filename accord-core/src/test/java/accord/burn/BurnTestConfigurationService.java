@@ -18,9 +18,9 @@
 
 package accord.burn;
 
-import accord.api.ConfigurationService;
 import accord.api.MessageSink;
 import accord.api.TestableConfigurationService;
+import accord.utils.RandomSource;
 import accord.local.Node;
 import accord.messages.*;
 import accord.topology.Topology;
@@ -30,7 +30,10 @@ import accord.utils.async.AsyncResults;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -41,11 +44,11 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
     private final Node.Id node;
     private final MessageSink messageSink;
     private final Function<Node.Id, Node> lookup;
-    private final Supplier<Random> randomSupplier;
+    private final Supplier<RandomSource> randomSupplier;
     private final Map<Long, FetchTopology> pendingEpochs = new HashMap<>();
 
     private final EpochHistory epochs = new EpochHistory();
-    private final List<ConfigurationService.Listener> listeners = new ArrayList<>();
+    private final List<Listener> listeners = new ArrayList<>();
     private final TopologyUpdates topologyUpdates;
 
     private static class EpochState
@@ -125,7 +128,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         }
     }
 
-    public BurnTestConfigurationService(Node.Id node, MessageSink messageSink, Supplier<Random> randomSupplier, Topology topology, Function<Node.Id, Node> lookup, TopologyUpdates topologyUpdates)
+    public BurnTestConfigurationService(Node.Id node, MessageSink messageSink, Supplier<RandomSource> randomSupplier, Topology topology, Function<Node.Id, Node> lookup, TopologyUpdates topologyUpdates)
     {
         this.node = node;
         this.messageSink = messageSink;

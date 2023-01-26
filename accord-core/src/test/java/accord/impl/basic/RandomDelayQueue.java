@@ -18,8 +18,9 @@
 
 package accord.impl.basic;
 
+import accord.utils.RandomSource;
+
 import java.util.PriorityQueue;
-import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -27,9 +28,9 @@ public class RandomDelayQueue<T> implements PendingQueue
 {
     public static class Factory implements Supplier<PendingQueue>
     {
-        final Random seeds;
+        final RandomSource seeds;
 
-        public Factory(Random seeds)
+        public Factory(RandomSource seeds)
         {
             this.seeds = seeds;
         }
@@ -37,7 +38,7 @@ public class RandomDelayQueue<T> implements PendingQueue
         @Override
         public PendingQueue get()
         {
-            return new RandomDelayQueue<>(new Random(seeds.nextLong()));
+            return new RandomDelayQueue<>(seeds.fork());
         }
     }
 
@@ -70,11 +71,11 @@ public class RandomDelayQueue<T> implements PendingQueue
     }
 
     final PriorityQueue<Item> queue = new PriorityQueue<>();
-    final Random random;
+    final RandomSource random;
     long now;
     int seq;
 
-    RandomDelayQueue(Random random)
+    RandomDelayQueue(RandomSource random)
     {
         this.random = random;
     }

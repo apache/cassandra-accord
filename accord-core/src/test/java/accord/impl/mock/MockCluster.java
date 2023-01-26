@@ -19,7 +19,6 @@
 package accord.impl.mock;
 
 import accord.NetworkFilter;
-import accord.api.Key;
 import accord.api.MessageSink;
 import accord.coordinate.Timeout;
 import accord.impl.*;
@@ -27,7 +26,9 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.ShardDistributor;
 import accord.primitives.Ranges;
+import accord.utils.DefaultRandom;
 import accord.utils.EpochFunction;
+import accord.utils.RandomSource;
 import accord.utils.ThreadPoolScheduler;
 import accord.primitives.TxnId;
 import accord.messages.Callback;
@@ -53,7 +54,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
 {
     private static final Logger logger = LoggerFactory.getLogger(MockCluster.class);
 
-    private final Random random;
+    private final RandomSource random;
     private final Config config;
     private final LongSupplier nowSupplier;
     private final Map<Id, Node> nodes = new ConcurrentHashMap<>();
@@ -68,7 +69,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
     private MockCluster(Builder builder)
     {
         this.config = new Config(builder);
-        this.random = new Random(config.seed);
+        this.random = new DefaultRandom(config.seed);
         this.nowSupplier = builder.nowSupplier;
         this.messageSinkFactory = builder.messageSinkFactory;
         this.onFetchTopology = builder.onFetchTopology;
@@ -110,7 +111,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                         () -> store,
                         new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()),
                         new TestAgent(),
-                        new Random(random.nextLong()),
+                        random.fork(),
                         new ThreadPoolScheduler(),
                         SizeOfIntersectionSorter.SUPPLIER,
                         SimpleProgressLog::new,

@@ -16,35 +16,29 @@
  * limitations under the License.
  */
 
-plugins {
-    id 'accord.java-conventions'
-}
+package accord.utils;
 
-dependencies {
-    implementation project(':accord-core')
-    implementation group: 'com.google.code.findbugs', name: 'jsr305', version: '3.0.2'
-    implementation 'com.google.code.gson:gson:2.8.7'
+import java.util.Random;
 
-    testImplementation project(':accord-core').sourceSets.test.output
-}
-
-jar {
-    manifest {
-        attributes(
-                'Main-Class': 'accord.maelstrom.Main',
-        )
+public class DefaultRandom extends Random implements RandomSource
+{
+    public DefaultRandom()
+    {
     }
-}
 
-task fatJar(type: Jar) {
-    manifest.from jar.manifest
-    archiveClassifier = 'all'
-    from {
-        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
-    } {
-        exclude "META-INF/*.SF"
-        exclude "META-INF/*.DSA"
-        exclude "META-INF/*.RSA"
+    public DefaultRandom(long seed)
+    {
+        super(seed);
     }
-    with jar
+
+    @Override
+    public DefaultRandom fork() {
+        return new DefaultRandom(nextLong());
+    }
+
+    @Override
+    public Random asJdkRandom()
+    {
+        return this;
+    }
 }

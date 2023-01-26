@@ -79,8 +79,10 @@ public class Json
     {
         switch (id.charAt(0))
         {
-            case 'c': return new Id(-Integer.parseInt(id.substring(1)));
-            case 'n':return  new Id( Integer.parseInt(id.substring(1)));
+            //TODO(Review) - toString idn't remove the - so doing - parseInt makes the value positive, which changes
+            // the value
+            case 'c': return new Id( Integer.parseInt(id.substring(1)));
+            case 'n': return new Id( Integer.parseInt(id.substring(1)));
             default: throw new IllegalStateException();
         }
     }
@@ -314,6 +316,8 @@ public class Json
         @Override
         public void write(JsonWriter out, Deps value) throws IOException
         {
+            out.beginObject();
+            out.name("keyDeps");
             out.beginArray();
             for (Map.Entry<Key, TxnId> e : value.keyDeps)
             {
@@ -323,6 +327,7 @@ public class Json
                 out.endArray();
             }
             out.endArray();
+            out.name("rangeDeps");
             out.beginArray();
             for (Map.Entry<Range, TxnId> e : value.rangeDeps)
             {
@@ -333,42 +338,61 @@ public class Json
                 out.endArray();
             }
             out.endArray();
+            out.endObject();
         }
 
         @Override
         public Deps read(JsonReader in) throws IOException
         {
-            KeyDeps keyDeps;
-            try (KeyDeps.Builder builder = KeyDeps.builder())
+            KeyDeps keyDeps = KeyDeps.NONE;
+            RangeDeps rangeDeps = RangeDeps.NONE;
+            in.beginObject();
+            while (in.hasNext())
             {
-                in.beginArray();
-                while (in.hasNext())
+                String name;
+                switch (name = in.nextName())
                 {
-                    in.beginArray();
-                    Key key = MaelstromKey.readKey(in);
-                    TxnId txnId = GSON.fromJson(in, TxnId.class);
-                    builder.add(key, txnId);
-                    in.endArray();
+                    case "keyDeps":
+                    {
+                        try (KeyDeps.Builder builder = KeyDeps.builder())
+                        {
+                            in.beginArray();
+                            while (in.hasNext())
+                            {
+                                in.beginArray();
+                                Key key = MaelstromKey.readKey(in);
+                                TxnId txnId = GSON.fromJson(in, TxnId.class);
+                                builder.add(key, txnId);
+                                in.endArray();
+                            }
+                            in.endArray();
+                            keyDeps = builder.build();
+                        }
+                    }
+                    break;
+                    case "rangeDeps":
+                    {
+                        try (RangeDeps.Builder builder = RangeDeps.builder())
+                        {
+                            in.beginArray();
+                            while (in.hasNext())
+                            {
+                                in.beginArray();
+                                RoutingKey start = MaelstromKey.readRouting(in);
+                                RoutingKey end = MaelstromKey.readRouting(in);
+                                TxnId txnId = GSON.fromJson(in, TxnId.class);
+                                builder.add(new MaelstromKey.Range(start, end), txnId);
+                                in.endArray();
+                            }
+                            in.endArray();
+                            rangeDeps = builder.build();
+                        }
+                    }
+                    break;
+                    default: throw new AssertionError("Unknown name: " + name);
                 }
-                in.endArray();
-                keyDeps = builder.build();
             }
-            RangeDeps rangeDeps;
-            try (RangeDeps.Builder builder = RangeDeps.builder())
-            {
-                in.beginArray();
-                while (in.hasNext())
-                {
-                    in.beginArray();
-                    RoutingKey start = MaelstromKey.readRouting(in);
-                    RoutingKey end = MaelstromKey.readRouting(in);
-                    TxnId txnId = GSON.fromJson(in, TxnId.class);
-                    builder.add(new MaelstromKey.Range(start, end), txnId);
-                    in.endArray();
-                }
-                in.endArray();
-                rangeDeps = builder.build();
-            }
+            in.endObject();
             return new Deps(keyDeps, rangeDeps);
         }
     };

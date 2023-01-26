@@ -19,6 +19,7 @@
 package accord.maelstrom;
 
 import java.io.IOException;
+import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.zip.CRC32;
 
@@ -42,6 +43,21 @@ public class Datum implements Comparable<Datum>
         public int compareTo(Hash that)
         {
             return Integer.compare(this.hash, that.hash);
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            Hash hash1 = (Hash) o;
+            return hash == hash1.hash;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(hash);
         }
 
         public String toString()

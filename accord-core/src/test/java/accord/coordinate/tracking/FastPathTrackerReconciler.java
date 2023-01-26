@@ -18,25 +18,24 @@
 
 package accord.coordinate.tracking;
 
+import accord.utils.RandomSource;
 import accord.coordinate.tracking.FastPathTracker.FastPathShardTracker;
-import accord.coordinate.tracking.QuorumTracker.QuorumShardTracker;
 import accord.local.Node;
 import accord.topology.Topologies;
 import org.junit.jupiter.api.Assertions;
 
 import java.util.ArrayList;
-import java.util.Random;
 
 public class FastPathTrackerReconciler extends TrackerReconciler<FastPathShardTracker, FastPathTracker, FastPathTrackerReconciler.Rsp>
 {
     enum Rsp { FAST, SLOW, FAIL }
 
-    FastPathTrackerReconciler(Random random, Topologies topologies)
+    FastPathTrackerReconciler(RandomSource random, Topologies topologies)
     {
         this(random, new FastPathTracker(topologies));
     }
 
-    private FastPathTrackerReconciler(Random random, FastPathTracker tracker)
+    private FastPathTrackerReconciler(RandomSource random, FastPathTracker tracker)
     {
         super(random, Rsp.class, tracker, new ArrayList<>(tracker.nodes()));
     }

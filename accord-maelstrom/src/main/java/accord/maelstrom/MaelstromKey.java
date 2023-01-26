@@ -19,6 +19,7 @@
 package accord.maelstrom;
 
 import java.io.IOException;
+import java.util.Objects;
 
 import accord.api.RoutingKey;
 
@@ -221,6 +222,21 @@ public class MaelstromKey implements RoutableKey
         if (this instanceof Routing)
             return (Routing)this;
         return new Routing(datum.value.hashCode());
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        MaelstromKey that = (MaelstromKey) o;
+        return Objects.equals(datum, that.datum);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hash(datum);
     }
 
     @Override

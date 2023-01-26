@@ -16,35 +16,11 @@
  * limitations under the License.
  */
 
-plugins {
-    id 'accord.java-conventions'
-}
+package accord.burn.random;
 
-dependencies {
-    implementation project(':accord-core')
-    implementation group: 'com.google.code.findbugs', name: 'jsr305', version: '3.0.2'
-    implementation 'com.google.code.gson:gson:2.8.7'
+import accord.utils.RandomSource;
 
-    testImplementation project(':accord-core').sourceSets.test.output
-}
-
-jar {
-    manifest {
-        attributes(
-                'Main-Class': 'accord.maelstrom.Main',
-        )
-    }
-}
-
-task fatJar(type: Jar) {
-    manifest.from jar.manifest
-    archiveClassifier = 'all'
-    from {
-        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
-    } {
-        exclude "META-INF/*.SF"
-        exclude "META-INF/*.DSA"
-        exclude "META-INF/*.RSA"
-    }
-    with jar
+public interface RandomLong
+{
+    long getLong(RandomSource randomSource);
 }

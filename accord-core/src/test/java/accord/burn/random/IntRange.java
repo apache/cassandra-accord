@@ -16,35 +16,26 @@
  * limitations under the License.
  */
 
-plugins {
-    id 'accord.java-conventions'
-}
+package accord.burn.random;
 
-dependencies {
-    implementation project(':accord-core')
-    implementation group: 'com.google.code.findbugs', name: 'jsr305', version: '3.0.2'
-    implementation 'com.google.code.gson:gson:2.8.7'
+import accord.utils.RandomSource;
 
-    testImplementation project(':accord-core').sourceSets.test.output
-}
+public class IntRange implements RandomInt
+{
+    public final int min, max;
+    private final int maxDelta;
 
-jar {
-    manifest {
-        attributes(
-                'Main-Class': 'accord.maelstrom.Main',
-        )
+    public IntRange(int min, int max)
+    {
+        if (min >= max) throw new IllegalArgumentException(String.format("Min (%s) should be less than max (%d).", min, max));
+        this.min = min;
+        this.max = max;
+        this.maxDelta = max - min + 1;
     }
-}
 
-task fatJar(type: Jar) {
-    manifest.from jar.manifest
-    archiveClassifier = 'all'
-    from {
-        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
-    } {
-        exclude "META-INF/*.SF"
-        exclude "META-INF/*.DSA"
-        exclude "META-INF/*.RSA"
+    @Override
+    public int getInt(RandomSource randomSource)
+    {
+        return min + randomSource.nextInt(maxDelta);
     }
-    with jar
 }

@@ -18,24 +18,24 @@
 
 package accord.coordinate.tracking;
 
+import accord.utils.RandomSource;
 import accord.coordinate.tracking.InvalidationTracker.InvalidationShardTracker;
 import accord.local.Node;
 import accord.topology.Topologies;
 import org.junit.jupiter.api.Assertions;
 
 import java.util.ArrayList;
-import java.util.Random;
 
 public class InvalidationTrackerReconciler extends TrackerReconciler<InvalidationShardTracker, InvalidationTracker, InvalidationTrackerReconciler.Rsp>
 {
     enum Rsp { PROMISED_FAST, NOT_PROMISED_FAST, PROMISED_SLOW, NOT_PROMISED_SLOW, FAIL }
 
-    InvalidationTrackerReconciler(Random random, Topologies topologies)
+    InvalidationTrackerReconciler(RandomSource random, Topologies topologies)
     {
         this(random, new InvalidationTracker(topologies));
     }
 
-    private InvalidationTrackerReconciler(Random random, InvalidationTracker tracker)
+    private InvalidationTrackerReconciler(RandomSource random, InvalidationTracker tracker)
     {
         super(random, Rsp.class, tracker, new ArrayList<>(tracker.nodes()));
     }

@@ -18,7 +18,14 @@
 
 package accord.primitives;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.NavigableSet;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -31,8 +38,10 @@ import java.util.stream.IntStream;
 
 import accord.impl.IntHashKey.Hash;
 import accord.primitives.KeyDeps.Builder;
+import accord.utils.DefaultRandom;
 import accord.utils.Gen;
 import accord.utils.Gens;
+import accord.utils.RandomSource;
 import accord.utils.RelationMultiMap.Entry;
 import com.google.common.collect.Sets;
 import org.junit.jupiter.api.Assertions;
@@ -73,7 +82,7 @@ public class KeyDepsTest
     private static void testMerge(long seed, int uniqueTxnIdsRange, int epochRange, int hlcRange, int nodeRange,
                                  int uniqueKeysRange, int emptyKeysRange, int keyRange, int totalCountRange, int mergeCountRange)
     {
-        Random random = random(seed);
+        RandomSource random = random(seed);
         Supplier<Deps> supplier = supplier(random, uniqueTxnIdsRange, epochRange, hlcRange, 0, nodeRange,
                                            uniqueKeysRange, emptyKeysRange, keyRange, totalCountRange);
         int count = 1 + random.nextInt(mergeCountRange);
@@ -92,7 +101,7 @@ public class KeyDepsTest
     private static void testWith(long seed, int uniqueTxnIdsRange, int epochRange, int hlcRange, int nodeRange,
                                  int uniqueKeysRange, int emptyKeysRange, int keyRange, int totalCountRange, int mergeCountRange)
     {
-        Random random = random(seed);
+        RandomSource random = random(seed);
         Supplier<Deps> supplier = supplier(random, uniqueTxnIdsRange, epochRange, hlcRange, 0, nodeRange,
                                            uniqueKeysRange, emptyKeysRange, keyRange, totalCountRange);
         Deps cur = supplier.get();
@@ -283,7 +292,7 @@ public class KeyDepsTest
                 {
                     builder.nextKey(key);
                     List<TxnId> ids = new ArrayList<>(deps.canonical.get(key));
-                    Collections.shuffle(ids, random);
+                    Collections.shuffle(ids, random.asJdkRandom());
                     ids.forEach(builder::add);
                 }
 
@@ -303,24 +312,24 @@ public class KeyDepsTest
             this.test = test;
         }
 
-        static Deps generate(Gen.Random random)
+        static Deps generate(RandomSource random)
         {
             int epochRange = 3;
             int hlcRange = 500;
             double uniqueTxnIdsPercentage = 0.66D;
-            int uniqueTxnIds = random.nextPositive((int) ((hlcRange * epochRange) * uniqueTxnIdsPercentage));
+            int uniqueTxnIds = random.nextInt(1, (int) ((hlcRange * epochRange) * uniqueTxnIdsPercentage));
 
-            int nodeRange = random.nextPositive(4);
+            int nodeRange = random.nextInt(1, 4);
             int uniqueKeys = random.nextInt(2, 200);
             int emptyKeys = random.nextInt(0, 10);
             int keyRange = random.nextInt(uniqueKeys + emptyKeys, 400);
-            int totalCount = random.nextPositive(1000);
+            int totalCount = random.nextInt(1, 1000);
             Deps deps = generate(random, uniqueTxnIds, epochRange, hlcRange, 0, nodeRange, uniqueKeys, emptyKeys, keyRange, totalCount);
             deps.testSimpleEquality();
             return deps;
         }
 
-        static Deps generate(Random random, int uniqueTxnIds, int epochRange, int hlcRange, int flagsRange, int nodeRange,
+        static Deps generate(RandomSource random, int uniqueTxnIds, int epochRange, int hlcRange, int flagsRange, int nodeRange,
                              int uniqueKeys, int emptyKeys, int keyRange, int totalCount)
         {
             // populateKeys is a subset of keys
@@ -446,7 +455,7 @@ public class KeyDepsTest
         }
     }
 
-    private static Ranges randomKeyRanges(Random random, int countRange, int valueRange)
+    private static Ranges randomKeyRanges(RandomSource random, int countRange, int valueRange)
     {
         int count = countRange == 1 ? 1 : 1 + random.nextInt(countRange - 1);
         Hash[] hashes;
@@ -468,14 +477,14 @@ public class KeyDepsTest
     private static void testOneRandom(long seed, int uniqueTxnIds, int epochRange, int hlcRange, int nodeRange,
                                       int uniqueKeys, int emptyKeys, int keyRange, int totalCountRange)
     {
-        Random random = random(seed);
+        RandomSource random = random(seed);
         int totalCount = 1 + random.nextInt(totalCountRange - 1);
         testOneDeps(random,
                     KeyDepsTest.Deps.generate(random, uniqueTxnIds, epochRange, hlcRange, 0, nodeRange, uniqueKeys, emptyKeys, keyRange, totalCount),
                     keyRange);
     }
 
-    private static Supplier<Deps> supplier(Random random, int uniqueTxnIdsRange, int epochRange, int hlcRange, int flagRange, int nodeRange,
+    private static Supplier<Deps> supplier(RandomSource random, int uniqueTxnIdsRange, int epochRange, int hlcRange, int flagRange, int nodeRange,
                                            int uniqueKeysRange, int emptyKeysRange, int keyRange, int totalCountRange)
     {
         return () -> {
@@ -492,7 +501,7 @@ public class KeyDepsTest
         };
     }
 
-    private static void testOneDeps(Random random, Deps deps, int keyRange)
+    private static void testOneDeps(RandomSource random, Deps deps, int keyRange)
     {
         deps.testSimpleEquality();
         {
@@ -559,12 +568,10 @@ public class KeyDepsTest
         return ThreadLocalRandom.current().nextLong();
     }
 
-    private static Random random(long seed)
+    private static RandomSource random(long seed)
     {
         logger.info("Seed {}", seed);
-        Random random = new Random();
-        random.setSeed(seed);
-        return random;
+        return new DefaultRandom(seed);
     }
 
     public static void main(String[] args)

@@ -31,6 +31,7 @@ import accord.api.Scheduler;
 import accord.impl.mock.MockCluster.Clock;
 import accord.primitives.*;
 import accord.topology.Topology;
+import accord.utils.DefaultRandom;
 import accord.utils.EpochFunction;
 import accord.utils.ThreadPoolScheduler;
 import accord.local.*;
@@ -39,7 +40,6 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.Random;
 import java.util.function.BiFunction;
 import java.util.stream.Stream;
 
@@ -75,7 +75,7 @@ public class PreAcceptTest
                         () -> store,
                         new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()),
                         new TestAgent(),
-                        new Random(),
+                        new DefaultRandom(),
                         scheduler,
                         SizeOfIntersectionSorter.SUPPLIER,
                         SimpleProgressLog::new,

@@ -18,6 +18,7 @@
 
 package accord.coordinate.tracking;
 
+import accord.utils.RandomSource;
 import accord.coordinate.tracking.ReadTracker.ReadShardTracker;
 import accord.local.Node;
 import accord.topology.Topologies;
@@ -25,7 +26,6 @@ import org.junit.jupiter.api.Assertions;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 
 public class ReadTrackerReconciler extends TrackerReconciler<ReadShardTracker, ReadTracker, ReadTrackerReconciler.Rsp>
 {
@@ -46,12 +46,12 @@ public class ReadTrackerReconciler extends TrackerReconciler<ReadShardTracker, R
         }
     }
 
-    ReadTrackerReconciler(Random random, Topologies topologies)
+    ReadTrackerReconciler(RandomSource random, Topologies topologies)
     {
         this(random, new InFlightCapturingReadTracker(topologies));
     }
 
-    private ReadTrackerReconciler(Random random, InFlightCapturingReadTracker tracker)
+    private ReadTrackerReconciler(RandomSource random, InFlightCapturingReadTracker tracker)
     {
         super(random, Rsp.class, tracker, tracker.inflight);
     }

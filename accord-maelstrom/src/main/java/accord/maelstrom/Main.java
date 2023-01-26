@@ -24,7 +24,6 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.util.Map;
-import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -41,6 +40,7 @@ import accord.api.Scheduler;
 import accord.local.ShardDistributor;
 import accord.messages.ReplyContext;
 import accord.topology.Topology;
+import accord.utils.DefaultRandom;
 import accord.utils.ThreadPoolScheduler;
 import accord.maelstrom.Packet.Type;
 import accord.api.MessageSink;
@@ -162,7 +162,7 @@ public class Main
             sink = new StdoutSink(System::currentTimeMillis, scheduler, start, init.self, out, err);
             on = new Node(init.self, sink, new SimpleConfigService(topology), System::currentTimeMillis,
                           MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
-                          MaelstromAgent.INSTANCE, new Random(), scheduler, SizeOfIntersectionSorter.SUPPLIER,
+                          MaelstromAgent.INSTANCE, new DefaultRandom(), scheduler, SizeOfIntersectionSorter.SUPPLIER,
                           SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new);
             err.println("Initialized node " + init.self);
             err.flush();

@@ -23,7 +23,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.Random;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ExecutionException;
@@ -38,6 +37,8 @@ import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 
+import accord.utils.DefaultRandom;
+import accord.utils.RandomSource;
 import accord.impl.IntHashKey;
 import accord.impl.basic.Cluster;
 import accord.impl.basic.PropagatingPendingQueue;
@@ -66,7 +67,7 @@ public class BurnTest
 {
     private static final Logger logger = LoggerFactory.getLogger(BurnTest.class);
 
-    static List<Packet> generate(Random random, List<Id> clients, List<Id> nodes, int keyCount, int operations)
+    static List<Packet> generate(RandomSource random, List<Id> clients, List<Id> nodes, int keyCount, int operations)
     {
         List<Key> keys = new ArrayList<>();
         for (int i = 0 ; i < keyCount ; ++i)
@@ -128,17 +129,17 @@ public class BurnTest
         return packets;
     }
 
-    private static Key randomKey(Random random, List<Key> keys, Set<Key> notIn)
+    private static Key randomKey(RandomSource random, List<Key> keys, Set<Key> notIn)
     {
         return keys.get(randomKeyIndex(random, keys, notIn));
     }
 
-    private static int randomKeyIndex(Random random, List<Key> keys, Set<Key> notIn)
+    private static int randomKeyIndex(RandomSource random, List<Key> keys, Set<Key> notIn)
     {
         return randomKeyIndex(random, keys, notIn::contains);
     }
 
-    private static int randomKeyIndex(Random random, List<Key> keys, Predicate<Key> notIn)
+    private static int randomKeyIndex(RandomSource random, List<Key> keys, Predicate<Key> notIn)
     {
         int i;
         while (notIn.test(keys.get(i = random.nextInt(keys.size()))));
@@ -147,7 +148,7 @@ public class BurnTest
 
     static void burn(TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency) throws IOException
     {
-        Random random = new Random();
+        RandomSource random = new DefaultRandom();
         long seed = random.nextLong();
         System.out.println(seed);
         random.setSeed(seed);
@@ -156,7 +157,7 @@ public class BurnTest
 
     static void burn(long seed, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency) throws IOException
     {
-        Random random = new Random();
+        RandomSource random = new DefaultRandom();
         System.out.println(seed);
         random.setSeed(seed);
         burn(random, topologyFactory, clients, nodes, keyCount, operations, concurrency);
@@ -166,7 +167,7 @@ public class BurnTest
     {
         ReconcilingLogger logReconciler = new ReconcilingLogger(logger);
 
-        Random random1 = new Random(), random2 = new Random();
+        RandomSource random1 = new DefaultRandom(), random2 = new DefaultRandom();
         random1.setSeed(seed);
         random2.setSeed(seed);
         ExecutorService exec = Executors.newFixedThreadPool(2);
@@ -188,7 +189,7 @@ public class BurnTest
         assert logReconciler.reconcile();
     }
 
-    static void burn(Random random, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency)
+    static void burn(RandomSource random, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency)
     {
         List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
         PendingQueue queue = new PropagatingPendingQueue(failures, new Factory(random).get());
@@ -268,7 +269,7 @@ public class BurnTest
         {
             Cluster.run(toArray(nodes, Id[]::new), () -> queue,
                         responseSink, failures::add,
-                        () -> new Random(random.nextLong()),
+                        () -> random.fork(),
                         () -> new AtomicLong()::incrementAndGet,
                         topologyFactory, () -> null);
         }
@@ -313,7 +314,7 @@ public class BurnTest
                     count = 1;
                     break;
                 case "--loop-seed":
-                    seedGenerator = new Random(Long.parseLong(args[i + 1]))::nextLong;
+                    seedGenerator = new DefaultRandom(Long.parseLong(args[i + 1]))::nextLong;
             }
         }
         while (count-- > 0)
@@ -332,7 +333,7 @@ public class BurnTest
     {
         logger.info("Seed: {}", seed);
         Cluster.trace.trace("Seed: {}", seed);
-        Random random = new Random(seed);
+        RandomSource random = new DefaultRandom(seed);
         try
         {
             List<Id> clients = generateIds(true, 1 + random.nextInt(4));

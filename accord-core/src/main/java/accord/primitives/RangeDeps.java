@@ -612,14 +612,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
 
     public static SymmetricComparator<? super Range> rangeComparator()
     {
-        return RangeDeps::compare;
-    }
-
-    public static int compare(Range left, Range right)
-    {
-        int c = left.start().compareTo(right.start());
-        if (c == 0) c = left.end().compareTo(right.end());
-        return c;
+        return Range::compare;
     }
 
     private static final RangeDepsAdapter ADAPTER = new RangeDepsAdapter();

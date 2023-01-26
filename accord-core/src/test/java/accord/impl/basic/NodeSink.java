@@ -20,10 +20,10 @@ package accord.impl.basic;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
+import accord.utils.RandomSource;
 import accord.coordinate.Timeout;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -40,12 +40,12 @@ public class NodeSink implements MessageSink
     final Id self;
     final Function<Id, Node> lookup;
     final Cluster parent;
-    final Random random;
+    final RandomSource random;
 
     int nextMessageId = 0;
     Map<Long, Callback> callbacks = new LinkedHashMap<>();
 
-    public NodeSink(Id self, Function<Id, Node> lookup, Cluster parent, Random random)
+    public NodeSink(Id self, Function<Id, Node> lookup, Cluster parent, RandomSource random)
     {
         this.self = self;
         this.lookup = lookup;
