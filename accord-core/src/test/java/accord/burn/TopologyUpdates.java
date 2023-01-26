@@ -34,6 +34,7 @@ import accord.utils.MapReduce;
 import accord.utils.MessageTask;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import com.google.common.collect.Sets;
@@ -185,19 +186,20 @@ public class TopologyUpdates
         return result;
     }
 
-    private static Stream<MessageTask> syncEpochCommands(Node node, long srcEpoch, Ranges ranges, Function<CommandSync, Collection<Node.Id>> recipients, long trgEpoch, boolean committedOnly) throws ExecutionException
+    private static AsyncChain<Stream<MessageTask>> syncEpochCommands(Node node, long srcEpoch, Ranges ranges, Function<CommandSync, Collection<Node.Id>> recipients, long trgEpoch, boolean committedOnly)
     {
         Map<TxnId, CheckStatusOk> syncMessages = new ConcurrentHashMap<>();
         Consumer<Command> commandConsumer = command -> syncMessages.merge(command.txnId(), new CheckStatusOk(node, command), CheckStatusOk::merge);
+        AsyncChain<Void> start;
         if (committedOnly)
-            getUninterruptibly(node.commandStores().forEach(commandStore -> InMemoryCommandStore.inMemory(commandStore).forCommittedInEpoch(ranges, srcEpoch, commandConsumer)));
+            start = node.commandStores().forEach(commandStore -> InMemoryCommandStore.inMemory(commandStore).forCommittedInEpoch(ranges, srcEpoch, commandConsumer));
         else
-            getUninterruptibly(node.commandStores().forEach(commandStore -> InMemoryCommandStore.inMemory(commandStore).forEpochCommands(ranges, srcEpoch, commandConsumer)));
+            start = node.commandStores().forEach(commandStore -> InMemoryCommandStore.inMemory(commandStore).forEpochCommands(ranges, srcEpoch, commandConsumer));
 
-        return syncMessages.entrySet().stream().map(e -> {
+        return start.map(ignore -> syncMessages.entrySet().stream().map(e -> {
             CommandSync sync = new CommandSync(e.getKey(), e.getValue(), srcEpoch, trgEpoch);
             return MessageTask.of(node, recipients.apply(sync), sync.toString(), sync::process);
-        });
+        }));
     }
 
     private static final boolean PREACCEPTED = false;
@@ -206,25 +208,23 @@ public class TopologyUpdates
     /**
      * Syncs all replicated commands. Overkill, but useful for confirming issues in optimizedSync
      */
-    private static Stream<MessageTask> thoroughSync(Node node, long syncEpoch) throws ExecutionException
+    private static AsyncChain<Stream<MessageTask>> thoroughSync(Node node, long syncEpoch)
     {
         Topology syncTopology = node.configService().getTopologyForEpoch(syncEpoch);
         Topology localTopology = syncTopology.forNode(node.id());
         Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().withUnsyncedEpochs(cmd.route, syncEpoch + 1).nodes();
 
         Ranges ranges = localTopology.ranges();
-        Stream<MessageTask> messageStream = Stream.empty();
+        List<AsyncChain<Stream<MessageTask>>> work = new ArrayList<>();
         for (long epoch=1; epoch<=syncEpoch; epoch++)
-        {
-            messageStream = Stream.concat(messageStream, syncEpochCommands(node, epoch, ranges, allNodes, syncEpoch, COMMITTED_ONLY));
-        }
-        return messageStream;
+            work.add(syncEpochCommands(node, epoch, ranges, allNodes, syncEpoch, COMMITTED_ONLY));
+        return AsyncChains.reduce(work, Stream.empty(), Stream::concat);
     }
 
     /**
      * Syncs all newly replicated commands when nodes are gaining ranges and the current epoch
      */
-    private static Stream<MessageTask> optimizedSync(Node node, long srcEpoch) throws ExecutionException
+    private static AsyncChain<Stream<MessageTask>> optimizedSync(Node node, long srcEpoch)
     {
         long trgEpoch = srcEpoch + 1;
         Topology syncTopology = node.configService().getTopologyForEpoch(srcEpoch);
@@ -233,7 +233,7 @@ public class TopologyUpdates
         Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().preciseEpochs(cmd.route, trgEpoch, trgEpoch).nodes();
 
         // backfill new replicas with operations from prior epochs
-        Stream<MessageTask> messageStream = Stream.empty();
+        List<AsyncChain<Stream<MessageTask>>> work = new ArrayList<>(localTopology.shards().size());
         for (Shard syncShard : localTopology.shards())
         {
             for (Shard nextShard : nextTopology.shards())
@@ -254,52 +254,35 @@ public class TopologyUpdates
 
                 Ranges ranges = Ranges.single(intersection);
                 for (long epoch=1; epoch<srcEpoch; epoch++)
-                    messageStream = Stream.concat(messageStream, syncEpochCommands(node,
-                                                                                   epoch,
-                                                                                   ranges,
-                                                                                   cmd -> newNodes,
-                                                                                   trgEpoch, COMMITTED_ONLY));
+                    work.add(syncEpochCommands(node, epoch, ranges, cmd -> newNodes, trgEpoch, COMMITTED_ONLY));
             }
         }
 
         // update all current and future replicas with the contents of the sync epoch
-        messageStream = Stream.concat(messageStream, syncEpochCommands(node,
-                                                                       srcEpoch,
-                                                                       localTopology.ranges(),
-                                                                       allNodes,
-                                                                       trgEpoch, PREACCEPTED));
-        return messageStream;
+        work.add(syncEpochCommands(node, srcEpoch, localTopology.ranges(), allNodes, trgEpoch, PREACCEPTED));
+
+        return AsyncChains.reduce(work, Stream.empty(), Stream::concat);
     }
 
-    public static AsyncResult<Void> sync(Node node, long syncEpoch)
+    private static AsyncChain<Void> sync(Node node, long syncEpoch)
     {
-        Stream<MessageTask> messageStream;
-        try
-        {
-            messageStream = optimizedSync(node, syncEpoch);
-        }
-        catch (ExecutionException e)
-        {
-            return AsyncResults.failure(e.getCause());
-        }
+        return optimizedSync(node, syncEpoch)
+                .flatMap(messageStream -> {
+                    Iterator<MessageTask> iter = messageStream.iterator();
+                    if (!iter.hasNext()) return AsyncResults.success(null);
 
-        Iterator<MessageTask> iter = messageStream.iterator();
-        if (!iter.hasNext())
-        {
-            return AsyncResults.success(null);
-        }
+                    MessageTask first = iter.next();
+                    MessageTask last = first;
+                    while (iter.hasNext())
+                    {
+                        MessageTask next = iter.next();
+                        last.addCallback(next);
+                        last = next;
+                    }
 
-        MessageTask first = iter.next();
-        MessageTask last = first;
-        while (iter.hasNext())
-        {
-            MessageTask next = iter.next();
-            last.addCallback(next);
-            last = next;
-        }
-
-        first.run();
-        return dieExceptionally(last);
+                    first.run();
+                    return dieExceptionally(last);
+                });
     }
 
     public AsyncResult<Void> syncEpoch(Node originator, long epoch, Collection<Node.Id> cluster)

@@ -18,7 +18,6 @@
 
 package accord.burn;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -30,7 +29,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -146,7 +144,7 @@ public class BurnTest
         return i;
     }
 
-    static void burn(TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency) throws IOException
+    static void burn(TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency)
     {
         RandomSource random = new DefaultRandom();
         long seed = random.nextLong();
@@ -155,7 +153,7 @@ public class BurnTest
         burn(random, topologyFactory, clients, nodes, keyCount, operations, concurrency);
     }
 
-    static void burn(long seed, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency) throws IOException
+    static void burn(long seed, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency)
     {
         RandomSource random = new DefaultRandom();
         System.out.println(seed);
@@ -163,7 +161,7 @@ public class BurnTest
         burn(random, topologyFactory, clients, nodes, keyCount, operations, concurrency);
     }
 
-    static void reconcile(long seed, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency) throws IOException, ExecutionException, InterruptedException, TimeoutException
+    static void reconcile(long seed, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency) throws ExecutionException, InterruptedException
     {
         ReconcilingLogger logReconciler = new ReconcilingLogger(logger);
 
@@ -295,7 +293,7 @@ public class BurnTest
         }
     }
 
-    public static void main(String[] args) throws Exception
+    public static void main(String[] args)
     {
         Long overrideSeed = null;
         int count = 1;
@@ -324,12 +322,12 @@ public class BurnTest
     }
 
     @Test
-    public void testOne() throws Exception
+    public void testOne()
     {
         run(ThreadLocalRandom.current().nextLong());
     }
 
-    private static void run(long seed) throws Exception
+    private static void run(long seed)
     {
         logger.info("Seed: {}", seed);
         Cluster.trace.trace("Seed: {}", seed);

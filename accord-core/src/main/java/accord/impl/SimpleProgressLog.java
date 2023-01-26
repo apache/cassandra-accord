@@ -500,6 +500,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     Unseekables<?, ?> someKeys = unseekables(command);
 
                     BiConsumer<Known, Throwable> callback = (success, fail) -> {
+                        if (fail != null) node.agent().onUncaughtException(fail);
                         commandStore.execute(PreLoadContext.empty(), ignore -> {
                             if (progress() != Investigating)
                                 return;

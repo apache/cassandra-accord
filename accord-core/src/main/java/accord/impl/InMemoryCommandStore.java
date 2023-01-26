@@ -819,12 +819,22 @@ public abstract class InMemoryCommandStore implements CommandStore
 
         public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
         {
-            super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
-            this.executor = Executors.newSingleThreadExecutor(r -> {
+            this(id, time, agent, store, progressLogFactory, rangesForEpochHolder, Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
                 thread.setName(CommandStore.class.getSimpleName() + '[' + time.id() + ']');
                 return thread;
-            });
+            }));
+        }
+
+        private SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder, ExecutorService executor)
+        {
+            super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
+            this.executor = executor;
+        }
+
+        public static CommandStore.Factory factory(ExecutorService executor)
+        {
+            return (id, time, agent, store, progressLogFactory, rangesForEpoch) -> new SingleThread(id, time, agent, store, progressLogFactory, rangesForEpoch, executor);
         }
 
         void assertThread()

@@ -165,4 +165,26 @@ abstract class AsyncChainCombiner<I, O> extends AsyncChains.Head<O>
             return reduce.reducer == reducer;
         }
     }
+
+    static class ReduceWithIdentity<A, B> extends AsyncChainCombiner<A, B>
+    {
+        private final B identity;
+        private final BiFunction<B, ? super A, B> reducer;
+
+        protected ReduceWithIdentity(List<? extends AsyncChain<? extends A>> inputs, B identity, BiFunction<B, ? super A, B> reducer)
+        {
+            super(inputs);
+            this.identity = identity;
+            this.reducer = reducer;
+        }
+
+        @Override
+        void complete(A[] results, BiConsumer<? super B, Throwable> callback)
+        {
+            B result = identity;
+            for (A r : results)
+                result = reducer.apply(result, r);
+            callback.accept(result, null);
+        }
+    }
 }

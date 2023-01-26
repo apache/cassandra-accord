@@ -58,6 +58,7 @@ public class ListAgent implements Agent
     @Override
     public void onUncaughtException(Throwable t)
     {
+        if (t instanceof accord.coordinate.Timeout) return;
         // TODO (required, testing): ensure reported to runner
         onFailure.accept(t);
     }
