@@ -18,8 +18,12 @@
 
 package accord.api;
 
+import accord.primitives.Seekable;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 /**
@@ -30,6 +34,9 @@ public interface Query
     /**
      * Perform some transformation on the complete {@link Data} result of a {@link Read}
      * from some {@link DataStore}, to produce a {@link Result} to return to the client.
+     *
+     * executeAt timestamp is provided so that the result of the transaction can be determined based
+     * on configuration at that epoch. This will be deterministic even if the transaction is recovered.
      */
-    Result compute(TxnId txnId, @Nullable Data data, @Nullable Read read, @Nullable Update update);
+    Result compute(@Nonnull TxnId txnId, @Nonnull Timestamp executeAt, @Nonnull Seekables<?, ?> keys, @Nullable Data data, @Nullable Read read, @Nullable Update update);
 }

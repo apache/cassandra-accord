@@ -18,7 +18,9 @@
 
 package accord.local;
 
+import java.util.Iterator;
 import java.util.function.Predicate;
+import javax.annotation.Nullable;
 
 import accord.api.Agent;
 import accord.api.DataStore;
@@ -30,7 +32,6 @@ import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn.Kind;
 import accord.primitives.TxnId;
-import javax.annotation.Nullable;
 
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.primitives.Txn.Kind.Read;
@@ -75,7 +76,7 @@ public interface SafeCommandStore
 
     interface CommandFunction<I, O>
     {
-        O apply(Seekable keyOrRange, TxnId txnId, Timestamp executeAt, I in);
+        O apply(Seekable keyOrRange, TxnId txnId, Timestamp executeAt, Status status, I in);
     }
 
     enum TestTimestamp
@@ -139,7 +140,12 @@ public interface SafeCommandStore
      * Visits keys first and then ranges, both in ascending order.
      * Within each key or range visits TxnId in ascending order of queried timestamp.
      */
-    <T> T mapReduce(Seekables<?, ?> keys, Ranges slice,
+    <T> T mapReduceWithTerminate(Seekables<?, ?> keysOrRanges, Ranges slice,
+                       TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp,
+                       TestDep testDep, @Nullable TxnId depId,
+                       @Nullable Status minStatus, @Nullable Status maxStatus,
+                       CommandFunction<T, T> map, T accumulate, Predicate<T> terminate);
+    <T> T mapReduce(Seekables<?, ?> keysOrRanges, Ranges slice,
                     TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp,
                     TestDep testDep, @Nullable TxnId depId, @Nullable Status minStatus, @Nullable Status maxStatus,
                     CommandFunction<T, T> map, T initialValue, T terminalValue);
@@ -164,8 +170,10 @@ public interface SafeCommandStore
     {
         TxnId txnId = safeCommand.txnId();
         Command command = safeCommand.current();
-        for (CommandListener listener : command.listeners())
+        Iterator<CommandListener> i = command.listeners().reverseIterator();
+        while (i.hasNext())
         {
+            CommandListener listener = i.next();
             PreLoadContext context = listener.listenerPreLoadContext(command.txnId());
             if (canExecuteWith(context))
             {

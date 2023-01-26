@@ -21,6 +21,9 @@ package accord.messages;
 import java.util.Collections;
 import java.util.Objects;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import accord.local.*;
 import accord.local.SafeCommandStore.TestKind;
 
@@ -43,6 +46,8 @@ import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 
 public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
 {
+    private static final Logger logger = LoggerFactory.getLogger(PreAccept.class);
+
     public static class SerializerSupport
     {
         public static PreAccept create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, long maxEpoch, PartialTxn partialTxn, @Nullable FullRoute<?> fullRoute)
@@ -233,7 +238,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         // could use MAY_EXECUTE_BEFORE to prune those we know execute later, but shouldn't usually be of much help
         // and would need to supply !hasOrderedTxnId
         commandStore.mapReduce(keys, ranges, testKind, STARTED_BEFORE, executeAt, ANY_DEPS, null, null, null,
-                (keyOrRange, testTxnId, testExecuteAt, in) -> {
+                (keyOrRange, testTxnId, testExecuteAt, saveStatus, in) -> {
                     // TODO (easy, efficiency): either pass txnId as parameter or encode this behaviour in a specialised builder to avoid extra allocations
                     if (!testTxnId.equals(txnId))
                         in.add(keyOrRange, testTxnId);

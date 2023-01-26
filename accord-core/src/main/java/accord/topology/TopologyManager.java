@@ -18,23 +18,31 @@
 
 package accord.topology;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+
+import com.google.common.annotations.VisibleForTesting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import accord.api.ConfigurationService;
 import accord.api.RoutingKey;
 import accord.api.TopologySorter;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.Node.Id;
 import accord.messages.Request;
-import accord.primitives.*;
-import accord.topology.Topologies.Single;
-import com.google.common.annotations.VisibleForTesting;
-import accord.utils.Invariants;
+import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
-import accord.utils.async.*;
-
-import java.util.*;
+import accord.primitives.Unseekables;
+import accord.topology.Topologies.Single;
+import accord.utils.Invariants;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 
 import static accord.coordinate.tracking.RequestStatus.Success;
-
 import static accord.utils.Invariants.checkArgument;
 
 /**
@@ -52,6 +60,8 @@ import static accord.utils.Invariants.checkArgument;
  */
 public class TopologyManager implements ConfigurationService.Listener
 {
+    private static final Logger logger = LoggerFactory.getLogger(TopologyManager.class);
+
     private static final AsyncResult<Void> SUCCESS = AsyncResults.success(null);
     static class EpochState
     {
@@ -315,7 +325,9 @@ public class TopologyManager implements ConfigurationService.Listener
 
         EpochState maxEpochState = snapshot.get(maxEpoch);
         if (minEpoch == maxEpoch && !snapshot.requiresHistoricalTopologiesFor(select, maxEpoch))
+        {
             return new Single(sorter, maxEpochState.global.forSelection(select));
+        }
 
         int start = (int)(snapshot.currentEpoch - maxEpoch);
         int limit = (int)(Math.min(1 + snapshot.currentEpoch - minEpoch, snapshot.epochs.length));

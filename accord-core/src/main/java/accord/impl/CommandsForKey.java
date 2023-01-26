@@ -18,24 +18,37 @@
 
 package accord.impl;
 
-import accord.api.Key;
-import accord.local.*;
-import accord.primitives.*;
-import com.google.common.collect.ImmutableSortedMap;
-
-import javax.annotation.Nullable;
-import java.util.*;
+import java.util.List;
+import java.util.NavigableMap;
+import java.util.Objects;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
+
+import com.google.common.collect.ImmutableSortedMap;
+
+import accord.api.Key;
+import accord.local.Command;
+import accord.local.CommandListener;
+import accord.local.PreLoadContext;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.local.SaveStatus;
+import accord.local.Status;
+import accord.primitives.Keys;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import javax.annotation.Nullable;
 
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.SafeCommandStore.TestKind.Ws;
 import static accord.local.Status.PreAccepted;
 import static accord.local.Status.PreCommitted;
-import static accord.utils.Utils.*;
+import static accord.utils.Utils.ensureSortedImmutable;
+import static accord.utils.Utils.ensureSortedMutable;
 
 public class CommandsForKey
 {
@@ -143,7 +156,7 @@ public class CommandsForKey
         public <T> T mapReduce(SafeCommandStore.TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp,
                                SafeCommandStore.TestDep testDep, @Nullable TxnId depId,
                                @Nullable Status minStatus, @Nullable Status maxStatus,
-                               SafeCommandStore.CommandFunction<T, T> map, T initialValue, T terminalValue)
+                               SafeCommandStore.CommandFunction<T, T> map, T initialValue, Predicate<T> terminate)
         {
 
             for (D data : (testTimestamp == TestTimestamp.BEFORE ? commands.headMap(timestamp, false) : commands.tailMap(timestamp, false)).values())
@@ -160,8 +173,8 @@ public class CommandsForKey
                     continue;
                 if (maxStatus != null && maxStatus.compareTo(status.status) < 0)
                     continue;
-                initialValue = map.apply(key, txnId, executeAt, initialValue);
-                if (initialValue.equals(terminalValue))
+                initialValue = map.apply(key, txnId, executeAt, status.status, initialValue);
+                if (terminate.test(initialValue))
                     break;
             }
             return initialValue;

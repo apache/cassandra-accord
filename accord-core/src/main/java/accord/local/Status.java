@@ -422,4 +422,9 @@ public enum Status
     {
         return max(a, a, acceptedA, b, b, acceptedB);
     }
+
+    public boolean isTerminal()
+    {
+        return this == Applied | this == Invalidated;
+    }
 }

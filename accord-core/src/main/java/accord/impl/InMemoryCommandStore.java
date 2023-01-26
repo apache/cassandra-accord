@@ -37,6 +37,8 @@ import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
+import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -72,7 +74,6 @@ import accord.utils.Invariants;
 import accord.utils.ReducingRangeMap;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
-import javax.annotation.Nullable;
 
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
@@ -270,7 +271,7 @@ public abstract class InMemoryCommandStore implements CommandStore
         return attrs;
     }
 
-    private <O> O mapReduceForKey(InMemorySafeStore safeStore, Routables<?, ?> keysOrRanges, Ranges slice, BiFunction<CommandsForKey, O, O> map, O accumulate, O terminalValue)
+    private <O> O mapReduceForKey(InMemorySafeStore safeStore, Routables<?, ?> keysOrRanges, Ranges slice, BiFunction<CommandsForKey, O, O> map, O accumulate, Predicate<O> terminate)
     {
         switch (keysOrRanges.domain()) {
             default:
@@ -284,7 +285,7 @@ public abstract class InMemoryCommandStore implements CommandStore
                     if (forKey.current() == null)
                         continue;
                     accumulate = map.apply(forKey.current(), accumulate);
-                    if (accumulate.equals(terminalValue))
+                    if (terminate.test(accumulate))
                         return accumulate;
                 }
                 break;
@@ -298,7 +299,7 @@ public abstract class InMemoryCommandStore implements CommandStore
                         if (forKey.value() == null)
                             continue;
                         accumulate = map.apply(forKey.value(), accumulate);
-                        if (accumulate.equals(terminalValue))
+                        if (terminate.test(accumulate))
                             return accumulate;
                     }
                 }
@@ -403,15 +404,9 @@ public abstract class InMemoryCommandStore implements CommandStore
         this.rejectBefore = newRejectBefore;
     }
 
-    public ReducingRangeMap<Timestamp> getRejectBefore()
-    {
-        return rejectBefore;
-    }
-
     @Override
     public Timestamp preaccept(TxnId txnId, Seekables<?, ?> keys, SafeCommandStore safeStore)
     {
-        ReducingRangeMap<Timestamp> rejectBefore = getRejectBefore();
         NodeTimeService time = safeStore.time();
         boolean isExpired = agent().isExpired(txnId, safeStore.time().now());
         if (rejectBefore != null && !isExpired)
@@ -673,7 +668,7 @@ public abstract class InMemoryCommandStore implements CommandStore
         @Override
         public Timestamp maxConflict(Seekables<?, ?> keysOrRanges, Ranges slice)
         {
-            Timestamp timestamp = commandStore.mapReduceForKey(this, keysOrRanges, slice, (forKey, prev) -> Timestamp.max(forKey.max(), prev), Timestamp.NONE, null);
+            Timestamp timestamp = commandStore.mapReduceForKey(this, keysOrRanges, slice, (forKey, prev) -> Timestamp.max(forKey.max(), prev), Timestamp.NONE, Objects::isNull);
             Seekables<?, ?> sliced = keysOrRanges.slice(slice, Minimal);
             for (RangeCommand command : commandStore.rangeCommands.values())
             {
@@ -691,6 +686,12 @@ public abstract class InMemoryCommandStore implements CommandStore
 
         @Override
         public <T> T mapReduce(Seekables<?, ?> keysOrRanges, Ranges slice, TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp, TestDep testDep, @Nullable TxnId depId, @Nullable Status minStatus, @Nullable Status maxStatus, CommandFunction<T, T> map, T accumulate, T terminalValue)
+        {
+            return mapReduceWithTerminate(keysOrRanges, slice, testKind, testTimestamp, timestamp, testDep, depId, minStatus, maxStatus, map, accumulate, Predicate.isEqual(terminalValue));
+        }
+
+        @Override
+        public <T> T mapReduceWithTerminate(Seekables<?, ?> keysOrRanges, Ranges slice, TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp, TestDep testDep, @Nullable TxnId depId, @Nullable Status minStatus, @Nullable Status maxStatus, CommandFunction<T, T> map, T accumulate, Predicate<T> terminate)
         {
             accumulate = commandStore.mapReduceForKey(this, keysOrRanges, slice, (forKey, prev) -> {
                 CommandsForKey.CommandTimeseries<?> timeseries;
@@ -717,10 +718,10 @@ public abstract class InMemoryCommandStore implements CommandStore
                     case MAY_EXECUTE_BEFORE:
                         remapTestTimestamp = CommandsForKey.CommandTimeseries.TestTimestamp.BEFORE;
                 }
-                return timeseries.mapReduce(testKind, remapTestTimestamp, timestamp, testDep, depId, minStatus, maxStatus, map, prev, terminalValue);
-            }, accumulate, terminalValue);
+                return timeseries.mapReduce(testKind, remapTestTimestamp, timestamp, testDep, depId, minStatus, maxStatus, map, prev, terminate);
+            }, accumulate, terminate);
 
-            if (accumulate.equals(terminalValue))
+            if (terminate.test(accumulate))
                 return accumulate;
 
             // TODO (find lib, efficiency): this is super inefficient, need to store Command in something queryable
@@ -781,7 +782,7 @@ public abstract class InMemoryCommandStore implements CommandStore
                 for (Command command : e.getValue())
                 {
                     T initial = accumulate;
-                    accumulate = map.apply(e.getKey(), command.txnId(), command.executeAt(), initial);
+                    accumulate = map.apply(e.getKey(), command.txnId(), command.executeAt(), command.status(), initial);
                 }
             }
 

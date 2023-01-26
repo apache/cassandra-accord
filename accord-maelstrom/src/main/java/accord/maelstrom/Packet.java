@@ -25,6 +25,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 import accord.messages.*;
+import accord.messages.WhenReadyToExecute.ExecuteNack;
+import accord.messages.WhenReadyToExecute.ExecuteOk;
 import com.google.gson.JsonObject;
 import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
@@ -49,9 +51,9 @@ public class Packet implements ReplyContext
         Commit(accord.messages.Commit.class),
         Apply(Apply.class),
         ApplyReply(Apply.ApplyReply.class),
-        Read(ReadData.class),
-        ReadOk(ReadData.ReadOk.class),
-        ReadNack(ReadData.ReadNack.class),
+        Read(WhenReadyToExecute.class),
+        ReadOk(ExecuteOk.class),
+        ReadNack(ExecuteNack.class),
         WaitOnCommit(accord.messages.WaitOnCommit.class),
         WaitOnCommitOk(accord.messages.WaitOnCommit.WaitOnCommitOk.class),
         Recover(BeginRecovery.class),

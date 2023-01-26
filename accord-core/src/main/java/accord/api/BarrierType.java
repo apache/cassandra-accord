@@ -16,22 +16,23 @@
  * limitations under the License.
  */
 
-package accord.primitives;
+package accord.api;
 
-import accord.api.RoutingKey;
-
-public class SyncPoint
+public enum BarrierType
 {
-    public final TxnId txnId;
-    public final RoutingKey homeKey;
-    public final Deps waitFor;
-    public final boolean finishedAsync;
+    // Only wait until the barrier is achieved locally, and possibly don't trigger the barrier remotely
+    local(false, true),
+    // Wait until the barrier has been achieved at a quorum globally
+    global_sync(true, false),
+    // Trigger the global barrier, but only block on creation of the barrier and local application
+    global_async(true, true);
 
-    public SyncPoint(TxnId txnId, RoutingKey homeKey, Deps waitFor, boolean finishedAsync)
+    public final boolean global;
+    public final boolean async;
+
+    BarrierType(boolean global, boolean async)
     {
-        this.txnId = txnId;
-        this.homeKey = homeKey;
-        this.waitFor = waitFor;
-        this.finishedAsync = finishedAsync;
+        this.global = global;
+        this.async = async;
     }
 }

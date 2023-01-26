@@ -544,7 +544,7 @@ public class Commands
             case PreApplied:
                 Ranges executeRanges = executeRanges(safeStore, command.executeAt());
                 Command.Executed executed = command.asExecuted();
-                boolean intersects = executed.writes().keys.intersects(executeRanges);
+                boolean  intersects = executed.writes().keys.intersects(executeRanges);
 
                 if (intersects)
                 {

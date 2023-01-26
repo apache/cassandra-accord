@@ -20,15 +20,18 @@ package accord.impl.list;
 
 import java.util.Map;
 
-import accord.api.Read;
-import accord.api.Update;
-import accord.local.Node.Id;
 import accord.api.Data;
 import accord.api.Key;
 import accord.api.Query;
+import accord.api.Read;
 import accord.api.Result;
+import accord.api.Update;
+import accord.local.Node.Id;
 import accord.primitives.Keys;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import javax.annotation.Nonnull;
 
 public class ListQuery implements Query
 {
@@ -42,7 +45,7 @@ public class ListQuery implements Query
     }
 
     @Override
-    public Result compute(TxnId txnId, Data data, Read untypedRead, Update update)
+    public Result compute(@Nonnull TxnId txnId, @Nonnull Timestamp executeAt, @Nonnull Seekables<?, ?> keys, Data data, Read untypedRead, Update update)
     {
         ListRead read = (ListRead) untypedRead;
         Keys responseKeys = Keys.ofSortedUnique(((ListData)data).keySet());

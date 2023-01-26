@@ -27,6 +27,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import accord.utils.IntrusiveLinkedList;
@@ -68,7 +71,11 @@ import static accord.primitives.Route.isFullRoute;
 // TODO (desired, consider): consider propagating invalidations in the same way as we do applied
 public class SimpleProgressLog implements ProgressLog.Factory
 {
+    private static final Logger logger = LoggerFactory.getLogger(SimpleProgressLog.class);
+
     enum Progress { NoneExpected, Expected, NoProgress, Investigating, Done }
+
+    public static volatile boolean PAUSE_FOR_TEST = false;
 
     enum CoordinateStatus
     {
@@ -831,6 +838,12 @@ public class SimpleProgressLog implements ProgressLog.Factory
             isScheduled = false;
             try
             {
+                if (PAUSE_FOR_TEST)
+                {
+                    logger.info("Skipping progress log because it is paused for test");
+                    return;
+                }
+
                 for (State.Monitoring run : this)
                 {
                     if (run.shouldRun())

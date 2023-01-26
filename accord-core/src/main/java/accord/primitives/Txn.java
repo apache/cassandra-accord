@@ -215,9 +215,9 @@ public interface Txn
         return kind().isWrite();
     }
 
-    default Result result(TxnId txnId, @Nullable Data data)
+    default Result result(TxnId txnId, Timestamp executeAt, @Nullable Data data)
     {
-        return query().compute(txnId, data, read(), update());
+        return query().compute(txnId, executeAt, keys(), data, read(), update());
     }
 
     default Writes execute(Timestamp executeAt, @Nullable Data data)

@@ -18,28 +18,34 @@
 
 package accord.local;
 
-import accord.api.*;
-import accord.primitives.*;
-import accord.api.RoutingKey;
-import accord.topology.Topology;
-import accord.utils.MapReduce;
-import accord.utils.MapReduceConsume;
-
-import com.google.common.annotations.VisibleForTesting;
-import org.agrona.collections.Hashing;
-import org.agrona.collections.Int2ObjectHashMap;
-import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncChains;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.stream.IntStream;
+
+import com.google.common.annotations.VisibleForTesting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import accord.api.Agent;
+import accord.api.DataStore;
+import accord.api.Key;
+import accord.api.ProgressLog;
+import accord.api.RoutingKey;
+import accord.primitives.AbstractKeys;
+import accord.primitives.Ranges;
+import accord.primitives.Routables;
+import accord.primitives.RoutingKeys;
+import accord.topology.Topology;
+import accord.utils.MapReduce;
+import accord.utils.MapReduceConsume;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
+import org.agrona.collections.Hashing;
+import org.agrona.collections.Int2ObjectHashMap;
 
 import static accord.local.PreLoadContext.empty;
 import static accord.utils.Invariants.checkArgument;
@@ -49,6 +55,8 @@ import static accord.utils.Invariants.checkArgument;
  */
 public abstract class CommandStores<S extends CommandStore>
 {
+    private static final Logger logger = LoggerFactory.getLogger(CommandStores.class);
+
     public interface Factory
     {
         CommandStores<?> create(NodeTimeService time,
@@ -334,6 +342,12 @@ public abstract class CommandStores<S extends CommandStore>
                     throw new IllegalStateException();
 
                 return null;
+            }
+
+            @Override
+            public String toString()
+            {
+                return forEach.getClass().getName();
             }
         });
     }

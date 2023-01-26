@@ -20,6 +20,9 @@ package accord.coordinate;
 
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import accord.local.Node;
 import accord.messages.Apply;
 import accord.messages.PreAccept.PreAcceptOk;
@@ -32,12 +35,12 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.Txn.Kind;
 import accord.primitives.TxnId;
-import accord.utils.async.AsyncResult;
 
 import static accord.coordinate.Propose.Invalidate.proposeAndCommitInvalidate;
 import static accord.primitives.Timestamp.mergeMax;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.utils.Functions.foldl;
+import static accord.utils.Invariants.checkArgument;
 
 /**
  * Perform initial rounds of PreAccept and Accept until we have reached agreement about when we should execute.
@@ -47,26 +50,33 @@ import static accord.utils.Functions.foldl;
  */
 public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
 {
-    private CoordinateSyncPoint(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
+    private static final Logger logger = LoggerFactory.getLogger(CoordinateSyncPoint.class);
+
+    // Whether to wait on the dependencies applying globally before returning a result
+    private final boolean async;
+
+    private CoordinateSyncPoint(Node node, TxnId txnId, Txn txn, FullRoute<?> route, boolean async)
     {
         super(node, txnId, txn, route);
+        checkArgument(txnId.rw() == Kind.SyncPoint || async, "Exclusive sync points only support async application");
+        this.async = async;
     }
 
-    public static AsyncResult<SyncPoint> exclusive(Node node, Seekables<?, ?> keysOrRanges)
+    public static CoordinateSyncPoint exclusive(Node node, Seekables<?, ?> keysOrRanges)
     {
-        return coordinate(ExclusiveSyncPoint, node, keysOrRanges);
+        return coordinate(ExclusiveSyncPoint, node, keysOrRanges, true);
     }
 
-    public static AsyncResult<SyncPoint> inclusive(Node node, Seekables<?, ?> keysOrRanges)
+    public static CoordinateSyncPoint inclusive(Node node, Seekables<?, ?> keysOrRanges, boolean async)
     {
-        return coordinate(Kind.SyncPoint, node, keysOrRanges);
+        return coordinate(Kind.SyncPoint, node, keysOrRanges, async);
     }
 
-    private static AsyncResult<SyncPoint> coordinate(Kind kind, Node node, Seekables<?, ?> keysOrRanges)
+    private static CoordinateSyncPoint coordinate(Kind kind, Node node, Seekables<?, ?> keysOrRanges, boolean async)
     {
         TxnId txnId = node.nextTxnId(kind, keysOrRanges.domain());
         FullRoute<?> route = node.computeRoute(txnId, keysOrRanges);
-        CoordinateSyncPoint coordinate = new CoordinateSyncPoint(node, txnId, node.agent().emptyTxn(kind, keysOrRanges), route);
+        CoordinateSyncPoint coordinate = new CoordinateSyncPoint(node, txnId, node.agent().emptyTxn(kind, keysOrRanges), route, async);
         coordinate.start();
         return coordinate;
     }
@@ -91,8 +101,33 @@ public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
                 @Override
                 void onAccepted()
                 {
-                    node.send(tracker.nodes(), id -> new Apply(id, tracker.topologies(), tracker.topologies(), txnId.epoch(), txnId, route, txn, txnId, deps, txn.execute(txnId, null), txn.result(txnId, null)));
-                    accept(new SyncPoint(txnId, deps), null);
+                    if (txnId.rw() == ExclusiveSyncPoint)
+                    {
+                        node.send(tracker.nodes(), id -> new Apply(id, tracker.topologies(), tracker.topologies(), txnId.epoch(), txnId, route, txn, txnId, deps, txn.execute(txnId, null), txn.result(txnId, txnId, null)));
+                        accept(new SyncPoint(txnId, route.homeKey(), deps, true), null);
+                    }
+                    else
+                    {
+                        // If deps are empty there is nothing to wait on application for so we can return immediately
+                        boolean processAsyncCompletion = deps.isEmpty() || async;
+                        BlockOnDeps.blockOnDeps(node, txnId, txn, route, deps, (result, throwable) -> {
+                            // Don't want to process completion twice
+                            if (processAsyncCompletion)
+                            {
+                                // Don't lose the error
+                                if (throwable != null)
+                                    node.agent().onUncaughtException(throwable);
+                                return;
+                            }
+                            if (throwable != null)
+                                accept(null, throwable);
+                            else
+                                accept(new SyncPoint(txnId, route.homeKey(), deps, false), null);
+                        });
+                        // Notify immediately and the caller can add a listener to command completion to track local application
+                        if (processAsyncCompletion)
+                            accept(new SyncPoint(txnId, route.homeKey(), deps, true), null);
+                    }
                 }
             }.start();
         }

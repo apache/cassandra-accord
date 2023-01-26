@@ -18,20 +18,28 @@
 
 package accord.topology;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+import com.google.common.collect.Sets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import accord.api.TopologySorter;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.primitives.Ranges;
 import accord.utils.IndexedConsumer;
-import com.google.common.collect.Sets;
 import accord.utils.Invariants;
-
-import java.util.*;
 
 // TODO (desired, efficiency/clarity): since Topologies are rarely needed, should optimise API for single topology case
 //  (e.g. at least implementing Topologies by Topology)
 public interface Topologies extends TopologySorter
 {
+    Logger logger = LoggerFactory.getLogger(Topologies.class);
+
     Topology current();
 
     Topology forEpoch(long epoch);

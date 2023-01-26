@@ -19,6 +19,7 @@
 package accord.primitives;
 
 import accord.api.RoutingKey;
+import accord.primitives.Routable.Domain;
 
 import static accord.primitives.Routables.Slice.Overlapping;
 
@@ -37,4 +38,9 @@ public interface Seekables<K extends Seekable, U extends Seekables<K, ?>> extend
     Unseekables<?, ?> toUnseekables();
 
     FullRoute<?> toRoute(RoutingKey homeKey);
+    
+    static Seekables<?, ?> of(Seekable seekable)
+    {
+        return seekable.domain() == Domain.Range ? Ranges.of(seekable.asRange()) : Keys.of(seekable.asKey());
+    }
 }

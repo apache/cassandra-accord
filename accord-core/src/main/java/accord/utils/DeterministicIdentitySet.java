@@ -18,15 +18,18 @@
 
 package accord.utils;
 
-import com.google.common.collect.Iterables;
-
-import java.util.*;
+import java.util.AbstractSet;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
+import com.google.common.collect.Iterables;
+
 public class DeterministicIdentitySet<T> extends AbstractSet<T>
 {
-    static class Entry<T>
+    public static class Entry<T>
     {
         final T item;
         Entry<T> prev;
@@ -78,6 +81,29 @@ public class DeterministicIdentitySet<T> extends AbstractSet<T>
                     throw new NoSuchElementException();
                 T result = next.item;
                 next = next.next;
+                return result;
+            }
+        };
+    }
+
+    public Iterator<T> reverseIterator()
+    {
+        return new Iterator<T>()
+        {
+            Entry<T> previous = head.prev;
+            @Override
+            public boolean hasNext()
+            {
+                return previous != head;
+            }
+
+            @Override
+            public T next()
+            {
+                if (!hasNext())
+                    throw new NoSuchElementException();
+                T result = previous.item;
+                previous = previous.prev;
                 return result;
             }
         };

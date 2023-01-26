@@ -158,6 +158,8 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
             return;
         }
 
+        long delayNanos = networkFilter.delayNanos(to);
+
         long messageId = nextMessageId();
         if (callback != null)
         {
@@ -168,8 +170,14 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                 }, 2L, TimeUnit.SECONDS);
         }
 
-        logger.info("processing message[{}] from {} to {}: {}", messageId, from, to, request);
-        node.receive(request, from, Network.replyCtxFor(messageId));
+        Runnable deliver = () -> {
+            logger.info("processing message[{}] from {} to {} with delay {}: {}", messageId, from, to, delayNanos, request);
+            node.receive(request, from, Network.replyCtxFor(messageId), delayNanos);
+        };
+        if (networkFilter.maybeCork(to, deliver))
+            logger.info("corking message[{}] from {} to {} with delay {}: {}", messageId, from, to, delayNanos, request);
+        else
+            deliver.run();
     }
 
     @Override
