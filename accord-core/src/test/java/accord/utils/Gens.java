@@ -56,6 +56,11 @@ public class Gens {
         return r -> r;
     }
 
+    public static BooleanDSL bools()
+    {
+        return new BooleanDSL();
+    }
+
     public static IntDSL ints()
     {
         return new IntDSL();
@@ -84,6 +89,14 @@ public class Gens {
     public static EnumDSL enums()
     {
         return new EnumDSL();
+    }
+
+    public static class BooleanDSL
+    {
+        public Gen<Boolean> all()
+        {
+            return Gen.Random::nextBoolean;
+        }
     }
 
     public static class IntDSL

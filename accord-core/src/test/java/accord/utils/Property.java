@@ -23,8 +23,6 @@ import accord.utils.Gen.Random;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 
 public class Property
 {
@@ -75,6 +73,11 @@ public class Property
         public <A, B> DoubleBuilder<A, B> forAll(Gen<A> a, Gen<B> b)
         {
             return new DoubleBuilder<>(a, b, this);
+        }
+
+        public <A, B, C> TrippleBuilder<A, B, C> forAll(Gen<A> a, Gen<B> b, Gen<C> c)
+        {
+            return new TrippleBuilder<>(a, b, c, this);
         }
     }
 
@@ -202,6 +205,51 @@ public class Property
                 catch (Throwable t)
                 {
                     throw new PropertyError(propertyError(this, t, a, b), t);
+                }
+                if (pure)
+                {
+                    seed = random.nextLong();
+                    random.setSeed(seed);
+                }
+            }
+        }
+    }
+
+    public interface FailingTriConsumer<A, B, C>
+    {
+        void accept(A a, B b, C c) throws Exception;
+    }
+
+    public static class TrippleBuilder<A, B, C> extends Common<TrippleBuilder<A, B, C>>
+    {
+        private final Gen<A> as;
+        private final Gen<B> bs;
+        private final Gen<C> cs;
+
+        public TrippleBuilder(Gen<A> as, Gen<B> bs, Gen<C> cs, Common<?> other)
+        {
+            super(other);
+            this.as = as;
+            this.bs = bs;
+            this.cs = cs;
+        }
+
+        public void check(FailingTriConsumer<A, B, C> fn)
+        {
+            Random random = new Random(seed);
+            for (int i = 0; i < examples; i++)
+            {
+                A a = null;
+                B b = null;
+                C c = null;
+                try
+                {
+                    checkInterrupted();
+                    fn.accept(a = as.next(random), b = bs.next(random), c = cs.next(random));
+                }
+                catch (Throwable t)
+                {
+                    throw new PropertyError(propertyError(this, t, a, b, c), t);
                 }
                 if (pure)
                 {

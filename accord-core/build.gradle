@@ -37,6 +37,8 @@ dependencies {
     // These act as runtimeOnly dependencies to users
     implementation 'org.slf4j:slf4j-api:1.7.36'
     implementation 'org.agrona:agrona:1.17.1'
+
+    testImplementation group: 'org.assertj', name: 'assertj-core', version: '3.24.2'
 }
 
 task burn(type: JavaExec) {

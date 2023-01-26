@@ -30,6 +30,7 @@ import java.util.function.Function;
 
 import accord.api.VisibleForImplementation;
 import accord.utils.Invariants;
+import accord.utils.async.AsyncChainCombiner.ReduceWithIdentity;
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -421,6 +422,16 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
             return a;
         }
         return new Reduce<>(Lists.newArrayList(a, b), reducer);
+    }
+
+    public static <A, B> AsyncChain<B> reduce(List<? extends AsyncChain<? extends A>> chains, B identity, BiFunction<B, ? super A, B> reducer)
+    {
+        switch (chains.size())
+        {
+            case 0: return AsyncChains.success(identity);
+            case 1: return chains.get(0).map(a -> reducer.apply(identity, a));
+        }
+        return new ReduceWithIdentity<>(chains, identity, reducer);
     }
 
     public static <V> V getBlocking(AsyncChain<V> chain) throws InterruptedException, ExecutionException
