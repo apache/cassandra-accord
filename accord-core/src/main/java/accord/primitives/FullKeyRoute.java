@@ -49,6 +49,7 @@ public class FullKeyRoute extends KeyRoute implements FullRoute<RoutingKey>
         return slice(ranges);
     }
 
+    @Override
     public FullKeyRoute toMaximalUnseekables()
     {
         return this;

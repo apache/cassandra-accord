@@ -29,7 +29,13 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 import javax.annotation.Nullable;
 
 import static accord.utils.ArrayBuffers.uncached;
+import static accord.utils.SortedArrays.Search.FAST;
 
+// TODO (low priority, efficiency): improvements:
+//        - Either by manually duplicating or using compiler inlining directives to
+//           - compile separate versions for Comparators vs Comparable.compareTo
+//           - compile dedicated binarySearch and exponentialSearch functions for FLOOR, CEIL, HIGHER, LOWER
+//        - Exploit exponentialSearch in union/intersection/etc
 public class SortedArrays
 {
     /**
@@ -72,6 +78,11 @@ public class SortedArrays
      */
     public static <T extends Comparable<? super T>> T[] linearUnion(T[] left, int leftLength, T[] right, int rightLength, ObjectBuffers<T> buffers)
     {
+        return linearUnion(left, leftLength, right, rightLength, Comparable::compareTo, buffers);
+    }
+
+    public static <T> T[] linearUnion(T[] left, int leftLength, T[] right, int rightLength, AsymmetricComparator<? super T, ? super T> comparator, ObjectBuffers<T> buffers)
+    {
         int leftIdx = 0;
         int rightIdx = 0;
 
@@ -86,7 +97,7 @@ public class SortedArrays
             {
                 T leftKey = left[leftIdx];
                 T rightKey = right[rightIdx];
-                int cmp = leftKey == rightKey ? 0 : leftKey.compareTo(rightKey);
+                int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
 
                 if (cmp <= 0)
                 {
@@ -119,7 +130,7 @@ public class SortedArrays
             {
                 T leftKey = left[leftIdx];
                 T rightKey = right[rightIdx];
-                int cmp = leftKey == rightKey ? 0 : leftKey.compareTo(rightKey);
+                int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
 
                 if (cmp >= 0)
                 {
@@ -153,7 +164,7 @@ public class SortedArrays
             {
                 T leftKey = left[leftIdx];
                 T rightKey = right[rightIdx];
-                int cmp = leftKey == rightKey ? 0 : leftKey.compareTo(rightKey);
+                int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
 
                 T minKey;
                 if (cmp == 0)
@@ -220,7 +231,7 @@ public class SortedArrays
      *
      * TODO (low priority, efficiency): introduce exponential search optimised version
      */
-    public static <T> T[] linearIntersection(T[] left, int leftLength, T[] right, int rightLength, Comparator<T> comparator, ObjectBuffers<T> buffers)
+    public static <T> T[] linearIntersection(T[] left, int leftLength, T[] right, int rightLength, AsymmetricComparator<? super T, ? super T> comparator, ObjectBuffers<T> buffers)
     {
         int leftIdx = 0;
         int rightIdx = 0;
@@ -544,7 +555,7 @@ public class SortedArrays
      */
     public static <T1, T2 extends Comparable<? super T1>> int exponentialSearch(T1[] in, int from, int to, T2 find)
     {
-        return exponentialSearch(in, from, to, find, Comparable::compareTo, Search.FAST);
+        return exponentialSearch(in, from, to, find, Comparable::compareTo, FAST);
     }
 
     public enum Search
@@ -736,6 +747,7 @@ public class SortedArrays
      * Given two sorted arrays where an item in each array may match at most one in the other, find the next
      * index in each array containing an equal item.
      */
+    @Inline
     public static <T extends Comparable<? super T>> long findNextIntersection(T[] as, int ai, T[] bs, int bi)
     {
         return findNextIntersection(as, ai, as.length, bs, bi, bs.length);
@@ -745,18 +757,30 @@ public class SortedArrays
      * Given two sorted arrays where an item in each array may match at most one in the other, find the next
      * index in each array containing an equal item.
      */
+    @Inline
     public static <T extends Comparable<? super T>> long findNextIntersection(T[] as, int ai, int alim, T[] bs, int bi, int blim)
     {
-        return findNextIntersection(as, ai, alim, bs, bi, blim, Comparable::compareTo, Comparable::compareTo, Search.FAST);
+        return findNextIntersection(as, ai, alim, bs, bi, blim, Comparable::compareTo, Comparable::compareTo, FAST);
     }
 
     /**
      * Given two sorted arrays where an item in each array may match at most one in the other, find the next
      * index in each array containing an equal item.
      */
+    @Inline
+    public static <T> long findNextIntersection(T[] as, int ai, int alim, T[] bs, int bi, int blim, AsymmetricComparator<? super T, ? super T> comparator)
+    {
+        return findNextIntersection(as, ai, alim, bs, bi, blim, comparator, comparator, FAST);
+    }
+
+    /**
+     * Given two sorted arrays where an item in each array may match at most one in the other, find the next
+     * index in each array containing an equal item.
+     */
+    @Inline
     public static <T> long findNextIntersection(T[] as, int ai, T[] bs, int bi, AsymmetricComparator<T, T> comparator)
     {
-        return findNextIntersection(as, ai, as.length, bs, bi, bs.length, comparator, comparator, Search.FAST);
+        return findNextIntersection(as, ai, as.length, bs, bi, bs.length, comparator, comparator, FAST);
     }
 
     /**
@@ -765,7 +789,8 @@ public class SortedArrays
      * Works with CEIL or FAST; FAST to be used if precisely one match for each item in either list, CEIL if one item
      * in either list may be matched to multiple in the other list.
      */
-    private static <T1, T2> long findNextIntersection(T1[] as, int ai, int asLength, T2[] bs, int bi, int bsLength, AsymmetricComparator<T1, T2> cmp1, AsymmetricComparator<T2, T1> cmp2, Search op)
+    @Inline
+    private static <T1, T2> long findNextIntersection(T1[] as, int ai, int asLength, T2[] bs, int bi, int bsLength, AsymmetricComparator<? super T1, ? super T2> cmp1, AsymmetricComparator<? super T2, ? super T1> cmp2, Search op)
     {
         if (ai == asLength)
             return -1;
@@ -809,6 +834,13 @@ public class SortedArrays
     public static <T extends Comparable<? super T>> int[] remapToSuperset(T[] src, int srcLength, T[] trg, int trgLength,
                                                                           IntBufferAllocator allocator)
     {
+        return remapToSuperset(src, srcLength, trg, trgLength, Comparable::compareTo, allocator);
+    }
+
+    @Nullable
+    public static <T> int[] remapToSuperset(T[] src, int srcLength, T[] trg, int trgLength, AsymmetricComparator<? super T, ? super T> comparator,
+                                            IntBufferAllocator allocator)
+    {
         if (src == trg || trgLength == srcLength)
             return null;
 
@@ -819,7 +851,7 @@ public class SortedArrays
         {
             if (src[i] != trg[j] && !src[i].equals(trg[j]))
             {
-                j = SortedArrays.exponentialSearch(trg, j, trgLength, src[i]);
+                j = SortedArrays.exponentialSearch(trg, j, trgLength, src[i], comparator, FAST);
                 if (j < 0)
                 {
                     if (i > 0 && src[i] == src[i-1])
@@ -846,9 +878,15 @@ public class SortedArrays
     @Inline
     public static <T extends Comparable<? super T>> long foldlIntersection(T[] as, int ai, int alim, T[] bs, int bi, int blim, IndexedFoldIntersectToLong<? super T> fold, long param, long initialValue, long terminalValue)
     {
+        return foldlIntersection(Comparable::compareTo, as, ai, alim, bs, bi, blim, fold, param, initialValue, terminalValue);
+    }
+
+    @Inline
+    public static <T> long foldlIntersection(AsymmetricComparator<? super T, ? super T> comparator, T[] as, int ai, int alim, T[] bs, int bi, int blim, IndexedFoldIntersectToLong<? super T> fold, long param, long initialValue, long terminalValue)
+    {
         while (true)
         {
-            long abi = findNextIntersection(as, ai, alim, bs, bi, blim);
+            long abi = findNextIntersection(as, ai, alim, bs, bi, blim, comparator);
             if (abi < 0)
                 break;
 
@@ -865,4 +903,43 @@ public class SortedArrays
 
         return initialValue;
     }
+
+    public static <T extends Comparable<T>> void assertSorted(T[] array)
+    {
+        if (!isSorted(array))
+            throw new IllegalArgumentException(Arrays.toString(array) + " is not sorted");
+    }
+
+    public static <T extends Comparable<T>> boolean isSorted(T[] array)
+    {
+        return isSorted(array, Comparable::compareTo);
+    }
+
+    public static <T> boolean isSorted(T[] array, Comparator<T> comparator)
+    {
+        return isSorted(array, comparator, 1);
+    }
+
+
+    public static <T extends Comparable<T>> boolean isSortedUnique(T[] array)
+    {
+        return isSortedUnique(array, Comparable::compareTo);
+    }
+
+    public static  <T> boolean isSortedUnique(T[] array, Comparator<T> comparator)
+    {
+        return isSorted(array, comparator, 0);
+    }
+
+    private static <T> boolean isSorted(T[] array, Comparator<T> comparator, int compareTo)
+    {
+        for (int i = 1 ; i < array.length ; ++i)
+        {
+            if (comparator.compare(array[i - 1], array[i]) >= compareTo)
+                return false;
+        }
+        return true;
+    }
+
+
 }

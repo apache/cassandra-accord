@@ -309,6 +309,7 @@ public class InMemoryCommand extends Command
         return waitingOnCommit != null && !waitingOnCommit.isEmpty();
     }
 
+    @Override
     public boolean isWaitingOnDependency()
     {
         return isWaitingOnCommit() || isWaitingOnApply();

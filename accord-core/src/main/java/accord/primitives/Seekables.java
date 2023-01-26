@@ -7,7 +7,9 @@ import accord.api.RoutingKey;
  */
 public interface Seekables<K extends Seekable, U extends Seekables<K, ?>> extends Routables<K, U>
 {
+    @Override
     U slice(Ranges ranges);
+    @Override
     Seekables<K, U> union(U with);
     Unseekables<?, ?> toUnseekables();
 

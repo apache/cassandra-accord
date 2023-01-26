@@ -53,7 +53,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
     final Txn txn;
     final FullRoute<?> route;
 
-    private FastPathTracker tracker;
+    private final FastPathTracker tracker;
     private boolean preAcceptIsDone;
     private final List<PreAcceptOk> successes;
 
@@ -108,6 +108,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
         tryFailure(failure);
     }
 
+    @Override
     public synchronized void onSuccess(Id from, PreAcceptReply reply)
     {
         if (preAcceptIsDone)

@@ -408,7 +408,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     {
         Ranges ranges = safeStore.ranges().since(executeAt().epoch());
         if (ranges != null) {
-            partialDeps().forEachOn(ranges, txnId -> {
+            partialDeps().forEach(ranges, txnId -> {
                 Command command = safeStore.ifLoaded(txnId);
                 if (command == null)
                 {
@@ -764,7 +764,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                     }
 
                     Unseekables<?, ?> someKeys = cur.maxUnseekables();
-                    if (someKeys == null && prev != null) someKeys = prev.partialDeps().someRoutables(cur.txnId());
+                    if (someKeys == null && prev != null) someKeys = prev.partialDeps().someUnseekables(cur.txnId());
                     Invariants.checkState(someKeys != null);
                     logger.trace("{} blocked on {} until {}", txnIds[0], cur.txnId(), until);
                     safeStore.progressLog().waiting(cur.txnId(), until, someKeys);

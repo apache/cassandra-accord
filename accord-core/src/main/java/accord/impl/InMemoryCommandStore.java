@@ -79,17 +79,20 @@ public class InMemoryCommandStore
             this.commandStore = commandStore;
         }
 
+        @Override
         public Command ifPresent(TxnId txnId)
         {
             return commands.get(txnId);
         }
 
         // TODO (required): mimic caching to test C* behaviour
+        @Override
         public Command ifLoaded(TxnId txnId)
         {
             return commands.get(txnId);
         }
 
+        @Override
         public Command command(TxnId txnId)
         {
             return commands.computeIfAbsent(txnId, id -> new InMemoryCommand(commandStore, id));
@@ -100,6 +103,7 @@ public class InMemoryCommandStore
             return commands.containsKey(txnId);
         }
 
+        @Override
         public CommandsForKey commandsForKey(Key key)
         {
             return commandsForKey.computeIfAbsent(key, k -> new InMemoryCommandsForKey((Key) k));
@@ -110,11 +114,13 @@ public class InMemoryCommandStore
             return commandsForKey.containsKey(key);
         }
 
+        @Override
         public CommandsForKey maybeCommandsForKey(Key key)
         {
             return commandsForKey.get(key);
         }
 
+        @Override
         public void addAndInvokeListener(TxnId txnId, CommandListener listener)
         {
             command(txnId).addListener(listener);
@@ -221,6 +227,7 @@ public class InMemoryCommandStore
             }
         }
 
+        @Override
         public <T> T mapReduce(Routables<?, ?> keysOrRanges, Ranges slice, Function<CommandsForKey, T> map, BinaryOperator<T> reduce, T initialValue)
         {
             switch (keysOrRanges.kindOfContents()) {
@@ -241,6 +248,7 @@ public class InMemoryCommandStore
             }
         }
 
+        @Override
         public void forEach(Routables<?, ?> keysOrRanges, Ranges slice, Consumer<CommandsForKey> forEach)
         {
             switch (keysOrRanges.kindOfContents()) {
@@ -259,6 +267,7 @@ public class InMemoryCommandStore
             }
         }
 
+        @Override
         public void forEach(Routable keyOrRange, Ranges slice, Consumer<CommandsForKey> forEach)
         {
             switch (keyOrRange.domain())
@@ -294,6 +303,7 @@ public class InMemoryCommandStore
                 return submit(context, i -> { consumer.accept(i); return null; });
             }
 
+            @Override
             public synchronized <T> Future<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
             {
                 AsyncPromise<T> promise = new AsyncPromise<>();

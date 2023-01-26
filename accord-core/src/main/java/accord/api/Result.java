@@ -28,5 +28,6 @@ import accord.primitives.ProgressToken;
  */
 public interface Result extends Outcome
 {
+    @Override
     default ProgressToken asProgressToken() { return ProgressToken.APPLIED; }
 }

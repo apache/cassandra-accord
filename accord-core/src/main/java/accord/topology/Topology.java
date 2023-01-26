@@ -177,7 +177,7 @@ public class Topology
         return info != null ? info.ranges : Ranges.EMPTY;
     }
 
-    // TODO: optimised HomeKey concept containing the Key, Shard and Topology to avoid lookups when topology hasn't changed
+    // TODO (low priority, efficiency): optimised HomeKey concept containing the Key, Shard and Topology to avoid lookups when topology hasn't changed
     public Shard forKey(RoutingKey key)
     {
         int i = ranges.indexOf(key);
@@ -294,7 +294,7 @@ public class Topology
         }
         catch (Throwable t)
         {
-            cachedInts.forceDiscard(newSubset, count);
+            cachedInts.forceDiscard(newSubset);
             throw t;
         }
 

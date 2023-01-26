@@ -50,6 +50,7 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
         return ranges.intersects(covering);
     }
 
+    @Override
     public PartialRangeRoute sliceStrict(Ranges newRange)
     {
         if (!covering.containsAll(newRange))
@@ -64,6 +65,7 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
         throw new UnsupportedOperationException();
     }
 
+    @Override
     public PartialRangeRoute slice(Ranges newRanges)
     {
         if (newRanges.containsAll(covering))
@@ -72,6 +74,7 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
         return slice(newRanges, this, homeKey, PartialRangeRoute::new);
     }
 
+    @Override
     public Unseekables<Range, ?> with(RoutingKey withKey)
     {
         throw new UnsupportedOperationException();
@@ -84,6 +87,7 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
         return union((PartialRangeRoute) that);
     }
 
+    @Override
     public PartialRangeRoute union(PartialRoute<Range> with)
     {
         if (!(with instanceof PartialRangeRoute))

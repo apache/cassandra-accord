@@ -44,10 +44,13 @@ public interface RoutableKey extends Routable, Comparable<RoutableKey>
      * @param that the object to be compared.
      * @return
      */
+    @Override
     int compareTo(@Nonnull RoutableKey that);
 
+    @Override
     default Domain domain() { return Domain.Key; }
 
+    @Override
     RoutingKey toUnseekable();
 
     @Override default RoutingKey someIntersectingRoutingKey() { return toUnseekable(); }

@@ -70,12 +70,14 @@ public class Apply extends TxnRequest<ApplyReply>
         this.result = result;
     }
 
+    @Override
     public void process()
     {
         // note, we do not also commit here if txnId.epoch != executeAt.epoch, as the scope() for a commit would be different
         node.mapReduceConsumeLocal(this, txnId.epoch(), untilEpoch, this);
     }
 
+    @Override
     public ApplyReply apply(SafeCommandStore safeStore)
     {
         Command command = safeStore.command(txnId);
@@ -91,6 +93,7 @@ public class Apply extends TxnRequest<ApplyReply>
         }
     }
 
+    @Override
     public ApplyReply reduce(ApplyReply a, ApplyReply b)
     {
         return a.compareTo(b) >= 0 ? a : b;

@@ -50,16 +50,19 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         return SortedArrays.binarySearch(ranges, 0, ranges.length, key, (k, r) -> -r.compareTo(k), FAST);
     }
 
+    @Override
     public int indexOf(Range find)
     {
         return SortedArrays.binarySearch(ranges, 0, ranges.length, find, Range::compareIntersecting, FAST);
     }
 
+    @Override
     public boolean contains(RoutableKey key)
     {
         return indexOf(key) >= 0;
     }
 
+    @Override
     public boolean containsAll(Routables<?, ?> that)
     {
         switch (that.kindOfContents())
@@ -90,6 +93,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         return ((int) supersetLinearMerge(this.ranges, that.ranges)) == that.size();
     }
 
+    @Override
     public int size()
     {
         return ranges.length;
@@ -128,6 +132,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         return findNextIntersection(0, keys, 0) >= 0;
     }
 
+    @Override
     public boolean intersects(AbstractRanges<?> that)
     {
         return SortedArrays.findNextIntersection(this.ranges, 0, that.ranges, 0, Range::compareIntersecting) >= 0;
@@ -139,12 +144,14 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     }
 
     // returns ri in low 32 bits, ki in top, or -1 if no match found
+    @Override
     public long findNextIntersection(int ri, AbstractKeys<?, ?> keys, int ki)
     {
         return swapHighLow32b(SortedArrays.findNextIntersectionWithMultipleMatches(keys.keys, ki, ranges, ri));
     }
 
     // returns ki in bottom 32 bits, ri in top, or -1 if no match found
+    @Override
     public long findNextIntersection(int thisi, AbstractRanges<?> that, int thati)
     {
         return SortedArrays.findNextIntersectionWithMultipleMatches(ranges, thisi, that.ranges, thati, Range::compareIntersecting, Range::compareIntersecting);
@@ -411,20 +418,20 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         if (ranges.length == 0)
             return input;
 
-        ObjectBuffers<Range> cachedKeyRanges = cachedRanges();
-        Range[] buffer = cachedKeyRanges.get(ranges.length);
+        ObjectBuffers<Range> cachedRanges = cachedRanges();
+        Range[] buffer = cachedRanges.get(ranges.length);
         try
         {
             int count = copyAndMergeTouching(ranges, 0, buffer, 0, ranges.length);
             if (count == buffer.length)
                 return input;
-            Range[] result = cachedKeyRanges.complete(buffer, count);
-            cachedKeyRanges.discard(buffer, count);
+            Range[] result = cachedRanges.complete(buffer, count);
+            cachedRanges.discard(buffer, count);
             return constructor.apply(result);
         }
         catch (Throwable t)
         {
-            cachedKeyRanges.forceDiscard(buffer, ranges.length);
+            cachedRanges.forceDiscard(buffer, ranges.length);
             throw t;
         }
     }

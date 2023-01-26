@@ -159,6 +159,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return messageSink;
     }
 
+    @Override
     public long epoch()
     {
         return topology().epoch();
@@ -235,6 +236,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         });
     }
 
+    @Override
     public Timestamp uniqueNow(Timestamp atLeast)
     {
         if (now.get().compareTo(atLeast) < 0)
@@ -247,6 +249,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return uniqueNow();
     }
 
+    @Override
     public long now()
     {
         return nowSupplier.getAsLong();
@@ -505,6 +508,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return agent;
     }
 
+    @Override
     public Id id()
     {
         return id;

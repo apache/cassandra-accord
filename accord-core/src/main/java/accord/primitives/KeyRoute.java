@@ -7,7 +7,7 @@ import accord.utils.SortedArrays;
 
 import javax.annotation.Nonnull;
 
-public abstract class KeyRoute extends AbstractRoutableKeys<Route<RoutingKey>> implements Route<RoutingKey>
+public abstract class KeyRoute extends AbstractUnseekableKeys<Route<RoutingKey>> implements Route<RoutingKey>
 {
     public final RoutingKey homeKey;
 

@@ -42,6 +42,7 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
         this.kind = kind;
     }
 
+    @Override
     public void process()
     {
         node.mapReduceConsumeLocal(this, minEpoch, executeAt.epoch(), this);

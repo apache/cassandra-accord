@@ -55,7 +55,7 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
     final TxnId txnId;
     private boolean isDone;
     private Throwable failure;
-    Map<Id, Object> debug = DEBUG ? new HashMap<>() : null;
+    final Map<Id, Object> debug = DEBUG ? new HashMap<>() : null;
 
     ReadCoordinator(Node node, Topologies topologies, TxnId txnId)
     {
@@ -102,6 +102,7 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
         }
     }
 
+    @Override
     public void onSlowResponse(Id from)
     {
         handle(recordSlowResponse(from));

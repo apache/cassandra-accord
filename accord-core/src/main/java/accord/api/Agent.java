@@ -47,6 +47,7 @@ public interface Agent extends UncaughtExceptionListener
      */
     void onInconsistentTimestamp(Command command, Timestamp prev, Timestamp next);
 
+    @Override
     void onUncaughtException(Throwable t);
 
     void onHandledException(Throwable t);

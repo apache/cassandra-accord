@@ -138,6 +138,7 @@ public class Commit extends TxnRequest<ReadNack>
         return Keys.EMPTY;
     }
 
+    @Override
     public void process()
     {
         node.mapReduceConsumeLocal(this, txnId.epoch(), executeAt.epoch(), this);
@@ -268,6 +269,7 @@ public class Commit extends TxnRequest<ReadNack>
             return waitForEpoch;
         }
 
+        @Override
         public void process(Node node, Id from, ReplyContext replyContext)
         {
             node.forEachLocal(this, scope, txnId.epoch(), invalidateUntilEpoch,

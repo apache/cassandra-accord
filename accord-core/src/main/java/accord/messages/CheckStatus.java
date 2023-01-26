@@ -100,6 +100,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
         this.includeInfo = includeInfo;
     }
 
+    @Override
     public void process()
     {
         node.mapReduceConsumeLocal(this, query, startEpoch, endEpoch, this);
@@ -272,6 +273,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
          * reply, the info would potentially be unsafe to act upon when given a higher status
          * (e.g. Accepted executeAt is very different to Committed executeAt))
          */
+        @Override
         public CheckStatusOk merge(CheckStatusOk that)
         {
             CheckStatusOk max = super.merge(that);

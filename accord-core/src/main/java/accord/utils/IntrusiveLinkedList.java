@@ -77,6 +77,7 @@ public class IntrusiveLinkedList<O extends IntrusiveLinkedListNode> extends Intr
         return next == this;
     }
 
+    @Override
     public Iterator<O> iterator()
     {
         return new Iterator<O>()

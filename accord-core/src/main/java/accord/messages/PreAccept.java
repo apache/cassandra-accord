@@ -88,6 +88,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         node.mapReduceConsumeLocal(this, minEpoch, maxEpoch, this);
     }
 
+    @Override
     public PreAcceptReply apply(SafeCommandStore safeStore)
     {
         // note: this diverges from the paper, in that instead of waiting for JoinShard,
@@ -210,24 +211,23 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
 
     static PartialDeps calculatePartialDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Txn.Kind kindOfTxn, Timestamp executeAt, Ranges ranges)
     {
-        try (PartialDeps.OrderedBuilder builder = PartialDeps.orderedBuilder(ranges, false))
+        try (PartialDeps.Builder builder = PartialDeps.builder(ranges))
         {
             return calculateDeps(commandStore, txnId, keys, kindOfTxn, executeAt, ranges, builder);
         }
     }
 
-    private static <T extends Deps> T calculateDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Txn.Kind kindOfTxn, Timestamp executeAt, Ranges ranges, Deps.AbstractOrderedBuilder<T> builder)
+    private static <T extends Deps> T calculateDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Txn.Kind kindOfTxn, Timestamp executeAt, Ranges ranges, Deps.AbstractBuilder<T> builder)
     {
         TestKind testKind = kindOfTxn.isWrite() ? RorWs : Ws;
         commandStore.forEach(keys, ranges, forKey -> {
-            builder.nextKey(forKey.key());
             forKey.uncommitted().before(executeAt, testKind, ANY_DEPS, null, ANY_STATUS, null)
                     .forEach(info -> {
-                        if (!info.txnId.equals(txnId)) builder.add(info.txnId);
+                        if (!info.txnId.equals(txnId)) builder.add(forKey.key(), info.txnId);
                     });
             forKey.committedByExecuteAt().before(executeAt, testKind, ANY_DEPS, null, ANY_STATUS, null)
                     .forEach(id -> {
-                        if (!id.equals(txnId)) builder.add(id);
+                        if (!id.equals(txnId)) builder.add(forKey.key(), id);
                     });
         });
 

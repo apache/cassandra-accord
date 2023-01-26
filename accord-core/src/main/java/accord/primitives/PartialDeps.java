@@ -1,49 +1,38 @@
 package accord.primitives;
 
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 
 public class PartialDeps extends Deps
 {
-    public static final PartialDeps NONE = new PartialDeps(Ranges.EMPTY, Deps.NONE.keys, Deps.NONE.txnIds, Deps.NONE.keyToTxnId);
+    public static final PartialDeps NONE = new PartialDeps(Ranges.EMPTY, KeyDeps.NONE, RangeDeps.NONE);
 
-    public static class SerializerSupport
+    public static Builder builder(Ranges covering)
     {
-        private SerializerSupport() {}
-
-        public static PartialDeps create(Ranges covering, Keys keys, TxnId[] txnIds, int[] keyToTxnId)
-        {
-            return new PartialDeps(covering, keys, txnIds, keyToTxnId);
-        }
+        return new Builder(covering);
     }
-
-    public static class OrderedBuilder extends AbstractOrderedBuilder<PartialDeps>
+    public static class Builder extends AbstractBuilder<PartialDeps>
     {
         final Ranges covering;
-        public OrderedBuilder(Ranges covering, boolean hasOrderedTxnId)
+        public Builder(Ranges covering)
         {
-            super(hasOrderedTxnId);
             this.covering = covering;
         }
 
         @Override
-        PartialDeps build(Keys keys, TxnId[] txnIds, int[] keysToTxnIds)
+        public PartialDeps build()
         {
-            return new PartialDeps(covering, keys, txnIds, keysToTxnIds);
+            return new PartialDeps(covering, keyBuilder.build(), rangeBuilder == null ? RangeDeps.NONE : rangeBuilder.build());
         }
-    }
-
-    public static OrderedBuilder orderedBuilder(Ranges ranges, boolean hasOrderedTxnId)
-    {
-        return new OrderedBuilder(ranges, hasOrderedTxnId);
     }
 
     public final Ranges covering;
 
-    PartialDeps(Ranges covering, Keys keys, TxnId[] txnIds, int[] keyToTxnId)
+    public PartialDeps(Ranges covering, KeyDeps keyDeps, RangeDeps rangeDeps)
     {
-        super(keys, txnIds, keyToTxnId);
+        super(keyDeps, rangeDeps);
         this.covering = covering;
-        Preconditions.checkState(covering.containsAll(keys));
+        Invariants.checkState(covering.containsAll(keyDeps.keys));
+        Invariants.checkState(rangeDeps.isCoveredBy(covering));
     }
 
     public boolean covers(Unseekables<?, ?> keysOrRanges)
@@ -53,15 +42,17 @@ public class PartialDeps extends Deps
 
     public PartialDeps with(PartialDeps that)
     {
-        Deps merged = with((Deps) that);
-        return new PartialDeps(covering.union(that.covering), merged.keys, merged.txnIds, merged.keyToTxnId);
+        Invariants.checkArgument((this.rangeDeps == null) == (that.rangeDeps == null));
+        return new PartialDeps(that.covering.union(this.covering),
+                this.keyDeps.with(that.keyDeps),
+                this.rangeDeps == null ? null : this.rangeDeps.with(that.rangeDeps));
     }
 
     public Deps reconstitute(FullRoute<?> route)
     {
         if (!covers(route))
             throw new IllegalArgumentException();
-        return new Deps(keys, txnIds, keyToTxnId);
+        return new Deps(keyDeps, rangeDeps);
     }
 
     // PartialRoute<?>might cover a wider set of ranges, some of which may have no involved keys
@@ -73,7 +64,24 @@ public class PartialDeps extends Deps
         if (covers(route.covering()))
             return this;
 
-        return new PartialDeps(route.covering(), keys, txnIds, keyToTxnId);
+        return new PartialDeps(route.covering(), keyDeps, rangeDeps);
+    }
+
+    @Override
+    public boolean equals(Object that)
+    {
+        return this == that || (that instanceof PartialDeps && equals((PartialDeps) that));
+    }
+
+    @Override
+    public boolean equals(Deps that)
+    {
+        return that instanceof PartialDeps && equals((PartialDeps) that);
+    }
+
+    public boolean equals(PartialDeps that)
+    {
+        return this.covering.equals(that.covering) && super.equals(that);
     }
 
     @Override
@@ -81,5 +89,4 @@ public class PartialDeps extends Deps
     {
         return covering + ":" + super.toString();
     }
-
 }
