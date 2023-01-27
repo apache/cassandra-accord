@@ -56,7 +56,7 @@ task testJar(type: Jar, dependsOn: testClasses) {
 publishing {
   publications {
     mavenJava(MavenPublication) {
-      artifactId = 'accord'
+      artifactId = accord_artifactId
       pom {
         inceptionYear = '2021'
       }
@@ -70,7 +70,7 @@ publishing {
     }
 
     test(MavenPublication) {
-      artifactId = 'accord'
+      artifactId = accord_artifactId
       artifact testJar
     }
   }

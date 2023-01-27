@@ -20,8 +20,8 @@ plugins {
     id 'java'
 }
 
-group 'accord'
-version '1.0-SNAPSHOT'
+group   accord_group
+version accord_version
 
 repositories {
     mavenCentral()
