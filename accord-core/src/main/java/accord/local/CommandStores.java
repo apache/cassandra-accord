@@ -26,9 +26,9 @@ import accord.utils.MapReduce;
 import accord.utils.MapReduceConsume;
 
 import accord.utils.ReducingFuture;
-import com.carrotsearch.hppc.IntObjectMap;
-import com.carrotsearch.hppc.IntObjectScatterMap;
 import com.google.common.annotations.VisibleForTesting;
+import org.agrona.collections.Hashing;
+import org.agrona.collections.Int2ObjectHashMap;
 import org.apache.cassandra.utils.concurrent.Future;
 
 import java.util.ArrayList;
@@ -200,14 +200,14 @@ public abstract class CommandStores<S extends CommandStore>
     static class Snapshot
     {
         final ShardHolder[] shards;
-        final IntObjectMap<CommandStore> byId;
+        final Int2ObjectHashMap<CommandStore> byId;
         final Topology local;
         final Topology global;
 
         Snapshot(ShardHolder[] shards, Topology local, Topology global)
         {
             this.shards = shards;
-            this.byId = new IntObjectScatterMap<>(shards.length);
+            this.byId = new Int2ObjectHashMap<>(shards.length, Hashing.DEFAULT_LOAD_FACTOR, true);
             for (ShardHolder shard : shards)
                 byId.put(shard.store.id(), shard.store);
             this.local = local;

@@ -33,7 +33,7 @@ import static accord.utils.Invariants.checkArgument;
  * A set of utility classes and interfaces for managing a collection of buffers for arrays of certain types.
  *
  * These buffers are designed to be used to combine simple one-shot methods that consume and produce one or more arrays
- * with methods that may (or may not) call them repeatedly. Specifically, {@link accord.primitives.Deps#linearUnion},
+ * with methods that may (or may not) call them repeatedly. Specifically, {@link accord.utils.RelationMultiMap#linearUnion},
  * {@link SortedArrays#linearUnion} and {@link SortedArrays#linearIntersection}
  *
  * To support this efficiently and ergonomically for users of the one-shot methods, the cache management must
