@@ -18,8 +18,6 @@
 
 package accord.utils;
 
-import accord.utils.Gen.Random;
-
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
@@ -152,7 +150,7 @@ public class Property
 
         public void check(FailingConsumer<T> fn)
         {
-            Random random = new Random(seed);
+            RandomSource random = new DefaultRandom(seed);
             for (int i = 0; i < examples; i++)
             {
                 T value = null;
@@ -192,7 +190,7 @@ public class Property
 
         public void check(FailingBiConsumer<A, B> fn)
         {
-            Random random = new Random(seed);
+            RandomSource random = new DefaultRandom(seed);
             for (int i = 0; i < examples; i++)
             {
                 A a = null;
@@ -236,7 +234,7 @@ public class Property
 
         public void check(FailingTriConsumer<A, B, C> fn)
         {
-            Random random = new Random(seed);
+            RandomSource random = new DefaultRandom(seed);
             for (int i = 0; i < examples; i++)
             {
                 A a = null;

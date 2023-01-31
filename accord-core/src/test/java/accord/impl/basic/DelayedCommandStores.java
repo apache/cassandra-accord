@@ -26,8 +26,7 @@ import accord.impl.InMemoryCommandStores;
 import accord.local.CommandStores;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
-
-import java.util.Random;
+import accord.utils.RandomSource;
 
 public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 {
@@ -36,7 +35,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         super(time, agent, store, shardDistributor, progressLogFactory, InMemoryCommandStore.SingleThread.factory(executorService));
     }
 
-    public static CommandStores.Factory factory(PendingQueue pending, Random random)
+    public static CommandStores.Factory factory(PendingQueue pending, RandomSource random)
     {
         SimulatedDelayedExecutorService executorService = new SimulatedDelayedExecutorService(pending, random);
         return (time, agent, store, shardDistributor, progressLogFactory) -> new DelayedCommandStores(time, agent, store, shardDistributor, progressLogFactory, executorService);

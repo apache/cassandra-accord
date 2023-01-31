@@ -20,12 +20,12 @@ package accord.burn.random;
 
 import accord.utils.Gen;
 import accord.utils.Gens;
+import accord.utils.RandomSource;
 import org.agrona.collections.Long2LongHashMap;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
-import java.util.Random;
 import java.util.stream.LongStream;
 
 import static accord.utils.Property.qt;
@@ -53,17 +53,17 @@ class SegmentedRandomRangeTest
             this.type = type;
         }
 
-        RandomLong min(Random random)
+        RandomLong min(RandomSource random)
         {
             return create(random, minSmall, maxSmall);
         }
 
-        RandomLong max(Random random)
+        RandomLong max(RandomSource random)
         {
             return create(random, minLarge, maxLarge);
         }
 
-        private RandomLong create(Random random, int min, int max)
+        private RandomLong create(RandomSource random, int min, int max)
         {
             switch (type)
             {
@@ -110,7 +110,7 @@ class SegmentedRandomRangeTest
         qt().forAll(Gens.random(), test).check(SegmentedRandomRangeTest::test);
     }
 
-    private static void test(Random rs, TestCase tc)
+    private static void test(RandomSource rs, TestCase tc)
     {
         double ratio = tc.ratio();
         FrequentLargeRange period = new FrequentLargeRange(tc.min(rs), tc.max(rs), ratio);

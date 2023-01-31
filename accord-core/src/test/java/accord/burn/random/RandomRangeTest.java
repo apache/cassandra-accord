@@ -20,11 +20,11 @@ package accord.burn.random;
 
 import accord.utils.Gen;
 import accord.utils.Gens;
+import accord.utils.RandomSource;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
-import java.util.Random;
 
 import static accord.utils.Property.qt;
 
@@ -78,6 +78,6 @@ class RandomRangeTest
 
     private interface Factory
     {
-        RandomLong create(Random random, int min, int max);
+        RandomLong create(RandomSource random, int min, int max);
     }
 }

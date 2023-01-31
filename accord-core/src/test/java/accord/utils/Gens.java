@@ -52,7 +52,7 @@ public class Gens {
         return rs -> ts.get(offset.nextInt(rs));
     }
 
-    public static Gen<Gen.Random> random() {
+    public static Gen<RandomSource> random() {
         return r -> r;
     }
 
@@ -95,7 +95,7 @@ public class Gens {
     {
         public Gen<Boolean> all()
         {
-            return Gen.Random::nextBoolean;
+            return RandomSource::nextBoolean;
         }
     }
 
@@ -108,7 +108,7 @@ public class Gens {
 
         public Gen.IntGen all()
         {
-            return Gen.Random::nextInt;
+            return RandomSource::nextInt;
         }
 
         public Gen.IntGen between(int min, int max)
@@ -131,7 +131,7 @@ public class Gens {
         }
 
         public Gen.LongGen all() {
-            return Gen.Random::nextLong;
+            return RandomSource::nextLong;
         }
 
         public Gen.LongGen between(long min, long max) {
@@ -298,7 +298,7 @@ public class Gens {
         }
 
         @Override
-        public T next(Random random)
+        public T next(RandomSource random)
         {
             T value;
             while (!seen.add((value = fn.next(random)))) {}
@@ -321,7 +321,7 @@ public class Gens {
             this.base = new GenReset<>(fn);
         }
         @Override
-        public int nextInt(Random random) {
+        public int nextInt(RandomSource random) {
             return base.next(random);
         }
 
@@ -340,7 +340,7 @@ public class Gens {
             this.base = new GenReset<>(fn);
         }
         @Override
-        public long nextLong(Random random) {
+        public long nextLong(RandomSource random) {
             return base.next(random);
         }
 

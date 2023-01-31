@@ -19,8 +19,7 @@
 package accord.burn.random;
 
 import accord.utils.Invariants;
-
-import java.util.Random;
+import accord.utils.RandomSource;
 
 public class FrequentLargeRange implements RandomLong
 {
@@ -43,7 +42,7 @@ public class FrequentLargeRange implements RandomLong
     }
 
     @Override
-    public long getLong(Random randomSource)
+    public long getLong(RandomSource randomSource)
     {
         if (run != -1)
         {

@@ -19,8 +19,9 @@
 package accord.maelstrom;
 
 import java.io.IOException;
-import java.util.Random;
 
+import accord.utils.DefaultRandom;
+import accord.utils.RandomSource;
 import org.junit.jupiter.api.Test;
 
 import accord.maelstrom.Runner.StandardQueue.Factory;
@@ -60,12 +61,12 @@ public class SimpleRandomTest
     @Test
     public void testReadAndWriteRandomMultiKey() throws IOException
     {
-        Random random = new Random();
+        RandomSource random = new DefaultRandom();
         long seed = random.nextLong();
         System.out.println(seed);
         random.setSeed(seed);
 
-        run(5, new Factory(random), () -> new Random(random.nextLong()), new TopologyFactory(4, 3),
+        run(5, new Factory(random), random::fork, new TopologyFactory(4, 3),
             "{\"src\":\"c1\",\"dest\":\"n1\",\"body\":{\"type\":\"txn\",\"msg_id\":1,\"txn\":"
                 + "[[\"r\", 1, null],[\"r\", 2, null],[\"r\", 3, null],[\"append\", 1, 1],[\"append\", 2, 3]]}}",
             "{\"src\":\"c1\",\"dest\":\"n2\",\"body\":{\"type\":\"txn\",\"msg_id\":2,\"txn\":"

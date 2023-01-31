@@ -19,6 +19,7 @@
 package accord.topology;
 
 import accord.burn.TopologyUpdates;
+import accord.utils.RandomSource;
 import accord.impl.IntHashKey;
 import accord.impl.IntHashKey.Hash;
 import accord.local.Node;
@@ -27,24 +28,34 @@ import accord.primitives.Ranges;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
-import java.util.function.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.function.Supplier;
+
 
 // TODO (required, testing): add change replication factor
 public class TopologyRandomizer
 {
     private static final Logger logger = LoggerFactory.getLogger(TopologyRandomizer.class);
-    private final Random random;
+    private final RandomSource random;
     private final BiConsumer<Node.Id, Topology> notifier;
     private final List<Topology> epochs = new ArrayList<>();
     private final Map<Node.Id, Ranges> previouslyReplicated = new HashMap<>();
     private final TopologyUpdates topologyUpdates;
 
-    public TopologyRandomizer(Supplier<Random> randomSupplier, Topology initialTopology, TopologyUpdates topologyUpdates, Function<Node.Id, Node> lookup)
+    public TopologyRandomizer(Supplier<RandomSource> randomSupplier, Topology initialTopology, TopologyUpdates topologyUpdates, Function<Node.Id, Node> lookup)
     {
         this(randomSupplier, initialTopology, topologyUpdates, (id, topology) -> topologyUpdates.notify(lookup.apply(id), topology.nodes(), topology));
     }
-    public TopologyRandomizer(Supplier<Random> randomSupplier, Topology initialTopology, TopologyUpdates topologyUpdates, BiConsumer<Node.Id, Topology> notifier)
+    public TopologyRandomizer(Supplier<RandomSource> randomSupplier, Topology initialTopology, TopologyUpdates topologyUpdates, BiConsumer<Node.Id, Topology> notifier)
     {
         this.random = randomSupplier.get();
         this.topologyUpdates = topologyUpdates;
@@ -61,26 +72,26 @@ public class TopologyRandomizer
         MEMBERSHIP(TopologyRandomizer::updateMembership),
         FASTPATH(TopologyRandomizer::updateFastPath);
 
-        private final BiFunction<Shard[], Random, Shard[]> function;
+        private final BiFunction<Shard[], RandomSource, Shard[]> function;
 
-        UpdateType(BiFunction<Shard[], Random, Shard[]> function)
+        UpdateType(BiFunction<Shard[], RandomSource, Shard[]> function)
         {
             this.function = function;
         }
 
-        public Shard[] apply(Shard[] shards, Random random)
+        public Shard[] apply(Shard[] shards, RandomSource random)
         {
             return function.apply(shards, random);
         }
 
-        static UpdateType kind(Random random)
+        static UpdateType kind(RandomSource random)
         {
             int idx = random.nextInt(values().length);
             return values()[idx];
         }
     }
 
-    private static Shard[] updateBoundary(Shard[] shards, Random random)
+    private static Shard[] updateBoundary(Shard[] shards, RandomSource random)
     {
         int idx = random.nextInt(shards.length - 1);
         Shard left = shards[idx];
@@ -104,7 +115,7 @@ public class TopologyRandomizer
         return shards;
     }
 
-    private static Shard[] updateMembership(Shard[] shards, Random random)
+    private static Shard[] updateMembership(Shard[] shards, RandomSource random)
     {
         if (shards.length <= 1)
             return shards;
@@ -156,7 +167,7 @@ public class TopologyRandomizer
         return shards;
     }
 
-    private static Set<Node.Id> newFastPath(List<Node.Id> nodes, Random random)
+    private static Set<Node.Id> newFastPath(List<Node.Id> nodes, RandomSource random)
     {
         List<Node.Id> available = new ArrayList<>(nodes);
         int rf = available.size();
@@ -174,7 +185,7 @@ public class TopologyRandomizer
         return fastPath;
     }
 
-    private static Shard[] updateFastPath(Shard[] shards, Random random)
+    private static Shard[] updateFastPath(Shard[] shards, RandomSource random)
     {
         int idx = random.nextInt(shards.length);
         Shard shard = shards[idx];

@@ -23,7 +23,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.PriorityQueue;
-import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
@@ -32,6 +31,8 @@ import java.util.function.Supplier;
 import accord.local.Node.Id;
 import accord.maelstrom.Cluster.Queue;
 import accord.maelstrom.Cluster.QueueSupplier;
+import accord.utils.DefaultRandom;
+import accord.utils.RandomSource;
 
 import static accord.utils.Utils.toArray;
 
@@ -41,9 +42,9 @@ public class Runner
     {
         static class Factory implements QueueSupplier
         {
-            final Random seeds;
+            final RandomSource seeds;
 
-            Factory(Random seeds)
+            Factory(RandomSource seeds)
             {
                 this.seeds = seeds;
             }
@@ -51,7 +52,7 @@ public class Runner
             @Override
             public <T> Queue<T> get()
             {
-                return new StandardQueue<>(new Random(seeds.nextLong()));
+                return new StandardQueue<>(seeds.fork());
             }
         }
 
@@ -78,11 +79,11 @@ public class Runner
         }
 
         final PriorityQueue<Item<T>> queue = new PriorityQueue<>();
-        final Random random;
+        final RandomSource random;
         long now;
         int seq;
 
-        StandardQueue(Random random)
+        StandardQueue(RandomSource random)
         {
             this.random = random;
         }
@@ -120,9 +121,9 @@ public class Runner
     {
         static class Factory implements QueueSupplier
         {
-            final Random seeds;
+            final RandomSource seeds;
 
-            Factory(Random seeds)
+            Factory(RandomSource seeds)
             {
                 this.seeds = seeds;
             }
@@ -130,7 +131,7 @@ public class Runner
             @Override
             public <T> Queue<T> get()
             {
-                return new RandomQueue<>(new Random(seeds.nextLong()));
+                return new RandomQueue<>(seeds.fork());
             }
         }
 
@@ -153,9 +154,9 @@ public class Runner
         }
 
         final PriorityQueue<Entry<T>> queue = new PriorityQueue<>();
-        final Random random;
+        final RandomSource random;
 
-        public RandomQueue(Random random)
+        public RandomQueue(RandomSource random)
         {
             this.random = random;
         }
@@ -282,7 +283,7 @@ public class Runner
                     }
                 };
             }
-        }, Random::new, factory, () -> null);
+        }, DefaultRandom::new, factory, () -> null);
     }
 
     static void run(TopologyFactory factory, String ... commands) throws IOException
@@ -292,10 +293,10 @@ public class Runner
 
     static void run(int nodeCount, TopologyFactory factory, String ... commands) throws IOException
     {
-        run(nodeCount, new StandardQueue.Factory(new Random()), Random::new, factory, commands);
+        run(nodeCount, new StandardQueue.Factory(new DefaultRandom()), DefaultRandom::new, factory, commands);
     }
 
-    static void run(int nodeCount, QueueSupplier queueSupplier, Supplier<Random> randomSupplier, TopologyFactory factory, String ... commands) throws IOException
+    static void run(int nodeCount, QueueSupplier queueSupplier, Supplier<RandomSource> randomSupplier, TopologyFactory factory, String ... commands) throws IOException
     {
         run(nodeCount, queueSupplier, randomSupplier, factory, new Supplier<Packet>()
         {
@@ -308,7 +309,7 @@ public class Runner
         });
     }
 
-    static void run(int nodeCount, QueueSupplier queueSupplier, Supplier<Random> randomSupplier, TopologyFactory factory, Supplier<Packet> commands) throws IOException
+    static void run(int nodeCount, QueueSupplier queueSupplier, Supplier<RandomSource> randomSupplier, TopologyFactory factory, Supplier<Packet> commands) throws IOException
     {
         List<Id> nodes = new ArrayList<>();
         for (int i = 1 ; i <= nodeCount ; ++i)

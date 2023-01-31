@@ -22,10 +22,10 @@ import accord.burn.random.FrequentLargeRange;
 import accord.burn.random.RandomLong;
 import accord.burn.random.RandomWalkRange;
 import accord.burn.random.Randoms;
+import accord.utils.RandomSource;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.Random;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
@@ -35,10 +35,10 @@ import java.util.concurrent.TimeUnit;
 public class SimulatedDelayedExecutorService extends AbstractExecutorService
 {
     private final PendingQueue pending;
-    private final Random random;
+    private final RandomSource random;
     private final RandomLong jitterInNano;
 
-    public SimulatedDelayedExecutorService(PendingQueue pending, Random random)
+    public SimulatedDelayedExecutorService(PendingQueue pending, RandomSource random)
     {
         this.pending = pending;
         this.random = random;

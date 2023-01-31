@@ -18,7 +18,7 @@
 
 package accord.burn.random;
 
-import java.util.Random;
+import accord.utils.RandomSource;
 
 public class RandomWalkRange implements RandomLong
 {
@@ -26,7 +26,7 @@ public class RandomWalkRange implements RandomLong
     private final int maxStepSize;
     long cur;
 
-    public RandomWalkRange(Random random, int min, int max)
+    public RandomWalkRange(RandomSource random, int min, int max)
     {
         this.min = min;
         this.max = max;
@@ -35,7 +35,7 @@ public class RandomWalkRange implements RandomLong
     }
 
     @Override
-    public long getLong(Random randomSource)
+    public long getLong(RandomSource randomSource)
     {
         long step = Randoms.nextLong(randomSource, -maxStepSize, maxStepSize);
         long cur = this.cur;
@@ -44,7 +44,7 @@ public class RandomWalkRange implements RandomLong
         return cur;
     }
 
-    private static int maxStepSize(Random random, int min, int max)
+    private static int maxStepSize(RandomSource random, int min, int max)
     {
         switch (random.nextInt(3))
         {

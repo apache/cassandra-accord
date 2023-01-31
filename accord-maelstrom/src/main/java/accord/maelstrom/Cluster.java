@@ -24,7 +24,15 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PrintWriter;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -33,7 +41,6 @@ import java.util.function.Supplier;
 
 import accord.coordinate.Timeout;
 import accord.impl.SizeOfIntersectionSorter;
-import accord.local.CommandStores;
 import accord.impl.SimpleProgressLog;
 import accord.impl.InMemoryCommandStores;
 import accord.local.Node;
@@ -46,6 +53,7 @@ import accord.messages.ReplyContext;
 import accord.messages.Request;
 import accord.api.Scheduler;
 import accord.topology.Topology;
+import accord.utils.RandomSource;
 
 // TODO (low priority, testing): merge with accord.impl.basic.Cluster
 public class Cluster implements Scheduler
@@ -68,12 +76,12 @@ public class Cluster implements Scheduler
         final Id self;
         final Function<Id, Node> lookup;
         final Cluster parent;
-        final Random random;
+        final RandomSource random;
 
         int nextMessageId = 0;
         Map<Long, Callback> callbacks = new LinkedHashMap<>();
 
-        public InstanceSink(Id self, Function<Id, Node> lookup, Cluster parent, Random random)
+        public InstanceSink(Id self, Function<Id, Node> lookup, Cluster parent, RandomSource random)
         {
             this.self = self;
             this.lookup = lookup;
@@ -125,7 +133,7 @@ public class Cluster implements Scheduler
         this.partitionSet = new HashSet<>();
     }
 
-    InstanceSink create(Id self, Random random)
+    InstanceSink create(Id self, RandomSource random)
     {
         InstanceSink sink = new InstanceSink(self, lookup, this, random);
         sinks.put(self, sink);
@@ -272,7 +280,7 @@ public class Cluster implements Scheduler
         run.run();
     }
 
-    public static void run(Id[] nodes, QueueSupplier queueSupplier, Consumer<Packet> responseSink, Supplier<Random> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, InputStream stdin, OutputStream stderr) throws IOException
+    public static void run(Id[] nodes, QueueSupplier queueSupplier, Consumer<Packet> responseSink, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, InputStream stdin, OutputStream stderr) throws IOException
     {
         try (BufferedReader in = new BufferedReader(new InputStreamReader(stdin)))
         {
@@ -289,7 +297,7 @@ public class Cluster implements Scheduler
         }
     }
 
-    public static void run(Id[] nodes, QueueSupplier queueSupplier, Consumer<Packet> responseSink, Supplier<Random> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, OutputStream stderr)
+    public static void run(Id[] nodes, QueueSupplier queueSupplier, Consumer<Packet> responseSink, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, OutputStream stderr)
     {
         Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> lookup = new HashMap<>();
@@ -309,7 +317,7 @@ public class Cluster implements Scheduler
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));
             sinks.recurring(() ->
                             {
-                                Collections.shuffle(nodesList, randomSupplier.get());
+                                Collections.shuffle(nodesList, randomSupplier.get().asJdkRandom());
                                 int partitionSize = randomSupplier.get().nextInt((topologyFactory.rf+1)/2);
                                 sinks.partitionSet = new HashSet<>(nodesList.subList(0, partitionSize));
                             }, 5L, TimeUnit.SECONDS);

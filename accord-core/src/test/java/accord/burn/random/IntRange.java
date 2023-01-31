@@ -18,7 +18,7 @@
 
 package accord.burn.random;
 
-import java.util.Random;
+import accord.utils.RandomSource;
 
 public class IntRange implements RandomInt
 {
@@ -34,7 +34,7 @@ public class IntRange implements RandomInt
     }
 
     @Override
-    public int getInt(Random randomSource)
+    public int getInt(RandomSource randomSource)
     {
         return min + randomSource.nextInt(maxDelta);
     }

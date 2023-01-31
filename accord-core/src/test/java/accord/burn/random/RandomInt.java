@@ -18,14 +18,14 @@
 
 package accord.burn.random;
 
-import java.util.Random;
+import accord.utils.RandomSource;
 
 public interface RandomInt extends RandomLong
 {
-    int getInt(Random randomSource);
+    int getInt(RandomSource randomSource);
 
     @Override
-    default long getLong(Random randomSource)
+    default long getLong(RandomSource randomSource)
     {
         return getInt(randomSource);
     }

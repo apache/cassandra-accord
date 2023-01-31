@@ -18,24 +18,24 @@
 
 package accord.coordinate.tracking;
 
+import accord.utils.RandomSource;
 import accord.coordinate.tracking.QuorumTracker.QuorumShardTracker;
 import accord.local.Node;
 import accord.topology.Topologies;
 import org.junit.jupiter.api.Assertions;
 
 import java.util.ArrayList;
-import java.util.Random;
 
 public class QuorumTrackerReconciler extends TrackerReconciler<QuorumShardTracker, QuorumTracker, QuorumTrackerReconciler.Rsp>
 {
     enum Rsp { QUORUM, FAIL }
 
-    QuorumTrackerReconciler(Random random, Topologies topologies)
+    QuorumTrackerReconciler(RandomSource random, Topologies topologies)
     {
         this(random, new QuorumTracker(topologies));
     }
 
-    private QuorumTrackerReconciler(Random random, QuorumTracker tracker)
+    private QuorumTrackerReconciler(RandomSource random, QuorumTracker tracker)
     {
         super(random, Rsp.class, tracker, new ArrayList<>(tracker.nodes()));
     }

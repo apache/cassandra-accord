@@ -18,7 +18,10 @@
 
 package accord.local;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -35,6 +38,7 @@ import accord.utils.MapReduceConsume;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
+import accord.utils.RandomSource;
 import com.google.common.annotations.VisibleForTesting;
 
 import accord.api.*;
@@ -119,7 +123,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private final LongSupplier nowSupplier;
     private final AtomicReference<Timestamp> now;
     private final Agent agent;
-    private final Random random;
+    private final RandomSource random;
 
     // TODO (expected, consider): this really needs to be thought through some more, as it needs to be per-instance in some cases, and per-node in others
     private final Scheduler scheduler;
@@ -128,7 +132,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private final Map<TxnId, AsyncResult<? extends Outcome>> coordinating = new ConcurrentHashMap<>();
 
     public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier,
-                Supplier<DataStore> dataSupplier, ShardDistributor shardDistributor, Agent agent, Random random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
+                Supplier<DataStore> dataSupplier, ShardDistributor shardDistributor, Agent agent, RandomSource random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
                 Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory)
     {
         this.id = id;

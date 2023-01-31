@@ -16,11 +16,23 @@
  * limitations under the License.
  */
 
-package accord.burn.random;
+package accord.utils;
 
-import accord.utils.RandomSource;
+import java.util.Random;
 
-public interface RandomLong
+public class DefaultRandom extends Random implements RandomSource
 {
-    long getLong(RandomSource randomSource);
+    public DefaultRandom()
+    {
+    }
+
+    public DefaultRandom(long seed)
+    {
+        super(seed);
+    }
+
+    @Override
+    public RandomSource fork() {
+        return new DefaultRandom(nextLong());
+    }
 }
