@@ -79,8 +79,8 @@ public class Json
     {
         switch (id.charAt(0))
         {
-            case 'c': return new Id(-Long.parseLong(id.substring(1)));
-            case 'n':return  new Id( Long.parseLong(id.substring(1)));
+            case 'c': return new Id(-Integer.parseInt(id.substring(1)));
+            case 'n':return  new Id( Integer.parseInt(id.substring(1)));
             default: throw new IllegalStateException();
         }
     }

@@ -26,8 +26,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-import com.carrotsearch.hppc.IntHashSet;
-import com.carrotsearch.hppc.IntSet;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -209,7 +207,6 @@ public class StrictSerializabilityVerifierTest
 
     private void fromLog(String log)
     {
-        IntSet pks = new IntHashSet();
         class Read
         {
             final int pk, id, count;
@@ -283,10 +280,7 @@ public class StrictSerializabilityVerifierTest
             if (line.startsWith("Witness"))
             {
                 if (current != null)
-                {
                     witnesses.add(current);
-                    current = null;
-                }
                 Matcher matcher = Pattern.compile("Witness\\(start=(.+), end=(.+)\\)").matcher(line);
                 if (!matcher.find()) throw new AssertionError("Unable to match start/end of " + line);
                 current = new Witness(Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2)));
@@ -296,7 +290,6 @@ public class StrictSerializabilityVerifierTest
                 Matcher matcher = Pattern.compile("\tread\\(pk=(.+), id=(.+), count=(.+), seq=\\[(.*)\\]\\)").matcher(line);
                 if (!matcher.find()) throw new AssertionError("Unable to match read of " + line);
                 int pk = Integer.parseInt(matcher.group(1));
-                pks.add(pk);
                 int id = Integer.parseInt(matcher.group(2));
                 int count = Integer.parseInt(matcher.group(3));
                 String seqStr = matcher.group(4);
@@ -308,28 +301,22 @@ public class StrictSerializabilityVerifierTest
                 Matcher matcher = Pattern.compile("\twrite\\(pk=(.+), id=(.+), success=(.+)\\)").matcher(line);
                 if (!matcher.find()) throw new AssertionError("Unable to match write of " + line);
                 int pk = Integer.parseInt(matcher.group(1));
-                pks.add(pk);
                 int id = Integer.parseInt(matcher.group(2));
                 boolean success = Boolean.parseBoolean(matcher.group(3));
                 current.write(pk, id, success);
             }
             else
             {
-                throw new IllegalArgumentException("Unknow line: " + line);
+                throw new IllegalArgumentException("Unknown line: " + line);
             }
         }
+
         if (current != null)
-        {
             witnesses.add(current);
-            current = null;
-        }
-        int[] keys = pks.toArray();
-        Arrays.sort(keys);
+
         StrictSerializabilityVerifier validator = new StrictSerializabilityVerifier(3);
         for (Witness w : witnesses)
-        {
             w.process(validator);
-        }
     }
 
     @Test

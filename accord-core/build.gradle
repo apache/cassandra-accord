@@ -36,7 +36,7 @@ dependencies {
     // Dependencies we depend on that are not part of our API.
     // These act as runtimeOnly dependencies to users
     implementation 'org.slf4j:slf4j-api:1.7.36'
-    implementation 'com.carrotsearch:hppc:0.8.1'
+    implementation 'org.agrona:agrona:1.17.1'
 }
 
 task burn(type: JavaExec) {
