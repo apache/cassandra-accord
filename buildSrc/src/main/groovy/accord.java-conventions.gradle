@@ -29,6 +29,8 @@ repositories {
 
 compileJava {
     sourceCompatibility = JavaVersion.VERSION_1_8
+
+    dependsOn(':rat')
 }
 
 test {
