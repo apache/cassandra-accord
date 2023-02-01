@@ -38,9 +38,9 @@ import accord.topology.Topology;
 
 import static java.lang.Long.min;
 
-public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, R>
+public abstract class TxnRequest implements Request, PreLoadContext
 {
-    public static abstract class WithUnsynced<R> extends TxnRequest<R>
+    public static abstract class WithUnsynced extends TxnRequest
     {
         public final long minUnsyncedEpoch; // TODO (low priority, clarity): can this just always be TxnId.epoch?
         public final boolean doNotComputeProgressKey;

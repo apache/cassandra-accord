@@ -24,6 +24,7 @@ import accord.local.Command;
 import accord.local.Node.Id;
 import accord.api.Result;
 import accord.topology.Topologies;
+import accord.utils.MapReduceConsume;
 import com.google.common.collect.Iterables;
 
 import java.util.Collections;
@@ -33,7 +34,7 @@ import static accord.local.PreLoadContext.empty;
 import static accord.messages.MessageType.APPLY_REQ;
 import static accord.messages.MessageType.APPLY_RSP;
 
-public class Apply extends TxnRequest<ApplyReply>
+public class Apply extends TxnRequest implements MapReduceConsume<SafeCommandStore, ApplyReply>
 {
     public static class SerializationSupport
     {
@@ -115,12 +116,6 @@ public class Apply extends TxnRequest<ApplyReply>
     public Iterable<TxnId> txnIds()
     {
         return Iterables.concat(Collections.singleton(txnId), deps.txnIds());
-    }
-
-    @Override
-    public Seekables<?, ?> keys()
-    {
-        return Keys.EMPTY;
     }
 
     @Override

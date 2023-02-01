@@ -20,7 +20,7 @@ package accord.impl;
 
 import accord.api.Key;
 import accord.local.Command;
-import accord.local.SafeCommandStore.CommandFunction;
+import accord.local.SafeCommandStore.SearchFunction;
 import accord.local.SafeCommandStore.TestDep;
 import accord.local.SafeCommandStore.TestKind;
 import accord.local.Status;
@@ -77,7 +77,7 @@ public class InMemoryCommandsForKey extends CommandsForKey
         public <T> T mapReduce(TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp,
                                TestDep testDep, @Nullable TxnId depId,
                                @Nullable Status minStatus, @Nullable Status maxStatus,
-                               CommandFunction<T, T> map, T initialValue, T terminalValue)
+                               SearchFunction<T, T> map, T initialValue, T terminalValue)
         {
 
             for (Command cmd : (testTimestamp == TestTimestamp.BEFORE ? commands.headMap(timestamp, false) : commands.tailMap(timestamp, false)).values())

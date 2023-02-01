@@ -21,7 +21,7 @@ package accord.utils;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
-public interface MapReduceConsume<I, O> extends MapReduce<I, O>, BiConsumer<O, Throwable>
+public interface MapReduceConsume<I, O> extends MapReduce<I, O>, ReduceConsume<O>
 {
     @Override
     void accept(O result, Throwable failure);

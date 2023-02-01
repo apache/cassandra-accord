@@ -32,6 +32,7 @@ import accord.utils.*;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 import static accord.primitives.Routable.Domain.Key;
+import static accord.utils.SortedArrays.Search.FAST;
 
 @SuppressWarnings("rawtypes")
 // TODO (desired, efficiency): check that foldl call-sites are inlined and optimised by HotSpot
@@ -110,6 +111,12 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     public final boolean intersects(AbstractRanges<?> ranges)
     {
         return findNextIntersection(0, ranges, 0) >= 0;
+    }
+
+    @Override
+    public final boolean intersects(Range range)
+    {
+        return findNext(0, range, FAST) >= 0;
     }
 
     @Override

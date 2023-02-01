@@ -125,14 +125,8 @@ public class RelationMultiMap
 
             if (keyCount == keys.length)
             {
-                K[] newKeys = cachedKeys.get(keyCount * 2);
-                System.arraycopy(keys, 0, newKeys, 0, keyCount);
-                cachedKeys.forceDiscard(keys, keyCount);
-                keys = newKeys;
-                int[] newKeyLimits = cachedInts.getInts(keyCount * 2);
-                System.arraycopy(keyLimits, 0, newKeyLimits, 0, keyCount);
-                cachedInts.forceDiscard(keyLimits);
-                keyLimits = newKeyLimits;
+                keys = cachedKeys.resize(keys, keyCount, keyCount * 2);
+                keyLimits = cachedInts.resize(keyLimits, keyCount, keyCount * 2);
             }
             keys[keyCount++] = key;
             hasOrderedValues = true;
@@ -180,12 +174,7 @@ public class RelationMultiMap
                 hasOrderedValues = false;
 
             if (totalCount >= keysToValues.length)
-            {
-                V[] newValues = cachedValues.get(keysToValues.length * 2);
-                System.arraycopy(keysToValues, 0, newValues, 0, totalCount);
-                cachedValues.forceDiscard(keysToValues, totalCount);
-                keysToValues = newValues;
-            }
+                keysToValues = cachedValues.resize(keysToValues, keysToValues.length, keysToValues.length * 2);
 
             keysToValues[totalCount++] = value;
         }

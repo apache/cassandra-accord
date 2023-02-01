@@ -20,7 +20,7 @@ package accord.utils;
 
 import java.util.function.Function;
 
-public interface MapReduce<I, O> extends Function<I, O>
+public interface MapReduce<I, O> extends Function<I, O>, Reduce<O>
 {
     // TODO (desired, safety): ensure mutual exclusivity when calling each of these methods
     @Override

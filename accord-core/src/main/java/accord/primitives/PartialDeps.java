@@ -28,6 +28,7 @@ public class PartialDeps extends Deps
     {
         return new Builder(covering);
     }
+
     public static class Builder extends AbstractBuilder<PartialDeps>
     {
         final Ranges covering;

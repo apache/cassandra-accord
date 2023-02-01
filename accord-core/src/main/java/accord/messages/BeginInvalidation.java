@@ -90,12 +90,6 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
     }
 
     @Override
-    public Seekables<?, ?> keys()
-    {
-        return Keys.EMPTY;
-    }
-
-    @Override
     public long waitForEpoch()
     {
         return txnId.epoch();

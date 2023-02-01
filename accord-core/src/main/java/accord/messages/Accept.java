@@ -31,8 +31,13 @@ import accord.primitives.Ballot;
 import accord.local.Command;
 
 import java.util.Collections;
+import java.util.function.BiFunction;
+
 import accord.primitives.Deps;
 import accord.primitives.TxnId;
+import accord.utils.AsyncMapReduceConsume;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -41,7 +46,7 @@ import static accord.local.Command.AcceptOutcome.*;
 
 // TODO (low priority, efficiency): use different objects for send and receive, so can be more efficient
 //                                  (e.g. serialize without slicing, and without unnecessary fields)
-public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
+public class Accept extends TxnRequest.WithUnsynced implements AsyncMapReduceConsume<SafeCommandStore, Accept.AcceptReply>
 {
     public static class SerializerSupport
     {
@@ -75,7 +80,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     }
 
     @Override
-    public synchronized AcceptReply apply(SafeCommandStore safeStore)
+    public synchronized Future<AcceptReply> apply(SafeCommandStore safeStore)
     {
         if (minUnsyncedEpoch < txnId.epoch())
         {
@@ -83,7 +88,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
             // if not, we're just providing dependencies, and we can do that without updating our state
             Ranges acceptRanges = safeStore.ranges().between(txnId.epoch(), executeAt.epoch());
             if (!acceptRanges.intersects(scope))
-                return new AcceptReply(calculatePartialDeps(safeStore));
+                return calculatePartialDeps(safeStore).map(AcceptReply::new);
         }
 
         // only accept if we actually participate in the ranges - otherwise we're just looking
@@ -94,14 +99,14 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
             case Redundant:
                 return AcceptReply.REDUNDANT;
             case RejectedBallot:
-                return new AcceptReply(command.promised());
+                return ImmediateFuture.success(new AcceptReply(command.promised()));
             case Success:
                 // TODO (desirable, efficiency): we don't need to calculate deps if executeAt == txnId
-                return new AcceptReply(calculatePartialDeps(safeStore));
+                return calculatePartialDeps(safeStore).map(AcceptReply::new);
         }
     }
 
-    private PartialDeps calculatePartialDeps(SafeCommandStore safeStore)
+    private Future<PartialDeps> calculatePartialDeps(SafeCommandStore safeStore)
     {
         return PreAccept.calculatePartialDeps(safeStore, txnId, keys, executeAt, safeStore.ranges().between(minUnsyncedEpoch, executeAt.epoch()));
     }
@@ -137,12 +142,6 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     }
 
     @Override
-    public Seekables<?, ?> keys()
-    {
-        return keys;
-    }
-
-    @Override
     public MessageType type()
     {
         return MessageType.ACCEPT_REQ;
@@ -159,8 +158,8 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
 
     public static final class AcceptReply implements Reply
     {
-        public static final AcceptReply ACCEPT_INVALIDATE = new AcceptReply(Success);
-        public static final AcceptReply REDUNDANT = new AcceptReply(Redundant);
+        public static final Future<AcceptReply> ACCEPT_INVALIDATE = ImmediateFuture.success(new AcceptReply(Success));
+        public static final Future<AcceptReply> REDUNDANT = ImmediateFuture.success(new AcceptReply(Redundant));
 
         public final AcceptOutcome outcome;
         public final Ballot supersededBy;
@@ -245,9 +244,9 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
             {
                 default:
                 case Redundant:
-                    return AcceptReply.REDUNDANT;
+                    return AcceptReply.REDUNDANT.getNow();
                 case Success:
-                    return AcceptReply.ACCEPT_INVALIDATE;
+                    return AcceptReply.ACCEPT_INVALIDATE.getNow();
                 case RejectedBallot:
                     return new AcceptReply(command.promised());
             }

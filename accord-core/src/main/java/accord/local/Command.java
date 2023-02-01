@@ -191,6 +191,9 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
     public Seekables<?, ?> keys()
     {
         // TODO (expected, consider): when do we need this, and will it always be sufficient?
+        // this is used for Apply; should probably have its own context for clarity, but since
+        // only used for local timestamp derivation in C* integration can probably remove it
+        // when we improve that
         return partialTxn().keys();
     }
 

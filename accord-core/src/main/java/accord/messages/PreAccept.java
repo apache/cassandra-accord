@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.Objects;
 
 import accord.local.*;
+import accord.local.SafeCommandStore.SlowSearcher;
 import accord.local.SafeCommandStore.TestKind;
 
 import accord.local.Node.Id;
@@ -33,13 +34,17 @@ import javax.annotation.Nullable;
 import accord.primitives.*;
 
 import accord.primitives.TxnId;
+import accord.utils.AsyncMapReduceConsume;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestKind.RorWs;
 import static accord.local.SafeCommandStore.TestKind.Ws;
+import static accord.local.SafeCommandStore.TestTimestamp.MAY_EXECUTE_BEFORE;
 import static accord.local.SafeCommandStore.TestTimestamp.STARTED_BEFORE;
 
-public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
+public class PreAccept extends WithUnsynced implements AsyncMapReduceConsume<SafeCommandStore, PreAccept.PreAcceptReply>
 {
     public static class SerializerSupport
     {
@@ -78,6 +83,8 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     @Override
     public Seekables<?, ?> keys()
     {
+        // TODO (expected): we shouldn't need this; it's currently used only for maxConflict, which we can always
+        //                  answer pessimistically, so should always be answered from cache
         return partialTxn.keys();
     }
 
@@ -88,7 +95,8 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     }
 
     @Override
-    public PreAcceptReply apply(SafeCommandStore safeStore)
+    // TODO (required): use AsyncChain
+    public Future<PreAcceptReply> apply(SafeCommandStore safeStore)
     {
         // note: this diverges from the paper, in that instead of waiting for JoinShard,
         //       we PreAccept to both old and new topologies and require quorums in both.
@@ -96,8 +104,8 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         if (minUnsyncedEpoch < txnId.epoch() && !safeStore.ranges().at(txnId.epoch()).intersects(scope))
         {
             // we only preaccept in the coordination epoch, but we might contact other epochs for dependencies
-            return new PreAcceptOk(txnId, txnId,
-                    calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().between(minUnsyncedEpoch, txnId.epoch())));
+            return calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().between(minUnsyncedEpoch, txnId.epoch()))
+                    .map(deps -> new PreAcceptOk(txnId, txnId, deps));
         }
 
         Command command = safeStore.command(txnId);
@@ -106,11 +114,11 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
             default:
             case Success:
             case Redundant:
-                return new PreAcceptOk(txnId, command.executeAt(),
-                        calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().between(minUnsyncedEpoch, txnId.epoch())));
+                return calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().between(minUnsyncedEpoch, txnId.epoch()))
+                        .map(deps -> new PreAcceptOk(txnId, command.executeAt(), deps));
 
             case RejectedBallot:
-                return PreAcceptNack.INSTANCE;
+                return ImmediateFuture.success(PreAcceptNack.INSTANCE);
         }
     }
 
@@ -129,10 +137,10 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     }
 
     @Override
-    public void accept(PreAcceptReply reply, Throwable failure)
+    public void accept(PreAcceptReply success, Throwable failure)
     {
         // TODO (required, error handling): communicate back the failure
-        node.reply(replyTo, replyContext, reply);
+        node.reply(replyTo, replyContext, success);
     }
 
     @Override
@@ -216,27 +224,34 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         }
     }
 
-    static PartialDeps calculatePartialDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Timestamp executeAt, Ranges ranges)
+    public static Future<PartialDeps> calculatePartialDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Timestamp executeAt, Ranges ranges)
     {
-        try (PartialDeps.Builder builder = PartialDeps.builder(ranges))
-        {
-            return calculateDeps(commandStore, txnId, keys, executeAt, ranges, builder);
-        }
+        PartialDeps.Builder builder = PartialDeps.builder(ranges);
+        TestKind testKind = txnId.isWrite() ? RorWs : Ws;
+        Future<PartialDeps> result = commandStore.fold(keys, ranges, testKind, MAY_EXECUTE_BEFORE, executeAt, null, null,
+                        (keyOrRange, testTxnId, testExecuteAt, in) -> {
+                            // TODO (easy, efficiency): either pass txnId as parameter or encode this behaviour in a specialised builder to avoid extra allocations
+                            if (!testTxnId.equals(txnId))
+                                in.add(keyOrRange, testTxnId);
+                            return in;
+                        }, builder, null)
+                .map(Deps.AbstractBuilder::build);
+        result.addListener(builder::close);
+        return result;
     }
 
-    private static <T extends Deps> T calculateDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Timestamp executeAt, Ranges ranges, Deps.AbstractBuilder<T> builder)
+    public static void addDeps(SlowSearcher searcher, TxnId txnId, Timestamp executeAt, Deps.AbstractBuilder<?> builder)
     {
-        TestKind testKind = txnId.rw().isWrite() ? RorWs : Ws;
+        TestKind testKind = txnId.isWrite() ? RorWs : Ws;
         // could use MAY_EXECUTE_BEFORE to prune those we know execute later, but shouldn't usually be of much help
         // and would need to supply !hasOrderedTxnId
-        commandStore.mapReduce(keys, ranges, testKind, STARTED_BEFORE, executeAt, ANY_DEPS, null, null, null,
+        searcher.fold(testKind, STARTED_BEFORE, executeAt, ANY_DEPS, null, null, null,
                 (keyOrRange, testTxnId, testExecuteAt, in) -> {
                     // TODO (easy, efficiency): either pass txnId as parameter or encode this behaviour in a specialised builder to avoid extra allocations
                     if (testTxnId != txnId)
                         in.add(keyOrRange, testTxnId);
                     return in;
                 }, builder, null);
-        return builder.build();
     }
 
     @Override

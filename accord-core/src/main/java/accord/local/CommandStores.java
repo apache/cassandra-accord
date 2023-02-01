@@ -22,10 +22,8 @@ import accord.api.*;
 import accord.primitives.*;
 import accord.api.RoutingKey;
 import accord.topology.Topology;
-import accord.utils.MapReduce;
-import accord.utils.MapReduceConsume;
+import accord.utils.*;
 
-import accord.utils.ReducingFuture;
 import com.carrotsearch.hppc.IntObjectMap;
 import com.carrotsearch.hppc.IntObjectScatterMap;
 import com.google.common.annotations.VisibleForTesting;
@@ -36,6 +34,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.IntStream;
 
 import static accord.local.PreLoadContext.empty;
@@ -287,13 +286,13 @@ public abstract class CommandStores<S extends CommandStore>
         return new Snapshot(result.toArray(new ShardHolder[0]), newLocalTopology, newTopology);
     }
 
-    interface MapReduceAdapter<S extends CommandStore, Intermediate, Accumulator, O>
+    interface MapReduceAdapter<S extends CommandStore, Accumulate, Accumulator, Intermediate, O>
     {
         Accumulator allocate();
-        Intermediate apply(MapReduce<? super SafeCommandStore, O> map, S commandStore, PreLoadContext context);
-        Accumulator reduce(MapReduce<? super SafeCommandStore, O> reduce, Accumulator accumulator, Intermediate next);
-        void consume(MapReduceConsume<?, O> consume, Intermediate reduced);
-        Intermediate reduce(MapReduce<?, O> reduce, Accumulator accumulator);
+        Accumulate apply(Function<? super SafeCommandStore, Intermediate> map, S commandStore, PreLoadContext context);
+        Accumulator reduce(Reduce<O> reduce, Accumulator accumulator, Accumulate next);
+        void consume(ReduceConsume<O> consume, Accumulate reduced);
+        Accumulate reduce(Reduce<O> reduce, Accumulator accumulator);
     }
 
     public Future<Void> forEach(Consumer<SafeCommandStore> forEach)
@@ -363,30 +362,57 @@ public abstract class CommandStores<S extends CommandStore>
      */
     public abstract <O> void mapReduceConsume(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume);
     public abstract <O> void mapReduceConsume(PreLoadContext context, IntStream commandStoreIds, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume);
+    public abstract <O> void mapReduceConsume(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, AsyncMapReduceConsume<? super SafeCommandStore, O> mapReduceConsume);
 
     protected <T1, T2, O> void mapReduceConsume(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume,
-                                                MapReduceAdapter<? super S, T1, T2, O> adapter)
+                                                MapReduceAdapter<? super S, T1, T2, O, O> adapter)
+    {
+        T1 reduced = mapReduce(context, keys, minEpoch, maxEpoch, mapReduceConsume, adapter);
+        adapter.consume(mapReduceConsume, reduced);
+    }
+
+    protected <T1, T2, O> void mapReduceConsume(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, AsyncMapReduceConsume<? super SafeCommandStore, O> mapReduceConsume,
+                                                MapReduceAdapter<? super S, T1, T2, Future<O>, O> adapter)
     {
         T1 reduced = mapReduce(context, keys, minEpoch, maxEpoch, mapReduceConsume, adapter);
         adapter.consume(mapReduceConsume, reduced);
     }
 
     protected <T1, T2, O> void mapReduceConsume(PreLoadContext context, IntStream commandStoreIds, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume,
-                                                   MapReduceAdapter<? super S, T1, T2, O> adapter)
+                                                   MapReduceAdapter<? super S, T1, T2, O, O> adapter)
     {
         T1 reduced = mapReduce(context, commandStoreIds, mapReduceConsume, adapter);
         adapter.consume(mapReduceConsume, reduced);
     }
 
     protected <T1, T2, O> T1 mapReduce(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduce<? super SafeCommandStore, O> mapReduce,
-                                       MapReduceAdapter<? super S, T1, T2, O> adapter)
+                                       MapReduceAdapter<? super S, T1, T2, O, O> adapter)
     {
         T2 accumulator = adapter.allocate();
         Snapshot snapshot = current;
         ShardHolder[] shards = snapshot.shards;
         for (ShardHolder shard : shards)
         {
-            // TODO (urgent, efficiency): range map for intersecting ranges (e.g. that to be introduced for range dependencies)
+            // TODO (required, efficiency): range map for intersecting ranges (e.g. that to be introduced for range dependencies)
+            Ranges shardRanges = shard.ranges().between(minEpoch, maxEpoch);
+            if (!shardRanges.intersects(keys))
+                continue;
+
+            T1 next = adapter.apply(mapReduce, (S)shard.store, context);
+            accumulator = adapter.reduce(mapReduce, accumulator, next);
+        }
+        return adapter.reduce(mapReduce, accumulator);
+    }
+
+    protected <T1, T2, O> T1 mapReduce(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, AsyncMapReduce<? super SafeCommandStore, O> mapReduce,
+                                       MapReduceAdapter<? super S, T1, T2, Future<O>, O> adapter)
+    {
+        T2 accumulator = adapter.allocate();
+        Snapshot snapshot = current;
+        ShardHolder[] shards = snapshot.shards;
+        for (ShardHolder shard : shards)
+        {
+            // TODO (required, efficiency): range map for intersecting ranges (e.g. that to be introduced for range dependencies)
             Ranges shardRanges = shard.ranges().between(minEpoch, maxEpoch);
             if (!shardRanges.intersects(keys))
                 continue;
@@ -398,7 +424,7 @@ public abstract class CommandStores<S extends CommandStore>
     }
 
     protected <T1, T2, O> T1 mapReduce(PreLoadContext context, IntStream commandStoreIds, MapReduce<? super SafeCommandStore, O> mapReduce,
-                                       MapReduceAdapter<? super S, T1, T2, O> adapter)
+                                       MapReduceAdapter<? super S, T1, T2, O, O> adapter)
     {
         // TODO (low priority, efficiency): avoid using an array, or use a scratch buffer
         int[] ids = commandStoreIds.toArray();

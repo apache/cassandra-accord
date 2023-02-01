@@ -26,6 +26,7 @@ import accord.local.SafeCommandStore;
 import accord.local.Status.Durability;
 import accord.primitives.*;
 import accord.topology.Topologies;
+import accord.utils.MapReduceConsume;
 
 import java.util.Collections;
 
@@ -35,7 +36,7 @@ import static accord.api.ProgressLog.ProgressShard.Local;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.messages.SimpleReply.Ok;
 
-public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
+public class InformDurable extends TxnRequest implements PreLoadContext, MapReduceConsume<SafeCommandStore, Reply>
 {
     public static class SerializationSupport
     {
@@ -132,11 +133,5 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     public Iterable<TxnId> txnIds()
     {
         return Collections.singleton(txnId);
-    }
-
-    @Override
-    public Seekables<?, ?> keys()
-    {
-        return Keys.EMPTY;
     }
 }

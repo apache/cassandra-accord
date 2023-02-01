@@ -53,11 +53,6 @@ public interface SafeCommandStore
      */
     void addAndInvokeListener(TxnId txnId, CommandListener listener);
 
-    interface CommandFunction<I, O>
-    {
-        O apply(Seekable keyOrRange, TxnId txnId, Timestamp executeAt, I in);
-    }
-
     enum TestTimestamp
     {
         STARTED_BEFORE,
@@ -69,14 +64,46 @@ public interface SafeCommandStore
     enum TestKind { Ws, RorWs }
 
     /**
-     * Visits keys first and then ranges, both in ascending order.
-     * Within each key or range visits TxnId in ascending order of queried timestamp.
+     * Is able to search based on dependency contents, which may require reading from storage
      */
-    <T> T mapReduce(Seekables<?, ?> keys, Ranges slice,
+    interface SlowSearcher
+    {
+        <T> T fold(TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp,
+                   TestDep testDep, @Nullable TxnId depId,
+                   @Nullable Status minStatus, @Nullable Status maxStatus,
+                   SearchFunction<T, T> mapReduce, T initialValue, T terminalValue);
+    }
+
+    interface SlowSearchFunction<I, O>
+    {
+        O apply(SlowSearcher slowSearcher, Seekable keyOrRange, I in);
+    }
+
+    interface SearchFunction<I, O>
+    {
+        O apply(Seekable keyOrRange, TxnId txnId, Timestamp executeAt, I in);
+    }
+
+    /**
+     * A slow fold that permits applying multiple searches to the data for an intersecting
+     * key or range. TODO (expected): we might want some pre-filter?
+     *
+     * Visits keys in unspecified order, hence neither foldl/foldr, though we aim for foldl
+     * (ascending order in keys/ranges then txnId).
+     * This may be applied asynchronously, though it is expected to normally respond immediately.
+     */
+    <T> Future<T> slowFold(Seekables<?, ?> keys, Ranges slice,
+                           SlowSearchFunction<T, T> fold, T initialValue, T terminalValue);
+
+    /**
+     * Visits keys in unspecified order, hence neither foldl/foldr, though we aim for foldl
+     * (ascending order in keys/ranges then txnId).
+     * This may be applied asynchronously, though it is expected to normally respond immediately.
+     */
+    <T> Future<T> fold(Seekables<?, ?> keys, Ranges slice,
                        TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp,
-                       TestDep testDep, @Nullable TxnId depId,
                        @Nullable Status minStatus, @Nullable Status maxStatus,
-                       CommandFunction<T, T> map, T initialValue, T terminalValue);
+                       SearchFunction<T, T> fold, T initialValue, T terminalValue);
 
     void register(Seekables<?, ?> keysOrRanges, Ranges slice, Command command);
     void register(Seekable keyOrRange, Ranges slice, Command command);
