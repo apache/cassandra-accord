@@ -21,6 +21,10 @@ plugins {
     id("org.nosphere.apache.rat") version "0.7.1"
 }
 
+repositories {
+    mavenCentral()
+}
+
 // See buildSrc/src/main/groovy/accord.java-conventions.gradle for java standards
 
 rat {
