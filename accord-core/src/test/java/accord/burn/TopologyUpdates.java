@@ -23,14 +23,17 @@ import accord.impl.InMemoryCommandStore;
 import accord.coordinate.FetchData;
 import accord.impl.InMemoryCommandStores;
 import accord.local.Command;
+import accord.local.Commands;
 import accord.local.Node;
 import accord.local.Status;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.primitives.*;
 import accord.topology.Shard;
 import accord.topology.Topology;
+import accord.utils.MapReduce;
 import accord.utils.MessageTask;
 import accord.utils.Invariants;
+import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import com.google.common.collect.Sets;
@@ -39,6 +42,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -48,7 +52,7 @@ import static accord.coordinate.Invalidate.invalidate;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.local.Status.*;
 import static accord.local.Status.Known.*;
-import static accord.utils.async.AsyncChains.awaitUninterruptibly;
+import static accord.utils.async.AsyncChains.getUninterruptibly;
 
 public class TopologyUpdates
 {
@@ -75,59 +79,70 @@ public class TopologyUpdates
             this.toEpoch = trgEpoch;
         }
 
+        @Override
+        public String toString()
+        {
+            return "CommandSync{" + "txnId:" + txnId + ", fromEpoch:" + fromEpoch + ", toEpoch:" + toEpoch + '}';
+        }
+
         public void process(Node node, Consumer<Boolean> onDone)
         {
             if (!node.topology().hasEpoch(toEpoch))
             {
                 node.configService().fetchTopologyForEpoch(toEpoch);
-                node.topology().awaitEpoch(toEpoch).addListener(() -> process(node, onDone));
+                node.topology().awaitEpoch(toEpoch).addCallback(() -> process(node, onDone));
                 return;
             }
 
-            // first check if already applied locally, and respond immediately
-            Status minStatus = ((InMemoryCommandStores.Synchronized)node.commandStores()).mapReduce(contextFor(txnId), route, toEpoch, toEpoch,
-                    instance -> instance.command(txnId).status(), (a, b) -> a.compareTo(b) <= 0 ? a : b);
-
-            if (minStatus == null || minStatus.phase.compareTo(status.phase) >= 0)
-            {
-                // TODO (low priority): minStatus == null means we're sending redundant messages
-                onDone.accept(true);
-                return;
-            }
-
-            BiConsumer<Status.Known, Throwable> callback = (outcome, fail) -> {
-                if (fail != null)
-                    process(node, onDone);
-                else if (outcome == Nothing)
-                    invalidate(node, txnId, route.with(route.homeKey()), (i1, i2) -> process(node, onDone));
-                else
+            AsyncChain<Status> statusChain = node.commandStores().mapReduce(contextFor(txnId), route, toEpoch, toEpoch,
+                                                                            MapReduce.of(safeStore -> safeStore.command(txnId).current().status(),
+                                                                                         (a, b) -> a.compareTo(b) <= 0 ? a : b));
+            AsyncResult<Object> sync = statusChain.map(minStatus -> {
+                if (minStatus == null || minStatus.phase.compareTo(status.phase) >= 0)
+                {
+                    // TODO (low priority): minStatus == null means we're sending redundant messages
                     onDone.accept(true);
-            };
-            switch (status)
-            {
-                case NotWitnessed:
-                    onDone.accept(true);
-                    break;
-                case PreAccepted:
-                case Accepted:
-                case AcceptedInvalidate:
-                    FetchData.fetch(DefinitionOnly, node, txnId, route, toEpoch, callback);
-                    break;
-                case Committed:
-                case ReadyToExecute:
-                    FetchData.fetch(Committed.minKnown, node, txnId, route, toEpoch, callback);
-                    break;
-                case PreApplied:
-                case Applied:
-                    node.withEpoch(Math.max(executeAt.epoch(), toEpoch), () -> {
-                        FetchData.fetch(PreApplied.minKnown, node, txnId, route, executeAt, toEpoch, callback);
-                    });
-                    break;
-                case Invalidated:
-                    node.forEachLocal(contextFor(txnId), route, txnId.epoch(), toEpoch, safeStore -> {
-                        safeStore.command(txnId).commitInvalidate(safeStore);
-                    });
-            }
+                    return null;
+                }
+
+                BiConsumer<Known, Throwable> callback = (outcome, fail) -> {
+                    if (fail != null)
+                        process(node, onDone);
+                    else if (outcome == Nothing)
+                        invalidate(node, txnId, route.with(route.homeKey()), (i1, i2) -> process(node, onDone));
+                    else
+                        onDone.accept(true);
+                };
+                switch (status)
+                {
+                    case NotWitnessed:
+                        onDone.accept(true);
+                        break;
+                    case PreAccepted:
+                    case Accepted:
+                    case AcceptedInvalidate:
+                        FetchData.fetch(DefinitionOnly, node, txnId, route, toEpoch, callback);
+                        break;
+                    case Committed:
+                    case ReadyToExecute:
+                        FetchData.fetch(Committed.minKnown, node, txnId, route, toEpoch, callback);
+                        break;
+                    case PreApplied:
+                    case Applied:
+                        node.withEpoch(Math.max(executeAt.epoch(), toEpoch), () -> {
+                            FetchData.fetch(PreApplied.minKnown, node, txnId, route, executeAt, toEpoch, callback);
+                        });
+                        break;
+                    case Invalidated:
+                        AsyncChain<Void> invalidate = node.forEachLocal(contextFor(txnId), route, txnId.epoch(), toEpoch, safeStore -> {
+                            Commands.commitInvalidate(safeStore, txnId);
+                        });
+
+                        dieExceptionally(invalidate.addCallback(((unused, failure) -> onDone.accept(failure == null))).beginAsResult());
+                }
+                return null;
+            }).beginAsResult();
+            dieExceptionally(sync);
         }
     }
 
@@ -170,18 +185,18 @@ public class TopologyUpdates
         return result;
     }
 
-    private static Stream<MessageTask> syncEpochCommands(Node node, long srcEpoch, Ranges ranges, Function<CommandSync, Collection<Node.Id>> recipients, long trgEpoch, boolean committedOnly)
+    private static Stream<MessageTask> syncEpochCommands(Node node, long srcEpoch, Ranges ranges, Function<CommandSync, Collection<Node.Id>> recipients, long trgEpoch, boolean committedOnly) throws ExecutionException
     {
         Map<TxnId, CheckStatusOk> syncMessages = new ConcurrentHashMap<>();
         Consumer<Command> commandConsumer = command -> syncMessages.merge(command.txnId(), new CheckStatusOk(node, command), CheckStatusOk::merge);
         if (committedOnly)
-            awaitUninterruptibly(node.commandStores().forEach(commandStore -> InMemoryCommandStore.inMemory(commandStore).forCommittedInEpoch(ranges, srcEpoch, commandConsumer)));
+            getUninterruptibly(node.commandStores().forEach(commandStore -> InMemoryCommandStore.inMemory(commandStore).forCommittedInEpoch(ranges, srcEpoch, commandConsumer)));
         else
-            awaitUninterruptibly(node.commandStores().forEach(commandStore -> InMemoryCommandStore.inMemory(commandStore).forEpochCommands(ranges, srcEpoch, commandConsumer)));
+            getUninterruptibly(node.commandStores().forEach(commandStore -> InMemoryCommandStore.inMemory(commandStore).forEpochCommands(ranges, srcEpoch, commandConsumer)));
 
         return syncMessages.entrySet().stream().map(e -> {
             CommandSync sync = new CommandSync(e.getKey(), e.getValue(), srcEpoch, trgEpoch);
-            return MessageTask.of(node, recipients.apply(sync), "Sync:" + e.getKey() + ':' + srcEpoch + ':' + trgEpoch, sync::process);
+            return MessageTask.of(node, recipients.apply(sync), sync.toString(), sync::process);
         });
     }
 
@@ -191,7 +206,7 @@ public class TopologyUpdates
     /**
      * Syncs all replicated commands. Overkill, but useful for confirming issues in optimizedSync
      */
-    private static Stream<MessageTask> thoroughSync(Node node, long syncEpoch)
+    private static Stream<MessageTask> thoroughSync(Node node, long syncEpoch) throws ExecutionException
     {
         Topology syncTopology = node.configService().getTopologyForEpoch(syncEpoch);
         Topology localTopology = syncTopology.forNode(node.id());
@@ -209,7 +224,7 @@ public class TopologyUpdates
     /**
      * Syncs all newly replicated commands when nodes are gaining ranges and the current epoch
      */
-    private static Stream<MessageTask> optimizedSync(Node node, long srcEpoch)
+    private static Stream<MessageTask> optimizedSync(Node node, long srcEpoch) throws ExecutionException
     {
         long trgEpoch = srcEpoch + 1;
         Topology syncTopology = node.configService().getTopologyForEpoch(srcEpoch);
@@ -258,7 +273,15 @@ public class TopologyUpdates
 
     public static AsyncResult<Void> sync(Node node, long syncEpoch)
     {
-        Stream<MessageTask> messageStream = optimizedSync(node, syncEpoch);
+        Stream<MessageTask> messageStream;
+        try
+        {
+            messageStream = optimizedSync(node, syncEpoch);
+        }
+        catch (ExecutionException e)
+        {
+            return AsyncResults.failure(e.getCause());
+        }
 
         Iterator<MessageTask> iter = messageStream.iterator();
         if (!iter.hasNext())
@@ -271,7 +294,7 @@ public class TopologyUpdates
         while (iter.hasNext())
         {
             MessageTask next = iter.next();
-            last.addListener(next);
+            last.addCallback(next);
             last = next;
         }
 

@@ -27,7 +27,7 @@ import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
 import accord.primitives.RoutingKeys;
 import accord.primitives.TxnId;
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 
 import static accord.primitives.Route.castToFullRoute;
 import static accord.primitives.Route.isFullRoute;
@@ -47,9 +47,9 @@ public class RecoverWithHomeKey extends CheckShards implements BiConsumer<Object
         super(node, txnId, RoutingKeys.of(homeKey), txnId.epoch(), IncludeInfo.Route);
         this.witnessedByInvalidation = witnessedByInvalidation;
         // if witnessedByInvalidation == AcceptedInvalidate then we cannot assume its definition was known, and our comparison with the status is invalid
-        Preconditions.checkState(witnessedByInvalidation != Status.AcceptedInvalidate);
+        Invariants.checkState(witnessedByInvalidation != Status.AcceptedInvalidate);
         // if witnessedByInvalidation == Invalidated we should anyway not be recovering
-        Preconditions.checkState(witnessedByInvalidation != Status.Invalidated);
+        Invariants.checkState(witnessedByInvalidation != Status.Invalidated);
         this.homeKey = homeKey;
         this.callback = callback;
     }

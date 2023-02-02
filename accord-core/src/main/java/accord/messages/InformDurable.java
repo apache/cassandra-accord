@@ -19,10 +19,8 @@
 package accord.messages;
 
 import accord.api.ProgressLog.ProgressShard;
-import accord.local.Command;
+import accord.local.*;
 import accord.local.Node.Id;
-import accord.local.PreLoadContext;
-import accord.local.SafeCommandStore;
 import accord.local.Status.Durability;
 import accord.primitives.*;
 import accord.topology.Topologies;
@@ -89,8 +87,7 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     @Override
     public Reply apply(SafeCommandStore safeStore)
     {
-        Command command = safeStore.command(txnId);
-        command.setDurability(safeStore, durability, scope.homeKey(), executeAt);
+        Commands.setDurability(safeStore, txnId, durability, scope.homeKey(), executeAt);
         safeStore.progressLog().durable(txnId, scope, shard);
         return Ok;
     }

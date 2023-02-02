@@ -20,7 +20,10 @@ package accord.utils;
 
 import net.nicoulaj.compilecommand.annotations.Inline;
 
+import javax.annotation.Nullable;
 import java.util.function.Predicate;
+
+import static java.lang.String.format;
 
 public class Invariants
 {
@@ -36,6 +39,27 @@ public class Invariants
         return DEBUG;
     }
 
+    private static void illegalState(String msg)
+    {
+        throw new IllegalStateException(msg);
+    }
+
+    private static void illegalState()
+    {
+        illegalState(null);
+    }
+
+    private static void illegalArgument(String msg)
+    {
+        throw new IllegalArgumentException(msg);
+    }
+
+
+    private static void illegalArgument()
+    {
+        illegalArgument(null);
+    }
+
     public static <T1, T2 extends T1> T2 checkType(T1 cast)
     {
         return (T2)cast;
@@ -44,33 +68,75 @@ public class Invariants
     public static <T1, T2 extends T1> T2 checkType(Class<T2> to, T1 cast)
     {
         if (cast != null && !to.isInstance(cast))
-            throw new IllegalStateException();
+            illegalState();
         return (T2)cast;
     }
 
     public static <T1, T2 extends T1> T2 checkType(Class<T2> to, T1 cast, String msg)
     {
         if (cast != null && !to.isInstance(cast))
-            throw new IllegalStateException(msg);
+            illegalState(msg);
         return (T2)cast;
     }
 
     public static void paranoid(boolean condition)
     {
         if (PARANOID && !condition)
-            throw new IllegalStateException();
+            illegalState();
     }
 
     public static void checkState(boolean condition)
     {
         if (!condition)
-            throw new IllegalStateException();
+            illegalState();
     }
 
     public static void checkState(boolean condition, String msg)
     {
         if (!condition)
-            throw new IllegalStateException(msg);
+            illegalState(msg);
+    }
+
+    public static void checkState(boolean condition, String fmt, int p1)
+    {
+        if (!condition)
+            illegalState(format(fmt, p1));
+    }
+
+    public static void checkState(boolean condition, String fmt, int p1, int p2)
+    {
+        if (!condition)
+            illegalState(format(fmt, p1, p2));
+    }
+
+    public static void checkState(boolean condition, String fmt, long p1)
+    {
+        if (!condition)
+            illegalState(format(fmt, p1));
+    }
+
+    public static void checkState(boolean condition, String fmt, long p1, long p2)
+    {
+        if (!condition)
+            illegalState(format(fmt, p1, p2));
+    }
+
+    public static void checkState(boolean condition, String fmt, @Nullable Object p1)
+    {
+        if (!condition)
+            illegalState(format(fmt, p1));
+    }
+
+    public static void checkState(boolean condition, String fmt, @Nullable Object p1, @Nullable Object p2)
+    {
+        if (!condition)
+            illegalState(format(fmt, p1, p2));
+    }
+
+    public static void checkState(boolean condition, String fmt, Object... args)
+    {
+        if (!condition)
+            illegalState(format(fmt, args));
     }
 
     public static <T> T nonNull(T param)
@@ -83,40 +149,131 @@ public class Invariants
     public static int isNatural(int input)
     {
         if (input < 0)
-            throw new IllegalStateException();
+            illegalState();
         return input;
     }
 
     public static long isNatural(long input)
     {
         if (input < 0)
-            throw new IllegalStateException();
+            illegalState();
         return input;
     }
 
     public static void checkArgument(boolean condition)
     {
         if (!condition)
-            throw new IllegalArgumentException();
+            illegalArgument();
     }
 
     public static void checkArgument(boolean condition, String msg)
     {
         if (!condition)
-            throw new IllegalArgumentException(msg);
+            illegalArgument(msg);
+    }
+
+    public static void checkArgument(boolean condition, String fmt, int p1)
+    {
+        if (!condition)
+            illegalArgument(format(fmt, p1));
+    }
+
+    public static void checkArgument(boolean condition, String fmt, int p1, int p2)
+    {
+        if (!condition)
+            illegalArgument(format(fmt, p1, p2));
+    }
+
+    public static void checkArgument(boolean condition, String fmt, long p1)
+    {
+        if (!condition)
+            illegalArgument(format(fmt, p1));
+    }
+
+    public static void checkArgument(boolean condition, String fmt, long p1, long p2)
+    {
+        if (!condition)
+            illegalArgument(format(fmt, p1, p2));
+    }
+
+    public static void checkArgument(boolean condition, String fmt, @Nullable Object p1)
+    {
+        if (!condition)
+            illegalArgument(format(fmt, p1));
+    }
+
+    public static void checkArgument(boolean condition, String fmt, @Nullable Object p1, @Nullable Object p2)
+    {
+        if (!condition)
+            illegalArgument(format(fmt, p1, p2));
+    }
+
+    public static void checkArgument(boolean condition, String fmt, Object... args)
+    {
+        if (!condition)
+            illegalArgument(format(fmt, args));
     }
 
     public static <T> T checkArgument(T param, boolean condition)
     {
         if (!condition)
-            throw new IllegalArgumentException();
+            illegalArgument();
         return param;
     }
 
     public static <T> T checkArgument(T param, boolean condition, String msg)
     {
         if (!condition)
-            throw new IllegalArgumentException(msg);
+            illegalArgument(msg);
+        return param;
+    }
+
+    public static <T> T checkArgument(T param, boolean condition, String fmt, int p1)
+    {
+        if (!condition)
+            illegalArgument(format(fmt, p1));
+        return param;
+    }
+
+    public static <T> T checkArgument(T param, boolean condition, String fmt, int p1, int p2)
+    {
+        if (!condition)
+            illegalArgument(format(fmt, p1, p2));
+        return param;
+    }
+
+    public static <T> T checkArgument(T param, boolean condition, String fmt, long p1)
+    {
+        if (!condition)
+            illegalArgument(format(fmt, p1));
+        return param;
+    }
+
+    public static <T> T checkArgument(T param, boolean condition, String fmt, long p1, long p2)
+    {
+        if (!condition)
+            illegalArgument(format(fmt, p1, p2));
+        return param;
+    }
+
+    public static <T> T checkArgument(T param, boolean condition, String fmt, @Nullable Object p1)
+    {
+        if (!condition)
+            illegalArgument(format(fmt, p1));
+        return param;
+    }
+
+    public static <T> T checkArgument(T param, boolean condition, String fmt, @Nullable Object p1, @Nullable Object p2)
+    {
+        if (!condition)
+            illegalArgument(format(fmt, p1, p2));
+        return param;
+    }
+
+    public static <T> T checkArgument(T param, boolean condition, String fmt, Object... args)
+    {
+        if (!condition)
+            illegalArgument(format(fmt, args));
         return param;
     }
 
@@ -124,7 +281,7 @@ public class Invariants
     public static <T> T checkArgument(T param, Predicate<T> condition)
     {
         if (!condition.test(param))
-            throw new IllegalArgumentException();
+            illegalArgument();
         return param;
     }
 
@@ -132,7 +289,19 @@ public class Invariants
     public static <T> T checkArgument(T param, Predicate<T> condition, String msg)
     {
         if (!condition.test(param))
-            throw new IllegalArgumentException(msg);
+            illegalArgument(msg);
         return param;
+    }
+
+    public static <O> O cast(Object o, Class<O> klass)
+    {
+        try
+        {
+            return klass.cast(o);
+        }
+        catch (ClassCastException e)
+        {
+            throw new IllegalArgumentException(format("Unable to cast %s to %s", o, klass.getName()));
+        }
     }
 }

@@ -21,10 +21,15 @@ package accord.local;
 import accord.api.Key;
 import accord.impl.CommandsForKey;
 import accord.primitives.Keys;
+import accord.primitives.Seekable;
 import accord.primitives.Seekables;
 import accord.primitives.TxnId;
+import accord.utils.Utils;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Sets;
 
 import java.util.Collections;
+import java.util.Set;
 
 /**
  * Lists txnids and keys of commands and commands for key that will be needed for an operation. Used
@@ -52,6 +57,13 @@ public interface PreLoadContext
      */
     Seekables<?, ?> keys();
 
+    default boolean isSubsetOf(PreLoadContext superset)
+    {
+        Set<TxnId> superIds = superset.txnIds() instanceof Set ? (Set<TxnId>) superset.txnIds() : Sets.newHashSet(superset.txnIds());
+        Set<Seekable> superKeys = Sets.newHashSet(superset.keys());
+        return Iterables.all(txnIds(), superIds::contains) && Iterables.all(keys(), superKeys::contains);
+    }
+
     static PreLoadContext contextFor(Iterable<TxnId> txnIds, Seekables<?, ?> keys)
     {
         return new PreLoadContext()
@@ -72,6 +84,11 @@ public interface PreLoadContext
             case Range: return contextFor(txnId); // TODO (required, correctness): this won't work for actual range queries
             case Key: return contextFor(Collections.singleton(txnId), keysOrRanges);
         }
+    }
+
+    static PreLoadContext contextFor(TxnId... txnIds)
+    {
+        return contextFor(Utils.listOf(txnIds), Keys.EMPTY);
     }
 
     static PreLoadContext contextFor(TxnId txnId)

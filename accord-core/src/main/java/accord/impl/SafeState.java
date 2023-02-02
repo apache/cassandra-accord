@@ -16,33 +16,19 @@
  * limitations under the License.
  */
 
-package accord.utils;
+package accord.impl;
 
-import java.util.function.BiFunction;
-import java.util.function.Function;
-
-public interface MapReduce<I, O> extends Function<I, O>
+/**
+ * State scoped to a single request that references global state
+ */
+public interface SafeState<T>
 {
-    // TODO (desired, safety): ensure mutual exclusivity when calling each of these methods
-    @Override
-    O apply(I in);
-    O reduce(O o1, O o2);
+    T current();
+    void invalidate();
+    boolean invalidated();
 
-    static <I, O> MapReduce<I, O> of(Function<I, O> map, BiFunction<O, O, O> reduce)
+    default boolean isEmpty()
     {
-        return new MapReduce<I, O>()
-        {
-            @Override
-            public O apply(I in)
-            {
-                return map.apply(in);
-            }
-
-            @Override
-            public O reduce(O o1, O o2)
-            {
-                return reduce.apply(o1, o2);
-            }
-        };
+        return current() == null;
     }
 }

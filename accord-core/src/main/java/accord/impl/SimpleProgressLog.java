@@ -36,6 +36,7 @@ import accord.local.*;
 import accord.local.Status.Known;
 import accord.primitives.*;
 import accord.utils.Invariants;
+import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResult;
 
 import accord.api.ProgressLog;
@@ -253,8 +254,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                                                 if (token.durability.isDurable())
                                                 {
                                                     commandStore.execute(contextFor(txnId), safeStore -> {
-                                                        Command cmd = safeStore.command(txnId);
-                                                        cmd.setDurability(safeStore, token.durability, homeKey, null);
+                                                        Command cmd = Commands.setDurability(safeStore, txnId, token.durability, homeKey, null);
                                                         safeStore.progressLog().durable(txnId, cmd.maxUnseekables(), null);
                                                     }).begin(commandStore.agent());
                                                 }
@@ -423,6 +423,11 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     if (notAwareOfDurability == null && !maybeReady(node, command))
                         return;
 
+                    // whenReady callbacks may run in maybeReady method, and those callbacks may set the progress to Done,
+                    // in which case this logic should no-op
+                    if (progress() == Done)
+                        return;
+
                     setProgress(Investigating);
                     if (notAwareOfDurability.isEmpty())
                     {
@@ -468,6 +473,11 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                 void record(Known known)
                 {
+                    // invalidation coordination callback may fire
+                    // before invalidation is committed locally
+                    if (progress() == Done)
+                        return;
+
                     if (blockedUntil.isSatisfiedBy(known))
                         setProgress(NoneExpected);
                 }
@@ -554,8 +564,8 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 void run(Command command)
                 {
                     // make sure a quorum of the home shard is aware of the transaction, so we can rely on it to ensure progress
-                    AsyncResult<Void> inform = inform(node, txnId, command.homeKey());
-                    inform.addCallback((success, fail) -> {
+                    AsyncChain<Void> inform = inform(node, txnId, command.homeKey());
+                    inform.begin((success, fail) -> {
                         commandStore.execute(PreLoadContext.empty(), ignore -> {
                             if (progress() == Done)
                                 return;
@@ -827,7 +837,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     {
                         commandStore.execute(contextFor(run.txnId()), safeStore -> {
                             if (run.shouldRun()) // could have been completed by a callback
-                                run.run(safeStore.command(run.txnId()));
+                                run.run(safeStore.command(run.txnId()).current());
                         }).begin(commandStore.agent());
                     }
                 }

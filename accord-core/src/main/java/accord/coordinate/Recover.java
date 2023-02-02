@@ -55,7 +55,7 @@ import static accord.utils.Invariants.debug;
 // TODO (low priority, cleanup): rename to Recover (verb); rename Recover message to not clash
 public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throwable>
 {
-    class AwaitCommit extends AsyncResults.Settable<Timestamp> implements Callback<WaitOnCommitOk>
+    class AwaitCommit extends AsyncResults.SettableResult<Timestamp> implements Callback<WaitOnCommitOk>
     {
         // TODO (desired, efficiency): this should collect the executeAt of any commit, and terminate as soon as one is found
         //                             that is earlier than TxnId for the Txn we are recovering; if all commits we wait for

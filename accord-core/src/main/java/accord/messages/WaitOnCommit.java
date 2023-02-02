@@ -75,9 +75,10 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
     }
 
     @Override
-    public Void apply(SafeCommandStore instance)
+    public Void apply(SafeCommandStore safeStore)
     {
-        Command command = instance.command(txnId);
+        SafeCommand safeCommand = safeStore.command(txnId);
+        Command command = safeCommand.current();
         switch (command.status())
         {
             default: throw new AssertionError();
@@ -87,8 +88,8 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
             case AcceptedInvalidate:
             case PreCommitted:
                 waitingOnUpdater.incrementAndGet(this);
-                command.addListener(this);
-                instance.progressLog().waiting(txnId, Committed.minKnown, scope);
+                safeCommand.addListener(this);
+                safeStore.progressLog().waiting(txnId, Committed.minKnown, scope);
                 break;
 
             case Committed:
@@ -101,8 +102,9 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
     }
 
     @Override
-    public void onChange(SafeCommandStore safeStore, Command command)
+    public void onChange(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
+        Command command = safeCommand.current();
         logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
                 this, command.txnId(), command.status(), command);
         switch (command.status())
@@ -122,7 +124,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
             case Invalidated:
         }
 
-        command.removeListener(this);
+        safeCommand.removeListener(this);
         ack();
     }
 

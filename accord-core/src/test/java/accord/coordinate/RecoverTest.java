@@ -41,7 +41,7 @@ public class RecoverTest
     {
         CommandStore commandStore = getCommandShard(node, key);
         Assertions.assertTrue(inMemory(commandStore).hasCommand(txnId));
-        return inMemory(commandStore).command(txnId);
+        return inMemory(commandStore).command(txnId).value();
     }
 
     private static void assertStatus(Node node, Key key, TxnId txnId, Status status)

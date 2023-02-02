@@ -23,8 +23,8 @@ import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 
+import accord.utils.Invariants;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 
 import java.util.*;
 import java.util.function.BiFunction;
@@ -82,7 +82,7 @@ public abstract class AbstractTracker<ST extends ShardTracker, P>
 
     AbstractTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, Function<Shard, ST> trackerFactory)
     {
-        Preconditions.checkArgument(topologies.totalShards() > 0);
+        Invariants.checkArgument(topologies.totalShards() > 0);
         int topologyCount = topologies.size();
         int maxShardsPerEpoch = topologies.get(0).size();
         int shardCount = maxShardsPerEpoch;
@@ -126,7 +126,7 @@ public abstract class AbstractTracker<ST extends ShardTracker, P>
     <T extends AbstractTracker<ST, P>>
     RequestStatus recordResponse(T self, Id node, BiFunction<? super ST, P, ? extends ShardOutcome<? super T>> function, P param, int topologyLimit)
     {
-        Preconditions.checkState(self == this); // we just accept self as parameter for type safety
+        Invariants.checkState(self == this); // we just accept self as parameter for type safety
         ShardOutcomes status = NoChange;
         int maxShards = maxShardsPerEpoch();
         for (int i = 0; i < topologyLimit && !status.isTerminalState() ; ++i)

@@ -18,17 +18,38 @@
 
 package accord.utils;
 
-import accord.utils.Invariants;
-
 import java.lang.reflect.Array;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 public class Gens {
     private Gens() {
+    }
+
+    public static <T> Gen<T> constant(T constant)
+    {
+        return ignore -> constant;
+    }
+
+    public static <T> Gen<T> constant(Supplier<T> constant)
+    {
+        return ignore -> constant.get();
+    }
+
+    public static <T> Gen<T> pick(T... ts)
+    {
+        return pick(Arrays.asList(ts));
+    }
+
+    public static <T> Gen<T> pick(List<T> ts)
+    {
+        Gen.IntGen offset = ints().between(0, ts.size() - 1);
+        return rs -> ts.get(offset.nextInt(rs));
     }
 
     public static Gen<Gen.Random> random() {
@@ -58,6 +79,11 @@ public class Gens {
 
     public static LongArrayDSL arrays(Gen.LongGen fn) {
         return new LongArrayDSL(fn);
+    }
+
+    public static EnumDSL enums()
+    {
+        return new EnumDSL();
     }
 
     public static class IntDSL
@@ -104,6 +130,14 @@ public class Gens {
             if (max == Long.MAX_VALUE)
                 return r -> r.nextLong(min, max);
             return r -> r.nextLong(min, max + 1);
+        }
+    }
+
+    public static class EnumDSL
+    {
+        public <T extends Enum<T>> Gen<T> all(Class<T> klass)
+        {
+            return pick(klass.getEnumConstants());
         }
     }
 

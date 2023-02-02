@@ -30,6 +30,7 @@ import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node.Id;
 import accord.local.Status;
 import accord.messages.Commit;
+import accord.local.*;
 import accord.primitives.*;
 import accord.topology.Topologies;
 
@@ -39,7 +40,6 @@ import accord.messages.BeginInvalidation;
 import accord.messages.BeginInvalidation.InvalidateReply;
 import accord.messages.Callback;
 import accord.utils.Invariants;
-import com.google.common.base.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -189,7 +189,7 @@ public class Invalidate implements Callback<InvalidateReply>
                         Status witnessedByInvalidation = maxReply.status;
                         if (!witnessedByInvalidation.hasBeen(Accepted))
                         {
-                            Preconditions.checkState(tracker.all(InvalidationShardTracker::isPromised));
+                            Invariants.checkState(tracker.all(InvalidationShardTracker::isPromised));
                             if (!invalidateWith.containsAll(route))
                                 witnessedByInvalidation = null;
                         }
@@ -197,19 +197,19 @@ public class Invalidate implements Callback<InvalidateReply>
                     }
                     else if (homeKey != null)
                     {
-                        Preconditions.checkState(maxReply.status.hasBeen(Accepted) || tracker.all(InvalidationShardTracker::isPromised));
+                        Invariants.checkState(maxReply.status.hasBeen(Accepted) || tracker.all(InvalidationShardTracker::isPromised));
                         // if we included the home shard, and we have either a recoverable status OR have not rejected the fast path,
                         // we must have at least one response that should contain the Route
                         if (invalidateWith.contains(homeKey) && tracker.isPromisedForKey(homeKey, txnId.epoch()))
                             throw new IllegalStateException("Received replies from a node that must have known the route, but that did not include it");
 
                         // if < Accepted, we should have short-circuited to invalidation above. This guarantees no Invaldate/Recover loop, as any later status will forbid invoking Invalidate
-                        Preconditions.checkState(!(transitivelyInvokedByPriorInvalidation && !maxReply.status.hasBeen(Accepted)));
+                        Invariants.checkState(!(transitivelyInvokedByPriorInvalidation && !maxReply.status.hasBeen(Accepted)));
 
                         Status witnessedByInvalidation = maxReply.status;
                         if (!witnessedByInvalidation.hasBeen(Accepted))
                         {
-                            Preconditions.checkState(tracker.all(InvalidationShardTracker::isPromised));
+                            Invariants.checkState(tracker.all(InvalidationShardTracker::isPromised));
                             if (!invalidateWith.contains(homeKey))
                                 witnessedByInvalidation = null;
                         }
@@ -268,7 +268,7 @@ public class Invalidate implements Callback<InvalidateReply>
         Commit.Invalidate.commitInvalidate(node, txnId, route != null ? Unseekables.merge(route, (Unseekables)invalidateWith) : invalidateWith, txnId);
         // TODO (required, consider): pick a reasonable upper bound, so we don't invalidate into an epoch/commandStore that no longer cares about this command
         node.forEachLocalSince(contextFor(txnId), invalidateWith, txnId, safeStore -> {
-            safeStore.command(txnId).commitInvalidate(safeStore);
+            Commands.commitInvalidate(safeStore, txnId);
         }).begin((s, f) -> {
             callback.accept(INVALIDATED, null);
             if (f != null) // TODO (required): consider exception handling more carefully: should we catch these prior to passing to callbacks?

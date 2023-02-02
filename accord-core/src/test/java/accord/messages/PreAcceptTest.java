@@ -20,7 +20,8 @@ package accord.messages;
 
 import accord.api.RoutingKey;
 import accord.impl.*;
-import accord.impl.InMemoryCommandsForKey.InMemoryCommandTimeseries;
+import accord.impl.CommandsForKey.CommandLoader;
+import accord.impl.CommandsForKey.CommandTimeseries;
 import accord.impl.IntKey.Raw;
 import accord.impl.mock.*;
 import accord.local.Node;
@@ -39,6 +40,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Random;
+import java.util.function.BiFunction;
+import java.util.stream.Stream;
 
 import static accord.Utils.*;
 import static accord.impl.InMemoryCommandStore.inMemory;
@@ -85,6 +88,11 @@ public class PreAcceptTest
         return PreAccept.SerializerSupport.create(txnId, route.slice(FULL_RANGE), txnId.epoch(), txnId.epoch(), false, txnId.epoch(), txn.slice(FULL_RANGE, true), route);
     }
 
+    static <T, D> Stream<T> convert(CommandTimeseries<D> timeseries, BiFunction<CommandLoader<D>, D, T> get)
+    {
+        return timeseries.all().map(d -> get.apply(timeseries.loader(), d));
+    }
+
     @Test
     void initialCommandTest()
     {
@@ -105,8 +113,12 @@ public class PreAcceptTest
             clock.increment(10);
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
-            Command command = ((InMemoryCommandTimeseries)inMemory(commandStore).commandsForKey(key).byId()).all().findFirst().get();
-            Assertions.assertEquals(Status.PreAccepted, command.status());
+            commandStore.execute(PreLoadContext.contextFor(txnId, txn.keys()), safeStore -> {
+                CommandsForKey cfk = ((AbstractSafeCommandStore) safeStore).commandsForKey(key).current();
+                TxnId commandId = convert(cfk.byId(), CommandLoader::txnId).findFirst().get();
+                Command command = safeStore.command(commandId).current();
+                Assertions.assertEquals(Status.PreAccepted, command.status());
+            });
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
@@ -234,8 +246,12 @@ public class PreAcceptTest
             clock.increment(10);
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
-            Command command = ((InMemoryCommandTimeseries)inMemory(commandStore).commandsForKey(key).byId()).all().findFirst().get();
-            Assertions.assertEquals(Status.PreAccepted, command.status());
+            commandStore.execute(PreLoadContext.contextFor(txnId, txn.keys()), safeStore -> {
+                CommandsForKey cfk = ((AbstractSafeCommandStore) safeStore).commandsForKey(key).current();
+                TxnId commandId = convert(cfk.byId(), CommandLoader::txnId).findFirst().get();
+                Command command = safeStore.command(commandId).current();
+                Assertions.assertEquals(Status.PreAccepted, command.status());
+            });
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);

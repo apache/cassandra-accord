@@ -35,7 +35,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.IntStream;
 
 import static accord.local.PreLoadContext.empty;
@@ -287,15 +290,6 @@ public abstract class CommandStores<S extends CommandStore>
         return new Snapshot(result.toArray(new ShardHolder[0]), newLocalTopology, newTopology);
     }
 
-    interface MapReduceAdapter<S extends CommandStore, Intermediate, Accumulator, O>
-    {
-        Accumulator allocate();
-        Intermediate apply(MapReduce<? super SafeCommandStore, O> map, S commandStore, PreLoadContext context);
-        Accumulator reduce(MapReduce<? super SafeCommandStore, O> reduce, Accumulator accumulator, Intermediate next);
-        void consume(MapReduceConsume<?, O> consume, Intermediate reduced);
-        Intermediate reduce(MapReduce<?, O> reduce, Accumulator accumulator);
-    }
-
     public AsyncChain<Void> forEach(Consumer<SafeCommandStore> forEach)
     {
         List<AsyncChain<Void>> list = new ArrayList<>();
@@ -341,7 +335,7 @@ public abstract class CommandStores<S extends CommandStore>
 
                 return null;
             }
-        }, AsyncCommandStores.AsyncMapReduceAdapter.instance());
+        });
     }
 
     /**
@@ -359,29 +353,24 @@ public abstract class CommandStores<S extends CommandStore>
      * Note that {@code reduce} and {@code accept} are invoked by only one thread, and never concurrently with {@code apply},
      * so they do not require mutual exclusion.
      *
-     * Implementations are expected to invoke {@link #mapReduceConsume(PreLoadContext, Routables, long, long, MapReduceConsume, MapReduceAdapter)}
+     * Implementations are expected to invoke {@link #mapReduceConsume(PreLoadContext, Routables, long, long, MapReduceConsume)}
      */
-    public abstract <O> void mapReduceConsume(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume);
-    public abstract <O> void mapReduceConsume(PreLoadContext context, IntStream commandStoreIds, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume);
-
-    protected <T1, T2, O> void mapReduceConsume(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume,
-                                                MapReduceAdapter<? super S, T1, T2, O> adapter)
+    protected <O> void mapReduceConsume(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
     {
-        T1 reduced = mapReduce(context, keys, minEpoch, maxEpoch, mapReduceConsume, adapter);
-        adapter.consume(mapReduceConsume, reduced);
+        AsyncChain<O> reduced = mapReduce(context, keys, minEpoch, maxEpoch, mapReduceConsume);
+        reduced.begin(mapReduceConsume);
     }
 
-    protected <T1, T2, O> void mapReduceConsume(PreLoadContext context, IntStream commandStoreIds, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume,
-                                                   MapReduceAdapter<? super S, T1, T2, O> adapter)
+    public  <O> void mapReduceConsume(PreLoadContext context, IntStream commandStoreIds, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
     {
-        T1 reduced = mapReduce(context, commandStoreIds, mapReduceConsume, adapter);
-        adapter.consume(mapReduceConsume, reduced);
+        AsyncChain<O> reduced = mapReduce(context, commandStoreIds, mapReduceConsume);
+        reduced.begin(mapReduceConsume);
     }
 
-    protected <T1, T2, O> T1 mapReduce(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduce<? super SafeCommandStore, O> mapReduce,
-                                       MapReduceAdapter<? super S, T1, T2, O> adapter)
+    public <O> AsyncChain<O> mapReduce(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduce<? super SafeCommandStore, O> mapReduce)
     {
-        T2 accumulator = adapter.allocate();
+        AsyncChain<O> chain = null;
+        BiFunction<O, O, O> reducer = mapReduce::reduce;
         Snapshot snapshot = current;
         ShardHolder[] shards = snapshot.shards;
         for (ShardHolder shard : shards)
@@ -391,24 +380,29 @@ public abstract class CommandStores<S extends CommandStore>
             if (!shardRanges.intersects(keys))
                 continue;
 
-            T1 next = adapter.apply(mapReduce, (S)shard.store, context);
-            accumulator = adapter.reduce(mapReduce, accumulator, next);
+            AsyncChain<O> next = shard.store.submit(context, mapReduce);
+            chain = chain != null ? AsyncChains.reduce(chain, next, reducer) : next;
         }
-        return adapter.reduce(mapReduce, accumulator);
+        if (chain == null)
+            return AsyncChains.success(null);
+        return chain;
     }
 
-    protected <T1, T2, O> T1 mapReduce(PreLoadContext context, IntStream commandStoreIds, MapReduce<? super SafeCommandStore, O> mapReduce,
-                                       MapReduceAdapter<? super S, T1, T2, O> adapter)
+    protected <O> AsyncChain<O> mapReduce(PreLoadContext context, IntStream commandStoreIds, MapReduce<? super SafeCommandStore, O> mapReduce)
     {
         // TODO (low priority, efficiency): avoid using an array, or use a scratch buffer
         int[] ids = commandStoreIds.toArray();
-        T2 accumulator = adapter.allocate();
+        AsyncChain<O> chain = null;
+        BiFunction<O, O, O> reducer = mapReduce::reduce;
         for (int id : ids)
         {
-            T1 next = adapter.apply(mapReduce, (S)forId(id), context);
-            accumulator = adapter.reduce(mapReduce, accumulator, next);
+            CommandStore commandStore = forId(id);
+            AsyncChain<O> next = commandStore.submit(context, mapReduce);
+            chain = chain != null ? AsyncChains.reduce(chain, next, reducer) : next;
         }
-        return adapter.reduce(mapReduce, accumulator);
+        if (chain == null)
+            return AsyncChains.success(null);
+        return chain;
     }
 
     public synchronized void updateTopology(Topology newTopology)

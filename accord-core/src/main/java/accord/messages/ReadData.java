@@ -28,7 +28,7 @@ import accord.primitives.*;
 import accord.local.*;
 import accord.api.Data;
 import accord.topology.Topologies;
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -108,8 +108,9 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
     }
 
     @Override
-    public synchronized void onChange(SafeCommandStore safeStore, Command command)
+    public synchronized void onChange(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
+        Command command = safeCommand.current();
         logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
                 this, command.txnId(), command.status(), command);
         switch (command.status())
@@ -130,18 +131,19 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
             case ReadyToExecute:
         }
 
-        command.removeListener(this);
+        command = safeCommand.removeListener(this);
+
         if (!isObsolete)
-            read(safeStore, command);
+            read(safeStore, command.asCommitted());
     }
 
     @Override
     public synchronized ReadNack apply(SafeCommandStore safeStore)
     {
-        Command command = safeStore.command(txnId);
-        Status status = command.status();
+        SafeCommand safeCommand = safeStore.command(txnId);
+        Status status = safeCommand.current().status();
         logger.trace("{}: setting up read with status {} on {}", txnId, status, safeStore);
-        switch (command.status()) {
+        switch (status) {
             default:
                 throw new AssertionError();
             case Committed:
@@ -152,7 +154,8 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
             case PreCommitted:
                 waitingOn.set(safeStore.commandStore().id());
                 ++waitingOnCount;
-                command.addListener(this);
+
+                safeCommand.addListener(this);
 
                 if (status == Committed)
                     return null;
@@ -164,7 +167,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
                 waitingOn.set(safeStore.commandStore().id());
                 ++waitingOnCount;
                 if (!isObsolete)
-                    read(safeStore, command);
+                    read(safeStore, safeCommand.current().asCommitted());
                 return null;
 
             case PreApplied:
@@ -183,6 +186,11 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
                 : r1.compareTo(r2) >= 0 ? r1 : r2;
     }
 
+    private void removeListener(SafeCommandStore safeStore, TxnId txnId)
+    {
+        safeStore.command(txnId).removeListener(this);
+    }
+
     @Override
     public synchronized void accept(ReadNack reply, Throwable failure)
     {
@@ -197,7 +205,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
             data = null;
             // TODO (expected, exceptions): probably a better way to handle this, as might not be uncaught
             node.agent().onUncaughtException(failure);
-            node.commandStores().mapReduceConsume(this, waitingOn.stream(), forEach(in -> in.command(txnId).removeListener(this), node.agent()));
+            node.commandStores().mapReduceConsume(this, waitingOn.stream(), forEach(in -> removeListener(in, txnId), node.agent()));
         }
         else
         {
@@ -207,13 +215,16 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
 
     private void ack()
     {
+        // wait for -1 to ensure the setup phase has also completed. Setup calls ack in its callback
+        // and prevents races where we respond before dispatching all the required reads (if the reads are
+        // completing faster than the reads can be setup on all required shards)
         if (-1 == --waitingOnCount)
             node.reply(replyTo, replyContext, new ReadOk(data));
     }
 
     private synchronized void readComplete(CommandStore commandStore, Data result)
     {
-        Preconditions.checkState(waitingOn.get(commandStore.id()));
+        Invariants.checkState(waitingOn.get(commandStore.id()));
         logger.trace("{}: read completed on {}", txnId, commandStore);
         if (result != null)
             data = data == null ? result : data.merge(result);
@@ -222,10 +233,10 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
         ack();
     }
 
-    private void read(SafeCommandStore safeStore, Command command)
+    private void read(SafeCommandStore safeStore, Command.Committed command)
     {
-        logger.trace("{}: executing read", command.txnId());
         CommandStore unsafeStore = safeStore.commandStore();
+        logger.trace("{}: executing read", command.txnId());
         command.read(safeStore).begin((next, throwable) -> {
             if (throwable != null)
             {

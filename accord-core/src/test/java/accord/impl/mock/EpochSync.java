@@ -22,19 +22,20 @@ import accord.coordinate.FetchData;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.*;
 import accord.messages.*;
-import accord.primitives.KeyRoute;
 import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies.Single;
 import accord.topology.Topology;
 
+import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResults;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
 
 import static accord.impl.InMemoryCommandStore.inMemory;
@@ -95,7 +96,7 @@ public class EpochSync implements Runnable
         }
     }
 
-    private static class CommandSync extends AsyncResults.Settable<Void> implements Callback<SimpleReply>
+    private static class CommandSync extends AsyncResults.SettableResult<Void> implements Callback<SimpleReply>
     {
         private final QuorumTracker tracker;
 
@@ -127,9 +128,8 @@ public class EpochSync implements Runnable
             tryFailure(failure);
         }
 
-        public static void sync(Node node, Route<?> route, SyncCommitted message, Topology topology)
-        {
-            AsyncResults.getUninterruptibly(new CommandSync(node, route, message, topology));
+        public static void sync(Node node, Route<?> route, SyncCommitted message, Topology topology) throws ExecutionException {
+            AsyncChains.getUninterruptibly(new CommandSync(node, route, message, topology));
         }
     }
 
@@ -174,10 +174,17 @@ public class EpochSync implements Runnable
             Map<TxnId, SyncCommitted> syncMessages = new ConcurrentHashMap<>();
             Consumer<Command> commandConsumer = command -> syncMessages.computeIfAbsent(command.txnId(), id -> new SyncCommitted(command, syncEpoch))
                     .update(command);
-            getUninterruptibly(node.commandStores().forEach(commandStore -> inMemory(commandStore).forCommittedInEpoch(syncTopology.ranges(), syncEpoch, commandConsumer)));
+            try
+            {
+                getUninterruptibly(node.commandStores().forEach(commandStore -> inMemory(commandStore).forCommittedInEpoch(syncTopology.ranges(), syncEpoch, commandConsumer)));
 
-            for (SyncCommitted send : syncMessages.values())
-                CommandSync.sync(node, send.route, send, nextTopology);
+                for (SyncCommitted send : syncMessages.values())
+                    CommandSync.sync(node, send.route, send, nextTopology);
+            }
+            catch (ExecutionException e)
+            {
+                throw new RuntimeException(e.getCause());
+            }
 
             SyncComplete syncComplete = new SyncComplete(syncEpoch);
             node.send(nextTopology.nodes(), syncComplete);

@@ -24,6 +24,9 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
@@ -176,5 +179,125 @@ public class AsyncChainsTest
         ResultCallback<Integer> callback = new ResultCallback<>();
         reduction2.begin(callback);
         Assertions.assertEquals(9, callback.value());
+    }
+
+    @Test
+    void beginSeesException()
+    {
+        AsyncChains.ofCallable(ignore -> {
+                    throw new RejectedExecutionException();
+                }, () -> 42)
+                .map(i -> i + 1)
+                .begin((success, failure) -> {
+                    if (failure == null)
+                        throw new IllegalStateException("Should see failure");
+                });
+
+        AsyncChains.ofRunnable(ignore -> {
+                    throw new RejectedExecutionException();
+                }, () -> {})
+                .map(ignore -> 1)
+                .beginAsResult()
+                .addCallback((success, failure) -> {
+                    if (failure == null)
+                        throw new IllegalStateException("Expected to fail");
+                });
+
+        AsyncChains.<Integer>ofCallable(fn -> fn.run(), () -> {
+                    throw new RuntimeException("Unchecked");
+                }).map(i -> i + 1).map(i -> i + 1)
+                .begin((success, failure) -> {
+                    if (failure == null)
+                        throw new IllegalStateException("Should see failure");
+                });
+
+        AsyncChains.ofCallable(fn -> fn.run(), () -> 42
+                ).map(i -> i + 1)
+                .map(ignore -> {
+                    throw new RuntimeException("Unchecked");
+                })
+                .begin((success, failure) -> {
+                    if (failure == null)
+                        throw new IllegalStateException("Should see failure");
+                });
+    }
+
+    @Test
+    void headRejectsSecondBegin()
+    {
+        AsyncChain<String> chain = new AsyncChains.Head<String>() {
+            @Override
+            protected void start(BiConsumer<? super String, Throwable> callback) {
+                callback.accept("success", null);
+            }
+        };
+
+        chain.begin((i1, i2) -> {});
+        assertThrows(() -> chain.begin((i1, i2) -> {}));
+    }
+
+    @Test
+    void chainRejectsSecondBegin()
+    {
+        AsyncChain<String> chain = new AsyncChains.Head<String>() {
+            @Override
+            protected void start(BiConsumer<? super String, Throwable> callback) {
+                callback.accept("success", null);
+            }
+        };
+        chain = chain.map(s -> s + " is true");
+        chain.begin((i1, i2) -> {});
+        AsyncChain<String> finalChain = chain;
+        assertThrows(() -> finalChain.begin((i1, i2) -> {}));
+    }
+
+    private static void assertThrows(Runnable fn)
+    {
+        try
+        {
+            fn.run();
+            Assertions.fail("Should have been rejected");
+        }
+        catch (AssertionError e)
+        {
+            if ("Should have been rejected".equals(e.getMessage())) throw e;
+        }
+        catch (Throwable t)
+        {
+            // expected
+        }
+    }
+
+    @Test
+    void test3()
+    {
+        AtomicReference<Boolean> sawFailure = new AtomicReference<>(null);
+        AtomicBoolean sawCallback = new AtomicBoolean(false);
+        AsyncChains.failure(new NullPointerException("just kidding"))
+                .beginAsResult()
+                .addCallback(() -> sawCallback.set(true))
+                .begin((success, failure) -> {
+                    if (failure != null) sawFailure.set(true);
+                    else sawFailure.set(false);
+                });
+        Assertions.assertEquals(Boolean.TRUE, sawFailure.get());
+        Assertions.assertFalse(sawCallback.get());
+    }
+
+    @Test
+    void simpleHeadChain() throws ExecutionException, InterruptedException {
+        AsyncChain<Integer> chain = new AsyncChains.Head<Integer>() {
+            @Override
+            protected void start(BiConsumer<? super Integer, Throwable> callback) {
+                callback.accept(0, null);
+            }
+        };
+        chain = chain.map(i -> i + 1)
+                     .map(i -> i + 2)
+                     .map(i -> i + 3)
+                     .map(i -> i + 4)
+                     .map(i -> i + 5);
+
+        Assertions.assertEquals(15, AsyncChains.getBlocking(chain));
     }
 }

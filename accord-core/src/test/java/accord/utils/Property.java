@@ -133,6 +133,11 @@ public class Property
         return sb.toString();
     }
 
+    public interface FailingConsumer<A>
+    {
+        void accept(A value) throws Exception;
+    }
+
     public static class SingleBuilder<T> extends Common<SingleBuilder<T>>
     {
         private final Gen<T> gen;
@@ -142,7 +147,7 @@ public class Property
             this.gen = Objects.requireNonNull(gen);
         }
 
-        public void check(Consumer<T> fn)
+        public void check(FailingConsumer<T> fn)
         {
             Random random = new Random(seed);
             for (int i = 0; i < examples; i++)
@@ -166,6 +171,11 @@ public class Property
         }
     }
 
+    public interface FailingBiConsumer<A, B>
+    {
+        void accept(A a, B b) throws Exception;
+    }
+
     public static class DoubleBuilder<A, B> extends Common<DoubleBuilder<A, B>>
     {
         private final Gen<A> aGen;
@@ -177,7 +187,7 @@ public class Property
             this.bGen = Objects.requireNonNull(bGen);
         }
 
-        public void check(BiConsumer<A, B> fn)
+        public void check(FailingBiConsumer<A, B> fn)
         {
             Random random = new Random(seed);
             for (int i = 0; i < examples; i++)

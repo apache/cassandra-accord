@@ -98,8 +98,8 @@ public class TopologyRandomizer
 
         shards[idx] = new Shard(IntHashKey.range((Hash)leftRange.start(), newBound), left.nodes, left.fastPathElectorate, left.joining);
         shards[idx+1] = new Shard(IntHashKey.range(newBound, (Hash)rightRange.end()), right.nodes, right.fastPathElectorate, right.joining);
-        logger.debug("Updated boundary on {} & {} {} {} to {} {}", idx, idx + 1, left, right,
-                     shards[idx].toString(true), shards[idx + 1].toString(true));
+//        logger.debug("Updated boundary on {} & {} {} {} to {} {}", idx, idx + 1, left, right,
+//                     shards[idx].toString(true), shards[idx + 1].toString(true));
 
         return shards;
     }
@@ -148,10 +148,10 @@ public class TopologyRandomizer
 
         shards[idxLeft] = new Shard(shardLeft.range, nodesLeft, newFastPath(nodesLeft, random), shardLeft.joining);
         shards[idxRight] = new Shard(shardRight.range, nodesRight, newFastPath(nodesRight, random), shardLeft.joining);
-        logger.debug("updated membership on {} & {} {} {} to {} {}",
-                    idxLeft, idxRight,
-                    shardLeft.toString(true), shardRight.toString(true),
-                    shards[idxLeft].toString(true), shards[idxRight].toString(true));
+//        logger.debug("updated membership on {} & {} {} {} to {} {}",
+//                    idxLeft, idxRight,
+//                    shardLeft.toString(true), shardRight.toString(true),
+//                    shards[idxLeft].toString(true), shards[idxRight].toString(true));
 
         return shards;
     }
@@ -179,7 +179,7 @@ public class TopologyRandomizer
         int idx = random.nextInt(shards.length);
         Shard shard = shards[idx];
         shards[idx] = new Shard(shard.range, shard.nodes, newFastPath(shard.nodes, random), shard.joining);
-        logger.debug("Updated fast path on {} {} to {}", idx, shard.toString(true), shards[idx].toString(true));
+//        logger.debug("Updated fast path on {} {} to {}", idx, shard.toString(true), shards[idx].toString(true));
         return shards;
     }
 
@@ -227,7 +227,7 @@ public class TopologyRandomizer
         Topology current = epochs.get(epochs.size() - 1);
         Shard[] shards = current.unsafeGetShards().clone();
         int mutations = random.nextInt(current.size());
-        logger.debug("Updating topology with {} mutations", mutations);
+//        logger.debug("Updating topology with {} mutations", mutations);
         for (int i=0; i<mutations; i++)
         {
             shards = UpdateType.kind(random).apply(shards, random);
@@ -250,7 +250,7 @@ public class TopologyRandomizer
             previouslyReplicated.put(entry.getKey(), merged);
         }
 
-        logger.debug("topology update to: {} from: {}", nextTopology, current);
+//        logger.debug("topology update to: {} from: {}", nextTopology, current);
         epochs.add(nextTopology);
 
         List<Node.Id> nodes = new ArrayList<>(nextTopology.nodes());

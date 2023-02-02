@@ -57,22 +57,25 @@ class Defer implements CommandListener
         this.request = request;
     }
 
-    void add(Command command, CommandStore commandStore)
+    void add(SafeCommandStore safeStore, SafeCommand safeCommand, CommandStore commandStore)
     {
         if (isDone)
             throw new IllegalStateException("Recurrent retry of " + request);
 
         waitingOn.add(commandStore.id());
         ++waitingOnCount;
-        command.addListener(this);
+        safeCommand.addListener(this);
     }
 
     @Override
-    public void onChange(SafeCommandStore safeStore, Command command)
+    public void onChange(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
+        Command command = safeCommand.current();
         Ready ready = waitUntil.apply(command);
         if (ready == No) return;
-        command.removeListener(this);
+
+        safeCommand.removeListener(this);
+
         if (ready == Expired) return;
 
         int id = safeStore.commandStore().id();
@@ -92,6 +95,12 @@ class Defer implements CommandListener
     {
         Invariants.checkState(caller.equals(request.txnId));
         return request;
+    }
+
+    @Override
+    public boolean isTransient()
+    {
+        return true;
     }
 }
 

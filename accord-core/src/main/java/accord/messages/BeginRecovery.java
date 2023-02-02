@@ -20,6 +20,7 @@ package accord.messages;
 
 import accord.api.Result;
 import accord.local.SafeCommandStore;
+import accord.local.*;
 import accord.local.Status.Phase;
 import accord.primitives.*;
 import accord.topology.Topologies;
@@ -32,8 +33,6 @@ import javax.annotation.Nullable;
 import accord.utils.Invariants;
 
 import accord.local.Node.Id;
-import accord.local.Command;
-import accord.local.Status;
 
 import java.util.Collections;
 
@@ -84,9 +83,8 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
 
     public RecoverReply apply(SafeCommandStore safeStore)
     {
-        Command command = safeStore.command(txnId);
-
-        switch (command.recover(safeStore, partialTxn, route != null ? route : scope, progressKey, ballot))
+        SafeCommand safeCommand = safeStore.command(txnId);
+        switch (Commands.recover(safeStore, txnId, partialTxn, route != null ? route : scope, progressKey, ballot))
         {
             default:
                 throw new IllegalStateException("Unhandled Outcome");
@@ -95,11 +93,12 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
                 throw new IllegalStateException("Invalid Outcome");
 
             case RejectedBallot:
-                return new RecoverNack(command.promised());
+                return new RecoverNack(safeCommand.current().promised());
 
             case Success:
         }
 
+        Command command = safeCommand.current();
         PartialDeps deps = command.partialDeps();
         if (!command.known().deps.hasProposedOrDecidedDeps())
         {
@@ -128,7 +127,11 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
             // accepted txns with an earlier txnid that don't have our txnid as a dependency
             earlierAcceptedNoWitness = acceptedStartedBeforeWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
         }
-        return new RecoverOk(txnId, command.status(), command.accepted(), command.executeAt(), deps, earlierCommittedWitness, earlierAcceptedNoWitness, rejectsFastPath, command.writes(), command.result());
+
+        Writes writes = command.isExecuted() ? command.asExecuted().writes() : null;
+        Result result = command.isExecuted() ? command.asExecuted().result() : null;
+        return new RecoverOk(txnId, command.status(), command.accepted(), command.executeAt(), deps,
+                             earlierCommittedWitness, earlierAcceptedNoWitness, rejectsFastPath, writes, result);
     }
 
     @Override

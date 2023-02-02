@@ -18,44 +18,51 @@
 
 package accord.impl;
 
+import accord.impl.InMemoryCommandStore.GlobalCommand;
 import accord.local.Command;
-import accord.local.Node;
-import accord.api.Agent;
-import accord.api.Result;
-import accord.primitives.Timestamp;
+import accord.local.SafeCommand;
 import accord.primitives.TxnId;
 
-import java.util.concurrent.TimeUnit;
-
-public class TestAgent implements Agent
+public class InMemorySafeCommand extends SafeCommand implements SafeState<Command>
 {
-    @Override
-    public void onRecover(Node node, Result success, Throwable fail)
+    private boolean invalidated;
+    private final GlobalCommand global;
+
+    public InMemorySafeCommand(TxnId txnId, GlobalCommand global)
     {
-        // do nothing, intended for use by implementations to decide what to do about recovered transactions
-        // specifically if and how they should inform clients of the result
-        // e.g. in Maelstrom we send the full result directly, in other impls we may simply acknowledge success via the coordinator
+        super(txnId);
+        this.global = global;
     }
 
     @Override
-    public void onInconsistentTimestamp(Command command, Timestamp prev, Timestamp next)
+    public Command current()
     {
-        throw new AssertionError();
+        checkNotInvalidated();
+        return global.value();
     }
 
     @Override
-    public void onUncaughtException(Throwable t)
+    protected void set(Command update)
     {
+        checkNotInvalidated();
+        global.value(update);
     }
 
     @Override
-    public void onHandledException(Throwable t)
+    public void invalidate()
     {
+        invalidated = true;
     }
 
     @Override
-    public boolean isExpired(TxnId initiated, long now)
+    public boolean invalidated()
     {
-        return TimeUnit.SECONDS.convert(now - initiated.hlc(), TimeUnit.MICROSECONDS) >= 10;
+        return invalidated;
+    }
+
+    private void checkNotInvalidated()
+    {
+        if (invalidated())
+            throw new IllegalStateException("Cannot access invalidated " + this);
     }
 }

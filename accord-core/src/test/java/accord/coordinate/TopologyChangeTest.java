@@ -33,15 +33,16 @@ import accord.utils.EpochFunction;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.concurrent.ExecutionException;
+
 import static accord.Utils.*;
 import static accord.impl.IntKey.keys;
 import static accord.impl.IntKey.range;
-import static accord.local.PreLoadContext.empty;
 import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Txn.Kind.Write;
 
-import static accord.utils.async.AsyncChains.awaitUninterruptibly;
-import static accord.utils.async.AsyncResults.awaitUninterruptibly;
+import static accord.local.PreLoadContext.contextFor;
+import static accord.utils.async.AsyncChains.getUninterruptibly;
 
 public class TopologyChangeTest
 {
@@ -65,9 +66,9 @@ public class TopologyChangeTest
             Node node1 = cluster.get(1);
             TxnId txnId1 = node1.nextTxnId(Write, Key);
             Txn txn1 = writeTxn(keys);
-            awaitUninterruptibly(node1.coordinate(txnId1, txn1));
-            awaitUninterruptibly(node1.commandStores().forEach(empty(), keys, 1, 1, commands -> {
-                Command command = commands.command(txnId1);
+            getUninterruptibly(node1.coordinate(txnId1, txn1));
+            getUninterruptibly(node1.commandStores().forEach(contextFor(txnId1), keys, 1, 1, commands -> {
+                Command command = commands.command(txnId1).current();
                 Assertions.assertTrue(command.partialDeps().isEmpty());
             }));
 
@@ -76,15 +77,21 @@ public class TopologyChangeTest
             Node node4 = cluster.get(4);
             TxnId txnId2 = node4.nextTxnId(Write, Key);
             Txn txn2 = writeTxn(keys);
-            awaitUninterruptibly(node4.coordinate(txnId2, txn2));
+            getUninterruptibly(node4.coordinate(txnId2, txn2));
 
             // new nodes should have the previous epochs operation as a dependency
-            PreLoadContext context = PreLoadContext.contextFor(txnId2);
             cluster.nodes(4, 5, 6).forEach(node -> {
-                awaitUninterruptibly(node.commandStores().forEach(context, keys, 2, 2, commands -> {
-                    Command command = commands.command(txnId2);
-                    Assertions.assertTrue(command.partialDeps().contains(txnId1));
-                }));
+                try
+                {
+                    getUninterruptibly(node.commandStores().forEach(contextFor(txnId1, txnId2), keys, 2, 2, commands -> {
+                        Command command = commands.command(txnId2).current();
+                        Assertions.assertTrue(command.partialDeps().contains(txnId1));
+                    }));
+                }
+                catch (ExecutionException e)
+                {
+                    throw new AssertionError(e.getCause());
+                }
             });
         }
     }

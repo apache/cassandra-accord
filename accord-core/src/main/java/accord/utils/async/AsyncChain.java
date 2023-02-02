@@ -20,6 +20,7 @@ package accord.utils.async;
 
 import java.util.concurrent.Executor;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 import com.google.common.util.concurrent.ListenableFuture;
@@ -36,20 +37,42 @@ public interface AsyncChain<V>
      */
     <T> AsyncChain<T> flatMap(Function<? super V, ? extends AsyncChain<T>> mapper);
 
+    default AsyncChain<Void> accept(Consumer<? super V> action)
+    {
+        return map(r -> {
+            action.accept(r);
+            return null;
+        });
+    }
+
     /**
      * Support {@link com.google.common.util.concurrent.Futures#addCallback} natively
      */
     AsyncChain<V> addCallback(BiConsumer<? super V, Throwable> callback);
 
-    void begin(BiConsumer<? super V, Throwable> callback);
-
-    default void begin(Runnable runnable)
+    /**
+     * Adds a callback that only listens to the successful case, a failed chain will not trigger the callback
+     */
+    default AsyncChain<V> addCallback(Runnable runnable)
     {
-        begin((unused, failure) -> {
-            if (failure == null) runnable.run();
-            else throw new RuntimeException(failure);
-        });
+        return addCallback(AsyncCallbacks.toCallback(runnable));
     }
+
+    default AsyncChain<V> addCallback(BiConsumer<? super V, Throwable> callback, Executor executor)
+    {
+        return addCallback(AsyncCallbacks.inExecutor(callback, executor));
+    }
+
+    default AsyncChain<V> addCallback(Runnable runnable, Executor executor)
+    {
+        return addCallback(AsyncCallbacks.inExecutor(runnable, executor));
+    }
+
+    /**
+     * Causes the chain to begin, starting all work required.  This method must be called exactly once, not calling will
+     * not cause any work to start, and calling multiple times will be rejected.
+     */
+    void begin(BiConsumer<? super V, Throwable> callback);
 
     default AsyncResult<V> beginAsResult()
     {

@@ -50,7 +50,7 @@ public class Timestamp implements Comparable<Timestamp>
         return new Timestamp(epochMsb(epoch), 0, Id.NONE);
     }
 
-    private static final long MAX_EPOCH = (1L << 48) - 1;
+    public static final long MAX_EPOCH = (1L << 48) - 1;
     private static final long HLC_INCR = 1L << 16;
     private static final long MAX_FLAGS = HLC_INCR - 1;
     public static final Timestamp NONE = new Timestamp(0, 0, 0, Id.NONE);
