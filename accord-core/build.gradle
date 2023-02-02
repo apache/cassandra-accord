@@ -64,14 +64,17 @@ publishing {
       // This is a bug with Gradle that is fixed in 8.0 but not yet released
       // see https://github.com/gradle/gradle/commit/6e596c638dff59dfa06032a7e7a3974275ddb3e1
       pom.withXml {
-        asNode().dependencies.'*'.findAll() { it.artifactId.text() == 'accord' }.each() { it.parent().remove(it) }
+        asNode().dependencies.'*'.findAll() { it.artifactId.text() == accord_artifactId }.each() { it.parent().remove(it) }
       }
       from components.java
-    }
-
-    test(MavenPublication) {
-      artifactId = accord_artifactId
+      // don't need to add javadoc or sources as they were added already in the java block
       artifact testJar
+
+      versionMapping {
+        allVariants {
+          fromResolutionOf('testRuntimeClasspath')
+        }
+      }
     }
   }
 }
