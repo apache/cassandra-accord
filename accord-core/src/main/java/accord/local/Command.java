@@ -574,7 +574,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
 
     private void apply(SafeCommandStore safeStore)
     {
-        applyChain(safeStore).begin(AsyncCallbacks.noop());
+        applyChain(safeStore).begin(safeStore.agent());
     }
 
     public AsyncChain<Data> read(SafeCommandStore safeStore)
@@ -733,7 +733,7 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
                 if (cur == null)
                 {
                     // need to load; schedule execution for later
-                    safeStore.execute(this, this).begin(AsyncCallbacks.noop());
+                    safeStore.execute(this, this).begin(safeStore.agent());
                     return;
                 }
 
