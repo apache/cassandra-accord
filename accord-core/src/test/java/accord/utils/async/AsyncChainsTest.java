@@ -1,0 +1,162 @@
+package accord.utils.async;
+
+import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.MoreExecutors;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
+
+public class AsyncChainsTest
+{
+    private static class ResultCallback<V> implements BiConsumer<V, Throwable>
+    {
+        private static class Result<V>
+        {
+            final V value;
+            final Throwable failure;
+
+            public Result(V value, Throwable failure)
+            {
+                this.value = value;
+                this.failure = failure;
+            }
+        }
+
+        private final AtomicReference<Result<V>> state = new AtomicReference<>(null);
+
+        @Override
+        public void accept(V result, Throwable failure)
+        {
+            boolean set = state.compareAndSet(null, new Result<>(result, failure));
+            Assertions.assertTrue(set);
+        }
+
+        public V value()
+        {
+            Result<V> result = state.get();
+            Assertions.assertTrue(result != null);
+            Assertions.assertTrue(result.failure == null);
+            return result.value;
+        }
+
+        public Throwable failure()
+        {
+            Result<V> result = state.get();
+            Assertions.assertTrue(result != null);
+            Assertions.assertTrue(result.failure != null);
+            return result.failure;
+        }
+    }
+
+    @Test
+    void basicTest()
+    {
+        ResultCallback<Integer> finalCallback = new ResultCallback<>();
+        ResultCallback<Integer> intermediateCallback = new ResultCallback<>();
+
+        AsyncChain<Integer> chain = AsyncChains.ofCallable(MoreExecutors.directExecutor(), () -> 5);
+        chain = chain.addCallback(intermediateCallback);
+
+        chain = chain.map(i -> i + 2);
+        chain.begin(finalCallback);
+
+        Assertions.assertEquals(5, intermediateCallback.value());
+        Assertions.assertEquals(7, finalCallback.value());
+    }
+
+    /**
+     * Test immediate chains can be reused
+     */
+    @Test
+    void immediateTest()
+    {
+        AsyncChain<Integer> success = AsyncChains.success(5);
+        AsyncChain<Integer> chain1 = success.map(i -> i + 2);
+        AsyncChain<Integer> chain2 = success.map(i -> i + 2);
+        chain2 = chain2.map(i -> i + 2);
+
+        ResultCallback<Integer> firstCallback = new ResultCallback<>();
+        ResultCallback<Integer> secondCallback = new ResultCallback<>();
+        ResultCallback<Integer> immediateCallback = new ResultCallback<>();
+
+        chain1.begin(firstCallback);
+        chain2.begin(secondCallback);
+        success.begin(immediateCallback);
+
+        Assertions.assertEquals(firstCallback.value(), 7);
+        Assertions.assertEquals(secondCallback.value(), 9);
+        Assertions.assertEquals(immediateCallback.value(), 5);
+    }
+
+    @Test
+    void allTest()
+    {
+        AsyncChain<Integer> chain1 = AsyncChains.success(1);
+        AsyncChain<Integer> chain2 = AsyncChains.success(2);
+        AsyncChain<Integer> chain3 = AsyncChains.success(3);
+        AsyncChain<List<Integer>> reduced = AsyncChains.all(Lists.newArrayList(chain1, chain2, chain3));
+        ResultCallback<List<Integer>> callback = new ResultCallback<>();
+        reduced.begin(callback);
+        Assertions.assertEquals(Lists.newArrayList(1, 2, 3), callback.value());
+    }
+
+    @Test
+    void reduceTest()
+    {
+        AsyncChain<Integer> chain1 = AsyncChains.success(1);
+        AsyncChain<Integer> chain2 = AsyncChains.success(2);
+        AsyncChain<Integer> chain3 = AsyncChains.success(3);
+        AsyncChain<Integer> reduced = AsyncChains.reduce(Lists.newArrayList(chain1, chain2, chain3), (a, b) -> a + b);
+        ResultCallback<Integer> callback = new ResultCallback<>();
+        reduced.begin(callback);
+        Assertions.assertEquals(6, callback.value());
+    }
+
+    private static void assertCombinerSize(int size, AsyncChain<?> chain)
+    {
+        Assertions.assertTrue(chain instanceof AsyncChainCombiner, () -> String.format("%s is not an instance of AsyncChainCombiner", chain));
+        AsyncChainCombiner<?, ?> combiner = (AsyncChainCombiner<?, ?>) chain;
+        Assertions.assertEquals(size, combiner.size());
+    }
+
+    @Test
+    void appendingReduceTest()
+    {
+        AsyncChain<Integer> chain1 = AsyncChains.success(1);
+        AsyncChain<Integer> chain2 = AsyncChains.success(2);
+        AsyncChain<Integer> chain3 = AsyncChains.success(3);
+        BiFunction<Integer, Integer, Integer> add = (a, b) -> a + b;
+        AsyncChain<Integer> reduction1 = AsyncChains.reduce(chain1, chain2, add);
+        assertCombinerSize(2, reduction1);
+        AsyncChain<Integer> reduction2 = AsyncChains.reduce(reduction1, chain3, add);
+        assertCombinerSize(3, reduction2);
+        Assertions.assertSame(reduction1, reduction2);
+
+        ResultCallback<Integer> callback = new ResultCallback<>();
+        reduction2.begin(callback);
+        Assertions.assertEquals(6, callback.value());
+    }
+
+    @Test
+    void uncombinableReduce()
+    {
+        AsyncChain<Integer> chain1 = AsyncChains.success(1);
+        AsyncChain<Integer> chain2 = AsyncChains.success(2);
+        AsyncChain<Integer> chain3 = AsyncChains.success(3);
+        BiFunction<Integer, Integer, Integer> add = (a, b) -> a + b;
+        BiFunction<Integer, Integer, Integer> mult = (a, b) -> a * b;
+        AsyncChain<Integer> reduction1 = AsyncChains.reduce(chain1, chain2, add);
+        assertCombinerSize(2, reduction1);
+        AsyncChain<Integer> reduction2 = AsyncChains.reduce(reduction1, chain3, mult);
+        assertCombinerSize(2, reduction2);
+        Assertions.assertNotSame(reduction1, reduction2);
+
+        ResultCallback<Integer> callback = new ResultCallback<>();
+        reduction2.begin(callback);
+        Assertions.assertEquals(9, callback.value());
+    }
+}

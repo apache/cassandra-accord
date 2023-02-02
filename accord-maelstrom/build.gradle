@@ -22,7 +22,7 @@ plugins {
 
 dependencies {
     implementation project(':accord-core')
-    implementation group: 'org.apache.cassandra', name: 'cassandra-all', version: '4.1-alpha1'
+    implementation group: 'com.google.code.findbugs', name: 'jsr305', version: '3.0.2'
     implementation 'com.google.code.gson:gson:2.8.7'
 
     testImplementation(testFixtures(project(':accord-core')))

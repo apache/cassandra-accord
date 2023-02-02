@@ -31,6 +31,13 @@ import javax.annotation.Nullable;
 
 import accord.utils.IntrusiveLinkedList;
 import accord.utils.IntrusiveLinkedListNode;
+import accord.coordinate.*;
+import accord.local.*;
+import accord.local.Status.Known;
+import accord.primitives.*;
+import accord.utils.Invariants;
+import accord.utils.async.AsyncResult;
+
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
 import accord.coordinate.*;
@@ -43,7 +50,6 @@ import accord.messages.SimpleReply;
 import accord.primitives.*;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
-import org.apache.cassandra.utils.concurrent.Future;
 
 import static accord.api.ProgressLog.ProgressShard.Home;
 import static accord.api.ProgressLog.ProgressShard.Unsure;
@@ -239,7 +245,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                                 RoutingKey homeKey = command.homeKey();
                                 node.withEpoch(txnId.epoch(), () -> {
 
-                                    Future<? extends Outcome> recover = node.maybeRecover(txnId, homeKey, command.route(), token);
+                                    AsyncResult<? extends Outcome> recover = node.maybeRecover(txnId, homeKey, command.route(), token);
                                     recover.addCallback((success, fail) -> {
                                         commandStore.execute(PreLoadContext.empty(), ignore -> {
                                             if (status.isAtMostReadyToExecute() && progress() == Investigating)
@@ -553,7 +559,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 void run(Command command)
                 {
                     // make sure a quorum of the home shard is aware of the transaction, so we can rely on it to ensure progress
-                    Future<Void> inform = inform(node, txnId, command.homeKey());
+                    AsyncResult<Void> inform = inform(node, txnId, command.homeKey());
                     inform.addCallback((success, fail) -> {
                         commandStore.execute(PreLoadContext.empty(), ignore -> {
                             if (progress() == Done)

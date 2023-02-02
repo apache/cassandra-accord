@@ -30,7 +30,7 @@ java {
 }
 
 dependencies {
-    implementation group: 'org.apache.cassandra', name: 'cassandra-all', version: '4.1-alpha1'
+    implementation group: "com.google.guava", name: "guava", version: "27.0-jre"
     implementation group: "net.ju-n.compile-command-annotations", name: "compile-command-annotations", version: "1.2.0"
 
     // Dependencies we depend on that are not part of our API.

@@ -20,11 +20,10 @@ package accord.api;
 
 import accord.local.SafeCommandStore;
 import accord.primitives.*;
-import org.apache.cassandra.utils.concurrent.AsyncPromise;
-import org.apache.cassandra.utils.concurrent.Future;
-
-import java.util.List;
-import java.util.function.BiConsumer;
+import accord.primitives.Ranges;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.utils.async.AsyncChain;
 
 
 /**
@@ -33,45 +32,7 @@ import java.util.function.BiConsumer;
 public interface Read
 {
     Seekables<?, ?> keys();
-    Future<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store);
-
-    class ReadFuture extends AsyncPromise<Data> implements BiConsumer<Data, Throwable>
-    {
-        public final Keys keyScope;
-        private Data result = null;
-        private int pending = 0;
-
-        public ReadFuture(Keys keyScope, List<Future<Data>> futures)
-        {
-            this.keyScope = keyScope;
-            pending = futures.size();
-            listen(futures);
-        }
-
-        private synchronized void listen(List<Future<Data>> futures)
-        {
-            for (int i=0, mi=futures.size(); i<mi; i++)
-                futures.get(i).addCallback(this);
-        }
-
-        @Override
-        public synchronized void accept(Data data, Throwable throwable)
-        {
-            if (isDone())
-                return;
-
-            if (throwable != null)
-            {
-                tryFailure(throwable);
-                return;
-            }
-
-            result = result != null ? result.merge(data) : data;
-            if (--pending == 0)
-                trySuccess(result);
-        }
-    }
-
+    AsyncChain<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store);
     Read slice(Ranges ranges);
     Read merge(Read other);
 }

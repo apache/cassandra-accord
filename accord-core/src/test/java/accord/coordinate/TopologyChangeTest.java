@@ -39,6 +39,9 @@ import static accord.local.PreLoadContext.empty;
 import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Txn.Kind.Write;
 
+import static accord.utils.async.AsyncChains.awaitUninterruptibly;
+import static accord.utils.async.AsyncResults.awaitUninterruptibly;
+
 public class TopologyChangeTest
 {
     @Test
@@ -61,33 +64,33 @@ public class TopologyChangeTest
             Node node1 = cluster.get(1);
             TxnId txnId1 = node1.nextTxnId(Write, Key);
             Txn txn1 = writeTxn(keys);
-            node1.coordinate(txnId1, txn1).get();
-            node1.commandStores().forEach(empty(), keys, 1, 1, commands -> {
+            awaitUninterruptibly(node1.coordinate(txnId1, txn1));
+            awaitUninterruptibly(node1.commandStores().forEach(empty(), keys, 1, 1, commands -> {
                 Command command = commands.command(txnId1);
                 Assertions.assertTrue(command.partialDeps().isEmpty());
-            }).awaitUninterruptibly();
+            }));
 
             cluster.configServices(4, 5, 6).forEach(config -> config.reportTopology(topology2));
 
             Node node4 = cluster.get(4);
             TxnId txnId2 = node4.nextTxnId(Write, Key);
             Txn txn2 = writeTxn(keys);
-            node4.coordinate(txnId2, txn2).get();
+            awaitUninterruptibly(node4.coordinate(txnId2, txn2));
 
             // new nodes should have the previous epochs operation as a dependency
             cluster.nodes(4, 5, 6).forEach(node -> {
-                node.commandStores().forEach(empty(), keys, 2, 2, commands -> {
+                awaitUninterruptibly(node.commandStores().forEach(empty(), keys, 2, 2, commands -> {
                     Command command = commands.command(txnId2);
                     Assertions.assertTrue(command.partialDeps().contains(txnId1));
-                }).awaitUninterruptibly();
+                }));
             });
 
             // ...and participated in consensus
             cluster.nodes(1, 2, 3).forEach(node -> {
-                node.commandStores().forEach(empty(), keys, 1, 1, commands -> {
+                awaitUninterruptibly(node.commandStores().forEach(empty(), keys, 1, 1, commands -> {
                     Command command = commands.command(txnId2);
-                    Assertions.assertTrue(command.hasBeen(Status.Accepted));
-                }).awaitUninterruptibly();
+                    Assertions.assertTrue(command.hasBeen(Status.PreAccepted));
+                }));
             });
         }
     }

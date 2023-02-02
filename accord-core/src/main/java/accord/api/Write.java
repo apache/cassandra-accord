@@ -21,7 +21,7 @@ package accord.api;
 import accord.local.SafeCommandStore;
 import accord.primitives.Seekable;
 import accord.primitives.Timestamp;
-import org.apache.cassandra.utils.concurrent.Future;
+import accord.utils.async.AsyncChain;
 
 /**
  * A collection of data to write to one or more stores
@@ -30,5 +30,5 @@ import org.apache.cassandra.utils.concurrent.Future;
  */
 public interface Write
 {
-    Future<Void> apply(Seekable key, SafeCommandStore safeStore, Timestamp executeAt, DataStore store);
+    AsyncChain<Void> apply(Seekable key, SafeCommandStore safeStore, Timestamp executeAt, DataStore store);
 }
