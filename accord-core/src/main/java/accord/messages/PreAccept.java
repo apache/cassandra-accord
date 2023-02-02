@@ -232,7 +232,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         commandStore.mapReduce(keys, ranges, testKind, STARTED_BEFORE, executeAt, ANY_DEPS, null, null, null,
                 (keyOrRange, testTxnId, testExecuteAt, in) -> {
                     // TODO (easy, efficiency): either pass txnId as parameter or encode this behaviour in a specialised builder to avoid extra allocations
-                    if (testTxnId != txnId)
+                    if (!testTxnId.equals(txnId))
                         in.add(keyOrRange, testTxnId);
                     return in;
                 }, builder, null);
