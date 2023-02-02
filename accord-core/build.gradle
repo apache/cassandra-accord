@@ -83,12 +83,6 @@ publishing {
       from components.java
       // don't need to add javadoc or sources as they were added already in the java block
       artifact testJar
-
-      versionMapping {
-        allVariants {
-          fromResolutionOf('testRuntimeClasspath')
-        }
-      }
     }
   }
 }
