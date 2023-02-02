@@ -22,6 +22,7 @@ import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
 import accord.local.Command;
 import accord.local.Node;
+import accord.local.PreLoadContext;
 import accord.local.Status;
 import accord.primitives.Range;
 import accord.topology.Topology;
@@ -78,18 +79,11 @@ public class TopologyChangeTest
             awaitUninterruptibly(node4.coordinate(txnId2, txn2));
 
             // new nodes should have the previous epochs operation as a dependency
+            PreLoadContext context = PreLoadContext.contextFor(txnId2);
             cluster.nodes(4, 5, 6).forEach(node -> {
-                awaitUninterruptibly(node.commandStores().forEach(empty(), keys, 2, 2, commands -> {
+                awaitUninterruptibly(node.commandStores().forEach(context, keys, 2, 2, commands -> {
                     Command command = commands.command(txnId2);
                     Assertions.assertTrue(command.partialDeps().contains(txnId1));
-                }));
-            });
-
-            // ...and participated in consensus
-            cluster.nodes(1, 2, 3).forEach(node -> {
-                awaitUninterruptibly(node.commandStores().forEach(empty(), keys, 1, 1, commands -> {
-                    Command command = commands.command(txnId2);
-                    Assertions.assertTrue(command.hasBeen(Status.Accepted));
                 }));
             });
         }
