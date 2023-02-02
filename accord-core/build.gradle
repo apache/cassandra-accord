@@ -58,7 +58,21 @@ publishing {
     mavenJava(MavenPublication) {
       artifactId = accord_artifactId
       pom {
+        name = 'Apache Cassandra Accord'
+        description = 'General purpose transactions library using a leaderless consensus protocol to have highly available transactions'
+        url = 'https://cwiki.apache.org/confluence/display/CASSANDRA/CEP-15%3A+General+Purpose+Transactions'
         inceptionYear = '2021'
+        licenses {
+          license {
+            name = 'The Apache Software License, Version 2.0'
+            url = 'https://www.apache.org/licenses/LICENSE-2.0.txt'
+          }
+        }
+        scm {
+          connection = 'scm:https://gitbox.apache.org/repos/asf/cassandra-accord.git'
+          developerConnection = 'scm:https://gitbox.apache.org/repos/asf/cassandra-accord.git'
+          url = 'https://gitbox.apache.org/repos/asf?p=cassandra-accord.git;a=tree'
+        }
       }
       // This is a hack to remove accord from the dependency list as this breaks Apache Cassandra
       // This is a bug with Gradle that is fixed in 8.0 but not yet released
