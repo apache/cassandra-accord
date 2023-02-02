@@ -18,85 +18,283 @@
 
 package accord.local;
 
-import accord.api.*;
-import accord.local.Status.Durability;
-import accord.local.Status.Known;
-import accord.primitives.*;
-import accord.primitives.Writes;
-import accord.utils.Invariants;
-import accord.utils.async.AsyncCallbacks;
-import accord.utils.async.AsyncChain;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
-import java.util.function.Function;
-
-import static accord.local.Status.*;
-import static accord.local.Status.Known.*;
-import static accord.local.Status.Known.Done;
-import static accord.local.Status.Known.ExecuteAtOnly;
-import static accord.primitives.Route.isFullRoute;
-import static accord.utils.Utils.listOf;
-
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-
-import accord.api.ProgressLog.ProgressShard;
-import accord.primitives.Ranges;
-import accord.primitives.Ballot;
-import accord.primitives.PartialDeps;
-import accord.primitives.PartialTxn;
-import accord.primitives.Route;
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
+import accord.api.Data;
 import accord.api.Result;
 import accord.api.RoutingKey;
+import accord.api.VisibleForImplementation;
+import accord.primitives.*;
+import accord.utils.Invariants;
+import accord.utils.Utils;
+import accord.utils.async.AsyncChain;
+import com.google.common.collect.ImmutableSortedMap;
+import com.google.common.collect.ImmutableSortedSet;
 
-import static accord.api.ProgressLog.ProgressShard.Home;
-import static accord.api.ProgressLog.ProgressShard.Local;
-import static accord.api.ProgressLog.ProgressShard.No;
-import static accord.api.ProgressLog.ProgressShard.Unsure;
-import static accord.local.Command.EnsureAction.Add;
-import static accord.local.Command.EnsureAction.Check;
-import static accord.local.Command.EnsureAction.Ignore;
-import static accord.local.Command.EnsureAction.Set;
-import static accord.local.Command.EnsureAction.TrySet;
+import javax.annotation.Nullable;
+import java.util.*;
 
-public abstract class Command implements CommandListener, BiConsumer<SafeCommandStore, CommandListener>, PreLoadContext
+import static accord.local.Status.Durability.Local;
+import static accord.local.Status.Durability.NotDurable;
+import static accord.local.Status.Known.DefinitionOnly;
+import static accord.utils.Utils.*;
+import static java.lang.String.format;
+
+public abstract class Command implements CommonAttributes
 {
-    private static final Logger logger = LoggerFactory.getLogger(Command.class);
-
-    public abstract TxnId txnId();
-
-    // TODO (desirable, API consistency): should any of these calls be replaced by corresponding known() registers?
-    public boolean hasBeen(Status status)
+    static PreLoadContext contextForCommand(Command command)
     {
-        return status().hasBeen(status);
+        Invariants.checkState(command.hasBeen(Status.PreAccepted) && command.partialTxn() != null);
+        return command instanceof PreLoadContext ? (PreLoadContext) command : PreLoadContext.contextFor(command.txnId(), command.partialTxn().keys());
     }
 
-    public boolean has(Known known)
+    private static Status.Durability durability(Status.Durability durability, SaveStatus status)
     {
-        return known.isSatisfiedBy(saveStatus().known);
+        if (status.compareTo(SaveStatus.PreApplied) >= 0 && durability == NotDurable)
+            return Local; // not necessary anywhere, but helps for logical consistency
+        return durability;
     }
 
-    public boolean has(Definition definition)
+    @VisibleForImplementation
+    public static class SerializerSupport
     {
-        return known().definition.compareTo(definition) >= 0;
+        public static NotWitnessed notWitnessed(CommonAttributes attributes, Ballot promised)
+        {
+            return NotWitnessed.notWitnessed(attributes, promised);
+        }
+
+        public static PreAccepted preaccepted(CommonAttributes common, Timestamp executeAt, Ballot promised)
+        {
+            return PreAccepted.preAccepted(common, executeAt, promised);
+        }
+
+        public static Accepted accepted(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted)
+        {
+            return Accepted.accepted(common, status, executeAt, promised, accepted);
+        }
+
+        public static Committed committed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply)
+        {
+            return Committed.committed(common, status, executeAt, promised, accepted, waitingOnCommit, waitingOnApply);
+        }
+
+        public static Executed executed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply, Writes writes, Result result)
+        {
+            return Executed.executed(common, status, executeAt, promised, accepted, waitingOnCommit, waitingOnApply, writes, result);
+        }
     }
 
-    public boolean has(Outcome outcome)
+    private static SaveStatus validateCommandClass(SaveStatus status, Class<?> expected, Class<?> actual)
     {
-        return known().outcome.compareTo(outcome) >= 0;
+        if (actual != expected)
+        {
+            throw new IllegalStateException(format("Cannot instantiate %s for status %s. %s expected",
+                                                   actual.getSimpleName(), status, expected.getSimpleName()));
+        }
+        return status;
     }
 
-    public boolean is(Status status)
+    private static SaveStatus validateCommandClass(SaveStatus status, Class<?> klass)
     {
-        return status() == status;
+        switch (status.status)
+        {
+            case NotWitnessed:
+                return validateCommandClass(status, NotWitnessed.class, klass);
+            case PreAccepted:
+                return validateCommandClass(status, PreAccepted.class, klass);
+            case AcceptedInvalidate:
+            case Accepted:
+            case PreCommitted:
+                return validateCommandClass(status, Accepted.class, klass);
+            case Committed:
+            case ReadyToExecute:
+                return validateCommandClass(status, Committed.class, klass);
+            case PreApplied:
+            case Applied:
+            case Invalidated:
+                return validateCommandClass(status, Executed.class, klass);
+            default:
+                throw new IllegalStateException("Unhandled status " + status);
+        }
     }
+
+    public static class Listener implements CommandListener
+    {
+        protected final TxnId listenerId;
+
+        public Listener(TxnId listenerId)
+        {
+            this.listenerId = listenerId;
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            Listener that = (Listener) o;
+            return listenerId.equals(that.listenerId);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(listenerId);
+        }
+
+        @Override
+        public String toString()
+        {
+            return "ListenerProxy{" + listenerId + '}';
+        }
+
+        public TxnId txnId()
+        {
+            return listenerId;
+        }
+
+        @Override
+        public void onChange(SafeCommandStore safeStore, SafeCommand safeCommand)
+        {
+            Commands.listenerUpdate(safeStore, safeStore.command(listenerId), safeCommand);
+        }
+
+        @Override
+        public PreLoadContext listenerPreLoadContext(TxnId caller)
+        {
+            return PreLoadContext.contextFor(Utils.listOf(listenerId, caller), Keys.EMPTY);
+        }
+    }
+
+    private abstract static class AbstractCommand extends Command
+    {
+        private final TxnId txnId;
+        private final SaveStatus status;
+        private final Status.Durability durability;
+        private final RoutingKey homeKey;
+        private final RoutingKey progressKey;
+        private final Route<?> route;
+        private final Ballot promised;
+        private final Listeners.Immutable listeners;
+
+        private AbstractCommand(TxnId txnId, SaveStatus status, Status.Durability durability, RoutingKey homeKey, RoutingKey progressKey, Route<?> route, Ballot promised, Listeners.Immutable listeners)
+        {
+            this.txnId = txnId;
+            this.status = validateCommandClass(status, getClass());
+            this.durability = durability;
+            this.homeKey = homeKey;
+            this.progressKey = progressKey;
+            this.route = route;
+            this.promised = promised;
+            this.listeners = listeners;
+        }
+
+        private AbstractCommand(CommonAttributes common, SaveStatus status, Ballot promised)
+        {
+            this.txnId = common.txnId();
+            this.status = validateCommandClass(status, getClass());
+            this.durability = common.durability();
+            this.homeKey = common.homeKey();
+            this.progressKey = common.progressKey();
+            this.route = common.route();
+            this.promised = promised;
+            this.listeners = common.listeners();
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            Command command = (Command) o;
+            return txnId.equals(command.txnId())
+                    && status == command.saveStatus()
+                    && durability == command.durability()
+                    && Objects.equals(homeKey, command.homeKey())
+                    && Objects.equals(progressKey, command.progressKey())
+                    && Objects.equals(route, command.route())
+                    && Objects.equals(promised, command.promised())
+                    && listeners.equals(command.listeners());
+        }
+
+        @Override
+        public String toString()
+        {
+            return "Command@" + System.identityHashCode(this) + '{' + txnId + ':' + status + '}';
+        }
+
+        @Override
+        public TxnId txnId()
+        {
+            return txnId;
+        }
+
+        @Override
+        public final RoutingKey homeKey()
+        {
+            return homeKey;
+        }
+
+        @Override
+        public final RoutingKey progressKey()
+        {
+            return progressKey;
+        }
+
+        @Override
+        public final Route<?> route()
+        {
+            return route;
+        }
+
+        @Override
+        public Ballot promised()
+        {
+            return promised;
+        }
+
+        @Override
+        public Status.Durability durability()
+        {
+            return Command.durability(durability, saveStatus());
+        }
+
+        @Override
+        public Listeners.Immutable listeners()
+        {
+            if (listeners == null)
+                return Listeners.Immutable.EMPTY;
+            return listeners;
+        }
+
+        @Override
+        public final SaveStatus saveStatus()
+        {
+            return status;
+        }
+    }
+
+    @Override
+    public final int hashCode()
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * If this is the home shard, we require that this is a Route for all states &gt; NotWitnessed;
+     * otherwise for the local progress shard this is ordinarily a PartialRoute, and for other shards this is not set,
+     * so that there is only one copy per node that can be consulted to construct the full set of involved keys.
+     *
+     * If hasBeen(Committed) this must contain the keys for both txnId.epoch and executeAt.epoch
+     */
+    public abstract Route<?> route();
+
+    /**
+     * A key nominated to be the primary shard within this node for managing progress of the command.
+     * It is nominated only as of txnId.epoch, and may be null (indicating that this node does not monitor
+     * the progress of this command).
+     *
+     * Preferentially, this is homeKey on nodes that replicate it, and otherwise any key that is replicated, as of txnId.epoch
+     */
+    public abstract RoutingKey progressKey();
 
     /**
      * homeKey is a global value that defines the home shard - the one tasked with ensuring the transaction is finished.
@@ -110,1014 +308,41 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
      *  Once this restriction is imposed, we no longer need to pass around Routable.Domain with TxnId.
      */
     public abstract RoutingKey homeKey();
-    protected abstract void setHomeKey(RoutingKey key);
-
-    public abstract RoutingKey progressKey();
-    protected abstract void setProgressKey(RoutingKey key);
-
-    /**
-     * If this is the home shard, we require that this is a Route for all states &gt; NotWitnessed;
-     * otherwise for the local progress shard this is ordinarily a PartialRoute, and for other shards this is not set,
-     * so that there is only one copy per node that can be consulted to construct the full set of involved keys.
-     *
-     * If hasBeen(Committed) this must contain the keys for both txnId.epoch and executeAt.epoch
-     */
-    public abstract @Nullable Route<?> route();
-    protected abstract void setRoute(Route<?> route);
-
-    public abstract PartialTxn partialTxn();
-    protected abstract void setPartialTxn(PartialTxn txn);
-
+    public abstract TxnId txnId();
     public abstract Ballot promised();
-    protected abstract void setPromised(Ballot ballot);
-
-    public abstract Ballot accepted();
-    protected abstract void setAccepted(Ballot ballot);
-
-    public abstract Timestamp executeAt();
-    protected abstract void setExecuteAt(Timestamp timestamp);
-
-    /**
-     * While !hasBeen(Committed), used only as a register for Accept state, used by Recovery
-     * If hasBeen(Committed), represents the full deps owned by this range for execution at both txnId.epoch
-     * AND executeAt.epoch so that it may be used for Recovery (which contacts only txnId.epoch topology),
-     * but also for execution.
-     */
-    public abstract PartialDeps partialDeps();
-    protected abstract void setPartialDeps(PartialDeps deps);
-
-    public abstract Writes writes();
-    protected abstract void setWrites(Writes writes);
-
-    public abstract Result result();
-    protected abstract void setResult(Result result);
-
+    public abstract Status.Durability durability();
+    public abstract Listeners.Immutable listeners();
     public abstract SaveStatus saveStatus();
-    protected abstract void setSaveStatus(SaveStatus status);
 
-    public Status status() { return saveStatus().status; }
-    protected void setStatus(Status status) { setSaveStatus(SaveStatus.get(status, known())); }
-
-    public Known known() { return saveStatus().known; }
-
-    public abstract Durability durability();
-    public abstract void setDurability(Durability v);
-
-    public abstract Command addListener(CommandListener listener);
-    public abstract void removeListener(CommandListener listener);
-    protected abstract void notifyListeners(SafeCommandStore safeStore);
-
-    protected abstract void addWaitingOnCommit(TxnId txnId);
-    protected abstract void removeWaitingOnCommit(TxnId txnId);
-    protected abstract TxnId firstWaitingOnCommit();
-
-    protected abstract void addWaitingOnApplyIfAbsent(TxnId txnId, Timestamp executeAt);
-    protected abstract TxnId firstWaitingOnApply(@Nullable TxnId ifExecutesBefore);
-
-    protected abstract void removeWaitingOn(TxnId txnId, Timestamp executeAt);
-    protected abstract boolean isWaitingOnDependency();
-
-    public boolean hasBeenWitnessed()
+    static boolean isSameClass(Command command, Class<? extends Command> klass)
     {
-        return partialTxn() != null;
+        return command.getClass() == klass;
     }
 
-    @Override
-    public Iterable<TxnId> txnIds()
+    private static void checkNewBallot(Ballot current, Ballot next, String name)
     {
-        return Collections.singleton(txnId());
+        if (next.compareTo(current) < 0)
+            throw new IllegalArgumentException(format("Cannot update %s ballot from %s to %s. New ballot is less than current", name, current, next));
     }
 
-    @Override
-    public Seekables<?, ?> keys()
+    private static void checkPromised(Command command, Ballot ballot)
     {
-        // TODO (expected, consider): when do we need this, and will it always be sufficient?
-        return partialTxn().keys();
+        checkNewBallot(command.promised(), ballot, "promised");
     }
 
-    public void setDurability(SafeCommandStore safeStore, Durability durability, RoutingKey homeKey, @Nullable Timestamp executeAt)
+    private static void checkAccepted(Command command, Ballot ballot)
     {
-        updateHomeKey(safeStore, homeKey);
-        if (executeAt != null && hasBeen(PreCommitted) && !this.executeAt().equals(executeAt))
-            safeStore.agent().onInconsistentTimestamp(this, this.executeAt(), executeAt);
-        setDurability(durability);
+        checkNewBallot(command.accepted(), ballot, "accepted");
     }
 
-    public enum AcceptOutcome
+    private static void checkSameClass(Command command, Class<? extends Command> klass, String errorMsg)
     {
-        Success, Redundant, RejectedBallot
-    }
-
-    public AcceptOutcome preaccept(SafeCommandStore safeStore, PartialTxn partialTxn, Route<?> route, @Nullable RoutingKey progressKey)
-    {
-        return preacceptOrRecover(safeStore, partialTxn, route, progressKey, Ballot.ZERO);
-    }
-
-    public AcceptOutcome recover(SafeCommandStore safeStore, PartialTxn partialTxn, Route<?> route, @Nullable RoutingKey progressKey, Ballot ballot)
-    {
-        return preacceptOrRecover(safeStore, partialTxn, route, progressKey, ballot);
-    }
-
-    private AcceptOutcome preacceptOrRecover(SafeCommandStore safeStore, PartialTxn partialTxn, Route<?> route, @Nullable RoutingKey progressKey, Ballot ballot)
-    {
-        int compareBallots = promised().compareTo(ballot);
-        if (compareBallots > 0)
-        {
-            logger.trace("{}: skipping preaccept - higher ballot witnessed ({})", txnId(), promised());
-            return AcceptOutcome.RejectedBallot;
-        }
-        else if (compareBallots < 0)
-        {
-            // save the new ballot as a promise
-            setPromised(ballot);
-        }
-
-        if (known().definition.isKnown())
-        {
-            Invariants.checkState(status() == Invalidated || executeAt() != null);
-            logger.trace("{}: skipping preaccept - already known ({})", txnId(), status());
-            // in case of Ballot.ZERO, we must either have a competing recovery coordinator or have late delivery of the
-            // preaccept; in the former case we should abandon coordination, and in the latter we have already completed
-            return ballot.equals(Ballot.ZERO) ? AcceptOutcome.Redundant : AcceptOutcome.Success;
-        }
-
-        Ranges coordinateRanges = coordinateRanges(safeStore);
-        Invariants.checkState(!coordinateRanges.isEmpty());
-        ProgressShard shard = progressShard(safeStore, route, progressKey, coordinateRanges);
-        if (!validate(Ranges.EMPTY, coordinateRanges, shard, route, Set, partialTxn, Set, null, Ignore))
-            throw new IllegalStateException();
-
-        if (executeAt() == null)
-        {
-            TxnId txnId = txnId();
-            // unlike in the Accord paper, we partition shards within a node, so that to ensure a total order we must either:
-            //  - use a global logical clock to issue new timestamps; or
-            //  - assign each shard _and_ process a unique id, and use both as components of the timestamp
-            // if we are performing recovery (i.e. non-zero ballot), do not permit a fast path decision as we want to
-            // invalidate any transactions that were not completed by their initial coordinator
-            if (ballot.equals(Ballot.ZERO)) setExecuteAt(safeStore.preaccept(txnId, partialTxn.keys()));
-            else setExecuteAt(safeStore.time().uniqueNow(txnId));
-
-            if (status() == NotWitnessed)
-                setStatus(PreAccepted);
-            safeStore.progressLog().preaccepted(this, shard);
-        }
-        else
-        {
-            // TODO (expected, ?): in the case that we are pre-committed but had not been preaccepted/accepted, should we inform progressLog?
-            setSaveStatus(SaveStatus.enrich(saveStatus(), DefinitionOnly));
-        }
-        set(safeStore, Ranges.EMPTY, coordinateRanges, shard, route, partialTxn, Set, null, Ignore);
-
-        notifyListeners(safeStore);
-        return AcceptOutcome.Success;
-    }
-
-    public boolean preacceptInvalidate(Ballot ballot)
-    {
-        if (promised().compareTo(ballot) > 0)
-        {
-            logger.trace("{}: skipping preacceptInvalidate - witnessed higher ballot ({})", txnId(), promised());
-            return false;
-        }
-        setPromised(ballot);
-        return true;
-    }
-
-    public AcceptOutcome accept(SafeCommandStore safeStore, Ballot ballot, PartialRoute<?> route, Seekables<?, ?> keys, @Nullable RoutingKey progressKey, Timestamp executeAt, PartialDeps partialDeps)
-    {
-        if (this.promised().compareTo(ballot) > 0)
-        {
-            logger.trace("{}: skipping accept - witnessed higher ballot ({} > {})", txnId(), promised(), ballot);
-            return AcceptOutcome.RejectedBallot;
-        }
-
-        if (hasBeen(PreCommitted))
-        {
-            logger.trace("{}: skipping accept - already committed ({})", txnId(), status());
-            return AcceptOutcome.Redundant;
-        }
-
-        TxnId txnId = txnId();
-        Ranges coordinateRanges = coordinateRanges(safeStore);
-        Ranges acceptRanges = txnId.epoch() == executeAt.epoch() ? coordinateRanges : safeStore.ranges().between(txnId.epoch(), executeAt.epoch());
-        Invariants.checkState(!acceptRanges.isEmpty());
-        ProgressShard shard = progressShard(safeStore, route, progressKey, coordinateRanges);
-
-        if (!validate(coordinateRanges, Ranges.EMPTY, shard, route, Ignore, null, Ignore, partialDeps, Set))
-            throw new AssertionError("Invalid response from validate function");
-
-        setExecuteAt(executeAt);
-        setPromised(ballot);
-        setAccepted(ballot);
-
-        // TODO (desired, clarity/efficiency): we don't need to set the route here, and perhaps we don't even need to
-        //  distributed partialDeps at all, since all we gain is not waiting for these transactions to commit during
-        //  recovery. We probably don't want to directly persist a Route in any other circumstances, either, to ease persistence.
-        set(safeStore, coordinateRanges, acceptRanges, shard, route, null, Ignore, partialDeps, Set);
-
-        // set only registers by transaction keys, which we mightn't already have received
-        if (!known().isDefinitionKnown())
-            safeStore.register(keys, acceptRanges, this);
-
-        setStatus(Accepted);
-        safeStore.progressLog().accepted(this, shard);
-        notifyListeners(safeStore);
-
-        return AcceptOutcome.Success;
-    }
-
-    public AcceptOutcome acceptInvalidate(SafeCommandStore safeStore, Ballot ballot)
-    {
-        if (this.promised().compareTo(ballot) > 0)
-        {
-            logger.trace("{}: skipping accept invalidated - witnessed higher ballot ({} > {})", txnId(), promised(), ballot);
-            return AcceptOutcome.RejectedBallot;
-        }
-
-        if (hasBeen(PreCommitted))
-        {
-            logger.trace("{}: skipping accept invalidated - already committed ({})", txnId(), status());
-            return AcceptOutcome.Redundant;
-        }
-
-        setPromised(ballot);
-        setAccepted(ballot);
-        setStatus(AcceptedInvalidate);
-        setPartialDeps(null);
-        logger.trace("{}: accepted invalidated", txnId());
-
-        notifyListeners(safeStore);
-        return AcceptOutcome.Success;
-    }
-
-    public enum CommitOutcome { Success, Redundant, Insufficient }
-
-    // relies on mutual exclusion for each key
-    public CommitOutcome commit(SafeCommandStore safeStore, Route<?> route, @Nullable RoutingKey progressKey, @Nullable PartialTxn partialTxn, Timestamp executeAt, PartialDeps partialDeps)
-    {
-        if (hasBeen(PreCommitted))
-        {
-            logger.trace("{}: skipping commit - already committed ({})", txnId(), status());
-            if (!executeAt.equals(executeAt()) || status() == Invalidated)
-                safeStore.agent().onInconsistentTimestamp(this, (status() == Invalidated ? Timestamp.NONE : this.executeAt()), executeAt);
-
-            if (hasBeen(Committed))
-                return CommitOutcome.Redundant;
-        }
-
-        Ranges coordinateRanges = coordinateRanges(safeStore);
-        // TODO (expected, consider): consider ranges between coordinateRanges and executeRanges? Perhaps don't need them
-        Ranges executeRanges = executeRanges(safeStore, executeAt);
-        ProgressShard shard = progressShard(safeStore, route, progressKey, coordinateRanges);
-
-        if (!validate(coordinateRanges, executeRanges, shard, route, Check, partialTxn, Add, partialDeps, Set))
-            return CommitOutcome.Insufficient;
-
-        setExecuteAt(executeAt);
-        set(safeStore, coordinateRanges, executeRanges, shard, route, partialTxn, Add, partialDeps, Set);
-
-        setStatus(Committed);
-        logger.trace("{}: committed with executeAt: {}, deps: {}", txnId(), executeAt, partialDeps);
-        populateWaitingOn(safeStore);
-
-        safeStore.progressLog().committed(this, shard);
-
-        // TODO (expected, safety): introduce intermediate status to avoid reentry when notifying listeners (which might notify us)
-        maybeExecute(safeStore, shard, true, true);
-        return CommitOutcome.Success;
-    }
-
-    // relies on mutual exclusion for each key
-    public void precommit(SafeCommandStore safeStore, Timestamp executeAt)
-    {
-        if (hasBeen(PreCommitted))
-        {
-            logger.trace("{}: skipping precommit - already committed ({})", txnId(), status());
-            if (executeAt.equals(executeAt()) && status() != Invalidated)
-                return;
-
-            safeStore.agent().onInconsistentTimestamp(this, (status() == Invalidated ? Timestamp.NONE : this.executeAt()), executeAt);
-        }
-
-        setExecuteAt(executeAt);
-        setStatus(PreCommitted);
-        notifyListeners(safeStore);
-        logger.trace("{}: precommitted with executeAt: {}", txnId(), executeAt);
-    }
-
-    protected void populateWaitingOn(SafeCommandStore safeStore)
-    {
-        Ranges ranges = safeStore.ranges().since(executeAt().epoch());
-        if (ranges != null)
-        {
-            partialDeps().forEach(ranges, txnId -> {
-                Command command = safeStore.ifLoaded(txnId);
-                if (command == null)
-                {
-                    addWaitingOnCommit(txnId);
-                    safeStore.addAndInvokeListener(txnId, this);
-                }
-                else
-                {
-                    switch (command.status())
-                    {
-                        default:
-                            throw new IllegalStateException();
-                        case NotWitnessed:
-                        case PreAccepted:
-                        case Accepted:
-                        case AcceptedInvalidate:
-                            // we don't know when these dependencies will execute, and cannot execute until we do
-                            command.addListener(this);
-                            addWaitingOnCommit(command.txnId());
-                            break;
-                        case PreCommitted:
-                        case Committed:
-                            // TODO (desired, efficiency): split into ReadyToRead and ReadyToWrite;
-                            //                             the distributed read can be performed as soon as those keys are ready,
-                            //                             and in parallel with any other reads. the client can even ACK immediately after;
-                            //                             only the write needs to be postponed until other in-progress reads complete
-                        case ReadyToExecute:
-                        case PreApplied:
-                        case Applied:
-                            command.addListener(this);
-                            insertPredecessor(command);
-                        case Invalidated:
-                            break;
-                    }
-                }
-            });
-        }
-    }
-
-    // TODO (expected, ?): commitInvalidate may need to update cfks _if_ possible
-    public void commitInvalidate(SafeCommandStore safeStore)
-    {
-        if (hasBeen(PreCommitted))
-        {
-            logger.trace("{}: skipping commit invalidated - already committed ({})", txnId(), status());
-            if (!hasBeen(Invalidated))
-                safeStore.agent().onInconsistentTimestamp(this, Timestamp.NONE, executeAt());
-
-            return;
-        }
-
-        ProgressShard shard = progressShard(safeStore);
-        safeStore.progressLog().invalidated(this, shard);
-        setExecuteAt(txnId());
-        if (partialDeps() == null)
-            setPartialDeps(PartialDeps.NONE);
-        setStatus(Invalidated);
-        logger.trace("{}: committed invalidated", txnId());
-
-        notifyListeners(safeStore);
-    }
-
-    public enum ApplyOutcome { Success, Redundant, Insufficient }
-
-    public ApplyOutcome apply(SafeCommandStore safeStore, long untilEpoch, Route<?> route, Timestamp executeAt, @Nullable PartialDeps partialDeps, Writes writes, Result result)
-    {
-        if (hasBeen(PreApplied) && executeAt.equals(this.executeAt()))
-        {
-            logger.trace("{}: skipping apply - already executed ({})", txnId(), status());
-            return ApplyOutcome.Redundant;
-        }
-        else if (hasBeen(PreCommitted) && !executeAt.equals(this.executeAt()))
-        {
-            safeStore.agent().onInconsistentTimestamp(this, this.executeAt(), executeAt);
-        }
-
-        Ranges coordinateRanges = coordinateRanges(safeStore);
-        Ranges executeRanges = executeRanges(safeStore, executeAt);
-        if (untilEpoch < safeStore.latestEpoch())
-        {
-            Ranges expectedRanges = safeStore.ranges().between(executeAt.epoch(), untilEpoch);
-            Invariants.checkState(expectedRanges.containsAll(executeRanges));
-        }
-        ProgressShard shard = progressShard(safeStore, route, coordinateRanges);
-
-        if (!validate(coordinateRanges, executeRanges, shard, route, Check, null, Check, partialDeps, hasBeen(Committed) ? Add : TrySet))
-            return ApplyOutcome.Insufficient; // TODO (expected, consider): this should probably be an assertion failure if !TrySet
-
-        setWrites(writes);
-        setResult(result);
-        setExecuteAt(executeAt);
-        set(safeStore, coordinateRanges, executeRanges, shard, route, null, Check, partialDeps, hasBeen(Committed) ? Add : TrySet);
-
-        if (!hasBeen(Committed))
-            populateWaitingOn(safeStore);
-        setStatus(PreApplied);
-        logger.trace("{}: apply, status set to Executed with executeAt: {}, deps: {}", txnId(), executeAt, partialDeps);
-
-        safeStore.progressLog().executed(this, shard);
-
-        maybeExecute(safeStore, shard, true, true);
-        return ApplyOutcome.Success;
-    }
-
-    @Override
-    public PreLoadContext listenerPreLoadContext(TxnId caller)
-    {
-        return PreLoadContext.contextFor(listOf(txnId(), caller));
-    }
-
-    @Override
-    public void onChange(SafeCommandStore safeStore, Command command)
-    {
-        logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
-                     txnId(), command.txnId(), command.status(), command);
-        switch (command.status())
-        {
-            default:
-                throw new IllegalStateException();
-            case NotWitnessed:
-            case PreAccepted:
-            case Accepted:
-            case AcceptedInvalidate:
-                break;
-
-            case PreCommitted:
-            case Committed:
-            case ReadyToExecute:
-            case PreApplied:
-            case Applied:
-            case Invalidated:
-                updatePredecessor(command);
-                maybeExecute(safeStore, progressShard(safeStore), false, true);
-                break;
-        }
-    }
-
-    protected void postApply(SafeCommandStore safeStore)
-    {
-        logger.trace("{} applied, setting status to Applied and notifying listeners", txnId());
-        setStatus(Applied);
-        notifyListeners(safeStore);
-    }
-
-    private static Function<SafeCommandStore, Void> callPostApply(TxnId txnId)
-    {
-        return safeStore -> {
-            safeStore.command(txnId).postApply(safeStore);
-            return null;
-        };
-    }
-
-    protected AsyncChain<Void> applyChain(SafeCommandStore safeStore)
-    {
-        // important: we can't include a reference to *this* in the lambda, since the C* implementation may evict
-        // the command instance from memory between now and the write completing (and post apply being called)
-        CommandStore unsafeStore = safeStore.commandStore();
-        return writes().apply(safeStore).flatMap(unused -> unsafeStore.submit(this, callPostApply(txnId())));
-    }
-
-    private void apply(SafeCommandStore safeStore)
-    {
-        applyChain(safeStore).begin(safeStore.agent());
-    }
-
-    public AsyncChain<Data> read(SafeCommandStore safeStore)
-    {
-        return partialTxn().read(safeStore, this);
-    }
-
-    // TODO (expected, API consistency): maybe split into maybeExecute and maybeApply?
-    private boolean maybeExecute(SafeCommandStore safeStore, ProgressShard shard, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
-    {
-        if (logger.isTraceEnabled())
-            logger.trace("{}: Maybe executing with status {}. Will notify listeners on noop: {}", txnId(), status(), alwaysNotifyListeners);
-
-        if (status() != Committed && status() != PreApplied)
-        {
-            if (alwaysNotifyListeners)
-                notifyListeners(safeStore);
-            return false;
-        }
-
-        if (isWaitingOnDependency())
-        {
-            if (alwaysNotifyListeners)
-                notifyListeners(safeStore);
-
-            if (notifyWaitingOn)
-                new NotifyWaitingOn(this).accept(safeStore);
-            return false;
-        }
-
-        switch (status())
-        {
-            case Committed:
-                // TODO (desirable, efficiency): maintain distinct ReadyToRead and ReadyToWrite states
-                setStatus(ReadyToExecute);
-                logger.trace("{}: set to ReadyToExecute", txnId());
-                safeStore.progressLog().readyToExecute(this, shard);
-                notifyListeners(safeStore);
-                break;
-
-            case PreApplied:
-                Ranges executeRanges = executeRanges(safeStore, executeAt());
-                boolean intersects = writes().keys.intersects(executeRanges);
-
-                if (intersects)
-                {
-                    logger.trace("{}: applying", txnId());
-                    apply(safeStore);
-                }
-                else
-                {
-                    // TODO (desirable, performance): This could be performed immediately upon Committed
-                    //      but: if we later support transitive dependency elision this could be dangerous
-                    logger.trace("{}: applying no-op", txnId());
-                    setStatus(Applied);
-                    notifyListeners(safeStore);
-                }
-        }
-        return true;
-    }
-
-    /**
-     * @param dependency is either committed or invalidated
-     * @return true iff {@code maybeExecute} might now have a different outcome
-     */
-    private boolean updatePredecessor(Command dependency)
-    {
-        Invariants.checkState(dependency.hasBeen(PreCommitted));
-        if (dependency.hasBeen(Invalidated))
-        {
-            logger.trace("{}: {} is invalidated. Stop listening and removing from waiting on commit set.", txnId(), dependency.txnId());
-            dependency.removeListener(this);
-            removeWaitingOnCommit(dependency.txnId());
-            return true;
-        }
-        else if (dependency.executeAt().compareTo(executeAt()) > 0)
-        {
-            // dependency cannot be a predecessor if it executes later
-            logger.trace("{}: {} executes after us. Stop listening and removing from waiting on apply set.", txnId(), dependency.txnId());
-            removeWaitingOn(dependency.txnId(), dependency.executeAt());
-            dependency.removeListener(this);
-            return true;
-        }
-        else if (dependency.hasBeen(Applied))
-        {
-            logger.trace("{}: {} has been applied. Stop listening and removing from waiting on apply set.", txnId(), dependency.txnId());
-            removeWaitingOn(dependency.txnId(), dependency.executeAt());
-            dependency.removeListener(this);
-            return true;
-        }
-        else if (isWaitingOnDependency())
-        {
-            logger.trace("{}: adding {} to waiting on apply set.", txnId(), dependency.txnId());
-            addWaitingOnApplyIfAbsent(dependency.txnId(), dependency.executeAt());
-            removeWaitingOnCommit(dependency.txnId());
-            return false;
-        }
-        else
-        {
-            throw new IllegalStateException();
-        }
-    }
-
-    private void insertPredecessor(Command dependency)
-    {
-        Invariants.checkState(dependency.hasBeen(PreCommitted));
-        if (dependency.hasBeen(Invalidated))
-        {
-            logger.trace("{}: {} is invalidated. Do not insert.", txnId(), dependency.txnId());
-        }
-        else if (dependency.executeAt().compareTo(executeAt()) > 0)
-        {
-            // dependency cannot be a predecessor if it executes later
-            logger.trace("{}: {} executes after us. Do not insert.", txnId(), dependency.txnId());
-        }
-        else if (dependency.hasBeen(Applied))
-        {
-            logger.trace("{}: {} has been applied. Do not insert.", txnId(), dependency.txnId());
-        }
-        else
-        {
-            logger.trace("{}: adding {} to waiting on apply set.", txnId(), dependency.txnId());
-            addWaitingOnApplyIfAbsent(dependency.txnId(), dependency.executeAt());
-        }
-    }
-
-    void updatePredecessorAndMaybeExecute(SafeCommandStore safeStore, Command predecessor, boolean notifyWaitingOn)
-    {
-        if (hasBeen(Applied))
-            return;
-
-        if (updatePredecessor(predecessor))
-            maybeExecute(safeStore, progressShard(safeStore), false, notifyWaitingOn);
-    }
-
-    static class NotifyWaitingOn implements PreLoadContext, Consumer<SafeCommandStore>
-    {
-        Known[] blockedUntil = new Known[4];
-        TxnId[] txnIds = new TxnId[4];
-        int depth;
-
-        public NotifyWaitingOn(Command command)
-        {
-            txnIds[0] = command.txnId();
-            blockedUntil[0] = Done;
-        }
-
-        @Override
-        public void accept(SafeCommandStore safeStore)
-        {
-            Command prev = get(safeStore, depth - 1);
-            while (depth >= 0)
-            {
-                Command cur = safeStore.ifLoaded(txnIds[depth]);
-                Known until = blockedUntil[depth];
-                if (cur == null)
-                {
-                    // need to load; schedule execution for later
-                    safeStore.execute(this, this).begin(safeStore.agent());
-                    return;
-                }
-
-                if (prev != null)
-                {
-                    if (cur.has(until) || (cur.hasBeen(PreCommitted) && cur.executeAt().compareTo(prev.executeAt()) > 0))
-                    {
-                        prev.updatePredecessorAndMaybeExecute(safeStore, cur, false);
-                        --depth;
-                        prev = get(safeStore, depth - 1);
-                        continue;
-                    }
-                }
-                else if (cur.has(until))
-                {
-                    // we're done; have already applied
-                    Invariants.checkState(depth == 0);
-                    break;
-                }
-
-                TxnId directlyBlockedOnCommit = cur.firstWaitingOnCommit();
-                TxnId directlyBlockedOnApply = cur.firstWaitingOnApply(directlyBlockedOnCommit);
-                if (directlyBlockedOnApply != null)
-                {
-                    push(directlyBlockedOnApply, Done);
-                }
-                else if (directlyBlockedOnCommit != null)
-                {
-                    push(directlyBlockedOnCommit, ExecuteAtOnly);
-                }
-                else
-                {
-                    if (cur.hasBeen(Committed) && !cur.hasBeen(ReadyToExecute) && !cur.isWaitingOnDependency())
-                    {
-                        if (!cur.maybeExecute(safeStore, cur.progressShard(safeStore), false, false))
-                            throw new AssertionError("Is able to Apply, but has not done so");
-                        // loop and re-test the command's status; we may still want to notify blocking, esp. if not homeShard
-                        continue;
-                    }
-
-                    Unseekables<?, ?> someKeys = cur.maxUnseekables();
-                    if (someKeys == null && prev != null) someKeys = prev.partialDeps().someUnseekables(cur.txnId());
-                    Invariants.checkState(someKeys != null);
-                    logger.trace("{} blocked on {} until {}", txnIds[0], cur.txnId(), until);
-                    safeStore.progressLog().waiting(cur.txnId(), until, someKeys);
-                    return;
-                }
-                prev = cur;
-            }
-        }
-
-        private Command get(SafeCommandStore safeStore, int i)
-        {
-            return i >= 0 ? safeStore.command(txnIds[i]) : null;
-        }
-
-        void push(TxnId by, Known until)
-        {
-            if (++depth == txnIds.length)
-            {
-                txnIds = Arrays.copyOf(txnIds, txnIds.length * 2);
-                blockedUntil = Arrays.copyOf(blockedUntil, txnIds.length);
-            }
-            txnIds[depth] = by;
-            blockedUntil[depth] = until;
-        }
-
-        @Override
-        public Iterable<TxnId> txnIds()
-        {
-            return Arrays.asList(txnIds).subList(0, depth + 1);
-        }
-
-        @Override
-        public Seekables<?, ?> keys()
-        {
-            return Keys.EMPTY;
-        }
-    }
-
-    /**
-     * A key nominated to represent the "home" shard - only members of the home shard may be nominated to recover
-     * a transaction, to reduce the cluster-wide overhead of ensuring progress. A transaction that has only been
-     * witnessed at PreAccept may however trigger a process of ensuring the home shard is durably informed of
-     * the transaction.
-     *
-     * Note that for ProgressLog purposes the "home shard" is the shard as of txnId.epoch.
-     * For recovery purposes the "home shard" is as of txnId.epoch until Committed, and executeAt.epoch once Executed
-     */
-    public final void homeKey(RoutingKey homeKey)
-    {
-        RoutingKey current = homeKey();
-        if (current == null) setHomeKey(homeKey);
-        else if (!current.equals(homeKey)) throw new AssertionError();
-    }
-
-    public void updateHomeKey(SafeCommandStore safeStore, RoutingKey homeKey)
-    {
-        if (homeKey() == null)
-        {
-            setHomeKey(homeKey);
-            // TODO (low priority, safety): if we're processed on a node that does not know the latest epoch,
-            //      do we guarantee the home key calculation is unchanged since the prior epoch?
-            if (progressKey() == null && owns(safeStore, txnId().epoch(), homeKey))
-                progressKey(homeKey);
-        }
-        else if (!this.homeKey().equals(homeKey))
-        {
-            throw new IllegalStateException();
-        }
-    }
-
-    private ProgressShard progressShard(SafeCommandStore safeStore, Route<?> route, @Nullable RoutingKey progressKey, Ranges coordinateRanges)
-    {
-        updateHomeKey(safeStore, route.homeKey());
-
-        if (progressKey == null || progressKey == NO_PROGRESS_KEY)
-        {
-            if (this.progressKey() == null)
-                setProgressKey(NO_PROGRESS_KEY);
-
-            return No;
-        }
-
-        if (this.progressKey() == null) setProgressKey(progressKey);
-        else if (!this.progressKey().equals(progressKey)) throw new AssertionError();
-
-        if (!coordinateRanges.contains(progressKey))
-            return No;
-
-        return progressKey.equals(homeKey()) ? Home : Local;
-    }
-
-    /**
-     * A key nominated to be the primary shard within this node for managing progress of the command.
-     * It is nominated only as of txnId.epoch, and may be null (indicating that this node does not monitor
-     * the progress of this command).
-     *
-     * Preferentially, this is homeKey on nodes that replicate it, and otherwise any key that is replicated, as of txnId.epoch
-     */
-
-    public final void progressKey(RoutingKey progressKey)
-    {
-        RoutingKey current = progressKey();
-        if (current == null) setProgressKey(progressKey);
-        else if (!current.equals(progressKey)) throw new AssertionError();
-    }
-
-    private ProgressShard progressShard(SafeCommandStore safeStore, Route<?> route, Ranges coordinateRanges)
-    {
-        if (progressKey() == null)
-            return Unsure;
-
-        return progressShard(safeStore, route, progressKey(), coordinateRanges);
-    }
-
-    private ProgressShard progressShard(SafeCommandStore safeStore)
-    {
-        RoutingKey progressKey = progressKey();
-        if (progressKey == null)
-            return Unsure;
-
-        if (progressKey == NO_PROGRESS_KEY)
-            return No;
-
-        Ranges coordinateRanges = safeStore.ranges().at(txnId().epoch());
-        if (!coordinateRanges.contains(progressKey))
-            return No;
-
-        return progressKey.equals(homeKey()) ? Home : Local;
-    }
-
-    private Ranges coordinateRanges(SafeCommandStore safeStore)
-    {
-        return safeStore.ranges().at(txnId().epoch());
-    }
-
-    private Ranges executeRanges(SafeCommandStore safeStore, Timestamp executeAt)
-    {
-        return safeStore.ranges().since(executeAt.epoch());
-    }
-
-    enum EnsureAction { Ignore, Check, Add, TrySet, Set }
-
-    /**
-     * Validate we have sufficient information for the route, partialTxn and partialDeps fields, and if so update them;
-     * otherwise return false (or throw an exception if an illegal state is encountered)
-     */
-    private boolean validate(Ranges existingRanges, Ranges additionalRanges, ProgressShard shard,
-                             Route<?> route, EnsureAction ensureRoute,
-                             @Nullable PartialTxn partialTxn, EnsureAction ensurePartialTxn,
-                             @Nullable PartialDeps partialDeps, EnsureAction ensurePartialDeps)
-    {
-        if (shard == Unsure)
-            return false;
-
-        // first validate route
-        if (shard.isHome())
-        {
-            switch (ensureRoute)
-            {
-                default: throw new AssertionError();
-                case Check:
-                    if (!isFullRoute(route()) && !isFullRoute(route))
-                        return false;
-                case Ignore:
-                    break;
-                case Add:
-                case Set:
-                    if (!isFullRoute(route))
-                        throw new IllegalArgumentException("Incomplete route (" + route + ") sent to home shard");
-                    break;
-                case TrySet:
-                    if (!isFullRoute(route))
-                        return false;
-            }
-        }
-        else
-        {
-            // failing any of these tests is always an illegal state
-            if (!route.covers(existingRanges))
-                return false;
-
-            if (existingRanges != additionalRanges && !route.covers(additionalRanges))
-                throw new IllegalArgumentException("Incomplete route (" + route + ") provided; does not cover " + additionalRanges);
-        }
-
-        // invalid to Add deps to Accepted or AcceptedInvalidate statuses, as Committed deps are not equivalent
-        // and we may erroneously believe we have covered a wider range than we have infact covered
-        if (ensurePartialDeps == Add)
-            Invariants.checkState(status() != Accepted && status() != AcceptedInvalidate);
-
-        // validate new partial txn
-        if (!validate(ensurePartialTxn, existingRanges, additionalRanges, covers(partialTxn()), covers(partialTxn), "txn", partialTxn))
-            return false;
-
-        if (partialTxn != null && txnId().rw() != partialTxn.kind())
-            throw new IllegalArgumentException("Transaction has different kind to its TxnId");
-
-        if (shard.isHome() && ensurePartialTxn != Ignore)
-        {
-            if (!hasQuery(partialTxn()) && !hasQuery(partialTxn))
-                throw new IllegalStateException();
-        }
-
-        return validate(ensurePartialDeps, existingRanges, additionalRanges, covers(partialDeps()), covers(partialDeps), "deps", partialDeps);
-    }
-
-    private void set(SafeCommandStore safeStore,
-                     Ranges existingRanges, Ranges additionalRanges, ProgressShard shard, Route<?> route,
-                     @Nullable PartialTxn partialTxn, EnsureAction ensurePartialTxn,
-                     @Nullable PartialDeps partialDeps, EnsureAction ensurePartialDeps)
-    {
-        Invariants.checkState(progressKey() != null);
-        Ranges allRanges = existingRanges.with(additionalRanges);
-
-        if (shard.isProgress()) setRoute(Route.merge(route(), (Route)route));
-        else setRoute(route.slice(allRanges));
-
-        switch (ensurePartialTxn)
-        {
-            case Add:
-                if (partialTxn == null)
-                    break;
-
-                if (partialTxn() != null)
-                {
-                    partialTxn = partialTxn.slice(allRanges, shard.isHome());
-                    Routables.foldlMissing((Seekables)partialTxn.keys(), partialTxn().keys(), (keyOrRange, p, v, i) -> {
-                        // TODO (expected, efficiency): we may register the same ranges more than once
-                        safeStore.register(keyOrRange, allRanges, this);
-                        return v;
-                    }, 0, 0, 1);
-                    this.setPartialTxn(partialTxn().with(partialTxn));
-                    break;
-                }
-
-            case Set:
-            case TrySet:
-                setPartialTxn(partialTxn = partialTxn.slice(allRanges, shard.isHome()));
-                // TODO (expected, efficiency): we may register the same ranges more than once
-                // TODO (desirable, efficiency): no need to register on PreAccept if already Accepted
-                safeStore.register(partialTxn.keys(), allRanges, this);
-                break;
-        }
-
-        switch (ensurePartialDeps)
-        {
-            case Add:
-                if (partialDeps == null)
-                    break;
-
-                if (partialDeps() != null)
-                {
-                    setPartialDeps(partialDeps().with(partialDeps.slice(allRanges)));
-                    break;
-                }
-
-            case Set:
-            case TrySet:
-                setPartialDeps(partialDeps.slice(allRanges));
-                break;
-        }
-    }
-
-    private static boolean validate(EnsureAction action, Ranges existingRanges, Ranges additionalRanges,
-                                    Ranges existing, Ranges adding, String kind, Object obj)
-    {
-        switch (action)
-        {
-            default: throw new IllegalStateException();
-            case Ignore:
-                break;
-
-            case TrySet:
-                if (adding != null)
-                {
-                    if (!adding.containsAll(existingRanges))
-                        return false;
-
-                    if (additionalRanges != existingRanges && !adding.containsAll(additionalRanges))
-                        return false;
-
-                    break;
-                }
-            case Set:
-                // failing any of these tests is always an illegal state
-                Invariants.checkState(adding != null);
-                if (!adding.containsAll(existingRanges))
-                    throw new IllegalArgumentException("Incomplete " + kind + " (" + obj + ") provided; does not cover " + existingRanges);
-
-                if (additionalRanges != existingRanges && !adding.containsAll(additionalRanges))
-                    throw new IllegalArgumentException("Incomplete " + kind + " (" + obj + ") provided; does not cover " + additionalRanges);
-                break;
-
-            case Check:
-            case Add:
-                if (adding == null)
-                {
-                    if (existing == null)
-                        return false;
-
-                    Invariants.checkState(existing.containsAll(existingRanges));
-                    if (existingRanges != additionalRanges && !existing.containsAll(additionalRanges))
-                    {
-                        if (action == Check)
-                            return false;
-
-                        throw new IllegalArgumentException("Missing additional " + kind + "; existing does not cover " + additionalRanges.difference(existingRanges));
-                    }
-                }
-                else if (existing != null)
-                {
-                    Ranges covering = adding.with(existing);
-                    Invariants.checkState(covering.containsAll(existingRanges));
-                    if (existingRanges != additionalRanges && !covering.containsAll(additionalRanges))
-                    {
-                        if (action == Check)
-                            return false;
-
-                        throw new IllegalArgumentException("Incomplete additional " + kind + " (" + obj + ") provided; does not cover " + additionalRanges.difference(existingRanges));
-                    }
-                }
-                else
-                {
-                    if (!adding.containsAll(existingRanges))
-                        return false;
-
-                    if (existingRanges != additionalRanges && !adding.containsAll(additionalRanges))
-                    {
-                        if (action == Check)
-                            return false;
-
-                        throw new IllegalArgumentException("Incomplete additional " + kind + " (" + obj + ") provided; does not cover " + additionalRanges.difference(existingRanges));
-                    }
-                }
-                break;
-        }
-
-        return true;
+        if (!isSameClass(command, klass))
+            throw new IllegalArgumentException(errorMsg + format(" expected %s got %s", klass.getSimpleName(), command.getClass().getSimpleName()));
     }
 
     // TODO (low priority, progress): callers should try to consult the local progress shard (if any) to obtain the full set of keys owned locally
-    public Route<?> someRoute()
+    public final Route<?> someRoute()
     {
         if (route() != null)
             return route();
@@ -1137,63 +362,657 @@ public abstract class Command implements CommandListener, BiConsumer<SafeCommand
         return route.toMaximalUnseekables();
     }
 
-    /**
-     * true iff this commandStore owns the given key on the given epoch
-     */
-    public boolean owns(SafeCommandStore safeStore, long epoch, RoutingKey someKey)
+    public PreLoadContext contextForSelf()
     {
-        return safeStore.ranges().at(epoch).contains(someKey);
+        return contextForCommand(this);
     }
 
-    @Override
-    public void accept(SafeCommandStore safeStore, CommandListener listener)
+    public abstract Timestamp executeAt();
+    public abstract Ballot accepted();
+    public abstract PartialTxn partialTxn();
+    public abstract @Nullable PartialDeps partialDeps();
+
+    public final Status status()
     {
-        listener.onChange(safeStore, this);
+        return saveStatus().status;
     }
 
-    @Override
-    public String toString()
+    public final Status.Known known()
     {
-        return "Command{" +
-               "txnId=" + txnId() +
-               ", status=" + status() +
-               ", partialTxn=" + partialTxn() +
-               ", executeAt=" + executeAt() +
-               ", partialDeps=" + partialDeps() +
-               '}';
+        return saveStatus().known;
     }
 
-    private static Ranges covers(@Nullable PartialTxn txn)
+    public final boolean hasBeen(Status status)
     {
-        return txn == null ? null : txn.covering();
+        return status().compareTo(status) >= 0;
     }
 
-    private static Ranges covers(@Nullable PartialDeps deps)
+    public boolean has(Status.Known known)
     {
-        return deps == null ? null : deps.covering;
+        return known.isSatisfiedBy(saveStatus().known);
     }
 
-    private static boolean hasQuery(PartialTxn txn)
+    public boolean has(Status.Definition definition)
     {
-        return txn != null && txn.query() != null;
+        return known().definition.compareTo(definition) >= 0;
     }
 
-    // TODO (low priority, API): this is an ugly hack, need to encode progress/homeKey/Route state combinations much more clearly
-    //                           (perhaps introduce encapsulating class representing each possible arrangement)
-    static class NoProgressKey implements RoutingKey
+    public boolean has(Status.Outcome outcome)
     {
-        @Override
-        public int compareTo(@Nonnull RoutableKey that)
+        return known().outcome.compareTo(outcome) >= 0;
+    }
+
+    public boolean is(Status status)
+    {
+        return status() == status;
+    }
+
+    public final CommandListener asListener()
+    {
+        return new Listener(txnId());
+    }
+
+    public final boolean isWitnessed()
+    {
+        boolean result = status().hasBeen(Status.PreAccepted);
+        Invariants.checkState(result == (this instanceof PreAccepted));
+        return result;
+    }
+
+    public final PreAccepted asWitnessed()
+    {
+        return Invariants.cast(this, PreAccepted.class);
+    }
+
+    public final boolean isAccepted()
+    {
+        boolean result = status().hasBeen(Status.AcceptedInvalidate);
+        Invariants.checkState(result == (this instanceof Accepted));
+        return result;
+    }
+
+    public final Accepted asAccepted()
+    {
+        return Invariants.cast(this, Accepted.class);
+    }
+
+    public final boolean isCommitted()
+    {
+        boolean result = status().hasBeen(Status.Committed);
+        Invariants.checkState(result == (this instanceof Committed));
+        return result;
+    }
+
+    public final Committed asCommitted()
+    {
+        return Invariants.cast(this, Committed.class);
+    }
+
+    public final boolean isExecuted()
+    {
+        boolean result = status().hasBeen(Status.PreApplied);
+        Invariants.checkState(result == (this instanceof Executed));
+        return result;
+    }
+
+    public final Executed asExecuted()
+    {
+        return Invariants.cast(this, Executed.class);
+    }
+
+    public abstract Command updateAttributes(CommonAttributes attrs, Ballot promised);
+
+    public final Command updateAttributes(CommonAttributes attrs)
+    {
+        return updateAttributes(attrs, promised());
+    }
+
+    public final Command updatePromised(Ballot promised)
+    {
+        return updateAttributes(this, promised);
+    }
+
+    public static final class NotWitnessed extends AbstractCommand
+    {
+        NotWitnessed(TxnId txnId, SaveStatus status, Status.Durability durability, RoutingKey homeKey, RoutingKey progressKey, Route<?> route, Ballot promised, Listeners.Immutable listeners)
         {
-            throw new UnsupportedOperationException();
+            super(txnId, status, durability, homeKey, progressKey, route, promised, listeners);
+        }
+
+        NotWitnessed(CommonAttributes common, SaveStatus status, Ballot promised)
+        {
+            super(common, status, promised);
         }
 
         @Override
-        public Range asRange()
+        public Command updateAttributes(CommonAttributes attrs, Ballot promised)
         {
-            throw new UnsupportedOperationException();
+            return new NotWitnessed(attrs, saveStatus(), promised);
+        }
+
+        public static NotWitnessed notWitnessed(CommonAttributes common, Ballot promised)
+        {
+            return new NotWitnessed(common, SaveStatus.NotWitnessed, promised);
+        }
+
+        public static NotWitnessed notWitnessed(TxnId txnId)
+        {
+            return new NotWitnessed(txnId, SaveStatus.NotWitnessed, NotDurable, null, null, null, Ballot.ZERO, null);
+        }
+
+        public static NotWitnessed notWitnessed(NotWitnessed command, CommonAttributes common, Ballot promised)
+        {
+            checkSameClass(command, NotWitnessed.class, "Cannot update");
+            Invariants.checkArgument(command.txnId().equals(common.txnId()));
+            return new NotWitnessed(common, command.saveStatus(), promised);
+        }
+
+        @Override
+        public Timestamp executeAt()
+        {
+            return null;
+        }
+
+        @Override
+        public Ballot promised()
+        {
+            return Ballot.ZERO;
+        }
+
+        @Override
+        public Ballot accepted()
+        {
+            return Ballot.ZERO;
+        }
+
+        @Override
+        public PartialTxn partialTxn()
+        {
+            return null;
+        }
+
+        @Override
+        public @Nullable PartialDeps partialDeps()
+        {
+            return null;
         }
     }
 
-    private static final NoProgressKey NO_PROGRESS_KEY = new NoProgressKey();
+    public static class PreAccepted extends AbstractCommand
+    {
+        private final Timestamp executeAt;
+        private final PartialTxn partialTxn;
+        private final @Nullable PartialDeps partialDeps;
+
+        private PreAccepted(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised)
+        {
+            super(common, status, promised);
+            this.executeAt = executeAt;
+            this.partialTxn = common.partialTxn();
+            this.partialDeps = common.partialDeps();
+        }
+
+        @Override
+        public Command updateAttributes(CommonAttributes attrs, Ballot promised)
+        {
+            return new PreAccepted(attrs, saveStatus(), executeAt(), promised);
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            if (!super.equals(o)) return false;
+            PreAccepted that = (PreAccepted) o;
+            return executeAt.equals(that.executeAt)
+                    && Objects.equals(partialTxn, that.partialTxn)
+                    && Objects.equals(partialDeps, that.partialDeps);
+        }
+
+        public static PreAccepted preAccepted(CommonAttributes common, Timestamp executeAt, Ballot promised)
+        {
+            return new PreAccepted(common, SaveStatus.PreAccepted, executeAt, promised);
+        }
+        public static PreAccepted preAccepted(PreAccepted command, CommonAttributes common, Ballot promised)
+        {
+            checkPromised(command, promised);
+            checkSameClass(command, PreAccepted.class, "Cannot update");
+            Invariants.checkArgument(command.getClass() == PreAccepted.class);
+            return preAccepted(common, command.executeAt(), promised);
+        }
+
+        @Override
+        public Timestamp executeAt()
+        {
+            return executeAt;
+        }
+
+        @Override
+        public Ballot accepted()
+        {
+            return Ballot.ZERO;
+        }
+
+        @Override
+        public PartialTxn partialTxn()
+        {
+            return partialTxn;
+        }
+
+        @Override
+        public @Nullable PartialDeps partialDeps()
+        {
+            return partialDeps;
+        }
+    }
+
+    public static class Accepted extends PreAccepted
+    {
+        private final Ballot accepted;
+
+        Accepted(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted)
+        {
+            super(common, status, executeAt, promised);
+            this.accepted = accepted;
+        }
+
+        @Override
+        public Command updateAttributes(CommonAttributes attrs, Ballot promised)
+        {
+            return new Accepted(attrs, saveStatus(), executeAt(), promised, accepted());
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            if (!super.equals(o)) return false;
+            Accepted that = (Accepted) o;
+            return Objects.equals(accepted, that.accepted);
+        }
+
+        static Accepted accepted(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted)
+        {
+            return new Accepted(common, status, executeAt, promised, accepted);
+        }
+        static Accepted accepted(Accepted command, CommonAttributes common, SaveStatus status, Ballot promised)
+        {
+            checkPromised(command, promised);
+            checkSameClass(command, Accepted.class, "Cannot update");
+            return new Accepted(common, status, command.executeAt(), promised, command.accepted());
+        }
+        static Accepted accepted(Accepted command, CommonAttributes common, Ballot promised)
+        {
+            return accepted(command, common, command.saveStatus(), promised);
+        }
+
+        @Override
+        public Ballot accepted()
+        {
+            return accepted;
+        }
+    }
+
+    public static class Committed extends Accepted
+    {
+        private final ImmutableSortedSet<TxnId> waitingOnCommit;
+        private final ImmutableSortedMap<Timestamp, TxnId> waitingOnApply;
+
+        private Committed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply)
+        {
+            super(common, status, executeAt, promised, accepted);
+            this.waitingOnCommit = waitingOnCommit;
+            this.waitingOnApply = waitingOnApply;
+        }
+
+        private Committed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOn waitingOn)
+        {
+            this(common, status, executeAt, promised, accepted, waitingOn.waitingOnCommit, waitingOn.waitingOnApply);
+        }
+
+        @Override
+        public Command updateAttributes(CommonAttributes attrs, Ballot promised)
+        {
+            return new Committed(attrs, saveStatus(), executeAt(), promised, accepted(), waitingOnCommit(), waitingOnApply());
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            if (!super.equals(o)) return false;
+            Committed committed = (Committed) o;
+            return Objects.equals(waitingOnCommit, committed.waitingOnCommit)
+                    && Objects.equals(waitingOnApply, committed.waitingOnApply);
+        }
+
+        private static Committed committed(Committed command, CommonAttributes common, Ballot promised, SaveStatus status, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply)
+        {
+            checkPromised(command, promised);
+            checkSameClass(command, Committed.class, "Cannot update");
+            return new Committed(common, status, command.executeAt(), promised, command.accepted(), waitingOnCommit, waitingOnApply);
+        }
+
+        static Committed committed(Committed command, CommonAttributes common, Ballot promised)
+        {
+            return committed(command, common, promised, command.saveStatus(), command.waitingOnCommit(), command.waitingOnApply());
+        }
+
+        static Committed committed(Committed command, CommonAttributes common, SaveStatus status)
+        {
+            return committed(command, common, command.promised(), status, command.waitingOnCommit(), command.waitingOnApply());
+        }
+
+        static Committed committed(Committed command, CommonAttributes common, WaitingOn waitingOn)
+        {
+            return committed(command, common, command.promised(), command.saveStatus(), waitingOn.waitingOnCommit, waitingOn.waitingOnApply);
+        }
+
+        static Committed committed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply)
+        {
+            return new Committed(common, status, executeAt, promised, accepted, waitingOnCommit, waitingOnApply);
+        }
+
+        public AsyncChain<Data> read(SafeCommandStore safeStore)
+        {
+            return partialTxn().read(safeStore, this);
+        }
+
+        public WaitingOn waitingOn()
+        {
+            return new WaitingOn(waitingOnCommit, waitingOnApply);
+        }
+
+        public ImmutableSortedSet<TxnId> waitingOnCommit()
+        {
+            return waitingOnCommit;
+        }
+
+        public boolean isWaitingOnCommit()
+        {
+            return waitingOnCommit != null && !waitingOnCommit.isEmpty();
+        }
+
+        public TxnId firstWaitingOnCommit()
+        {
+            return isWaitingOnCommit() ? waitingOnCommit.first() : null;
+        }
+
+        public ImmutableSortedMap<Timestamp, TxnId> waitingOnApply()
+        {
+            return waitingOnApply;
+        }
+
+        public boolean isWaitingOnApply()
+        {
+            return waitingOnApply != null && !waitingOnApply.isEmpty();
+        }
+
+        public TxnId firstWaitingOnApply()
+        {
+            return isWaitingOnApply() ? waitingOnApply.firstEntry().getValue() : null;
+        }
+
+        public boolean isWaitingOnDependency()
+        {
+            return isWaitingOnCommit() || isWaitingOnApply();
+        }
+    }
+
+    public static class Executed extends Committed
+    {
+        private final Writes writes;
+        private final Result result;
+
+        public Executed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply, Writes writes, Result result)
+        {
+            super(common, status, executeAt, promised, accepted, waitingOnCommit, waitingOnApply);
+            this.writes = writes;
+            this.result = result;
+        }
+
+        public Executed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOn waitingOn, Writes writes, Result result)
+        {
+            super(common, status, executeAt, promised, accepted, waitingOn);
+            this.writes = writes;
+            this.result = result;
+        }
+
+        @Override
+        public Command updateAttributes(CommonAttributes attrs, Ballot promised)
+        {
+            return new Executed(attrs, saveStatus(), executeAt(), promised, accepted(), waitingOnCommit(), waitingOnApply(), writes, result);
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            if (!super.equals(o)) return false;
+            Executed executed = (Executed) o;
+            return Objects.equals(writes, executed.writes)
+                    && Objects.equals(result, executed.result);
+        }
+
+        public static Executed executed(Executed command, CommonAttributes common, SaveStatus status, Ballot promised, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply)
+        {
+            checkSameClass(command, Executed.class, "Cannot update");
+            return new Executed(common, status, command.executeAt(), promised, command.accepted(), waitingOnCommit, waitingOnApply, command.writes(), command.result());
+        }
+
+        public static Executed executed(Executed command, CommonAttributes common, SaveStatus status)
+        {
+            return executed(command, common, status, command.promised(), command.waitingOnCommit(), command.waitingOnApply());
+        }
+
+        public static Executed executed(Executed command, CommonAttributes common, WaitingOn waitingOn)
+        {
+            return executed(command, common, command.saveStatus(), command.promised(), waitingOn.waitingOnCommit, waitingOn.waitingOnApply);
+        }
+
+        public static Executed executed(Executed command, CommonAttributes common, Ballot promised)
+        {
+            return executed(command, common, command.saveStatus(), promised, command.waitingOnCommit(), command.waitingOnApply());
+        }
+
+        public static Executed executed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply, Writes writes, Result result)
+        {
+            return new Executed(common, status, executeAt, promised, accepted, waitingOnCommit, waitingOnApply, writes, result);
+        }
+
+        public static Executed executed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOn waitingOn, Writes writes, Result result)
+        {
+            return new Executed(common, status, executeAt, promised, accepted, waitingOn.waitingOnCommit, waitingOn.waitingOnApply, writes, result);
+        }
+
+        public Writes writes()
+        {
+            return writes;
+        }
+
+        public Result result()
+        {
+            return result;
+        }
+    }
+
+    public static class WaitingOn
+    {
+        public static final WaitingOn EMPTY = new WaitingOn(ImmutableSortedSet.of(), ImmutableSortedMap.of());
+        public final ImmutableSortedSet<TxnId> waitingOnCommit;
+        public final ImmutableSortedMap<Timestamp, TxnId> waitingOnApply;
+
+        public WaitingOn(ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply)
+        {
+            this.waitingOnCommit = waitingOnCommit;
+            this.waitingOnApply = waitingOnApply;
+        }
+
+        public static class Update
+        {
+            private boolean hasChanges = false;
+            private NavigableSet<TxnId> waitingOnCommit;
+            private NavigableMap<Timestamp, TxnId> waitingOnApply;
+
+            public Update()
+            {
+
+            }
+
+            public Update(WaitingOn waitingOn)
+            {
+                this.waitingOnCommit = waitingOn.waitingOnCommit;
+                this.waitingOnApply = waitingOn.waitingOnApply;
+            }
+
+            public Update(Committed committed)
+            {
+                this.waitingOnCommit = committed.waitingOnCommit();
+                this.waitingOnApply = committed.waitingOnApply();
+            }
+
+            public boolean hasChanges()
+            {
+                return hasChanges;
+            }
+
+            public void addWaitingOnCommit(TxnId txnId)
+            {
+                waitingOnCommit = ensureSortedMutable(waitingOnCommit);
+                waitingOnCommit.add(txnId);
+                hasChanges = true;
+            }
+
+            public void removeWaitingOnCommit(TxnId txnId)
+            {
+                if (waitingOnApply == null)
+                    return;
+                waitingOnCommit = ensureSortedMutable(waitingOnCommit);
+                waitingOnCommit.remove(txnId);
+                hasChanges = true;
+            }
+
+            public void addWaitingOnApply(TxnId txnId, Timestamp executeAt)
+            {
+                waitingOnApply = ensureSortedMutable(waitingOnApply);
+                waitingOnApply.put(executeAt, txnId);
+                hasChanges = true;
+            }
+
+            public void removeWaitingOnApply(TxnId txnId, Timestamp executeAt)
+            {
+                if (waitingOnApply == null)
+                    return;
+                waitingOnApply = ensureSortedMutable(waitingOnApply);
+                waitingOnApply.remove(executeAt);
+                hasChanges = true;
+            }
+
+            public void removeWaitingOn(TxnId txnId, Timestamp executeAt)
+            {
+                removeWaitingOnCommit(txnId);
+                removeWaitingOnApply(txnId, executeAt);
+                hasChanges = true;
+            }
+
+            public WaitingOn build()
+            {
+                if ((waitingOnCommit == null || waitingOnCommit.isEmpty()) && (waitingOnApply == null || waitingOnApply.isEmpty()))
+                    return EMPTY;
+                return new WaitingOn(ensureSortedImmutable(waitingOnCommit), ensureSortedImmutable(waitingOnApply));
+            }
+        }
+    }
+
+    static Command addListener(Command command, CommandListener listener)
+    {
+        CommonAttributes attrs = command.mutable().addListener(listener);
+        return command.updateAttributes(attrs);
+    }
+
+    static Command removeListener(Command command, CommandListener listener)
+    {
+        CommonAttributes attrs = command.mutable().removeListener(listener);
+        return command.updateAttributes(attrs);
+    }
+
+    static Command.Committed updateWaitingOn(Committed command, WaitingOn.Update waitingOn)
+    {
+        if (!waitingOn.hasChanges())
+            return command;
+
+        return command instanceof Command.Executed ?
+                Command.Executed.executed(command.asExecuted(), command, waitingOn.build()) :
+                Command.Committed.committed(command, command, waitingOn.build());
+    }
+
+    static Command.PreAccepted preaccept(Command command, CommonAttributes attrs, Timestamp executeAt, Ballot ballot)
+    {
+        if (command.status() == Status.NotWitnessed)
+        {
+            return Command.PreAccepted.preAccepted(attrs, executeAt, ballot);
+        }
+        else if (command.status() == Status.AcceptedInvalidate && command.executeAt() == null)
+        {
+            Command.Accepted accepted = command.asAccepted();
+            return Command.Accepted.accepted(attrs, accepted.saveStatus(), executeAt, ballot, accepted.accepted());
+        }
+        else
+        {
+            Invariants.checkState(command.status() == Status.Accepted);
+            return (Command.PreAccepted) command.updateAttributes(attrs, ballot);
+        }
+    }
+
+    static Command.Accepted markDefined(Command command, CommonAttributes attributes, Ballot promised)
+    {
+        if (Command.isSameClass(command, Command.Accepted.class))
+            return Command.Accepted.accepted(command.asAccepted(), attributes, SaveStatus.enrich(command.saveStatus(), DefinitionOnly), promised);
+        return (Command.Accepted) command.updateAttributes(attributes, promised);
+    }
+
+    static Command.Accepted accept(Command command, CommonAttributes attrs, Timestamp executeAt, Ballot ballot)
+    {
+        return new Command.Accepted(attrs, SaveStatus.get(Status.Accepted, command.known()), executeAt, ballot, ballot);
+    }
+
+    static Command.Accepted acceptInvalidated(Command command, Ballot ballot)
+    {
+        Timestamp executeAt = command.isWitnessed() ? command.asWitnessed().executeAt() : null;
+        return new Command.Accepted(command, SaveStatus.get(Status.AcceptedInvalidate, command.known()), executeAt, ballot, ballot);
+    }
+
+    static Command.Committed commit(Command command, CommonAttributes attrs, Timestamp executeAt, Command.WaitingOn waitingOn)
+    {
+        return Command.Committed.committed(attrs, SaveStatus.get(Status.Committed, command.known()), executeAt, command.promised(), command.accepted(), waitingOn.waitingOnCommit, waitingOn.waitingOnApply);
+    }
+
+    static Command precommit(Command command, Timestamp executeAt)
+    {
+        return new Command.Accepted(command, SaveStatus.get(Status.PreCommitted, command.known()), executeAt, command.promised(), command.accepted());
+    }
+
+    static Command.Committed commitInvalidated(Command command, CommonAttributes attrs, Timestamp executeAt)
+    {
+        return Command.Executed.executed(attrs, SaveStatus.get(Status.Invalidated, command.known()), executeAt, command.promised(), command.accepted(), Command.WaitingOn.EMPTY, null, null);
+    }
+
+    static Command.Committed readyToExecute(Command.Committed command)
+    {
+        return Command.Committed.committed(command, command, SaveStatus.ReadyToExecute);
+    }
+
+    static Command.Executed preapplied(Command command, CommonAttributes attrs, Timestamp executeAt, Command.WaitingOn waitingOn, Writes writes, Result result)
+    {
+        return Command.Executed.executed(attrs, SaveStatus.get(Status.PreApplied, command.known()), executeAt, command.promised(), command.accepted(), waitingOn, writes, result);
+    }
+
+    static Command.Executed applied(Command.Executed command)
+    {
+        return Command.Executed.executed(command, command, SaveStatus.get(Status.Applied, command.known()));
+    }
 }

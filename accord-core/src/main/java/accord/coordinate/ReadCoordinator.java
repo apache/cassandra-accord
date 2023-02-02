@@ -20,7 +20,6 @@ package accord.coordinate;
 
 import accord.coordinate.tracking.RequestStatus;
 import accord.messages.Callback;
-import com.google.common.base.Preconditions;
 
 import accord.coordinate.tracking.ReadTracker;
 import accord.local.Node;
@@ -67,6 +66,7 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
          */
         Approve
     }
+
     protected enum Success { Quorum, Success }
 
     final Node node;
@@ -103,7 +103,7 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
                 break;
 
             case TryAlternative:
-                Preconditions.checkState(!reply.isFinal());
+                Invariants.checkState(!reply.isFinal());
                 onSlowResponse(from);
                 break;
 
@@ -158,7 +158,7 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
 
     protected void finishOnFailure()
     {
-        Preconditions.checkState(!isDone);
+        Invariants.checkState(!isDone);
         isDone = true;
         if (failure == null)
             failure = new Exhausted(txnId, null);
@@ -173,7 +173,7 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
             case NoChange:
                 break;
             case Success:
-                Preconditions.checkState(!isDone);
+                Invariants.checkState(!isDone);
                 isDone = true;
                 onDone(waitingOnData == 0 ? Success.Success : Success.Quorum, null);
                 break;

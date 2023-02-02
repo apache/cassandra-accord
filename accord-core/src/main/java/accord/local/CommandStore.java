@@ -30,9 +30,9 @@ import java.util.function.Function;
 /**
  * Single threaded internal shard of accord transaction metadata
  */
-public abstract class CommandStore
+public interface CommandStore
 {
-    public interface Factory
+    interface Factory
     {
         CommandStore create(int id,
                             NodeTimeService time,
@@ -42,20 +42,9 @@ public abstract class CommandStore
                             RangesForEpochHolder rangesForEpoch);
     }
 
-    private final int id; // unique id
-
-    public CommandStore(int id)
-    {
-        this.id = id;
-    }
-
-    public int id()
-    {
-        return id;
-    }
-
-    public abstract Agent agent();
-    public abstract AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer);
-    public abstract <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);
-    public abstract void shutdown();
+    int id();
+    Agent agent();
+    AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer);
+    <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);
+    void shutdown();
 }

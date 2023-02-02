@@ -18,6 +18,10 @@
 
 package accord.utils;
 
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableSortedMap;
+import com.google.common.collect.ImmutableSortedSet;
+
 import java.util.*;
 import java.util.function.IntFunction;
 
@@ -50,5 +54,47 @@ public class Utils
         for (int i=0; i<src.length; i++)
             dst.add(src[i]);
         return dst;
+    }
+
+    public static <T> ImmutableSortedSet<T> ensureSortedImmutable(NavigableSet<T> set)
+    {
+        if (set == null || set.isEmpty())
+            return ImmutableSortedSet.of();
+        return set instanceof ImmutableSortedSet ? (ImmutableSortedSet<T>) set : ImmutableSortedSet.copyOf(set);
+    }
+
+    public static <K, V> ImmutableSortedMap<K, V> ensureSortedImmutable(NavigableMap<K, V> map)
+    {
+        if (map == null || map.isEmpty())
+            return ImmutableSortedMap.of();
+        return map instanceof ImmutableSortedMap ? (ImmutableSortedMap<K, V>) map : ImmutableSortedMap.copyOf(map);
+    }
+
+    public static <T> ImmutableSet<T> ensureImmutable(java.util.Set<T> set)
+    {
+        if (set == null || set.isEmpty())
+            return ImmutableSet.of();
+        return set instanceof ImmutableSet ? (ImmutableSet<T>) set : ImmutableSet.copyOf(set);
+    }
+
+    public static <T extends Comparable<? super T>> NavigableSet<T> ensureSortedMutable(NavigableSet<T> set)
+    {
+        if (set == null)
+            return new TreeSet<>();
+        return set instanceof ImmutableSortedSet ? new TreeSet<>(set) : set;
+    }
+
+    public static <K extends Comparable<K>, V> NavigableMap<K, V> ensureSortedMutable(NavigableMap<K, V> map)
+    {
+        if (map == null)
+            return new TreeMap<>();
+        return map instanceof ImmutableSortedMap ? new TreeMap<>(map) : map;
+    }
+
+    public static <T> Set<T> ensureMutable(Set<T> set)
+    {
+        if (set == null)
+            return new HashSet<>();
+        return set instanceof ImmutableSet ? new HashSet<>(set) : set;
     }
 }

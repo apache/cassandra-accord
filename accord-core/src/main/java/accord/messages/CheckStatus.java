@@ -107,9 +107,10 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
     }
 
     @Override
-    public CheckStatusOk apply(SafeCommandStore instance)
+    public CheckStatusOk apply(SafeCommandStore safeStore)
     {
-        Command command = instance.command(txnId);
+        SafeCommand safeCommand = safeStore.command(txnId);
+        Command command = safeCommand.current();
         switch (includeInfo)
         {
             default: throw new IllegalStateException();
@@ -248,8 +249,8 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
             super(node, command);
             this.partialTxn = command.partialTxn();
             this.committedDeps = command.status().compareTo(Committed) >= 0 ? command.partialDeps() : null;
-            this.writes = command.writes();
-            this.result = command.result();
+            this.writes = command.isExecuted() ? command.asExecuted().writes() : null;
+            this.result = command.isExecuted() ? command.asExecuted().result() : null;
         }
 
         protected CheckStatusOkFull(SaveStatus status, Ballot promised, Ballot accepted, Timestamp executeAt,

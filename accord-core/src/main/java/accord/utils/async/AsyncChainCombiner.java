@@ -18,7 +18,7 @@
 
 package accord.utils.async;
 
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 import com.google.common.collect.Lists;
 
 import java.util.List;
@@ -33,32 +33,32 @@ abstract class AsyncChainCombiner<I, O> extends AsyncChains.Head<O>
     private volatile BiConsumer<? super O, Throwable> callback;
     private volatile int remaining;
 
-    protected AsyncChainCombiner(List<AsyncChain<I>> inputs)
+    protected AsyncChainCombiner(List<? extends AsyncChain<? extends I>> inputs)
     {
-        Preconditions.checkArgument(!inputs.isEmpty());
+        Invariants.checkArgument(!inputs.isEmpty(), "No inputs defined");
         this.state = inputs;
     }
 
     private List<AsyncChain<? extends I>> inputs()
     {
         Object current = state;
-        Preconditions.checkState(current instanceof List);
+        Invariants.checkState(current instanceof List, "Expected state to be List but was %s", (current == null ? null : current.getClass()));
         return (List<AsyncChain<? extends I>>) current;
     }
 
     private I[] results()
     {
         Object current = state;
-        Preconditions.checkState(current instanceof Object[]);
+        Invariants.checkState(current instanceof Object[], "Expected state to be Object[] but was %s", (current == null ? null : current.getClass()));
         return (I[]) current;
     }
 
-    void add(AsyncChain<I> chain)
+    void add(AsyncChain<? extends I> chain)
     {
         inputs().add(chain);
     }
 
-    void addAll(List<AsyncChain<I>> chains)
+    void addAll(List<? extends AsyncChain<? extends I>> chains)
     {
         inputs().addAll(chains);
     }
@@ -70,7 +70,7 @@ abstract class AsyncChainCombiner<I, O> extends AsyncChains.Head<O>
             return ((List) current).size();
         if (current instanceof Object[])
             return ((Object[]) current).length;
-        throw new IllegalStateException();
+        throw new IllegalStateException("Unexpected type: " + (current == null ? "null" : current.getClass()));
     }
 
     abstract void complete(I[] results, BiConsumer<? super O, Throwable> callback);
@@ -81,7 +81,7 @@ abstract class AsyncChainCombiner<I, O> extends AsyncChains.Head<O>
         if (current == 0)
             return;
 
-        if (throwable != null && REMAINING.compareAndSet(this, current, 0))
+        if (throwable != null && REMAINING.getAndSet(this, 0) != 0)
         {
             callback.accept(null, throwable);
             return;
@@ -107,7 +107,7 @@ abstract class AsyncChainCombiner<I, O> extends AsyncChains.Head<O>
     }
 
     @Override
-    public void begin(BiConsumer<? super O, Throwable> callback)
+    protected void start(BiConsumer<? super O, Throwable> callback)
     {
         List<? extends AsyncChain<? extends I>> chains = inputs();
         state = new Object[chains.size()];
@@ -121,7 +121,7 @@ abstract class AsyncChainCombiner<I, O> extends AsyncChains.Head<O>
 
     static class All<V> extends AsyncChainCombiner<V, List<V>>
     {
-        All(List<AsyncChain<V>> asyncChains)
+        All(List<? extends AsyncChain<? extends V>> asyncChains)
         {
             super(asyncChains);
         }
@@ -137,7 +137,7 @@ abstract class AsyncChainCombiner<I, O> extends AsyncChains.Head<O>
     static class Reduce<V> extends AsyncChainCombiner<V, V>
     {
         private final BiFunction<V, V, V> reducer;
-        Reduce(List<AsyncChain<V>> asyncChains, BiFunction<V, V, V> reducer)
+        Reduce(List<? extends AsyncChain<? extends V>> asyncChains, BiFunction<V, V, V> reducer)
         {
             super(asyncChains);
             this.reducer = reducer;

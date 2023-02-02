@@ -40,9 +40,12 @@ public class AsyncCallbacks
 
     public static <T> BiConsumer<? super T, Throwable> inExecutor(Runnable runnable, Executor executor)
     {
-        return (result, throwable) -> {
-            if (throwable == null) executor.execute(runnable);
-            else throw new RuntimeException(throwable);
+        return inExecutor(toCallback(runnable), executor);
+    }
+
+    public static <T> BiConsumer<T, Throwable> toCallback(Runnable runnable) {
+        return (unused, failure) -> {
+            if (failure == null) runnable.run();
         };
     }
 }

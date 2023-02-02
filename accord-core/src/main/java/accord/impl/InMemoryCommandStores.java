@@ -23,45 +23,18 @@ import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.ProgressLog;
 import accord.local.CommandStore;
-import accord.primitives.Routables;
-import accord.utils.MapReduce;
-
-import java.util.function.BiFunction;
-import java.util.function.Function;
 
 public class InMemoryCommandStores
 {
-    public static class Synchronized extends SyncCommandStores
+    public static class Synchronized extends CommandStores
     {
         public Synchronized(NodeTimeService time, Agent agent, DataStore store, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory)
         {
             super(time, agent, store, shardDistributor, progressLogFactory, InMemoryCommandStore.Synchronized::new);
         }
-
-        public <T> T mapReduce(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduce<? super SafeCommandStore, T> map)
-        {
-            return super.mapReduce(context, keys, minEpoch, maxEpoch, map, SyncMapReduceAdapter.instance());
-        }
-
-        public <T> T mapReduce(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, Function<? super SafeCommandStore, T> map, BiFunction<T, T, T> reduce)
-        {
-            return mapReduce(context, keys, minEpoch, maxEpoch, new MapReduce<SafeCommandStore, T>() {
-                @Override
-                public T apply(SafeCommandStore in)
-                {
-                    return map.apply(in);
-                }
-
-                @Override
-                public T reduce(T o1, T o2)
-                {
-                    return reduce.apply(o1, o2);
-                }
-            });
-        }
     }
 
-    public static class SingleThread extends AsyncCommandStores
+    public static class SingleThread extends CommandStores
     {
         public SingleThread(NodeTimeService time, Agent agent, DataStore store, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory)
         {

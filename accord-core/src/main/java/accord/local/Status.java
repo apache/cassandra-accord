@@ -20,7 +20,7 @@ package accord.local;
 
 import accord.messages.BeginRecovery;
 import accord.primitives.Ballot;
-import com.google.common.base.Preconditions;
+import accord.utils.Invariants;
 
 import java.util.List;
 import java.util.function.Function;
@@ -199,7 +199,7 @@ public enum Status
         {
             if (!deps.hasDecidedDeps())
                 return false;
-            Preconditions.checkState(executeAt.hasDecidedExecuteAt());
+            Invariants.checkState(executeAt.hasDecidedExecuteAt());
             return true;
         }
     }

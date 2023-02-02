@@ -19,8 +19,8 @@
 package accord.messages;
 
 import accord.local.SafeCommandStore;
+import accord.local.*;
 import accord.primitives.*;
-import accord.local.Command;
 import accord.local.Node.Id;
 import accord.api.Result;
 import accord.topology.Topologies;
@@ -37,35 +37,39 @@ public class Apply extends TxnRequest<ApplyReply>
 {
     public static class SerializationSupport
     {
-        public static Apply create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long untilEpoch, Timestamp executeAt, PartialDeps deps, Writes writes, Result result)
+        public static Apply create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long untilEpoch, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, Writes writes, Result result)
         {
-            return new Apply(txnId, scope, waitForEpoch, untilEpoch, executeAt, deps, writes, result);
+            return new Apply(txnId, scope, waitForEpoch, untilEpoch, keys, executeAt, deps, writes, result);
         }
     }
 
     public final long untilEpoch;
     public final Timestamp executeAt;
     public final PartialDeps deps;
+    public final Seekables<?, ?> keys;
     public final Writes writes;
     public final Result result;
 
-    public Apply(Id to, Topologies sendTo, Topologies applyTo, long untilEpoch, TxnId txnId, Route<?> route, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    public Apply(Id to, Topologies sendTo, Topologies applyTo, long untilEpoch, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         super(to, sendTo, route, txnId);
         this.untilEpoch = untilEpoch;
         Ranges slice = applyTo == sendTo ? scope.covering() : applyTo.computeRangesForNode(to);
+
         this.deps = deps.slice(slice);
+        this.keys = txn.keys().slice(slice);
         this.executeAt = executeAt;
         this.writes = writes;
         this.result = result;
     }
 
-    private Apply(TxnId txnId, PartialRoute<?> route, long waitForEpoch, long untilEpoch, Timestamp executeAt, PartialDeps deps, Writes writes, Result result)
+    private Apply(TxnId txnId, PartialRoute<?> route, long waitForEpoch, long untilEpoch, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, Writes writes, Result result)
     {
         super(txnId, route, waitForEpoch);
         this.untilEpoch = untilEpoch;
         this.executeAt = executeAt;
         this.deps = deps;
+        this.keys = keys;
         this.writes = writes;
         this.result = result;
     }
@@ -80,8 +84,7 @@ public class Apply extends TxnRequest<ApplyReply>
     @Override
     public ApplyReply apply(SafeCommandStore safeStore)
     {
-        Command command = safeStore.command(txnId);
-        switch (command.apply(safeStore, untilEpoch, scope, executeAt, deps, writes, result))
+        switch (Commands.apply(safeStore, txnId, untilEpoch, scope, executeAt, deps, writes, result))
         {
             default:
             case Insufficient:
@@ -120,7 +123,7 @@ public class Apply extends TxnRequest<ApplyReply>
     @Override
     public Seekables<?, ?> keys()
     {
-        return Keys.EMPTY;
+        return keys;
     }
 
     @Override

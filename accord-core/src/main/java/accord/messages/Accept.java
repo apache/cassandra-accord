@@ -18,26 +18,28 @@
 
 package accord.messages;
 
+import accord.local.Commands;
+import accord.local.Commands.AcceptOutcome;
+import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.primitives.*;
 import accord.local.Node.Id;
 import accord.topology.Topologies;
 
 import accord.api.RoutingKey;
-import accord.local.Command.AcceptOutcome;
 import accord.primitives.PartialDeps;
 import accord.primitives.FullRoute;
 import accord.primitives.Ballot;
-import accord.local.Command;
 
 import java.util.Collections;
 import accord.primitives.Deps;
 import accord.primitives.TxnId;
 
 import javax.annotation.Nonnull;
+
 import javax.annotation.Nullable;
 
-import static accord.local.Command.AcceptOutcome.*;
+import static accord.local.Commands.AcceptOutcome.*;
 
 // TODO (low priority, efficiency): use different objects for send and receive, so can be more efficient
 //                                  (e.g. serialize without slicing, and without unnecessary fields)
@@ -87,14 +89,13 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         }
 
         // only accept if we actually participate in the ranges - otherwise we're just looking
-        Command command = safeStore.command(txnId);
-        switch (command.accept(safeStore, ballot, scope, keys, progressKey, executeAt, partialDeps))
+        switch (Commands.accept(safeStore, txnId, ballot, scope, keys, progressKey, executeAt, partialDeps))
         {
             default: throw new IllegalStateException();
             case Redundant:
                 return AcceptReply.REDUNDANT;
             case RejectedBallot:
-                return new AcceptReply(command.promised());
+                return new AcceptReply(safeStore.command(txnId).current().promised());
             case Success:
                 // TODO (desirable, efficiency): we don't need to calculate deps if executeAt == txnId
                 return new AcceptReply(calculatePartialDeps(safeStore));
@@ -240,8 +241,8 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         @Override
         public AcceptReply apply(SafeCommandStore safeStore)
         {
-            Command command = safeStore.command(txnId);
-            switch (command.acceptInvalidate(safeStore, ballot))
+            SafeCommand safeCommand = safeStore.command(txnId);
+            switch (Commands.acceptInvalidate(safeStore, safeCommand, ballot))
             {
                 default:
                 case Redundant:
@@ -249,7 +250,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
                 case Success:
                     return AcceptReply.ACCEPT_INVALIDATE;
                 case RejectedBallot:
-                    return new AcceptReply(command.promised());
+                    return new AcceptReply(safeCommand.current().promised());
             }
         }
 

@@ -53,6 +53,12 @@ public class DeterministicIdentitySet<T> extends AbstractSet<T>
         lookup = new IdentityHashMap<>(size);
     }
 
+    public DeterministicIdentitySet(DeterministicIdentitySet<T> copy)
+    {
+        this(copy.size());
+        copy.forEach(this::addInternal);
+    }
+
     @Override
     public Iterator<T> iterator()
     {
@@ -104,9 +110,7 @@ public class DeterministicIdentitySet<T> extends AbstractSet<T>
         return lookup.size();
     }
 
-    // we add to the front, and iterate in reverse order, so that we can add and remove while iterating without modifying the set we iterate over
-    @Override
-    public boolean add(T item)
+    private boolean addInternal(T item)
     {
         Entry<T> entry = lookup.computeIfAbsent(item, Entry::new);
         if (entry.prev != null)
@@ -116,6 +120,12 @@ public class DeterministicIdentitySet<T> extends AbstractSet<T>
         head.next = entry;
         entry.next.prev = entry;
         return true;
+    }
+    // we add to the front, and iterate in reverse order, so that we can add and remove while iterating without modifying the set we iterate over
+    @Override
+    public boolean add(T item)
+    {
+        return addInternal(item);
     }
 
     @Override

@@ -18,8 +18,8 @@
 
 package accord.api;
 
-import accord.local.Node;
 import accord.local.Command;
+import accord.local.Node;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 

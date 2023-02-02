@@ -18,14 +18,12 @@
 
 package accord.utils.async;
 
-import com.google.common.base.Preconditions;
+import accord.api.VisibleForImplementation;
+import accord.utils.Invariants;
 
-import java.util.List;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.BiConsumer;
-import java.util.function.BiFunction;
 import java.util.function.Function;
 
 public class AsyncResults
@@ -91,24 +89,17 @@ public class AsyncResults
             return trySetResult(new Result<>(result, failure));
         }
 
-        void setResult(Result<V> result)
-        {
-            if (!trySetResult(result))
-                throw new IllegalStateException("Result has already been set on " + this);
-        }
-
         private  AsyncChain<V> newChain()
         {
             return new AsyncChains.Head<V>()
             {
                 @Override
-                public void begin(BiConsumer<? super V, Throwable> callback)
+                protected void start(BiConsumer<? super V, Throwable> callback)
                 {
                     AbstractResult.this.addCallback(callback);
                 }
             };
         }
-
 
         void setResult(V result, Throwable failure)
         {
@@ -139,7 +130,7 @@ public class AsyncResults
                 {
                     Result<V> result = (Result<V>) current;
                     callback.accept(result.value, result.failure);
-                    return null;
+                    return this;
                 }
                 if (listener == null)
                     listener = new Listener<>(callback);
@@ -162,6 +153,29 @@ public class AsyncResults
             Object current = state;
             return current instanceof Result && ((Result) current).failure == null;
         }
+
+        private Result<V> getResult()
+        {
+            Object current = state;
+            Invariants.checkState(current instanceof Result);
+            return (Result<V>) current;
+        }
+
+        public V result()
+        {
+            Result<V> result = getResult();
+            if (result.failure != null)
+                throw new IllegalStateException("Result failed", result.failure);
+            return result.value;
+        }
+
+        public Throwable failure()
+        {
+            Result<V> result = getResult();
+            if (result.failure == null)
+                throw new IllegalStateException("Result succeeded");
+            return result.failure;
+        }
     }
 
     static class Chain<V> extends AbstractResult<V>
@@ -172,7 +186,7 @@ public class AsyncResults
         }
     }
 
-    public static class Settable<V> extends AbstractResult<V> implements AsyncResult.Settable<V>
+    public static class SettableResult<V> extends AbstractResult<V> implements AsyncResult.Settable<V>
     {
         @Override
         public boolean trySuccess(V value)
@@ -209,7 +223,7 @@ public class AsyncResults
             return new AsyncChains.Head<V>()
             {
                 @Override
-                public void begin(BiConsumer<? super V, Throwable> callback)
+                protected void start(BiConsumer<? super V, Throwable> callback)
                 {
                     AsyncResults.Immediate.this.addCallback(callback);
                 }
@@ -266,103 +280,50 @@ public class AsyncResults
         return new Immediate<>(failure);
     }
 
-    public static <V> AsyncResult<V> ofCallable(Executor executor, Callable<V> callable)
-    {
-        Settable<V> result = new Settable<V>();
-        executor.execute(() -> {
-            try
-            {
-                result.trySuccess(callable.call());
-            }
-            catch (Exception e)
-            {
-                result.tryFailure(e);
-            }
-        });
-        return result;
-    }
-
-    public static AsyncResult<Void> ofRunnable(Executor executor, Runnable runnable)
-    {
-        Settable<Void> result = new Settable<Void>();
-        executor.execute(() -> {
-            try
-            {
-                runnable.run();
-                result.trySuccess(null);
-            }
-            catch (Exception e)
-            {
-                result.tryFailure(e);
-            }
-        });
-        return result;
-    }
-
     public static <V> AsyncResult.Settable<V> settable()
     {
-        return new Settable<>();
+        return new SettableResult<>();
     }
 
-    public static <V> AsyncChain<List<V>> all(List<AsyncChain<V>> results)
+    /**
+     * An AsyncResult that also implements Runnable
+     * @param <V>
+     */
+    @VisibleForImplementation
+    public static class RunnableResult<V> extends AbstractResult<V> implements Runnable
     {
-        Preconditions.checkArgument(!results.isEmpty());
-        return new AsyncChainCombiner.All<>(results);
-    }
+        private final Callable<V> callable;
 
-    public static <V> AsyncChain<V> reduce(List<AsyncChain<V>> results, BiFunction<V, V, V> reducer)
-    {
-        Preconditions.checkArgument(!results.isEmpty());
-        if (results.size() == 1)
-            return results.get(0);
-        return new AsyncChainCombiner.Reduce<>(results, reducer);
-    }
-
-    public static <V> V getBlocking(AsyncResult<V> asyncResult) throws InterruptedException, ExecutionException
-    {
-        AtomicReference<Result<V>> callbackResult = new AtomicReference<>();
-        CountDownLatch latch = new CountDownLatch(1);
-        asyncResult.addCallback((result, failure) -> {
-            callbackResult.set(new Result<>(result, failure));
-            latch.countDown();
-        });
-
-        latch.await();
-        Result<V> result = callbackResult.get();
-        if (result.failure == null) return result.value;
-        else throw new ExecutionException(result.failure);
-    }
-
-    public static <V> V getBlocking(AsyncResult<V> asyncResult, long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException
-    {
-        AtomicReference<Result<V>> callbackResult = new AtomicReference<>();
-        CountDownLatch latch = new CountDownLatch(1);
-        asyncResult.addCallback((result, failure) -> {
-            callbackResult.set(new Result(result, failure));
-            latch.countDown();
-        });
-
-        if (!latch.await(timeout, unit))
-            throw new TimeoutException();
-        Result<V> result = callbackResult.get();
-        if (result.failure == null) return result.value;
-        else throw new ExecutionException(result.failure);
-    }
-
-    public static <V> V getUninterruptibly(AsyncResult<V> asyncResult)
-    {
-        try
+        public RunnableResult(Callable<V> callable)
         {
-            return getBlocking(asyncResult);
+            this.callable = callable;
         }
-        catch (ExecutionException | InterruptedException e)
+
+        @Override
+        public void run()
         {
-            throw new RuntimeException(e);
+            try
+            {
+                trySetResult(callable.call(), null);
+            }
+            catch (Throwable t)
+            {
+                trySetResult(null, t);
+            }
         }
     }
 
-    public static <V> void awaitUninterruptibly(AsyncResult<V> asyncResult)
+    public static <V> RunnableResult<V> runnableResult(Callable<V> callable)
     {
-        getUninterruptibly(asyncResult);
+        return new RunnableResult<>(callable);
     }
+
+    public static RunnableResult<Void> runnableResult(Runnable runnable)
+    {
+        return new RunnableResult<>(() -> {
+            runnable.run();
+            return null;
+        });
+    }
+
 }

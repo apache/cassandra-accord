@@ -22,13 +22,10 @@ import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.ProgressLog;
 import accord.primitives.*;
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
-import accord.utils.async.AsyncChain;
 
 import javax.annotation.Nullable;
-import java.util.function.Consumer;
-import java.util.function.Function;
+
+import static accord.utils.Utils.listOf;
 
 /**
  * A CommandStore with exclusive access; a reference to this should not be retained outside of the scope of the method
@@ -38,7 +35,7 @@ import java.util.function.Function;
  */
 public interface SafeCommandStore
 {
-    Command ifPresent(TxnId txnId);
+    SafeCommand ifPresent(TxnId txnId);
 
     /**
      * If the transaction is in memory, return it (and make it visible to future invocations of {@code command}, {@code ifPresent} etc).
@@ -46,14 +43,25 @@ public interface SafeCommandStore
      *
      * This permits efficient operation when a transaction involved in processing another transaction happens to be in memory.
      */
-    Command ifLoaded(TxnId txnId);
-    Command command(TxnId txnId);
+    SafeCommand ifLoaded(TxnId txnId);
+    SafeCommand command(TxnId txnId);
+
+    boolean canExecuteWith(PreLoadContext context);
 
     /**
      * Register a listener against the given TxnId, then load the associated transaction and invoke the listener
      * with its current state.
      */
-    void addAndInvokeListener(TxnId txnId, CommandListener listener);
+    default void addAndInvokeListener(TxnId txnId, TxnId listenerId)
+    {
+        PreLoadContext context = PreLoadContext.contextFor(listOf(txnId, listenerId), Keys.EMPTY);
+        commandStore().execute(context, safeStore -> {
+            SafeCommand safeCommand = safeStore.command(txnId);
+            CommandListener listener = new Command.Listener(listenerId);
+            safeCommand.addListener(listener);
+            listener.onChange(safeStore, safeCommand);
+        }).begin(agent());
+    }
 
     interface CommandFunction<I, O>
     {
@@ -75,10 +83,9 @@ public interface SafeCommandStore
      * Within each key or range visits TxnId in ascending order of queried timestamp.
      */
     <T> T mapReduce(Seekables<?, ?> keys, Ranges slice,
-                       TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp,
-                       TestDep testDep, @Nullable TxnId depId,
-                       @Nullable Status minStatus, @Nullable Status maxStatus,
-                       CommandFunction<T, T> map, T initialValue, T terminalValue);
+                    TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp,
+                    TestDep testDep, @Nullable TxnId depId, @Nullable Status minStatus, @Nullable Status maxStatus,
+                    CommandFunction<T, T> map, T initialValue, T terminalValue);
 
     void register(Seekables<?, ?> keysOrRanges, Ranges slice, Command command);
     void register(Seekable keyOrRange, Ranges slice, Command command);
@@ -92,6 +99,21 @@ public interface SafeCommandStore
     long latestEpoch();
     Timestamp preaccept(TxnId txnId, Seekables<?, ?> keys);
 
-    AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer);
-    <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function);
+    default void notifyListeners(SafeCommand safeCommand)
+    {
+        TxnId txnId = safeCommand.txnId();
+        Command command = safeCommand.current();
+        for (CommandListener listener : command.listeners())
+        {
+            PreLoadContext context = listener.listenerPreLoadContext(command.txnId());
+            if (canExecuteWith(context))
+            {
+                listener.onChange(this, safeCommand);
+            }
+            else
+            {
+                commandStore().execute(context, safeStore -> listener.onChange(safeStore, safeStore.command(txnId))).begin(agent());
+            }
+        }
+    }
 }

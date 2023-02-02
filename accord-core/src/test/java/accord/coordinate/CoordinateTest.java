@@ -31,7 +31,7 @@ import static accord.impl.IntKey.keys;
 import static accord.impl.IntKey.range;
 import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Txn.Kind.Write;
-import static accord.utils.async.AsyncResults.getUninterruptibly;
+import static accord.utils.async.AsyncChains.getUninterruptibly;
 
 public class CoordinateTest
 {

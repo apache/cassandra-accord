@@ -20,6 +20,73 @@ package accord.local;
 
 import accord.utils.DeterministicIdentitySet;
 
+import java.util.Collection;
+import java.util.function.Predicate;
+
 public class Listeners extends DeterministicIdentitySet<CommandListener>
 {
+    public Listeners()
+    {
+    }
+
+    public Listeners(Listeners copy)
+    {
+        super(copy);
+    }
+
+    public static class Immutable extends Listeners
+    {
+        public static final Immutable EMPTY = new Immutable();
+
+        private Immutable()
+        {
+            super();
+        }
+
+        public Immutable(Listeners listeners)
+        {
+            super(listeners);
+        }
+
+        Listeners mutable()
+        {
+            return new Listeners(this);
+        }
+
+        @Override
+        public boolean add(CommandListener item)
+        {
+            throw new UnsupportedOperationException("Cannot modify immutable set");
+        }
+
+        @Override
+        public boolean remove(Object item)
+        {
+            throw new UnsupportedOperationException("Cannot modify immutable set");
+        }
+
+        @Override
+        public boolean removeAll(Collection<?> c)
+        {
+            throw new UnsupportedOperationException("Cannot modify immutable set");
+        }
+
+        @Override
+        public boolean addAll(Collection<? extends CommandListener> c)
+        {
+            throw new UnsupportedOperationException("Cannot modify immutable set");
+        }
+
+        @Override
+        public boolean retainAll(Collection<?> c)
+        {
+            throw new UnsupportedOperationException("Cannot modify immutable set");
+        }
+
+        @Override
+        public boolean removeIf(Predicate<? super CommandListener> filter)
+        {
+            throw new UnsupportedOperationException("Cannot modify immutable set");
+        }
+    }
 }

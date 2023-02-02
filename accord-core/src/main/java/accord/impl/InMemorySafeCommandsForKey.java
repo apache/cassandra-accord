@@ -16,33 +16,43 @@
  * limitations under the License.
  */
 
-package accord.utils;
+package accord.impl;
 
-import java.util.function.BiFunction;
-import java.util.function.Function;
+import accord.api.Key;
+import accord.impl.InMemoryCommandStore.GlobalCommandsForKey;
 
-public interface MapReduce<I, O> extends Function<I, O>
+public class InMemorySafeCommandsForKey extends SafeCommandsForKey
 {
-    // TODO (desired, safety): ensure mutual exclusivity when calling each of these methods
-    @Override
-    O apply(I in);
-    O reduce(O o1, O o2);
+    private boolean invalidated = false;
+    private final GlobalCommandsForKey global;
 
-    static <I, O> MapReduce<I, O> of(Function<I, O> map, BiFunction<O, O, O> reduce)
+    public InMemorySafeCommandsForKey(Key key, GlobalCommandsForKey global)
     {
-        return new MapReduce<I, O>()
-        {
-            @Override
-            public O apply(I in)
-            {
-                return map.apply(in);
-            }
+        super(key);
+        this.global = global;
+    }
 
-            @Override
-            public O reduce(O o1, O o2)
-            {
-                return reduce.apply(o1, o2);
-            }
-        };
+    @Override
+    public CommandsForKey current()
+    {
+        return global.value();
+    }
+
+    @Override
+    protected void set(CommandsForKey update)
+    {
+        global.value(update);
+    }
+
+    @Override
+    public void invalidate()
+    {
+        invalidated = true;
+    }
+
+    @Override
+    public boolean invalidated()
+    {
+        return invalidated;
     }
 }

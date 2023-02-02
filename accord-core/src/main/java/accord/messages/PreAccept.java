@@ -100,12 +100,12 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
                     calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().between(minUnsyncedEpoch, txnId.epoch())));
         }
 
-        Command command = safeStore.command(txnId);
-        switch (command.preaccept(safeStore, partialTxn, route != null ? route : scope, progressKey))
+        switch (Commands.preaccept(safeStore, txnId, partialTxn, route != null ? route : scope, progressKey))
         {
             default:
             case Success:
             case Redundant:
+                Command command = safeStore.command(txnId).current();
                 return new PreAcceptOk(txnId, command.executeAt(),
                         calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().between(minUnsyncedEpoch, txnId.epoch())));
 

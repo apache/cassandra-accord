@@ -42,6 +42,11 @@ public class TxnId extends Timestamp
         return new TxnId(epoch, hlc, flags, node);
     }
 
+    public static TxnId fromValues(long epoch, long hlc, int flags, int node)
+    {
+        return new TxnId(epoch, hlc, flags, new Id(node));
+    }
+
     public TxnId(Timestamp timestamp, Kind rw, Domain domain)
     {
         super(timestamp, flags(rw, domain));
