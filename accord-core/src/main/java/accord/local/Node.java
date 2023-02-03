@@ -173,6 +173,11 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
             configService.acknowledgeEpoch(topology.epoch());
     }
 
+    public String newMethod()
+    {
+        return "Testing";
+    }
+
     @Override
     public synchronized void onTopologyUpdate(Topology topology)
     {
