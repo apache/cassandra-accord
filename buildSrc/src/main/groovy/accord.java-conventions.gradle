@@ -45,3 +45,17 @@ dependencies {
     testImplementation 'ch.qos.logback:logback-classic:1.2.3'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.7.0'
 }
+
+task copyMainDependencies(type: Copy) {
+    from configurations.compileClasspath
+    into "${buildDir}/dependencies/main/libs"
+}
+task copyTestDependencies(type: Copy) {
+    from configurations.testCompileClasspath - configurations.compileClasspath
+    into "${buildDir}/dependencies/test/libs"
+}
+
+task copyDependencies {
+  dependsOn(copyMainDependencies)
+  dependsOn(copyTestDependencies)
+}
