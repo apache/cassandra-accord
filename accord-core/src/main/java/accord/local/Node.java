@@ -173,7 +173,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
             configService.acknowledgeEpoch(topology.epoch());
     }
 
-    public String newMethod()
+    public String newMethodV2()
     {
         return "Testing";
     }
