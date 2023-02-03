@@ -90,4 +90,3 @@ public class AsyncCommandStores extends CommandStores<CommandStore>
         mapReduceConsume(context, commandStoreIds, mapReduceConsume, AsyncMapReduceAdapter.INSTANCE);
     }
 }
-
