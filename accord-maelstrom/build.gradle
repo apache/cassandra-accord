@@ -38,7 +38,7 @@ jar {
 
 task fatJar(type: Jar) {
     manifest.from jar.manifest
-    classifier = 'all'
+    archiveClassifier = 'all'
     from {
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     } {

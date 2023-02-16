@@ -41,7 +41,7 @@ dependencies {
 
 task burn(type: JavaExec) {
     classpath sourceSets.main.runtimeClasspath, sourceSets.test.output
-    main = 'accord.burn.BurnTest'
+    mainClass = 'accord.burn.BurnTest'
     jvmArgs '-Dlogback.configurationFile=burn-logback.xml'
     args = ['-c', '1']
 }
@@ -75,7 +75,7 @@ publishing {
         }
       }
       // This is a hack to remove accord from the dependency list as this breaks Apache Cassandra
-      // This is a bug with Gradle that is fixed in 8.0 but not yet released
+      // This is a bug with Gradle that was supposed to be fixed in 8.0 but does not seem to work
       // see https://github.com/gradle/gradle/commit/6e596c638dff59dfa06032a7e7a3974275ddb3e1
       pom.withXml {
         asNode().dependencies.'*'.findAll() { it.artifactId.text() == accord_artifactId }.each() { it.parent().remove(it) }
@@ -93,7 +93,7 @@ task burnforkloop {
                 .times {
                     javaexec {
                         classpath sourceSets.main.runtimeClasspath, sourceSets.test.output
-                        main = 'accord.burn.BurnTest'
+                        mainClass = 'accord.burn.BurnTest'
                         jvmArgs '-Dlogback.configurationFile=burn-logback.xml'
                         args = ['-c', '1']
                     }
@@ -105,7 +105,7 @@ task burnloop {
     doLast {
         javaexec {
             classpath sourceSets.main.runtimeClasspath, sourceSets.test.output
-            main = 'accord.burn.BurnTest'
+            mainClass = 'accord.burn.BurnTest'
             jvmArgs '-Dlogback.configurationFile=burn-logback.xml'
             args = ['-c', project.hasProperty('burnTimes') ? project.getProperty('burnTimes') : '1000000']
         }
