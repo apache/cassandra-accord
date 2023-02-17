@@ -41,7 +41,7 @@ dependencies {
 
 task burn(type: JavaExec) {
     classpath sourceSets.main.runtimeClasspath, sourceSets.test.output
-    main = 'accord.burn.BurnTest'
+    mainClass = 'accord.burn.BurnTest'
     jvmArgs '-Dlogback.configurationFile=burn-logback.xml'
     args = ['-c', '1']
 }
@@ -56,15 +56,32 @@ task testJar(type: Jar, dependsOn: testClasses) {
 publishing {
   publications {
     mavenJava(MavenPublication) {
-      artifactId = 'accord'
+      artifactId = accord_artifactId
       pom {
+        name = 'Apache Cassandra Accord'
+        description = 'General purpose transactions library using a leaderless consensus protocol to have highly available transactions'
+        url = 'https://cwiki.apache.org/confluence/display/CASSANDRA/CEP-15%3A+General+Purpose+Transactions'
         inceptionYear = '2021'
+        licenses {
+          license {
+            name = 'The Apache Software License, Version 2.0'
+            url = 'https://www.apache.org/licenses/LICENSE-2.0.txt'
+          }
+        }
+        scm {
+          connection = 'scm:https://gitbox.apache.org/repos/asf/cassandra-accord.git'
+          developerConnection = 'scm:https://gitbox.apache.org/repos/asf/cassandra-accord.git'
+          url = 'https://gitbox.apache.org/repos/asf?p=cassandra-accord.git;a=tree'
+        }
+      }
+      // This is a hack to remove accord from the dependency list as this breaks Apache Cassandra
+      // This is a bug with Gradle that was supposed to be fixed in 8.0 but does not seem to work
+      // see https://github.com/gradle/gradle/commit/6e596c638dff59dfa06032a7e7a3974275ddb3e1
+      pom.withXml {
+        asNode().dependencies.'*'.findAll() { it.artifactId.text() == accord_artifactId }.each() { it.parent().remove(it) }
       }
       from components.java
-    }
-
-    test(MavenPublication) {
-      artifactId = 'accord'
+      // don't need to add javadoc or sources as they were added already in the java block
       artifact testJar
     }
   }
@@ -76,7 +93,7 @@ task burnforkloop {
                 .times {
                     javaexec {
                         classpath sourceSets.main.runtimeClasspath, sourceSets.test.output
-                        main = 'accord.burn.BurnTest'
+                        mainClass = 'accord.burn.BurnTest'
                         jvmArgs '-Dlogback.configurationFile=burn-logback.xml'
                         args = ['-c', '1']
                     }
@@ -88,7 +105,7 @@ task burnloop {
     doLast {
         javaexec {
             classpath sourceSets.main.runtimeClasspath, sourceSets.test.output
-            main = 'accord.burn.BurnTest'
+            mainClass = 'accord.burn.BurnTest'
             jvmArgs '-Dlogback.configurationFile=burn-logback.xml'
             args = ['-c', project.hasProperty('burnTimes') ? project.getProperty('burnTimes') : '1000000']
         }
