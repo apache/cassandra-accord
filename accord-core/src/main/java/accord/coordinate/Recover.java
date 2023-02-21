@@ -31,6 +31,8 @@ import accord.coordinate.tracking.*;
 import accord.primitives.*;
 import accord.messages.Commit;
 import accord.utils.Invariants;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 
 import accord.api.Result;
 import accord.topology.Topologies;
@@ -43,10 +45,6 @@ import accord.messages.BeginRecovery.RecoverReply;
 import accord.messages.WaitOnCommit;
 import accord.messages.WaitOnCommit.WaitOnCommitOk;
 import accord.topology.Topology;
-import org.apache.cassandra.utils.concurrent.AsyncPromise;
-import org.apache.cassandra.utils.concurrent.AsyncFuture;
-import org.apache.cassandra.utils.concurrent.Future;
-import org.apache.cassandra.utils.concurrent.Promise;
 
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
 import static accord.coordinate.tracking.RequestStatus.Failed;
@@ -57,7 +55,7 @@ import static accord.utils.Invariants.debug;
 // TODO (low priority, cleanup): rename to Recover (verb); rename Recover message to not clash
 public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throwable>
 {
-    class AwaitCommit extends AsyncFuture<Timestamp> implements Callback<WaitOnCommitOk>
+    class AwaitCommit extends AsyncResults.Settable<Timestamp> implements Callback<WaitOnCommitOk>
     {
         // TODO (desired, efficiency): this should collect the executeAt of any commit, and terminate as soon as one is found
         //                             that is earlier than TxnId for the Txn we are recovering; if all commits we wait for
@@ -96,23 +94,23 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         }
     }
 
-    Future<Object> awaitCommits(Node node, Deps waitOn)
+    AsyncResult<Object> awaitCommits(Node node, Deps waitOn)
     {
         AtomicInteger remaining = new AtomicInteger(waitOn.txnIdCount());
-        Promise<Object> future = new AsyncPromise<>();
+        AsyncResult.Settable<Object> result = AsyncResults.settable();
         for (int i = 0 ; i < waitOn.txnIdCount() ; ++i)
         {
             TxnId txnId = waitOn.txnId(i);
             new AwaitCommit(node, txnId, waitOn.someUnseekables(txnId)).addCallback((success, failure) -> {
-                if (future.isDone())
+                if (result.isDone())
                     return;
                 if (success != null && remaining.decrementAndGet() == 0)
-                    future.setSuccess(success);
+                    result.setSuccess(success);
                 else
-                    future.tryFailure(failure);
+                    result.tryFailure(failure);
             });
         }
-        return future;
+        return result;
     }
 
     private final Node node;

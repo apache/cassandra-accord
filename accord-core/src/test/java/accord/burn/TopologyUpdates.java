@@ -31,9 +31,9 @@ import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.utils.MessageTask;
 import accord.utils.Invariants;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 import com.google.common.collect.Sets;
-import org.apache.cassandra.utils.concurrent.Future;
-import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,6 +48,7 @@ import static accord.coordinate.Invalidate.invalidate;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.local.Status.*;
 import static accord.local.Status.Known.*;
+import static accord.utils.async.AsyncChains.awaitUninterruptibly;
 
 public class TopologyUpdates
 {
@@ -143,9 +144,10 @@ public class TopologyUpdates
         };
     }
 
-    public static <T> Future<T> dieExceptionally(Future<T> stage)
+    public static <T> AsyncResult<T> dieExceptionally(AsyncResult<T> stage)
     {
-        return stage.addCallback(dieOnException());
+        stage.addCallback(dieOnException());
+        return stage;
     }
 
     public MessageTask notify(Node originator, Collection<Node.Id> cluster, Topology update)
@@ -173,9 +175,9 @@ public class TopologyUpdates
         Map<TxnId, CheckStatusOk> syncMessages = new ConcurrentHashMap<>();
         Consumer<Command> commandConsumer = command -> syncMessages.merge(command.txnId(), new CheckStatusOk(node, command), CheckStatusOk::merge);
         if (committedOnly)
-            node.commandStores().forEach(commandStore -> InMemoryCommandStore.inMemory(commandStore).forCommittedInEpoch(ranges, srcEpoch, commandConsumer));
+            awaitUninterruptibly(node.commandStores().forEach(commandStore -> InMemoryCommandStore.inMemory(commandStore).forCommittedInEpoch(ranges, srcEpoch, commandConsumer)));
         else
-            node.commandStores().forEach(commandStore -> InMemoryCommandStore.inMemory(commandStore).forEpochCommands(ranges, srcEpoch, commandConsumer));
+            awaitUninterruptibly(node.commandStores().forEach(commandStore -> InMemoryCommandStore.inMemory(commandStore).forEpochCommands(ranges, srcEpoch, commandConsumer)));
 
         return syncMessages.entrySet().stream().map(e -> {
             CommandSync sync = new CommandSync(e.getKey(), e.getValue(), srcEpoch, trgEpoch);
@@ -254,14 +256,14 @@ public class TopologyUpdates
         return messageStream;
     }
 
-    public static Future<Void> sync(Node node, long syncEpoch)
+    public static AsyncResult<Void> sync(Node node, long syncEpoch)
     {
         Stream<MessageTask> messageStream = optimizedSync(node, syncEpoch);
 
         Iterator<MessageTask> iter = messageStream.iterator();
         if (!iter.hasNext())
         {
-            return ImmediateFuture.success(null);
+            return AsyncResults.success(null);
         }
 
         MessageTask first = iter.next();
@@ -277,15 +279,15 @@ public class TopologyUpdates
         return dieExceptionally(last);
     }
 
-    public Future<Void> syncEpoch(Node originator, long epoch, Collection<Node.Id> cluster)
+    public AsyncResult<Void> syncEpoch(Node originator, long epoch, Collection<Node.Id> cluster)
     {
-        Future<Void> future = dieExceptionally(sync(originator, epoch)
+        AsyncResult<Void> result = dieExceptionally(sync(originator, epoch)
                 .flatMap(v -> MessageTask.apply(originator, cluster, "SyncComplete:" + epoch, (node, from, onDone) -> {
                     node.onEpochSyncComplete(originator.id(), epoch);
                     onDone.accept(true);
-                })));
-        future.addCallback((unused, throwable) -> pendingTopologies.remove(epoch));
-        return future;
+                })).beginAsResult());
+        result.addCallback((unused, throwable) -> pendingTopologies.remove(epoch));
+        return result;
     }
 
     public int pendingTopologies()

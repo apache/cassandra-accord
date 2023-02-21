@@ -34,11 +34,11 @@ import accord.messages.PreAccept.PreAcceptOk;
 import accord.messages.PreAccept.PreAcceptReply;
 import com.google.common.base.Preconditions;
 
-import org.apache.cassandra.utils.concurrent.AsyncFuture;
-import org.apache.cassandra.utils.concurrent.Future;
-
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
 import static accord.messages.Commit.Invalidate.commitInvalidate;
+
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 
 /**
  * Perform initial rounds of PreAccept and Accept until we have reached agreement about when we should execute.
@@ -46,7 +46,7 @@ import static accord.messages.Commit.Invalidate.commitInvalidate;
  *
  * TODO (desired, testing): dedicated burn test to validate outcomes
  */
-public class Coordinate extends AsyncFuture<Result> implements Callback<PreAcceptReply>, BiConsumer<Result, Throwable>
+public class Coordinate extends AsyncResults.Settable<Result> implements Callback<PreAcceptReply>, BiConsumer<Result, Throwable>
 {
     final Node node;
     final TxnId txnId;
@@ -75,7 +75,7 @@ public class Coordinate extends AsyncFuture<Result> implements Callback<PreAccep
         node.send(tracker.nodes(), to -> new PreAccept(to, tracker.topologies(), txnId, txn, route), this);
     }
 
-    public static Future<Result> coordinate(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
+    public static AsyncResult<Result> coordinate(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
     {
         Coordinate coordinate = new Coordinate(node, txnId, txn, route);
         coordinate.start();

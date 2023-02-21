@@ -26,8 +26,8 @@ import accord.local.Command;
 
 import accord.api.*;
 import accord.local.SafeCommandStore;
-import accord.utils.ReducingFuture;
-import org.apache.cassandra.utils.concurrent.Future;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -186,14 +186,14 @@ public interface Txn
         return new Writes(executeAt, update.keys(), update.apply(data));
     }
 
-    default Future<Data> read(SafeCommandStore safeStore, Command command)
+    default AsyncChain<Data> read(SafeCommandStore safeStore, Command command)
     {
         Ranges ranges = safeStore.ranges().at(command.executeAt().epoch());
-        List<Future<Data>> futures = Routables.foldlMinimal(keys(), ranges, (key, accumulate, index) -> {
-            Future<Data> result = read().read(key, kind(), safeStore, command.executeAt(), safeStore.dataStore());
+        List<AsyncChain<Data>> futures = Routables.foldlMinimal(keys(), ranges, (key, accumulate, index) -> {
+            AsyncChain<Data> result = read().read(key, kind(), safeStore, command.executeAt(), safeStore.dataStore());
             accumulate.add(result);
             return accumulate;
         }, new ArrayList<>());
-        return ReducingFuture.reduce(futures, Data::merge);
+        return AsyncChains.reduce(futures, Data::merge);
     }
 }

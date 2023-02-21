@@ -29,20 +29,19 @@ import accord.primitives.TxnId;
 import accord.topology.Topologies.Single;
 import accord.topology.Topology;
 
-import org.apache.cassandra.utils.concurrent.AsyncPromise;
-
+import accord.utils.async.AsyncResults;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
 
 import static accord.impl.InMemoryCommandStore.inMemory;
 import static accord.impl.mock.MockCluster.configService;
 import static accord.local.Status.Committed;
 import static accord.messages.SimpleReply.Ok;
+import static accord.utils.async.AsyncChains.getUninterruptibly;
 
 public class EpochSync implements Runnable
 {
@@ -96,7 +95,7 @@ public class EpochSync implements Runnable
         }
     }
 
-    private static class CommandSync extends AsyncPromise<Void> implements Callback<SimpleReply>
+    private static class CommandSync extends AsyncResults.Settable<Void> implements Callback<SimpleReply>
     {
         private final QuorumTracker tracker;
 
@@ -130,14 +129,7 @@ public class EpochSync implements Runnable
 
         public static void sync(Node node, Route<?> route, SyncCommitted message, Topology topology)
         {
-            try
-            {
-                new CommandSync(node, route, message, topology).get();
-            }
-            catch (InterruptedException | ExecutionException e)
-            {
-                throw new RuntimeException(e);
-            }
+            AsyncResults.getUninterruptibly(new CommandSync(node, route, message, topology));
         }
     }
 
@@ -182,8 +174,7 @@ public class EpochSync implements Runnable
             Map<TxnId, SyncCommitted> syncMessages = new ConcurrentHashMap<>();
             Consumer<Command> commandConsumer = command -> syncMessages.computeIfAbsent(command.txnId(), id -> new SyncCommitted(command, syncEpoch))
                     .update(command);
-            node.commandStores().forEach(commandStore -> inMemory(commandStore).forCommittedInEpoch(syncTopology.ranges(), syncEpoch, commandConsumer))
-                    .syncUninterruptibly();
+            getUninterruptibly(node.commandStores().forEach(commandStore -> inMemory(commandStore).forCommittedInEpoch(syncTopology.ranges(), syncEpoch, commandConsumer)));
 
             for (SyncCommitted send : syncMessages.values())
                 CommandSync.sync(node, send.route, send, nextTopology);

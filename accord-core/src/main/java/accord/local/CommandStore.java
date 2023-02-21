@@ -22,7 +22,7 @@ import accord.api.*;
 import accord.api.ProgressLog;
 import accord.api.DataStore;
 import accord.local.CommandStores.RangesForEpochHolder;
-import org.apache.cassandra.utils.concurrent.Future;
+import accord.utils.async.AsyncChain;
 
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -55,7 +55,7 @@ public abstract class CommandStore
     }
 
     public abstract Agent agent();
-    public abstract Future<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer);
-    public abstract <T> Future<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);
+    public abstract AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer);
+    public abstract <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);
     public abstract void shutdown();
 }

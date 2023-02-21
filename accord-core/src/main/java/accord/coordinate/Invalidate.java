@@ -269,7 +269,7 @@ public class Invalidate implements Callback<InvalidateReply>
         // TODO (required, consider): pick a reasonable upper bound, so we don't invalidate into an epoch/commandStore that no longer cares about this command
         node.forEachLocalSince(contextFor(txnId), invalidateWith, txnId, safeStore -> {
             safeStore.command(txnId).commitInvalidate(safeStore);
-        }).addCallback((s, f) -> {
+        }).begin((s, f) -> {
             callback.accept(INVALIDATED, null);
             if (f != null) // TODO (required): consider exception handling more carefully: should we catch these prior to passing to callbacks?
                 node.agent().onUncaughtException(f);

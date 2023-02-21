@@ -27,13 +27,13 @@ import accord.messages.InformOfTxnId;
 import accord.messages.SimpleReply;
 import accord.topology.Shard;
 import accord.primitives.TxnId;
-import org.apache.cassandra.utils.concurrent.AsyncFuture;
-import org.apache.cassandra.utils.concurrent.Future;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Success;
 
-public class InformHomeOfTxn extends AsyncFuture<Void> implements Callback<SimpleReply>
+public class InformHomeOfTxn extends AsyncResults.Settable<Void> implements Callback<SimpleReply>
 {
     final TxnId txnId;
     final RoutingKey homeKey;
@@ -47,7 +47,7 @@ public class InformHomeOfTxn extends AsyncFuture<Void> implements Callback<Simpl
         this.tracker = new QuorumShardTracker(homeShard);
     }
 
-    public static Future<Void> inform(Node node, TxnId txnId, RoutingKey homeKey)
+    public static AsyncResult<Void> inform(Node node, TxnId txnId, RoutingKey homeKey)
     {
         return node.withEpoch(txnId.epoch(), () -> {
             Shard homeShard = node.topology().forEpoch(homeKey, txnId.epoch());

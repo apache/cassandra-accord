@@ -31,19 +31,20 @@ import javax.annotation.Nullable;
 
 import accord.utils.IntrusiveLinkedList;
 import accord.utils.IntrusiveLinkedListNode;
-import accord.api.ProgressLog;
-import accord.api.RoutingKey;
 import accord.coordinate.*;
 import accord.local.*;
-import accord.local.Node.Id;
 import accord.local.Status.Known;
+import accord.primitives.*;
+import accord.utils.Invariants;
+import accord.utils.async.AsyncResult;
+
+import accord.api.ProgressLog;
+import accord.api.RoutingKey;
+import accord.local.Node.Id;
 import accord.messages.Callback;
 import accord.messages.InformDurable;
 import accord.messages.SimpleReply;
-import accord.primitives.*;
 import accord.topology.Topologies;
-import accord.utils.Invariants;
-import org.apache.cassandra.utils.concurrent.Future;
 
 import static accord.api.ProgressLog.ProgressShard.Home;
 import static accord.api.ProgressLog.ProgressShard.Unsure;
@@ -231,7 +232,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                                         // should have found enough information to apply the result, but in case we did not reset progress
                                         if (progress() == Investigating)
                                             setProgress(Expected);
-                                    });
+                                    }).begin(commandStore.agent());
                                 }));
                             }
                             else
@@ -239,7 +240,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                                 RoutingKey homeKey = command.homeKey();
                                 node.withEpoch(txnId.epoch(), () -> {
 
-                                    Future<? extends Outcome> recover = node.maybeRecover(txnId, homeKey, command.route(), token);
+                                    AsyncResult<? extends Outcome> recover = node.maybeRecover(txnId, homeKey, command.route(), token);
                                     recover.addCallback((success, fail) -> {
                                         commandStore.execute(PreLoadContext.empty(), ignore -> {
                                             if (status.isAtMostReadyToExecute() && progress() == Investigating)
@@ -255,12 +256,12 @@ public class SimpleProgressLog implements ProgressLog.Factory
                                                         Command cmd = safeStore.command(txnId);
                                                         cmd.setDurability(safeStore, token.durability, homeKey, null);
                                                         safeStore.progressLog().durable(txnId, cmd.maxUnseekables(), null);
-                                                    }).addCallback(commandStore.agent());
+                                                    }).begin(commandStore.agent());
                                                 }
 
                                                 updateMax(token);
                                             }
-                                        });
+                                        }).begin(commandStore.agent());
                                     });
 
                                     debugInvestigating = recover;
@@ -292,7 +293,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                             notAwareOfDurability.remove(from);
                             maybeDone();
-                        });
+                        }).begin(commandStore.agent());
                     }
 
                     @Override
@@ -499,7 +500,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                                 if (!success.isDefinitionKnown()) invalidate(node, txnId, someKeys);
                                 else record(success);
                             }
-                        });
+                        }).begin(commandStore.agent());
                     };
 
                     node.withEpoch(toEpoch, () -> {
@@ -525,7 +526,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                             setProgress(Expected);
                             if (fail == null && success.asProgressToken().durability.isDurable())
                                 setProgress(Done);
-                        });
+                        }).begin(commandStore.agent());
                     });
                 }
 
@@ -553,14 +554,14 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 void run(Command command)
                 {
                     // make sure a quorum of the home shard is aware of the transaction, so we can rely on it to ensure progress
-                    Future<Void> inform = inform(node, txnId, command.homeKey());
+                    AsyncResult<Void> inform = inform(node, txnId, command.homeKey());
                     inform.addCallback((success, fail) -> {
                         commandStore.execute(PreLoadContext.empty(), ignore -> {
                             if (progress() == Done)
                                 return;
 
                             setProgress(fail != null ? Expected : Done);
-                        });
+                        }).begin(commandStore.agent());
                     });
                 }
 
@@ -811,7 +812,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 return;
 
             isScheduled = true;
-            node.scheduler().once(() -> commandStore.execute(PreLoadContext.empty(), ignore -> run()), 200L, TimeUnit.MILLISECONDS);
+            node.scheduler().once(() -> commandStore.execute(PreLoadContext.empty(), ignore -> run()).begin(commandStore.agent()), 200L, TimeUnit.MILLISECONDS);
         }
 
         @Override
@@ -827,7 +828,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                         commandStore.execute(contextFor(run.txnId()), safeStore -> {
                             if (run.shouldRun()) // could have been completed by a callback
                                 run.run(safeStore.command(run.txnId()));
-                        });
+                        }).begin(commandStore.agent());
                     }
                 }
             }

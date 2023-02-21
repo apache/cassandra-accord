@@ -95,7 +95,7 @@ public class FetchData
     {
         long srcEpoch = executeAt == null || target.epoch() == Coordination ? txnId.epoch() : executeAt.epoch();
         if (!node.topology().hasEpoch(srcEpoch))
-            return node.topology().awaitEpoch(srcEpoch).map(ignore -> fetchInternal(ranges, target, node, txnId, route, executeAt, untilLocalEpoch, callback));
+            return node.topology().awaitEpoch(srcEpoch).map(ignore -> fetchInternal(ranges, target, node, txnId, route, executeAt, untilLocalEpoch, callback)).beginAsResult();
 
         PartialRoute<?> fetch = route.sliceStrict(ranges);
         return CheckOn.checkOn(target, node, txnId, fetch, srcEpoch, untilLocalEpoch, (ok, fail) -> {
