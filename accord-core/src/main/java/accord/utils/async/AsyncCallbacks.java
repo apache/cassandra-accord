@@ -16,28 +16,33 @@
  * limitations under the License.
  */
 
-package accord.maelstrom;
+package accord.utils.async;
 
-import accord.api.Key;
-import accord.api.DataStore;
-import accord.api.Write;
-import accord.local.SafeCommandStore;
-import accord.primitives.Seekable;
-import accord.primitives.Timestamp;
-import accord.primitives.Writes;
-import accord.utils.Timestamped;
-import accord.utils.async.AsyncChain;
+import java.util.concurrent.Executor;
+import java.util.function.BiConsumer;
 
-import java.util.TreeMap;
-
-public class MaelstromWrite extends TreeMap<Key, Value> implements Write
+public class AsyncCallbacks
 {
-    @Override
-    public AsyncChain<Void> apply(Seekable key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
+    public static <T> BiConsumer<? super T, Throwable> inExecutor(BiConsumer<? super T, Throwable> callback, Executor executor)
     {
-        MaelstromStore s = (MaelstromStore) store;
-        if (containsKey(key))
-            s.data.merge((Key)key, new Timestamped<>(executeAt, get(key)), Timestamped::merge);
-        return Writes.SUCCESS;
+        return (result, throwable) -> {
+            try
+            {
+                executor.execute(() -> callback.accept(result, throwable));
+            }
+            catch (Throwable t)
+            {
+                callback.accept(null, t);
+            }
+        };
+    }
+
+
+    public static <T> BiConsumer<? super T, Throwable> inExecutor(Runnable runnable, Executor executor)
+    {
+        return (result, throwable) -> {
+            if (throwable == null) executor.execute(runnable);
+            else throw new RuntimeException(throwable);
+        };
     }
 }

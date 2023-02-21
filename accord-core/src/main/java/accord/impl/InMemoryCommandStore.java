@@ -33,14 +33,15 @@ import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.*;
 import accord.utils.Invariants;
-import org.apache.cassandra.utils.concurrent.AsyncPromise;
-import org.apache.cassandra.utils.concurrent.Future;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 
 import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -455,25 +456,35 @@ public class InMemoryCommandStore
             }
 
             @Override
-            public Future<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
+            public AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
             {
                 return submit(context, i -> { consumer.accept(i); return null; });
             }
 
             @Override
-            public synchronized <T> Future<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
+            public synchronized <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
             {
-                AsyncPromise<T> promise = new AsyncPromise<>();
-                try
+                return new AsyncChains.Head<T>()
                 {
-                    T result = function.apply(this);
-                    promise.trySuccess(result);
-                }
-                catch (Throwable t)
-                {
-                    promise.tryFailure(t);
-                }
-                return promise;
+                    @Override
+                    public void begin(BiConsumer<? super T, Throwable> callback)
+                    {
+                        T result = null;
+                        Throwable failure = null;
+                        synchronized (SynchronizedState.this)
+                        {
+                            try
+                            {
+                                result = function.apply(SynchronizedState.this);
+                            }
+                            catch (Throwable t)
+                            {
+                                failure = t;
+                            }
+                        }
+                        callback.accept(result, failure);
+                    }
+                };
             }
 
             public synchronized <T> T executeSync(PreLoadContext context, Function<? super SafeCommandStore, T> function)
@@ -503,13 +514,13 @@ public class InMemoryCommandStore
         }
 
         @Override
-        public Future<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
+        public AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
         {
             return safeStore().execute(context, consumer);
         }
 
         @Override
-        public <T> Future<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
+        public <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
         {
             return safeStore().submit(context, function);
         }
@@ -526,29 +537,6 @@ public class InMemoryCommandStore
 
     public static class SingleThread extends CommandStore
     {
-        private class FunctionWrapper<T> extends AsyncPromise<T> implements Runnable
-        {
-            private final Function<? super SafeCommandStore, T> function;
-
-            public FunctionWrapper(Function<? super SafeCommandStore, T> function)
-            {
-                this.function = function;
-            }
-
-            @Override
-            public void run()
-            {
-                try
-                {
-                    trySuccess(function.apply(state));
-                }
-                catch (Throwable t)
-                {
-                    tryFailure(t);
-                }
-            }
-        }
-
         class AsyncState extends State implements SafeCommandStore
         {
             public AsyncState(NodeTimeService time, Agent agent, DataStore store, ProgressLog progressLog, RangesForEpochHolder rangesForEpoch, CommandStore commandStore)
@@ -557,20 +545,17 @@ public class InMemoryCommandStore
             }
 
             @Override
-            public Future<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
+            public AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
             {
                 return submit(context, i -> { consumer.accept(i); return null; });
             }
 
             @Override
-            public <T> Future<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
+            public <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
             {
-                FunctionWrapper<T> future = new FunctionWrapper<>(function);
-                executor.execute(future);
-                return future;
+                return AsyncChains.ofCallable(executor, () -> function.apply(this));
             }
         }
-
         private final ExecutorService executor;
         private final AsyncState state;
 
@@ -603,13 +588,13 @@ public class InMemoryCommandStore
         }
 
         @Override
-        public Future<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
+        public AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer)
         {
             return safeStore().execute(context, consumer);
         }
 
         @Override
-        public <T> Future<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
+        public <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
         {
             return safeStore().submit(context, function);
         }

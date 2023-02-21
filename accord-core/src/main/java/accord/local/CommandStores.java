@@ -25,11 +25,11 @@ import accord.topology.Topology;
 import accord.utils.MapReduce;
 import accord.utils.MapReduceConsume;
 
-import accord.utils.ReducingFuture;
 import com.google.common.annotations.VisibleForTesting;
 import org.agrona.collections.Hashing;
 import org.agrona.collections.Int2ObjectHashMap;
-import org.apache.cassandra.utils.concurrent.Future;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -296,33 +296,33 @@ public abstract class CommandStores<S extends CommandStore>
         Intermediate reduce(MapReduce<?, O> reduce, Accumulator accumulator);
     }
 
-    public Future<Void> forEach(Consumer<SafeCommandStore> forEach)
+    public AsyncChain<Void> forEach(Consumer<SafeCommandStore> forEach)
     {
-        List<Future<Void>> list = new ArrayList<>();
+        List<AsyncChain<Void>> list = new ArrayList<>();
         Snapshot snapshot = current;
         for (ShardHolder shard : snapshot.shards)
         {
             list.add(shard.store.execute(empty(), forEach));
         }
-        return ReducingFuture.reduce(list, (a, b) -> null);
+        return AsyncChains.reduce(list, (a, b) -> null);
     }
 
-    public Future<Void> ifLocal(PreLoadContext context, RoutingKey key, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
+    public AsyncChain<Void> ifLocal(PreLoadContext context, RoutingKey key, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
     {
         return forEach(context, RoutingKeys.of(key), minEpoch, maxEpoch, forEach, false);
     }
 
-    public Future<Void> forEach(PreLoadContext context, RoutingKey key, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
+    public AsyncChain<Void> forEach(PreLoadContext context, RoutingKey key, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
     {
         return forEach(context, RoutingKeys.of(key), minEpoch, maxEpoch, forEach, true);
     }
 
-    public Future<Void> forEach(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
+    public AsyncChain<Void> forEach(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
     {
         return forEach(context, keys, minEpoch, maxEpoch, forEach, true);
     }
 
-    private Future<Void> forEach(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach, boolean matchesMultiple)
+    private AsyncChain<Void> forEach(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach, boolean matchesMultiple)
     {
         return this.mapReduce(context, keys, minEpoch, maxEpoch, new MapReduce<SafeCommandStore, Void>()
         {

@@ -23,16 +23,12 @@ import accord.api.TestableConfigurationService;
 import accord.local.Node;
 import accord.topology.Topology;
 import accord.utils.EpochFunction;
-import org.apache.cassandra.utils.concurrent.AsyncPromise;
-import org.apache.cassandra.utils.concurrent.Future;
-import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 import org.junit.jupiter.api.Assertions;
 
 import java.util.*;
 
 public class MockConfigurationService implements TestableConfigurationService
 {
-    private static final Future<Void> SUCCESS = ImmediateFuture.success(null);
     private final MessageSink messageSink;
     private final List<Topology> epochs = new ArrayList<>();
     private final List<Listener> listeners = new ArrayList<>();

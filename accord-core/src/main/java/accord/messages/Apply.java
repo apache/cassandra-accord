@@ -106,7 +106,7 @@ public class Apply extends TxnRequest<ApplyReply>
         {
             node.ifLocal(empty(), scope.homeKey(), txnId.epoch(), instance -> {
                 node.withEpoch(executeAt.epoch(), () -> instance.progressLog().durableLocal(txnId));
-            }).addCallback(node.agent());
+            }).begin(node.agent());
         }
         node.reply(replyTo, replyContext, reply);
     }

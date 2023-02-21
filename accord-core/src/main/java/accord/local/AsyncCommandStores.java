@@ -24,9 +24,8 @@ import accord.api.ProgressLog;
 import accord.primitives.Routables;
 import accord.utils.MapReduce;
 import accord.utils.MapReduceConsume;
-import accord.utils.ReducingFuture;
-import org.apache.cassandra.utils.concurrent.Future;
-import org.apache.cassandra.utils.concurrent.ImmediateFuture;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,42 +33,43 @@ import java.util.stream.IntStream;
 
 public class AsyncCommandStores extends CommandStores<CommandStore>
 {
-    static class AsyncMapReduceAdapter<O> implements MapReduceAdapter<CommandStore, Future<O>, List<Future<O>>, O>
+    static class AsyncMapReduceAdapter<O> implements MapReduceAdapter<CommandStore, AsyncChain<O>, List<AsyncChain<O>>, O>
     {
+        private static final AsyncChain<?> SUCCESS = AsyncChains.success(null);
         private static final AsyncMapReduceAdapter INSTANCE = new AsyncMapReduceAdapter<>();
         public static <O> AsyncMapReduceAdapter<O> instance() { return INSTANCE; }
 
         @Override
-        public List<Future<O>> allocate()
+        public List<AsyncChain<O>> allocate()
         {
             return new ArrayList<>();
         }
 
         @Override
-        public Future<O> apply(MapReduce<? super SafeCommandStore, O> map, CommandStore commandStore, PreLoadContext context)
+        public AsyncChain<O> apply(MapReduce<? super SafeCommandStore, O> map, CommandStore commandStore, PreLoadContext context)
         {
             return commandStore.submit(context, map);
         }
 
         @Override
-        public List<Future<O>> reduce(MapReduce<? super SafeCommandStore, O> reduce, List<Future<O>> futures, Future<O> next)
+        public List<AsyncChain<O>> reduce(MapReduce<? super SafeCommandStore, O> reduce, List<AsyncChain<O>> chains, AsyncChain<O> next)
         {
-            futures.add(next);
-            return futures;
+            chains.add(next);
+            return chains;
         }
 
         @Override
-        public void consume(MapReduceConsume<?, O> reduceAndConsume, Future<O> future)
+        public void consume(MapReduceConsume<?, O> reduceAndConsume, AsyncChain<O> chain)
         {
-            future.addCallback(reduceAndConsume);
+            chain.begin(reduceAndConsume);
         }
 
         @Override
-        public Future<O> reduce(MapReduce<?, O> reduce, List<Future<O>> futures)
+        public AsyncChain<O> reduce(MapReduce<?, O> reduce, List<AsyncChain<O>> futures)
         {
             if (futures.isEmpty())
-                return ImmediateFuture.success(null);
-            return ReducingFuture.reduce(futures, reduce::reduce);
+                return (AsyncChain<O>) SUCCESS;
+            return AsyncChains.reduce(futures, reduce::reduce);
         }
     }
 
