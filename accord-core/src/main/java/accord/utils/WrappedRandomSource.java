@@ -54,9 +54,9 @@ class WrappedRandomSource implements RandomSource
     }
 
     @Override
-    public int nextInt(int bound)
+    public int nextInt(int maxExclusive)
     {
-        return random.nextInt(bound);
+        return random.nextInt(maxExclusive);
     }
 
     @Override

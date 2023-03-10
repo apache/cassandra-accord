@@ -47,6 +47,12 @@ public interface RandomSource extends JDKRandomAPI
         return IntStream.generate(() -> nextInt(minInclusive, maxExclusive));
     }
 
+    @Override
+    default int nextInt(int maxExclusive)
+    {
+        return nextInt(0, maxExclusive);
+    }
+
     default int nextInt(int minInclusive, int maxExclusive)
     {
         // this is diff behavior than ThreadLocalRandom, which returns nextInt
