@@ -162,11 +162,21 @@ public interface RandomSource extends JDKRandomAPI
         return result;
     }
 
+    /**
+     * Returns true with a probability of {@code chance}.  This logic is logically the same as
+     * <pre>{@code nextFloat() < chance}</pre>
+     * @param chance cumulative probability in range [0..1]
+     */
     default boolean decide(float chance)
     {
         return nextFloat() < chance;
     }
 
+    /**
+     * Returns true with a probability of {@code chance}.  This logic is logically the same as
+     * <pre>{@code nextDouble() < chance}</pre>
+     * @param chance cumulative probability in range [0..1]
+     */
     default boolean decide(double chance)
     {
         return nextDouble() < chance;
