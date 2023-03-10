@@ -35,4 +35,10 @@ public class DefaultRandom extends Random implements RandomSource
     public DefaultRandom fork() {
         return new DefaultRandom(nextLong());
     }
+
+    @Override
+    public Random asJdkRandom()
+    {
+        return this;
+    }
 }
