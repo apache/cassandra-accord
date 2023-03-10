@@ -656,7 +656,7 @@ public abstract class InMemoryCommandStore implements CommandStore
 
             // TODO (find lib, efficiency): this is super inefficient, need to store Command in something queryable
             Seekables<?, ?> sliced = keysOrRanges.slice(slice, Minimal);
-            Map<Range, List<Command>> collect = new TreeMap<>(Range::compare);
+            Map<Range, List<Command>> collect = new TreeMap<>();
             commandStore.rangeCommands.forEach(((txnId, rangeCommand) -> {
                 Command command = rangeCommand.command.value();
                 Invariants.nonNull(command);

@@ -47,7 +47,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
 
     public int indexOf(RoutableKey key)
     {
-        return SortedArrays.binarySearch(ranges, 0, ranges.length, key, (k, r) -> -r.compareTo(k), FAST);
+        return SortedArrays.binarySearch(ranges, 0, ranges.length, key, (k, r) -> -r.compareToKey(k), FAST);
     }
 
     @Override
@@ -158,7 +158,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     @Override
     public final long findNextIntersection(int ri, AbstractKeys<?, ?> keys, int ki)
     {
-        return swapHighLow32b(SortedArrays.findNextIntersectionWithMultipleMatches(keys.keys, ki, ranges, ri));
+        return swapHighLow32b(SortedArrays.findNextIntersectionWithMultipleMatches(keys.keys, ki, ranges, ri, Range::compareToKey));
     }
 
     // returns ki in bottom 32 bits, ri in top, or -1 if no match found
@@ -183,7 +183,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     @Override
     public final int findNext(int thisIndex, RoutableKey find, SortedArrays.Search search)
     {
-        return SortedArrays.exponentialSearch(ranges, thisIndex, size(), find, (k, r) -> -r.compareTo(k), search);
+        return SortedArrays.exponentialSearch(ranges, thisIndex, size(), find, (k, r) -> -r.compareToKey(k), search);
     }
 
     /**
@@ -204,7 +204,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
             case Key:
             {
                 AbstractKeys<?, ?> that = (AbstractKeys<?, ?>) keysOrRanges;
-                Range[] result = SortedArrays.linearIntersection(input.ranges, input.ranges.length, that.keys, that.keys.length, cachedRanges());
+                Range[] result = SortedArrays.linearIntersection(input.ranges, input.ranges.length, that.keys, that.keys.length, cachedRanges(), Range::compareToKey);
                 return result == input.ranges ? input : constructor.apply(param, result);
             }
         }
@@ -611,7 +611,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
             return constructor.apply(Arrays.copyOf(ranges, count));
         }
 
-        Arrays.sort(ranges, 0, count, Range::compare);
+        Arrays.sort(ranges, 0, count, Range::compareTo);
         Range prev = ranges[0];
         int removed = 0;
         for (int i = 1 ; i < count ; ++i)
