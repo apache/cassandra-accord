@@ -21,7 +21,6 @@ package accord.impl.basic;
 import accord.burn.random.FrequentLargeRange;
 import accord.burn.random.RandomLong;
 import accord.burn.random.RandomWalkRange;
-import accord.burn.random.Randoms;
 import accord.utils.RandomSource;
 
 import java.util.Collections;
@@ -44,8 +43,7 @@ public class SimulatedDelayedExecutorService extends AbstractExecutorService
         this.random = random;
         // this is different from Apache Cassandra Simulator as this is computed differently for each executor
         // rather than being a global config
-        //TODO In CASSANDRA-18213 switch to calc directly from random
-        double ratio = Randoms.nextInt(random, 1, 10) / 100.0D;
+        double ratio = random.nextInt(1, 11) / 100.0D;
         this.jitterInNano = new FrequentLargeRange(
                 new RandomWalkRange(random, microToNanos(0), microToNanos(50)),
                 new RandomWalkRange(random, microToNanos(50), msToNanos(5)),

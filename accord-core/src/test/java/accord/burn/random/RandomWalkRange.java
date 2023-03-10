@@ -31,13 +31,13 @@ public class RandomWalkRange implements RandomLong
         this.min = min;
         this.max = max;
         this.maxStepSize = maxStepSize(random, min, max);
-        this.cur = Randoms.nextLong(random, min, max);
+        this.cur = random.nextLong(min, max + 1);
     }
 
     @Override
     public long getLong(RandomSource randomSource)
     {
-        long step = Randoms.nextLong(randomSource, -maxStepSize, maxStepSize);
+        long step = randomSource.nextLong(-maxStepSize, maxStepSize + 1);
         long cur = this.cur;
         this.cur = step > 0 ? Math.min(max, cur + step)
                             : Math.max(min, cur + step);
