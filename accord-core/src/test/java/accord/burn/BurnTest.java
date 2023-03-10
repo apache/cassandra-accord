@@ -267,7 +267,7 @@ public class BurnTest
         {
             Cluster.run(toArray(nodes, Id[]::new), () -> queue,
                         responseSink, failures::add,
-                        () -> new DefaultRandom(random.nextLong()),
+                        () -> random.fork(),
                         () -> new AtomicLong()::incrementAndGet,
                         topologyFactory, () -> null);
         }
