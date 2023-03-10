@@ -32,7 +32,7 @@ public class DefaultRandom extends Random implements RandomSource
     }
 
     @Override
-    public RandomSource fork() {
+    public DefaultRandom fork() {
         return new DefaultRandom(nextLong());
     }
 }
