@@ -25,7 +25,7 @@ dependencies {
     implementation group: 'com.google.code.findbugs', name: 'jsr305', version: '3.0.2'
     implementation 'com.google.code.gson:gson:2.8.7'
 
-    testImplementation(testFixtures(project(':accord-core')))
+    testImplementation project(':accord-core').sourceSets.test.output
 }
 
 jar {
