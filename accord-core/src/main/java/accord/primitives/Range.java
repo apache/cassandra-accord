@@ -32,7 +32,7 @@ import static accord.utils.SortedArrays.Search.FAST;
 /**
  * A range of keys
  */
-public abstract class Range implements Comparable<Range>, Unseekable, Seekable
+public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seekable
 {
     public static class EndInclusive extends Range
     {
@@ -42,7 +42,7 @@ public abstract class Range implements Comparable<Range>, Unseekable, Seekable
         }
 
         @Override
-        public int compareToKey(RoutableKey key)
+        public int compareTo(RoutableKey key)
         {
             if (key.compareTo(start()) <= 0)
                 return 1;
@@ -84,7 +84,7 @@ public abstract class Range implements Comparable<Range>, Unseekable, Seekable
         }
 
         @Override
-        public int compareToKey(RoutableKey key)
+        public int compareTo(RoutableKey key)
         {
             if (key.compareTo(start()) < 0)
                 return 1;
@@ -141,7 +141,7 @@ public abstract class Range implements Comparable<Range>, Unseekable, Seekable
             }
 
             @Override
-            public int compareToKey(RoutableKey key)
+            public int compareTo(RoutableKey key)
             {
                 if (startInclusive)
                 {
@@ -230,11 +230,12 @@ public abstract class Range implements Comparable<Range>, Unseekable, Seekable
      * Returns a negative integer, zero, or a positive integer as the provided key is greater than, contained by,
      * or less than this range.
      */
-    public abstract int compareToKey(RoutableKey key);
+    @Override
+    public abstract int compareTo(RoutableKey key);
 
     public boolean contains(RoutableKey key)
     {
-        return compareToKey(key) == 0;
+        return compareTo(key) == 0;
     }
 
     /**
@@ -255,8 +256,7 @@ public abstract class Range implements Comparable<Range>, Unseekable, Seekable
     /**
      * Sorts by start then end
      */
-    @Override
-    public int compareTo(Range that)
+    public int compare(Range that)
     {
         if (that.getClass() != this.getClass())
             throw new IllegalArgumentException("Cannot mix Range of different types");
@@ -280,7 +280,7 @@ public abstract class Range implements Comparable<Range>, Unseekable, Seekable
 
     public boolean intersects(AbstractKeys<?, ?> keys)
     {
-        return SortedArrays.binarySearch(keys.keys, 0, keys.size(), this, Range::compareToKey, FAST) >= 0;
+        return SortedArrays.binarySearch(keys.keys, 0, keys.size(), this, Range::compareTo, FAST) >= 0;
     }
 
     /**
@@ -302,7 +302,7 @@ public abstract class Range implements Comparable<Range>, Unseekable, Seekable
      */
     public int nextHigherKeyIndex(AbstractKeys<?, ?> keys, int from)
     {
-        int i = SortedArrays.exponentialSearch(keys.keys, from, keys.size(), this, Range::compareToKey, Search.FLOOR);
+        int i = SortedArrays.exponentialSearch(keys.keys, from, keys.size(), this, Range::compareTo, Search.FLOOR);
         if (i < 0) i = -1 - i;
         else i += 1;
         return i;
@@ -316,7 +316,7 @@ public abstract class Range implements Comparable<Range>, Unseekable, Seekable
      */
     public int nextCeilKeyIndex(Keys keys, int from)
     {
-        return SortedArrays.exponentialSearch(keys.keys, from, keys.size(), this, Range::compareToKey, CEIL);
+        return SortedArrays.exponentialSearch(keys.keys, from, keys.size(), this, Range::compareTo, CEIL);
     }
 
     @Override

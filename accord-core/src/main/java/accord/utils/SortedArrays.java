@@ -334,7 +334,7 @@ public class SortedArrays
      *
      * TODO (low priority, efficiency): introduce exponential search optimised version
      */
-    public static <T2, T1> T1[] linearIntersection(T1[] left, int leftLength, T2[] right, int rightLength, ObjectBuffers<T1> buffers, AsymmetricComparator<T1, T2> comparator)
+    public static <T2, T1 extends Comparable<? super T2>> T1[] linearIntersection(T1[] left, int leftLength, T2[] right, int rightLength, ObjectBuffers<T1> buffers)
     {
         int leftIdx = 0;
         int rightIdx = 0;
@@ -347,7 +347,7 @@ public class SortedArrays
         {
             T1 leftKey = left[leftIdx];
             T2 rightKey = right[rightIdx];
-            int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
+            int cmp = leftKey == rightKey ? 0 : leftKey.compareTo(rightKey);
 
             if (cmp >= 0)
             {
@@ -374,7 +374,7 @@ public class SortedArrays
             {
                 T1 leftKey = left[leftIdx];
                 T2 rightKey = right[rightIdx];
-                int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
+                int cmp = leftKey == rightKey ? 0 : leftKey.compareTo(rightKey);
 
                 if (cmp == 0)
                 {
@@ -729,9 +729,9 @@ public class SortedArrays
      * Given two sorted arrays where an item in each array may match multiple in the other, find the next
      * index in each array containing an equal item.
      */
-    public static <T1, T2> long findNextIntersectionWithMultipleMatches(T1[] as, int ai, T2[] bs, int bi, AsymmetricComparator<T2, T1> cmp)
+    public static <T1, T2 extends Comparable<T1>> long findNextIntersectionWithMultipleMatches(T1[] as, int ai, T2[] bs, int bi)
     {
-        return findNextIntersectionWithMultipleMatches(as, ai, bs, bi, (a, b) -> -cmp.compare(b, a), cmp);
+        return findNextIntersectionWithMultipleMatches(as, ai, bs, bi, (a, b) -> -b.compareTo(a), Comparable::compareTo);
     }
 
     /**

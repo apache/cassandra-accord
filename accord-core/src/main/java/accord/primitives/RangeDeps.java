@@ -35,6 +35,8 @@ import java.util.function.Predicate;
 import static accord.utils.ArrayBuffers.*;
 import static accord.utils.RelationMultiMap.*;
 import static accord.utils.RelationMultiMap.remove;
+import static accord.utils.SearchableRangeListBuilder.Links.LINKS;
+import static accord.utils.SearchableRangeListBuilder.Strategy.ACCURATE;
 import static accord.utils.SortedArrays.Search.CEIL;
 
 /**
@@ -115,7 +117,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     {
         Invariants.checkArgument(rangesToTxnIds.length >= ranges.length);
         Invariants.checkArgument(ranges.length > 0 || rangesToTxnIds.length == 0);
-        Invariants.paranoid(SortedArrays.isSorted(ranges, Range::compareTo));
+        Invariants.paranoid(SortedArrays.isSorted(ranges, Range::compare));
         this.ranges = ranges;
         this.txnIds = txnIds;
         this.rangesToTxnIds = rangesToTxnIds;

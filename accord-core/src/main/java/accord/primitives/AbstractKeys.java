@@ -121,13 +121,13 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     @Override
     public final int findNext(int thisIndex, Range find, SortedArrays.Search search)
     {
-        return SortedArrays.exponentialSearch(keys, thisIndex, size(), find, Range::compareToKey, search);
+        return SortedArrays.exponentialSearch(keys, thisIndex, size(), find, Range::compareTo, search);
     }
 
     @Override
     public final long findNextIntersection(int thisIdx, AbstractRanges<?> that, int thatIdx)
     {
-        return SortedArrays.findNextIntersectionWithMultipleMatches(this.keys, thisIdx, that.ranges, thatIdx, (RoutableKey k, Range r) -> -r.compareToKey(k), Range::compareToKey);
+        return SortedArrays.findNextIntersectionWithMultipleMatches(this.keys, thisIdx, that.ranges, thatIdx, (RoutableKey k, Range r) -> -r.compareTo(k), Range::compareTo);
     }
 
     @Override
@@ -178,7 +178,7 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     // TODO (expected, efficiency): accept cached buffers
     protected K[] slice(Ranges ranges, IntFunction<K[]> factory)
     {
-        return SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareToKey(k), Range::compareToKey);
+        return SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareTo(k), Range::compareTo);
     }
 
     public boolean any(Ranges ranges, Predicate<? super K> predicate)

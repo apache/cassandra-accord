@@ -79,7 +79,7 @@ public class RelationMultiMap
 
 
     // TODO (expected, efficiency): cache this object per thread
-    public static abstract class AbstractBuilder<K extends Comparable<? super K>, V, T> implements AutoCloseable
+    public static abstract class AbstractBuilder<K, V, T> implements AutoCloseable
     {
         final Adapter<K, V> adapter;
         final ObjectBuffers<K> cachedKeys;
