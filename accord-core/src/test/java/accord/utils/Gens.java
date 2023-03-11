@@ -25,7 +25,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.Supplier;
+
 
 public class Gens {
     private Gens() {
@@ -50,6 +52,36 @@ public class Gens {
     {
         Gen.IntGen offset = ints().between(0, ts.size() - 1);
         return rs -> ts.get(offset.nextInt(rs));
+    }
+
+    public static Gen<char[]> charArray(Gen.IntGen sizes, char[] domain)
+    {
+        return charArray(sizes, domain, (a, b) -> true);
+    }
+
+    public interface IntCharBiPredicate
+    {
+        boolean test(int a, char b);
+    }
+
+    public static Gen<char[]> charArray(Gen.IntGen sizes, char[] domain, IntCharBiPredicate fn)
+    {
+        Gen.IntGen indexGen = ints().between(0, domain.length - 1);
+        return rs -> {
+            int size = sizes.nextInt(rs);
+            char[] is = new char[size];
+            for (int i = 0; i != size; i++)
+            {
+                char c;
+                do
+                {
+                    c = domain[indexGen.nextInt(rs)];
+                }
+                while (!fn.test(i, c));
+                is[i] = c;
+            }
+            return is;
+        };
     }
 
     public static Gen<RandomSource> random() {
@@ -91,6 +123,11 @@ public class Gens {
         return new EnumDSL();
     }
 
+    public static StringDSL strings()
+    {
+        return new StringDSL();
+    }
+
     public static class BooleanDSL
     {
         public Gen<Boolean> all()
@@ -113,7 +150,7 @@ public class Gens {
 
         public Gen.IntGen between(int min, int max)
         {
-            Invariants.checkArgument(max >= min);
+            Invariants.checkArgument(max >= min, "max (%d) < min (%d)", max, min);
             if (min == max)
                 return of(min);
             // since bounds is exclusive, if max == max_value unable to do +1 to include... so will return a gen
@@ -151,6 +188,87 @@ public class Gens {
         public <T extends Enum<T>> Gen<T> all(Class<T> klass)
         {
             return pick(klass.getEnumConstants());
+        }
+    }
+    
+    public static class StringDSL
+    {
+        public Gen<String> of(Gen.IntGen sizes, char[] domain)
+        {
+            // note, map is overloaded so String::new is ambugious to javac, so need a lambda here
+            return charArray(sizes, domain).map(c -> new String(c));
+        }
+
+        public SizeBuilder<String> of(char[] domain)
+        {
+            return new SizeBuilder<>(sizes -> of(sizes, domain));
+        }
+
+        public Gen<String> of(Gen.IntGen sizes, char[] domain, IntCharBiPredicate fn)
+        {
+            // note, map is overloaded so String::new is ambugious to javac, so need a lambda here
+            return charArray(sizes, domain, fn).map(c -> new String(c));
+        }
+
+        public SizeBuilder<String> of(char[] domain, IntCharBiPredicate fn)
+        {
+            return new SizeBuilder<>(sizes -> of(sizes, domain, fn));
+        }
+
+        public Gen<String> all(Gen.IntGen sizes)
+        {
+            return betweenCodePoints(sizes, Character.MIN_CODE_POINT, Character.MAX_CODE_POINT);
+        }
+
+        public SizeBuilder<String> all()
+        {
+            return new SizeBuilder<>(this::all);
+        }
+
+        public Gen<String> ascii(Gen.IntGen sizes)
+        {
+            return betweenCodePoints(sizes, 0, 127);
+        }
+
+        public SizeBuilder<String> ascii()
+        {
+            return new SizeBuilder<>(this::ascii);
+        }
+
+        public Gen<String> betweenCodePoints(Gen.IntGen sizes, int min, int max)
+        {
+            Gen.IntGen codePointGen = ints().between(min, max).filter(Character::isDefined);
+            return rs -> {
+                int[] array = new int[sizes.nextInt(rs)];
+                for (int i = 0; i < array.length; i++)
+                    array[i] = codePointGen.nextInt(rs);
+                return new String(array, 0, array.length);
+            };
+        }
+
+        public SizeBuilder<String> betweenCodePoints(int min, int max)
+        {
+            return new SizeBuilder<>(sizes -> betweenCodePoints(sizes, min, max));
+        }
+    }
+
+    public static class SizeBuilder<T>
+    {
+        private final Function<Gen.IntGen, Gen<T>> fn;
+
+        public SizeBuilder(Function<Gen.IntGen, Gen<T>> fn)
+        {
+            this.fn = fn;
+        }
+
+        public Gen<T> ofLength(int fixed)
+        {
+            return ofLengthBetween(fixed, fixed);
+        }
+
+        public Gen<T> ofLengthBetween(int min, int max)
+        {
+            return fn.apply(ints().between(min, max));
         }
     }
 
