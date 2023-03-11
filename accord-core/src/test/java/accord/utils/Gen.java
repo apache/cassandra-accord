@@ -20,6 +20,8 @@ package accord.utils;
 
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.IntPredicate;
+import java.util.function.LongPredicate;
 import java.util.function.Predicate;
 
 public interface Gen<A> {
@@ -66,6 +68,25 @@ public interface Gen<A> {
         {
             return nextInt(random);
         }
+
+        default Gen.IntGen filterInt(IntPredicate fn)
+        {
+            return rs -> {
+                int value;
+                do
+                {
+                    value = nextInt(rs);
+                }
+                while (!fn.test(value));
+                return value;
+            };
+        }
+
+        @Override
+        default Gen.IntGen filter(Predicate<Integer> fn)
+        {
+            return filterInt(i -> fn.test(i));
+        }
     }
 
     interface LongGen extends Gen<Long>
@@ -76,6 +97,25 @@ public interface Gen<A> {
         default Long next(RandomSource random)
         {
             return nextLong(random);
+        }
+
+        default Gen.LongGen filterLong(LongPredicate fn)
+        {
+            return rs -> {
+                long value;
+                do
+                {
+                    value = nextLong(rs);
+                }
+                while (!fn.test(value));
+                return value;
+            };
+        }
+
+        @Override
+        default Gen.LongGen filter(Predicate<Long> fn)
+        {
+            return filterLong(i -> fn.test(i));
         }
     }
 }
