@@ -23,31 +23,19 @@ import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 
-public interface RandomSource extends JDKRandomAPI
+public interface RandomSource
 {
     static RandomSource wrap(Random random)
     {
         return new WrappedRandomSource(random);
     }
 
-    RandomSource fork();
+    void nextBytes(byte[] bytes);
 
-    default IntStream ints()
-    {
-        return IntStream.generate(this::nextInt);
-    }
+    boolean nextBoolean();
 
-    default IntStream ints(int maxExclusive)
-    {
-        return IntStream.generate(() -> nextInt(maxExclusive));
-    }
+    int nextInt();
 
-    default IntStream ints(int minInclusive, int maxExclusive)
-    {
-        return IntStream.generate(() -> nextInt(minInclusive, maxExclusive));
-    }
-
-    @Override
     default int nextInt(int maxExclusive)
     {
         return nextInt(0, maxExclusive);
@@ -82,20 +70,22 @@ public interface RandomSource extends JDKRandomAPI
         return result;
     }
 
-    default LongStream longs()
+    default IntStream ints()
     {
-        return LongStream.generate(this::nextLong);
+        return IntStream.generate(this::nextInt);
     }
 
-    default LongStream longs(long maxExclusive)
+    default IntStream ints(int maxExclusive)
     {
-        return LongStream.generate(() -> nextLong(maxExclusive));
+        return IntStream.generate(() -> nextInt(maxExclusive));
     }
 
-    default LongStream longs(long minInclusive, long maxExclusive)
+    default IntStream ints(int minInclusive, int maxExclusive)
     {
-        return LongStream.generate(() -> nextLong(minInclusive, maxExclusive));
+        return IntStream.generate(() -> nextInt(minInclusive, maxExclusive));
     }
+
+    long nextLong();
 
     default long nextLong(long maxExclusive)
     {
@@ -131,6 +121,42 @@ public interface RandomSource extends JDKRandomAPI
         return result;
     }
 
+    default LongStream longs()
+    {
+        return LongStream.generate(this::nextLong);
+    }
+
+    default LongStream longs(long maxExclusive)
+    {
+        return LongStream.generate(() -> nextLong(maxExclusive));
+    }
+
+    default LongStream longs(long minInclusive, long maxExclusive)
+    {
+        return LongStream.generate(() -> nextLong(minInclusive, maxExclusive));
+    }
+
+    float nextFloat();
+
+    double nextDouble();
+
+    default double nextDouble(double maxExclusive)
+    {
+        return nextDouble(0, maxExclusive);
+    }
+
+    default double nextDouble(double minInclusive, double maxExclusive)
+    {
+        if (minInclusive >= maxExclusive)
+            throw new IllegalArgumentException(String.format("Min (%s) should be less than max (%d).", minInclusive, maxExclusive));
+
+        double result = nextDouble();
+        result = result * (maxExclusive - minInclusive) + minInclusive;
+        if (result >= maxExclusive) // correct for rounding
+            result = Double.longBitsToDouble(Double.doubleToLongBits(maxExclusive) - 1);
+        return result;
+    }
+
     default DoubleStream doubles()
     {
         return DoubleStream.generate(this::nextDouble);
@@ -146,25 +172,16 @@ public interface RandomSource extends JDKRandomAPI
         return DoubleStream.generate(() -> nextDouble(minInclusive, maxExclusive));
     }
 
-    default double nextDouble(double maxExclusive)
-    {
-        return nextDouble(0, maxExclusive);
-    }
+    double nextGaussian();
 
-    default double nextDouble(double minInclusive, double maxExclusive) {
-        if (minInclusive >= maxExclusive)
-            throw new IllegalArgumentException(String.format("Min (%s) should be less than max (%d).", minInclusive, maxExclusive));
+    void setSeed(long seed);
 
-        double result = nextDouble();
-        result = result * (maxExclusive - minInclusive) + minInclusive;
-        if (result >= maxExclusive) // correct for rounding
-            result = Double.longBitsToDouble(Double.doubleToLongBits(maxExclusive) - 1);
-        return result;
-    }
+    RandomSource fork();
 
     /**
      * Returns true with a probability of {@code chance}.  This logic is logically the same as
      * <pre>{@code nextFloat() < chance}</pre>
+     *
      * @param chance cumulative probability in range [0..1]
      */
     default boolean decide(float chance)
@@ -175,6 +192,7 @@ public interface RandomSource extends JDKRandomAPI
     /**
      * Returns true with a probability of {@code chance}.  This logic is logically the same as
      * <pre>{@code nextDouble() < chance}</pre>
+     *
      * @param chance cumulative probability in range [0..1]
      */
     default boolean decide(double chance)
@@ -187,5 +205,65 @@ public interface RandomSource extends JDKRandomAPI
         long seed = nextLong();
         setSeed(seed);
         return seed;
+    }
+
+    default Random asJdkRandom()
+    {
+        return new Random()
+        {
+            @Override
+            public void setSeed(long seed)
+            {
+                RandomSource.this.setSeed(seed);
+            }
+
+            @Override
+            public void nextBytes(byte[] bytes)
+            {
+                RandomSource.this.nextBytes(bytes);
+            }
+
+            @Override
+            public int nextInt()
+            {
+                return RandomSource.this.nextInt();
+            }
+
+            @Override
+            public int nextInt(int bound)
+            {
+                return RandomSource.this.nextInt(bound);
+            }
+
+            @Override
+            public long nextLong()
+            {
+                return RandomSource.this.nextLong();
+            }
+
+            @Override
+            public boolean nextBoolean()
+            {
+                return RandomSource.this.nextBoolean();
+            }
+
+            @Override
+            public float nextFloat()
+            {
+                return RandomSource.this.nextFloat();
+            }
+
+            @Override
+            public double nextDouble()
+            {
+                return RandomSource.this.nextDouble();
+            }
+
+            @Override
+            public double nextGaussian()
+            {
+                return RandomSource.this.nextGaussian();
+            }
+        };
     }
 }
