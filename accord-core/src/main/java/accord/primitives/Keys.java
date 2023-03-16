@@ -109,7 +109,7 @@ public class Keys extends AbstractKeys<Key, Keys> implements Seekables<Key, Keys
     public static Keys ofUnique(Key ... keys)
     {
         // check unique
-        return ofSorted(sort(keys));
+        return ofSortedUnique(sort(keys));
     }
 
     public static Keys of(Collection<? extends Key> keys)
@@ -167,7 +167,7 @@ public class Keys extends AbstractKeys<Key, Keys> implements Seekables<Key, Keys
 
             Key[] result = cache.complete(array, count);
             cache.discard(array, count);
-            return ofSorted(result);
+            return ofSortedUnique(result);
         }
         catch (Throwable t)
         {
@@ -176,17 +176,12 @@ public class Keys extends AbstractKeys<Key, Keys> implements Seekables<Key, Keys
         }
     }
 
-    public static Keys ofUnique(Collection<? extends Key> keys)
-    {
-        return ofUnique(keys.toArray(new Key[0]));
-    }
-
     public static Keys of(Set<? extends Key> keys)
     {
         return ofUnique(keys.toArray(new Key[0]));
     }
 
-    public static Keys ofSorted(Key ... keys)
+    public static Keys ofSortedUnique(Key ... keys)
     {
         if (!isSortedUnique(keys))
             throw new IllegalArgumentException(Arrays.toString(keys) + " is not sorted");
@@ -195,30 +190,12 @@ public class Keys extends AbstractKeys<Key, Keys> implements Seekables<Key, Keys
 
     private static Keys dedupSorted(Key ... keys)
     {
-        int removed = 0;
-        for (int i = 1 ; i < keys.length ; ++i)
-        {
-            int c = keys[i - 1].compareTo(keys[i]);
-            if (c >= 0)
-            {
-                if (c > 0)
-                    throw new IllegalArgumentException(Arrays.toString(keys) + " is not sorted");
-
-                removed++;
-            }
-            else if (removed > 0)
-            {
-                keys[i - removed] = keys[i];
-            }
-        }
-        if (removed > 0)
-            keys = Arrays.copyOf(keys, keys.length - removed);
-        return new Keys(keys);
+        return new Keys(SortedArrays.toUnique(keys));
     }
 
-    public static Keys ofSorted(Collection<? extends Key> keys)
+    public static Keys ofSortedUnique(Collection<? extends Key> keys)
     {
-        return ofSorted(keys.toArray(new Key[0]));
+        return ofSortedUnique(keys.toArray(new Key[0]));
     }
 
     static Keys ofSortedUnchecked(Key ... keys)

@@ -23,7 +23,7 @@ import java.util.function.BiConsumer;
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.coordinate.CheckShards;
-import accord.coordinate.CoordinateFailed;
+import accord.coordinate.CoordinationFailed;
 import accord.impl.basic.Cluster;
 import accord.impl.basic.Packet;
 import accord.local.Node;
@@ -106,11 +106,11 @@ public class ListRequest implements Request
             {
                 node.reply(client, replyContext, (ListResult) success);
             }
-            else if (fail instanceof CoordinateFailed)
+            else if (fail instanceof CoordinationFailed)
             {
                 ((Cluster)node.scheduler()).onDone(() -> {
-                    RoutingKey homeKey = ((CoordinateFailed) fail).homeKey();
-                    TxnId txnId = ((CoordinateFailed) fail).txnId();
+                    RoutingKey homeKey = ((CoordinationFailed) fail).homeKey();
+                    TxnId txnId = ((CoordinationFailed) fail).txnId();
                     CheckOnResult.checkOnResult(node, txnId, homeKey, (s, f) -> {
                         if (f != null)
                             return;

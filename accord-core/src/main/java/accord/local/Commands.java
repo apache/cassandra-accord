@@ -18,30 +18,58 @@
 
 package accord.local;
 
-import accord.api.ProgressLog.ProgressShard;
-import accord.api.Result;
-import accord.api.RoutingKey;
-import accord.local.Command.WaitingOn;
-import accord.primitives.*;
-import accord.utils.Invariants;
-import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncChains;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-
 import java.util.Arrays;
 import java.util.Map;
 import java.util.function.Consumer;
 
-import static accord.api.ProgressLog.ProgressShard.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import accord.api.ProgressLog.ProgressShard;
+import accord.api.Result;
+import accord.api.RoutingKey;
+import accord.local.Command.WaitingOn;
+import accord.primitives.Ballot;
+import accord.primitives.Keys;
+import accord.primitives.PartialDeps;
+import accord.primitives.PartialRoute;
+import accord.primitives.PartialTxn;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.RoutableKey;
+import accord.primitives.Routables;
+import accord.primitives.Route;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
+import accord.primitives.Writes;
+import accord.utils.Invariants;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+
+import static accord.api.ProgressLog.ProgressShard.Home;
 import static accord.api.ProgressLog.ProgressShard.Local;
-import static accord.local.Commands.EnsureAction.*;
-import static accord.local.Status.*;
+import static accord.api.ProgressLog.ProgressShard.No;
+import static accord.api.ProgressLog.ProgressShard.Unsure;
+import static accord.local.Commands.EnsureAction.Add;
+import static accord.local.Commands.EnsureAction.Check;
+import static accord.local.Commands.EnsureAction.Ignore;
+import static accord.local.Commands.EnsureAction.Set;
+import static accord.local.Commands.EnsureAction.TrySet;
+import static accord.local.Status.Accepted;
+import static accord.local.Status.AcceptedInvalidate;
+import static accord.local.Status.Applied;
+import static accord.local.Status.Committed;
+import static accord.local.Status.Durability;
+import static accord.local.Status.Invalidated;
+import static accord.local.Status.Known;
 import static accord.local.Status.Known.ExecuteAtOnly;
+import static accord.local.Status.PreApplied;
+import static accord.local.Status.PreCommitted;
+import static accord.local.Status.ReadyToExecute;
 import static accord.primitives.Route.isFullRoute;
 
 public class Commands
@@ -131,7 +159,7 @@ public class Commands
             // if we are performing recovery (i.e. non-zero ballot), do not permit a fast path decision as we want to
             // invalidate any transactions that were not completed by their initial coordinator
             Timestamp executeAt = ballot.equals(Ballot.ZERO)
-                    ? safeStore.preaccept(txnId, partialTxn.keys())
+                    ? safeStore.commandStore().preaccept(txnId, partialTxn.keys(), safeStore)
                     : safeStore.time().uniqueNow(txnId);
             command = safeCommand.preaccept(attrs, executeAt, ballot);
             safeStore.progressLog().preaccepted(command, shard);

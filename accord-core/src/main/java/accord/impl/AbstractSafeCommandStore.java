@@ -18,14 +18,25 @@
 
 package accord.impl;
 
-import accord.api.VisibleForImplementation;
-import accord.impl.CommandsForKey.CommandLoader;
-import accord.local.*;
-import accord.primitives.*;
-
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
+
+import accord.api.VisibleForImplementation;
+import accord.impl.CommandsForKey.CommandLoader;
+import accord.local.Command;
+import accord.local.CommonAttributes;
+import accord.local.PreLoadContext;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.primitives.Ranges;
+import accord.primitives.RoutableKey;
+import accord.primitives.Seekable;
+import accord.primitives.Seekables;
+import accord.primitives.TxnId;
 
 public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, CommandsForKeyType extends SafeCommandsForKey> implements SafeCommandStore
 {
@@ -159,20 +170,6 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
         if (pendingSeekableRegistrations == null)
             pendingSeekableRegistrations = new ArrayList<>();
         pendingSeekableRegistrations.add(new PendingRegistration<>(keyOrRange, slice, command.txnId()));
-    }
-
-    protected abstract Timestamp maxConflict(Seekables<?, ?> keysOrRanges, Ranges slice);
-
-    @Override
-    public Timestamp preaccept(TxnId txnId, Seekables<?, ?> keys)
-    {
-        Timestamp max = maxConflict(keys, ranges().at(txnId.epoch()));
-        long epoch = latestEpoch();
-        long now = time().now();
-        if (txnId.compareTo(max) > 0 && txnId.epoch() >= epoch && !agent().isExpired(txnId, now))
-            return txnId;
-
-        return time().uniqueNow(max);
     }
 
     public abstract CommonAttributes completeRegistration(Seekables<?, ?> keysOrRanges, Ranges slice, CommandType command, CommonAttributes attrs);

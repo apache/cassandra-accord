@@ -47,6 +47,7 @@ import accord.messages.WaitOnCommit.WaitOnCommitOk;
 import accord.topology.Topology;
 
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
+import static accord.coordinate.ProposeAndExecute.proposeAndExecute;
 import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.messages.BeginRecovery.RecoverOk.maxAcceptedOrLater;
@@ -201,7 +202,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         Invariants.checkState(!isBallotPromised);
         isBallotPromised = true;
 
-        // first look for the most recent Accept; if present, go straight to proposing it again
+        // first look for the most recent Accept (or later); if present, go straight to proposing it again
         RecoverOk acceptOrCommit = maxAcceptedOrLater(recoverOks);
         if (acceptOrCommit != null)
         {
@@ -210,48 +211,62 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             {
                 default: throw new IllegalStateException();
                 case Invalidated:
+                {
                     commitInvalidate();
                     return;
+                }
 
                 case Applied:
                 case PreApplied:
-                    // TODO (desired, efficiency): in some cases we can use the deps we already have (e.g. if we have a quorum of Committed responses)
-                    node.withEpoch(executeAt.epoch(), () -> {
-                        CollectDeps.withDeps(node, txnId, route, txn, acceptOrCommit.executeAt, (deps, fail) -> {
-                            if (fail != null)
-                            {
-                                accept(null, fail);
-                            }
-                            else
-                            {
-                                // TODO (required, consider): when writes/result are partially replicated, need to confirm we have quorum of these
-                                Persist.persistAndCommit(node, txnId, route, txn, executeAt, deps, acceptOrCommit.writes, acceptOrCommit.result);
-                                accept(acceptOrCommit.result, null);
-                            }
-                        });
-                    });
+                {
+                    // must have gone through Accepted, so we must have witnessed >= Accepted for each shard
+                    Deps acceptedDeps = tryMergeAcceptedDeps();
+                    Invariants.checkState(acceptedDeps != null);
+                    // TODO (required, consider): when writes/result are partially replicated, need to confirm we have quorum of these
+                    Persist.persistAndCommit(node, txnId, route, txn, executeAt, acceptedDeps, acceptOrCommit.writes, acceptOrCommit.result);
+                    accept(acceptOrCommit.result, null);
                     return;
+                }
 
                 case ReadyToExecute:
                 case PreCommitted:
                 case Committed:
+                {
+                    Deps acceptedDeps = tryMergeAcceptedDeps(); // must have gone through Accepted, so we must have witnessed >= Accepted for each shard
+                    Invariants.checkState(acceptedDeps != null);
                     // TODO (desired, efficiency): in some cases we can use the deps we already have (e.g. if we have a quorum of Committed responses)
-                    node.withEpoch(executeAt.epoch(), () -> {
-                        CollectDeps.withDeps(node, txnId, route, txn, executeAt, (deps, fail) -> {
-                            if (fail != null) accept(null, fail);
-                            else Execute.execute(node, txnId, txn, route, acceptOrCommit.executeAt, deps, this);
-                        });
-                    });
+                    Execute.execute(node, txnId, txn, route, acceptOrCommit.executeAt, acceptedDeps, this);
                     return;
+                }
 
                 case Accepted:
-                    // no need to preaccept the later round, as future operations always include every old epoch (until it is fully migrated)
-                    propose(acceptOrCommit.executeAt, mergeDeps());
-                    return;
+                {
+                    // Today we send Deps for all Accept rounds, however their contract is different for SyncPoint
+                    // and regular transactions. The former require that their deps be durably agreed before they
+                    // proceed, but this is impossible for a regular transaction that may agree a later executeAt
+                    // than proposed. Deps for standard transactions are only used for recovery.
+                    // While we could safely behave identically here for them, we expect to stop sending deps in the
+                    // Accept round for these transactions as it is not necessary for correctness with some modifications
+                    // to recovery.
+                    Deps deps;
+                    if (txnId.rw().proposesDeps()) deps = tryMergeAcceptedDeps();
+                    else deps = mergeDeps();
+
+                    if (deps != null)
+                    {
+                        // TODO (desired, behaviour): if we didn't find Accepted in *every* shard, consider invalidating for consistency of behaviour
+                        propose(acceptOrCommit.executeAt, deps);
+                        return;
+                    }
+
+                    // if we propose deps, and cannot assemble a complete set, then we never reached consensus and can be invalidated
+                }
 
                 case AcceptedInvalidate:
+                {
                     invalidate();
                     return;
+                }
 
                 case NotWitnessed:
                 case PreAccepted:
@@ -259,7 +274,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             }
         }
 
-        if (tracker.rejectsFastPath() || recoverOks.stream().anyMatch(ok -> ok.rejectsFastPath))
+        if (txnId.rw().proposesDeps() || tracker.rejectsFastPath() || recoverOks.stream().anyMatch(ok -> ok.rejectsFastPath))
         {
             invalidate();
             return;
@@ -305,7 +320,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     private void propose(Timestamp executeAt, Deps deps)
     {
-        node.withEpoch(executeAt.epoch(), () -> Propose.propose(node, ballot, txnId, txn, route, executeAt, deps, this));
+        node.withEpoch(executeAt.epoch(), () -> proposeAndExecute(node, ballot, txnId, txn, route, executeAt, deps, this));
     }
 
     private Deps mergeDeps()
@@ -313,6 +328,14 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         Ranges ranges = recoverOks.stream().map(r -> r.deps.covering).reduce(Ranges::with).orElseThrow(NoSuchElementException::new);
         Invariants.checkState(ranges.containsAll(txn.keys()));
         return Deps.merge(recoverOks, r -> r.deps);
+    }
+
+    private Deps tryMergeAcceptedDeps()
+    {
+        Ranges ranges = recoverOks.stream().map(r -> r.acceptedDeps.covering).reduce(Ranges::with).orElseThrow(NoSuchElementException::new);
+        if (!ranges.containsAll(txn.keys()))
+            return null;
+        return Deps.merge(recoverOks, r -> r.acceptedDeps);
     }
 
     private void retry()

@@ -941,5 +941,27 @@ public class SortedArrays
         return true;
     }
 
+    public static <T extends Comparable<? super T>> T[] toUnique(T[] sorted)
+    {
+        int removed = 0;
+        for (int i = 1 ; i < sorted.length ; ++i)
+        {
+            int c = sorted[i - 1].compareTo(sorted[i]);
+            if (c >= 0)
+            {
+                if (c > 0)
+                    throw new IllegalArgumentException(Arrays.toString(sorted) + " is not sorted");
 
+                removed++;
+            }
+            else if (removed > 0)
+            {
+                sorted[i - removed] = sorted[i];
+            }
+        }
+        if (removed == 0)
+            return sorted;
+
+        return Arrays.copyOf(sorted, sorted.length - removed);
+    }
 }

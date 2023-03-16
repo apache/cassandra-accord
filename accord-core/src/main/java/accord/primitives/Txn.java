@@ -31,13 +31,45 @@ import accord.utils.async.AsyncChains;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import static accord.primitives.Routables.Slice.Overlapping;
-
 public interface Txn
 {
     enum Kind
     {
-        Read, Write;
+        Read,
+        Write,
+
+        /**
+         * A pseudo-transaction whose deps represent the complete set of transactions that may execute before it,
+         * without interfering with their execution.
+         *
+         * A SyncPoint is unique in that it does not agree an executeAt, but instead agrees a precise collection of
+         * dependencies that represent a superset of the transactions that have reached consensus to execute before
+         * their txnId. This set of dependencies will be made durable in the Accept round, and re-proposed by recovery
+         * if the transaction is not fully committed (but was durably accepted).
+         *
+         * This is only safe because the transaction does not really "execute" and does not order itself with respect to
+         * others, it only orders others with respect to itself, so its executeAt can be declared to be its txnId.
+         * In effect it represents an inequality relation, rather than a precise point in the transaction log - its
+         * dependencies permit saying that we are "after" its point in the log, not that we are *at* that point.
+         * This permits us to use the dependencies from the PreAccept round.
+         *
+         * Note, it would be possible to do a three-round operation that achieved this with a precise "at" position
+         * in the log, with a second round between PreAccept and Accept to collect deps < executeAt, if executeAt &gt; txnId,
+         * but we do not need this property here.
+         *
+         * This all ensures the effect of this transaction on invalidation of earlier transactions is durable.
+         * This is most useful for ExclusiveSyncPoint.
+         */
+        SyncPoint,
+
+        /**
+         * A {@link #SyncPoint} that invalidates transactions with lower TxnId that it does not witness, i.e. it ensures
+         * that earlier TxnId that had not reached consensus before it did must be retried with a higher TxnId,
+         * so that replicas that are bootstrapping may ignore lower TxnId and still be sure they have a complete
+         * representation of the reified transaction log.
+         */
+        ExclusiveSyncPoint;
+
         // in future: BlindWrite, Interactive?
 
         private static final Kind[] VALUES = Kind.values();
@@ -50,6 +82,18 @@ public interface Txn
         public boolean isRead()
         {
             return this == Read;
+        }
+
+        /**
+         * Does the transaction propose dependencies as part of its Accept round, i.e. make durable a set of dependencies
+         *
+         * Note that this it is only possible to do this for transactions whose execution time is not dependent on
+         * others, i.e. where we may safely propose executeAt = txnId regardless of when it is witnessed by
+         * replicas
+         */
+        public boolean proposesDeps()
+        {
+            return this == ExclusiveSyncPoint || this == SyncPoint;
         }
 
         public static Kind ofOrdinal(int ordinal)
@@ -84,7 +128,7 @@ public interface Txn
             this.query = query;
         }
 
-        protected InMemory(@Nonnull Kind kind, @Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nullable Query query, @Nullable Update update)
+        public InMemory(@Nonnull Kind kind, @Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nullable Query query, @Nullable Update update)
         {
             this.kind = kind;
             this.keys = keys;

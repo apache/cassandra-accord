@@ -24,6 +24,7 @@ import accord.topology.ShardSelection;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 
+// TODO (required): a variant that sorts by distance
 public class SizeOfIntersectionSorter implements TopologySorter
 {
     public static final TopologySorter.Supplier SUPPLIER = new Supplier() {

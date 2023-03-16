@@ -16,20 +16,8 @@
  * limitations under the License.
  */
 
-package accord.coordinate;
+package accord.utils;
 
-import javax.annotation.Nullable;
-
-import accord.api.RoutingKey;
-import accord.primitives.TxnId;
-
-/**
- * Thrown when a transaction exceeds its specified timeout for obtaining a result for a client
- */
-public class Timeout extends CoordinationFailed
+public interface IndexedBiFold<P1, P2, Accumulate> extends IndexedTriFunction<P1, P2, Accumulate, Accumulate>
 {
-    public Timeout(TxnId txnId, @Nullable RoutingKey homeKey)
-    {
-        super(txnId, homeKey);
-    }
 }

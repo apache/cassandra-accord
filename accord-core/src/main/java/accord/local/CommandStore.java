@@ -18,14 +18,18 @@
 
 package accord.local;
 
-import accord.api.*;
-import accord.api.ProgressLog;
-import accord.api.DataStore;
-import accord.local.CommandStores.RangesForEpochHolder;
-import accord.utils.async.AsyncChain;
-
 import java.util.function.Consumer;
 import java.util.function.Function;
+
+import accord.api.Agent;
+import accord.api.DataStore;
+import accord.api.ProgressLog;
+import accord.local.CommandStores.RangesForEpochHolder;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.utils.ReducingRangeMap;
+import accord.utils.async.AsyncChain;
 
 /**
  * Single threaded internal shard of accord transaction metadata
@@ -41,6 +45,12 @@ public interface CommandStore
                             ProgressLog.Factory progressLogFactory,
                             RangesForEpochHolder rangesForEpoch);
     }
+
+    void setRejectBefore(ReducingRangeMap<Timestamp> newRejectBefore);
+
+    ReducingRangeMap<Timestamp> getRejectBefore();
+
+    Timestamp preaccept(TxnId txnId, Seekables<?, ?> keys, SafeCommandStore safeStore);
 
     int id();
     Agent agent();

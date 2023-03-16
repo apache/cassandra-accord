@@ -16,20 +16,16 @@
  * limitations under the License.
  */
 
-package accord.coordinate;
+package accord.primitives;
 
-import javax.annotation.Nullable;
-
-import accord.api.RoutingKey;
-import accord.primitives.TxnId;
-
-/**
- * Thrown when a transaction exceeds its specified timeout for obtaining a result for a client
- */
-public class Timeout extends CoordinationFailed
+public class SyncPoint
 {
-    public Timeout(TxnId txnId, @Nullable RoutingKey homeKey)
+    public final Timestamp at;
+    public final Deps waitFor;
+
+    public SyncPoint(Timestamp at, Deps waitFor)
     {
-        super(txnId, homeKey);
+        this.at = at;
+        this.waitFor = waitFor;
     }
 }

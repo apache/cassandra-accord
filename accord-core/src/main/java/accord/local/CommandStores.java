@@ -88,7 +88,7 @@ public abstract class CommandStores<S extends CommandStore>
 
         /**
          * This is updated asynchronously, so should only be fetched between executing tasks;
-         * otherwise the contents may differ between invocations for the same task
+         * otherwise the contents may differ between invocations for the same task.
          * @return the current RangesForEpoch
          */
         public RangesForEpoch get() { return current; }

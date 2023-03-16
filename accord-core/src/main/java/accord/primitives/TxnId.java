@@ -120,7 +120,7 @@ public class TxnId extends Timestamp
 
     private static int rwOrdinal(int flags)
     {
-        return (flags >> 1) & 1;
+        return (flags >> 1) & 3;
     }
 
     private static int domainOrdinal(int flags)

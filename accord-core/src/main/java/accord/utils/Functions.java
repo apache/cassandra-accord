@@ -57,4 +57,12 @@ public class Functions
         return result;
     }
 
+    public static <I, O> O foldl(List<I> list, BiFunction<I, O, O> foldl, O zero)
+    {
+        O result = zero;
+        for (int i = 0, mi = list.size(); i < mi; ++i)
+            result = foldl.apply(list.get(i), result);
+        return result;
+    }
+
 }

@@ -19,12 +19,22 @@
 package accord.primitives;
 
 import accord.local.Node.Id;
-import accord.utils.Invariants;
+
+import static accord.utils.Invariants.checkArgument;
 
 import javax.annotation.Nonnull;
 
 public class Timestamp implements Comparable<Timestamp>
 {
+    private static final int REJECTED_FLAG = 0x8000;
+
+    /**
+     * The set of flags we want to retain as we merge timestamps (e.g. when taking mergeMax).
+     * Today this is only the REJECTED_FLAG, but we may include additional flags in future (such as Committed, Applied..)
+     * which we may also want to retain when merging in other contexts (such as in Deps).
+     */
+    private static final int MERGE_FLAGS = 0x8000;
+
     public static Timestamp fromBits(long msb, long lsb, Id node)
     {
         return new Timestamp(msb, lsb, node);
@@ -61,8 +71,8 @@ public class Timestamp implements Comparable<Timestamp>
 
     Timestamp(long epoch, long hlc, int flags, Id node)
     {
-        Invariants.checkArgument(epoch <= MAX_EPOCH);
-        Invariants.checkArgument(flags <= MAX_FLAGS);
+        checkArgument(epoch <= MAX_EPOCH);
+        checkArgument(flags <= MAX_FLAGS);
         this.msb = epochMsb(epoch) | hlcMsb(hlc);
         this.lsb = hlcLsb(hlc) | flags;
         this.node = node;
@@ -84,7 +94,7 @@ public class Timestamp implements Comparable<Timestamp>
 
     Timestamp(Timestamp copy, int flags)
     {
-        Invariants.checkArgument(flags <= MAX_FLAGS);
+        checkArgument(flags <= MAX_FLAGS);
         this.msb = copy.msb;
         this.lsb = notFlags(copy.lsb) | flags;
         this.node = copy.node;
@@ -108,9 +118,36 @@ public class Timestamp implements Comparable<Timestamp>
         return flags(lsb);
     }
 
+    public boolean isRejected()
+    {
+        return (lsb & REJECTED_FLAG) != 0;
+    }
+
+    public Timestamp asRejected()
+    {
+        return withExtraFlags(REJECTED_FLAG);
+    }
+
     public Timestamp withEpochAtLeast(long minEpoch)
     {
         return minEpoch <= epoch() ? this : new Timestamp(minEpoch, hlc(), flags(), node);
+    }
+
+    public Timestamp withExtraFlags(int flags)
+    {
+        checkArgument(flags <= MAX_FLAGS);
+        long newLsb = lsb | flags;
+        if (lsb == newLsb)
+            return this;
+        return new Timestamp(msb, newLsb, node);
+    }
+
+    public Timestamp mergeFlags(Timestamp mergeFlags)
+    {
+        long newLsb = lsb | (mergeFlags.lsb & MERGE_FLAGS);
+        if (lsb == newLsb)
+            return this;
+        return new Timestamp(msb, newLsb, node);
     }
 
     public Timestamp logicalNext(Id node)
@@ -169,6 +206,26 @@ public class Timestamp implements Comparable<Timestamp>
     public static <T extends Timestamp> T max(T a, T b)
     {
         return a.compareTo(b) >= 0 ? a : b;
+    }
+
+    /**
+     * Take the maximum of the two, but merge any mergeable flags
+     */
+    public static Timestamp mergeMax(Timestamp a, Timestamp b)
+    {
+        return a.compareTo(b) >= 0 ? a.mergeFlags(b) : b.mergeFlags(a);
+    }
+
+    public static <T extends Timestamp> T rejectedOrMax(T a, T b)
+    {
+        return a.compareTo(b) >= 0 ? a : b;
+    }
+
+    public static Timestamp rejectStale(Timestamp maybeReject, Timestamp ifOnOrBefore)
+    {
+        if (maybeReject.compareTo(ifOnOrBefore) > 0)
+            return maybeReject;
+        return maybeReject.asRejected();
     }
 
     public static <T extends Timestamp> T nonNullOrMax(T a, T b)
@@ -233,9 +290,9 @@ public class Timestamp implements Comparable<Timestamp>
 
     static <T extends Timestamp> T merge(Timestamp a, Timestamp b, Constructor<T> constructor)
     {
-        Invariants.checkArgument(a.msb == b.msb);
-        Invariants.checkArgument(lowHlc(a.lsb) == lowHlc(b.lsb));
-        Invariants.checkArgument(a.node.equals(b.node));
+        checkArgument(a.msb == b.msb);
+        checkArgument(lowHlc(a.lsb) == lowHlc(b.lsb));
+        checkArgument(a.node.equals(b.node));
         return constructor.construct(a.msb, a.lsb | b.lsb, a.node);
     }
 
