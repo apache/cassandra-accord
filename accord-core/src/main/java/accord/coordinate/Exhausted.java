@@ -26,7 +26,7 @@ import javax.annotation.Nullable;
 /**
  * Thrown when a transaction exceeds its specified timeout for obtaining a result for a client
  */
-public class Exhausted extends CoordinateFailed
+public class Exhausted extends CoordinationFailed
 {
     public Exhausted(TxnId txnId, @Nullable RoutingKey homeKey)
     {

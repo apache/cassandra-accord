@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import javax.annotation.Nullable;
 
 /**
  * A collection of transaction dependencies, keyed by the key or range on which they were adopted
@@ -119,7 +120,12 @@ public class Deps
 
     public PartialDeps slice(Ranges covering)
     {
-        return new PartialDeps(covering, keyDeps.slice(covering), rangeDeps.slice(covering));
+        return slice(covering, covering);
+    }
+
+    public PartialDeps slice(Ranges covering, Ranges slice)
+    {
+        return new PartialDeps(covering, keyDeps.slice(slice), rangeDeps.slice(slice));
     }
 
     public boolean isEmpty()
@@ -137,6 +143,15 @@ public class Deps
         return i < keyDeps.txnIdCount()
                 ? keyDeps.txnId(i)
                 : rangeDeps.txnId(i - keyDeps.txnIdCount());
+    }
+
+    public TxnId minTxnId()
+    {
+        if (keyDeps.isEmpty() && rangeDeps.isEmpty())
+            throw new IndexOutOfBoundsException();
+        if (keyDeps.isEmpty()) return rangeDeps.txnId(0);
+        if (rangeDeps.isEmpty()) return keyDeps.txnId(0);
+        return TxnId.min(keyDeps.txnId(0), rangeDeps.txnId(0));
     }
 
     public List<TxnId> txnIds()
@@ -209,7 +224,7 @@ public class Deps
     }
 
     // NOTE: filter only applied to keyDeps
-    public void forEach(Ranges ranges, Consumer<TxnId> forEach)
+    public void forEachUniqueTxnId(Ranges ranges, Consumer<TxnId> forEach)
     {
         keyDeps.forEachUniqueTxnId(ranges, forEach);
         rangeDeps.forEachUniqueTxnId(ranges, forEach);
@@ -236,6 +251,13 @@ public class Deps
     public boolean equals(Deps that)
     {
         return this.keyDeps.equals(that.keyDeps) && this.rangeDeps.equals(that.rangeDeps);
+    }
+
+    public @Nullable TxnId maxTxnId()
+    {
+        TxnId maxKeyDep = keyDeps.isEmpty() ? null : keyDeps.txnId(keyDeps.txnIdCount() - 1);
+        TxnId maxRangeDep = rangeDeps.isEmpty() ? null : rangeDeps.txnId(rangeDeps.txnIdCount() - 1);
+        return TxnId.nonNullOrMax(maxKeyDep, maxRangeDep);
     }
 
     @Override

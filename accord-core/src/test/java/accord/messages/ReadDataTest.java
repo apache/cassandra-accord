@@ -75,6 +75,7 @@ import org.mockito.stubbing.Answer;
 import static accord.Utils.createNode;
 import static accord.Utils.id;
 import static accord.utils.Utils.listOf;
+import static accord.utils.async.AsyncChains.getUninterruptibly;
 import static org.mockito.ArgumentMatchers.any;
 
 class ReadDataTest
@@ -224,7 +225,7 @@ class ReadDataTest
     {
         try
         {
-            AsyncChains.getUninterruptibly(execute);
+            getUninterruptibly(execute);
         }
         catch (ExecutionException e)
         {

@@ -19,14 +19,15 @@
 package accord.primitives;
 
 import accord.api.RoutingKey;
+import accord.utils.ArrayBuffers.ObjectBuffers;
 
 import javax.annotation.Nonnull;
-import java.util.*;
 import java.util.stream.Stream;
 
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_OVERLAPPING;
 import static accord.primitives.Routables.Slice.Overlapping;
-import static accord.utils.Utils.toArray;
+import static accord.utils.ArrayBuffers.cachedRanges;
+import static accord.utils.SortedArrays.Search.CEIL;
 
 public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, Seekables<Range, Ranges>, Unseekables<Range, Ranges>
 {
@@ -82,6 +83,11 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
     public Ranges slice(Ranges ranges)
     {
         return slice(ranges, Overlapping);
+    }
+
+    public Ranges intersecting(Routables<?, ?> keysOrRanges)
+    {
+        return intersecting(this, keysOrRanges, this, (i1, i2, rs) -> i2.ranges == rs ? i2 : new Ranges(rs));
     }
 
     @Override
@@ -156,48 +162,69 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
      */
     public Ranges difference(AbstractRanges<?> that)
     {
-        if (that == this)
-            return construct(NO_RANGES);
+        if (that.isEmpty())
+            return this;
 
-        List<Range> result = new ArrayList<>(this.size() + that.size());
-        int thatIdx = 0;
+        if (isEmpty() || that == this)
+            return EMPTY;
 
-        for (int thisIdx=0; thisIdx<this.size(); thisIdx++)
+        ObjectBuffers<Range> cachedRanges = cachedRanges();
+        Range[] result = null;
+
+        int count = 0;
+        int i = 0, j = 0;
+        Range iv = ranges[0];
+        while (true)
         {
-            Range thisRange = this.ranges[thisIdx];
-            while (thatIdx < that.size())
+            j = that.findNext(j, iv, CEIL);
+            if (j < 0)
             {
-                Range thatRange = that.ranges[thatIdx];
+                j = -1 - j;
+                int nexti = j == that.size() ? size() : findNext(i + 1, that.ranges[j], CEIL);
+                if (nexti < 0) nexti = -1 - nexti;
+                if (count == 0)
+                    result = cachedRanges.get(1 + (this.size() - i) + (that.size() - j));
+                else if (count == result.length)
+                    result = cachedRanges.resize(result, count, count * 2);
 
-                int cmp = thisRange.compareIntersecting(thatRange);
-                if (cmp > 0)
-                {
-                    thatIdx++;
-                    continue;
-                }
-                if (cmp < 0) break;
+                result[count] = iv;
+                if (nexti > i + 1)
+                    System.arraycopy(ranges, i + 1, result, count + 1, nexti - (i + 1));
+                count += nexti - i;
 
-                int scmp = thisRange.start().compareTo(thatRange.start());
-                int ecmp = thisRange.end().compareTo(thatRange.end());
-
-                if (scmp < 0)
-                    result.add(thisRange.newRange(thisRange.start(), thatRange.start()));
-
-                if (ecmp <= 0)
-                {
-                    thisRange = null;
+                if (nexti == ranges.length)
                     break;
-                }
-                else
-                {
-                    thisRange = thisRange.newRange(thatRange.end(), thisRange.end());
-                    thatIdx++;
-                }
+                iv = ranges[i = nexti];
+                continue;
             }
-            if (thisRange != null)
-                result.add(thisRange);
+
+            Range jv = that.ranges[j];
+            if (jv.start().compareTo(iv.start()) > 0)
+            {
+                if (count == 0)
+                    result = cachedRanges.get(1 + (this.size() - i) + (that.size() - j));
+                else if (count == result.length)
+                    result = cachedRanges.resize(result, count, count * 2);
+
+                result[count++] = iv.newRange(iv.start(), jv.start());
+            }
+
+            if (jv.end().compareTo(iv.end()) >= 0)
+            {
+                if (++i == ranges.length)
+                    break;
+                iv = ranges[i];
+            }
+            else
+            {
+                iv = iv.newRange(jv.end(), iv.end());
+            }
         }
-        return construct(toArray(result, Range[]::new));
+
+        if (count == 0)
+            return EMPTY;
+
+        return construct(cachedRanges.completeAndDiscard(result, count));
     }
 
 }

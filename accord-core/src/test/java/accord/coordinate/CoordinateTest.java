@@ -22,12 +22,22 @@ import accord.local.Node;
 import accord.impl.mock.MockCluster;
 import accord.api.Result;
 import accord.impl.mock.MockStore;
-import accord.primitives.*;
+import java.util.concurrent.ExecutionException;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import static accord.Utils.*;
+import accord.primitives.FullKeyRoute;
+import accord.primitives.FullRangeRoute;
+import accord.primitives.Keys;
+import accord.primitives.Ranges;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
+
+import static accord.Utils.id;
+import static accord.Utils.ids;
+import static accord.Utils.ranges;
+import static accord.Utils.writeTxn;
 import static accord.impl.IntKey.keys;
 import static accord.impl.IntKey.range;
 import static accord.primitives.Routable.Domain.Key;
@@ -52,6 +62,7 @@ public class CoordinateTest
             Assertions.assertEquals(MockStore.RESULT, result);
         }
     }
+
     @Test
     void simpleRangeTest() throws Throwable
     {
@@ -66,6 +77,38 @@ public class CoordinateTest
             FullRangeRoute route = keys.toRoute(keys.get(0).someIntersectingRoutingKey(null));
             Result result = getUninterruptibly(Coordinate.coordinate(node, txnId, txn, route));
             Assertions.assertEquals(MockStore.RESULT, result);
+        }
+    }
+
+    @Test
+    void exclusiveSyncTest() throws Throwable
+    {
+        try (MockCluster cluster = MockCluster.builder().build())
+        {
+            Node node = cluster.get(1);
+            Assertions.assertNotNull(node);
+
+            TxnId oldId1 = node.nextTxnId(Write, Key);
+            TxnId oldId2 = node.nextTxnId(Write, Key);
+
+            getUninterruptibly(CoordinateSyncPoint.exclusive(node, ranges(range(0, 1))));
+            try
+            {
+                Keys keys = keys(1);
+                Txn txn = writeTxn(keys);
+                FullKeyRoute route = keys.toRoute(keys.get(0).someIntersectingRoutingKey(null));
+                getUninterruptibly(Coordinate.coordinate(node, oldId1, txn, route));
+                Assertions.fail();
+            }
+            catch (ExecutionException e)
+            {
+                Assertions.assertEquals(Invalidated.class, e.getCause().getClass());
+            }
+
+            Keys keys = keys(2);
+            Txn txn = writeTxn(keys);
+            FullKeyRoute route = keys.toRoute(keys.get(0).someIntersectingRoutingKey(null));
+            getUninterruptibly(Coordinate.coordinate(node, oldId2, txn, route));
         }
     }
 

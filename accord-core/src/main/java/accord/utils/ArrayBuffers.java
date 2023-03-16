@@ -300,7 +300,7 @@ public class ArrayBuffers
         @Override
         public T[] completeWithExisting(T[] buffer, int usedSize)
         {
-            return checkArgument(buffer, buffer.length == usedSize);
+            return complete(buffer, usedSize);
         }
 
         @Override
@@ -449,7 +449,11 @@ public class ArrayBuffers
         @Override
         public T[] completeWithExisting(T[] buffer, int usedSize)
         {
-            return buffer;
+            // note, due to how we have implemented the buffering decisions, this is identical to #complete
+            if (usedSize == buffer.length)
+                return buffer;
+
+            return Arrays.copyOf(buffer, usedSize);
         }
 
         @Override

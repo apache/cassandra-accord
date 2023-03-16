@@ -18,13 +18,23 @@
 
 package accord.local;
 
+import java.util.function.Predicate;
+
 import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.ProgressLog;
-import accord.primitives.*;
-
+import accord.primitives.Keys;
+import accord.primitives.Ranges;
+import accord.primitives.Seekable;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn.Kind;
+import accord.primitives.TxnId;
 import javax.annotation.Nullable;
 
+import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
+import static accord.primitives.Txn.Kind.Read;
+import static accord.primitives.Txn.Kind.Write;
 import static accord.utils.Utils.listOf;
 
 /**
@@ -76,7 +86,54 @@ public interface SafeCommandStore
         EXECUTES_AFTER
     }
     enum TestDep { WITH, WITHOUT, ANY_DEPS }
-    enum TestKind { Ws, RorWs }
+    enum TestKind implements Predicate<Kind>
+    {
+        Ws, RorWs, WsOrSyncPoint, SyncPoints, Any;
+
+        public boolean test(Kind kind)
+        {
+            switch (this)
+            {
+                default: throw new AssertionError();
+                case Any: return true;
+                case WsOrSyncPoint: return kind == Write || kind == Kind.SyncPoint || kind == ExclusiveSyncPoint;
+                case SyncPoints: return kind == Kind.SyncPoint || kind == ExclusiveSyncPoint;
+                case Ws: return kind == Write;
+                case RorWs: return kind == Read || kind == Write;
+            }
+        }
+
+        public static TestKind conflicts(Kind kind)
+        {
+            switch (kind)
+            {
+                default: throw new AssertionError();
+                case Read:
+                    return Ws;
+                case Write:
+                    return RorWs;
+                case SyncPoint:
+                case ExclusiveSyncPoint:
+                    return Any;
+            }
+        }
+
+        public static TestKind shouldHaveWitnessed(Kind kind)
+        {
+            switch (kind)
+            {
+                default: throw new AssertionError();
+                case Read:
+                    return WsOrSyncPoint;
+                case Write:
+                    return Any;
+                case SyncPoint:
+                case ExclusiveSyncPoint:
+                    return SyncPoints;
+            }
+        }
+
+    }
 
     /**
      * Visits keys first and then ranges, both in ascending order.
@@ -96,8 +153,12 @@ public interface SafeCommandStore
     ProgressLog progressLog();
     NodeTimeService time();
     CommandStores.RangesForEpoch ranges();
-    long latestEpoch();
-    Timestamp preaccept(TxnId txnId, Seekables<?, ?> keys);
+    Timestamp maxConflict(Seekables<?, ?> keys, Ranges slice);
+
+    default long latestEpoch()
+    {
+        return time().epoch();
+    }
 
     default void notifyListeners(SafeCommand safeCommand)
     {

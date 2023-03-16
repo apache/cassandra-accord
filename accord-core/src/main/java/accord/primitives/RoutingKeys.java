@@ -19,9 +19,13 @@
 package accord.primitives;
 
 import accord.api.RoutingKey;
+import accord.utils.Invariants;
 import accord.utils.SortedArrays;
 
 import static accord.utils.ArrayBuffers.cachedRoutingKeys;
+import static accord.utils.Invariants.checkArgument;
+import static accord.utils.SortedArrays.isSortedUnique;
+import static accord.utils.SortedArrays.toUnique;
 
 public class RoutingKeys extends AbstractUnseekableKeys<AbstractUnseekableKeys<?>> implements Unseekables<RoutingKey, AbstractUnseekableKeys<?>>
 {
@@ -42,7 +46,13 @@ public class RoutingKeys extends AbstractUnseekableKeys<AbstractUnseekableKeys<?
 
     public static RoutingKeys of(RoutingKey ... keys)
     {
-        return new RoutingKeys(sort(keys));
+        return new RoutingKeys(toUnique(sort(keys)));
+    }
+
+    public static RoutingKeys ofSortedUnique(RoutingKey ... keys)
+    {
+        checkArgument(isSortedUnique(keys));
+        return new RoutingKeys(keys);
     }
 
     @Override
