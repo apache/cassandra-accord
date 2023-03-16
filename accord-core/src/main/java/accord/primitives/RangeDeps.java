@@ -22,6 +22,7 @@ import accord.api.Key;
 import accord.utils.*;
 import accord.utils.RelationMultiMap.AbstractBuilder;
 import accord.utils.RelationMultiMap.Adapter;
+import accord.utils.SortedArrays.SortedArrayList;
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
@@ -153,10 +154,16 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
                 this, forEach, visited, minIndex);
     }
 
+    private <P> int forEach(Range range, IndexedConsumer<P> forEach, P param, int minIndex)
+    {
+        return forEach(range, RangeDeps::visitTxnIdxsForRangeIndex, RangeDeps::visitTxnIdxsForRangeIndex,
+                this, forEach, param, minIndex);
+    }
+
     private void visitTxnIdsForRangeIndex(Consumer<TxnId> forEach, @Nullable BitSet visited, int rangeIndex)
     {
         for (int i = startOffset(ranges, rangesToTxnIds, rangeIndex), end = endOffset(rangesToTxnIds, rangeIndex) ; i < end ; ++i)
-            visitTxnIdx(rangesToTxnIds[i], forEach, visited);
+            visitTxnId(rangesToTxnIds[i], forEach, visited);
     }
 
     private void visitTxnIdsForRangeIndex(Consumer<TxnId> forEach, @Nullable BitSet visited, int start, int end)
@@ -164,12 +171,12 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
         if (end == 0)
             return;
         for (int i = startOffset(ranges, rangesToTxnIds, start) ; i < endOffset(rangesToTxnIds, end - 1) ; ++i)
-            visitTxnIdx(rangesToTxnIds[i], forEach, visited);
+            visitTxnId(rangesToTxnIds[i], forEach, visited);
     }
 
     // TODO (low priority, efficiency): ideally we would accept something like a BitHashSet or IntegerTrie
     //   as O(N) space needed for BitSet here (but with a very low constant multiplier)
-    private void visitTxnIdx(int txnIdx, Consumer<TxnId> forEach, @Nullable BitSet visited)
+    private void visitTxnId(int txnIdx, Consumer<TxnId> forEach, @Nullable BitSet visited)
     {
         if (visited == null || !visited.get(txnIdx))
         {
@@ -177,6 +184,20 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
                 visited.set(txnIdx);
             forEach.accept(txnIds[txnIdx]);
         }
+    }
+
+    private <P> void visitTxnIdxsForRangeIndex(IndexedConsumer<P> forEach, P param, int rangeIndex)
+    {
+        for (int i = startOffset(ranges, rangesToTxnIds, rangeIndex), end = endOffset(rangesToTxnIds, rangeIndex) ; i < end ; ++i)
+            forEach.accept(param, rangesToTxnIds[i]);
+    }
+
+    private <P> void visitTxnIdxsForRangeIndex(IndexedConsumer<P> forEach, P param, int start, int end)
+    {
+        if (end == 0)
+            return;
+        for (int i = startOffset(ranges, rangesToTxnIds, start) ; i < endOffset(rangesToTxnIds, end - 1) ; ++i)
+            forEach.accept(param, rangesToTxnIds[i]);
     }
 
     /**
@@ -203,6 +224,16 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
         int minIndex = 0;
         for (int i = 0; i < ranges.size() ; ++i)
             minIndex = forEach(ranges.get(i), forEach, minIndex, null);
+    }
+
+    /**
+     * The same TxnId may be provided as a parameter multiple times
+     */
+    public <P> void forEach(Ranges ranges, IndexedConsumer<P> forEach, P param)
+    {
+        int minIndex = 0;
+        for (int i = 0; i < ranges.size() ; ++i)
+            minIndex = forEach(ranges.get(i), forEach, param, minIndex);
     }
 
     /**
@@ -233,7 +264,12 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
         return RelationMultiMap.isEmpty(ranges, rangesToTxnIds);
     }
 
-    public Unseekables<Range, ?> someUnseekables(TxnId txnId)
+    public Ranges someUnseekables(TxnId txnId)
+    {
+        return ranges(txnId);
+    }
+
+    public Ranges ranges(TxnId txnId)
     {
         int txnIdIndex = Arrays.binarySearch(txnIds, txnId);
         if (txnIdIndex < 0)
@@ -247,7 +283,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
             throw new IllegalStateException("Cannot create a RouteFragment without any keys");
 
         Range[] result = new Range[end - start];
-        result[0] = ranges[txnIdsToRanges[start]].toUnseekable();
+        result[0] = ranges[txnIdsToRanges[start]];
         int resultCount = 1;
         for (int i = start + 1 ; i < end ; ++i)
         {
@@ -337,6 +373,11 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
             prev = end;
         }
         return prev == ranges.length;
+    }
+
+    public SortedArrayList<TxnId> txnIds()
+    {
+        return new SortedArrayList<>(txnIds);
     }
 
     public List<TxnId> txnIds(Key key)

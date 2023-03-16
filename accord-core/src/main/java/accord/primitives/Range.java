@@ -26,6 +26,8 @@ import accord.utils.SortedArrays.Search;
 
 import java.util.Objects;
 
+import javax.annotation.Nullable;
+
 import static accord.utils.SortedArrays.Search.CEIL;
 import static accord.utils.SortedArrays.Search.FAST;
 
@@ -320,7 +322,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
     }
 
     @Override
-    public RoutingKey someIntersectingRoutingKey(Ranges ranges)
+    public RoutingKey someIntersectingRoutingKey(@Nullable Ranges ranges)
     {
         if (ranges == null)
             return startInclusive() ? start.toUnseekable() : end.toUnseekable();

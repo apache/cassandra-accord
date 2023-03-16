@@ -18,9 +18,18 @@
 
 package accord.coordinate;
 
+import accord.api.RoutingKey;
+import accord.primitives.TxnId;
+
+import javax.annotation.Nullable;
+
 /**
  * Thrown when a transaction has been invalidated
  */
-public class Invalidated extends Throwable
+public class Invalidated extends CoordinationFailed
 {
+    public Invalidated(TxnId txnId, @Nullable RoutingKey homeKey)
+    {
+        super(txnId, homeKey);
+    }
 }

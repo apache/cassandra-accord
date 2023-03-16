@@ -18,9 +18,11 @@
 
 package accord.utils;
 
+import java.util.AbstractList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.function.IntFunction;
+import java.util.stream.StreamSupport;
 
 import accord.utils.ArrayBuffers.ObjectBuffers;
 import accord.utils.ArrayBuffers.IntBufferAllocator;
@@ -29,6 +31,7 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 import javax.annotation.Nullable;
 
 import static accord.utils.ArrayBuffers.uncached;
+import static accord.utils.Invariants.checkArgument;
 import static accord.utils.SortedArrays.Search.FAST;
 
 // TODO (low priority, efficiency): improvements:
@@ -38,6 +41,57 @@ import static accord.utils.SortedArrays.Search.FAST;
 //        - Exploit exponentialSearch in union/intersection/etc
 public class SortedArrays
 {
+    public static class SortedArrayList<T extends Comparable<? super T>> extends AbstractList<T>
+    {
+        final T[] array;
+        public SortedArrayList(T[] array)
+        {
+            this.array = checkArgument(array, SortedArrays::isSortedUnique);
+        }
+
+        @Override
+        public T get(int index)
+        {
+            return array[index];
+        }
+
+        @Override
+        public int size()
+        {
+            return array.length;
+        }
+
+        public int findNext(int i, Comparable<? super T> find)
+        {
+            return exponentialSearch(array, i, array.length, find);
+        }
+
+        public boolean containsAll(SortedArrayList<T> test)
+        {
+            return test.array.length == SortedArrays.foldlIntersection(Comparable::compareTo, array, 0, array.length, test.array, 0, test.array.length, (t, p, v, li, ri) -> v + 1, 0, 0, test.array.length);
+        }
+    }
+
+    public static class ExtendedSortedArrayList<T extends Comparable<? super T>> extends SortedArrayList<T>
+    {
+        public static <T extends Comparable<? super T>> ExtendedSortedArrayList<T> sortedCopyOf(Iterable<T> iterator, IntFunction<T[]> allocator)
+        {
+            return new ExtendedSortedArrayList<T>(checkArgument(StreamSupport.stream(iterator.spliterator(), false).sorted().toArray(allocator), SortedArrays::isSortedUnique), allocator);
+        }
+
+        final IntFunction<T[]> allocator;
+        public ExtendedSortedArrayList(T[] array, IntFunction<T[]> allocator)
+        {
+            super(array);
+            this.allocator = allocator;
+        }
+
+        public ExtendedSortedArrayList<T> difference(SortedArrayList<T> remove)
+        {
+            return new ExtendedSortedArrayList<T>(linearDifference(array, remove.array, allocator), allocator);
+        }
+    }
+
     /**
      * {@link #linearUnion(Comparable[], int, Comparable[], int, ObjectBuffers)}
      */
@@ -233,20 +287,35 @@ public class SortedArrays
      */
     public static <T> T[] linearIntersection(T[] left, int leftLength, T[] right, int rightLength, AsymmetricComparator<? super T, ? super T> comparator, ObjectBuffers<T> buffers)
     {
+        return (T[])internalLinearIntersection(leftLength <= rightLength, left, leftLength, right, rightLength, comparator, buffers, buffers);
+    }
+
+    /**
+     * A linear intersection where we only want results from the left inputs, and the right inputs may either be a different type or otherwise only used for filtering
+     */
+    public static <T1, T2> T1[] asymmetricLinearIntersection(T1[] left, int leftLength, T2[] right, int rightLength, AsymmetricComparator<? super T1, ? super T2> comparator, ObjectBuffers<T1> buffers)
+    {
+        return (T1[])internalLinearIntersection(true, left, leftLength, right, rightLength, comparator, buffers, null);
+    }
+
+    /**
+     * A linear intersection where we only want results from the left inputs, and the right inputs may either be a different type or otherwise only used for filtering
+     */
+    private static <T1, T2> Object[] internalLinearIntersection(boolean preferLeft, T1[] left, int leftLength, T2[] right, int rightLength, AsymmetricComparator<? super T1, ? super T2> comparator, ObjectBuffers<T1> leftBuffers, @Nullable ObjectBuffers<T2> rightBuffers)
+    {
         int leftIdx = 0;
         int rightIdx = 0;
 
-        T[] result = null;
+        Object[] result = null;
         int resultSize = 0;
 
-        // first pick a subset candidate, and merge both until we encounter an element not present in the other array
-        if (leftLength <= rightLength)
+        if (preferLeft)
         {
             boolean hasMatch = false;
             while (leftIdx < leftLength && rightIdx < rightLength)
             {
-                T leftKey = left[leftIdx];
-                T rightKey = right[rightIdx];
+                T1 leftKey = left[leftIdx];
+                T2 rightKey = right[rightIdx];
                 int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
 
                 if (cmp >= 0)
@@ -259,22 +328,23 @@ public class SortedArrays
                 else
                 {
                     resultSize = leftIdx++;
-                    result = buffers.get(resultSize + Math.min(leftLength - leftIdx, rightLength - rightIdx));
+                    result = leftBuffers.get(resultSize + Math.min(leftLength - leftIdx, rightLength - rightIdx));
                     System.arraycopy(left, 0, result, 0, resultSize);
                     break;
                 }
             }
 
             if (result == null)
-                return hasMatch ? buffers.completeWithExisting(left, leftLength) : buffers.complete(buffers.get(0), 0);
+                return hasMatch ? leftBuffers.completeWithExisting(left, leftIdx) : leftBuffers.complete(leftBuffers.get(0), 0);
         }
         else
         {
+            checkArgument(rightBuffers != null);
             boolean hasMatch = false;
             while (leftIdx < leftLength && rightIdx < rightLength)
             {
-                T leftKey = left[leftIdx];
-                T rightKey = right[rightIdx];
+                T1 leftKey = left[leftIdx];
+                T2 rightKey = right[rightIdx];
                 int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
 
                 if (cmp <= 0)
@@ -287,23 +357,22 @@ public class SortedArrays
                 else
                 {
                     resultSize = rightIdx++;
-                    result = buffers.get(resultSize + Math.min(leftLength - leftIdx, rightLength - rightIdx));
+                    result = rightBuffers.get(resultSize + Math.min(leftLength - leftIdx, rightLength - rightIdx));
                     System.arraycopy(right, 0, result, 0, resultSize);
                     break;
                 }
             }
 
             if (result == null)
-                return hasMatch ? buffers.completeWithExisting(right, rightLength) : buffers.complete(buffers.get(0), 0);
+                return hasMatch ? rightBuffers.completeWithExisting(right, rightIdx) : rightBuffers.complete(rightBuffers.get(0), 0);
         }
 
         try
         {
-
             while (leftIdx < leftLength && rightIdx < rightLength)
             {
-                T leftKey = left[leftIdx];
-                T rightKey = right[rightIdx];
+                T1 leftKey = left[leftIdx];
+                T2 rightKey = right[rightIdx];
                 int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
 
                 if (cmp == 0)
@@ -316,11 +385,125 @@ public class SortedArrays
                 else rightIdx++;
             }
 
-            return buffers.complete(result, resultSize);
+            return leftBuffers.complete((T1[])result, resultSize);
         }
         finally
         {
-            buffers.discard(result, resultSize);
+            leftBuffers.discard((T1[])result, resultSize);
+        }
+    }
+
+    /**
+     * A linear intersection where we only want results from the left inputs, and the right inputs may either be a different type or otherwise only used for filtering
+     */
+    public static <T1, T2> T1[] asymmetricLinearIntersectionWithOverlaps(T1[] left, int leftLength, T2[] right, int rightLength, AsymmetricComparator<? super T1, ? super T2> comparator, ObjectBuffers<T1> buffers)
+    {
+        return (T1[])internalLinearIntersectionWithOverlaps(true, left, leftLength, right, rightLength, comparator, buffers, null);
+    }
+
+    /**
+     * A linear intersection where we only want results from the left inputs, and the right inputs may either be a different type or otherwise only used for filtering
+     */
+    private static <T1, T2> Object[] internalLinearIntersectionWithOverlaps(boolean preferLeft, T1[] left, int leftLength, T2[] right, int rightLength, AsymmetricComparator<? super T1, ? super T2> comparator, ObjectBuffers<T1> leftBuffers, @Nullable ObjectBuffers<T2> rightBuffers)
+    {
+        int leftIdx = 0;
+        int rightIdx = 0;
+
+        Object[] result = null;
+        int resultSize = 0;
+
+        if (preferLeft)
+        {
+            boolean hasMatch = false;
+            while (leftIdx < leftLength && rightIdx < rightLength)
+            {
+                T1 leftKey = left[leftIdx];
+                T2 rightKey = right[rightIdx];
+                int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
+
+                if (cmp == 0)
+                {
+                    leftIdx++;
+                    hasMatch = true;
+                }
+                else if (cmp > 0)
+                {
+                    rightIdx++;
+                }
+                else
+                {
+                    resultSize = leftIdx++;
+                    result = leftBuffers.get(resultSize + leftLength - leftIdx);
+                    System.arraycopy(left, 0, result, 0, resultSize);
+                    break;
+                }
+            }
+
+            if (result == null)
+                return hasMatch ? leftBuffers.completeWithExisting(left, leftIdx) : leftBuffers.complete(leftBuffers.get(0), 0);
+        }
+        else
+        {
+            checkArgument(rightBuffers != null);
+            boolean hasMatch = false;
+            while (leftIdx < leftLength && rightIdx < rightLength)
+            {
+                T1 leftKey = left[leftIdx];
+                T2 rightKey = right[rightIdx];
+                int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
+
+                if (cmp == 0)
+                {
+                    rightIdx++;
+                    hasMatch = true;
+                }
+                else if (cmp < 0)
+                {
+                    leftIdx++;
+                }
+                else
+                {
+                    resultSize = rightIdx++;
+                    result = rightBuffers.get(resultSize + rightLength - rightIdx);
+                    System.arraycopy(right, 0, result, 0, resultSize);
+                    break;
+                }
+            }
+
+            if (result == null)
+                return hasMatch ? rightBuffers.completeWithExisting(right, rightIdx) : rightBuffers.complete(rightBuffers.get(0), 0);
+        }
+
+        try
+        {
+            while (leftIdx < leftLength && rightIdx < rightLength)
+            {
+                T1 leftKey = left[leftIdx];
+                T2 rightKey = right[rightIdx];
+                int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
+
+                if (cmp == 0)
+                {
+                    if (preferLeft)
+                    {
+                        leftIdx++;
+                        result[resultSize++] = leftKey;
+                    }
+                    else
+                    {
+                        rightIdx++;
+                        result[resultSize++] = rightKey;
+                    }
+                }
+                else if (cmp < 0) leftIdx++;
+                else rightIdx++;
+            }
+
+            return leftBuffers.complete((T1[])result, resultSize);
+        }
+        finally
+        {
+            leftBuffers.discard((T1[])result, resultSize);
         }
     }
 
@@ -921,12 +1104,12 @@ public class SortedArrays
     }
 
 
-    public static <T extends Comparable<T>> boolean isSortedUnique(T[] array)
+    public static <T extends Comparable<? super T>> boolean isSortedUnique(T[] array)
     {
         return isSortedUnique(array, Comparable::compareTo);
     }
 
-    public static  <T> boolean isSortedUnique(T[] array, Comparator<T> comparator)
+    public static <T> boolean isSortedUnique(T[] array, Comparator<T> comparator)
     {
         return isSorted(array, comparator, 0);
     }
@@ -941,5 +1124,27 @@ public class SortedArrays
         return true;
     }
 
+    public static <T extends Comparable<? super T>> T[] toUnique(T[] sorted)
+    {
+        int removed = 0;
+        for (int i = 1 ; i < sorted.length ; ++i)
+        {
+            int c = sorted[i - 1].compareTo(sorted[i]);
+            if (c >= 0)
+            {
+                if (c > 0)
+                    throw new IllegalArgumentException(Arrays.toString(sorted) + " is not sorted");
 
+                removed++;
+            }
+            else if (removed > 0)
+            {
+                sorted[i - removed] = sorted[i];
+            }
+        }
+        if (removed == 0)
+            return sorted;
+
+        return Arrays.copyOf(sorted, sorted.length - removed);
+    }
 }

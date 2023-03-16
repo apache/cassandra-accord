@@ -18,30 +18,69 @@
 
 package accord.impl;
 
-import accord.api.*;
-import accord.local.*;
-import accord.local.CommandStores.RangesForEpochHolder;
-import accord.local.CommandStores.RangesForEpoch;
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
-import accord.primitives.*;
-import accord.utils.Invariants;
-import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncChains;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import javax.annotation.Nullable;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.NavigableMap;
+import java.util.Objects;
+import java.util.Queue;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-import static accord.local.SafeCommandStore.TestDep.*;
-import static accord.local.SafeCommandStore.TestKind.Ws;
-import static accord.local.Status.*;
+import accord.api.Agent;
+import accord.api.DataStore;
+import accord.api.Key;
+import accord.api.ProgressLog;
+import accord.local.Command;
+import accord.local.CommandListener;
+import accord.local.CommandStore;
+import accord.local.CommandStores.RangesForEpoch;
+import accord.local.CommandStores.RangesForEpochHolder;
+import accord.local.CommonAttributes;
+import accord.local.Listeners;
+import accord.local.NodeTimeService;
+import accord.local.PreLoadContext;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.local.SaveStatus;
+import accord.local.Status;
+import accord.primitives.AbstractKeys;
+import accord.primitives.PartialDeps;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.Routable;
+import accord.primitives.RoutableKey;
+import accord.primitives.Routables;
+import accord.primitives.Seekable;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.utils.Invariants;
+import accord.utils.ReducingRangeMap;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
+import javax.annotation.Nullable;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
+import static accord.local.SafeCommandStore.TestDep.WITH;
+import static accord.local.Status.Committed;
+import static accord.local.Status.PreAccepted;
+import static accord.local.Status.PreCommitted;
 import static accord.primitives.Routables.Slice.Minimal;
 
 public abstract class InMemoryCommandStore extends CommandStore
@@ -56,6 +95,8 @@ public abstract class InMemoryCommandStore extends CommandStore
     private final TreeMap<TxnId, RangeCommand> rangeCommands = new TreeMap<>();
 
     private InMemorySafeStore current;
+
+    private ReducingRangeMap<Timestamp> rejectBefore;
 
     public InMemoryCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
     {
@@ -346,6 +387,16 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
     }
 
+    public void setRejectBefore(ReducingRangeMap<Timestamp> newRejectBefore)
+    {
+        this.rejectBefore = newRejectBefore;
+    }
+
+    public ReducingRangeMap<Timestamp> getRejectBefore()
+    {
+        return rejectBefore;
+    }
+
     private <T> T executeInContext(InMemoryCommandStore commandStore, PreLoadContext preLoadContext, Function<? super SafeCommandStore, T> function, boolean isDirectCall)
     {
 
@@ -490,7 +541,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         public void addListener(Command.TransientListener listener)
         {
             if (transientListeners == null) transientListeners = new Listeners<>();
-            else transientListeners.add(listener);
+            transientListeners.add(listener);
         }
 
         public void removeListener(Command.TransientListener listener)
@@ -607,13 +658,6 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        public long latestEpoch()
-        {
-            return commandStore.time.epoch();
-
-        }
-
-        @Override
         public Timestamp maxConflict(Seekables<?, ?> keysOrRanges, Ranges slice)
         {
             Timestamp timestamp = commandStore.mapReduceForKey(this, keysOrRanges, slice, (forKey, prev) -> Timestamp.max(forKey.max(), prev), Timestamp.NONE, null);
@@ -696,7 +740,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                 if (maxStatus != null && command.status().compareTo(maxStatus) > 0)
                     return;
 
-                if (testKind == Ws && command.txnId().rw().isRead())
+                if (!testKind.test(command.txnId().rw()))
                     return;
 
                 if (testDep != ANY_DEPS)

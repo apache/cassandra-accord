@@ -26,7 +26,6 @@ import com.google.common.collect.Iterators;
 
 import javax.annotation.Nonnull;
 import java.util.*;
-import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import static accord.utils.ArrayBuffers.cachedRanges;
@@ -187,41 +186,36 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     }
 
     /**
-     * Returns the ranges that intersect with any of the members of the parameter.
+     * Returns the inputs that intersect with any of the members of the keysOrRanges.
      * DOES NOT MODIFY THE RANGES.
      */
-    static <RS extends AbstractRanges<?>, P> RS intersect(RS input, Unseekables<?, ?> keysOrRanges, P param, BiFunction<P, Range[], RS> constructor)
+    static <I extends AbstractRanges<?>, P> I intersecting(I input, Routables<?, ?> keysOrRanges, P param, SliceConstructor<AbstractRanges<?>, P, I> constructor)
     {
         switch (keysOrRanges.domain())
         {
             default: throw new AssertionError();
-            case Range:
-            {
-                AbstractRanges<?> that = (AbstractRanges<?>) keysOrRanges;
-                Range[] result = SortedArrays.linearIntersection(input.ranges, input.ranges.length, that.ranges, that.ranges.length, Range::compareIntersecting, cachedRanges());
-                return result == input.ranges ? input : constructor.apply(param, result);
-            }
+            case Range: return sliceOverlapping((AbstractRanges<?>)keysOrRanges, input, param, constructor);
             case Key:
             {
                 AbstractKeys<?, ?> that = (AbstractKeys<?, ?>) keysOrRanges;
-                Range[] result = SortedArrays.linearIntersection(input.ranges, input.ranges.length, that.keys, that.keys.length, cachedRanges());
-                return result == input.ranges ? input : constructor.apply(param, result);
+                Range[] result = SortedArrays.asymmetricLinearIntersectionWithOverlaps(input.ranges, input.ranges.length, that.keys, that.keys.length, Range::compareTo, cachedRanges());
+                return result == input.ranges ? input : constructor.construct(input, param, result);
             }
         }
     }
 
-    interface SliceConstructor<P, RS extends AbstractRanges<?>>
+    interface SliceConstructor<I extends AbstractRanges<?>, P, RS extends AbstractRanges<?>>
     {
-        RS construct(Ranges covering, P param, Range[] ranges);
+        RS construct(I covering, P param, Range[] ranges);
     }
 
     @Override
     public final Ranges slice(Ranges ranges, Slice slice)
     {
-        return slice(ranges, slice, this, null, (i1, i2, rs) -> new Ranges(rs));
+        return slice(ranges, slice, this, null, (i1, i2, rs) -> i1.ranges == rs ? i1 : new Ranges(rs));
     }
 
-    static <RS extends AbstractRanges<?>, P> RS slice(Ranges covering, Slice slice, AbstractRanges<?> input, P param, SliceConstructor<P, RS> constructor)
+    static <I extends AbstractRanges<?>, P, O extends AbstractRanges<?>> O slice(I covering, Slice slice, AbstractRanges<?> input, P param, SliceConstructor<I, P, O> constructor)
     {
         switch (slice)
         {
@@ -232,41 +226,13 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         }
     }
 
-    static <RS extends AbstractRanges<?>, P> RS sliceOverlapping(Ranges covering, AbstractRanges<?> input, P param, SliceConstructor<P, RS> constructor)
+    static <C extends AbstractRanges<?>, P, O extends AbstractRanges<?>> O sliceOverlapping(C covering, AbstractRanges<?> input, P param, SliceConstructor<? super C, P, O> constructor)
     {
-        ObjectBuffers<Range> cachedRanges = cachedRanges();
-
-        Range[] buffer = cachedRanges.get(covering.ranges.length + input.ranges.length);
-        int bufferCount = 0;
-        try
-        {
-            int li = 0, ri = 0;
-            while (true)
-            {
-                long lri = covering.findNextIntersection(li, input, ri);
-                if (lri < 0)
-                    break;
-
-                li = (int) (lri);
-                ri = (int) (lri >>> 32);
-
-                Range l = covering.ranges[li], r = input.ranges[ri];
-                buffer[bufferCount++] = r;
-                if (l.end().compareTo(r.end()) <= 0) li++;
-                ri++;
-            }
-            Range[] result = cachedRanges.complete(buffer, bufferCount);
-            cachedRanges.discard(buffer, bufferCount);
-            return constructor.construct(covering, param, result);
-        }
-        catch (Throwable t)
-        {
-            cachedRanges.forceDiscard(buffer, bufferCount);
-            throw t;
-        }
+        Range[] result = SortedArrays.asymmetricLinearIntersectionWithOverlaps(input.ranges, input.ranges.length, covering.ranges, covering.ranges.length, Range::compareIntersecting, cachedRanges());
+        return constructor.construct(covering, param, result);
     }
 
-    static <RS extends AbstractRanges<?>, P> RS sliceMinimal(Ranges covering, AbstractRanges<?> input, P param, SliceConstructor<P, RS> constructor)
+    static <C extends AbstractRanges<?>, P, O extends AbstractRanges<?>> O sliceMinimal(C covering, AbstractRanges<?> input, P param, SliceConstructor<C, P, O> constructor)
     {
         ObjectBuffers<Range> cachedRanges = cachedRanges();
 
@@ -313,7 +279,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         }
     }
 
-    static <RS extends AbstractRanges<?>, P> RS sliceMaximal(Ranges covering, AbstractRanges<?> input, P param, SliceConstructor<P, RS> constructor)
+    static <C extends AbstractRanges<?>, P, O extends AbstractRanges<?>> O sliceMaximal(C covering, AbstractRanges<?> input, P param, SliceConstructor<C, P, O> constructor)
     {
         ObjectBuffers<Range> cachedRanges = cachedRanges();
 

@@ -20,7 +20,9 @@ package accord.api;
 
 import accord.local.Command;
 import accord.local.Node;
+import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
 
 /**
@@ -53,4 +55,6 @@ public interface Agent extends UncaughtExceptionListener
     void onHandledException(Throwable t);
 
     boolean isExpired(TxnId initiated, long now);
+
+    Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges);
 }

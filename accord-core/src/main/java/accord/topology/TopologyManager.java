@@ -37,6 +37,7 @@ import java.util.*;
 import static accord.coordinate.tracking.RequestStatus.Success;
 
 import static accord.utils.Invariants.checkArgument;
+import static accord.utils.Invariants.nonNull;
 
 /**
  * Manages topology state changes and update bookkeeping
@@ -186,9 +187,9 @@ public class TopologyManager implements ConfigurationService.Listener
         public void syncComplete(Id node, long epoch)
         {
             checkArgument(epoch > 0);
-            if (epoch > currentEpoch - 1)
+            if (epoch > currentEpoch)
             {
-                int idx = (int) (epoch - currentEpoch);
+                int idx = (int) (epoch - (1 + currentEpoch));
                 for (int i=pendingSyncComplete.size(); i<=idx; i++)
                     pendingSyncComplete.add(new HashSet<>());
 
@@ -213,13 +214,6 @@ public class TopologyManager implements ConfigurationService.Listener
 
             return epochs[(int) (currentEpoch - epoch)];
         }
-
-        boolean requiresHistoricalTopologiesFor(Unseekables<?, ?> intersect, long epoch)
-        {
-            Invariants.checkState(epoch <= currentEpoch);
-            EpochState state = get(epoch - 1);
-            return state != null && !state.syncCompleteFor(intersect);
-        }
     }
 
     private final TopologySorter.Supplier sorter;
@@ -241,12 +235,13 @@ public class TopologyManager implements ConfigurationService.Listener
         checkArgument(topology.epoch == current.nextEpoch());
         EpochState[] nextEpochs = new EpochState[current.epochs.length + 1];
         List<Set<Id>> pendingSync = new ArrayList<>(current.pendingSyncComplete);
+        Set<Id> alreadySyncd = Collections.emptySet();
         if (!pendingSync.isEmpty())
         {
             EpochState currentEpoch = current.epochs[0];
-            if (current.epochs.length <= 1 || current.epochs[1].syncComplete())
+            if (current.epochs[0].syncComplete())
                 currentEpoch.markPrevSynced();
-            pendingSync.remove(0).forEach(currentEpoch::recordSyncComplete);
+            alreadySyncd = pendingSync.remove(0);
         }
         System.arraycopy(current.epochs, 0, nextEpochs, 1, current.epochs.length);
 
@@ -315,13 +310,14 @@ public class TopologyManager implements ConfigurationService.Listener
 
     public Topologies withUnsyncedEpochs(Unseekables<?, ?> select, long minEpoch, long maxEpoch)
     {
+        Invariants.checkArgument(minEpoch <= maxEpoch);
         Epochs snapshot = epochs;
 
         if (maxEpoch == Long.MAX_VALUE) maxEpoch = snapshot.currentEpoch;
         else Invariants.checkState(snapshot.currentEpoch >= maxEpoch);
 
-        EpochState maxEpochState = snapshot.get(maxEpoch);
-        if (minEpoch == maxEpoch && !snapshot.requiresHistoricalTopologiesFor(select, maxEpoch))
+        EpochState maxEpochState = nonNull(snapshot.get(maxEpoch));
+        if (minEpoch == maxEpoch && maxEpochState.syncCompleteFor(select))
             return new Single(sorter, maxEpochState.global.forSelection(select));
 
         int start = (int)(snapshot.currentEpoch - maxEpoch);

@@ -22,6 +22,8 @@ import accord.local.Command;
 import accord.local.Node;
 import accord.api.Agent;
 import accord.api.Result;
+import accord.local.Command;
+import accord.primitives.*;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
@@ -61,5 +63,11 @@ public class MaelstromAgent implements Agent
     public boolean isExpired(TxnId initiated, long now)
     {
         return TimeUnit.SECONDS.convert(now - initiated.hlc(), TimeUnit.MICROSECONDS) >= 10;
+    }
+
+    @Override
+    public Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
+    {
+        return new Txn.InMemory(kind, keysOrRanges, new MaelstromRead(Keys.EMPTY, Keys.EMPTY), new MaelstromQuery(Node.Id.NONE, -1), null);
     }
 }

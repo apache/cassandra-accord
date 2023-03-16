@@ -35,9 +35,11 @@ import accord.primitives.*;
 import accord.primitives.TxnId;
 
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
+import static accord.local.SafeCommandStore.TestKind.Any;
 import static accord.local.SafeCommandStore.TestKind.RorWs;
 import static accord.local.SafeCommandStore.TestKind.Ws;
 import static accord.local.SafeCommandStore.TestTimestamp.STARTED_BEFORE;
+import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 
 public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
 {
@@ -90,6 +92,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     @Override
     public PreAcceptReply apply(SafeCommandStore safeStore)
     {
+        // TODO (desired): restore consistency with paper, either by changing code or paper
         // note: this diverges from the paper, in that instead of waiting for JoinShard,
         //       we PreAccept to both old and new topologies and require quorums in both.
         //       This necessitates sending to ALL replicas of old topology, not only electorate (as fast path may be unreachable).
@@ -226,7 +229,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
 
     private static <T extends Deps> T calculateDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Timestamp executeAt, Ranges ranges, Deps.AbstractBuilder<T> builder)
     {
-        TestKind testKind = txnId.rw().isWrite() ? RorWs : Ws;
+        TestKind testKind = TestKind.conflicts(txnId.rw());
         // could use MAY_EXECUTE_BEFORE to prune those we know execute later, but shouldn't usually be of much help
         // and would need to supply !hasOrderedTxnId
         commandStore.mapReduce(keys, ranges, testKind, STARTED_BEFORE, executeAt, ANY_DEPS, null, null, null,
