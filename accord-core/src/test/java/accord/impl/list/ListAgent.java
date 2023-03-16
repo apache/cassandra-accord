@@ -20,11 +20,19 @@ package accord.impl.list;
 
 import java.util.function.Consumer;
 
+import com.google.common.base.Functions;
+
 import accord.impl.mock.Network;
 import accord.local.Command;
 import accord.local.Node;
 import accord.api.Agent;
 import accord.api.Result;
+import accord.local.Command;
+import accord.primitives.*;
+
+import static accord.local.Node.Id.NONE;
+import static com.google.common.base.Functions.identity;
+
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
@@ -71,5 +79,11 @@ public class ListAgent implements Agent
     public boolean isExpired(TxnId initiated, long now)
     {
         return now - initiated.hlc() >= timeout;
+    }
+
+    @Override
+    public Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
+    {
+        return new Txn.InMemory(kind, keysOrRanges, new ListRead(identity(), Keys.EMPTY, Keys.EMPTY), new ListQuery(NONE, -1), null);
     }
 }

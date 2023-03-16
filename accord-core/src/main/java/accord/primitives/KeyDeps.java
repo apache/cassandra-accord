@@ -93,7 +93,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         @Override
         protected KeyDeps build(Key[] keys, TxnId[] txnIds, int[] keysToTxnIds)
         {
-            return new KeyDeps(Keys.ofSorted(keys), txnIds, keysToTxnIds);
+            return new KeyDeps(Keys.ofSortedUnique(keys), txnIds, keysToTxnIds);
         }
     }
 
@@ -145,7 +145,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
 
     KeyDeps(Key[] keys, TxnId[] txnIds, int[] keysToTxnIds)
     {
-        this(Keys.ofSorted(keys), txnIds, keysToTxnIds);
+        this(Keys.ofSortedUnique(keys), txnIds, keysToTxnIds);
     }
 
     KeyDeps(Keys keys, TxnId[] txnIds, int[] keysToTxnIds)

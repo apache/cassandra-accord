@@ -45,7 +45,7 @@ public class ListQuery implements Query
     public Result compute(TxnId txnId, Data data, Read untypedRead, Update update)
     {
         ListRead read = (ListRead) untypedRead;
-        Keys responseKeys = Keys.ofSorted(((ListData)data).keySet());
+        Keys responseKeys = Keys.ofSortedUnique(((ListData)data).keySet());
         int[][] values = new int[responseKeys.size()][];
         for (Map.Entry<Key, int[]> e : ((ListData)data).entrySet())
         {

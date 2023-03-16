@@ -26,11 +26,11 @@ import accord.primitives.TxnId;
 /**
  * Thrown when a transaction exceeds its specified timeout for obtaining a result for a client
  */
-public class CoordinateFailed extends Throwable
+public class CoordinationFailed extends Throwable
 {
     private @Nullable TxnId txnId;
     private @Nullable RoutingKey homeKey;
-    public CoordinateFailed(TxnId txnId, @Nullable RoutingKey homeKey)
+    public CoordinationFailed(TxnId txnId, @Nullable RoutingKey homeKey)
     {
         this.txnId = txnId;
         this.homeKey = homeKey;

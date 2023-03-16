@@ -18,17 +18,25 @@
 
 package accord.local;
 
-import accord.api.*;
 import accord.api.ProgressLog;
 import accord.api.DataStore;
 import accord.local.CommandStores.RangesForEpochHolder;
+import accord.primitives.Ranges;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.utils.ReducingRangeMap;
 import accord.utils.async.AsyncChain;
 
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
 import javax.annotation.Nullable;
+import accord.api.Agent;
+
+import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 
 /**
  * Single threaded internal shard of accord transaction metadata
@@ -53,6 +61,7 @@ public abstract class CommandStore implements AgentExecutor
     protected final DataStore store;
     protected final ProgressLog progressLog;
     protected final RangesForEpochHolder rangesForEpochHolder;
+    @Nullable private ReducingRangeMap<Timestamp> rejectBefore;
 
     protected CommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
     {
@@ -82,6 +91,37 @@ public abstract class CommandStore implements AgentExecutor
     public abstract <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);
 
     public abstract void shutdown();
+
+    // implementations are expected to override this for persistence
+    protected void setRejectBefore(ReducingRangeMap<Timestamp> newRejectBefore)
+    {
+        this.rejectBefore = newRejectBefore;
+    }
+
+    public Timestamp preaccept(TxnId txnId, Seekables<?, ?> keys, SafeCommandStore safeStore)
+    {
+        NodeTimeService time = safeStore.time();
+        boolean isExpired = agent().isExpired(txnId, safeStore.time().now());
+        if (rejectBefore != null && !isExpired)
+            isExpired = null == rejectBefore.foldl(keys, (rejectIfBefore, test) -> rejectIfBefore.compareTo(test) >= 0 ? null : test, txnId, Objects::isNull);
+
+        if (isExpired)
+            return time.uniqueNow(txnId).asRejected();
+
+        if (txnId.rw() == ExclusiveSyncPoint)
+        {
+            Ranges ranges = (Ranges)keys;
+            ReducingRangeMap<Timestamp> newRejectBefore = rejectBefore != null ? rejectBefore : new ReducingRangeMap<>(Timestamp.NONE);
+            newRejectBefore = ReducingRangeMap.add(newRejectBefore, ranges, txnId, Timestamp::max);
+            setRejectBefore(newRejectBefore);
+        }
+
+        Timestamp maxConflict = safeStore.maxConflict(keys, safeStore.ranges().at(txnId.epoch()));
+        if (txnId.compareTo(maxConflict) > 0 && txnId.epoch() >= time.epoch())
+            return txnId;
+
+        return time.uniqueNow(maxConflict);
+    }
 
     protected void unsafeRunIn(Runnable fn)
     {

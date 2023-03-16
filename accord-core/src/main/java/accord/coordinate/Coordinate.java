@@ -18,27 +18,22 @@
 
 package accord.coordinate;
 
-import java.util.*;
-import java.util.function.BiConsumer;
+import java.util.List;
 
 import accord.api.Result;
-import accord.coordinate.tracking.FastPathTracker;
-import accord.coordinate.tracking.RequestStatus;
-import accord.primitives.*;
-import accord.topology.Topologies;
-import accord.messages.Callback;
 import accord.local.Node;
-import accord.local.Node.Id;
-import accord.messages.PreAccept;
 import accord.messages.PreAccept.PreAcceptOk;
-import accord.messages.PreAccept.PreAcceptReply;
-import accord.utils.Invariants;
-
-import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
-import static accord.messages.Commit.Invalidate.commitInvalidate;
-
+import accord.primitives.Ballot;
+import accord.primitives.Deps;
+import accord.primitives.FullRoute;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
+import accord.topology.Topologies;
 import accord.utils.async.AsyncResult;
-import accord.utils.async.AsyncResults;
+
+import static accord.coordinate.Propose.Invalidate.proposeAndCommitInvalidate;
+import static accord.coordinate.ProposeAndExecute.proposeAndExecute;
 
 /**
  * Perform initial rounds of PreAccept and Accept until we have reached agreement about when we should execute.
@@ -46,34 +41,11 @@ import accord.utils.async.AsyncResults;
  *
  * TODO (desired, testing): dedicated burn test to validate outcomes
  */
-public class Coordinate extends AsyncResults.SettableResult<Result> implements Callback<PreAcceptReply>, BiConsumer<Result, Throwable>
+public class Coordinate extends CoordinatePreAccept<Result>
 {
-    final Node node;
-    final TxnId txnId;
-    final Txn txn;
-    final FullRoute<?> route;
-
-    private final FastPathTracker tracker;
-    private boolean preAcceptIsDone;
-    private final List<PreAcceptOk> successes;
-
     private Coordinate(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
     {
-        this.node = node;
-        this.txnId = txnId;
-        this.txn = txn;
-        this.route = route;
-        Topologies topologies = node.topology().withUnsyncedEpochs(route, txnId, txnId);
-        this.tracker = new FastPathTracker(topologies);
-        this.successes = new ArrayList<>(tracker.topologies().estimateUniqueNodes());
-    }
-
-    private void start()
-    {
-        // TODO (desired, efficiency): consider sending only to electorate of most recent topology (as only these PreAccept votes matter)
-        // note that we must send to all replicas of old topology, as electorate may not be reachable
-        node.send(tracker.nodes(), to -> new PreAccept(to, tracker.topologies(), txnId, txn, route),
-                  node.commandStores().select(route.homeKey()), this);
+        super(node, txnId, txn, route);
     }
 
     public static AsyncResult<Result> coordinate(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
@@ -83,63 +55,8 @@ public class Coordinate extends AsyncResults.SettableResult<Result> implements C
         return coordinate;
     }
 
-    @Override
-    public synchronized void onFailure(Id from, Throwable failure)
+    void onPreAccepted(List<PreAcceptOk> successes)
     {
-        if (preAcceptIsDone)
-            return;
-
-        switch (tracker.recordFailure(from))
-        {
-            default: throw new AssertionError();
-            case NoChange:
-                break;
-            case Failed:
-                preAcceptIsDone = true;
-                tryFailure(new Timeout(txnId, route.homeKey()));
-                break;
-            case Success:
-                onPreAccepted();
-        }
-    }
-
-    @Override
-    public void onCallbackFailure(Id from, Throwable failure)
-    {
-        tryFailure(failure);
-    }
-
-    @Override
-    public synchronized void onSuccess(Id from, PreAcceptReply reply)
-    {
-        if (preAcceptIsDone)
-            return;
-
-        if (!reply.isOk())
-        {
-            // TODO (expected): reads should not be recovered, so should not be preempted
-            // we've been preempted by a recovery coordinator; defer to it, and wait to hear any result
-            preAcceptIsDone = true;
-            tryFailure(new Preempted(txnId, route.homeKey()));
-            return;
-        }
-
-        PreAcceptOk ok = (PreAcceptOk) reply;
-        successes.add(ok);
-
-        boolean fastPath = ok.witnessedAt.compareTo(txnId) == 0;
-        // TODO (desired, safety): update formalisation (and proof), as we do not seek additional pre-accepts from later epochs.
-        //                         instead we rely on accept to do our work: a quorum of accept in the later epoch
-        //                         and its effect on preaccepted timestamps and the deps it returns create our sync point.
-        if (tracker.recordSuccess(from, fastPath) == RequestStatus.Success)
-            onPreAccepted();
-    }
-
-    private synchronized void onPreAccepted()
-    {
-        Invariants.checkState(!preAcceptIsDone);
-        preAcceptIsDone = true;
-
         if (tracker.hasFastPathAccepted())
         {
             Deps deps = Deps.merge(successes, ok -> ok.witnessedAt.equals(txnId) ? ok.deps : null);
@@ -159,22 +76,9 @@ public class Coordinate extends AsyncResults.SettableResult<Result> implements C
             //                                  but by sending accept we rule out hybrid fast-path
             // TODO (low priority, efficiency): if we receive an expired response, perhaps defer to permit at least one other
             //                                  node to respond before invalidating
-            if (node.agent().isExpired(txnId, executeAt.hlc()))
+            if (executeAt.isRejected() || node.agent().isExpired(txnId, executeAt.hlc()))
             {
-                proposeInvalidate(node, Ballot.ZERO, txnId, route.homeKey(), (success, fail) -> {
-                    if (fail != null)
-                    {
-                        accept(null, fail);
-                    }
-                    else
-                    {
-                        node.withEpoch(executeAt.epoch(), () -> {
-                            commitInvalidate(node, txnId, route, executeAt);
-                            // TODO (required, API consistency): this should be Invalidated rather than Timeout?
-                            accept(null, new Timeout(txnId, route.homeKey()));
-                        });
-                    }
-                });
+                proposeAndCommitInvalidate(node, Ballot.ZERO, txnId, route.homeKey(), route, executeAt,this);
             }
             else
             {
@@ -182,19 +86,8 @@ public class Coordinate extends AsyncResults.SettableResult<Result> implements C
                     Topologies topologies = tracker.topologies();
                     if (executeAt.epoch() > txnId.epoch())
                         topologies = node.topology().withUnsyncedEpochs(route, txnId.epoch(), executeAt.epoch());
-                    Propose.propose(node, topologies, Ballot.ZERO, txnId, txn, route, executeAt, deps, this);
-                });
+                    proposeAndExecute(node, topologies, Ballot.ZERO, txnId, txn, route, executeAt, deps, this);                });
             }
         }
-    }
-
-    @Override
-    public void accept(Result success, Throwable failure)
-    {
-        if (failure instanceof CoordinateFailed)
-            ((CoordinateFailed) failure).set(txnId, route.homeKey());
-
-        if (success != null) trySuccess(success);
-        else tryFailure(failure);
     }
 }

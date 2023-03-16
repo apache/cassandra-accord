@@ -45,10 +45,10 @@ class Execute extends ReadCoordinator<ReadReply>
     final Timestamp executeAt;
     final Deps deps;
     final Topologies applyTo;
-    final BiConsumer<Result, Throwable> callback;
+    final BiConsumer<? super Result, Throwable> callback;
     private Data data;
 
-    private Execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
+    private Execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
     {
         super(node, node.topology().forEpoch(readScope.toUnseekables(), executeAt.epoch()), txnId);
         this.txn = txn;
@@ -60,7 +60,7 @@ class Execute extends ReadCoordinator<ReadReply>
         this.callback = callback;
     }
 
-    public static void execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
+    public static void execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
     {
         if (txn.read().keys().isEmpty())
         {

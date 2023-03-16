@@ -20,11 +20,10 @@ package accord.primitives;
 
 import accord.api.RoutingKey;
 import accord.primitives.Routable.Domain;
-import accord.utils.IndexedFold;
-import accord.utils.IndexedFoldToLong;
-import accord.utils.IndexedRangeFoldToLong;
-import accord.utils.SortedArrays;
+import accord.utils.*;
 import net.nicoulaj.compilecommand.annotations.Inline;
+
+import java.util.function.Predicate;
 
 import static accord.utils.SortedArrays.Search.FLOOR;
 
@@ -150,6 +149,40 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
      * Terminate once we hit {@code terminalValue}.
      */
     @Inline
+    static <Input extends RoutableKey, T> T foldl(AbstractKeys<Input, ?> inputs, Routables<?, ?> matching, IndexedFold<? super Input, T> fold, T initialValue)
+    {
+        switch (matching.domain())
+        {
+            default: throw new AssertionError();
+            case Key: return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, (AbstractKeys<?,?>)matching, fold, initialValue);
+            case Range: return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, (AbstractRanges<?>)matching, fold, initialValue);
+        }
+    }
+
+    @Inline
+    static <P1, P2, Input extends RoutableKey, T> T foldl(AbstractKeys<Input, ?> inputs, Routables<?, ?> matching, IndexedTriFold<P1, P2, ? super Input, T> fold, P1 p1, P2 p2, T initialValue, Predicate<T> terminate)
+    {
+        switch (matching.domain())
+        {
+            default: throw new AssertionError();
+            case Key: return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, (AbstractKeys<?,?>)matching, fold, p1, p2, initialValue, terminate);
+            case Range: return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, (AbstractRanges<?>)matching, fold, p1, p2, initialValue, terminate);
+        }
+    }
+
+    @Inline
+    static <P1, P2, Input extends RoutableKey, T> T foldl(AbstractKeys<Input, ?> inputs, AbstractRanges<?> matching, IndexedTriFold<P1, P2, ? super Input, T> fold, P1 p1, P2 p2, T initialValue, Predicate<T> terminate)
+    {
+        return Helper.foldl(Routables::findNextIntersection, Helper::findLimit, inputs, matching, fold, p1, p2, initialValue, terminate);
+    }
+
+    @Inline
+    static <P1, P2, Input extends Routable, T> T foldl(Routables<Input, ?> inputs, AbstractRanges<?> matching, IndexedTriFold<P1, P2, ? super Input, T> fold, P1 p1, P2 p2, T initialValue, Predicate<T> terminate)
+    {
+        return Helper.foldl(Routables::findNextIntersection, Helper::findLimit, inputs, matching, fold, p1, p2, initialValue, terminate);
+    }
+
+    @Inline
     static <Input extends RoutableKey> long foldl(AbstractKeys<Input, ?> inputs, AbstractRanges<?> matching, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
     {
         return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, matching, fold, param, initialValue, terminalValue);
@@ -233,7 +266,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
         }
 
         @Inline
-        static <T> T foldlMinimal(Seekables<?, ?> is, AbstractRanges<?> ms, IndexedFold<? super Seekable, T> fold, T initialValue)
+        static <T> T foldlMinimal(Seekables<?, ?> is, AbstractRanges<?> ms, IndexedFold<? super Seekable, T> fold, T accumulator)
         {
             int i = 0, m = 0;
             while (true)
@@ -249,18 +282,18 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 int nexti = Helper.findLimit(is, i, ms, m);
                 while (i < nexti)
                 {
-                    initialValue = fold.apply(is.get(i).slice(mv), initialValue, i);
+                    accumulator = fold.apply(is.get(i).slice(mv), accumulator, i);
                     ++i;
                 }
             }
 
-            return initialValue;
+            return accumulator;
         }
 
         @Inline
         static <Input extends Routable, Inputs extends Routables<Input, ?>, Matches extends Routables<?, ?>, T>
         T foldl(SetIntersections<Inputs, Matches> setIntersections, ValueIntersections<Inputs, Matches> valueIntersections,
-                Inputs is, Matches ms, IndexedFold<? super Input, T> fold, T initialValue)
+                Inputs is, Matches ms, IndexedFold<? super Input, T> fold, T accumulator)
         {
             int i = 0, m = 0;
             while (true)
@@ -275,18 +308,46 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 int nexti = valueIntersections.findLimit(is, i, ms, m);
                 while (i < nexti)
                 {
-                    initialValue = fold.apply(is.get(i), initialValue, i);
+                    accumulator = fold.apply(is.get(i), accumulator, i);
                     ++i;
                 }
             }
 
-            return initialValue;
+            return accumulator;
+        }
+
+        @Inline
+        static <P1, P2, Input extends Routable, Inputs extends Routables<Input, ?>, Matches extends Routables<?, ?>, T>
+        T foldl(SetIntersections<Inputs, Matches> setIntersections, ValueIntersections<Inputs, Matches> valueIntersections,
+                Inputs is, Matches ms, IndexedTriFold<P1, P2, ? super Input, T> fold, P1 p1, P2 p2, T accumulator, Predicate<T> terminate)
+        {
+            int i = 0, m = 0;
+            while (true)
+            {
+                long im = setIntersections.findNext(is, i, ms, m);
+                if (im < 0)
+                    break;
+
+                i = (int)(im);
+                m = (int)(im >>> 32);
+
+                int nexti = valueIntersections.findLimit(is, i, ms, m);
+                while (i < nexti)
+                {
+                    accumulator = fold.apply(p1, p2, is.get(i), accumulator, i);
+                    if (terminate.test(accumulator))
+                        return accumulator;
+                    ++i;
+                }
+            }
+
+            return accumulator;
         }
 
         @Inline
         static <Input extends Routable, Inputs extends Routables<Input, ?>, Matches extends Routables<?, ?>>
         long foldl(SetIntersections<Inputs, Matches> setIntersections, ValueIntersections<Inputs, Matches> valueIntersections,
-                   Inputs is, Matches ms, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
+                   Inputs is, Matches ms, IndexedFoldToLong<? super Input> fold, long param, long accumulator, long terminalValue)
         {
             int i = 0, m = 0;
             done: while (true)
@@ -301,20 +362,20 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 int nexti = valueIntersections.findLimit(is, i, ms, m);
                 while (i < nexti)
                 {
-                    initialValue = fold.apply(is.get(i), param, initialValue, i);
-                    if (initialValue == terminalValue)
+                    accumulator = fold.apply(is.get(i), param, accumulator, i);
+                    if (accumulator == terminalValue)
                         break done;
                     ++i;
                 }
             }
 
-            return initialValue;
+            return accumulator;
         }
 
         @Inline
         static <Input extends Routable, Inputs extends Routables<Input, ?>, Matches extends Routables<?, ?>>
         long foldlMissing(SetIntersections<Inputs, Matches> setIntersections, ValueIntersections<Inputs, Matches> valueIntersections,
-                   Inputs is, Matches ms, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
+                   Inputs is, Matches ms, IndexedFoldToLong<? super Input> fold, long param, long accumulator, long terminalValue)
         {
             int i = 0, m = 0;
             done: while (true)
@@ -326,8 +387,8 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 int nexti = (int)(im);
                 while (i < nexti)
                 {
-                    initialValue = fold.apply(is.get(i), param, initialValue, i);
-                    if (initialValue == terminalValue)
+                    accumulator = fold.apply(is.get(i), param, accumulator, i);
+                    if (accumulator == terminalValue)
                         break done;
                     ++i;
                 }
@@ -336,12 +397,12 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 i = 1 + valueIntersections.findLimit(is, nexti, ms, m);
             }
 
-            return initialValue;
+            return accumulator;
         }
 
         static <Input extends Routable, Inputs extends Routables<Input, ?>, Matches extends Routables<?, ?>>
         long rangeFoldl(SetIntersections<Inputs, Matches> setIntersections, ValueIntersections<Inputs, Matches> valueIntersections,
-                        Inputs is, Matches ms, IndexedRangeFoldToLong fold, long param, long initialValue, long terminalValue)
+                        Inputs is, Matches ms, IndexedRangeFoldToLong fold, long param, long accumulator, long terminalValue)
         {
             int i = 0, m = 0;
             while (true)
@@ -354,13 +415,13 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 m = (int)(kri >>> 32);
 
                 int nexti = valueIntersections.findLimit(is, i, ms, m);
-                initialValue = fold.apply(param, initialValue, i, nexti);
-                if (initialValue == terminalValue)
+                accumulator = fold.apply(param, accumulator, i, nexti);
+                if (accumulator == terminalValue)
                     break;
                 i = nexti;
             }
 
-            return initialValue;
+            return accumulator;
         }
 
         static <L extends Routable> int findLimit(Routables<L, ?> ls, int li, AbstractRanges<?> rs, int ri)
@@ -374,6 +435,16 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
         }
 
         static int findLimit(AbstractRanges<?> ls, int li, AbstractKeys<?, ?> rs, int ri)
+        {
+            RoutableKey r = rs.get(ri);
+
+            int nextl = ls.findNext(li + 1, r, FLOOR);
+            if (nextl < 0) nextl = -1 - nextl;
+            else nextl++;
+            return nextl;
+        }
+
+        static int findLimit(AbstractKeys<?, ?> ls, int li, AbstractKeys<?, ?> rs, int ri)
         {
             RoutableKey r = rs.get(ri);
 
