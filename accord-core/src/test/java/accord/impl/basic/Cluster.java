@@ -223,7 +223,7 @@ public class Cluster implements Scheduler
                                           () -> new ListStore(node), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
                                           new ListAgent(30L, onFailure),
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
-                                          SimpleProgressLog::new, InMemoryCommandStores.Synchronized::new));
+                                          SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending, randomSupplier.get())));
             }
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));

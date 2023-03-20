@@ -224,7 +224,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
 
     private synchronized void readComplete(CommandStore commandStore, Data result)
     {
-        Invariants.checkState(waitingOn.get(commandStore.id()));
+        Invariants.checkState(waitingOn.get(commandStore.id()), "Waiting on does not contain store %d; waitingOn=%s", commandStore.id(), waitingOn);
         logger.trace("{}: read completed on {}", txnId, commandStore);
         if (result != null)
             data = data == null ? result : data.merge(result);
