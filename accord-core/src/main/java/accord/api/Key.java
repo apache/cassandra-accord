@@ -21,6 +21,7 @@ package accord.api;
 import accord.primitives.Range;
 import accord.primitives.RoutableKey;
 import accord.primitives.Seekable;
+import accord.utils.Invariants;
 
 /**
  * A key we can find in both the cluster and on disk
@@ -31,7 +32,11 @@ public interface Key extends Seekable, RoutableKey
     default Key asKey() { return this; }
 
     @Override
-    default Key slice(Range range) { return this; }
+    default Key slice(Range range)
+    {
+        Invariants.checkArgument(range.contains(this));
+        return this;
+    }
 
     @Override
     default Range asRange() { throw new UnsupportedOperationException(); }

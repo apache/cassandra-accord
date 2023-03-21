@@ -25,7 +25,19 @@ import accord.api.Key;
  */
 public interface Seekable extends Routable
 {
+    /**
+     * If this is a key, it will return itself, otherwise it throw an exception
+     */
     Key asKey();
+
+    /**
+     * If this is a range, it will return itself, otherwise it throw an exception
+     */
     Range asRange();
+
+    /**
+     * Returns a {@link Seekable} of the same type as this one truncated to the given range (intersection).
+     * If the provided range does not intersect with this {@link Seekable}, an exception is thrown.
+     */
     Seekable slice(Range range);
 }

@@ -30,7 +30,7 @@ import static accord.utils.SortedArrays.Search.CEIL;
 import static accord.utils.SortedArrays.Search.FAST;
 
 /**
- * A range of keys
+ * A range of keys.
  */
 public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seekable
 {
@@ -52,13 +52,13 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         }
 
         @Override
-        public boolean startInclusive()
+        public final boolean startInclusive()
         {
             return false;
         }
 
         @Override
-        public boolean endInclusive()
+        public final boolean endInclusive()
         {
             return true;
         }
@@ -94,13 +94,13 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         }
 
         @Override
-        public boolean startInclusive()
+        public final boolean startInclusive()
         {
             return true;
         }
 
         @Override
-        public boolean endInclusive()
+        public final boolean endInclusive()
         {
             return false;
         }
@@ -244,8 +244,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
      */
     public int compareIntersecting(Range that)
     {
-        if (that.getClass() != this.getClass())
-            throw new IllegalArgumentException("Cannot mix Range of different types");
+        checkRangeType(that);
         if (this.start.compareTo(that.end) >= 0)
             return 1;
         if (this.end.compareTo(that.start) <= 0)
@@ -258,8 +257,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
      */
     public int compare(Range that)
     {
-        if (that.getClass() != this.getClass())
-            throw new IllegalArgumentException("Cannot mix Range of different types");
+        checkRangeType(that);
         int c = this.start.compareTo(that.start);
         if (c == 0) c = this.end.compareTo(that.end);
         return c;
@@ -272,10 +270,9 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
 
     public Range slice(Range truncateTo)
     {
-        int cs = start.compareTo(truncateTo.start);
-        int ce = end.compareTo(truncateTo.end);
-        if (cs >= 0 && ce <= 0) return this;
-        return newRange(cs >= 0 ? start : truncateTo.start, ce <= 0 ? end : truncateTo.end);
+        Range intersection = this.intersection(truncateTo);
+        Invariants.checkArgument(intersection != null);
+        return intersection;
     }
 
     public boolean intersects(AbstractKeys<?, ?> keys)
@@ -289,8 +286,16 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
      */
     public Range intersection(Range that)
     {
+        checkRangeType(that);
+
         if (this.compareIntersecting(that) != 0)
             return null;
+
+        if (this.contains(that))
+            return that;
+
+        if (that.contains(this))
+            return this;
 
         RoutingKey start = this.start.compareTo(that.start) > 0 ? this.start : that.start;
         RoutingKey end = this.end.compareTo(that.end) < 0 ? this.end : that.end;
@@ -365,5 +370,11 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
     public Range toUnseekable()
     {
         return this;
+    }
+
+    void checkRangeType(Range that)
+    {
+        if (that.getClass() != this.getClass())
+            throw new IllegalArgumentException(String.format("Cannot mix Range of different types (%s and %s)", this.getClass().getSimpleName(), that.getClass().getSimpleName()));
     }
 }
