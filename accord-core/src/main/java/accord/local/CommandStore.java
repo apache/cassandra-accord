@@ -48,8 +48,6 @@ public interface CommandStore
 
     void setRejectBefore(ReducingRangeMap<Timestamp> newRejectBefore);
 
-    ReducingRangeMap<Timestamp> getRejectBefore();
-
     Timestamp preaccept(TxnId txnId, Seekables<?, ?> keys, SafeCommandStore safeStore);
 
     int id();
