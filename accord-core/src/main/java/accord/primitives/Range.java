@@ -291,14 +291,15 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         if (this.compareIntersecting(that) != 0)
             return null;
 
-        if (this.contains(that))
-            return that;
-
-        if (that.contains(this))
-            return this;
-
         RoutingKey start = this.start.compareTo(that.start) > 0 ? this.start : that.start;
         RoutingKey end = this.end.compareTo(that.end) < 0 ? this.end : that.end;
+
+        if (start == this.start && end == this.end)
+            return this;
+
+        if (start == that.start && end == that.end)
+            return that;
+
         return newRange(start, end);
     }
 
@@ -354,25 +355,13 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         }
     }
 
-    public static Range slice(Range bound, Range toSlice)
-    {
-        Invariants.checkArgument(bound.compareIntersecting(toSlice) == 0);
-        if (bound.contains(toSlice))
-            return toSlice;
-
-        return toSlice.newRange(
-                toSlice.start().compareTo(bound.start()) >= 0 ? toSlice.start() : bound.start(),
-                toSlice.end().compareTo(bound.end()) <= 0 ? toSlice.end() : bound.end()
-        );
-    }
-
     @Override
     public Range toUnseekable()
     {
         return this;
     }
 
-    void checkRangeType(Range that)
+    final void checkRangeType(Range that)
     {
         if (that.getClass() != this.getClass())
             throw new IllegalArgumentException(String.format("Cannot mix Range of different types (%s and %s)", this.getClass().getSimpleName(), that.getClass().getSimpleName()));

@@ -42,9 +42,11 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     AbstractRanges(@Nonnull Range[] ranges)
     {
         if (ranges.length > 0)
+        {
             // check that ranges are of the same type
             for (int i = 1; i < ranges.length; i++)
                 ranges[0].checkRangeType(ranges[i]);
+        }
 
         // TODO (simple, validation): check ranges are non-overlapping (or make sure it's safe for all methods that they aren't)
         this.ranges = Invariants.nonNull(ranges);
