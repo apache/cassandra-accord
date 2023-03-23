@@ -286,7 +286,7 @@ class ReadDataTest
         {
             AsyncResults.SettableResult<Void> writeResult = new AsyncResults.SettableResult<>();
             Write write = Mockito.mock(Write.class);
-            Mockito.when(write.apply(any(), any(), any(), any())).thenReturn(writeResult);
+            Mockito.when(write.apply(any(), any(), any(), any(), any())).thenReturn(writeResult);
             Writes writes = new Writes(txnId, executeAt, keys, write);
 
             forEach(store -> check(store.execute(PreLoadContext.contextFor(txnId, keys), safe -> {

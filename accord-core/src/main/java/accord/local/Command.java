@@ -650,7 +650,7 @@ public abstract class Command implements CommonAttributes
 
         public static Truncated invalidated(TxnId txnId, Listeners.Immutable durableListeners)
         {
-            return new Truncated(txnId, SaveStatus.Invalidated, DurableOrInvalidated, null, Timestamp.NONE, durableListeners, null, null);
+            return new Truncated(txnId, SaveStatus.Invalidated, DurableOrInvalidated, null, Timestamp.NONE, durableListeners, null, Result.INVALIDATED);
         }
 
         @Override

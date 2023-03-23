@@ -23,6 +23,7 @@ import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import accord.primitives.PartialTxn;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,7 +51,7 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
     }
 
     @Override
-    public AsyncChain<Void> apply(Seekable key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
+    public AsyncChain<Void> apply(Seekable key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store, PartialTxn txn)
     {
         ListStore s = (ListStore) store;
         if (!containsKey(key))
