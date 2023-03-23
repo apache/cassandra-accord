@@ -582,7 +582,7 @@ public class Commands
         //  that was pre-bootstrap for some range (so redundant and we may have gone ahead of), but had to be executed locally
         //  for another range
         CommandStore unsafeStore = safeStore.commandStore();
-        return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()))
+        return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()), command.partialTxn())
                .flatMap(unused -> unsafeStore.submit(context, ss -> {
                    postApply(ss, txnId);
                    return null;

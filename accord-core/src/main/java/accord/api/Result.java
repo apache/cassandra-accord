@@ -23,11 +23,17 @@ import accord.primitives.ProgressToken;
 
 /**
  * A result to be returned to a client, or be stored in a node's command state.
- *
- * TODO (expected, efficiency): support minimizing the result for storage in a node's command state (e.g. to only retain success/failure)
  */
 public interface Result extends Outcome
 {
+    Result APPLIED = new Result() { };
+    
+    Result INVALIDATED = new Result()
+    {
+        @Override
+        public ProgressToken asProgressToken() { return ProgressToken.INVALIDATED; }
+    };
+
     @Override
     default ProgressToken asProgressToken() { return ProgressToken.APPLIED; }
 }
