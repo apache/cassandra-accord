@@ -162,7 +162,8 @@ public class Commit extends TxnRequest<ReadNack>
             case Insufficient:
                 SafeCommand safeCommand = safeStore.command(txnId);
                 Invariants.checkState(!safeCommand.current().known().isDefinitionKnown());
-                if (defer == null)
+                // When isDone=true this.process() is called and all CommandStores run apply again; so safe to create a new one
+                if (defer == null || defer.isDone)
                     defer = new Defer(DefinitionOnly, Committed.minKnown, Commit.this);
                 defer.add(safeStore, safeCommand, safeStore.commandStore());
                 return ReadNack.NotCommitted;

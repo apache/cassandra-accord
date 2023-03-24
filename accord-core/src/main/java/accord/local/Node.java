@@ -145,7 +145,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.agent = agent;
         this.random = random;
         this.scheduler = scheduler;
-        this.commandStores = factory.create(this, agent, dataSupplier.get(), shardDistributor, progressLogFactory.apply(this));
+        this.commandStores = factory.create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this));
 
         configService.registerListener(this);
         onTopologyUpdate(topology, false);
@@ -203,7 +203,9 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         else
         {
             configService.fetchTopologyForEpoch(epoch);
-            topology.awaitEpoch(epoch).addCallback(runnable);
+            CommandStore current = CommandStore.Unsafe.maybeCurrent();
+            if (current == null) topology.awaitEpoch(epoch).addCallback(runnable);
+            else topology.awaitEpoch(epoch).addCallback(runnable, current);
         }
     }
 
@@ -217,7 +219,9 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         else
         {
             configService.fetchTopologyForEpoch(epoch);
-            return topology.awaitEpoch(epoch).flatMap(ignore -> supplier.get());
+            CommandStore current = CommandStore.Unsafe.maybeCurrent();
+            if (current == null) return topology.awaitEpoch(epoch).flatMap(ignore -> supplier.get());
+            return topology.awaitEpoch(epoch).flatMap(ignore -> supplier.get(), current);
         }
     }
 
@@ -311,7 +315,13 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public void send(Shard shard, Request send, Callback callback)
     {
-        shard.nodes.forEach(node -> messageSink.send(node, send, callback));
+        send(shard, send, CommandStore.current(), callback);
+    }
+
+    private void send(Shard shard, Request send, CommandStore commandStore, Callback callback)
+    {
+        checkStore(commandStore);
+        shard.nodes.forEach(node -> messageSink.send(node, send, commandStore, callback));
     }
 
     private <T> void send(Shard shard, Request send, Set<Id> alreadyContacted)
@@ -334,18 +344,44 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public <T> void send(Collection<Id> to, Request send, Callback<T> callback)
     {
-        to.forEach(dst -> send(dst, send, callback));
+        send(to, send, CommandStore.current(), callback);
+    }
+
+    public <T> void send(Collection<Id> to, Request send, CommandStore commandStore, Callback<T> callback)
+    {
+        checkStore(commandStore);
+        to.forEach(dst -> messageSink.send(dst, send, commandStore, callback));
     }
 
     public <T> void send(Collection<Id> to, Function<Id, Request> requestFactory, Callback<T> callback)
     {
-        to.forEach(dst -> send(dst, requestFactory.apply(dst), callback));
+        send(to, requestFactory, CommandStore.current(), callback);
+    }
+
+    public <T> void send(Collection<Id> to, Function<Id, Request> requestFactory, CommandStore commandStore, Callback<T> callback)
+    {
+        checkStore(commandStore);
+        to.forEach(dst -> messageSink.send(dst, requestFactory.apply(dst), commandStore, callback));
     }
 
     // send to a specific node
     public <T> void send(Id to, Request send, Callback<T> callback)
     {
-        messageSink.send(to, send, callback);
+        send(to, send, CommandStore.current(), callback);
+    }
+
+    // send to a specific node
+    public <T> void send(Id to, Request send, CommandStore commandStore, Callback<T> callback)
+    {
+        checkStore(commandStore);
+        messageSink.send(to, send, commandStore, callback);
+    }
+
+    private void checkStore(CommandStore commandStore)
+    {
+        CommandStore current = CommandStore.Unsafe.maybeCurrent();
+        if (current != null && current != commandStore)
+            throw new IllegalStateException(String.format("Used wrong CommandStore %s; current is %s", commandStore, current));
     }
 
     // send to a specific node

@@ -44,7 +44,7 @@ import accord.api.Scheduler;
 import accord.impl.list.ListAgent;
 import accord.impl.list.ListStore;
 import accord.local.ShardDistributor;
-import accord.messages.Callback;
+import accord.messages.SafeCallback;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.topology.TopologyRandomizer;
@@ -150,24 +150,12 @@ public class Cluster implements Scheduler
             if (deliver.message instanceof Reply)
             {
                 Reply reply = (Reply) deliver.message;
-                Callback callback = reply.isFinal()
-                        ? sinks.get(deliver.dst).callbacks.remove(deliver.replyId)
-                        : sinks.get(deliver.dst).callbacks.get(deliver.replyId);
+                SafeCallback callback = reply.isFinal()
+                                        ? sinks.get(deliver.dst).callbacks.remove(deliver.replyId)
+                                        : sinks.get(deliver.dst).callbacks.get(deliver.replyId);
 
                 if (callback != null)
-                {
-                    on.scheduler().now(() -> {
-                        try
-                        {
-                            callback.onSuccess(deliver.src, reply);
-                        }
-                        catch (Throwable t)
-                        {
-                            callback.onCallbackFailure(deliver.src, t);
-                            on.agent().onUncaughtException(t);
-                        }
-                    });
-                }
+                    callback.success(deliver.src, reply);
             }
             else on.receive((Request) deliver.message, deliver.src, deliver);
         }
@@ -223,7 +211,7 @@ public class Cluster implements Scheduler
                                           () -> new ListStore(node), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
                                           new ListAgent(30L, onFailure),
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
-                                          SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending, randomSupplier.get())));
+                                          SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending)));
             }
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));

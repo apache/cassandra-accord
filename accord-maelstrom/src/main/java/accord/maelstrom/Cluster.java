@@ -39,15 +39,16 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
-import accord.coordinate.Timeout;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.SimpleProgressLog;
 import accord.impl.InMemoryCommandStores;
+import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.MessageSink;
 import accord.local.ShardDistributor;
 import accord.messages.Callback;
+import accord.messages.SafeCallback;
 import accord.messages.Reply;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
@@ -79,7 +80,7 @@ public class Cluster implements Scheduler
         final RandomSource random;
 
         int nextMessageId = 0;
-        Map<Long, Callback> callbacks = new LinkedHashMap<>();
+        Map<Long, SafeCallback> callbacks = new LinkedHashMap<>();
 
         public InstanceSink(Id self, Function<Id, Node> lookup, Cluster parent, RandomSource random)
         {
@@ -96,14 +97,15 @@ public class Cluster implements Scheduler
         }
 
         @Override
-        public void send(Id to, Request send, Callback callback)
+        public void send(Id to, Request send, CommandStore commandStore, Callback callback)
         {
             long messageId = nextMessageId++;
-            callbacks.put(messageId, callback);
+            SafeCallback sc = new SafeCallback(commandStore, callback);
+            callbacks.put(messageId, sc);
             parent.add(self, to, messageId, send);
             parent.pending.add((Runnable)() -> {
-                if (callback == callbacks.remove(messageId))
-                    callback.onFailure(to, new Timeout(null, null));
+                if (sc == callbacks.remove(messageId))
+                    sc.timeout(to);
             }, 1000 + random.nextInt(10000), TimeUnit.MILLISECONDS);
         }
 
@@ -201,18 +203,9 @@ public class Cluster implements Scheduler
                     if (deliver.body.in_reply_to > Body.SENTINEL_MSG_ID || body instanceof Reply)
                     {
                         Reply reply = (Reply) body;
-                        Callback callback = sinks.get(deliver.dest).callbacks.remove(deliver.body.in_reply_to);
+                        SafeCallback callback = sinks.get(deliver.dest).callbacks.remove(deliver.body.in_reply_to);
                         if (callback != null)
-                            on.scheduler().now(() -> {
-                                try
-                                {
-                                    callback.onSuccess(deliver.src, reply);
-                                }
-                                catch (Throwable t)
-                                {
-                                    callback.onCallbackFailure(deliver.src, t);
-                                }
-                            });
+                            callback.success(deliver.src, reply);
                     }
                     else on.receive((Request) body, deliver.src, deliver);
             }

@@ -31,8 +31,6 @@ import accord.utils.async.AsyncChains;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import static accord.primitives.Routables.Slice.Overlapping;
-
 public interface Txn
 {
     enum Kind

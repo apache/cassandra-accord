@@ -20,11 +20,12 @@ package accord.impl.mock;
 
 import accord.NetworkFilter;
 import accord.api.MessageSink;
-import accord.coordinate.Timeout;
 import accord.impl.*;
+import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.ShardDistributor;
+import accord.messages.SafeCallback;
 import accord.primitives.Ranges;
 import accord.utils.DefaultRandom;
 import accord.utils.EpochFunction;
@@ -63,7 +64,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
     public NetworkFilter networkFilter = new NetworkFilter();
 
     private long nextMessageId = 0;
-    Map<Long, Callback> callbacks = new ConcurrentHashMap<>();
+    Map<Long, SafeCallback> callbacks = new ConcurrentHashMap<>();
     private final EpochFunction<MockConfigurationService> onFetchTopology;
 
     private MockCluster(Builder builder)
@@ -140,7 +141,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
     }
 
     @Override
-    public void send(Id from, Id to, Request request, Callback callback)
+    public void send(Id from, Id to, Request request, CommandStore commandStore, Callback callback)
     {
         Node node = nodes.get(to);
         if (node == null)
@@ -153,7 +154,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         {
             // TODO (desired, testing): more flexible timeouts
             if (callback != null)
-                callback.onFailure(to, new Timeout(null, null));
+                new SafeCallback(commandStore, callback).timeout(to);
             logger.info("discarding filtered message from {} to {}: {}", from, to, request);
             return;
         }
@@ -161,10 +162,11 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         long messageId = nextMessageId();
         if (callback != null)
         {
-            callbacks.put(messageId, callback);
+            SafeCallback sc = new SafeCallback(commandStore, callback);
+            callbacks.put(messageId, sc);
             node.scheduler().once(() -> {
-                if (callbacks.remove(messageId, callback))
-                    callback.onFailure(to, new Timeout(null, null));
+                if (callbacks.remove(messageId, sc))
+                    sc.timeout(to);
                 }, 2L, TimeUnit.SECONDS);
         }
 
@@ -182,17 +184,17 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
             return;
         }
 
-        Callback callback = callbacks.remove(replyingToMessage);
+        SafeCallback sc = callbacks.remove(replyingToMessage);
 
         if (networkFilter.shouldDiscard(from, replyingToNode, reply))
         {
             logger.info("discarding filtered reply from {} to {}: {}", from, reply, reply);
-            if (callback != null)
-                callback.onFailure(from, new Timeout(null, null));
+            if (sc != null)
+                sc.timeout(from);
             return;
         }
 
-        if (callback == null)
+        if (sc == null)
         {
             logger.warn("Callback not found for reply from {} to {}: {} (msgid: {})", from, replyingToNode, reply, replyingToMessage);
             return;
@@ -202,11 +204,11 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         node.scheduler().now(() -> {
             try
             {
-                callback.onSuccess(from, reply);
+                sc.success(from, reply);
             }
             catch (Throwable t)
             {
-                callback.onCallbackFailure(from, t);
+                sc.failure(from, t);
             }
         });
     }

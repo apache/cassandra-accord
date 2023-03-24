@@ -23,8 +23,9 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
+import accord.local.CommandStore;
+import accord.messages.SafeCallback;
 import accord.utils.RandomSource;
-import accord.coordinate.Timeout;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.MessageSink;
@@ -43,7 +44,7 @@ public class NodeSink implements MessageSink
     final RandomSource random;
 
     int nextMessageId = 0;
-    Map<Long, Callback> callbacks = new LinkedHashMap<>();
+    Map<Long, SafeCallback> callbacks = new LinkedHashMap<>();
 
     public NodeSink(Id self, Function<Id, Node> lookup, Cluster parent, RandomSource random)
     {
@@ -60,39 +61,19 @@ public class NodeSink implements MessageSink
     }
 
     @Override
-    public void send(Id to, Request send, Callback callback)
+    public void send(Id to, Request send, CommandStore commandStore, Callback callback)
     {
         long messageId = nextMessageId++;
-        callbacks.put(messageId, callback);
+        SafeCallback sc = new SafeCallback(commandStore, callback);
+        callbacks.put(messageId, sc);
         parent.add(self, to, messageId, send);
         parent.pending.add((PendingRunnable) () -> {
-            if (callback == callbacks.get(messageId))
-            {
-                try
-                {
-                    callback.onSlowResponse(to);
-                }
-                catch (Throwable t)
-                {
-                    callback.onCallbackFailure(to, t);
-                    lookup.apply(self).agent().onUncaughtException(t);
-                }
-
-            }
+            if (sc == callbacks.get(messageId))
+                sc.slowResponse(to);
         }, 100 + random.nextInt(200), TimeUnit.MILLISECONDS);
         parent.pending.add((PendingRunnable) () -> {
-            if (callback == callbacks.remove(messageId))
-            {
-                try
-                {
-                    callback.onFailure(to, new Timeout(null, null));
-                }
-                catch (Throwable t)
-                {
-                    callback.onCallbackFailure(to, t);
-                    lookup.apply(self).agent().onUncaughtException(t);
-                }
-            }
+            if (sc == callbacks.remove(messageId))
+                sc.timeout(to);
         }, 1000 + random.nextInt(10000), TimeUnit.MILLISECONDS);
     }
 

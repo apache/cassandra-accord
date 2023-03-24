@@ -18,6 +18,7 @@
 
 package accord.impl.mock;
 
+import accord.local.CommandStore;
 import accord.local.Node.Id;
 import accord.messages.Callback;
 import accord.messages.Reply;
@@ -46,13 +47,13 @@ public interface Network
         return new MessageId(messageId);
     }
 
-    void send(Id from, Id to, Request request, Callback callback);
+    void send(Id from, Id to, Request request, CommandStore commandStore, Callback callback);
     void reply(Id from, Id replyingToNode, long replyingToMessage, Reply reply);
 
     Network BLACK_HOLE = new Network()
     {
         @Override
-        public void send(Id from, Id to, Request request, Callback callback)
+        public void send(Id from, Id to, Request request, CommandStore commandStore, Callback callback)
         {
             // TODO (easy, testing): log
         }

@@ -477,12 +477,15 @@ public class Json
         public void write(JsonWriter out, ReadOk value) throws IOException
         {
             out.beginArray();
-            for (Map.Entry<Key, Value> e : ((MaelstromData)value.data).entrySet())
+            if (value.data != null)
             {
-                out.beginArray();
-                ((MaelstromKey)e.getKey()).datum.write(out);
-                e.getValue().write(out);
-                out.endArray();
+                for (Map.Entry<Key, Value> e : ((MaelstromData)value.data).entrySet())
+                {
+                    out.beginArray();
+                    ((MaelstromKey)e.getKey()).datum.write(out);
+                    e.getValue().write(out);
+                    out.endArray();
+                }
             }
             out.endArray();
         }

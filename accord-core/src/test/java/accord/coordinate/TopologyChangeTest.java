@@ -22,8 +22,6 @@ import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
 import accord.local.Command;
 import accord.local.Node;
-import accord.local.PreLoadContext;
-import accord.local.Status;
 import accord.primitives.Range;
 import accord.topology.Topology;
 import accord.primitives.Keys;

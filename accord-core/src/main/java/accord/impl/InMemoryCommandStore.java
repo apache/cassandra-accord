@@ -34,7 +34,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -381,7 +380,6 @@ public abstract class InMemoryCommandStore implements CommandStore
     protected <T> T executeInContext(InMemoryCommandStore commandStore, PreLoadContext context, Function<? super SafeCommandStore, T> function)
     {
         return executeInContext(commandStore, context, function, true);
-
     }
 
     protected <T> void executeInContext(InMemoryCommandStore commandStore, PreLoadContext context, Function<? super SafeCommandStore, T> function, BiConsumer<? super T, Throwable> callback)
@@ -396,6 +394,14 @@ public abstract class InMemoryCommandStore implements CommandStore
             logger.error("Uncaught exception", t);
             callback.accept(null, t);
         }
+    }
+
+    @Override
+    public String toString()
+    {
+        return getClass().getSimpleName() + "{" +
+               "id=" + id +
+               '}';
     }
 
     class RangeCommand
@@ -769,14 +775,16 @@ public abstract class InMemoryCommandStore implements CommandStore
             active = queue.poll();
             while (active != null)
             {
-                try
-                {
-                    active.run();
-                }
-                catch (Throwable t)
-                {
-                    logger.error("Uncaught exception", t);
-                }
+                CommandStore.Unsafe.runWith(this, () -> {
+                    try
+                    {
+                        active.run();
+                    }
+                    catch (Throwable t)
+                    {
+                        logger.error("Uncaught exception", t);
+                    }
+                });
                 active = queue.poll();
             }
         }
@@ -787,6 +795,12 @@ public abstract class InMemoryCommandStore implements CommandStore
             if (!result)
                 throw new IllegalStateException("could not add item to queue");
             maybeRun();
+        }
+
+        @Override
+        public boolean inStore()
+        {
+            return CommandStore.Unsafe.maybeCurrent() == this;
         }
 
         @Override
@@ -837,7 +851,7 @@ public abstract class InMemoryCommandStore implements CommandStore
 
     public static class SingleThread extends InMemoryCommandStore
     {
-        private final AtomicReference<Thread> expectedThread = new AtomicReference<>();
+        private Thread thread; // when run in the executor this will be non-null, null implies not running in this store
         private final ExecutorService executor;
 
         public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
@@ -849,30 +863,27 @@ public abstract class InMemoryCommandStore implements CommandStore
             }));
         }
 
-        private SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder, ExecutorService executor)
+        public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder, ExecutorService executor)
         {
             super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
             this.executor = executor;
-        }
-
-        public static CommandStore.Factory factory(ExecutorService executor)
-        {
-            return (id, time, agent, store, progressLogFactory, rangesForEpoch) -> new SingleThread(id, time, agent, store, progressLogFactory, rangesForEpoch, executor);
+            executor.execute(() -> thread = Thread.currentThread());
         }
 
         void assertThread()
         {
             Thread current = Thread.currentThread();
-            Thread expected;
-            while (true)
-            {
-                expected = expectedThread.get();
-                if (expected != null)
-                    break;
-                expectedThread.compareAndSet(null, Thread.currentThread());
-            }
+            Thread expected = thread;
+            if (expected == null)
+                throw new IllegalStateException(String.format("Command store called from wrong thread; unexpected %s", current));
             if (expected != current)
                 throw new IllegalStateException(String.format("Command store called from the wrong thread. Expected %s, got %s", expected, current));
+        }
+
+        @Override
+        public boolean inStore()
+        {
+            return thread == Thread.currentThread();
         }
 
         @Override

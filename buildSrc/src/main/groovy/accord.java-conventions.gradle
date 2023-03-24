@@ -18,6 +18,7 @@
 
 plugins {
     id 'java'
+    id 'checkstyle'
 }
 
 group   accord_group
@@ -31,6 +32,11 @@ compileJava {
     sourceCompatibility = JavaVersion.VERSION_1_8
 
     dependsOn(':rat')
+}
+
+checkstyle {
+  showViolations = true
+  configDirectory = file("${rootProject.projectDir}/.build/checkstyle")
 }
 
 test {

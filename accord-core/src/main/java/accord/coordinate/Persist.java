@@ -94,13 +94,13 @@ public class Persist implements Callback<ApplyReply>
                     {
                         // TODO (low priority, consider, efficiency): send to non-home replicas also, so they may clear their log more easily?
                         Shard homeShard = node.topology().forEpochIfKnown(route.homeKey(), txnId.epoch());
-                        node.send(homeShard, new InformHomeDurable(txnId, route.homeKey(), executeAt, Durable, persistedOn));
+                        node.send(homeShard, new InformHomeDurable(txnId, route.homeKey(), executeAt, Durable, new HashSet<>(persistedOn)));
                         isDone = true;
                     }
                     else if (!tracker.hasInFlight() && !tracker.hasFailures())
                     {
                         Shard homeShard = node.topology().forEpochIfKnown(route.homeKey(), txnId.epoch());
-                        node.send(homeShard, new InformHomeDurable(txnId, route.homeKey(), executeAt, Universal, persistedOn));
+                        node.send(homeShard, new InformHomeDurable(txnId, route.homeKey(), executeAt, Universal, new HashSet<>(persistedOn)));
                     }
                 }
                 break;

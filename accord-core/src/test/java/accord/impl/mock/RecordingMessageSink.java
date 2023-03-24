@@ -18,6 +18,7 @@
 
 package accord.impl.mock;
 
+import accord.local.CommandStore;
 import accord.local.Node;
 import accord.messages.Callback;
 import accord.messages.Reply;
@@ -62,10 +63,10 @@ public class RecordingMessageSink extends SimpleMessageSink
     }
 
     @Override
-    public void send(Node.Id to, Request request, Callback callback)
+    public void send(Node.Id to, Request request, CommandStore commandStore, Callback callback)
     {
         requests.add(new Envelope<>(to, request, callback));
-        super.send(to, request, callback);
+        super.send(to, request, commandStore, callback);
     }
 
     @Override

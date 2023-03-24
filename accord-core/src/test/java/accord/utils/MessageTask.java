@@ -18,6 +18,7 @@
 
 package accord.utils;
 
+import accord.local.CommandStore;
 import accord.local.Node;
 import accord.messages.*;
 import accord.utils.async.AsyncResults;
@@ -70,6 +71,7 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
     private final List<Node.Id> recipients;
     private final String desc;
     private final Request request;
+    public final CommandStore commandStore;
     private final RetryingCallback callback;
 
     private class TaskRequest implements Request
@@ -117,7 +119,7 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
             Invariants.checkArgument(reply == SUCCESS || reply == FAILURE);
             if (reply == FAILURE)
             {
-                originator.send(from, request, this);
+                originator.send(from, request, commandStore, this);
                 return;
             }
 
@@ -132,7 +134,7 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
         @Override
         public void onFailure(Node.Id from, Throwable failure)
         {
-            originator.send(from, request, this);
+            originator.send(from, request, commandStore, this);
         }
 
         @Override
@@ -151,10 +153,11 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
         this.recipients = ImmutableList.copyOf(recipients);
         this.desc = desc;
         this.request = new TaskRequest(process, desc);
+        this.commandStore = originator.commandStores().any();
         this.callback = new RetryingCallback(recipients);
     }
 
-    public static MessageTask of(Node originator, Collection<Node.Id> recipients, String desc, NodeProcess process)
+    private static MessageTask of(Node originator, Collection<Node.Id> recipients, String desc, NodeProcess process)
     {
         return new MessageTask(originator, new ArrayList<>(recipients), desc, process);
     }
@@ -162,29 +165,32 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
     public static MessageTask begin(Node originator, Collection<Node.Id> recipients, String desc, NodeProcess process)
     {
         MessageTask task = of(originator, recipients, desc, process);
-        task.run();
+        task.schedule();
         return task;
     }
 
     public static MessageTask of(Node originator, Collection<Node.Id> recipients, String desc, BiConsumer<Node, Consumer<Boolean>> consumer)
     {
-        NodeProcess process = (node, from, onDone) -> {
-            consumer.accept(node, onDone);
-        };
+        NodeProcess process = (node, from, onDone) -> consumer.accept(node, onDone);
         return of(originator, recipients, desc, process);
     }
 
     public static MessageTask apply(Node originator, Collection<Node.Id> recipients, String desc, NodeProcess process)
     {
         MessageTask task = of(originator, recipients, desc, process);
-        task.run();
+        task.schedule();
         return task;
+    }
+
+    public void schedule()
+    {
+        commandStore.execute(this);
     }
 
     @Override
     public void run()
     {
-        originator.send(recipients, request, callback);
+        originator.send(recipients, request, commandStore, callback);
     }
 
     @Override

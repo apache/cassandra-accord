@@ -356,7 +356,7 @@ public class BurnTest
         catch (Throwable t)
         {
             logger.error("Exception running burn test for seed {}:", seed, t);
-            throw t;
+            throw SimulationException.wrap(seed, t);
         }
     }
 

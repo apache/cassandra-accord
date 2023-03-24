@@ -18,7 +18,6 @@
 
 package accord.impl.basic;
 
-import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
 import accord.burn.random.FrequentLargeRange;
@@ -58,12 +57,5 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService
     public void execute(Task<?> task)
     {
         pending.add(task, jitterInNano.getLong(random), TimeUnit.NANOSECONDS);
-    }
-
-    public <T> Task<T> submit(Callable<T> fn, long delay, TimeUnit unit)
-    {
-        Task<T> task = newTaskFor(fn);
-        pending.add(task, jitterInNano.getLong(random) + unit.toNanos(delay), TimeUnit.NANOSECONDS);
-        return task;
     }
 }

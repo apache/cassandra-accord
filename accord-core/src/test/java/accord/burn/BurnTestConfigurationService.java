@@ -20,6 +20,7 @@ package accord.burn;
 
 import accord.api.MessageSink;
 import accord.api.TestableConfigurationService;
+import accord.local.CommandStore;
 import accord.utils.RandomSource;
 import accord.local.Node;
 import accord.messages.*;
@@ -213,15 +214,17 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
     {
         private final FetchTopologyRequest request;
         private final List<Node.Id> candidates;
+        private final CommandStore store;
 
         public FetchTopology(long epoch)
         {
             this.request = new FetchTopologyRequest(epoch);
             this.candidates = new ArrayList<>();
-            sendNext();
+            this.store = originator().commandStores().any();
+            store.execute(this::sendNext);
         }
 
-        synchronized void sendNext()
+        void sendNext()
         {
             if (candidates.isEmpty())
             {
@@ -230,7 +233,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
             }
             int idx = randomSupplier.get().nextInt(candidates.size());
             Node.Id node = candidates.remove(idx);
-            messageSink.send(node, request, this);
+            originator().send(node, request, store, this);
         }
 
         @Override
@@ -243,7 +246,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         }
 
         @Override
-        public synchronized void onFailure(Node.Id from, Throwable failure)
+        public void onFailure(Node.Id from, Throwable failure)
         {
             sendNext();
         }
@@ -269,8 +272,13 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
     {
         epochs.acknowledge(epoch);
         Topology topology = getTopologyForEpoch(epoch);
-        Node originator = lookup.apply(node);
+        Node originator = originator();
         topologyUpdates.syncEpoch(originator, epoch - 1, topology.nodes());
+    }
+
+    private Node originator()
+    {
+        return lookup.apply(node);
     }
 
     @Override

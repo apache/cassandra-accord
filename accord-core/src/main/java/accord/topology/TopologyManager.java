@@ -399,7 +399,10 @@ public class TopologyManager implements ConfigurationService.Listener
 
     public Topology localForEpoch(long epoch)
     {
-        return epochs.get(epoch).local();
+        EpochState epochState = epochs.get(epoch);
+        if (epochState == null)
+            throw new IllegalStateException("Unknown epoch " + epoch);
+        return epochState.local();
     }
 
     public Ranges localRangesForEpoch(long epoch)

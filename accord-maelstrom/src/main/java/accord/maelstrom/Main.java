@@ -34,6 +34,7 @@ import accord.coordinate.Timeout;
 import accord.impl.SimpleProgressLog;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.SizeOfIntersectionSorter;
+import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Scheduler;
@@ -112,8 +113,9 @@ public class Main
         }
 
         @Override
-        public void send(Id to, Request send, Callback callback)
+        public void send(Id to, Request send, CommandStore ignored, Callback callback)
         {
+            // CommandStore is ignored due to the fact callbacks are applied in a single thread already
             long messageId = nextMessageId.incrementAndGet();
             callbacks.put(messageId, new CallbackInfo(callback, to, nowSupplier.getAsLong() + 1000L));
             send(new Packet(self, to, messageId, send));

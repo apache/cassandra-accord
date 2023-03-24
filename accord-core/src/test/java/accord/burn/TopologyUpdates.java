@@ -21,8 +21,8 @@ package accord.burn;
 import accord.api.TestableConfigurationService;
 import accord.impl.InMemoryCommandStore;
 import accord.coordinate.FetchData;
-import accord.impl.InMemoryCommandStores;
 import accord.local.Command;
+import accord.local.CommandStore;
 import accord.local.Commands;
 import accord.local.Node;
 import accord.local.Status;
@@ -43,7 +43,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -53,7 +52,6 @@ import static accord.coordinate.Invalidate.invalidate;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.local.Status.*;
 import static accord.local.Status.Known.*;
-import static accord.utils.async.AsyncChains.getUninterruptibly;
 
 public class TopologyUpdates
 {
@@ -142,7 +140,7 @@ public class TopologyUpdates
                         dieExceptionally(invalidate.addCallback(((unused, failure) -> onDone.accept(failure == null))).beginAsResult());
                 }
                 return null;
-            }).beginAsResult();
+            }, node.commandStores().any()).beginAsResult();
             dieExceptionally(sync);
         }
     }
@@ -154,7 +152,8 @@ public class TopologyUpdates
         return (result, throwable) -> {
             if (throwable != null)
             {
-                logger.error("", throwable);
+                logger.error("Unexpected exception", throwable);
+                logger.error("", new Throwable("Shutting down test"));
                 System.exit(1);
             }
         };
@@ -169,6 +168,7 @@ public class TopologyUpdates
     public MessageTask notify(Node originator, Collection<Node.Id> cluster, Topology update)
     {
         pendingTopologies.add(update.epoch());
+        CommandStore.checkNotInStore();
         return MessageTask.begin(originator, cluster, "TopologyNotify:" + update.epoch(), (node, from, onDone) -> {
             long nodeEpoch = node.topology().epoch();
             if (nodeEpoch + 1 < update.epoch())
@@ -215,6 +215,7 @@ public class TopologyUpdates
         Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().withUnsyncedEpochs(cmd.route, syncEpoch + 1).nodes();
 
         Ranges ranges = localTopology.ranges();
+
         List<AsyncChain<Stream<MessageTask>>> work = new ArrayList<>();
         for (long epoch=1; epoch<=syncEpoch; epoch++)
             work.add(syncEpochCommands(node, epoch, ranges, allNodes, syncEpoch, COMMITTED_ONLY));
@@ -276,11 +277,11 @@ public class TopologyUpdates
                     while (iter.hasNext())
                     {
                         MessageTask next = iter.next();
-                        last.addCallback(next);
+                        last.addCallback(next, next.commandStore);
                         last = next;
                     }
 
-                    first.run();
+                    first.schedule();
                     return dieExceptionally(last);
                 });
     }

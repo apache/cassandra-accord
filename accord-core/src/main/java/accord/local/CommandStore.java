@@ -25,8 +25,13 @@ import accord.local.CommandStores.RangesForEpochHolder;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncExecutor;
 
+import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 import java.util.function.Function;
+
+import javax.annotation.Nullable;
+
+import com.google.common.annotations.VisibleForTesting;
 
 /**
  * Single threaded internal shard of accord transaction metadata
@@ -43,7 +48,90 @@ public interface CommandStore extends AsyncExecutor
                             RangesForEpochHolder rangesForEpoch);
     }
 
+    class Internal // java 8 doesn't allow an interface to have private fields, so use this wrapper to hide the field
+    {
+        private static final ThreadLocal<CommandStore> CURRENT_STORE = new ThreadLocal<>();
+    }
+
+    @VisibleForTesting
+    class Unsafe
+    {
+        @Nullable
+        public static CommandStore maybeCurrent()
+        {
+            return Internal.CURRENT_STORE.get();
+        }
+
+        public static void register(CommandStore store)
+        {
+            Internal.CURRENT_STORE.set(store);
+        }
+
+        public static void remove()
+        {
+            Internal.CURRENT_STORE.remove();
+        }
+
+        public static void runWith(CommandStore store, Runnable fn)
+        {
+            CommandStore prev = maybeCurrent();
+            register(store);
+            try
+            {
+                fn.run();
+            }
+            finally
+            {
+                if (prev == null) remove();
+                else register(prev);
+            }
+        }
+
+        public static <T> T runWith(CommandStore store, Callable<T> fn) throws Exception
+        {
+            CommandStore prev = maybeCurrent();
+            register(store);
+            try
+            {
+                return fn.call();
+            }
+            finally
+            {
+                if (prev == null) remove();
+                else register(prev);
+            }
+        }
+    }
+
+    static CommandStore current()
+    {
+        CommandStore cs = Internal.CURRENT_STORE.get();
+        if (cs == null) throw new IllegalStateException("Attempted to access current CommandStore, but not running in a CommandStore");
+        return cs;
+    }
+
+    static void register(CommandStore store)
+    {
+        if (!store.inStore())
+            throw new IllegalStateException("Unable to register a CommandStore when not running in it; store " + store);
+        Internal.CURRENT_STORE.set(store);
+    }
+
+    static void checkInStore()
+    {
+        CommandStore store = Unsafe.maybeCurrent();
+        if (store == null) throw new IllegalStateException("Expected to be running in a CommandStore but is not");
+    }
+
+    static void checkNotInStore()
+    {
+        CommandStore store = Unsafe.maybeCurrent();
+        if (store != null)
+            throw new IllegalStateException("Expected to not be running in a CommandStore, but running in " + store);
+    }
+
     int id();
+    boolean inStore();
     Agent agent();
     AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer);
     <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);
