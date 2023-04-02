@@ -31,6 +31,7 @@ import accord.api.Scheduler;
 import accord.impl.mock.MockCluster.Clock;
 import accord.primitives.*;
 import accord.topology.Topology;
+import accord.utils.AccordConfig;
 import accord.utils.DefaultRandom;
 import accord.utils.EpochFunction;
 import accord.utils.ThreadPoolScheduler;
@@ -69,6 +70,7 @@ public class PreAcceptTest
         MockStore store = new MockStore();
         Scheduler scheduler = new ThreadPoolScheduler();
         return new Node(nodeId,
+                        new AccordConfig(),
                         messageSink,
                         new MockConfigurationService(messageSink, EpochFunction.noop(), TOPOLOGY),
                         clock,

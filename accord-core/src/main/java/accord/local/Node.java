@@ -25,6 +25,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
@@ -34,6 +35,7 @@ import accord.coordinate.*;
 import accord.messages.*;
 import accord.primitives.*;
 import accord.primitives.Routable.Domain;
+import accord.utils.AccordConfig;
 import accord.utils.MapReduceConsume;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResult;
@@ -131,9 +133,9 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     // TODO (expected, liveness): monitor the contents of this collection for stalled coordination, and excise them
     private final Map<TxnId, AsyncResult<? extends Outcome>> coordinating = new ConcurrentHashMap<>();
 
-    public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier,
+    public Node(Id id, AccordConfig config, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier,
                 Supplier<DataStore> dataSupplier, ShardDistributor shardDistributor, Agent agent, RandomSource random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
-                Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory)
+                BiFunction<Node, AccordConfig, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory)
     {
         this.id = id;
         this.messageSink = messageSink;
@@ -145,7 +147,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.agent = agent;
         this.random = random;
         this.scheduler = scheduler;
-        this.commandStores = factory.create(this, agent, dataSupplier.get(), shardDistributor, progressLogFactory.apply(this));
+        this.commandStores = factory.create(this, agent, dataSupplier.get(), shardDistributor, progressLogFactory.apply(this, config));
 
         configService.registerListener(this);
         onTopologyUpdate(topology, false);
