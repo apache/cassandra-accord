@@ -40,6 +40,7 @@ import accord.api.Scheduler;
 import accord.local.ShardDistributor;
 import accord.messages.ReplyContext;
 import accord.topology.Topology;
+import accord.utils.AccordConfig;
 import accord.utils.DefaultRandom;
 import accord.utils.ThreadPoolScheduler;
 import accord.maelstrom.Packet.Type;
@@ -160,7 +161,7 @@ public class Main
             MaelstromInit init = (MaelstromInit) packet.body;
             topology = topologyFactory.toTopology(init.cluster);
             sink = new StdoutSink(System::currentTimeMillis, scheduler, start, init.self, out, err);
-            on = new Node(init.self, sink, new SimpleConfigService(topology), System::currentTimeMillis,
+            on = new Node(init.self, new AccordConfig(), sink, new SimpleConfigService(topology), System::currentTimeMillis,
                           MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                           MaelstromAgent.INSTANCE, new DefaultRandom(), scheduler, SizeOfIntersectionSorter.SUPPLIER,
                           SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new);

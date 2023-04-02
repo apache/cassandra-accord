@@ -30,6 +30,8 @@ import accord.local.Status.Known;
 import accord.primitives.*;
 import accord.topology.Topology;
 import com.google.common.collect.Lists;
+
+import accord.utils.AccordConfig;
 import accord.utils.DefaultRandom;
 
 import org.junit.jupiter.api.Assertions;
@@ -95,9 +97,9 @@ public class ImmutableCommandTest
 
     private static Node createNode(Id id, CommandStoreSupport storeSupport)
     {
-        return new Node(id, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
+        return new Node(id, new AccordConfig(), null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
                         new MockCluster.Clock(100), () -> storeSupport.data, new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), new TestAgent(), new DefaultRandom(), null,
-                        SizeOfIntersectionSorter.SUPPLIER, ignore -> ignore2 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new);
+                        SizeOfIntersectionSorter.SUPPLIER, (ignore, ignore2) -> ignore3 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new);
     }
 
     @Test

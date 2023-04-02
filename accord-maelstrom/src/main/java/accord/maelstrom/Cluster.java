@@ -53,6 +53,7 @@ import accord.messages.ReplyContext;
 import accord.messages.Request;
 import accord.api.Scheduler;
 import accord.topology.Topology;
+import accord.utils.AccordConfig;
 import accord.utils.RandomSource;
 
 // TODO (low priority, testing): merge with accord.impl.basic.Cluster
@@ -307,7 +308,7 @@ public class Cluster implements Scheduler
             for (Id node : nodes)
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
-                lookup.put(node, new Node(node, messageSink, new SimpleConfigService(topology),
+                lookup.put(node, new Node(node, new AccordConfig(), messageSink, new SimpleConfigService(topology),
                                           nowSupplier.get(), MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                                           MaelstromAgent.INSTANCE,
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,

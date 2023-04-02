@@ -26,6 +26,7 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.ShardDistributor;
 import accord.primitives.Ranges;
+import accord.utils.AccordConfig;
 import accord.utils.DefaultRandom;
 import accord.utils.EpochFunction;
 import accord.utils.RandomSource;
@@ -105,6 +106,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         MessageSink messageSink = messageSinkFactory.apply(id, this);
         MockConfigurationService configurationService = new MockConfigurationService(messageSink, onFetchTopology, topology);
         return new Node(id,
+                        new AccordConfig(),
                         messageSink,
                         configurationService,
                         nowSupplier,

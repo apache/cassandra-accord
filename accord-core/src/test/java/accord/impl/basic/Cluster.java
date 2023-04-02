@@ -49,6 +49,7 @@ import accord.messages.Reply;
 import accord.messages.Request;
 import accord.topology.TopologyRandomizer;
 import accord.topology.Topology;
+import accord.utils.AccordConfig;
 import accord.utils.RandomSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -219,7 +220,7 @@ public class Cluster implements Scheduler
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(node, messageSink, randomSupplier, topology, lookup::get, topologyUpdates);
-                lookup.put(node, new Node(node, messageSink, configService, nowSupplier.get(),
+                lookup.put(node, new Node(node, new AccordConfig(), messageSink, configService, nowSupplier.get(),
                                           () -> new ListStore(node), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
                                           new ListAgent(30L, onFailure),
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,

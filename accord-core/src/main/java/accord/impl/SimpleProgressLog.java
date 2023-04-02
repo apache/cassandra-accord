@@ -29,6 +29,7 @@ import java.util.function.BiConsumer;
 
 import javax.annotation.Nullable;
 
+import accord.utils.AccordConfig;
 import accord.utils.IntrusiveLinkedList;
 import accord.utils.IntrusiveLinkedListNode;
 import accord.coordinate.*;
@@ -88,11 +89,13 @@ public class SimpleProgressLog implements ProgressLog.Factory
     enum DisseminateStatus { NotExecuted, Durable, Done }
 
     final Node node;
+    final AccordConfig config;
     final List<Instance> instances = new CopyOnWriteArrayList<>();
 
-    public SimpleProgressLog(Node node)
+    public SimpleProgressLog(Node node, AccordConfig config)
     {
         this.node = node;
+        this.config = config;
     }
 
     class Instance extends IntrusiveLinkedList<Instance.State.Monitoring> implements ProgressLog, Runnable
@@ -822,7 +825,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 return;
 
             isScheduled = true;
-            node.scheduler().once(() -> commandStore.execute(PreLoadContext.empty(), ignore -> run()).begin(commandStore.agent()), 200L, TimeUnit.MILLISECONDS);
+            node.scheduler().once(() -> commandStore.execute(PreLoadContext.empty(), ignore -> run()).begin(commandStore.agent()), config.progress_log_scheduler_delay_in_ms, TimeUnit.MILLISECONDS);
         }
 
         @Override
