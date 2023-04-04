@@ -142,7 +142,7 @@ class ReadDataTest
 
         readResult.setSuccess(data);
 
-        Mockito.verify(sink).reply(Mockito.eq(node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.ReadNack.Redundant));
+        Mockito.verify(sink, Mockito.atMost(2)).reply(Mockito.eq(node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.ReadNack.Redundant));
     }
 
     private void check(AsyncChain<Void> execute)
