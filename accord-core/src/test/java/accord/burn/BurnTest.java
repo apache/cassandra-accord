@@ -257,7 +257,7 @@ public class BurnTest
                 int start = starts[(int)packet.replyId];
                 int end = clock.incrementAndGet();
 
-//                logger.debug("{} at [{}, {}]", reply, start, end);
+                logger.debug("{} at [{}, {}]", reply, start, end);
 
                 replies[(int)packet.replyId] = packet;
                 if (reply.responseKeys == null)
