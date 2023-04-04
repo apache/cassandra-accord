@@ -79,7 +79,7 @@ public class ListRead implements Read
                         result.put(e.getKey(), e.getValue());
             }
             return result;
-        });
+        }, 1, TimeUnit.SECONDS);
     }
 
     @Override

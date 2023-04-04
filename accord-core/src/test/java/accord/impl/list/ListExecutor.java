@@ -18,6 +18,7 @@
 
 package accord.impl.list;
 
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import accord.local.CommandStore;
@@ -27,6 +28,7 @@ import accord.utils.async.AsyncChain;
 public interface ListExecutor
 {
     <T> AsyncChain<T> submit(Supplier<T> fn);
+    <T> AsyncChain<T> submit(Supplier<T> fn, long delay, TimeUnit unit);
 
     AsyncChain<Void> execute(Runnable fn);
 
@@ -38,6 +40,12 @@ public interface ListExecutor
             public <T> AsyncChain<T> submit(Supplier<T> fn)
             {
                 return store.submit(PreLoadContext.empty(), ignore -> fn.get());
+            }
+
+            @Override
+            public <T> AsyncChain<T> submit(Supplier<T> fn, long delay, TimeUnit unit)
+            {
+                return submit(fn);
             }
 
             @Override
