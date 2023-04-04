@@ -18,20 +18,14 @@
 
 package accord.impl.basic;
 
+import java.util.concurrent.TimeUnit;
+
 import accord.burn.random.FrequentLargeRange;
 import accord.burn.random.RandomLong;
 import accord.burn.random.RandomWalkRange;
 import accord.utils.RandomSource;
 
-import java.util.Collections;
-import java.util.List;
-import java.util.concurrent.AbstractExecutorService;
-import java.util.concurrent.Callable;
-import java.util.concurrent.Executors;
-import java.util.concurrent.FutureTask;
-import java.util.concurrent.TimeUnit;
-
-public class SimulatedDelayedExecutorService extends AbstractExecutorService
+public class SimulatedDelayedExecutorService extends TaskExecutorService
 {
     private final PendingQueue pending;
     private final RandomSource random;
@@ -44,10 +38,9 @@ public class SimulatedDelayedExecutorService extends AbstractExecutorService
         // this is different from Apache Cassandra Simulator as this is computed differently for each executor
         // rather than being a global config
         double ratio = random.nextInt(1, 11) / 100.0D;
-        this.jitterInNano = new FrequentLargeRange(
-                new RandomWalkRange(random, microToNanos(0), microToNanos(50)),
-                new RandomWalkRange(random, microToNanos(50), msToNanos(5)),
-                ratio);
+        this.jitterInNano = new FrequentLargeRange(new RandomWalkRange(random, microToNanos(0), microToNanos(50)),
+                                                   new RandomWalkRange(random, microToNanos(50), msToNanos(5)),
+                                                   ratio);
     }
 
     private static int msToNanos(int value)
@@ -61,63 +54,8 @@ public class SimulatedDelayedExecutorService extends AbstractExecutorService
     }
 
     @Override
-    protected <T> Task<T> newTaskFor(Runnable runnable, T value)
+    public void execute(Task<?> task)
     {
-        return newTaskFor(Executors.callable(runnable, value));
-    }
-
-    @Override
-    protected <T> Task<T> newTaskFor(Callable<T> callable)
-    {
-        return new Task<>(callable);
-    }
-
-    private Task<?> newTaskFor(Runnable command)
-    {
-        return command instanceof Task ? (Task<?>) command : newTaskFor(command, null);
-    }
-
-    @Override
-    public void execute(Runnable command)
-    {
-        pending.add(newTaskFor(command), jitterInNano.getLong(random), TimeUnit.NANOSECONDS);
-    }
-
-    @Override
-    public void shutdown()
-    {
-    }
-
-    @Override
-    public List<Runnable> shutdownNow()
-    {
-        return Collections.emptyList();
-    }
-
-    @Override
-    public boolean isShutdown()
-    {
-        return false;
-    }
-
-    @Override
-    public boolean isTerminated()
-    {
-        return false;
-    }
-
-    @Override
-    public boolean awaitTermination(long timeout, TimeUnit unit)
-    {
-        return false;
-    }
-
-
-    private static class Task<T> extends FutureTask<T> implements Pending
-    {
-        public Task(Callable<T> fn)
-        {
-            super(fn);
-        }
+        pending.add(task, jitterInNano.getLong(random), TimeUnit.NANOSECONDS);
     }
 }

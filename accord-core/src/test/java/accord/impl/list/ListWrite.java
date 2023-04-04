@@ -20,23 +20,33 @@ package accord.impl.list;
 
 import java.util.Arrays;
 import java.util.TreeMap;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import accord.api.Key;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import accord.api.DataStore;
+import accord.api.Key;
 import accord.api.Write;
+import accord.local.CommandStore;
 import accord.local.SafeCommandStore;
 import accord.primitives.Seekable;
 import accord.primitives.Timestamp;
 import accord.primitives.Writes;
 import accord.utils.Timestamped;
 import accord.utils.async.AsyncChain;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class ListWrite extends TreeMap<Key, int[]> implements Write
 {
     private static final Logger logger = LoggerFactory.getLogger(ListWrite.class);
+
+    private final Function<CommandStore, ListExecutor> executor;
+
+    public ListWrite(Function<CommandStore, ListExecutor> executor)
+    {
+        this.executor = executor;
+    }
 
     @Override
     public AsyncChain<Void> apply(Seekable key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
@@ -44,10 +54,11 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
         ListStore s = (ListStore) store;
         if (!containsKey(key))
             return Writes.SUCCESS;
-        int[] data = get(key);
-        s.data.merge((Key)key, new Timestamped<>(executeAt, data), Timestamped::merge);
-        logger.trace("WRITE on {} at {} key:{} -> {}", s.node, executeAt, key, data);
-        return Writes.SUCCESS;
+        return executor.apply(commandStore.commandStore()).execute(() -> {
+            int[] data = get(key);
+            s.data.merge((Key)key, new Timestamped<>(executeAt, data), Timestamped::merge);
+            logger.trace("WRITE on {} at {} key:{} -> {}", s.node, executeAt, key, data);
+        });
     }
 
     @Override

@@ -21,17 +21,26 @@ package accord.impl.list;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import accord.api.Key;
 import accord.api.Data;
+import accord.api.Key;
 import accord.api.Update;
-import accord.primitives.Ranges;
+import accord.local.CommandStore;
 import accord.primitives.Keys;
+import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 
 public class ListUpdate extends TreeMap<Key, Integer> implements Update
 {
+    private final Function<CommandStore, ListExecutor> executor;
+
+    public ListUpdate(Function<CommandStore, ListExecutor> executor)
+    {
+        this.executor = executor;
+    }
+
     @Override
     public Seekables<?, ?> keys()
     {
@@ -41,7 +50,7 @@ public class ListUpdate extends TreeMap<Key, Integer> implements Update
     @Override
     public ListWrite apply(Data read)
     {
-        ListWrite write = new ListWrite();
+        ListWrite write = new ListWrite(executor);
         Map<Key, int[]> data = (ListData)read;
         for (Map.Entry<Key, Integer> e : entrySet())
             write.put(e.getKey(), append(data.get(e.getKey()), e.getValue()));
@@ -51,7 +60,7 @@ public class ListUpdate extends TreeMap<Key, Integer> implements Update
     @Override
     public Update slice(Ranges ranges)
     {
-        ListUpdate result = new ListUpdate();
+        ListUpdate result = new ListUpdate(executor);
         for (Map.Entry<Key, Integer> e : entrySet())
         {
             if (ranges.contains(e.getKey()))
@@ -63,7 +72,7 @@ public class ListUpdate extends TreeMap<Key, Integer> implements Update
     @Override
     public Update merge(Update other)
     {
-        ListUpdate result = new ListUpdate();
+        ListUpdate result = new ListUpdate(executor);
         result.putAll(this);
         result.putAll((ListUpdate) other);
         return result;

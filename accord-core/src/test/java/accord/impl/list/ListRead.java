@@ -19,6 +19,10 @@
 package accord.impl.list;
 
 import accord.api.*;
+import accord.impl.basic.DelayedCommandStores;
+import accord.impl.basic.SimulatedDelayedExecutorService;
+import accord.local.CommandStore;
+import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
 import accord.primitives.*;
 import accord.primitives.Ranges;
@@ -31,16 +35,21 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 public class ListRead implements Read
 {
     private static final Logger logger = LoggerFactory.getLogger(ListRead.class);
 
+    private final Function<CommandStore, ListExecutor> executor;
     public final Seekables<?, ?> readKeys;
     public final Seekables<?, ?> keys;
 
-    public ListRead(Seekables<?, ?> readKeys, Seekables<?, ?> keys)
+    public ListRead(Function<CommandStore, ListExecutor> executor, Seekables<?, ?> readKeys, Seekables<?, ?> keys)
     {
+        this.executor = executor;
         this.readKeys = readKeys;
         this.keys = keys;
     }
@@ -55,32 +64,34 @@ public class ListRead implements Read
     public AsyncChain<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
     {
         ListStore s = (ListStore)store;
-        ListData result = new ListData();
-        switch (key.domain())
-        {
-            default: throw new AssertionError();
-            case Key:
-                int[] data = s.get((Key)key);
-                logger.trace("READ on {} at {} key:{} -> {}", s.node, executeAt, key, data);
-                result.put((Key)key, data);
-                break;
-            case Range:
-                for (Map.Entry<Key, int[]> e : s.get((Range)key))
-                    result.put(e.getKey(), e.getValue());
-        }
-        return AsyncChains.success(result);
+        return executor.apply(commandStore.commandStore()).submit(() -> {
+            ListData result = new ListData();
+            switch (key.domain())
+            {
+                default: throw new AssertionError();
+                case Key:
+                    int[] data = s.get((Key)key);
+                    logger.trace("READ on {} at {} key:{} -> {}", s.node, executeAt, key, data);
+                    result.put((Key)key, data);
+                    break;
+                case Range:
+                    for (Map.Entry<Key, int[]> e : s.get((Range)key))
+                        result.put(e.getKey(), e.getValue());
+            }
+            return result;
+        });
     }
 
     @Override
     public Read slice(Ranges ranges)
     {
-        return new ListRead(readKeys.slice(ranges), keys.slice(ranges));
+        return new ListRead(executor, readKeys.slice(ranges), keys.slice(ranges));
     }
 
     @Override
     public Read merge(Read other)
     {
-        return new ListRead(((Seekables)readKeys).with(((ListRead)other).readKeys), ((Seekables)keys).with(((ListRead)other).keys));
+        return new ListRead(executor, ((Seekables)readKeys).with(((ListRead)other).readKeys), ((Seekables)keys).with(((ListRead)other).keys));
     }
 
     @Override
