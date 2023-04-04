@@ -610,6 +610,8 @@ public class StrictSerializabilityVerifier
             {
                 if (maybeWrite >= 0)
                 {
+                    if (IntStream.of(sequence).anyMatch(i -> i == maybeWrite))
+                        throw new HistoryViolation(key, "Attempted to write " + maybeWrite + " which is already found in the seq; seq=" + Arrays.toString(sequence));
                     sequence = Arrays.copyOf(sequence, sequence.length + 1);
                     sequence[sequence.length - 1] = maybeWrite;
                 }

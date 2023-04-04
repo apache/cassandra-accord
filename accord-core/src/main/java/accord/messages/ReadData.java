@@ -22,23 +22,35 @@ import java.util.BitSet;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
+import javax.annotation.Nullable;
 
-import accord.primitives.*;
-
-import accord.local.*;
-import accord.api.Data;
-import accord.topology.Topologies;
-import accord.utils.Invariants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
+import accord.api.Data;
+import accord.local.Command;
+import accord.local.CommandListener;
+import accord.local.CommandStore;
+import accord.local.Node;
+import accord.local.PreLoadContext;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.local.Status;
+import accord.primitives.Keys;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.topology.Topologies;
+import accord.utils.Invariants;
+import accord.utils.MapReduceConsume;
 
 import static accord.local.Status.Committed;
 import static accord.messages.MessageType.READ_RSP;
 import static accord.messages.ReadData.ReadNack.NotCommitted;
 import static accord.messages.ReadData.ReadNack.Redundant;
-import static accord.messages.TxnRequest.*;
+import static accord.messages.TxnRequest.computeScope;
+import static accord.messages.TxnRequest.computeWaitForEpoch;
+import static accord.messages.TxnRequest.latestRelevantEpochIndex;
 import static accord.utils.MapReduceConsume.forEach;
 
 // TODO (required, efficiency): dedup - can currently have infinite pending reads that will be executed independently
@@ -219,7 +231,57 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
         // and prevents races where we respond before dispatching all the required reads (if the reads are
         // completing faster than the reads can be setup on all required shards)
         if (-1 == --waitingOnCount)
-            node.reply(replyTo, replyContext, new ReadOk(data));
+        {
+            // It is possible that the status changed between the read call and the result, double check that the status
+            // has not changed and is safe to return the read
+            node.mapReduceConsumeLocal(this, readScope, executeAtEpoch, executeAtEpoch, new MapReduceConsume<SafeCommandStore, Status>()
+            {
+                @Override
+                public void accept(Status status, Throwable failure)
+                {
+                    if (failure != null)
+                    {
+                        ReadData.this.accept(null, failure);
+                    }
+                    else
+                    {
+                        switch (status)
+                        {
+                            case PreApplied:
+                            case Applied:
+                            case Invalidated:
+                                logger.debug("After the read completed for txn {}, the status was changed to {}; marking the read as Redundant", txnId, status);
+                                isObsolete = true;
+                                node.reply(replyTo, replyContext, Redundant);
+                                break;
+                            case ReadyToExecute:
+                                node.reply(replyTo, replyContext, new ReadOk(data));
+                                break;
+                            default:
+                                throw new IllegalStateException("Unexpected status detected: " + status);
+                        }
+                    }
+                }
+
+                @Override
+                public Status apply(SafeCommandStore safeStore)
+                {
+                    return safeStore.command(txnId).current().status();
+                }
+
+                @Override
+                public Status reduce(Status o1, Status o2)
+                {
+                    int rc = o1.phase.compareTo(o2.phase);
+                    if (rc > 0) return o1;
+                    if (rc < 0) return o2;
+                    rc = o1.compareTo(o2);
+                    if (rc > 0) return o1;
+                    if (rc < 0) return o2;
+                    return o1;
+                }
+            });
+        }
     }
 
     private synchronized void readComplete(CommandStore commandStore, Data result)
