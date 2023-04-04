@@ -29,6 +29,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -209,6 +210,12 @@ public class BurnTest
             }
 
             @Override
+            public <T> AsyncChain<T> submit(Supplier<T> fn, long delay, TimeUnit unit)
+            {
+                return globalExecutor.submit(fn::get, delay, unit);
+            }
+
+            @Override
             public AsyncChain<Void> execute(Runnable fn)
             {
                 return globalExecutor.submit(fn).map(ignore -> null);
@@ -346,7 +353,6 @@ public class BurnTest
     @Test
     public void testOne()
     {
-        for (int i = 0; i < 99999; i++)
         run(ThreadLocalRandom.current().nextLong());
     }
 
