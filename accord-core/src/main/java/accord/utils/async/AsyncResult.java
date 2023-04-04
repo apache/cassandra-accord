@@ -79,7 +79,11 @@ public interface AsyncResult<V> extends AsyncChain<V>
         default void setFailure(Throwable throwable)
         {
             if (!tryFailure(throwable))
-                throw new IllegalStateException("Result has already been set on " + this);
+            {
+                IllegalStateException e = new IllegalStateException("Result has already been set on " + this);
+                e.addSuppressed(throwable);
+                throw e;
+            }
         }
 
         default BiConsumer<V, Throwable> settingCallback()
