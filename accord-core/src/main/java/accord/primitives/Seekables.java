@@ -25,7 +25,7 @@ import static accord.primitives.Routables.Slice.Overlapping;
 /**
  * Either a Route or a collection of Routable
  */
-public interface Seekables<K extends Seekable, U extends Seekables<K, ?>> extends Routables<K, U>
+public interface Seekables<K extends Seekable, U extends Seekables<K, U>> extends Routables<K, U>
 {
     @Override
     default U slice(Ranges ranges) { return slice(ranges, Overlapping); }

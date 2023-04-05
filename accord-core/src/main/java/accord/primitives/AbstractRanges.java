@@ -33,7 +33,7 @@ import static accord.utils.ArrayBuffers.cachedRanges;
 import static accord.utils.SortedArrays.Search.FAST;
 import static accord.utils.SortedArrays.swapHighLow32b;
 
-public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements Iterable<Range>, Routables<Range, RS>
+public abstract class AbstractRanges<RS extends Routables<Range, RS>> implements Iterable<Range>, Routables<Range, RS>
 {
     static final Range[] NO_RANGES = new Range[0];
 

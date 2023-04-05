@@ -23,7 +23,7 @@ import accord.api.RoutingKey;
 /**
  * Either a Route or a simple collection of keys or ranges
  */
-public interface Unseekables<K extends Unseekable, U extends Unseekables<K, ?>> extends Iterable<K>, Routables<K, U>
+public interface Unseekables<K extends Unseekable, U extends Unseekables<K, U>> extends Iterable<K>, Routables<K, U>
 {
     enum UnseekablesKind
     {
