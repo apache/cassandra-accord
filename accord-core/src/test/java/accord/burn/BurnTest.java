@@ -72,7 +72,7 @@ public class BurnTest
 {
     private static final Logger logger = LoggerFactory.getLogger(BurnTest.class);
 
-    static List<Packet> generate(RandomSource random, Function<CommandStore, AsyncExecutor> executor, List<Id> clients, List<Id> nodes, int keyCount, int operations)
+    static List<Packet> generate(RandomSource random, Function<? super CommandStore, AsyncExecutor> executor, List<Id> clients, List<Id> nodes, int keyCount, int operations)
     {
         List<Key> keys = new ArrayList<>();
         for (int i = 0 ; i < keyCount ; ++i)
@@ -80,6 +80,7 @@ public class BurnTest
 
         List<Packet> packets = new ArrayList<>();
         int[] next = new int[keyCount];
+        double readInCommandStore = random.nextDouble();
 
         for (int count = 0 ; count < operations ; ++count)
         {
@@ -97,7 +98,7 @@ public class BurnTest
                     requestRanges.add(IntHashKey.range(forHash(i), forHash(j)));
                 }
                 Ranges ranges = Ranges.of(requestRanges.toArray(new Range[0]));
-                ListRead read = new ListRead(executor, ranges, ranges);
+                ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, ranges, ranges);
                 ListQuery query = new ListQuery(client, count);
                 ListRequest request = new ListRequest(new Txn.InMemory(ranges, read, query, null));
                 packets.add(new Packet(client, node, count, request));
@@ -124,7 +125,7 @@ public class BurnTest
                 Keys readKeys = new Keys(requestKeys);
                 if (isWrite)
                     requestKeys.addAll(update.keySet());
-                ListRead read = new ListRead(executor, readKeys, new Keys(requestKeys));
+                ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, readKeys, new Keys(requestKeys));
                 ListQuery query = new ListQuery(client, count);
                 ListRequest request = new ListRequest(new Txn.InMemory(new Keys(requestKeys), read, query, update));
                 packets.add(new Packet(client, node, count, request));
@@ -333,6 +334,7 @@ public class BurnTest
     @Test
     public void testOne()
     {
+        for (; true; )
         run(ThreadLocalRandom.current().nextLong());
     }
 

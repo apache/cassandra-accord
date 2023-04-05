@@ -42,9 +42,9 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
 {
     private static final Logger logger = LoggerFactory.getLogger(ListWrite.class);
 
-    private final Function<CommandStore, AsyncExecutor> executor;
+    private final Function<? super CommandStore, AsyncExecutor> executor;
 
-    public ListWrite(Function<CommandStore, AsyncExecutor> executor)
+    public ListWrite(Function<? super CommandStore, AsyncExecutor> executor)
     {
         this.executor = executor;
     }

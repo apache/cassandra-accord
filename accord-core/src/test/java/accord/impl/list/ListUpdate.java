@@ -35,9 +35,9 @@ import accord.utils.async.AsyncExecutor;
 
 public class ListUpdate extends TreeMap<Key, Integer> implements Update
 {
-    private final Function<CommandStore, AsyncExecutor> executor;
+    private final Function<? super CommandStore, AsyncExecutor> executor;
 
-    public ListUpdate(Function<CommandStore, AsyncExecutor> executor)
+    public ListUpdate(Function<? super CommandStore, AsyncExecutor> executor)
     {
         this.executor = executor;
     }

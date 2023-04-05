@@ -43,11 +43,11 @@ public class ListRead implements Read
 {
     private static final Logger logger = LoggerFactory.getLogger(ListRead.class);
 
-    private final Function<CommandStore, AsyncExecutor> executor;
+    private final Function<? super CommandStore, AsyncExecutor> executor;
     public final Seekables<?, ?> readKeys;
     public final Seekables<?, ?> keys;
 
-    public ListRead(Function<CommandStore, AsyncExecutor> executor, Seekables<?, ?> readKeys, Seekables<?, ?> keys)
+    public ListRead(Function<? super CommandStore, AsyncExecutor> executor, Seekables<?, ?> readKeys, Seekables<?, ?> keys)
     {
         this.executor = executor;
         this.readKeys = readKeys;

@@ -809,6 +809,29 @@ public abstract class InMemoryCommandStore implements CommandStore
         }
 
         @Override
+        public <T> AsyncChain<T> submit(Callable<T> task)
+        {
+            return new AsyncChains.Head<T>()
+            {
+                @Override
+                protected void start(BiConsumer<? super T, Throwable> callback)
+                {
+                    enqueueAndRun(() -> {
+                        try
+                        {
+                            callback.accept(task.call(), null);
+                        }
+                        catch (Throwable t)
+                        {
+                            logger.error("Uncaught exception", t);
+                            callback.accept(null, t);
+                        }
+                    });
+                }
+            };
+        }
+
+        @Override
         public void shutdown() {}
     }
 
@@ -862,6 +885,12 @@ public abstract class InMemoryCommandStore implements CommandStore
         public <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> function)
         {
             return AsyncChains.ofCallable(executor, () -> executeInContext(this, context, function));
+        }
+
+        @Override
+        public <T> AsyncChain<T> submit(Callable<T> task)
+        {
+            return AsyncChains.ofCallable(executor, task);
         }
 
         @Override
