@@ -252,7 +252,6 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
             if (isObsolete)
             {
                 logger.debug("After the read completed for txn {}, the result was marked obsolete", txnId);
-                node.reply(replyTo, replyContext, Redundant);
             }
             else
             {
