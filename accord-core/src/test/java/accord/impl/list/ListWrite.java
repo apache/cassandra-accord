@@ -36,14 +36,15 @@ import accord.primitives.Timestamp;
 import accord.primitives.Writes;
 import accord.utils.Timestamped;
 import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncExecutor;
 
 public class ListWrite extends TreeMap<Key, int[]> implements Write
 {
     private static final Logger logger = LoggerFactory.getLogger(ListWrite.class);
 
-    private final Function<CommandStore, ListExecutor> executor;
+    private final Function<CommandStore, AsyncExecutor> executor;
 
-    public ListWrite(Function<CommandStore, ListExecutor> executor)
+    public ListWrite(Function<CommandStore, AsyncExecutor> executor)
     {
         this.executor = executor;
     }
@@ -54,10 +55,11 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
         ListStore s = (ListStore) store;
         if (!containsKey(key))
             return Writes.SUCCESS;
-        return executor.apply(commandStore.commandStore()).execute(() -> {
+        return executor.apply(commandStore.commandStore()).submit(() -> {
             int[] data = get(key);
             s.data.merge((Key)key, new Timestamped<>(executeAt, data), Timestamped::merge);
             logger.trace("WRITE on {} at {} key:{} -> {}", s.node, executeAt, key, data);
+            return null;
         });
     }
 

@@ -31,12 +31,13 @@ import accord.local.CommandStore;
 import accord.primitives.Keys;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
+import accord.utils.async.AsyncExecutor;
 
 public class ListUpdate extends TreeMap<Key, Integer> implements Update
 {
-    private final Function<CommandStore, ListExecutor> executor;
+    private final Function<CommandStore, AsyncExecutor> executor;
 
-    public ListUpdate(Function<CommandStore, ListExecutor> executor)
+    public ListUpdate(Function<CommandStore, AsyncExecutor> executor)
     {
         this.executor = executor;
     }

@@ -23,14 +23,14 @@ import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.RunnableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import accord.utils.async.AsyncExecutor;
 import accord.utils.async.AsyncResults;
 
-public abstract class TaskExecutorService extends AbstractExecutorService
+public abstract class TaskExecutorService extends AbstractExecutorService implements AsyncExecutor
 {
     public static class Task<T> extends AsyncResults.SettableResult<T> implements Pending, RunnableFuture<T>
     {

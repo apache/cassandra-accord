@@ -29,41 +29,41 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 
-import accord.impl.basic.SimulatedDelayedExecutorService;
-import accord.impl.list.ListExecutor;
-import accord.local.CommandStore;
-import accord.utils.DefaultRandom;
-import accord.utils.RandomSource;
+import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import accord.api.Key;
 import accord.impl.IntHashKey;
-import accord.impl.basic.Cluster;
-import accord.impl.basic.PropagatingPendingQueue;
-import accord.impl.basic.RandomDelayQueue.Factory;
 import accord.impl.TopologyFactory;
+import accord.impl.basic.Cluster;
 import accord.impl.basic.Packet;
 import accord.impl.basic.PendingQueue;
+import accord.impl.basic.PropagatingPendingQueue;
+import accord.impl.basic.RandomDelayQueue.Factory;
+import accord.impl.basic.SimulatedDelayedExecutorService;
 import accord.impl.list.ListQuery;
 import accord.impl.list.ListRead;
 import accord.impl.list.ListRequest;
 import accord.impl.list.ListResult;
 import accord.impl.list.ListUpdate;
+import accord.local.CommandStore;
 import accord.local.Node.Id;
-import accord.api.Key;
-import accord.primitives.*;
-import accord.utils.async.AsyncChain;
+import accord.primitives.Keys;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.Txn;
+import accord.utils.DefaultRandom;
+import accord.utils.RandomSource;
+import accord.utils.async.AsyncExecutor;
 import accord.verify.StrictSerializabilityVerifier;
-
-import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import static accord.impl.IntHashKey.forHash;
 import static accord.utils.Utils.toArray;
@@ -72,7 +72,7 @@ public class BurnTest
 {
     private static final Logger logger = LoggerFactory.getLogger(BurnTest.class);
 
-    static List<Packet> generate(RandomSource random, Function<CommandStore, ListExecutor> executor, List<Id> clients, List<Id> nodes, int keyCount, int operations)
+    static List<Packet> generate(RandomSource random, Function<CommandStore, AsyncExecutor> executor, List<Id> clients, List<Id> nodes, int keyCount, int operations)
     {
         List<Key> keys = new ArrayList<>();
         for (int i = 0 ; i < keyCount ; ++i)
@@ -201,27 +201,7 @@ public class BurnTest
         SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, random.fork());
 
         StrictSerializabilityVerifier strictSerializable = new StrictSerializabilityVerifier(keyCount);
-        ListExecutor listExecutor = new ListExecutor()
-        {
-            @Override
-            public <T> AsyncChain<T> submit(Supplier<T> fn)
-            {
-                return globalExecutor.submit(fn::get);
-            }
-
-            @Override
-            public <T> AsyncChain<T> submit(Supplier<T> fn, long delay, TimeUnit unit)
-            {
-                return globalExecutor.submit(fn::get, delay, unit);
-            }
-
-            @Override
-            public AsyncChain<Void> execute(Runnable fn)
-            {
-                return globalExecutor.submit(fn).map(ignore -> null);
-            }
-        };
-        Function<CommandStore, ListExecutor> executor = ignore -> listExecutor;
+        Function<CommandStore, AsyncExecutor> executor = ignore -> globalExecutor;
 
         Packet[] requests = toArray(generate(random, executor, clients, nodes, keyCount, operations), Packet[]::new);
         int[] starts = new int[requests.length];
