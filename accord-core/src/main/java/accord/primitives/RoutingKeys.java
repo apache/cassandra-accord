@@ -23,7 +23,7 @@ import accord.utils.SortedArrays;
 
 import static accord.utils.ArrayBuffers.cachedRoutingKeys;
 
-public class RoutingKeys extends AbstractUnseekableKeys<AbstractUnseekableKeys<?>> implements Unseekables<RoutingKey, AbstractUnseekableKeys<?>>
+public class RoutingKeys extends AbstractUnseekableKeys<RoutingKeys>
 {
     public static class SerializationSupport
     {
