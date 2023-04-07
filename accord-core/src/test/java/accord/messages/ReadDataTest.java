@@ -166,16 +166,7 @@ class ReadDataTest
     {
         // status=Commit, will listen waiting for ReadyToExecute; obsolete marked by status listener
         test(state -> {
-            List<CommandStore> stores = new ArrayList<>(2);
-            state.forEach(stores::add);
-            Assertions.assertThat(stores).hasSize(2);
-            // block duplicate stores
-            Map<Integer, Long> counts = stores.stream().map(CommandStore::id).collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
-            for (Map.Entry<Integer, Long> e : counts.entrySet())
-            {
-                if (e.getValue() == 1) continue;
-                throw new AssertionError("Duplicate command store detected with id: " + e.getKey());
-            }
+            List<CommandStore> stores = stores(state);
             // this test is a bit implementation specific... so if implementations change this may need an update
             // since mapReduceConsume walks the store in id order, by making sure the stores involved in this test
             // are in the "right" order, can make sure to hit a very specific edge case
@@ -197,6 +188,36 @@ class ReadDataTest
 
             Mockito.verify(state.sink).reply(Mockito.eq(state.node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.ReadNack.Redundant));
         });
+    }
+
+    @Test
+    public void mapReduceAllStageMarksObsolete()
+    {
+        test(state -> {
+            List<CommandStore> stores = stores(state);
+            stores.forEach(store -> check(store.execute(PreLoadContext.contextFor(state.txnId, state.keys), safe -> {
+                SafeCommand command = safe.command(state.txnId);
+                command.commitInvalidated(command.current(), state.executeAt);
+            })));
+            ReplyContext replyContext = state.process();
+
+            Mockito.verify(state.sink).reply(Mockito.eq(state.node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.ReadNack.Redundant));
+        });
+    }
+
+    private static List<CommandStore> stores(State state)
+    {
+        List<CommandStore> stores = new ArrayList<>(2);
+        state.forEach(stores::add);
+        Assertions.assertThat(stores).hasSize(2);
+        // block duplicate stores
+        Map<Integer, Long> counts = stores.stream().map(CommandStore::id).collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+        for (Map.Entry<Integer, Long> e : counts.entrySet())
+        {
+            if (e.getValue() == 1) continue;
+            throw new AssertionError("Duplicate command store detected with id: " + e.getKey());
+        }
+        return stores;
     }
 
     private static void check(AsyncChain<Void> execute)
