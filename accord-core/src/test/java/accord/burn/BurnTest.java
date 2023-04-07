@@ -334,7 +334,6 @@ public class BurnTest
     @Test
     public void testOne()
     {
-        for (; true; )
         run(ThreadLocalRandom.current().nextLong());
     }
 
