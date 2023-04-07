@@ -176,7 +176,7 @@ public class Commit extends TxnRequest<ReadNack>
     }
 
     @Override
-    public void accept(ReadNack reply, Throwable failure)
+    public synchronized void accept(ReadNack reply, Throwable failure)
     {
         if (failure != null)
         {
@@ -188,6 +188,11 @@ public class Commit extends TxnRequest<ReadNack>
             node.reply(replyTo, replyContext, reply);
         else if (read != null)
             read.process(node, replyTo, replyContext);
+        if (defer != null)
+        {
+            defer.ack();
+            defer = null;
+        }
     }
 
     @Override
