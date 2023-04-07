@@ -18,7 +18,16 @@
 
 package accord;
 
+import accord.api.MessageSink;
+import accord.api.Scheduler;
+import accord.impl.InMemoryCommandStores;
+import accord.impl.IntKey;
+import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
+import accord.impl.TestAgent;
+import accord.impl.mock.MockCluster;
+import accord.impl.mock.MockConfigurationService;
+import accord.local.ShardDistributor;
 import accord.primitives.Range;
 import accord.local.Node;
 import accord.impl.mock.MockStore;
@@ -28,7 +37,11 @@ import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.primitives.Txn;
 import accord.primitives.Keys;
+import accord.utils.DefaultRandom;
+import accord.utils.EpochFunction;
 import accord.utils.Invariants;
+import accord.utils.ThreadPoolScheduler;
+
 import com.google.common.collect.Sets;
 
 import java.util.ArrayList;
@@ -116,5 +129,23 @@ public class Utils
     public static Topologies topologies(Topology... topologies)
     {
         return new Topologies.Multi(SizeOfIntersectionSorter.SUPPLIER, topologies);
+    }
+
+    public static Node createNode(Node.Id nodeId, Topology topology, MessageSink messageSink, MockCluster.Clock clock)
+    {
+        MockStore store = new MockStore();
+        Scheduler scheduler = new ThreadPoolScheduler();
+        return new Node(nodeId,
+                        messageSink,
+                        new MockConfigurationService(messageSink, EpochFunction.noop(), topology),
+                        clock,
+                        () -> store,
+                        new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()),
+                        new TestAgent(),
+                        new DefaultRandom(),
+                        scheduler,
+                        SizeOfIntersectionSorter.SUPPLIER,
+                        SimpleProgressLog::new,
+                        InMemoryCommandStores.Synchronized::new);
     }
 }

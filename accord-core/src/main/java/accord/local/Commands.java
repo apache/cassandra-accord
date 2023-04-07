@@ -402,6 +402,7 @@ public class Commands
         attrs = set(safeStore, command, attrs, coordinateRanges, executeRanges, shard, route, null, Check, partialDeps, command.hasBeen(Committed) ? Add : TrySet);
 
         safeCommand.preapplied(attrs, executeAt, waitingOn, writes, result);
+        safeStore.notifyListeners(safeCommand);
         logger.trace("{}: apply, status set to Executed with executeAt: {}, deps: {}", txnId, executeAt, partialDeps);
 
         maybeExecute(safeStore, safeCommand, shard, true, true);

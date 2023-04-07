@@ -23,6 +23,7 @@ import accord.api.ProgressLog;
 import accord.api.DataStore;
 import accord.local.CommandStores.RangesForEpochHolder;
 import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncExecutor;
 
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -30,7 +31,7 @@ import java.util.function.Function;
 /**
  * Single threaded internal shard of accord transaction metadata
  */
-public interface CommandStore
+public interface CommandStore extends AsyncExecutor
 {
     interface Factory
     {
@@ -46,5 +47,12 @@ public interface CommandStore
     Agent agent();
     AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer);
     <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);
+
+    @Override
+    default void execute(Runnable command)
+    {
+        submit(command).begin(agent());
+    }
+
     void shutdown();
 }

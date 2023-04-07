@@ -32,31 +32,38 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 
-import accord.utils.DefaultRandom;
-import accord.utils.RandomSource;
+import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import accord.api.Key;
 import accord.impl.IntHashKey;
-import accord.impl.basic.Cluster;
-import accord.impl.basic.PropagatingPendingQueue;
-import accord.impl.basic.RandomDelayQueue.Factory;
 import accord.impl.TopologyFactory;
+import accord.impl.basic.Cluster;
 import accord.impl.basic.Packet;
 import accord.impl.basic.PendingQueue;
+import accord.impl.basic.PropagatingPendingQueue;
+import accord.impl.basic.RandomDelayQueue.Factory;
+import accord.impl.basic.SimulatedDelayedExecutorService;
 import accord.impl.list.ListQuery;
 import accord.impl.list.ListRead;
 import accord.impl.list.ListRequest;
 import accord.impl.list.ListResult;
 import accord.impl.list.ListUpdate;
+import accord.local.CommandStore;
 import accord.local.Node.Id;
-import accord.api.Key;
-import accord.primitives.*;
+import accord.primitives.Keys;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.Txn;
+import accord.utils.DefaultRandom;
+import accord.utils.RandomSource;
+import accord.utils.async.AsyncExecutor;
 import accord.verify.StrictSerializabilityVerifier;
-
-import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import static accord.impl.IntHashKey.forHash;
 import static accord.utils.Utils.toArray;
@@ -65,7 +72,7 @@ public class BurnTest
 {
     private static final Logger logger = LoggerFactory.getLogger(BurnTest.class);
 
-    static List<Packet> generate(RandomSource random, List<Id> clients, List<Id> nodes, int keyCount, int operations)
+    static List<Packet> generate(RandomSource random, Function<? super CommandStore, AsyncExecutor> executor, List<Id> clients, List<Id> nodes, int keyCount, int operations)
     {
         List<Key> keys = new ArrayList<>();
         for (int i = 0 ; i < keyCount ; ++i)
@@ -73,6 +80,7 @@ public class BurnTest
 
         List<Packet> packets = new ArrayList<>();
         int[] next = new int[keyCount];
+        double readInCommandStore = random.nextDouble();
 
         for (int count = 0 ; count < operations ; ++count)
         {
@@ -90,7 +98,7 @@ public class BurnTest
                     requestRanges.add(IntHashKey.range(forHash(i), forHash(j)));
                 }
                 Ranges ranges = Ranges.of(requestRanges.toArray(new Range[0]));
-                ListRead read = new ListRead(ranges, ranges);
+                ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, ranges, ranges);
                 ListQuery query = new ListQuery(client, count);
                 ListRequest request = new ListRequest(new Txn.InMemory(ranges, read, query, null));
                 packets.add(new Packet(client, node, count, request));
@@ -107,7 +115,7 @@ public class BurnTest
                 while (readCount-- > 0)
                     requestKeys.add(randomKey(random, keys, requestKeys));
 
-                ListUpdate update = isWrite ? new ListUpdate() : null;
+                ListUpdate update = isWrite ? new ListUpdate(executor) : null;
                 while (writeCount-- > 0)
                 {
                     int i = randomKeyIndex(random, keys, update.keySet());
@@ -117,7 +125,7 @@ public class BurnTest
                 Keys readKeys = new Keys(requestKeys);
                 if (isWrite)
                     requestKeys.addAll(update.keySet());
-                ListRead read = new ListRead(readKeys, new Keys(requestKeys));
+                ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, readKeys, new Keys(requestKeys));
                 ListQuery query = new ListQuery(client, count);
                 ListRequest request = new ListRequest(new Txn.InMemory(new Keys(requestKeys), read, query, update));
                 packets.add(new Packet(client, node, count, request));
@@ -191,10 +199,12 @@ public class BurnTest
     {
         List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
         PendingQueue queue = new PropagatingPendingQueue(failures, new Factory(random).get());
+        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, random.fork());
 
         StrictSerializabilityVerifier strictSerializable = new StrictSerializabilityVerifier(keyCount);
+        Function<CommandStore, AsyncExecutor> executor = ignore -> globalExecutor;
 
-        Packet[] requests = toArray(generate(random, clients, nodes, keyCount, operations), Packet[]::new);
+        Packet[] requests = toArray(generate(random, executor, clients, nodes, keyCount, operations), Packet[]::new);
         int[] starts = new int[requests.length];
         Packet[] replies = new Packet[requests.length];
 

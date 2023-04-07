@@ -59,28 +59,9 @@ public class PreAcceptTest
     private static final Id ID3 = id(3);
     private static final List<Id> IDS = listOf(ID1, ID2, ID3);
     private static final Topology TOPOLOGY = TopologyFactory.toTopology(IDS, 3, IntKey.range(0, 100));
-    private static final Ranges RANGE = Ranges.single(IntKey.range(0, 100));
     private static final Ranges FULL_RANGE = Ranges.single(IntKey.range(routing(Integer.MIN_VALUE), routing(Integer.MAX_VALUE)));
 
     private static final ReplyContext REPLY_CONTEXT = Network.replyCtxFor(0);
-
-    private static Node createNode(Id nodeId, MessageSink messageSink, Clock clock)
-    {
-        MockStore store = new MockStore();
-        Scheduler scheduler = new ThreadPoolScheduler();
-        return new Node(nodeId,
-                        messageSink,
-                        new MockConfigurationService(messageSink, EpochFunction.noop(), TOPOLOGY),
-                        clock,
-                        () -> store,
-                        new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()),
-                        new TestAgent(),
-                        new DefaultRandom(),
-                        scheduler,
-                        SizeOfIntersectionSorter.SUPPLIER,
-                        SimpleProgressLog::new,
-                        InMemoryCommandStores.Synchronized::new);
-    }
 
     private static PreAccept preAccept(TxnId txnId, Txn txn, RoutingKey homeKey)
     {
@@ -98,7 +79,7 @@ public class PreAcceptTest
     {
         RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
         Clock clock = new Clock(100);
-        Node node = createNode(ID1, messageSink, clock);
+        Node node = createNode(ID1, TOPOLOGY, messageSink, clock);
         messageSink.clearHistory();
 
         try
@@ -137,7 +118,7 @@ public class PreAcceptTest
     {
         RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
         Clock clock = new Clock(100);
-        Node node = createNode(ID1, messageSink, clock);
+        Node node = createNode(ID1, TOPOLOGY, messageSink, clock);
         try
         {
             Raw key = IntKey.key(10);
@@ -165,7 +146,7 @@ public class PreAcceptTest
     {
         RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
         Clock clock = new Clock(100);
-        Node node = createNode(ID1, messageSink, clock);
+        Node node = createNode(ID1, TOPOLOGY, messageSink, clock);
         try
         {
             Raw key1 = IntKey.key(10);
@@ -201,7 +182,7 @@ public class PreAcceptTest
     {
         RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
         Clock clock = new Clock(100);
-        Node node = createNode(ID1, messageSink, clock);
+        Node node = createNode(ID1, TOPOLOGY, messageSink, clock);
         messageSink.clearHistory();
         Raw key = IntKey.key(10);
         try
@@ -228,7 +209,7 @@ public class PreAcceptTest
     {
         RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
         Clock clock = new Clock(100);
-        Node node = createNode(ID1, messageSink, clock);
+        Node node = createNode(ID1, TOPOLOGY, messageSink, clock);
 
         try
         {
