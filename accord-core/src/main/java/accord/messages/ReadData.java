@@ -59,13 +59,16 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
         @Override
         public void onChange(SafeCommandStore safeStore, SafeCommand safeCommand)
         {
-            switch (safeCommand.current().status())
+            synchronized (ReadData.this)
             {
-                case PreApplied:
-                case Applied:
-                case Invalidated:
-                    obsolete();
-                    safeCommand.removeListener(this);
+                switch (safeCommand.current().status())
+                {
+                    case PreApplied:
+                    case Applied:
+                    case Invalidated:
+                        obsolete();
+                        safeCommand.removeListener(this);
+                }
             }
         }
 
