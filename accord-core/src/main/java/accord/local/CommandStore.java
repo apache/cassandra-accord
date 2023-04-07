@@ -48,28 +48,25 @@ public interface CommandStore extends AsyncExecutor
                             RangesForEpochHolder rangesForEpoch);
     }
 
-    class Internal // java 8 doesn't allow an interface to have private fields, so use this wrapper to hide the field
-    {
-        private static final ThreadLocal<CommandStore> CURRENT_STORE = new ThreadLocal<>();
-    }
-
     @VisibleForTesting
     class Unsafe
     {
+        private static final ThreadLocal<CommandStore> CURRENT_STORE = new ThreadLocal<>();
+
         @Nullable
         public static CommandStore maybeCurrent()
         {
-            return Internal.CURRENT_STORE.get();
+            return CURRENT_STORE.get();
         }
 
         public static void register(CommandStore store)
         {
-            Internal.CURRENT_STORE.set(store);
+            CURRENT_STORE.set(store);
         }
 
         public static void remove()
         {
-            Internal.CURRENT_STORE.remove();
+            CURRENT_STORE.remove();
         }
 
         public static void runWith(CommandStore store, Runnable fn)
@@ -105,7 +102,7 @@ public interface CommandStore extends AsyncExecutor
 
     static CommandStore current()
     {
-        CommandStore cs = Internal.CURRENT_STORE.get();
+        CommandStore cs = Unsafe.CURRENT_STORE.get();
         if (cs == null) throw new IllegalStateException("Attempted to access current CommandStore, but not running in a CommandStore");
         return cs;
     }
@@ -114,7 +111,7 @@ public interface CommandStore extends AsyncExecutor
     {
         if (!store.inStore())
             throw new IllegalStateException("Unable to register a CommandStore when not running in it; store " + store);
-        Internal.CURRENT_STORE.set(store);
+        Unsafe.CURRENT_STORE.set(store);
     }
 
     static void checkInStore()
