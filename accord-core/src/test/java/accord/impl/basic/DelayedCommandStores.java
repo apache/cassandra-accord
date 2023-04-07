@@ -86,15 +86,19 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         @Override
         public <T> AsyncChain<T> submit(Callable<T> fn)
         {
-            Callable<T> work = () -> Unsafe.runWith(this, fn);
-            TaskExecutorService.Task<T> task = new TaskExecutorService.Task<>(work);
-            task.addCallback(agent());
+            TaskExecutorService.Task<T> task = new TaskExecutorService.Task<>(() -> Unsafe.runWith(this, fn));
+            task.addCallback(agent()); // used to track unexpected exceptions and notify simulations
             if (previous == null || previous.isDone())
             {
                 executor.execute(task);
             }
             else
             {
+                // SimulatedDelayedExecutorService can interleave tasks and is global; this violates a requirement for
+                // CommandStore; single threaded with ordered execution!  To simulate this behavior, add the callback
+                // to enqueue once the "previous" task completes.  This solution has a negative side effect that
+                // the current task (fn) jitter is the random jitter defined from SimulatedDelayedExecutorService plus
+                // the previous's tasks queue + execution time!
                 previous.addCallback((i1, i2) -> executor.execute(task));
             }
             previous = task;
