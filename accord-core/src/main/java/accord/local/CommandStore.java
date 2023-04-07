@@ -103,7 +103,8 @@ public interface CommandStore extends AsyncExecutor
     static CommandStore current()
     {
         CommandStore cs = Unsafe.CURRENT_STORE.get();
-        if (cs == null) throw new IllegalStateException("Attempted to access current CommandStore, but not running in a CommandStore");
+        if (cs == null)
+            throw new IllegalStateException("Attempted to access current CommandStore, but not running in a CommandStore");
         return cs;
     }
 
