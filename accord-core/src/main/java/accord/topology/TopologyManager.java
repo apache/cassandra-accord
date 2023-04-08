@@ -22,6 +22,7 @@ import accord.api.ConfigurationService;
 import accord.api.RoutingKey;
 import accord.api.TopologySorter;
 import accord.coordinate.tracking.QuorumTracker;
+import accord.local.CommandStore;
 import accord.local.Node.Id;
 import accord.messages.Request;
 import accord.primitives.*;
@@ -259,9 +260,14 @@ public class TopologyManager implements ConfigurationService.Listener
             toComplete.trySuccess(null);
     }
 
-    public synchronized AsyncResult<Void> awaitEpoch(long epoch)
+    public synchronized AsyncChain<Void> awaitEpoch(long epoch)
     {
-        return epochs.awaitEpoch(epoch);
+        AsyncResult<Void> result = epochs.awaitEpoch(epoch);
+        CommandStore current = CommandStore.Unsafe.maybeCurrent();
+        if (current == null)
+            return result;
+        // by running a no-op map in the command store, the chained result is also run in such command store
+        return result.map(ignore -> null, current);
     }
 
     @Override

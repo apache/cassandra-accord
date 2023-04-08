@@ -203,9 +203,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         else
         {
             configService.fetchTopologyForEpoch(epoch);
-            CommandStore current = CommandStore.Unsafe.maybeCurrent();
-            if (current == null) topology.awaitEpoch(epoch).addCallback(runnable);
-            else topology.awaitEpoch(epoch).addCallback(runnable, current);
+            topology.awaitEpoch(epoch).addCallback(runnable).begin(agent());
         }
     }
 
@@ -219,9 +217,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         else
         {
             configService.fetchTopologyForEpoch(epoch);
-            CommandStore current = CommandStore.Unsafe.maybeCurrent();
-            if (current == null) return topology.awaitEpoch(epoch).flatMap(ignore -> supplier.get());
-            return topology.awaitEpoch(epoch).flatMap(ignore -> supplier.get(), current);
+            return topology.awaitEpoch(epoch).flatMap(ignore -> supplier.get());
         }
     }
 
