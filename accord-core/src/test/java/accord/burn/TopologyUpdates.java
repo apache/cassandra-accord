@@ -277,11 +277,11 @@ public class TopologyUpdates
                     while (iter.hasNext())
                     {
                         MessageTask next = iter.next();
-                        last.addCallback(next, next.commandStore);
+                        last.addCallback(next);
                         last = next;
                     }
 
-                    first.schedule();
+                    first.run();
                     return dieExceptionally(last);
                 });
     }
