@@ -45,6 +45,12 @@ public class PropagatingPendingQueue implements PendingQueue
     }
 
     @Override
+    public long nowMillis()
+    {
+        return wrapped.nowMillis();
+    }
+
+    @Override
     public Pending poll()
     {
         if (!failures.isEmpty())

@@ -53,9 +53,23 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService
         return Math.toIntExact(TimeUnit.MICROSECONDS.toNanos(value));
     }
 
+    public long nowMillis()
+    {
+        return pending.nowMillis();
+    }
+
     @Override
     public void execute(Task<?> task)
     {
         pending.add(task, jitterInNano.getLong(random), TimeUnit.NANOSECONDS);
+    }
+
+    public void executeWithObservedDelay(Task<?> task, long observed, TimeUnit unit)
+    {
+        long observedDelayNanos = unit.toNanos(observed);
+        long desiredDelayNanos = jitterInNano.getLong(random);
+        long delayNanos = observedDelayNanos >= desiredDelayNanos ? 0
+                                                                  : desiredDelayNanos - observedDelayNanos;
+        pending.add(task, delayNanos, TimeUnit.NANOSECONDS);
     }
 }

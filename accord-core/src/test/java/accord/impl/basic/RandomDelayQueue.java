@@ -93,6 +93,12 @@ public class RandomDelayQueue<T> implements PendingQueue
     }
 
     @Override
+    public long nowMillis()
+    {
+        return now;
+    }
+
+    @Override
     public Pending poll()
     {
         Item item = queue.poll();

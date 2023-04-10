@@ -19,6 +19,7 @@
 package accord.impl.basic;
 
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -96,10 +97,9 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             {
                 // SimulatedDelayedExecutorService can interleave tasks and is global; this violates a requirement for
                 // CommandStore; single threaded with ordered execution!  To simulate this behavior, add the callback
-                // to enqueue once the "previous" task completes.  This solution has a negative side effect that
-                // the current task (fn) jitter is the random jitter defined from SimulatedDelayedExecutorService plus
-                // the previous's tasks queue + execution time!
-                previous.addCallback((i1, i2) -> executor.execute(task));
+                // to enqueue once the "previous" task completes.
+                long nowMilis = executor.nowMillis();
+                previous.addCallback((i1, i2) -> executor.executeWithObservedDelay(task, executor.nowMillis() - nowMilis, TimeUnit.MILLISECONDS));
             }
             previous = task;
             return task;
