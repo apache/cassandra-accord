@@ -89,7 +89,7 @@ public class TopologyUpdates
             if (!node.topology().hasEpoch(toEpoch))
             {
                 node.configService().fetchTopologyForEpoch(toEpoch);
-                node.topology().awaitEpoch(toEpoch).addCallback(() -> process(node, onDone));
+                node.topology().awaitEpoch(toEpoch).addCallback(() -> process(node, onDone)).begin(node.agent());
                 return;
             }
 

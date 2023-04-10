@@ -527,7 +527,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         if (unknownEpoch > 0)
         {
             configService.fetchTopologyForEpoch(unknownEpoch);
-            topology().awaitEpoch(unknownEpoch).addCallback(() -> receive(request, from, replyContext));
+            topology().awaitEpoch(unknownEpoch).addCallback(() -> receive(request, from, replyContext)).begin(agent());
             return;
         }
         scheduler.now(() -> request.process(this, from, replyContext));
