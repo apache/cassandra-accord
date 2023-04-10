@@ -28,6 +28,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -203,10 +204,11 @@ public class Cluster implements Scheduler
         try
         {
             Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink);
+            Executor executor = new SimulatedDelayedExecutorService(sinks.pending, randomSupplier.get().fork());
             for (Id node : nodes)
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
-                BurnTestConfigurationService configService = new BurnTestConfigurationService(node, messageSink, randomSupplier, topology, lookup::get, topologyUpdates);
+                BurnTestConfigurationService configService = new BurnTestConfigurationService(node, executor, messageSink, randomSupplier, topology, lookup::get, topologyUpdates);
                 lookup.put(node, new Node(node, messageSink, configService, nowSupplier.get(),
                                           () -> new ListStore(node), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
                                           new ListAgent(30L, onFailure),

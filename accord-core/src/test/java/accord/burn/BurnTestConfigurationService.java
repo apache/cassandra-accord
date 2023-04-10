@@ -20,7 +20,6 @@ package accord.burn;
 
 import accord.api.MessageSink;
 import accord.api.TestableConfigurationService;
-import accord.local.CommandStore;
 import accord.utils.RandomSource;
 import accord.local.Node;
 import accord.messages.*;
@@ -35,6 +34,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -43,6 +43,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
     private static final Logger logger = LoggerFactory.getLogger(BurnTestConfigurationService.class);
 
     private final Node.Id node;
+    private final Executor executor;
     private final MessageSink messageSink;
     private final Function<Node.Id, Node> lookup;
     private final Supplier<RandomSource> randomSupplier;
@@ -129,9 +130,10 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         }
     }
 
-    public BurnTestConfigurationService(Node.Id node, MessageSink messageSink, Supplier<RandomSource> randomSupplier, Topology topology, Function<Node.Id, Node> lookup, TopologyUpdates topologyUpdates)
+    public BurnTestConfigurationService(Node.Id node, Executor executor, MessageSink messageSink, Supplier<RandomSource> randomSupplier, Topology topology, Function<Node.Id, Node> lookup, TopologyUpdates topologyUpdates)
     {
         this.node = node;
+        this.executor = executor;
         this.messageSink = messageSink;
         this.randomSupplier = randomSupplier;
         this.lookup = lookup;
@@ -214,14 +216,12 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
     {
         private final FetchTopologyRequest request;
         private final List<Node.Id> candidates;
-        private final CommandStore store;
 
         public FetchTopology(long epoch)
         {
             this.request = new FetchTopologyRequest(epoch);
             this.candidates = new ArrayList<>();
-            this.store = originator().commandStores().any();
-            store.execute(this::sendNext);
+            executor.execute(this::sendNext);
         }
 
         void sendNext()
@@ -233,7 +233,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
             }
             int idx = randomSupplier.get().nextInt(candidates.size());
             Node.Id node = candidates.remove(idx);
-            originator().send(node, request, store, this);
+            originator().send(node, request, executor, this);
         }
 
         @Override

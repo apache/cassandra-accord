@@ -18,7 +18,8 @@
 
 package accord.api;
 
-import accord.local.CommandStore;
+import java.util.concurrent.Executor;
+
 import accord.local.Node.Id;
 import accord.messages.Callback;
 import accord.messages.Reply;
@@ -28,6 +29,6 @@ import accord.messages.Request;
 public interface MessageSink
 {
     void send(Id to, Request request);
-    void send(Id to, Request request, CommandStore commandStore, Callback callback);
+    void send(Id to, Request request, Executor executor, Callback callback);
     void reply(Id replyingToNode, ReplyContext replyContext, Reply reply);
 }

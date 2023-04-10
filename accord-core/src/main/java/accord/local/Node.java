@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -145,7 +146,8 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.agent = agent;
         this.random = random;
         this.scheduler = scheduler;
-        this.commandStores = factory.create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this));
+        this.commandStores = factory.
+                             create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this));
 
         configService.registerListener(this);
         onTopologyUpdate(topology, false);
@@ -314,10 +316,10 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         send(shard, send, CommandStore.current(), callback);
     }
 
-    private void send(Shard shard, Request send, CommandStore commandStore, Callback callback)
+    private void send(Shard shard, Request send, Executor executor, Callback callback)
     {
-        checkStore(commandStore);
-        shard.nodes.forEach(node -> messageSink.send(node, send, commandStore, callback));
+        checkStore(executor);
+        shard.nodes.forEach(node -> messageSink.send(node, send, executor, callback));
     }
 
     private <T> void send(Shard shard, Request send, Set<Id> alreadyContacted)
@@ -343,10 +345,10 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         send(to, send, CommandStore.current(), callback);
     }
 
-    public <T> void send(Collection<Id> to, Request send, CommandStore commandStore, Callback<T> callback)
+    public <T> void send(Collection<Id> to, Request send, Executor executor, Callback<T> callback)
     {
-        checkStore(commandStore);
-        to.forEach(dst -> messageSink.send(dst, send, commandStore, callback));
+        checkStore(executor);
+        to.forEach(dst -> messageSink.send(dst, send, executor, callback));
     }
 
     public <T> void send(Collection<Id> to, Function<Id, Request> requestFactory, Callback<T> callback)
@@ -354,10 +356,10 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         send(to, requestFactory, CommandStore.current(), callback);
     }
 
-    public <T> void send(Collection<Id> to, Function<Id, Request> requestFactory, CommandStore commandStore, Callback<T> callback)
+    public <T> void send(Collection<Id> to, Function<Id, Request> requestFactory, Executor executor, Callback<T> callback)
     {
-        checkStore(commandStore);
-        to.forEach(dst -> messageSink.send(dst, requestFactory.apply(dst), commandStore, callback));
+        checkStore(executor);
+        to.forEach(dst -> messageSink.send(dst, requestFactory.apply(dst), executor, callback));
     }
 
     // send to a specific node
@@ -367,17 +369,17 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     }
 
     // send to a specific node
-    public <T> void send(Id to, Request send, CommandStore commandStore, Callback<T> callback)
+    public <T> void send(Id to, Request send, Executor executor, Callback<T> callback)
     {
-        checkStore(commandStore);
-        messageSink.send(to, send, commandStore, callback);
+        checkStore(executor);
+        messageSink.send(to, send, executor, callback);
     }
 
-    private void checkStore(CommandStore commandStore)
+    private void checkStore(Executor executor)
     {
         CommandStore current = CommandStore.Unsafe.maybeCurrent();
-        if (current != null && current != commandStore)
-            throw new IllegalStateException(String.format("Used wrong CommandStore %s; current is %s", commandStore, current));
+        if (current != null && current != executor)
+            throw new IllegalStateException(String.format("Used wrong CommandStore %s; current is %s", executor, current));
     }
 
     // send to a specific node

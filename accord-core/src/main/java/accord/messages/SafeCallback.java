@@ -19,19 +19,22 @@
 package accord.messages;
 
 import java.util.Objects;
+import java.util.concurrent.Executor;
 
+import accord.api.Agent;
 import accord.coordinate.Timeout;
-import accord.local.CommandStore;
 import accord.local.Node;
 
 public class SafeCallback<T extends Reply>
 {
-    private final CommandStore commandStore;
+    private final Executor executor;
+    private final Agent agent;
     private final Callback<T> callback;
 
-    public SafeCallback(CommandStore commandStore, Callback<T> callback)
+    public SafeCallback(Executor executor, Agent agent, Callback<T> callback)
     {
-        this.commandStore = Objects.requireNonNull(commandStore, "commandStore");
+        this.executor = Objects.requireNonNull(executor, "executor");
+        this.agent = Objects.requireNonNull(agent, "agent");
         this.callback = Objects.requireNonNull(callback, "callback");
     }
 
@@ -57,7 +60,7 @@ public class SafeCallback<T extends Reply>
 
     private void safeCall(Node.Id src, Runnable fn)
     {
-        commandStore.execute(() -> {
+        executor.execute(() -> {
             try
             {
                 fn.run();
@@ -70,7 +73,7 @@ public class SafeCallback<T extends Reply>
                 }
                 finally
                 {
-                    commandStore.agent().onUncaughtException(t);
+                    agent.onUncaughtException(t);
                 }
             }
         });
