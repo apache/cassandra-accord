@@ -59,12 +59,12 @@ public interface CommandStore extends AsyncExecutor
             return CURRENT_STORE.get();
         }
 
-        public static void register(CommandStore store)
+        private static void register(CommandStore store)
         {
             CURRENT_STORE.set(store);
         }
 
-        public static void remove()
+        private static void remove()
         {
             CURRENT_STORE.remove();
         }
