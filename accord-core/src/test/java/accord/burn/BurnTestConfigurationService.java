@@ -44,7 +44,6 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
 
     private final Node.Id node;
     private final Executor executor;
-    private final MessageSink messageSink;
     private final Function<Node.Id, Node> lookup;
     private final Supplier<RandomSource> randomSupplier;
     private final Map<Long, FetchTopology> pendingEpochs = new HashMap<>();
@@ -130,11 +129,10 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         }
     }
 
-    public BurnTestConfigurationService(Node.Id node, Executor executor, MessageSink messageSink, Supplier<RandomSource> randomSupplier, Topology topology, Function<Node.Id, Node> lookup, TopologyUpdates topologyUpdates)
+    public BurnTestConfigurationService(Node.Id node, Executor executor, Supplier<RandomSource> randomSupplier, Topology topology, Function<Node.Id, Node> lookup, TopologyUpdates topologyUpdates)
     {
         this.node = node;
         this.executor = executor;
-        this.messageSink = messageSink;
         this.randomSupplier = randomSupplier;
         this.lookup = lookup;
         this.topologyUpdates = topologyUpdates;

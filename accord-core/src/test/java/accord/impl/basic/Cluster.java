@@ -208,7 +208,7 @@ public class Cluster implements Scheduler
             for (Id node : nodes)
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
-                BurnTestConfigurationService configService = new BurnTestConfigurationService(node, executor, messageSink, randomSupplier, topology, lookup::get, topologyUpdates);
+                BurnTestConfigurationService configService = new BurnTestConfigurationService(node, executor, randomSupplier, topology, lookup::get, topologyUpdates);
                 lookup.put(node, new Node(node, messageSink, configService, nowSupplier.get(),
                                           () -> new ListStore(node), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
                                           new ListAgent(30L, onFailure),
