@@ -78,4 +78,10 @@ public class SafeCallback<T extends Reply>
             }
         });
     }
+
+    @Override
+    public String toString()
+    {
+        return callback.toString();
+    }
 }
