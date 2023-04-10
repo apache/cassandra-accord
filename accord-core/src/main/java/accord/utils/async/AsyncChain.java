@@ -63,6 +63,13 @@ public interface AsyncChain<V>
         }, executor);
     }
 
+    default AsyncChain<V> withExecutor(Executor e)
+    {
+        // since a chain runs as a sequence of callbacks, by adding a callback that moves to this executor any new actions
+        // will be run on that desired executor.
+        return map(a -> a, e);
+    }
+
     /**
      * Support {@link com.google.common.util.concurrent.Futures#addCallback} natively
      */
