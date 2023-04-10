@@ -269,7 +269,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
                 case RETURNED:
                     throw new IllegalStateException("ReadOk was sent, yet ack called again");
                 case OBSOLETE:
-                    logger.debug("After the read completed for txn {}, the result was marked obsolete", txnId);
+                    logger.trace("After the read completed for txn {}, the result was marked obsolete", txnId);
                     break;
                 case PENDING:
                     state = State.RETURNED;
