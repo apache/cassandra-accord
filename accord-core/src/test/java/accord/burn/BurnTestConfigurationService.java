@@ -18,7 +18,6 @@
 
 package accord.burn;
 
-import accord.api.MessageSink;
 import accord.api.TestableConfigurationService;
 import accord.utils.RandomSource;
 import accord.local.Node;
