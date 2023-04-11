@@ -22,7 +22,6 @@ import accord.local.Node;
 import accord.messages.*;
 import accord.utils.async.AsyncResults;
 import com.google.common.collect.ImmutableList;
-import com.google.common.util.concurrent.MoreExecutors;
 
 import java.util.*;
 import java.util.concurrent.Executor;
@@ -120,7 +119,7 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
             Invariants.checkArgument(reply == SUCCESS || reply == FAILURE);
             if (reply == FAILURE)
             {
-                originator.send(from, request, MoreExecutors.directExecutor(), this);
+                originator.send(from, request, executor, this);
                 return;
             }
 
@@ -135,7 +134,7 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
         @Override
         public void onFailure(Node.Id from, Throwable failure)
         {
-            originator.send(from, request, MoreExecutors.directExecutor(), this);
+            originator.send(from, request, executor, this);
         }
 
         @Override
@@ -186,7 +185,7 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
     @Override
     public void run()
     {
-        originator.send(recipients, request, MoreExecutors.directExecutor(), callback);
+        originator.send(recipients, request, executor, callback);
     }
 
     @Override
