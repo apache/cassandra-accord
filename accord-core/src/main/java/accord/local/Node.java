@@ -146,8 +146,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.agent = agent;
         this.random = random;
         this.scheduler = scheduler;
-        this.commandStores = factory.
-                             create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this));
+        this.commandStores = factory.create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this));
 
         configService.registerListener(this);
         onTopologyUpdate(topology, false);
