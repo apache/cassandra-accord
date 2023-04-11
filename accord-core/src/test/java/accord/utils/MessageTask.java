@@ -25,6 +25,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.MoreExecutors;
 
 import java.util.*;
+import java.util.concurrent.Executor;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -71,6 +72,7 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
     private final List<Node.Id> recipients;
     private final String desc;
     private final Request request;
+    private final Executor executor;
     private final RetryingCallback callback;
 
     private class TaskRequest implements Request
@@ -145,7 +147,7 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
 
     private MessageTask(Node originator,
                         List<Node.Id> recipients,
-                        String desc, NodeProcess process)
+                        Executor executor, String desc, NodeProcess process)
     {
         Invariants.checkArgument(!recipients.isEmpty());
         this.originator = originator;
@@ -153,29 +155,30 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
         this.desc = desc;
         this.request = new TaskRequest(process, desc);
         this.callback = new RetryingCallback(recipients);
+        this.executor = executor;
     }
 
-    private static MessageTask of(Node originator, Collection<Node.Id> recipients, String desc, NodeProcess process)
+    private static MessageTask of(Node originator, Collection<Node.Id> recipients, Executor executor, String desc, NodeProcess process)
     {
-        return new MessageTask(originator, new ArrayList<>(recipients), desc, process);
+        return new MessageTask(originator, new ArrayList<>(recipients), executor, desc, process);
     }
 
-    public static MessageTask begin(Node originator, Collection<Node.Id> recipients, String desc, NodeProcess process)
+    public static MessageTask begin(Node originator, Collection<Node.Id> recipients, Executor executor, String desc, NodeProcess process)
     {
-        MessageTask task = of(originator, recipients, desc, process);
+        MessageTask task = of(originator, recipients, executor, desc, process);
         task.run();
         return task;
     }
 
-    public static MessageTask of(Node originator, Collection<Node.Id> recipients, String desc, BiConsumer<Node, Consumer<Boolean>> consumer)
+    public static MessageTask of(Node originator, Collection<Node.Id> recipients, Executor executor, String desc, BiConsumer<Node, Consumer<Boolean>> consumer)
     {
         NodeProcess process = (node, from, onDone) -> consumer.accept(node, onDone);
-        return of(originator, recipients, desc, process);
+        return of(originator, recipients, executor, desc, process);
     }
 
-    public static MessageTask apply(Node originator, Collection<Node.Id> recipients, String desc, NodeProcess process)
+    public static MessageTask apply(Node originator, Collection<Node.Id> recipients, Executor executor, String desc, NodeProcess process)
     {
-        MessageTask task = of(originator, recipients, desc, process);
+        MessageTask task = of(originator, recipients, executor, desc, process);
         task.run();
         return task;
     }

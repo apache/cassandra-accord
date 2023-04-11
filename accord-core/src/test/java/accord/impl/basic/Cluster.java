@@ -197,14 +197,15 @@ public class Cluster implements Scheduler
 
     public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, Consumer<Throwable> onFailure, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in)
     {
-        TopologyUpdates topologyUpdates = new TopologyUpdates();
+
         Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> lookup = new LinkedHashMap<>();
-        TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, lookup::get);
         try
         {
             Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink);
             Executor executor = new SimulatedDelayedExecutorService(sinks.pending, randomSupplier.get().fork());
+            TopologyUpdates topologyUpdates = new TopologyUpdates(executor);
+            TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, lookup::get);
             for (Id node : nodes)
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
