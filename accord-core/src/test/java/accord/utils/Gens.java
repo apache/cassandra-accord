@@ -235,6 +235,16 @@ public class Gens {
             return new SizeBuilder<>(this::ascii);
         }
 
+        public Gen<String> asciiVisible(Gen.IntGen sizes)
+        {
+            return betweenCodePoints(sizes, 33, 127);
+        }
+
+        public SizeBuilder<String> asciiVisible()
+        {
+            return new SizeBuilder<>(this::asciiVisible);
+        }
+
         public Gen<String> betweenCodePoints(Gen.IntGen sizes, int min, int max)
         {
             Gen.IntGen codePointGen = ints().between(min, max).filter(Character::isDefined);
