@@ -27,12 +27,18 @@ import accord.utils.WrapAroundList;
 import accord.utils.WrapAroundSet;
 
 import java.util.*;
+import java.util.function.BiFunction;
 
 import static accord.utils.Utils.toArray;
 
 public class TopologyUtils
 {
     public static Ranges initialRanges(int num, int maxKey)
+    {
+        return initialRanges(num, maxKey, IntKey::range);
+    }
+
+    public static Ranges initialRanges(int num, int maxKey, BiFunction<Integer, Integer, Range> fn)
     {
         int rangeSize = maxKey / num;
         Range[] ranges = new Range[num];
@@ -41,7 +47,7 @@ public class TopologyUtils
         {
             int start = end;
             end = i == num - 1 ? maxKey : start + rangeSize;
-            ranges[i] = IntKey.range(start, end);
+            ranges[i] = fn.apply(start, end);
         }
         return Ranges.of(ranges);
     }
