@@ -21,8 +21,12 @@ package accord.utils;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.IntPredicate;
+import java.util.function.IntUnaryOperator;
 import java.util.function.LongPredicate;
+import java.util.function.LongUnaryOperator;
 import java.util.function.Predicate;
+import java.util.function.ToIntFunction;
+import java.util.function.ToLongFunction;
 
 public interface Gen<A> {
     /**
@@ -44,6 +48,16 @@ public interface Gen<A> {
     default <B> Gen<B> map(BiFunction<RandomSource, A, B> fn)
     {
         return r -> fn.apply(r, this.next(r));
+    }
+
+    default IntGen mapToInt(ToIntFunction<A> fn)
+    {
+        return r -> fn.applyAsInt(next(r));
+    }
+
+    default LongGen mapToLong(ToLongFunction<A> fn)
+    {
+        return r -> fn.applyAsLong(next(r));
     }
 
     default Gen<A> filter(Predicate<A> fn)
@@ -69,7 +83,12 @@ public interface Gen<A> {
             return nextInt(random);
         }
 
-        default Gen.IntGen filterInt(IntPredicate fn)
+        default IntGen mapAsInt(IntUnaryOperator fn)
+        {
+            return r -> fn.applyAsInt(nextInt(r));
+        }
+
+        default Gen.IntGen filterAsInt(IntPredicate fn)
         {
             return rs -> {
                 int value;
@@ -85,7 +104,7 @@ public interface Gen<A> {
         @Override
         default Gen.IntGen filter(Predicate<Integer> fn)
         {
-            return filterInt(i -> fn.test(i));
+            return filterAsInt(i -> fn.test(i));
         }
     }
 
@@ -99,7 +118,12 @@ public interface Gen<A> {
             return nextLong(random);
         }
 
-        default Gen.LongGen filterLong(LongPredicate fn)
+        default LongGen mapAsLong(LongUnaryOperator fn)
+        {
+            return r -> fn.applyAsLong(nextLong(r));
+        }
+
+        default Gen.LongGen filterAsLong(LongPredicate fn)
         {
             return rs -> {
                 long value;
@@ -115,7 +139,7 @@ public interface Gen<A> {
         @Override
         default Gen.LongGen filter(Predicate<Long> fn)
         {
-            return filterLong(i -> fn.test(i));
+            return filterAsLong(i -> fn.test(i));
         }
     }
 }

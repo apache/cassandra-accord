@@ -21,12 +21,16 @@ package accord.utils;
 import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 
 public class Gens {
@@ -52,6 +56,41 @@ public class Gens {
     {
         Gen.IntGen offset = ints().between(0, ts.size() - 1);
         return rs -> ts.get(offset.nextInt(rs));
+    }
+
+    private static class Weight<T> implements Comparable<Weight<T>>
+    {
+        private final T value;
+        private final double weight;
+
+        private Weight(T value, double weight) {
+            this.value = value;
+            this.weight = weight;
+        }
+
+        @Override
+        public int compareTo(Weight<T> o) {
+            return Double.compare(weight, o.weight);
+        }
+    }
+
+    public static <T> Gen<T> pick(Map<T, Integer> values)
+    {
+        if (values == null || values.isEmpty())
+            throw new IllegalArgumentException("values is empty");
+        double totalWeight = values.values().stream().mapToDouble(Integer::intValue).sum();
+        List<Weight<T>> list = values.entrySet().stream().map(e -> new Weight<>(e.getKey(), e.getValue())).collect(Collectors.toList());
+        Collections.sort(list);
+        return rs -> {
+            double value = rs.nextDouble() * totalWeight;
+            for (Weight<T> w : list)
+            {
+                value -= w.weight;
+                if (value <= 0)
+                    return w.value;
+            }
+            return list.get(list.size() - 1).value;
+        };
     }
 
     public static Gen<char[]> charArray(Gen.IntGen sizes, char[] domain)
@@ -134,6 +173,50 @@ public class Gens {
         {
             return RandomSource::nextBoolean;
         }
+
+        public Gen<Boolean> runs(double ratio)
+        {
+            Invariants.checkArgument(ratio > 0 && ratio <= 1, "Expected %d to be larger than 0 and <= 1", ratio);
+            int steps = (int) (1 / ratio);
+            double lower = ratio * .8;
+            double upper = ratio * 1.2;
+            return new Gen<Boolean>() {
+                private int run = -1;
+                private long falseCount = 0, trueCount = 0;
+                @Override
+                public Boolean next(RandomSource rs)
+                {
+                    if (run != -1)
+                    {
+                        run--;
+                        trueCount++;
+                        return true;
+                    }
+                    double currentRatio = trueCount / (double) (falseCount + trueCount);
+                    if (currentRatio < lower)
+                    {
+                        // not enough true
+                        trueCount++;
+                        return true;
+                    }
+                    if (currentRatio > upper)
+                    {
+                        // not enough false
+                        falseCount++;
+                        return false;
+                    }
+                    if (rs.decide(ratio))
+                    {
+                        run = rs.nextInt(steps);
+                        run--;
+                        trueCount++;
+                        return true;
+                    }
+                    falseCount++;
+                    return false;
+                }
+            };
+        }
     }
 
     public static class IntDSL
@@ -189,8 +272,19 @@ public class Gens {
         {
             return pick(klass.getEnumConstants());
         }
+
+        public <T extends Enum<T>> Gen<T> allWithWeights(Class<T> klass, int... weights)
+        {
+            T[] constants = klass.getEnumConstants();
+            if (constants.length != weights.length)
+                throw new IllegalArgumentException(String.format("Total number of weights (%s) does not match the enum (%s)", Arrays.toString(weights), Arrays.toString(constants)));
+            Map<T, Integer> values = new EnumMap<>(klass);
+            for (int i = 0; i < constants.length; i++)
+                values.put(constants[i], weights[i]);
+            return pick(values);
+        }
     }
-    
+
     public static class StringDSL
     {
         public Gen<String> of(Gen.IntGen sizes, char[] domain)

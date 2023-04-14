@@ -18,19 +18,25 @@
 
 package accord.utils;
 
+import org.agrona.collections.IntArrayList;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 
 import static accord.utils.Property.qt;
+import static org.assertj.core.api.Assertions.assertThat;
 
 public class GenTest {
     @Test
@@ -96,5 +102,75 @@ public class GenTest {
                 return "Expected " + list + " to be equal to " + unique + " but had different sizes";
             });
         });
+    }
+
+    enum PickWeight {A, B, C}
+
+    @Test
+    public void pickWeight()
+    {
+        int samples = 1000;
+        Gen<PickWeight> enums = Gens.enums().allWithWeights(PickWeight.class, 81, 10, 1);
+        Gen<Map<PickWeight, Integer>> gen = rs -> {
+            Map<PickWeight, Integer> counts = new EnumMap<>(PickWeight.class);
+            for (int i = 0; i < samples; i++)
+                counts.compute(enums.next(rs), (ignore, accum) -> accum == null ? 1 : accum + 1);
+            return counts;
+        };
+        qt().forAll(gen).check(counts -> {
+            // expected 810
+            assertThat(counts.get(PickWeight.A)).isGreaterThan(counts.get(PickWeight.B));
+            // expected 100
+            assertThat(counts.get(PickWeight.B))
+                    .isBetween(50, 200);
+
+            if (counts.containsKey(PickWeight.C))
+            {
+                assertThat(counts.get(PickWeight.B))
+                        .isGreaterThan(counts.get(PickWeight.C));
+
+                // expected 10
+                assertThat(counts.get(PickWeight.C))
+                        .isBetween(1, 60);
+            }
+        });
+    }
+
+    @Test
+    public void runs()
+    {
+        double ratio = 0.0625;
+        int samples = 1000;
+        Gen<Runs> gen = Gens.lists(Gens.bools().runs(ratio)).ofSize(samples).map(Runs::new);
+        qt().forAll(gen).check(runs -> {
+            assertThat(IntStream.of(runs.runs).filter(i -> i > 5).toArray()).isNotEmpty();
+            assertThat(runs.counts.get(true) / 1000.0).isBetween(ratio * .5, 0.1);
+        });
+    }
+
+    private static class Runs
+    {
+        private final Map<Boolean, Long> counts;
+        private final int[] runs;
+
+        Runs(List<Boolean> samples)
+        {
+            this.counts = samples.stream().collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+            IntArrayList runs = new IntArrayList();
+            int run = -1;
+            for (boolean b : samples)
+            {
+                if (b)
+                {
+                    run = run == -1 ? 1 : run + 1;
+                }
+                else if (run != -1)
+                {
+                    runs.add(run);
+                    run = -1;
+                }
+            }
+            this.runs = runs.toIntArray();
+        }
     }
 }

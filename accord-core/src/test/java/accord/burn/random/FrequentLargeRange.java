@@ -18,59 +18,121 @@
 
 package accord.burn.random;
 
-import accord.utils.Invariants;
+import accord.utils.Gen;
+import accord.utils.Gen.LongGen;
+import accord.utils.Gens;
 import accord.utils.RandomSource;
 
-public class FrequentLargeRange implements RandomLong
-{
-    private final RandomLong small, large;
-    private final double ratio;
-    private final int steps;
-    private final double lower, upper;
-    private int run = -1;
-    private long smallCount = 0, largeCount = 0;
+import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 
-    public FrequentLargeRange(RandomLong small, RandomLong large, double ratio)
+public class FrequentLargeRange implements LongGen
+{
+    private final LongGen small, large;
+    private final Gen<Boolean> runs;
+
+    public FrequentLargeRange(LongGen small, LongGen large, double ratio)
     {
-        Invariants.checkArgument(ratio > 0 && ratio <= 1);
         this.small = small;
         this.large = large;
-        this.ratio = ratio;
-        this.steps = (int) (1 / ratio);
-        this.lower = ratio * .8;
-        this.upper = ratio * 1.2;
+        this.runs = Gens.bools().runs(ratio);
     }
 
     @Override
-    public long getLong(RandomSource randomSource)
+    public long nextLong(RandomSource randomSource)
     {
-        if (run != -1)
+        if (runs.next(randomSource)) return large.nextLong(randomSource);
+        else                         return small.nextLong(randomSource);
+    }
+
+    public static Builder builder(RandomSource randomSource)
+    {
+        return new Builder(randomSource);
+    }
+
+    public static class Builder
+    {
+        private final RandomSource random;
+        private Double ratio;
+        private LongGen small, large;
+
+        public Builder(RandomSource random)
         {
-            run--;
-            largeCount++;
-            return large.getLong(randomSource);
+            this.random = random;
         }
-        double currentRatio = largeCount / (double) (smallCount + largeCount);
-        if (currentRatio < lower)
+
+        public Builder raitio(double ratio)
         {
-            // not enough large
-            largeCount++;
-            return large.getLong(randomSource);
+            this.ratio = ratio;
+            return this;
         }
-        if (currentRatio > upper)
+
+        public Builder raitio(int min, int max)
         {
-            // not enough small
-            smallCount++;
-            return small.getLong(randomSource);
+            this.ratio = ratio = random.nextInt(min, max) / 100.0D;
+            return this;
         }
-        if (randomSource.nextDouble() < ratio)
+
+        public Builder small(Duration min, Duration max)
         {
-            run = randomSource.nextInt(steps);
-            run--;
-            largeCount++;
-            return large.getLong(randomSource);
+            small = create(min, max);
+            return this;
         }
-        smallCount++;
-        return small.getLong(randomSource);
+
+        public Builder small(long min, long max, TimeUnit unit)
+        {
+            small = create(min, max, unit);
+            return this;
+        }
+
+        public Builder small(long min, TimeUnit minUnit, long max, TimeUnit maxUnit)
+        {
+            small = create(min, minUnit, max, maxUnit);
+            return this;
+        }
+
+        public Builder large(Duration min, Duration max)
+        {
+            large = create(min, max);
+            return this;
+        }
+
+        public Builder large(long min, long max, TimeUnit unit)
+        {
+            large = create(min, max, unit);
+            return this;
+        }
+
+        public Builder large(long min, TimeUnit minUnit, long max, TimeUnit maxUnit)
+        {
+            large = create(min, minUnit, max, maxUnit);
+            return this;
+        }
+
+        private RandomWalkRange create(Duration min, Duration max)
+        {
+            return new RandomWalkRange(random, min.toNanos(), max.toNanos());
+        }
+
+        private RandomWalkRange create(long min, long max, TimeUnit unit)
+        {
+            return create(min, unit, max, unit);
+        }
+
+        private RandomWalkRange create(long min, TimeUnit minUnit, long max, TimeUnit maxUnit)
+        {
+            return new RandomWalkRange(random, minUnit.toNanos(min), maxUnit.toNanos(max));
+        }
+
+        public FrequentLargeRange build()
+        {
+            if (small == null)
+                throw new IllegalStateException("Small range undefined");
+            if (large == null)
+                throw new IllegalStateException("Large range undefined");
+            if (ratio == null)
+                raitio(1, 11);
+            return new FrequentLargeRange(small, large, ratio);
+        }
     }
 }

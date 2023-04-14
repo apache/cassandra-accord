@@ -46,9 +46,9 @@ class RandomRangeTest
     {
         int samples = 1000;
         qt().forAll(Gens.random(), ranges()).check((rs, range) -> {
-            RandomLong randRange = factory.create(rs, range.min, range.max);
+            Gen.LongGen randRange = factory.create(rs, range.min, range.max);
             for (int i = 0; i < samples; i++)
-                Assertions.assertThat(randRange.getLong(rs)).isBetween((long) range.min, (long) range.max);
+                Assertions.assertThat(randRange.nextLong(rs)).isBetween((long) range.min, (long) range.max);
         });
     }
 
@@ -78,6 +78,6 @@ class RandomRangeTest
 
     private interface Factory
     {
-        RandomLong create(RandomSource random, int min, int max);
+        Gen.LongGen create(RandomSource random, int min, int max);
     }
 }

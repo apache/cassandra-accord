@@ -16,17 +16,18 @@
  * limitations under the License.
  */
 
-package accord.burn.random;
+package accord.impl.list;
 
-import accord.utils.RandomSource;
+import accord.messages.MessageType;
+import accord.messages.Reply;
 
-public interface RandomInt extends RandomLong
+public enum ListHeartbeat implements Reply
 {
-    int getInt(RandomSource randomSource);
+    INSTANCE;
 
     @Override
-    default long getLong(RandomSource randomSource)
+    public MessageType type()
     {
-        return getInt(randomSource);
+        throw new UnsupportedOperationException();
     }
 }

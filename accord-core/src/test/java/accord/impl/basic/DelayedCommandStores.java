@@ -49,7 +49,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
     public static CommandStores.Factory factory(PendingQueue pending)
     {
         return (time, agent, store, random, shardDistributor, progressLogFactory) ->
-               new DelayedCommandStores(time, agent, store, random, shardDistributor, progressLogFactory, new SimulatedDelayedExecutorService(pending, agent, random));
+               new DelayedCommandStores(time, agent, store, random, shardDistributor, progressLogFactory, new SimulatedDelayedExecutorService(pending, agent));
     }
 
     public static class DelayedCommandStore extends InMemoryCommandStore

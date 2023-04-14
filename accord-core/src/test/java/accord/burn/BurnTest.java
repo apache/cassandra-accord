@@ -40,6 +40,8 @@ import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
+import accord.burn.random.FrequentLargeRange;
+import accord.utils.Gen;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -200,13 +202,17 @@ public class BurnTest
         });
 
         Supplier<LongSupplier> nowSupplier = () -> {
-            RandomSource jitter = random.fork();
-            // TODO (expected): jitter should be random walk with intermittent long periods
-            return () -> Math.max(0, delayQueue.nowInMillis() + (jitter.nextInt(10) - 5));
+            RandomSource forked = random.fork();
+            Gen.LongGen jitter = FrequentLargeRange.builder(forked)
+                                                   .raitio(1, 5)
+                                                   .small(50, 5000, TimeUnit.MICROSECONDS)
+                                                   .large(1, 10, TimeUnit.MILLISECONDS)
+                                                   .build();
+            return () -> Math.max(0, queue.nowInMillis() + jitter.nextLong(forked));
         };
 
         StrictSerializabilityVerifier strictSerializable = new StrictSerializabilityVerifier(keyCount);
-        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, agent, random.fork());
+        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, agent);
         Function<CommandStore, AsyncExecutor> executor = ignore -> globalExecutor;
 
         Packet[] requests = toArray(generate(random, executor, clients, nodes, keyCount, operations), Packet[]::new);
@@ -228,35 +234,53 @@ public class BurnTest
 
         // not used for atomicity, just for encapsulation
         AtomicReference<Runnable> onSubmitted = new AtomicReference<>();
-        Consumer<Packet> responseSink = packet -> {
-            ListResult reply = (ListResult) packet.message;
-            if (replies[(int)packet.replyId] != null)
-                return;
-
+        Runnable maybeTriggerNextRequest = () -> {
             if (requestIndex.get() < requests.length)
             {
                 int i = requestIndex.getAndIncrement();
                 starts[i] = clock.incrementAndGet();
-                queue.add(requests[i]);
+                // TODO (review): why did i add this again?
+                queue.addNoDelay(requests[i]);
                 if (i == requests.length - 1)
                     onSubmitted.get().run();
             }
-
+        };
+        Consumer<Packet> responseSink = packet -> {
+            ListResult reply = (ListResult) packet.message;
+            if (!reply.isSuccess() && reply.fault() == ListResult.Fault.HeartBeat)
+            {
+                // when a request failed, this is sent as the result will only be learned once onDone is triggered;
+                // without this logic the sink may stop being called, so the backlog won't be enqueued
+                maybeTriggerNextRequest.run();
+                return;
+            }
+            if (replies[(int)packet.replyId] != null)
+                return;
             try
             {
-                if (reply.responseKeys == null && reply.read != null && reply.read.length == 0)
-                    return; // interrupted; will fetch our actual reply once rest of simulation is finished (but wanted to send another request to keep correct number in flight)
+                maybeTriggerNextRequest.run();
 
                 int start = starts[(int)packet.replyId];
                 int end = clock.incrementAndGet();
                 logger.debug("{} at [{}, {}]", reply, start, end);
                 replies[(int)packet.replyId] = packet;
 
-                if (reply.responseKeys == null)
+                if (!reply.isSuccess())
                 {
-                    if (reply.read == null) nacks.incrementAndGet();
-                    else if (reply.read.length == 1) lost.incrementAndGet();
-                    else throw new AssertionError();
+                    switch (reply.fault())
+                    {
+                        case Lost:
+                            lost.incrementAndGet();
+                            break;
+                        case Invalidated:
+                            nacks.incrementAndGet();
+                            break;
+                        case Timeout:
+                            // txn was applied, but client saw a timeout, so response isn't known
+                            break;
+                        default:
+                            throw new AssertionError("Unexpected fault: " + reply.fault());
+                    }
                     return;
                 }
 
@@ -314,7 +338,7 @@ public class BurnTest
                 logger.info("{}", requests[i]);
                 logger.info("\t\t" + replies[i]);
             }
-            throw new AssertionError("Incomplete set of responses");
+            throw new AssertionError("Incomplete set of responses; clock=" + clock.get() + ", expected operations=" + (operations * 2));
         }
     }
 

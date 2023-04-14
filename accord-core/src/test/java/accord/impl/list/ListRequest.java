@@ -18,14 +18,14 @@
 
 package accord.impl.list;
 
-import java.util.function.BiConsumer;
-
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.coordinate.CheckShards;
 import accord.coordinate.CoordinationFailed;
+import accord.coordinate.Timeout;
 import accord.impl.basic.Cluster;
 import accord.impl.basic.Packet;
+import accord.impl.basic.SimulatedFault;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.Status;
@@ -33,10 +33,12 @@ import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
 import accord.messages.MessageType;
 import accord.messages.ReplyContext;
+import accord.messages.Request;
 import accord.primitives.RoutingKeys;
 import accord.primitives.Txn;
-import accord.messages.Request;
 import accord.primitives.TxnId;
+
+import java.util.function.BiConsumer;
 
 import static accord.local.Status.PreApplied;
 
@@ -110,27 +112,39 @@ public class ListRequest implements Request
             {
                 RoutingKey homeKey = ((CoordinationFailed) fail).homeKey();
                 TxnId txnId = ((CoordinationFailed) fail).txnId();
-                node.reply(client, replyContext, new ListResult(client, ((Packet)replyContext).requestId, txnId, null, null, new int[0][], null));
-                ((Cluster)node.scheduler()).onDone(() -> {
-                    node.commandStores()
-                        .select(homeKey)
-                        .execute(() -> CheckOnResult.checkOnResult(node, txnId, homeKey, (s, f) -> {
-                            if (f != null)
-                                return;
-                            switch (s)
-                            {
-                                case Invalidated:
-                                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, null, null));
-                                    break;
-                                case Lost:
-                                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, new int[1][], null));
-                                    break;
-                                case Neither:
-                                    // currently caught elsewhere in response tracking, but might help to throw an exception here
-                            }
-                        }));
-                });
+                node.reply(client, replyContext, ListResult.heartBeat(client, ((Packet)replyContext).requestId, txnId));
+                ((Cluster) node.scheduler()).onDone(() -> checkOnResult(homeKey, txnId, 0, null));
             }
+        }
+
+        private void checkOnResult(RoutingKey homeKey, TxnId txnId, int attempt, Throwable t) {
+            if (attempt == 10)
+            {
+                node.agent().onUncaughtException(t);
+                return;
+            }
+            node.commandStores().select(homeKey).execute(() -> CheckOnResult.checkOnResult(node, txnId, homeKey, (s, f) -> {
+                if (f != null)
+                {
+                    if (f instanceof Timeout || f instanceof SimulatedFault) checkOnResult(homeKey, txnId, attempt + 1, f);
+                    else node.agent().onUncaughtException(f);
+                    return;
+                }
+                switch (s)
+                {
+                    case Invalidated:
+                        node.reply(client, replyContext, ListResult.invalidated(client, ((Packet)replyContext).requestId, txnId));
+                        break;
+                    case Lost:
+                        node.reply(client, replyContext, ListResult.lost(client, ((Packet)replyContext).requestId, txnId));
+                        break;
+                    case Neither:
+                        node.reply(client, replyContext, ListResult.timeout(client, ((Packet)replyContext).requestId, txnId));
+                        break;
+                    default:
+                        node.agent().onUncaughtException(new AssertionError("Unknown outcome: " + s));
+                }
+            }));
         }
     }
 

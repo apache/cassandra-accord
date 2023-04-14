@@ -53,17 +53,17 @@ class SegmentedRandomRangeTest
             this.type = type;
         }
 
-        RandomLong min(RandomSource random)
+        Gen.LongGen min(RandomSource random)
         {
             return create(random, minSmall, maxSmall);
         }
 
-        RandomLong max(RandomSource random)
+        Gen.LongGen max(RandomSource random)
         {
             return create(random, minLarge, maxLarge);
         }
 
-        private RandomLong create(RandomSource random, int min, int max)
+        private Gen.LongGen create(RandomSource random, int min, int max)
         {
             switch (type)
             {
@@ -127,7 +127,7 @@ class SegmentedRandomRangeTest
         int resamples = 0;
         for (int i = 0; i < numSamples; i++)
         {
-            long size = period.getLong(rs);
+            long size = period.nextLong(rs);
             if (size > tc.maxSmall)
             {
                 largeCount++;

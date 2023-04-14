@@ -28,6 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -40,6 +41,7 @@ import org.junit.jupiter.api.Assertions;
 import accord.api.MessageSink;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
+import accord.burn.random.FrequentLargeRange;
 import accord.impl.*;
 import accord.local.AgentExecutor;
 import accord.local.Node;
@@ -49,10 +51,12 @@ import accord.impl.list.ListStore;
 import accord.local.ShardDistributor;
 import accord.messages.SafeCallback;
 import accord.messages.MessageType;
+import accord.messages.Message;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.topology.TopologyRandomizer;
 import accord.topology.Topology;
+import accord.utils.Gen.LongGen;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
@@ -77,17 +81,55 @@ public class Cluster implements Scheduler
 
     EnumMap<MessageType, Stats> statsMap = new EnumMap<>(MessageType.class);
 
+    private static class Connection
+    {
+        private final Id from, to;
+
+        private Connection(Id from, Id to)
+        {
+            this.from = from;
+            this.to = to;
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            Connection that = (Connection) o;
+            return Objects.equals(from, that.from) && Objects.equals(to, that.to);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(from, to);
+        }
+
+        @Override
+        public String toString()
+        {
+            return "Connection{" +
+                    "from=" + from +
+                    ", to=" + to +
+                    '}';
+        }
+    }
+
+    final RandomSource randomSource;
     final Function<Id, Node> lookup;
     final PendingQueue pending;
     final List<Runnable> onDone = new ArrayList<>();
     final Consumer<Packet> responseSink;
     final Map<Id, NodeSink> sinks = new HashMap<>();
+    final Map<Connection, LongGen> networkJitter = new HashMap<>();
     int clock;
     int recurring;
     Set<Id> partitionSet;
 
-    public Cluster(Supplier<PendingQueue> queueSupplier, Function<Id, Node> lookup, Consumer<Packet> responseSink)
+    public Cluster(RandomSource randomSource, Supplier<PendingQueue> queueSupplier, Function<Id, Node> lookup, Consumer<Packet> responseSink)
     {
+        this.randomSource = randomSource;
         this.pending = queueSupplier.get();
         this.lookup = lookup;
         this.responseSink = responseSink;
@@ -110,7 +152,22 @@ public class Cluster implements Scheduler
         if (trace.isTraceEnabled())
             trace.trace("{} {} {}", clock++, isReply ? "RPLY" : "SEND", packet);
         if (lookup.apply(packet.dst) == null) responseSink.accept(packet);
-        else pending.add(packet);
+        else pending.add(packet, networkJitterNanos(packet), TimeUnit.NANOSECONDS);
+    }
+
+    private long networkJitterNanos(Packet packet)
+    {
+        return networkJitter.computeIfAbsent(new Connection(packet.src, packet.dst), ignore -> defaultJitter())
+                            .nextLong(randomSource);
+    }
+
+    private LongGen defaultJitter()
+    {
+        return FrequentLargeRange.builder(randomSource)
+                                 .raitio(1, 5)
+                                 .small(500, TimeUnit.MICROSECONDS, 5, TimeUnit.MILLISECONDS)
+                                 .large(50, TimeUnit.MILLISECONDS, 5, SECONDS)
+                                 .build();
     }
 
     void add(Id from, Id to, long messageId, Request send)
@@ -153,18 +210,6 @@ public class Cluster implements Scheduler
             Packet deliver = (Packet) next;
             Node on = lookup.apply(deliver.dst);
 
-            // TODO (required, testing): random drop chance independent of partition; also port flaky connections etc. from simulator
-            // Drop the message if it goes across the partition
-            boolean drop = ((Packet) next).src.id >= 0 &&
-                           !(partitionSet.contains(deliver.src) && partitionSet.contains(deliver.dst)
-                             || !partitionSet.contains(deliver.src) && !partitionSet.contains(deliver.dst));
-            if (drop)
-            {
-                if (trace.isTraceEnabled())
-                    trace.trace("{} DROP[{}] {}", clock++, on.epoch(), deliver);
-                return;
-            }
-
             if (trace.isTraceEnabled())
                 trace.trace("{} RECV[{}] {}", clock++, on.epoch(), deliver);
 
@@ -184,6 +229,13 @@ public class Cluster implements Scheduler
         {
             ((Runnable) next).run();
         }
+    }
+
+    public void notifyDropped(Node.Id from, Node.Id to, long id, Message message)
+    {
+        Node on = lookup.apply(to);
+        if (trace.isTraceEnabled())
+            trace.trace("{} DROP[{}] (from:{}, to:{}, {}:{}, body:{})", clock++, on.epoch(), from, to, message instanceof Reply ? "replyTo" : "id", id, message);
     }
 
     @Override
@@ -221,7 +273,7 @@ public class Cluster implements Scheduler
         Map<Id, Node> lookup = new LinkedHashMap<>();
         try
         {
-            Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink);
+            Cluster sinks = new Cluster(randomSupplier.get(), queueSupplier, lookup::get, responseSink);
             TopologyUpdates topologyUpdates = new TopologyUpdates(executor);
             TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, lookup::get);
             for (Id node : nodes)

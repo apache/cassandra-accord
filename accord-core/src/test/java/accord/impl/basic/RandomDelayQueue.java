@@ -18,6 +18,8 @@
 
 package accord.impl.basic;
 
+import accord.burn.random.FrequentLargeRange;
+import accord.utils.Gen.LongGen;
 import accord.utils.RandomSource;
 
 import java.util.PriorityQueue;
@@ -72,24 +74,40 @@ public class RandomDelayQueue implements PendingQueue
 
     final PriorityQueue<Item> queue = new PriorityQueue<>();
     final RandomSource random;
+    private final LongGen jitterInNano;
     long now;
     int seq;
 
     RandomDelayQueue(RandomSource random)
     {
         this.random = random;
+        this.jitterInNano = FrequentLargeRange.builder(random)
+                                              .small(0, 50, TimeUnit.MICROSECONDS)
+                                              .large(50, TimeUnit.MICROSECONDS, 5, TimeUnit.MILLISECONDS)
+                                              .build();
     }
 
     @Override
     public void add(Pending item)
     {
-        add(item, random.nextInt(500), TimeUnit.MILLISECONDS);
+        add(item, jitterInNano.nextLong(random), TimeUnit.NANOSECONDS);
+    }
+
+    @Override
+    public void addNoDelay(Pending item)
+    {
+        add(item, 0, TimeUnit.NANOSECONDS);
     }
 
     @Override
     public void add(Pending item, long delay, TimeUnit units)
     {
         queue.add(new Item(now + units.toMillis(delay), seq++, item));
+    }
+
+    @Override
+    public long nowInMillis() {
+        return now;
     }
 
     @Override
@@ -106,10 +124,5 @@ public class RandomDelayQueue implements PendingQueue
     public int size()
     {
         return queue.size();
-    }
-
-    public long nowInMillis()
-    {
-        return now;
     }
 }
