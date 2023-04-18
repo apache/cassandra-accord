@@ -185,7 +185,7 @@ public class Barrier extends AsyncResults.AbstractResult<Timestamp>
                 doBarrierSuccess(executeAt);
             }
             else if (command.is(Status.Invalidated))
-                // TODO is this the right way to error out?
+                // Surface the invalidation and the barrier can be retried by the caller
                 Barrier.this.tryFailure(new Timeout(command.txnId(), command.homeKey()));
 
         }
