@@ -60,6 +60,7 @@ import static accord.utils.Invariants.checkArgument;
  */
 public class TopologyManager implements ConfigurationService.Listener
 {
+    @SuppressWarnings("unused")
     private static final Logger logger = LoggerFactory.getLogger(TopologyManager.class);
 
     private static final AsyncResult<Void> SUCCESS = AsyncResults.success(null);

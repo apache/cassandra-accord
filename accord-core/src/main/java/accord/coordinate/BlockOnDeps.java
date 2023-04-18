@@ -47,6 +47,7 @@ import static accord.messages.Commit.Kind.Maximal;
  */
 public class BlockOnDeps implements Callback<ExecuteReply>
 {
+    @SuppressWarnings("unused")
     private static final Logger logger = LoggerFactory.getLogger(BlockOnDeps.class);
 
     final Node node;

@@ -58,6 +58,8 @@ import static accord.utils.MapReduceConsume.forEach;
 // TODO (required, efficiency): dedup - can currently have infinite pending reads that will be executed independently
 public abstract class WhenReadyToExecute extends AbstractEpochRequest<WhenReadyToExecute.ExecuteNack> implements CommandListener
 {
+    private static final Logger logger = LoggerFactory.getLogger(WhenReadyToExecute.class);
+
     public enum ExecuteType
     {
         readData(0),
@@ -84,8 +86,6 @@ public abstract class WhenReadyToExecute extends AbstractEpochRequest<WhenReadyT
             }
         }
     }
-
-    private static final Logger logger = LoggerFactory.getLogger(WhenReadyToExecute.class);
 
     public final long executeAtEpoch;
     public final Seekables<?, ?> scope; // TODO (low priority, efficiency): this should be RoutingKeys, as we have the Keys locally, but for simplicity we use this to implement keys()

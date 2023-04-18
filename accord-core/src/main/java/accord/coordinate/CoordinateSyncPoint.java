@@ -50,6 +50,7 @@ import static accord.utils.Invariants.checkArgument;
  */
 public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
 {
+    @SuppressWarnings("unused")
     private static final Logger logger = LoggerFactory.getLogger(CoordinateSyncPoint.class);
 
     // Whether to wait on the dependencies applying globally before returning a result

@@ -60,6 +60,7 @@ import static accord.utils.Invariants.checkArgument;
  */
 public class Barrier extends AsyncResults.AbstractResult<Timestamp>
 {
+    @SuppressWarnings("unused")
     private static final Logger logger = LoggerFactory.getLogger(Barrier.class);
 
     private final Node node;

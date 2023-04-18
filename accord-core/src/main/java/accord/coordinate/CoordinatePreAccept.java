@@ -49,6 +49,7 @@ import static accord.utils.Invariants.checkState;
  */
 abstract class CoordinatePreAccept<T> extends AsyncResults.SettableResult<T> implements Callback<PreAcceptReply>, BiConsumer<T, Throwable>
 {
+    @SuppressWarnings("unused")
     private static final Logger logger = LoggerFactory.getLogger(CoordinatePreAccept.class);
 
     final Node node;

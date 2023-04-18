@@ -55,6 +55,7 @@ import static accord.utils.Invariants.checkArgument;
  */
 public abstract class CommandStores<S extends CommandStore>
 {
+    @SuppressWarnings("unused")
     private static final Logger logger = LoggerFactory.getLogger(CommandStores.class);
 
     public interface Factory
