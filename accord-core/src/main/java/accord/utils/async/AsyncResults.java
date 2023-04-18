@@ -48,7 +48,7 @@ public class AsyncResults
         }
     }
 
-    static class AbstractResult<V> implements AsyncResult<V>
+    public static class AbstractResult<V> implements AsyncResult<V>
     {
         private static final AtomicReferenceFieldUpdater<AbstractResult, Object> STATE = AtomicReferenceFieldUpdater.newUpdater(AbstractResult.class, Object.class, "state");
 
@@ -108,9 +108,18 @@ public class AsyncResults
             }
         }
 
-        boolean trySetResult(V result, Throwable failure)
+        protected boolean trySetResult(V result, Throwable failure)
         {
             return trySetResult(new Result<>(result, failure));
+        }
+
+        protected boolean trySuccess(V value)
+        {
+            return trySetResult(value, null);
+        }
+        protected boolean tryFailure(Throwable throwable)
+        {
+            return trySetResult(null, throwable);
         }
 
         private  AsyncChain<V> newChain()
@@ -215,13 +224,13 @@ public class AsyncResults
         @Override
         public boolean trySuccess(V value)
         {
-            return trySetResult(value, null);
+            return super.trySuccess(value);
         }
 
         @Override
         public boolean tryFailure(Throwable throwable)
         {
-            return trySetResult(null, throwable);
+            return super.tryFailure(throwable);
         }
     }
 

@@ -18,6 +18,8 @@
 
 package accord.coordinate;
 
+import javax.annotation.Nonnull;
+
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,7 +45,6 @@ import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.utils.MapReduceConsume;
 import accord.utils.async.AsyncResults;
-import javax.annotation.Nonnull;
 
 import static accord.local.PreLoadContext.EMPTY_PRELOADCONTEXT;
 import static accord.local.PreLoadContext.contextFor;
@@ -57,7 +58,7 @@ import static accord.utils.Invariants.checkArgument;
  *
  * Note that reads might still order after, but side effect bearing transactions should not.
  */
-public class Barrier extends AsyncResults.SettableResult<Timestamp>
+public class Barrier extends AsyncResults.AbstractResult<Timestamp>
 {
     private static final Logger logger = LoggerFactory.getLogger(Barrier.class);
 
