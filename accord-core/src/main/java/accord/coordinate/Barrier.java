@@ -254,12 +254,10 @@ public class Barrier extends AsyncResults.AbstractResult<Timestamp>
         @Override
         public BarrierTxn apply(SafeCommandStore safeStore)
         {
-            // TODO Is this going to find the correct command store to listen for transaction progress?
             BarrierTxn found = safeStore.mapReduceWithTerminate(
                     seekables,
                     safeStore.ranges().since(minEpoch),
-                    // Can I use any transaction, optimally I could wait on a sync point just created as part of transaction initiation
-                    // so we can overlap the accord sync point with sending the prepare/reads for Paxos
+                    // TODO review this with Benedict, but I don't believe an exclusive sync point works here
                     TestKind.Any,
                     TestTimestamp.EXECUTES_AFTER,
                     TxnId.minForEpoch(minEpoch),
@@ -275,7 +273,6 @@ public class Barrier extends AsyncResults.AbstractResult<Timestamp>
             // It's not applied so add a listener to find out when it is applied
             if (found != null && !found.status.equals(Status.Applied))
             {
-                // TODO Should this lean harder into AsyncChain and not call begin?
                 safeStore.commandStore().execute(PreLoadContext.contextFor(found.txnId), safeStoreWithTxn -> safeStoreWithTxn.command(found.txnId).addListener(new BarrierCommandListener())).begin(node.agent());
             }
             return found;
@@ -284,7 +281,7 @@ public class Barrier extends AsyncResults.AbstractResult<Timestamp>
         @Override
         public BarrierTxn reduce(BarrierTxn o1, BarrierTxn o2)
         {
-            return o1 != null && o1.status.compareTo(o2.status) >= 0 ? o1 : o2;
+            throw new IllegalStateException("Should not be possible to find multiple transactions");
         }
 
         @Override
