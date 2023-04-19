@@ -18,17 +18,17 @@
 
 package accord.utils.async;
 
-import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.function.BiConsumer;
 
 public class AsyncCallbacks
 {
-    public static <T> BiConsumer<? super T, Throwable> inExecutor(BiConsumer<? super T, Throwable> callback, Executor executor)
+    public static <T> BiConsumer<? super T, Throwable> inExecutorService(BiConsumer<? super T, Throwable> callback, ExecutorService es)
     {
         return (result, throwable) -> {
             try
             {
-                executor.execute(() -> callback.accept(result, throwable));
+                es.execute(() -> callback.accept(result, throwable));
             }
             catch (Throwable t)
             {
@@ -38,9 +38,9 @@ public class AsyncCallbacks
     }
 
 
-    public static <T> BiConsumer<? super T, Throwable> inExecutor(Runnable runnable, Executor executor)
+    public static <T> BiConsumer<? super T, Throwable> inExecutorService(Runnable runnable, ExecutorService es)
     {
-        return inExecutor(toCallback(runnable), executor);
+        return inExecutorService(toCallback(runnable), es);
     }
 
     public static <T> BiConsumer<T, Throwable> toCallback(Runnable runnable) {

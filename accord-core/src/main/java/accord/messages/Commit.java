@@ -20,22 +20,35 @@ package accord.messages;
 
 import java.util.Collections;
 import java.util.Set;
-
-import accord.local.*;
-import accord.local.PreLoadContext;
-import accord.messages.WhenReadyToExecute.ExecuteNack;
-import accord.messages.WhenReadyToExecute.ExecuteReply;
-import accord.primitives.*;
-import accord.local.Node.Id;
-import accord.topology.Topologies;
-import accord.utils.TriFunction;
 import javax.annotation.Nullable;
 
-import accord.utils.Invariants;
-
-import accord.topology.Topology;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import accord.local.Commands;
+import accord.local.Node;
+import accord.local.Node.Id;
+import accord.local.PreLoadContext;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.messages.WhenReadyToExecute.ExecuteNack;
+import accord.messages.WhenReadyToExecute.ExecuteReply;
+import accord.primitives.Deps;
+import accord.primitives.FullRoute;
+import accord.primitives.Keys;
+import accord.primitives.PartialDeps;
+import accord.primitives.PartialRoute;
+import accord.primitives.PartialTxn;
+import accord.primitives.Ranges;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
+import accord.topology.Topologies;
+import accord.topology.Topology;
+import accord.utils.Invariants;
+import accord.utils.TriFunction;
 
 import static accord.local.Status.Committed;
 import static accord.local.Status.Known.DefinitionOnly;
@@ -151,7 +164,7 @@ public class Commit extends TxnRequest<ExecuteNack>
         {
             // To simplify making sure the agent is notified once and is notified before the barrier coordination
             // returns a result; we never notify the agent on the coordinator as part of WaitForDependenciesThenApply execution
-            boolean notifyAgent = to != node.id();
+            boolean notifyAgent = !to.equals(node.id());
             Commit commit = new Commit(
                     Kind.Minimal, to, topology, topologies, txnId,
                     txn, route, txnId, deps,

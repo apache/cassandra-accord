@@ -18,11 +18,11 @@
 
 package accord.primitives;
 
+import javax.annotation.Nonnull;
+
 import accord.local.Node.Id;
 
 import static accord.utils.Invariants.checkArgument;
-
-import javax.annotation.Nonnull;
 
 public class Timestamp implements Comparable<Timestamp>
 {
@@ -133,7 +133,7 @@ public class Timestamp implements Comparable<Timestamp>
         return minEpoch <= epoch() ? this : new Timestamp(minEpoch, hlc(), flags(), node);
     }
 
-    public Timestamp withExtraFlags(int flags)
+    private Timestamp withExtraFlags(int flags)
     {
         checkArgument(flags <= MAX_FLAGS);
         long newLsb = lsb | flags;
@@ -142,7 +142,7 @@ public class Timestamp implements Comparable<Timestamp>
         return new Timestamp(msb, newLsb, node);
     }
 
-    public Timestamp mergeFlags(Timestamp mergeFlags)
+    private Timestamp mergeFlags(Timestamp mergeFlags)
     {
         long newLsb = lsb | (mergeFlags.lsb & MERGE_FLAGS);
         if (lsb == newLsb)

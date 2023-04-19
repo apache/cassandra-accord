@@ -36,6 +36,7 @@ dependencies {
     implementation 'org.agrona:agrona:1.17.1'
 
     testImplementation group: 'org.assertj', name: 'assertj-core', version: '3.24.2'
+    testImplementation group: 'org.awaitility', name: 'awaitility', version: '4.2.0'
 }
 
 task burn(type: JavaExec) {
