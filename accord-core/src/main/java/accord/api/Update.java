@@ -19,21 +19,34 @@
 package accord.api;
 
 import accord.primitives.Ranges;
-import accord.primitives.Keys;
 import accord.primitives.Seekables;
 
 import javax.annotation.Nullable;
 
 /**
  * A client-defined update operation (the write equivalent of a query).
- * Takes as input the data returned by {@code Read}, and returns a {@code Write}
- * representing new information to distributed to each shard's stores.
  */
 public interface Update
 {
+    /**
+     * Returns the scope of the transaction, that is, the keys or ranges that will be written
+     */
+    //TODO maybe this method should be renamed to updateScope, or just scope, or something else which would not mention keys as it can be ranges as well?
     Seekables<?, ?> keys();
-    // null is provided only if nothing was read
+
+    /**
+     * Takes as input the data returned by {@link Read}, and returns a {@link Write} representing new information
+     * to be distributed to each shard's stores. Accepts {@code null} if nothing was read.
+     */
     Write apply(@Nullable Data data);
+
+    /**
+     * Returns a new update operation whose scope is an intersection of {@link #keys()} and the provided ranges.
+     */
     Update slice(Ranges ranges);
+
+    /**
+     * Returns a new update operation whose scope is a union of the scopes of this and the provided update operations.
+     */
     Update merge(Update other);
 }

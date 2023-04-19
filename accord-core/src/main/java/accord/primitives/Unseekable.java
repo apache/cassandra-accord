@@ -19,7 +19,10 @@
 package accord.primitives;
 
 /**
- * Something that can only be routed, i.e. is NOT a Seekable.
+ * Something that can only be routed.
+ * In particular, it purposely does not contain enough information to found it on disk (in contrast to {@link Seekable}).
+ * Those two interfaces were created to explicitly distinguish what information it is intended to be serialized when
+ * exchanging data between nodes. {@link Seekable} contains more information, but it is not always necessary to send it.
  */
 public interface Unseekable extends Routable
 {

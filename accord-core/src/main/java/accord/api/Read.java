@@ -31,8 +31,26 @@ import accord.utils.async.AsyncChain;
  */
 public interface Read
 {
+    /**
+     * Returns the scope of the transaction, that is, the keys or ranges that will be read
+     * // TODO maybe this method should be renamed to readScope, or just scope, or something else which would not mention keys as it can be ranges as well?
+     */
     Seekables<?, ?> keys();
+
+    /**
+     * The method is called when Accord reads data.
+     *
+     * @param key denotes which data to read; it is guaranteed that the key passed there is one of the items covered by {@link #keys()}.
+     */
     AsyncChain<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store);
+
+    /**
+     * Returns a new read operation whose scope is an intersection of {@link #keys()} and the provided ranges.
+     */
     Read slice(Ranges ranges);
+
+    /**
+     * Returns a new read operation whose scope is a union of the scopes of this and the provided read operations.
+     */
     Read merge(Read other);
 }

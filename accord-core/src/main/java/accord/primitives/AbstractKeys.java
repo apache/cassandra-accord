@@ -35,7 +35,7 @@ import static accord.primitives.Routable.Domain.Key;
 
 @SuppressWarnings("rawtypes")
 // TODO (desired, efficiency): check that foldl call-sites are inlined and optimised by HotSpot
-public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K, ?>> implements Iterable<K>, Routables<K, KS>
+public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K, KS>> implements Iterable<K>, Routables<K, KS>
 {
     final K[] keys;
 

@@ -24,18 +24,15 @@ import accord.utils.IndexedFold;
 import accord.utils.IndexedFoldToLong;
 import accord.utils.IndexedRangeFoldToLong;
 import accord.utils.SortedArrays;
+
 import net.nicoulaj.compilecommand.annotations.Inline;
 
-import java.util.function.BiFunction;
-import java.util.function.Function;
-
-import static accord.primitives.Routables.Slice.Overlapping;
 import static accord.utils.SortedArrays.Search.FLOOR;
 
 /**
  * A collection of either Seekable or Unseekable
  */
-public interface Routables<K extends Routable, U extends Routables<K, ?>> extends Iterable<K>
+public interface Routables<K extends Routable, U extends Routables<K, U>> extends Iterable<K>
 {
     enum Slice
     {

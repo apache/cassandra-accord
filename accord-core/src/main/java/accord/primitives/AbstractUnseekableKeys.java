@@ -23,7 +23,7 @@ import accord.api.RoutingKey;
 import java.util.Arrays;
 
 // TODO: do we need this class?
-public abstract class AbstractUnseekableKeys<KS extends Unseekables<RoutingKey, ?>> extends AbstractKeys<RoutingKey, KS> implements Iterable<RoutingKey>, Unseekables<RoutingKey, KS>
+public abstract class AbstractUnseekableKeys<KS extends Unseekables<RoutingKey, KS>> extends AbstractKeys<RoutingKey, KS> implements Iterable<RoutingKey>, Unseekables<RoutingKey, KS>
 {
     AbstractUnseekableKeys(RoutingKey[] keys)
     {
