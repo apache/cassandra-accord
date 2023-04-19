@@ -24,7 +24,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.local.Node;
-import accord.messages.Apply;
 import accord.messages.PreAccept.PreAcceptOk;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
@@ -97,40 +96,7 @@ public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
             // that *may* execute before their txnId, so once these dependencies apply we can say that any action that
             // awaits these dependencies applies after them. In the case of ExclusiveSyncPoint, we additionally guarantee
             // that no lower TxnId can later apply.
-            new Propose<SyncPoint>(node, tracker.topologies(), Ballot.ZERO, txnId, txn, route, deps, txnId, this)
-            {
-                @Override
-                void onAccepted()
-                {
-                    if (txnId.rw() == ExclusiveSyncPoint)
-                    {
-                        node.send(tracker.nodes(), id -> new Apply(id, tracker.topologies(), tracker.topologies(), txnId.epoch(), txnId, route, txn, txnId, deps, txn.execute(txnId, null), txn.result(txnId, txnId, null)));
-                        accept(new SyncPoint(txnId, route.homeKey(), deps, true), null);
-                    }
-                    else
-                    {
-                        // If deps are empty there is nothing to wait on application for so we can return immediately
-                        boolean processAsyncCompletion = deps.isEmpty() || async;
-                        BlockOnDeps.blockOnDeps(node, txnId, txn, route, deps, (result, throwable) -> {
-                            // Don't want to process completion twice
-                            if (processAsyncCompletion)
-                            {
-                                // Don't lose the error
-                                if (throwable != null)
-                                    node.agent().onUncaughtException(throwable);
-                                return;
-                            }
-                            if (throwable != null)
-                                accept(null, throwable);
-                            else
-                                accept(new SyncPoint(txnId, route.homeKey(), deps, false), null);
-                        });
-                        // Notify immediately and the caller can add a listener to command completion to track local application
-                        if (processAsyncCompletion)
-                            accept(new SyncPoint(txnId, route.homeKey(), deps, true), null);
-                    }
-                }
-            }.start();
+            ProposeSyncPoint.proposeSyncPoint(node, tracker.topologies(), Ballot.ZERO, txnId, txn, route, deps, txnId, this, async, tracker.nodes());
         }
     }
 }

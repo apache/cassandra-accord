@@ -49,7 +49,6 @@ import accord.local.Node.Id;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.Status;
 import accord.messages.WhenReadyToExecute.ExecuteOk;
 import accord.primitives.FullKeyRoute;
 import accord.primitives.FullRangeRoute;
@@ -64,13 +63,16 @@ import accord.primitives.TxnId;
 import static accord.Utils.id;
 import static accord.Utils.ids;
 import static accord.Utils.ranges;
+import static accord.Utils.spinUntilSuccess;
 import static accord.Utils.writeTxn;
 import static accord.impl.IntKey.keys;
 import static accord.impl.IntKey.range;
 import static accord.local.PreLoadContext.EMPTY_PRELOADCONTEXT;
+import static accord.local.Status.Applied;
 import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Txn.Kind.Read;
 import static accord.primitives.Txn.Kind.Write;
+import static accord.utils.Invariants.checkState;
 import static accord.utils.async.AsyncChains.getUninterruptibly;
 import static com.google.common.base.Predicates.alwaysTrue;
 import static java.lang.Thread.sleep;
@@ -175,14 +177,22 @@ public class CoordinateTest
             Semaphore existingTransactionCheckCompleted = new Semaphore(0);
             localInitiatingBarrier.existingTransactionCheck.addCallback((ignored1, ignored2) -> existingTransactionCheckCompleted.release());
             assertTrue(existingTransactionCheckCompleted.tryAcquire(5, TimeUnit.SECONDS));
+            // It's possible for the callback to run before the sync point is created in a different callback
+            // because multiple callbacks can run concurrently. `addCallback` might see the finished result
+            // and run immediately in this thread
+            spinUntilSuccess(() -> checkState(localInitiatingBarrier.coordinateSyncPoint != null));
             // Should be able to find the txnid now and wait for local application
             TxnId initiatingBarrierSyncTxnId = localInitiatingBarrier.coordinateSyncPoint.txnId;
             Semaphore barrierAppliedLocally = new Semaphore(0);
             node.ifLocal(PreLoadContext.contextFor(initiatingBarrierSyncTxnId), IntKey.key(3).toUnseekable(), epoch, (safeStore) -> {
-                safeStore.command(initiatingBarrierSyncTxnId).addListener(commandListener((safeStore2, command) -> {
-                    if (command.current().is(Status.Applied))
-                        barrierAppliedLocally.release();
-                }));
+                SafeCommand safeCommand = safeStore.command(initiatingBarrierSyncTxnId);
+                if (safeCommand.current().status() == Applied)
+                    barrierAppliedLocally.release();
+                else
+                    safeCommand.addListener(commandListener((safeStore2, command) -> {
+                        if (command.current().is(Applied))
+                            barrierAppliedLocally.release();
+                    }));
             }).begin(agent);
             assertTrue(barrierAppliedLocally.tryAcquire(5, TimeUnit.SECONDS));
             // If the command is locally applied the future for the barrier should be completed as well and not waiting on messages from other nodes
@@ -245,12 +255,18 @@ public class CoordinateTest
             CoordinateSyncPoint asyncInclusiveSyncFuture = CoordinateSyncPoint.inclusive(node, ranges, true);
             SyncPoint localSyncPoint = getUninterruptibly(asyncInclusiveSyncFuture);
             Semaphore localSyncOccurred = new Semaphore(0);
-            node.commandStores().ifLocal(PreLoadContext.contextFor(localSyncPoint.txnId), homeKey, epoch, epoch, safeStore ->
-                safeStore.command(localSyncPoint.txnId).addListener(
+            node.commandStores().ifLocal(PreLoadContext.contextFor(localSyncPoint.txnId), homeKey, epoch, epoch, safeStore -> {
+                SafeCommand safeCommand = safeStore.command(localSyncPoint.txnId);
+                if (safeCommand.current().status() == Applied)
+                    barrierAppliedLocally.release();
+                else
+                    safeCommand.addListener(
                         commandListener((safeStore2, command) -> {
-                            if (command.current().hasBeen(Status.Applied))
+                            if (command.current().hasBeen(Applied))
                                 localSyncOccurred.release();
-            }))).begin(agent);
+                        })
+                    );
+            }).begin(agent);
 
             // Move to preapplied in order to test that Barrier will find the transaction and add a listener
             for (Node n : cluster)

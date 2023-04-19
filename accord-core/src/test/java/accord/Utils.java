@@ -18,22 +18,27 @@
 
 package accord;
 
-import accord.impl.SizeOfIntersectionSorter;
-import accord.primitives.Range;
-import accord.local.Node;
-import accord.impl.mock.MockStore;
-import accord.primitives.Ranges;
-import accord.topology.Shard;
-import accord.topology.Topologies;
-import accord.topology.Topology;
-import accord.primitives.Txn;
-import accord.primitives.Keys;
-import accord.utils.Invariants;
-import com.google.common.collect.Sets;
-
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
+
+import com.google.common.collect.Sets;
+
+import accord.impl.SizeOfIntersectionSorter;
+import accord.impl.mock.MockStore;
+import accord.local.Node;
+import accord.primitives.Keys;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.Txn;
+import accord.topology.Shard;
+import accord.topology.Topologies;
+import accord.topology.Topology;
+import accord.utils.Invariants;
+import org.awaitility.Awaitility;
+import org.awaitility.core.ThrowingRunnable;
 
 public class Utils
 {
@@ -116,5 +121,20 @@ public class Utils
     public static Topologies topologies(Topology... topologies)
     {
         return new Topologies.Multi(SizeOfIntersectionSorter.SUPPLIER, topologies);
+    }
+
+    public static void spinUntilSuccess(ThrowingRunnable runnable)
+    {
+        spinUntilSuccess(runnable, 10);
+    }
+
+    public static void spinUntilSuccess(ThrowingRunnable runnable, int timeoutInSeconds)
+    {
+        Awaitility.await()
+                  .pollInterval(Duration.ofMillis(100))
+                  .pollDelay(0, TimeUnit.MILLISECONDS)
+                  .atMost(timeoutInSeconds, TimeUnit.SECONDS)
+                  .ignoreExceptions()
+                  .untilAsserted(runnable);
     }
 }

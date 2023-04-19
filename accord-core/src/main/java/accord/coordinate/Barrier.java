@@ -249,7 +249,7 @@ public class Barrier extends AsyncResults.AbstractResult<Timestamp>
      * For Applied we can return success immediately with the executeAt epoch. For PreApplied we can add
      * a listener for when it transitions to Applied and then return success.
      */
-    class ExistingTransactionCheck extends AsyncResults.SettableResult<BarrierTxn> implements MapReduceConsume<SafeCommandStore, BarrierTxn>
+    class ExistingTransactionCheck extends AsyncResults.AbstractResult<BarrierTxn> implements MapReduceConsume<SafeCommandStore, BarrierTxn>
     {
         @Override
         public BarrierTxn apply(SafeCommandStore safeStore)
