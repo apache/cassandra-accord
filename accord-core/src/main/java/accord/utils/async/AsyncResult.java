@@ -18,7 +18,6 @@
 
 package accord.utils.async;
 
-import java.util.concurrent.ExecutorService;
 import java.util.function.BiConsumer;
 
 /**
@@ -34,18 +33,6 @@ public interface AsyncResult<V> extends AsyncChain<V>
     default AsyncResult<V> addCallback(Runnable runnable)
     {
         return addCallback(AsyncCallbacks.toCallback(runnable));
-    }
-
-    @Override
-    default AsyncResult<V> addCallback(BiConsumer<? super V, Throwable> callback, ExecutorService executor)
-    {
-        return addCallback(AsyncCallbacks.inExecutorService(callback, executor));
-    }
-
-    @Override
-    default AsyncResult<V> addCallback(Runnable runnable, ExecutorService executor)
-    {
-        return addCallback(AsyncCallbacks.inExecutorService(runnable, executor));
     }
 
     boolean isDone();
