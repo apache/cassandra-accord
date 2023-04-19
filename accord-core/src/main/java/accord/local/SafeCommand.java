@@ -61,6 +61,13 @@ public abstract class SafeCommand
         return update(Command.addListener(current(), listener));
     }
 
+    public Command addAndInvokeListener(SafeCommandStore safeStore, CommandListener listener)
+    {
+        Command command = update(Command.addListener(current(), listener));
+        listener.onChange(safeStore, this);
+        return command;
+    }
+
     public Command removeListener(CommandListener listener)
     {
         return update(Command.removeListener(current(), listener));

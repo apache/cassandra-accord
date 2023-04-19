@@ -184,16 +184,14 @@ public class CoordinateTest
             // Should be able to find the txnid now and wait for local application
             TxnId initiatingBarrierSyncTxnId = localInitiatingBarrier.coordinateSyncPoint.txnId;
             Semaphore barrierAppliedLocally = new Semaphore(0);
-            node.ifLocal(PreLoadContext.contextFor(initiatingBarrierSyncTxnId), IntKey.key(3).toUnseekable(), epoch, (safeStore) -> {
-                SafeCommand safeCommand = safeStore.command(initiatingBarrierSyncTxnId);
-                if (safeCommand.current().status() == Applied)
-                    barrierAppliedLocally.release();
-                else
-                    safeCommand.addListener(commandListener((safeStore2, command) -> {
+            node.ifLocal(PreLoadContext.contextFor(initiatingBarrierSyncTxnId), IntKey.key(3).toUnseekable(), epoch, (safeStore) ->
+                safeStore.command(initiatingBarrierSyncTxnId).addAndInvokeListener(
+                    safeStore,
+                    commandListener((safeStore2, command) -> {
                         if (command.current().is(Applied))
                             barrierAppliedLocally.release();
-                    }));
-            }).begin(agent);
+                    }))
+            ).begin(agent);
             assertTrue(barrierAppliedLocally.tryAcquire(5, TimeUnit.SECONDS));
             // If the command is locally applied the future for the barrier should be completed as well and not waiting on messages from other nodes
             assertTrue(localInitiatingBarrier.isDone());
@@ -255,18 +253,15 @@ public class CoordinateTest
             CoordinateSyncPoint asyncInclusiveSyncFuture = CoordinateSyncPoint.inclusive(node, ranges, true);
             SyncPoint localSyncPoint = getUninterruptibly(asyncInclusiveSyncFuture);
             Semaphore localSyncOccurred = new Semaphore(0);
-            node.commandStores().ifLocal(PreLoadContext.contextFor(localSyncPoint.txnId), homeKey, epoch, epoch, safeStore -> {
-                SafeCommand safeCommand = safeStore.command(localSyncPoint.txnId);
-                if (safeCommand.current().status() == Applied)
-                    barrierAppliedLocally.release();
-                else
-                    safeCommand.addListener(
-                        commandListener((safeStore2, command) -> {
-                            if (command.current().hasBeen(Applied))
-                                localSyncOccurred.release();
-                        })
-                    );
-            }).begin(agent);
+            node.commandStores().ifLocal(PreLoadContext.contextFor(localSyncPoint.txnId), homeKey, epoch, epoch, safeStore ->
+                safeStore.command(localSyncPoint.txnId).addAndInvokeListener(
+                    safeStore,
+                    commandListener((safeStore2, command) -> {
+                        if (command.current().hasBeen(Applied))
+                            localSyncOccurred.release();
+                    })
+                )
+            ).begin(agent);
 
             // Move to preapplied in order to test that Barrier will find the transaction and add a listener
             for (Node n : cluster)
