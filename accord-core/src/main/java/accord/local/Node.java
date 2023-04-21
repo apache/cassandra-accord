@@ -30,44 +30,53 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
-
-import accord.coordinate.*;
-import accord.messages.*;
-import accord.primitives.*;
-import accord.primitives.Routable.Domain;
-import accord.utils.MapReduceConsume;
-import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncResult;
-import accord.utils.async.AsyncResults;
-import accord.utils.RandomSource;
-import com.google.common.annotations.VisibleForTesting;
-
-import accord.api.*;
-
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import accord.api.Agent;
+import accord.api.BarrierType;
+import accord.api.ConfigurationService;
+import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.MessageSink;
-import accord.api.Result;
 import accord.api.ProgressLog;
+import accord.api.Result;
+import accord.api.RoutingKey;
 import accord.api.Scheduler;
-import accord.api.DataStore;
+import accord.api.TopologySorter;
+import accord.coordinate.Barrier;
+import accord.coordinate.Coordinate;
+import accord.coordinate.MaybeRecover;
+import accord.coordinate.Outcome;
+import accord.coordinate.RecoverWithRoute;
 import accord.messages.Callback;
+import accord.messages.Reply;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
-import accord.messages.Reply;
-import accord.coordinate.RecoverWithRoute;
-import accord.topology.Shard;
-import accord.topology.Topology;
-import accord.topology.TopologyManager;
-import net.nicoulaj.compilecommand.annotations.Inline;
+import accord.messages.TxnRequest;
 import accord.primitives.Ballot;
+import accord.primitives.FullRoute;
+import accord.primitives.ProgressToken;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.Routable.Domain;
+import accord.primitives.Routables;
+import accord.primitives.Route;
+import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
-
-import static accord.utils.Invariants.checkArgument;
+import accord.primitives.Unseekables;
+import accord.topology.Shard;
+import accord.topology.Topology;
+import accord.topology.TopologyManager;
+import accord.utils.MapReduceConsume;
+import accord.utils.RandomSource;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
+import net.nicoulaj.compilecommand.annotations.Inline;
 
 public class Node implements ConfigurationService.Listener, NodeTimeService
 {
@@ -384,9 +393,9 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
      *
      * Returns the Timestamp the barrier actually ended up occurring at. Keep in mind for local barriers it doesn't mean a new transaction was created.
      */
-    public AsyncResult<Timestamp> barrier(Seekable keyOrRange, long minEpoch, BarrierType barrierType)
+    public AsyncResult<Timestamp> barrier(Seekables keysOrRanges, long minEpoch, BarrierType barrierType)
     {
-        return Barrier.barrier(this, keyOrRange, minEpoch, barrierType);
+        return Barrier.barrier(this, keysOrRanges, minEpoch, barrierType);
     }
 
     public AsyncResult<Result> coordinate(Txn txn)

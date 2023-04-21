@@ -25,6 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.api.BarrierType;
+import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.local.Command;
 import accord.local.CommandListener;
@@ -36,10 +37,7 @@ import accord.local.SafeCommandStore.TestDep;
 import accord.local.SafeCommandStore.TestKind;
 import accord.local.SafeCommandStore.TestTimestamp;
 import accord.local.Status;
-import accord.primitives.Keys;
-import accord.primitives.Ranges;
 import accord.primitives.Routable.Domain;
-import accord.primitives.Seekable;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -49,6 +47,7 @@ import accord.utils.async.AsyncResults;
 import static accord.local.PreLoadContext.EMPTY_PRELOADCONTEXT;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.utils.Invariants.checkArgument;
+import static accord.utils.Invariants.checkState;
 
 /**
  * Local or global barriers that return a result once all transactions have their side effects visible.
@@ -64,7 +63,6 @@ public class Barrier extends AsyncResults.AbstractResult<Timestamp>
     private static final Logger logger = LoggerFactory.getLogger(Barrier.class);
 
     private final Node node;
-    private final Seekable keyOrRange;
 
     private final Seekables<?, ?> seekables;
 
@@ -76,19 +74,19 @@ public class Barrier extends AsyncResults.AbstractResult<Timestamp>
     @VisibleForTesting
     ExistingTransactionCheck existingTransactionCheck;
 
-    Barrier(Node node, Seekable keyOrRange, long minEpoch, BarrierType barrierType)
+    Barrier(Node node, Seekables keysOrRanges, long minEpoch, BarrierType barrierType)
     {
-        checkArgument(keyOrRange.domain() == Domain.Key || barrierType.global, "Ranges are only supported with global barriers");
+        checkArgument(keysOrRanges.domain() == Domain.Key || barrierType.global, "Ranges are only supported with global barriers");
+        checkArgument(keysOrRanges.size() == 1 || barrierType.global, "Only a single key is supported with local barriers");
         this.node = node;
         this.minEpoch = minEpoch;
-        this.keyOrRange = keyOrRange;
-        this.seekables = keyOrRange.domain() == Domain.Key ? Keys.of(keyOrRange.asKey()) : Ranges.of(keyOrRange.asRange());
+        this.seekables = keysOrRanges;
         this.barrierType = barrierType;
     }
 
-    public static Barrier barrier(Node node, Seekable keyOrRange, long minEpoch, BarrierType barrierType)
+    public static Barrier barrier(Node node, Seekables keysOrRanges, long minEpoch, BarrierType barrierType)
     {
-        Barrier barrier = new Barrier(node, keyOrRange, minEpoch, barrierType);
+        Barrier barrier = new Barrier(node, keysOrRanges, minEpoch, barrierType);
         barrier.start();
         return barrier;
     }
@@ -97,7 +95,7 @@ public class Barrier extends AsyncResults.AbstractResult<Timestamp>
     {
         // It may be possible to use local state to determine that the barrier is already satisfied or
         // there is an existing transaction we can wait on
-        if (keyOrRange.domain().isKey() && !barrierType.global)
+        if (!barrierType.global)
         {
             existingTransactionCheck = checkForExistingTransaction();
             existingTransactionCheck.addCallback((barrierTxn, existingTransactionCheckFailure) -> {
@@ -141,7 +139,7 @@ public class Barrier extends AsyncResults.AbstractResult<Timestamp>
 
     private void createSyncPoint()
     {
-        coordinateSyncPoint = CoordinateSyncPoint.inclusive(node, Seekables.of(keyOrRange), barrierType.async);
+        coordinateSyncPoint = CoordinateSyncPoint.inclusive(node, seekables, barrierType.async);
         coordinateSyncPoint.addCallback((syncPoint, syncPointFailure) -> {
             if (syncPointFailure != null)
             {
@@ -156,7 +154,7 @@ public class Barrier extends AsyncResults.AbstractResult<Timestamp>
                 TxnId txnId = syncPoint.txnId;
                 long epoch = txnId.epoch();
                 RoutingKey homeKey = syncPoint.homeKey;
-                node.commandStores().ifLocal(PreLoadContext.contextFor(syncPoint.txnId), homeKey, epoch, epoch, safeStore -> {
+                node.commandStores().ifLocal(contextFor(syncPoint.txnId), homeKey, epoch, epoch, safeStore -> {
                     CommandListener listener = new BarrierCommandListener();
                     SafeCommand safeCommand = safeStore.command(txnId);
                     listener.onChange(safeStore, safeCommand);
@@ -206,12 +204,12 @@ public class Barrier extends AsyncResults.AbstractResult<Timestamp>
 
     private ExistingTransactionCheck checkForExistingTransaction()
     {
-        // TODO this could execute at several different command stores and register multiple command listeners
-        // Won't harm correctness, but maybe wasteful?
+        checkState(seekables.size() == 1 && seekables.domain() == Domain.Key);
         ExistingTransactionCheck check = new ExistingTransactionCheck();
+        Key k = seekables.get(0).asKey();
         node.commandStores().mapReduceConsume(
-                contextFor(keyOrRange.asKey()),
-                keyOrRange.asKey().toUnseekable(),
+                contextFor(k),
+                k.toUnseekable(),
                 minEpoch,
                 Long.MAX_VALUE,
                 check);
@@ -273,7 +271,7 @@ public class Barrier extends AsyncResults.AbstractResult<Timestamp>
             // It's not applied so add a listener to find out when it is applied
             if (found != null && !found.status.equals(Status.Applied))
             {
-                safeStore.commandStore().execute(PreLoadContext.contextFor(found.txnId), safeStoreWithTxn -> safeStoreWithTxn.command(found.txnId).addListener(new BarrierCommandListener())).begin(node.agent());
+                safeStore.commandStore().execute(contextFor(found.txnId), safeStoreWithTxn -> safeStoreWithTxn.command(found.txnId).addListener(new BarrierCommandListener())).begin(node.agent());
             }
             return found;
         }

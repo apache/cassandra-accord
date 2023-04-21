@@ -18,11 +18,12 @@
 
 package accord.primitives;
 
-import accord.api.RoutingKey;
-
-import javax.annotation.Nonnull;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.stream.Stream;
+import javax.annotation.Nonnull;
+
+import accord.api.RoutingKey;
 
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_OVERLAPPING;
 import static accord.primitives.Routables.Slice.Overlapping;
@@ -199,5 +200,4 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
         }
         return construct(toArray(result, Range[]::new));
     }
-
 }

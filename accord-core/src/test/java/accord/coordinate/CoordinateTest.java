@@ -55,6 +55,7 @@ import accord.primitives.FullRangeRoute;
 import accord.primitives.Keys;
 import accord.primitives.PartialDeps;
 import accord.primitives.Ranges;
+import accord.primitives.Seekables;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -172,7 +173,7 @@ public class CoordinateTest
             // This is checking for a local barrier so it should succeed even if we drop the completion messages from the other nodes
             cluster.networkFilter.addFilter(id -> ImmutableSet.of(cluster.get(2).id(), cluster.get(3).id()).contains(id), alwaysTrue(), message -> message instanceof ExecuteOk);
             // Should create a sync transaction since no pre-existing one can be used and return as soon as it is locally applied
-            Barrier localInitiatingBarrier = Barrier.barrier(node, IntKey.key(3), node.epoch(), BarrierType.local);
+            Barrier localInitiatingBarrier = Barrier.barrier(node, Seekables.of(IntKey.key(3)), node.epoch(), BarrierType.local);
             // Sync transaction won't be created until callbacks for existing transaction check runs
             Semaphore existingTransactionCheckCompleted = new Semaphore(0);
             localInitiatingBarrier.existingTransactionCheck.addCallback((ignored1, ignored2) -> existingTransactionCheckCompleted.release());
@@ -197,9 +198,10 @@ public class CoordinateTest
             assertTrue(localInitiatingBarrier.isDone());
             cluster.networkFilter.clear();
 
+            Seekables globalSyncBarrierKeys = keys(2, 3);
             // At least one other should have completed by the time it is locally applied, a down node should be fine since it is quorum
             cluster.networkFilter.isolate(cluster.get(2).id());
-            Barrier globalInitiatingBarrier = Barrier.barrier(node, IntKey.key(2), node.epoch(), BarrierType.global_sync);
+            Barrier globalInitiatingBarrier = Barrier.barrier(node, globalSyncBarrierKeys, node.epoch(), BarrierType.global_sync);
             Timestamp globalBarrierTimestamp = getUninterruptibly(globalInitiatingBarrier);
             int localBarrierCount = ((TestAgent)agent).completedLocalBarriers.getOrDefault(globalBarrierTimestamp, new AtomicInteger(0)).get();
             assertNotNull(globalInitiatingBarrier.coordinateSyncPoint);
@@ -208,7 +210,7 @@ public class CoordinateTest
             cluster.networkFilter.clear();
 
             // The existing barrier should suffice here
-            Barrier nonInitiatingLocalBarrier = Barrier.barrier(node, IntKey.key(2), node.epoch(), BarrierType.local);
+            Barrier nonInitiatingLocalBarrier = Barrier.barrier(node, Seekables.of(IntKey.key(2)), node.epoch(), BarrierType.local);
             Timestamp previousBarrierTimestamp = getUninterruptibly(nonInitiatingLocalBarrier);
             assertNull(nonInitiatingLocalBarrier.coordinateSyncPoint);
             assertEquals(previousBarrierTimestamp, getUninterruptibly(nonInitiatingLocalBarrier));
@@ -275,7 +277,7 @@ public class CoordinateTest
                     Commands.apply(store, txnId, txnId.epoch(), route, txnId, partialDeps, txn.execute(txnId, null), txn.query().compute(txnId, txnId, keys, null, null, null));
                 }));
 
-            Barrier listeningLocalBarrier = Barrier.barrier(node, key, node.epoch(), BarrierType.local);
+            Barrier listeningLocalBarrier = Barrier.barrier(node, Seekables.of(key), node.epoch(), BarrierType.local);
             // Wait and make sure the existing transaction check worked and there is no coordinate sync point created
             Thread.sleep(500);
             assertNull(listeningLocalBarrier.coordinateSyncPoint);
