@@ -35,6 +35,12 @@ public class CoordinationFailed extends Throwable
         this.txnId = txnId;
         this.homeKey = homeKey;
     }
+    public CoordinationFailed(TxnId txnId, @Nullable RoutingKey homeKey, String message)
+    {
+        super(message);
+        this.txnId = txnId;
+        this.homeKey = homeKey;
+    }
 
     void set(TxnId txnId, RoutingKey homeKey)
     {

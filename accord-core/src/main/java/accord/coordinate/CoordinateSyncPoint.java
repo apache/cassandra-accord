@@ -35,6 +35,7 @@ import accord.primitives.Txn.Kind;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.async.AsyncResult;
+import accord.utils.Invariants;
 
 import static accord.coordinate.Propose.Invalidate.proposeAndCommitInvalidate;
 import static accord.primitives.Timestamp.mergeMax;
@@ -56,15 +57,15 @@ public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
 
     public static AsyncResult<SyncPoint> exclusive(Node node, Seekables<?, ?> keysOrRanges)
     {
-        return coordinate(ExclusiveSyncPoint, node, keysOrRanges);
+        return coordinate(node, ExclusiveSyncPoint, keysOrRanges);
     }
 
     public static AsyncResult<SyncPoint> inclusive(Node node, Seekables<?, ?> keysOrRanges)
     {
-        return coordinate(Kind.SyncPoint, node, keysOrRanges);
+        return coordinate(node, Kind.SyncPoint, keysOrRanges);
     }
 
-    private static AsyncResult<SyncPoint> coordinate(Kind kind, Node node, Seekables<?, ?> keysOrRanges)
+    private static AsyncResult<SyncPoint> coordinate(Node node, Kind kind, Seekables<?, ?> keysOrRanges)
     {
         TxnId txnId = node.nextTxnId(kind, keysOrRanges.domain());
         FullRoute<?> route = node.computeRoute(txnId, keysOrRanges);
@@ -73,22 +74,39 @@ public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
         return coordinate;
     }
 
-    void onPreAccepted(List<PreAcceptOk> successes)
+    public static AsyncResult<SyncPoint> coordinate(Node node, TxnId txnId, Seekables<?, ?> keysOrRanges)
+    {
+        Invariants.checkState(txnId.rw() == Kind.SyncPoint || txnId.rw() == ExclusiveSyncPoint);
+        FullRoute<?> route = node.computeRoute(txnId, keysOrRanges);
+        CoordinateSyncPoint coordinate = new CoordinateSyncPoint(node, txnId, node.agent().emptyTxn(txnId.rw(), keysOrRanges), route);
+        coordinate.start();
+        return coordinate;
+    }
+
+    void onNewEpoch(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> successes)
+    {
+        // SyncPoint transactions always propose their own txnId as their executeAt, as they are not really executed.
+        // They only create happens-after relationships wrt their dependencies, which represent all transactions
+        // that *may* execute before their txnId, so once these dependencies apply we can say that any action that
+        // awaits these dependencies applies after them. In the case of ExclusiveSyncPoint, we additionally guarantee
+        // that no lower TxnId can later apply.
+        onPreAccepted(topologies, executeAt, successes);
+    }
+
+    void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> successes)
     {
         Deps deps = Deps.merge(successes, ok -> ok.deps);
-        Timestamp executeAt = foldl(successes, (ok, prev) -> mergeMax(ok.witnessedAt, prev), Timestamp.NONE);
-        if (executeAt.isRejected())
+        Timestamp checkRejected = foldl(successes, (ok, prev) -> mergeMax(ok.witnessedAt, prev), Timestamp.NONE);
+        if (checkRejected.isRejected())
         {
-            proposeAndCommitInvalidate(node, Ballot.ZERO, txnId, route.homeKey(), route, executeAt, this);
+            proposeAndCommitInvalidate(node, Ballot.ZERO, txnId, route.homeKey(), route, checkRejected, this);
         }
         else
         {
-            // SyncPoint transactions always propose their own txnId as their executeAt, as they are not really executed.
-            // They only create happens-after relationships wrt their dependencies, which represent all transactions
-            // that *may* execute before their txnId, so once these dependencies apply we can say that any action that
-            // awaits these dependencies applies after them. In the case of ExclusiveSyncPoint, we additionally guarantee
-            // that no lower TxnId can later apply.
-            new Propose<SyncPoint>(node, tracker.topologies(), Ballot.ZERO, txnId, txn, route, deps, txnId, this)
+            executeAt = txnId;
+            // we don't need to fetch deps from Accept replies, so we don't need to contact unsynced epochs
+            topologies = node.topology().forEpoch(route, txnId.epoch());
+            new Propose<SyncPoint>(node, topologies, Ballot.ZERO, txnId, txn, route, executeAt, deps, this)
             {
                 @Override
                 void onAccepted()
@@ -97,7 +115,7 @@ public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
                     Topologies latest = commit.size() == 1 ? commit : node.topology().forEpoch(route, executeAt.epoch());
                     if (latest != commit)
                         node.send(commit.nodes(), id -> new Commit(Commit.Kind.Maximal, id, commit.forEpoch(txnId.epoch()), commit, txnId, txn, route, null, executeAt, deps, false));
-                    node.send(latest.nodes(), id -> new Apply(id, latest, latest, executeAt.epoch(), txnId, route, txn, executeAt, deps, txn.execute(txnId, null), txn.result(txnId, null)));
+                    node.send(latest.nodes(), id -> new Apply(id, latest, latest, executeAt.epoch(), txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null)));
                     accept(new SyncPoint(txnId, deps, route), null);
                 }
             }.start();

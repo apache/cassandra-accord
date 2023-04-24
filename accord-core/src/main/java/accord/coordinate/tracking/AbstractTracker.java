@@ -34,9 +34,9 @@ import java.util.function.Predicate;
 
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.NoChange;
 
-public abstract class AbstractTracker<ST extends ShardTracker, P>
+public abstract class AbstractTracker<ST extends ShardTracker>
 {
-    public enum ShardOutcomes implements ShardOutcome<AbstractTracker<?, ?>>
+    public enum ShardOutcomes implements ShardOutcome<AbstractTracker<?>>
     {
         Fail(RequestStatus.Failed),
         Success(RequestStatus.Success),
@@ -60,19 +60,24 @@ public abstract class AbstractTracker<ST extends ShardTracker, P>
         }
 
         @Override
-        public ShardOutcomes apply(AbstractTracker<?, ?> tracker, int shardIndex)
+        public ShardOutcomes apply(AbstractTracker<?> tracker, int shardIndex)
         {
             if (this == Success)
                 return --tracker.waitingOnShards == 0 ? Success : NoChange;
             return this;
         }
 
-        private RequestStatus toRequestStatus(AbstractTracker<?, ?> tracker)
+        private RequestStatus toRequestStatus(AbstractTracker<?> tracker)
         {
             if (result != null)
                 return result;
             return tracker.trySendMore();
         }
+    }
+
+    public interface ShardFactory<ST extends ShardTracker>
+    {
+        ST apply(int epochIndex, Shard shard);
     }
 
     final Topologies topologies;
@@ -81,6 +86,10 @@ public abstract class AbstractTracker<ST extends ShardTracker, P>
     protected int waitingOnShards;
 
     AbstractTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, Function<Shard, ST> trackerFactory)
+    {
+        this(topologies, arrayFactory, (ignore, shard) -> trackerFactory.apply(shard));
+    }
+    AbstractTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, ShardFactory<ST> trackerFactory)
     {
         Invariants.checkArgument(topologies.totalShards() > 0);
         int topologyCount = topologies.size();
@@ -99,7 +108,7 @@ public abstract class AbstractTracker<ST extends ShardTracker, P>
             Topology topology = topologies.get(i);
             int size = topology.size();
             for (int j = 0; j < size; ++j)
-                trackers[i * maxShardsPerEpoch + j] = trackerFactory.apply(topology.get(j));
+                trackers[i * maxShardsPerEpoch + j] = trackerFactory.apply(i, topology.get(j));
         }
         this.maxShardsPerEpoch = maxShardsPerEpoch;
         this.waitingOnShards = shardCount;
@@ -117,13 +126,13 @@ public abstract class AbstractTracker<ST extends ShardTracker, P>
 
     protected RequestStatus trySendMore() { throw new UnsupportedOperationException(); }
 
-    <T extends AbstractTracker<ST, P>>
+    <T extends AbstractTracker<ST>, P>
     RequestStatus recordResponse(T self, Id node, BiFunction<? super ST, P, ? extends ShardOutcome<? super T>> function, P param)
     {
         return recordResponse(self, node, function, param, topologies.size());
     }
 
-    <T extends AbstractTracker<ST, P>>
+    <T extends AbstractTracker<ST>, P>
     RequestStatus recordResponse(T self, Id node, BiFunction<? super ST, P, ? extends ShardOutcome<? super T>> function, P param, int topologyLimit)
     {
         Invariants.checkState(self == this); // we just accept self as parameter for type safety
@@ -137,7 +146,7 @@ public abstract class AbstractTracker<ST extends ShardTracker, P>
         return status.toRequestStatus(this);
     }
 
-    static <ST extends ShardTracker, P, T extends AbstractTracker<ST, P>>
+    static <ST extends ShardTracker, P, T extends AbstractTracker<ST>>
     ShardOutcomes apply(T tracker, BiFunction<? super ST, P, ? extends ShardOutcome<? super T>> function, P param, int trackerIndex)
     {
         return function.apply(tracker.trackers[trackerIndex], param).apply(tracker, trackerIndex);

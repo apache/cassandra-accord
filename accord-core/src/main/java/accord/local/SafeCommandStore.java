@@ -35,7 +35,6 @@ import javax.annotation.Nullable;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.primitives.Txn.Kind.Read;
 import static accord.primitives.Txn.Kind.Write;
-import static accord.utils.Utils.listOf;
 
 /**
  * A CommandStore with exclusive access; a reference to this should not be retained outside of the scope of the method
@@ -64,7 +63,7 @@ public interface SafeCommandStore
      */
     default void addAndInvokeListener(TxnId txnId, TxnId listenerId)
     {
-        PreLoadContext context = PreLoadContext.contextFor(listOf(txnId, listenerId), Keys.EMPTY);
+        PreLoadContext context = PreLoadContext.contextFor(txnId, listenerId, Keys.EMPTY);
         commandStore().execute(context, safeStore -> {
             SafeCommand safeCommand = safeStore.command(txnId);
             Command.ProxyListener listener = new Command.ProxyListener(listenerId);
@@ -109,6 +108,7 @@ public interface SafeCommandStore
             {
                 default: throw new AssertionError();
                 case Read:
+                case NoOp:
                     return Ws;
                 case Write:
                     return RorWs;
@@ -129,6 +129,7 @@ public interface SafeCommandStore
                     return Any;
                 case SyncPoint:
                 case ExclusiveSyncPoint:
+                case NoOp:
                     return SyncPoints;
             }
         }

@@ -364,7 +364,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                         whenReady = null;
                     }
 
-                    return true;
+                    return shouldRun();
                 }
 
                 private void maybeDone()
@@ -514,7 +514,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     };
 
                     node.withEpoch(toEpoch, () -> {
-                        debugInvestigating = FetchData.fetch(blockedUntil, node, txnId, someKeys, executeAt, toEpoch, callback);
+                            debugInvestigating = FetchData.fetch(blockedUntil, node, txnId, someKeys, executeAt, toEpoch, callback);
                     });
                 }
 
@@ -535,7 +535,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                             setProgress(Expected);
                             if (fail == null && success.asProgressToken().durability.isDurable())
-                                setProgress(Done);
+                                setProgress(NoneExpected);
                         }).begin(commandStore.agent());
                     });
                 }
@@ -793,6 +793,9 @@ public class SimpleProgressLog implements ProgressLog.Factory
         @Override
         public void waiting(TxnId blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn)
         {
+            if (blockedBy.rw().isLocal())
+                return;
+
             // TODO (consider): consider triggering a preemption of existing coordinator (if any) in some circumstances;
             //                  today, an LWT can pre-empt more efficiently (i.e. instantly) a failed operation whereas Accord will
             //                  wait for some progress interval before taking over; there is probably some middle ground where we trigger
@@ -822,7 +825,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 return;
 
             isScheduled = true;
-            node.scheduler().once(() -> commandStore.execute(PreLoadContext.empty(), ignore -> run()).begin(commandStore.agent()), 200L, TimeUnit.MILLISECONDS);
+            node.scheduler().once(() -> commandStore.execute(PreLoadContext.empty(), ignore -> run()).begin(commandStore.agent()), 1L, TimeUnit.SECONDS);
         }
 
         @Override

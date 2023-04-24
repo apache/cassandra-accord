@@ -24,10 +24,13 @@ import accord.impl.CommandsForKey.CommandLoader;
 import accord.impl.CommandsForKey.CommandTimeseries;
 import accord.local.Command;
 import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import accord.utils.Invariants;
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static accord.local.Command.NotWitnessed.notWitnessed;
 
 public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
 {
@@ -96,6 +99,23 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
                                          current.lastWriteTimestamp(),
                                          byId.add(command.txnId(), command).build(),
                                          byExecuteAt.add(command.txnId(), command).build() ));
+    }
+
+    public <D> CommandsForKey registerNotWitnessed(TxnId txnId)
+    {
+        CommandsForKey current = current();
+        if (current.byId().commands.containsKey(txnId))
+            return current;
+
+        CommandTimeseries.Update<D> byId = (CommandTimeseries.Update<D>) current().byId().beginUpdate();
+        CommandTimeseries.Update<D> byExecuteAt = (CommandTimeseries.Update<D>) current().byExecuteAt().beginUpdate();
+        return update(new CommandsForKey(current.key(),
+                                         updateMax(current, txnId),
+                                         current.lastExecutedTimestamp(),
+                                         current.lastExecutedMicros(),
+                                         current.lastWriteTimestamp(),
+                                         byId.add(txnId, notWitnessed(txnId)).build(),
+                                         byExecuteAt.add(txnId, notWitnessed(txnId)).build()));
     }
 
     public <D> CommandsForKey listenerUpdate(Command command)

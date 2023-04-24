@@ -27,6 +27,7 @@ import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -176,7 +177,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         @Override
         public MessageType type()
         {
-            throw new UnsupportedOperationException();
+            return null;
         }
 
         @Override
@@ -198,7 +199,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         @Override
         public MessageType type()
         {
-            throw new UnsupportedOperationException();
+            return null;
         }
 
         @Override
@@ -261,16 +262,15 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         if (epoch <= epochs.lastReceived)
             return;
 
-        pendingEpochs.computeIfAbsent(epoch, FetchTopology::new);
+        for (long e = epochs.lastReceived + 1; e < epoch ; ++e)
+            pendingEpochs.computeIfAbsent(epoch, FetchTopology::new);
     }
 
     @Override
-    public synchronized void acknowledgeEpoch(long epoch)
+    public synchronized void acknowledgeEpoch(EpochReady ready)
     {
-        epochs.acknowledge(epoch);
-        Topology topology = getTopologyForEpoch(epoch);
-        Node originator = originator();
-        topologyUpdates.syncEpoch(originator, epoch - 1, topology.nodes());
+        ready.metadata.addCallback(() -> epochs.acknowledge(ready.epoch));
+        ready.coordination.addCallback(() ->  topologyUpdates.syncComplete(lookup.apply(node), epochs.get(ready.epoch).topology.nodes(), ready.epoch));
     }
 
     private Node originator()
@@ -279,24 +279,24 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
     }
 
     @Override
-    public synchronized void reportTopology(Topology topology)
+    public synchronized AsyncResult<Void> reportTopology(Topology topology)
     {
         long lastReceived = epochs.lastReceived;
         if (topology.epoch() <= lastReceived)
-            return;
+            return AsyncResults.success(null);
 
         if (topology.epoch() > lastReceived + 1)
         {
             fetchTopologyForEpoch(lastReceived + 1);
             epochs.receiveFuture(lastReceived + 1).addCallback(() -> reportTopology(topology));
-            return;
+            return AsyncResults.success(null);
         }
 
         long lastAcked = epochs.lastAcknowledged;
         if (topology.epoch() > lastAcked + 1)
         {
             epochs.acknowledgeFuture(lastAcked + 1).addCallback(() -> reportTopology(topology));
-            return;
+            return AsyncResults.success(null);
         }
         logger.trace("Epoch {} received by {}", topology.epoch(), node);
 
@@ -306,8 +306,9 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
 
         FetchTopology fetch = pendingEpochs.remove(topology.epoch());
         if (fetch == null)
-            return;
+            return AsyncResults.success(null);
 
         fetch.setSuccess(null);
+        return AsyncResults.success(null);
     }
 }

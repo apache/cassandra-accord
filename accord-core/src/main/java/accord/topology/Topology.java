@@ -458,14 +458,14 @@ public class Topology
         return nodeLookup.containsKey(id);
     }
 
-    public Collection<Shard> shards()
+    public List<Shard> shards()
     {
-        return new AbstractCollection<Shard>()
+        return new AbstractList<Shard>()
         {
             @Override
-            public Iterator<Shard> iterator()
+            public Shard get(int i)
             {
-                return IntStream.of(supersetIndexes).mapToObj(i -> shards[i]).iterator();
+                return shards[supersetIndexes[i]];
             }
 
             @Override

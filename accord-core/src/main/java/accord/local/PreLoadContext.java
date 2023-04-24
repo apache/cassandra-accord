@@ -21,15 +21,17 @@ package accord.local;
 import accord.api.Key;
 import accord.impl.CommandsForKey;
 import accord.primitives.Keys;
-import accord.primitives.Seekable;
 import accord.primitives.Seekables;
 import accord.primitives.TxnId;
-import accord.utils.Utils;
-import com.google.common.collect.Iterables;
+import net.nicoulaj.compilecommand.annotations.Inline;
+
 import com.google.common.collect.Sets;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Set;
+import java.util.function.Consumer;
+import javax.annotation.Nullable;
 
 /**
  * Lists txnids and keys of commands and commands for key that will be needed for an operation. Used
@@ -37,6 +39,8 @@ import java.util.Set;
  */
 public interface PreLoadContext
 {
+    @Nullable TxnId primaryTxnId();
+
     /**
      * @return ids of the {@link Command} objects that need to be loaded into memory before this operation is run
      *
@@ -46,7 +50,16 @@ public interface PreLoadContext
      *  out of memory have un-applied transactions (and try not to evict those that are not applied).
      *  Either way, the information we need in memory is super minimal for secondary transactions.
      */
-    Iterable<TxnId> txnIds();
+    default Collection<TxnId> additionalTxnIds() { return Collections.emptyList(); }
+
+    @Inline
+    default void forEachId(Consumer<TxnId> consumer)
+    {
+        TxnId primaryTxnId = primaryTxnId();
+        if (primaryTxnId != null)
+            consumer.accept(primaryTxnId);
+        additionalTxnIds().forEach(consumer);
+    }
 
     /**
      * @return keys of the {@link CommandsForKey} objects that need to be loaded into memory before this operation is run
@@ -55,59 +68,98 @@ public interface PreLoadContext
      *  Both can be done without. For range transactions calculateDeps needs to be asynchronous anyway to support
      *  potentially large scans, and for register we do not need to load into memory, we can perform a blind write.
      */
-    Seekables<?, ?> keys();
+    default Seekables<?, ?> keys() { return Keys.EMPTY; }
 
     default boolean isSubsetOf(PreLoadContext superset)
     {
-        Set<TxnId> superIds = superset.txnIds() instanceof Set ? (Set<TxnId>) superset.txnIds() : Sets.newHashSet(superset.txnIds());
-        Set<Seekable> superKeys = Sets.newHashSet(superset.keys());
-        return Iterables.all(txnIds(), superIds::contains) && Iterables.all(keys(), superKeys::contains);
+        if (superset.keys().domain() != keys().domain() || !superset.keys().containsAll(keys()))
+            return false;
+
+        TxnId primaryId = primaryTxnId();
+        Collection<TxnId> additionalIds = additionalTxnIds();
+        if (additionalIds.isEmpty())
+        {
+            if (primaryId == null || primaryId.equals(superset.primaryTxnId()))
+                return true;
+
+            return superset.additionalTxnIds().contains(primaryTxnId());
+        }
+        else
+        {
+            TxnId supersetPrimaryId = superset.primaryTxnId();
+            Set<TxnId> supersetAdditionalIds = superset.additionalTxnIds() instanceof Set ? (Set<TxnId>) superset.additionalTxnIds() : Sets.newHashSet(superset.additionalTxnIds());
+            if (primaryId != null && !primaryId.equals(supersetPrimaryId) && !supersetAdditionalIds.contains(primaryId))
+                return false;
+
+            for (TxnId txnId : additionalIds)
+            {
+                if (!txnId.equals(supersetPrimaryId) && !supersetAdditionalIds.contains(txnId))
+                    return false;
+            }
+            return true;
+        }
     }
 
-    static PreLoadContext contextFor(Iterable<TxnId> txnIds, Seekables<?, ?> keys)
+    static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional, Seekables<?, ?> keys)
     {
         return new PreLoadContext()
         {
             @Override
-            public Iterable<TxnId> txnIds() { return txnIds; }
+            public TxnId primaryTxnId()
+            {
+                return primary;
+            }
+
+            @Override
+            public Collection<TxnId> additionalTxnIds() { return additional; }
 
             @Override
             public Seekables<?, ?> keys() { return keys; }
         };
     }
 
-    static PreLoadContext contextFor(TxnId txnId, Seekables<?, ?> keysOrRanges)
+    static PreLoadContext contextFor(TxnId primary, TxnId additional)
     {
-        switch (keysOrRanges.domain())
-        {
-            default: throw new AssertionError();
-            case Range: return contextFor(txnId); // TODO (required, correctness): this won't work for actual range queries
-            case Key: return contextFor(Collections.singleton(txnId), keysOrRanges);
-        }
+        return contextFor(primary, Collections.singletonList(additional), Keys.EMPTY);
     }
 
-    static PreLoadContext contextFor(TxnId... txnIds)
+    static PreLoadContext contextFor(TxnId primary, TxnId additional, Seekables<?, ?> keys)
     {
-        return contextFor(Utils.listOf(txnIds), Keys.EMPTY);
+        return contextFor(primary, Collections.singletonList(additional), keys);
+    }
+
+    static PreLoadContext contextFor(TxnId txnId, Seekables<?, ?> keysOrRanges)
+    {
+        return contextFor(txnId, Collections.emptyList(), keysOrRanges);
     }
 
     static PreLoadContext contextFor(TxnId txnId)
     {
-        return contextFor(Collections.singleton(txnId), Keys.EMPTY);
+        return contextFor(txnId, Keys.EMPTY);
     }
 
-    static PreLoadContext contextFor(Iterable<TxnId> txnIds)
+    static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional)
     {
-        return contextFor(txnIds, Keys.EMPTY);
+        return contextFor(primary, additional, Keys.EMPTY);
     }
 
     static PreLoadContext contextFor(Key key)
     {
-        return contextFor(Collections.emptyList(), Keys.of(key));
+        return contextFor(null, Collections.emptyList(), Keys.of(key));
+    }
+
+    static PreLoadContext contextFor(Collection<TxnId> ids, Seekables<?, ?> keys)
+    {
+        return contextFor(null, ids, keys);
+    }
+
+    static PreLoadContext contextFor(Seekables<?, ?> keys)
+    {
+        return contextFor(null, Collections.emptyList(), keys);
     }
 
     static PreLoadContext empty()
     {
-        return contextFor(Collections.emptyList(), Keys.EMPTY);
+        return contextFor(null, Collections.emptyList(), Keys.EMPTY);
     }
 }

@@ -19,6 +19,7 @@
 package accord.impl;
 
 import java.util.Collection;
+import java.util.function.Supplier;
 
 import accord.impl.InMemoryCommandStore.GlobalCommand;
 import accord.local.Command;
@@ -27,8 +28,10 @@ import accord.primitives.TxnId;
 
 public class InMemorySafeCommand extends SafeCommand implements SafeState<Command>
 {
-    private boolean invalidated;
-    private final GlobalCommand global;
+    private static final Supplier<GlobalCommand> INVALIDATED = () -> null;
+
+    private Supplier<GlobalCommand> lazy;
+    private GlobalCommand global;
 
     public InMemorySafeCommand(TxnId txnId, GlobalCommand global)
     {
@@ -36,17 +39,23 @@ public class InMemorySafeCommand extends SafeCommand implements SafeState<Comman
         this.global = global;
     }
 
+    public InMemorySafeCommand(TxnId txnId, Supplier<GlobalCommand> global)
+    {
+        super(txnId);
+        this.lazy = global;
+    }
+
     @Override
     public Command current()
     {
-        checkNotInvalidated();
+        touch();
         return global.value();
     }
 
     @Override
     protected void set(Command update)
     {
-        checkNotInvalidated();
+        touch();
         global.value(update);
     }
 
@@ -57,9 +66,9 @@ public class InMemorySafeCommand extends SafeCommand implements SafeState<Comman
     }
 
     @Override
-    public void removeListener(Command.TransientListener listener)
+    public boolean removeListener(Command.TransientListener listener)
     {
-        global.removeListener(listener);
+        return global.removeListener(listener);
     }
 
     @Override
@@ -71,18 +80,23 @@ public class InMemorySafeCommand extends SafeCommand implements SafeState<Comman
     @Override
     public void invalidate()
     {
-        invalidated = true;
+        lazy = INVALIDATED;
     }
 
     @Override
     public boolean invalidated()
     {
-        return invalidated;
+        return lazy == INVALIDATED;
     }
 
-    private void checkNotInvalidated()
+    private void touch()
     {
         if (invalidated())
             throw new IllegalStateException("Cannot access invalidated " + this);
+        if (lazy != null)
+        {
+            global = lazy.get();
+            lazy = null;
+        }
     }
 }

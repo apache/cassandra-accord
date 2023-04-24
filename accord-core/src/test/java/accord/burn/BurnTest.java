@@ -20,9 +20,10 @@ package accord.burn;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Queue;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ExecutionException;
@@ -30,12 +31,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -43,12 +46,14 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.Key;
 import accord.impl.IntHashKey;
-import accord.impl.TopologyFactory;
 import accord.impl.basic.Cluster;
+import accord.impl.basic.PendingRunnable;
+import accord.impl.basic.PropagatingPendingQueue;
+import accord.impl.basic.RandomDelayQueue;
+import accord.impl.basic.RandomDelayQueue.Factory;
+import accord.impl.TopologyFactory;
 import accord.impl.basic.Packet;
 import accord.impl.basic.PendingQueue;
-import accord.impl.basic.PropagatingPendingQueue;
-import accord.impl.basic.RandomDelayQueue.Factory;
 import accord.impl.basic.SimulatedDelayedExecutorService;
 import accord.impl.list.ListAgent;
 import accord.impl.list.ListQuery;
@@ -58,6 +63,7 @@ import accord.impl.list.ListResult;
 import accord.impl.list.ListUpdate;
 import accord.local.CommandStore;
 import accord.local.Node.Id;
+import accord.messages.MessageType;
 import accord.primitives.Keys;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
@@ -150,27 +156,12 @@ public class BurnTest
     private static int randomKeyIndex(RandomSource random, List<Key> keys, Predicate<Key> notIn)
     {
         int i;
+        //noinspection StatementWithEmptyBody
         while (notIn.test(keys.get(i = random.nextInt(keys.size()))));
         return i;
     }
 
-    static void burn(TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency)
-    {
-        RandomSource random = new DefaultRandom();
-        long seed = random.nextLong();
-        System.out.println(seed);
-        random.setSeed(seed);
-        burn(random, topologyFactory, clients, nodes, keyCount, operations, concurrency);
-    }
-
-    static void burn(long seed, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency)
-    {
-        RandomSource random = new DefaultRandom();
-        System.out.println(seed);
-        random.setSeed(seed);
-        burn(random, topologyFactory, clients, nodes, keyCount, operations, concurrency);
-    }
-
+    @SuppressWarnings("unused")
     static void reconcile(long seed, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency) throws ExecutionException, InterruptedException
     {
         ReconcilingLogger logReconciler = new ReconcilingLogger(logger);
@@ -180,13 +171,13 @@ public class BurnTest
         random2.setSeed(seed);
         ExecutorService exec = Executors.newFixedThreadPool(2);
         Future<?> f1;
-        try (ReconcilingLogger.Session session = logReconciler.nextSession())
+        try (@SuppressWarnings("unused") ReconcilingLogger.Session session = logReconciler.nextSession())
         {
             f1 = exec.submit(() -> burn(random1, topologyFactory, clients, nodes, keyCount, operations, concurrency));
         }
 
         Future<?> f2;
-        try (ReconcilingLogger.Session session = logReconciler.nextSession())
+        try (@SuppressWarnings("unused") ReconcilingLogger.Session session = logReconciler.nextSession())
         {
             f2 = exec.submit(() -> burn(random2, topologyFactory, clients, nodes, keyCount, operations, concurrency));
         }
@@ -200,11 +191,22 @@ public class BurnTest
     static void burn(RandomSource random, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency)
     {
         List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
-        PendingQueue queue = new PropagatingPendingQueue(failures, new Factory(random).get());
-        ListAgent agent = new ListAgent(30L, failures::add);
-        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, agent, random.fork());
+        RandomDelayQueue delayQueue = new Factory(random).get();
+        PendingQueue queue = new PropagatingPendingQueue(failures, delayQueue);
+        RandomSource retryRandom = random.fork();
+        ListAgent agent = new ListAgent(1000L, failures::add, retry -> {
+            long delay = retryRandom.nextInt(1, 15);
+            queue.add((PendingRunnable)retry::run, delay, TimeUnit.SECONDS);
+        });
+
+        Supplier<LongSupplier> nowSupplier = () -> {
+            RandomSource jitter = random.fork();
+            // TODO (expected): jitter should be random walk with intermittent long periods
+            return () -> Math.max(0, delayQueue.nowInMillis() + (jitter.nextInt(10) - 5));
+        };
 
         StrictSerializabilityVerifier strictSerializable = new StrictSerializabilityVerifier(keyCount);
+        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, agent, random.fork());
         Function<CommandStore, AsyncExecutor> executor = ignore -> globalExecutor;
 
         Packet[] requests = toArray(generate(random, executor, clients, nodes, keyCount, operations), Packet[]::new);
@@ -216,14 +218,16 @@ public class BurnTest
         AtomicInteger lost = new AtomicInteger();
         AtomicInteger clock = new AtomicInteger();
         AtomicInteger requestIndex = new AtomicInteger();
+        Queue<Packet> initialRequests = new ArrayDeque<>();
         for (int max = Math.min(concurrency, requests.length) ; requestIndex.get() < max ; )
         {
             int i = requestIndex.getAndIncrement();
             starts[i] = clock.incrementAndGet();
-            queue.add(requests[i]);
+            initialRequests.add(requests[i]);
         }
 
         // not used for atomicity, just for encapsulation
+        AtomicReference<Runnable> onSubmitted = new AtomicReference<>();
         Consumer<Packet> responseSink = packet -> {
             ListResult reply = (ListResult) packet.message;
             if (replies[(int)packet.replyId] != null)
@@ -234,20 +238,25 @@ public class BurnTest
                 int i = requestIndex.getAndIncrement();
                 starts[i] = clock.incrementAndGet();
                 queue.add(requests[i]);
+                if (i == requests.length - 1)
+                    onSubmitted.get().run();
             }
 
             try
             {
+                if (reply.responseKeys == null && reply.read != null && reply.read.length == 0)
+                    return; // interrupted; will fetch our actual reply once rest of simulation is finished (but wanted to send another request to keep correct number in flight)
+
                 int start = starts[(int)packet.replyId];
                 int end = clock.incrementAndGet();
-
                 logger.debug("{} at [{}, {}]", reply, start, end);
-
                 replies[(int)packet.replyId] = packet;
+
                 if (reply.responseKeys == null)
                 {
                     if (reply.read == null) nacks.incrementAndGet();
-                    else lost.incrementAndGet();
+                    else if (reply.read.length == 1) lost.incrementAndGet();
+                    else throw new AssertionError();
                     return;
                 }
 
@@ -276,13 +285,15 @@ public class BurnTest
             }
         };
 
+        EnumMap<MessageType, Cluster.Stats> messageStatsMap;
         try
         {
-            Cluster.run(toArray(nodes, Id[]::new), () -> queue,
-                        responseSink, globalExecutor,
-                        () -> random.fork(),
-                        () -> new AtomicLong()::incrementAndGet,
-                        topologyFactory, () -> null);
+            messageStatsMap = Cluster.run(toArray(nodes, Id[]::new), () -> queue,
+                                          responseSink, globalExecutor,
+                                          random::fork, nowSupplier,
+                                          topologyFactory, initialRequests::poll,
+                                          onSubmitted::set
+            );
         }
         catch (Throwable t)
         {
@@ -294,7 +305,8 @@ public class BurnTest
             throw t;
         }
 
-        logger.info("Received {} acks, {} nacks and {} lost ({} total) to {} operations\n", acks.get(), nacks.get(), lost.get(), acks.get() + nacks.get() + lost.get(), operations);
+        logger.info("Received {} acks, {} nacks and {} lost ({} total) to {} operations", acks.get(), nacks.get(), lost.get(), acks.get() + nacks.get() + lost.get(), operations);
+        logger.info("Message counts: {}", messageStatsMap.entrySet());
         if (clock.get() != operations * 2)
         {
             for (int i = 0 ; i < requests.length ; ++i)
@@ -308,8 +320,9 @@ public class BurnTest
 
     public static void main(String[] args)
     {
-        Long overrideSeed = null;
         int count = 1;
+        int operations = 1000;
+        Long overrideSeed = -3309027396608571728L;
         LongSupplier seedGenerator = ThreadLocalRandom.current()::nextLong;
         for (int i = 0 ; i < args.length ; i += 2)
         {
@@ -324,23 +337,26 @@ public class BurnTest
                     overrideSeed = Long.parseLong(args[i + 1]);
                     count = 1;
                     break;
+                case "-o":
+                    operations = Integer.parseInt(args[i + 1]);
+                    break;
                 case "--loop-seed":
                     seedGenerator = new DefaultRandom(Long.parseLong(args[i + 1]))::nextLong;
             }
         }
         while (count-- > 0)
         {
-            run(overrideSeed != null ? overrideSeed : seedGenerator.getAsLong());
+            run(overrideSeed != null ? overrideSeed : seedGenerator.getAsLong(), operations);
         }
     }
 
     @Test
     public void testOne()
     {
-        run(ThreadLocalRandom.current().nextLong());
+        run(ThreadLocalRandom.current().nextLong(), 1000);
     }
 
-    private static void run(long seed)
+    private static void run(long seed, int operations)
     {
         logger.info("Seed: {}", seed);
         Cluster.trace.trace("Seed: {}", seed);
@@ -353,7 +369,7 @@ public class BurnTest
                     clients,
                     nodes,
                     5 + random.nextInt(15),
-                    200,
+                    operations,
                     10 + random.nextInt(30));
         }
         catch (Throwable t)
@@ -374,12 +390,5 @@ public class BurnTest
     private static int key(Key key)
     {
         return ((IntHashKey) key).key;
-    }
-
-    private static int[] append(int[] to, int append)
-    {
-        to = Arrays.copyOf(to, to.length + 1);
-        to[to.length - 1] = append;
-        return to;
     }
 }

@@ -65,7 +65,6 @@ import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResults;
 import org.assertj.core.api.Assertions;
 import org.mockito.Mockito;
@@ -288,7 +287,7 @@ class ReadDataTest
             AsyncResults.SettableResult<Void> writeResult = new AsyncResults.SettableResult<>();
             Write write = Mockito.mock(Write.class);
             Mockito.when(write.apply(any(), any(), any(), any())).thenReturn(writeResult);
-            Writes writes = new Writes(executeAt, keys, write);
+            Writes writes = new Writes(txnId, executeAt, keys, write);
 
             forEach(store -> check(store.execute(PreLoadContext.contextFor(txnId, keys), safe -> {
                 CheckedCommands.apply(safe, txnId, safe.latestEpoch(), route, executeAt, deps, writes, Mockito.mock(Result.class));
@@ -299,7 +298,7 @@ class ReadDataTest
         ReplyContext process()
         {
             ReplyContext replyContext = Mockito.mock(ReplyContext.class);
-            ReadData readData = new ReadData(node.id(), TOPOLOGIES, txnId, keys, txnId);
+            ReadData readData = new ReadTxnData(node.id(), TOPOLOGIES, txnId, keys, txnId);
             readData.process(node, node.id(), replyContext);
             return replyContext;
         }

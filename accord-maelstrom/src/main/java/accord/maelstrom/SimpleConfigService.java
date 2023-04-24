@@ -56,7 +56,7 @@ public class SimpleConfigService implements ConfigurationService
     }
 
     @Override
-    public void acknowledgeEpoch(long epoch)
+    public void acknowledgeEpoch(EpochReady ready)
     {
 
     }

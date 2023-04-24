@@ -26,6 +26,7 @@ import accord.api.Data;
 import accord.api.Update;
 import accord.primitives.Ranges;
 import accord.primitives.Keys;
+import accord.primitives.Timestamp;
 
 public class MaelstromUpdate extends TreeMap<Key, Value> implements Update
 {
@@ -36,7 +37,7 @@ public class MaelstromUpdate extends TreeMap<Key, Value> implements Update
     }
 
     @Override
-    public MaelstromWrite apply(Data read)
+    public MaelstromWrite apply(Timestamp executeAt, Data read)
     {
         MaelstromWrite write = new MaelstromWrite();
         Map<Key, Value> data = (MaelstromData)read;

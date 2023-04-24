@@ -21,6 +21,12 @@ package accord.impl.list;
 import java.util.Map;
 import java.util.function.Function;
 
+import accord.local.SafeCommandStore;
+import accord.primitives.Ranges;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.utils.async.AsyncChain;
+import accord.utils.Timestamped;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,14 +35,9 @@ import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.Read;
 import accord.local.CommandStore;
-import accord.local.SafeCommandStore;
 import accord.primitives.Range;
-import accord.primitives.Ranges;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
-import accord.primitives.Timestamp;
-import accord.primitives.Txn;
-import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncExecutor;
 
 public class ListRead implements Read
@@ -55,7 +56,7 @@ public class ListRead implements Read
     }
 
     @Override
-    public Seekables keys()
+    public Seekables<?, ?> keys()
     {
         return keys;
     }
@@ -70,12 +71,12 @@ public class ListRead implements Read
             {
                 default: throw new AssertionError();
                 case Key:
-                    int[] data = s.get((Key)key);
+                    Timestamped<int[]> data = s.get((Key)key);
                     logger.trace("READ on {} at {} key:{} -> {}", s.node, executeAt, key, data);
                     result.put((Key)key, data);
                     break;
                 case Range:
-                    for (Map.Entry<Key, int[]> e : s.get((Range)key))
+                    for (Map.Entry<Key, Timestamped<int[]>> e : s.get((Range)key))
                         result.put(e.getKey(), e.getValue());
             }
             return result;

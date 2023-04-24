@@ -23,8 +23,11 @@ import accord.primitives.Ballot;
 import accord.utils.Invariants;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static accord.local.Status.Definition.*;
 import static accord.local.Status.Known.*;
@@ -201,6 +204,15 @@ public enum Status
                 return false;
             Invariants.checkState(executeAt.hasDecidedExecuteAt());
             return true;
+        }
+
+        public String toString()
+        {
+            return Stream.of(definition.isKnown() ? "Definition" : null,
+                             executeAt.hasDecidedExecuteAt() ? "ExecuteAt" : null,
+                             deps.hasDecidedDeps() ? "Deps" : null,
+                             outcome.isKnown() ? "Outcome" : null
+            ).filter(Objects::nonNull).collect(Collectors.joining(",", "[", "]"));
         }
     }
 

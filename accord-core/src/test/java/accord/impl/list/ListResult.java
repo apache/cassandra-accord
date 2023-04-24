@@ -54,7 +54,7 @@ public class ListResult implements Result, Reply
     @Override
     public MessageType type()
     {
-        throw new UnsupportedOperationException();
+        return null;
     }
 
     @Override

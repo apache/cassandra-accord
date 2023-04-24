@@ -50,6 +50,7 @@ import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
 import static accord.coordinate.ProposeAndExecute.proposeAndExecute;
 import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
+import static accord.local.Status.Committed;
 import static accord.messages.BeginRecovery.RecoverOk.maxAcceptedOrLater;
 import static accord.utils.Invariants.debug;
 
@@ -219,11 +220,15 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 case Applied:
                 case PreApplied:
                 {
-                    // must have gone through Accepted, so we must have witnessed >= Accepted for each shard
-                    Deps acceptedDeps = tryMergeAcceptedDeps();
-                    Invariants.checkState(acceptedDeps != null);
-                    // TODO (required, consider): when writes/result are partially replicated, need to confirm we have quorum of these
-                    Persist.persistAndCommit(node, txnId, route, txn, executeAt, acceptedDeps, acceptOrCommit.writes, acceptOrCommit.result);
+                    Deps committedDeps = tryMergeCommittedDeps();
+                    node.withEpoch(executeAt.epoch(), () -> {
+                        // TODO (required, consider): when writes/result are partially replicated, need to confirm we have quorum of these
+                        if (committedDeps != null) Persist.persistAndCommitMaximal(node, txnId, route, txn, executeAt, committedDeps, acceptOrCommit.writes, acceptOrCommit.result);
+                        else CollectDeps.withDeps(node, txnId, route, txn.keys(), executeAt, (deps, fail) -> {
+                            if (fail != null) accept(null, fail);
+                            else Persist.persistAndCommitMaximal(node, txnId, route, txn, executeAt, deps, acceptOrCommit.writes, acceptOrCommit.result);
+                        });
+                    });
                     accept(acceptOrCommit.result, null);
                     return;
                 }
@@ -232,15 +237,26 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 case PreCommitted:
                 case Committed:
                 {
-                    Deps acceptedDeps = tryMergeAcceptedDeps(); // must have gone through Accepted, so we must have witnessed >= Accepted for each shard
-                    Invariants.checkState(acceptedDeps != null);
-                    // TODO (desired, efficiency): in some cases we can use the deps we already have (e.g. if we have a quorum of Committed responses)
-                    Execute.execute(node, txnId, txn, route, acceptOrCommit.executeAt, acceptedDeps, this);
+                    Deps committedDeps = tryMergeCommittedDeps();
+                    node.withEpoch(executeAt.epoch(), () -> {
+                        if (committedDeps != null)
+                        {
+                            Execute.execute(node, txnId, txn, route, executeAt, committedDeps, this);
+                        }
+                        else
+                        {
+                            CollectDeps.withDeps(node, txnId, route, txn.keys(), executeAt, (deps, fail) -> {
+                                if (fail != null) accept(null, fail);
+                                else Execute.execute(node, txnId, txn, route, acceptOrCommit.executeAt, deps, this);
+                            });
+                        }
+                    });
                     return;
                 }
 
                 case Accepted:
                 {
+                    // TODO (required): this is broken given feedback from Gotsman, Sutra and Ryabinin. Every transaction proposes deps.
                     // Today we send Deps for all Accept rounds, however their contract is different for SyncPoint
                     // and regular transactions. The former require that their deps be durably agreed before they
                     // proceed, but this is impossible for a regular transaction that may agree a later executeAt
@@ -336,6 +352,17 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         if (!ranges.containsAll(txn.keys()))
             return null;
         return Deps.merge(recoverOks, r -> r.acceptedDeps);
+    }
+
+    private Deps tryMergeCommittedDeps()
+    {
+        Ranges ranges = recoverOks.stream()
+                                  .filter(r -> r.status.hasBeen(Committed))
+                                  .map(r -> r.acceptedDeps.covering)
+                                  .reduce(Ranges::with).orElse(null);
+        if (ranges == null || !ranges.containsAll(txn.keys()))
+            return null;
+        return Deps.merge(recoverOks, r -> r.status.hasBeen(Committed) ? r.acceptedDeps : null);
     }
 
     private void retry()

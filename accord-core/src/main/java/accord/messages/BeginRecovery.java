@@ -34,12 +34,8 @@ import accord.utils.Invariants;
 
 import accord.local.Node.Id;
 
-import java.util.Collections;
-
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.SafeCommandStore.TestDep.WITHOUT;
-import static accord.local.SafeCommandStore.TestKind.Any;
-import static accord.local.SafeCommandStore.TestKind.RorWs;
 import static accord.local.SafeCommandStore.TestKind.shouldHaveWitnessed;
 import static accord.local.SafeCommandStore.TestTimestamp.*;
 import static accord.local.Status.*;
@@ -104,7 +100,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         PartialDeps deps = command.partialDeps();
         if (!command.known().deps.hasProposedOrDecidedDeps())
         {
-            deps = calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().at(txnId.epoch()));
+            deps = calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().coordinates(txnId));
         }
 
         boolean rejectsFastPath;
@@ -117,13 +113,13 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         }
         else
         {
-            Ranges ranges = safeStore.ranges().at(txnId.epoch());
             // TODO (expected): if we can combine these with the earlierAcceptedNoWitness we can avoid persisting deps on Accept
             //    the problem is we need some way to ensure liveness. If we were to store witnessedAt as a separate register
             //    we could return these and filter them by whatever the max witnessedAt is that we discover, OR we could
             //    filter on replicas to exclude any that are started after anything that is committed, since they will have to adopt
             //    them as a dependency (but we have to make sure we consider dependency rules, so if there's no write and only reads)
             //    we might still have new transactions block our execution.
+            Ranges ranges = safeStore.ranges().allAt(txnId);
             rejectsFastPath = hasAcceptedStartedAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
             if (!rejectsFastPath)
                 rejectsFastPath = hasCommittedExecutesAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
@@ -187,9 +183,9 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
     }
 
     @Override
-    public Iterable<TxnId> txnIds()
+    public TxnId primaryTxnId()
     {
-        return Collections.singleton(txnId);
+        return txnId;
     }
 
     @Override

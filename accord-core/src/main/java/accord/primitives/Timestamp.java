@@ -27,6 +27,9 @@ import javax.annotation.Nonnull;
 
 public class Timestamp implements Comparable<Timestamp>
 {
+    public static final Timestamp MAX = new Timestamp(Long.MAX_VALUE, Long.MAX_VALUE, Id.MAX);
+    public static final Timestamp NONE = new Timestamp(0, 0, 0, Id.NONE);
+
     private static final int REJECTED_FLAG = 0x8000;
 
     /**
@@ -35,6 +38,11 @@ public class Timestamp implements Comparable<Timestamp>
      * which we may also want to retain when merging in other contexts (such as in Deps).
      */
     private static final int MERGE_FLAGS = 0x8000;
+    private static final long IDENTITY_LSB = 0xFFFFFFFFFFFF001EL;
+    private static final int IDENTITY_FLAGS = 0x001E;
+    public static final long MAX_EPOCH = (1L << 48) - 1;
+    private static final long HLC_INCR = 1L << 16;
+    private static final long MAX_FLAGS = HLC_INCR - 1;
 
     public static Timestamp fromBits(long msb, long lsb, Id node)
     {
@@ -60,12 +68,6 @@ public class Timestamp implements Comparable<Timestamp>
     {
         return new Timestamp(epochMsb(epoch), 0, Id.NONE);
     }
-
-    // TODO (expected): we can only use 63 bits for HLC as we don't support negative timestamps, so can use 49 bits for epoch
-    public static final long MAX_EPOCH = (1L << 48) - 1;
-    private static final long HLC_INCR = 1L << 16;
-    private static final long MAX_FLAGS = HLC_INCR - 1;
-    public static final Timestamp NONE = new Timestamp(0, 0, 0, Id.NONE);
 
     public final long msb;
     public final long lsb;
@@ -93,6 +95,13 @@ public class Timestamp implements Comparable<Timestamp>
         this.msb = copy.msb;
         this.lsb = copy.lsb;
         this.node = copy.node;
+    }
+
+    public Timestamp(Timestamp copy, Id node)
+    {
+        this.msb = copy.msb;
+        this.lsb = copy.lsb;
+        this.node = node;
     }
 
     Timestamp(Timestamp copy, int flags)
@@ -131,9 +140,30 @@ public class Timestamp implements Comparable<Timestamp>
         return withExtraFlags(REJECTED_FLAG);
     }
 
+    public Timestamp withNextHlc(long hlcAtLeast)
+    {
+        Invariants.checkArgument(hlcAtLeast >= 0);
+        return new Timestamp(epoch(), Math.max(hlcAtLeast, hlc() + 1), flags(), node);
+    }
+
     public Timestamp withEpochAtLeast(long minEpoch)
     {
         return minEpoch <= epoch() ? this : new Timestamp(minEpoch, hlc(), flags(), node);
+    }
+
+    public Timestamp withHlcAtLeast(long minHlc)
+    {
+        return minHlc <= hlc() ? this : new Timestamp(epoch(), minHlc, flags(), node);
+    }
+
+    public Timestamp withStaleEpoch(long epoch)
+    {
+        return epoch == epoch() ? this : new Timestamp(epoch, hlc(), flags(), node);
+    }
+
+    public Timestamp withNode(Id node)
+    {
+        return this.node.equals(node) ? this : new Timestamp(this, node);
     }
 
     public Timestamp withExtraFlags(int flags)
@@ -162,12 +192,21 @@ public class Timestamp implements Comparable<Timestamp>
         return new Timestamp(msb, lsb, node);
     }
 
+    public Timestamp next()
+    {
+        if (node.id < Long.MAX_VALUE)
+            return new Timestamp(msb, lsb, new Id(node.id + 1));
+        return logicalNext(Id.NONE);
+    }
+
     @Override
     public int compareTo(@Nonnull Timestamp that)
     {
         if (this == that) return 0;
         int c = Long.compareUnsigned(this.msb, that.msb);
         if (c == 0) c = Long.compare(lowHlc(this.lsb), lowHlc(that.lsb));
+        if (c == 0) c = Long.compare(lowHlc(this.lsb), lowHlc(that.lsb));
+        if (c == 0) c = Long.compare(this.lsb & IDENTITY_FLAGS, that.lsb & IDENTITY_FLAGS);
         if (c == 0) c = this.node.compareTo(that.node);
         return c;
     }
@@ -189,7 +228,9 @@ public class Timestamp implements Comparable<Timestamp>
 
     public boolean equals(Timestamp that)
     {
-        return this.msb == that.msb && lowHlc(this.lsb) == lowHlc(that.lsb) && this.node.equals(that.node);
+        return that != null && this.msb == that.msb
+               && ((this.lsb ^ that.lsb) & IDENTITY_LSB) == 0
+               && this.node.equals(that.node);
     }
 
     /**

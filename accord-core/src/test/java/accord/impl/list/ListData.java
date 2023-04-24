@@ -24,14 +24,19 @@ import java.util.stream.Collectors;
 
 import accord.api.Data;
 import accord.api.Key;
+import accord.utils.Timestamped;
 
-public class ListData extends TreeMap<Key, int[]> implements Data
+public class ListData extends TreeMap<Key, Timestamped<int[]>> implements Data
 {
     @Override
     public Data merge(Data data)
     {
         if (data != null)
-            this.putAll(((ListData)data));
+        {
+            ((ListData)data).forEach((k, v) -> {
+                merge(k, v, (a, b) -> a == null ? b : b == null ? a : Timestamped.merge(a, b, Arrays::equals));
+            });
+        }
         return this;
     }
 
@@ -39,7 +44,7 @@ public class ListData extends TreeMap<Key, int[]> implements Data
     public String toString()
     {
         return entrySet().stream()
-                         .map(e -> e.getKey() + "=" + Arrays.toString(e.getValue()))
+                         .map(e -> e.getKey() + "=" + Arrays.toString(e.getValue().data))
                          .collect(Collectors.joining(", ", "{", "}"));
     }
 }

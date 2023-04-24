@@ -18,13 +18,11 @@
 
 package accord.topology;
 
-import accord.api.ConfigurationService;
 import accord.api.RoutingKey;
 import accord.api.TopologySorter;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.CommandStore;
 import accord.local.Node.Id;
-import accord.messages.Request;
 import accord.primitives.*;
 import accord.topology.Topologies.Single;
 import com.google.common.annotations.VisibleForTesting;
@@ -52,7 +50,7 @@ import static accord.utils.Invariants.nonNull;
  * TODO (desired, efficiency/clarity): make TopologyManager a Topologies and copy-on-write update to it,
  *  so we can always just take a reference for transactions instead of copying every time (and index into it by the txnId.epoch)
  */
-public class TopologyManager implements ConfigurationService.Listener
+public class TopologyManager
 {
     private static final AsyncResult<Void> SUCCESS = AsyncResults.success(null);
     static class EpochState
@@ -61,16 +59,17 @@ public class TopologyManager implements ConfigurationService.Listener
         private final Topology global;
         private final Topology local;
         private final QuorumTracker syncTracker;
-        private boolean syncComplete = false;
+        private boolean syncComplete;
         private boolean prevSynced;
 
-        EpochState(Id node, Topology global, TopologySorter sorter, boolean prevSynced)
+        EpochState(Id node, Topology global, TopologySorter sorter, boolean syncComplete, boolean prevSynced)
         {
             this.self = node;
             this.global = checkArgument(global, !global.isSubset());
             this.local = global.forNode(node).trim();
             Invariants.checkArgument(!global().isSubset());
             this.syncTracker = new QuorumTracker(new Single(sorter, global()));
+            this.syncComplete = syncComplete;
             this.prevSynced = prevSynced;
         }
 
@@ -227,7 +226,6 @@ public class TopologyManager implements ConfigurationService.Listener
         this.epochs = new Epochs(new EpochState[0]);
     }
 
-    @Override
     public synchronized void onTopologyUpdate(Topology topology)
     {
         Epochs current = epochs;
@@ -246,7 +244,8 @@ public class TopologyManager implements ConfigurationService.Listener
         System.arraycopy(current.epochs, 0, nextEpochs, 1, current.epochs.length);
 
         boolean prevSynced = current.epochs.length == 0 || current.epochs[0].syncComplete();
-        nextEpochs[0] = new EpochState(node, topology, sorter.get(topology), prevSynced);
+        nextEpochs[0] = new EpochState(node, topology, sorter.get(topology), topology.epoch == 1, prevSynced);
+        alreadySyncd.forEach(nextEpochs[0]::recordSyncComplete);
 
         List<AsyncResult.Settable<Void>> futureEpochFutures = new ArrayList<>(current.futureEpochFutures);
         AsyncResult.Settable<Void> toComplete = !futureEpochFutures.isEmpty() ? futureEpochFutures.remove(0) : null;
@@ -266,7 +265,6 @@ public class TopologyManager implements ConfigurationService.Listener
         return current == null || result.isDone() ? result : result.withExecutor(current);
     }
 
-    @Override
     public void onEpochSyncComplete(Id node, long epoch)
     {
         epochs.syncComplete(node, epoch);
@@ -323,7 +321,7 @@ public class TopologyManager implements ConfigurationService.Listener
         int start = (int)(snapshot.currentEpoch - maxEpoch);
         int limit = (int)(Math.min(1 + snapshot.currentEpoch - minEpoch, snapshot.epochs.length));
         int count = limit - start;
-        while (limit < snapshot.epochs.length && !snapshot.epochs[limit].syncCompleteFor(select))
+        while (limit < snapshot.epochs.length && !snapshot.epochs[limit - 1].syncCompleteFor(select))
         {
             ++count;
             ++limit;
@@ -425,13 +423,5 @@ public class TopologyManager implements ConfigurationService.Listener
     public Topology globalForEpoch(long epoch)
     {
         return epochs.get(epoch).global();
-    }
-
-    public long maxUnknownEpoch(Request request)
-    {
-        long waitForEpoch = request.waitForEpoch();
-        if (epochs.currentEpoch < waitForEpoch)
-            return waitForEpoch;
-        return 0;
     }
 }

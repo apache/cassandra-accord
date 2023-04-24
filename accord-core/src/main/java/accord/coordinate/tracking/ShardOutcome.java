@@ -23,7 +23,7 @@ package accord.coordinate.tracking;
  * encapsulating also any modification it should make to the AbstractTracker
  * containing the shard.
  */
-public interface ShardOutcome<T extends AbstractTracker<?, ?>>
+public interface ShardOutcome<T extends AbstractTracker<?>>
 {
     AbstractTracker.ShardOutcomes apply(T tracker, int shardIndex);
 }

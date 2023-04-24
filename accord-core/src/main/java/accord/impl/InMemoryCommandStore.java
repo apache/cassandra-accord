@@ -18,6 +18,7 @@
 
 package accord.impl;
 
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -26,7 +27,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
 import java.util.TreeMap;
@@ -44,7 +44,6 @@ import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.local.Command;
-import accord.local.CommandListener;
 import accord.local.CommandStore;
 import accord.local.CommandStores.RangesForEpoch;
 import accord.local.CommandStores.RangesForEpochHolder;
@@ -57,6 +56,7 @@ import accord.local.SafeCommandStore;
 import accord.local.SaveStatus;
 import accord.local.Status;
 import accord.primitives.AbstractKeys;
+import accord.primitives.Deps;
 import accord.primitives.PartialDeps;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
@@ -68,7 +68,6 @@ import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
-import accord.utils.ReducingRangeMap;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 import javax.annotation.Nullable;
@@ -81,6 +80,8 @@ import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.Status.Committed;
 import static accord.local.Status.PreAccepted;
 import static accord.local.Status.PreCommitted;
+import static accord.local.Status.Applied;
+import static accord.local.Status.Invalidated;
 import static accord.primitives.Routables.Slice.Minimal;
 
 public abstract class InMemoryCommandStore extends CommandStore
@@ -93,20 +94,13 @@ public abstract class InMemoryCommandStore extends CommandStore
     // TODO (find library, efficiency): this is obviously super inefficient, need some range map
 
     private final TreeMap<TxnId, RangeCommand> rangeCommands = new TreeMap<>();
+    private final TreeMap<TxnId, Ranges> historicalRangeCommands = new TreeMap<>();
 
     private InMemorySafeStore current;
-
-    private ReducingRangeMap<Timestamp> rejectBefore;
 
     public InMemoryCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
     {
         super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
-    }
-
-    @Override
-    public int id()
-    {
-        return id;
     }
 
     @Override
@@ -123,6 +117,13 @@ public abstract class InMemoryCommandStore extends CommandStore
     public GlobalCommand command(TxnId txnId)
     {
         return commands.computeIfAbsent(txnId, GlobalCommand::new);
+    }
+
+    public InMemorySafeCommand lazyReference(TxnId txnId)
+    {
+        GlobalCommand command = commands.get(txnId);
+        return command != null ? new InMemorySafeCommand(txnId, command)
+                               : new InMemorySafeCommand(txnId, () -> command(txnId));
     }
 
     public boolean hasCommand(TxnId txnId)
@@ -332,18 +333,49 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
     }
 
+    @Override
+    protected void registerHistoricalTransactions(Deps deps)
+    {
+        Ranges allRanges = rangesForEpochHolder.get().all();
+        deps.keyDeps.keys().forEach(allRanges, key -> {
+            SafeCommandsForKey cfk = commandsForKey(key).createSafeReference();
+            deps.keyDeps.forEach(key, txnId -> {
+                // TODO (desired, efficiency): this can be made more efficient by batching by epoch
+                if (rangesForEpochHolder.get().coordinates(txnId).contains(key))
+                    return; // already coordinates, no need to replicate
+                if (!rangesForEpochHolder.get().allBefore(txnId.epoch()).contains(key))
+                    return;
 
-    protected InMemorySafeStore createCommandStore(PreLoadContext context, RangesForEpoch ranges, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys)
+                cfk.registerNotWitnessed(txnId);
+            });
+
+        });
+        deps.rangeDeps.forEachUniqueTxnId(allRanges, txnId -> {
+
+            if (rangeCommands.containsKey(txnId))
+                return;
+
+            Ranges ranges = deps.rangeDeps.ranges(txnId);
+            if (rangesForEpochHolder.get().coordinates(txnId).intersects(ranges))
+                return; // already coordinates, no need to replicate
+            if (!rangesForEpochHolder.get().allBefore(txnId.epoch()).intersects(ranges))
+                return;
+
+            historicalRangeCommands.merge(txnId, ranges.slice(allRanges), Ranges::with);
+        });
+    }
+
+    protected InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys)
     {
         return new InMemorySafeStore(this, cfkLoader, ranges, context, commands, commandsForKeys);
     }
 
-    protected final InMemorySafeStore createCommandStore(PreLoadContext context, RangesForEpoch ranges)
+    protected final InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges)
     {
         Map<TxnId, InMemorySafeCommand> commands = new HashMap<>();
         Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys = new HashMap<>();
-        for (TxnId txnId : context.txnIds())
-            commands.put(txnId, command(txnId).createSafeReference());
+
+        context.forEachId(txnId -> commands.put(txnId, lazyReference(txnId)));
 
         for (Seekable seekable : context.keys())
         {
@@ -357,14 +389,14 @@ public abstract class InMemoryCommandStore extends CommandStore
                     // load range cfks here
             }
         }
-        return createCommandStore(context, ranges, commands, commandsForKeys);
+        return createSafeStore(context, ranges, commands, commandsForKeys);
     }
 
     public SafeCommandStore beginOperation(PreLoadContext context)
     {
         if (current != null)
             throw new IllegalStateException("Another operation is in progress or it's store was not cleared");
-        current = createCommandStore(context, rangesForEpochHolder.get());
+        current = createSafeStore(context, rangesForEpochHolder.get());
         return current;
     }
 
@@ -385,16 +417,6 @@ public abstract class InMemoryCommandStore extends CommandStore
         {
             current = null;
         }
-    }
-
-    public void setRejectBefore(ReducingRangeMap<Timestamp> newRejectBefore)
-    {
-        this.rejectBefore = newRejectBefore;
-    }
-
-    public ReducingRangeMap<Timestamp> getRejectBefore()
-    {
-        return rejectBefore;
     }
 
     private <T> T executeInContext(InMemoryCommandStore commandStore, PreLoadContext preLoadContext, Function<? super SafeCommandStore, T> function, boolean isDirectCall)
@@ -521,6 +543,11 @@ public abstract class InMemoryCommandStore extends CommandStore
             this.value = value;
             return this;
         }
+
+        public String toString()
+        {
+            return value == null ? "null" : value.toString();
+        }
     }
 
     public static class GlobalCommand extends GlobalState<Command>
@@ -544,10 +571,15 @@ public abstract class InMemoryCommandStore extends CommandStore
             transientListeners.add(listener);
         }
 
-        public void removeListener(Command.TransientListener listener)
+        public boolean removeListener(Command.TransientListener listener)
         {
-            if (transientListeners != null && transientListeners.remove(listener) && transientListeners.isEmpty())
+            if (transientListeners == null || !transientListeners.remove(listener))
+                return false;
+
+            if (transientListeners.isEmpty())
                 transientListeners = null;
+
+            return true;
         }
 
         public Collection<Command.TransientListener> transientListeners()
@@ -571,7 +603,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
     }
 
-    static class InMemorySafeStore extends AbstractSafeCommandStore<InMemorySafeCommand, InMemorySafeCommandsForKey>
+    public static class InMemorySafeStore extends AbstractSafeCommandStore<InMemorySafeCommand, InMemorySafeCommandsForKey>
     {
         private final InMemoryCommandStore commandStore;
         private final Map<TxnId, InMemorySafeCommand> commands;
@@ -670,6 +702,19 @@ public abstract class InMemoryCommandStore extends CommandStore
             return timestamp;
         }
 
+        public Timestamp maxApplied(Seekables<?, ?> keysOrRanges, Ranges slice)
+        {
+            Seekables<?, ?> sliced = keysOrRanges.slice(slice, Minimal);
+            Timestamp timestamp = Timestamp.NONE;
+            for (SafeCommand safeCommand : commands.values())
+            {
+                Command command = safeCommand.current();
+                if (command.hasBeen(Applied) && !command.hasBeen(Invalidated) && command.partialTxn().keys().intersects(sliced))
+                    timestamp = Timestamp.max(timestamp, command.executeAt());
+            }
+            return timestamp;
+        }
+
         @Override
         public NodeTimeService time()
         {
@@ -712,7 +757,7 @@ public abstract class InMemoryCommandStore extends CommandStore
 
             // TODO (find lib, efficiency): this is super inefficient, need to store Command in something queryable
             Seekables<?, ?> sliced = keysOrRanges.slice(slice, Minimal);
-            Map<Range, List<Command>> collect = new TreeMap<>(Range::compare);
+            Map<Range, List<Map.Entry<TxnId, Timestamp>>> collect = new TreeMap<>(Range::compare);
             commandStore.rangeCommands.forEach(((txnId, rangeCommand) -> {
                 Command command = rangeCommand.command.value();
                 Invariants.nonNull(command);
@@ -757,18 +802,52 @@ public abstract class InMemoryCommandStore extends CommandStore
 
                 Routables.foldl(rangeCommand.ranges, sliced, (r, in, i) -> {
                     // TODO (easy, efficiency): pass command as a parameter to Fold
-                    List<Command> list = in.computeIfAbsent(r, ignore -> new ArrayList<>());
-                    if (list.isEmpty() || list.get(list.size() - 1) != command)
-                        list.add(command);
+                    List<Map.Entry<TxnId, Timestamp>> list = in.computeIfAbsent(r, ignore -> new ArrayList<>());
+                    if (list.isEmpty() || !list.get(list.size() - 1).getKey().equals(command.txnId()))
+                        list.add(new AbstractMap.SimpleImmutableEntry<>(command.txnId(), command.executeAt()));
                     return in;
                 }, collect);
             }));
-            for (Map.Entry<Range, List<Command>> e : collect.entrySet())
+
+            if (minStatus == null && testDep == ANY_DEPS)
             {
-                for (Command command : e.getValue())
+
+                commandStore.historicalRangeCommands.forEach(((txnId, ranges) -> {
+                    switch (testTimestamp)
+                    {
+                        default: throw new AssertionError();
+                        case STARTED_AFTER:
+                        case EXECUTES_AFTER:
+                            if (txnId.compareTo(timestamp) < 0) return;
+                            else break;
+                        case STARTED_BEFORE:
+                        case MAY_EXECUTE_BEFORE:
+                            if (txnId.compareTo(timestamp) > 0) return;
+                            else break;
+                    }
+
+                    if (!testKind.test(txnId.rw()))
+                        return;
+
+                    if (!ranges.intersects(sliced))
+                        return;
+
+                    Routables.foldl(ranges, sliced, (r, in, i) -> {
+                        // TODO (easy, efficiency): pass command as a parameter to Fold
+                        List<Map.Entry<TxnId, Timestamp>> list = in.computeIfAbsent(r, ignore -> new ArrayList<>());
+                        if (list.isEmpty() || !list.get(list.size() - 1).getKey().equals(txnId))
+                            list.add(new AbstractMap.SimpleImmutableEntry<>(txnId, txnId));
+                        return in;
+                    }, collect);
+                }));
+            }
+
+            for (Map.Entry<Range, List<Map.Entry<TxnId, Timestamp>>> e : collect.entrySet())
+            {
+                for (Map.Entry<TxnId, Timestamp> command : e.getValue())
                 {
                     T initial = accumulate;
-                    accumulate = map.apply(e.getKey(), command.txnId(), command.executeAt(), initial);
+                    accumulate = map.apply(e.getKey(), command.getKey(), command.getValue(), initial);
                 }
             }
 
@@ -1010,7 +1089,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        protected InMemorySafeStore createCommandStore(PreLoadContext context, RangesForEpoch ranges, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys)
+        protected InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys)
         {
             return new DebugSafeStore(this, cfkLoader(), ranges, context, commands, commandsForKeys);
         }

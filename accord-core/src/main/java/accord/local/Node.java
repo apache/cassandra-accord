@@ -30,6 +30,7 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import accord.api.ConfigurationService.EpochReady;
 import accord.coordinate.*;
 import accord.messages.*;
 import accord.primitives.*;
@@ -118,7 +119,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private final MessageSink messageSink;
     private final ConfigurationService configService;
     private final TopologyManager topology;
-    private final CommandStores<?> commandStores;
+    private final CommandStores commandStores;
 
     private final LongSupplier nowSupplier;
     private final AtomicReference<Timestamp> now;
@@ -146,12 +147,15 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.random = random;
         this.scheduler = scheduler;
         this.commandStores = factory.create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this));
-
         configService.registerListener(this);
-        onTopologyUpdate(topology, false);
     }
 
-    public CommandStores<?> commandStores()
+    public AsyncResult<Void> start()
+    {
+        return onTopologyUpdateInternal(configService.currentTopology()).metadata;
+    }
+
+    public CommandStores commandStores()
     {
         return commandStores;
     }
@@ -172,20 +176,21 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return topology().epoch();
     }
 
-    private synchronized void onTopologyUpdate(Topology topology, boolean acknowledge)
+    private synchronized EpochReady onTopologyUpdateInternal(Topology topology)
     {
-        if (topology.epoch() <= this.topology.epoch())
-            return;
-        commandStores.updateTopology(topology);
+        Supplier<EpochReady> bootstrap = commandStores.updateTopology(this, topology);
         this.topology.onTopologyUpdate(topology);
-        if (acknowledge)
-            configService.acknowledgeEpoch(topology.epoch());
+        return bootstrap.get();
     }
 
     @Override
-    public synchronized void onTopologyUpdate(Topology topology)
+    public synchronized AsyncResult<Void> onTopologyUpdate(Topology topology)
     {
-        onTopologyUpdate(topology, true);
+        if (topology.epoch() <= this.topology.epoch())
+            return AsyncResults.success(null);
+        EpochReady ready = onTopologyUpdateInternal(topology);
+        configService.acknowledgeEpoch(ready);
+        return ready.coordination;
     }
 
     @Override
@@ -233,27 +238,50 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public Timestamp uniqueNow()
     {
-        return now.updateAndGet(cur -> {
-            // TODO (low priority, proof): this diverges from proof; either show isomorphism or make consistent
-            long now = nowSupplier.getAsLong();
-            long epoch = Math.max(cur.epoch(), topology.epoch());
-            return now > cur.hlc()
-                 ? Timestamp.fromValues(epoch, now, id)
-                 : Timestamp.fromValues(epoch, cur.hlc() + 1, id);
-        });
+        while (true)
+        {
+            Timestamp cur = now.get();
+            Timestamp next = cur.withNextHlc(nowSupplier.getAsLong())
+                                .withEpochAtLeast(topology.epoch());
+
+            if (now.compareAndSet(cur, next))
+                return next;
+        }
+    }
+
+    public Timestamp uniqueNowWithStaleEpoch(long epoch)
+    {
+        while (true)
+        {
+            Timestamp cur = now.get();
+            Timestamp next = cur.withNextHlc(nowSupplier.getAsLong());
+            if (now.compareAndSet(cur, next))
+                return next.withStaleEpoch(epoch);
+        }
     }
 
     @Override
     public Timestamp uniqueNow(Timestamp atLeast)
     {
-        if (now.get().compareTo(atLeast) < 0)
-            now.accumulateAndGet(atLeast, (current, proposed) -> {
-                long minEpoch = topology.epoch();
-                current = current.withEpochAtLeast(minEpoch);
-                proposed = proposed.withEpochAtLeast(minEpoch);
-                return proposed.compareTo(current) <= 0 ? current.logicalNext(id) : proposed;
-            });
+        Timestamp cur = now.get();
+        if (cur.compareTo(atLeast) < 0)
+        {
+            long topologyEpoch = topology.epoch();
+            if (atLeast.epoch() > topologyEpoch)
+                configService.fetchTopologyForEpoch(atLeast.epoch());
+            now.accumulateAndGet(atLeast, Node::nowAtLeast);
+        }
         return uniqueNow();
+    }
+
+    private static Timestamp nowAtLeast(Timestamp current, Timestamp proposed)
+    {
+        if (current.epoch() >= proposed.epoch() && current.hlc() >= proposed.hlc())
+            return current;
+
+        return proposed.withEpochAtLeast(proposed.epoch())
+                       .withHlcAtLeast(current.hlc())
+                       .withNode(current.node);
     }
 
     @Override
@@ -328,12 +356,12 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         });
     }
 
-    public <T> void send(Collection<Id> to, Request send)
+    public void send(Collection<Id> to, Request send)
     {
         to.forEach(dst -> send(dst, send));
     }
 
-    public <T> void send(Collection<Id> to, Function<Id, Request> requestFactory)
+    public void send(Collection<Id> to, Function<Id, Request> requestFactory)
     {
         to.forEach(dst -> send(dst, requestFactory.apply(dst)));
     }
@@ -416,7 +444,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     private AsyncResult<Result> initiateCoordination(TxnId txnId, Txn txn)
     {
-        return Coordinate.coordinate(this, txnId, txn, computeRoute(txnId, txn.keys()));
+        return CoordinateTransaction.coordinate(this, txnId, txn, computeRoute(txnId, txn.keys()));
     }
 
     public FullRoute<?> computeRoute(TxnId txnId, Seekables<?, ?> keysOrRanges)
@@ -523,12 +551,16 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public void receive(Request request, Id from, ReplyContext replyContext)
     {
-        long unknownEpoch = topology().maxUnknownEpoch(request);
-        if (unknownEpoch > 0)
+        long knownEpoch = request.knownEpoch();
+        if (knownEpoch > topology.epoch())
         {
-            configService.fetchTopologyForEpoch(unknownEpoch);
-            topology().awaitEpoch(unknownEpoch).addCallback(() -> receive(request, from, replyContext)).begin(agent());
-            return;
+            configService.fetchTopologyForEpoch(knownEpoch);
+            long waitForEpoch = request.waitForEpoch();
+            if (waitForEpoch > topology.epoch())
+            {
+                topology().awaitEpoch(waitForEpoch).addCallback(() -> receive(request, from, replyContext));
+                return;
+            }
         }
         scheduler.now(() -> request.process(this, from, replyContext));
     }

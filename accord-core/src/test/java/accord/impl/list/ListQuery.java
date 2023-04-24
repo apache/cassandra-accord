@@ -28,7 +28,9 @@ import accord.api.Key;
 import accord.api.Query;
 import accord.api.Result;
 import accord.primitives.Keys;
+import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.utils.Timestamped;
 
 public class ListQuery implements Query
 {
@@ -42,16 +44,19 @@ public class ListQuery implements Query
     }
 
     @Override
-    public Result compute(TxnId txnId, Data data, Read untypedRead, Update update)
+    public Result compute(TxnId txnId, Timestamp executeAt, Data data, Read untypedRead, Update update)
     {
+        if (data == null)
+            return new ListResult(client, requestId, txnId, Keys.EMPTY, Keys.EMPTY, new int[0][0], (ListUpdate) update);
+
         ListRead read = (ListRead) untypedRead;
         Keys responseKeys = Keys.ofSortedUnique(((ListData)data).keySet());
         int[][] values = new int[responseKeys.size()][];
-        for (Map.Entry<Key, int[]> e : ((ListData)data).entrySet())
+        for (Map.Entry<Key, Timestamped<int[]>> e : ((ListData)data).entrySet())
         {
             int i = responseKeys.indexOf(e.getKey());
             if (i >= 0)
-                values[i] = e.getValue();
+                values[i] = e.getValue().data;
         }
         return new ListResult(client, requestId, txnId, read.readKeys, responseKeys, values, (ListUpdate) update);
     }

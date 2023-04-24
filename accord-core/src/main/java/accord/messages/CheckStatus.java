@@ -28,7 +28,6 @@ import accord.primitives.Ballot;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
-import java.util.Collections;
 import accord.primitives.*;
 import accord.topology.Topologies;
 import accord.utils.MapReduceConsume;
@@ -80,15 +79,9 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
     }
 
     @Override
-    public Iterable<TxnId> txnIds()
+    public TxnId primaryTxnId()
     {
-        return Collections.singleton(txnId);
-    }
-
-    @Override
-    public Seekables<?, ?> keys()
-    {
-        return Keys.EMPTY;
+        return txnId;
     }
 
     public CheckStatus(Id to, Topologies topologies, TxnId txnId, Unseekables<?, ?> query, IncludeInfo includeInfo)
@@ -121,7 +114,8 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusOk>
                         command.durability(), includeInfo == IncludeInfo.No ? null : command.route(), command.homeKey());
             case All:
                 return new CheckStatusOkFull(node, command);
-        }    }
+        }
+    }
 
     @Override
     public CheckStatusOk reduce(CheckStatusOk r1, CheckStatusOk r2)

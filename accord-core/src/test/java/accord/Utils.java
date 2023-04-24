@@ -48,6 +48,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import static accord.utils.async.AsyncChains.awaitUninterruptibly;
+
 public class Utils
 {
     public static Node.Id id(int i)
@@ -135,7 +137,7 @@ public class Utils
     {
         MockStore store = new MockStore();
         Scheduler scheduler = new ThreadPoolScheduler();
-        return new Node(nodeId,
+        Node node = new Node(nodeId,
                         messageSink,
                         new MockConfigurationService(messageSink, EpochFunction.noop(), topology),
                         clock,
@@ -147,5 +149,7 @@ public class Utils
                         SizeOfIntersectionSorter.SUPPLIER,
                         SimpleProgressLog::new,
                         InMemoryCommandStores.Synchronized::new);
+        awaitUninterruptibly(node.start());
+        return node;
     }
 }

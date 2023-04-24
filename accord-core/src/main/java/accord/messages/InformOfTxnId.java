@@ -22,8 +22,6 @@ import accord.api.RoutingKey;
 import accord.local.*;
 import accord.primitives.TxnId;
 
-import java.util.Collections;
-
 import static accord.api.ProgressLog.ProgressShard.Home;
 import static accord.messages.SimpleReply.Nack;
 import static accord.messages.SimpleReply.Ok;
@@ -85,10 +83,8 @@ public class InformOfTxnId extends AbstractEpochRequest<Reply> implements Reques
     }
 
     @Override
-    public Iterable<TxnId> txnIds()
+    public TxnId primaryTxnId()
     {
-        // TODO (expected, efficiency): should be empty list, as can be written without existing state
-        //                              (though perhaps might check existing in-memory state in case already present)
-        return Collections.singleton(txnId);
+        return txnId;
     }
 }

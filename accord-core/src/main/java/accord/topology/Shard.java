@@ -25,6 +25,7 @@ import java.util.Set;
 import accord.local.Node.Id;
 import accord.api.Key;
 import accord.primitives.Range;
+import accord.utils.SortedArrays.ExtendedSortedArrayList;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
@@ -37,9 +38,8 @@ import static accord.utils.Invariants.checkArgument;
 public class Shard
 {
     public final Range range;
-    // TODO (desired, clarity): use BTreeSet to combine these two (or introduce version that operates over long values)
     public final List<Id> nodes;
-    public final Set<Id> nodeSet;
+    public final ExtendedSortedArrayList<Id> sortedNodes;
     public final Set<Id> fastPathElectorate;
     public final Set<Id> joining;
     public final int maxFailures;
@@ -51,7 +51,7 @@ public class Shard
     {
         this.range = range;
         this.nodes = ImmutableList.copyOf(nodes);
-        this.nodeSet = checkArgument(ImmutableSet.copyOf(nodes), set -> set.size() == nodes.size());
+        this.sortedNodes = ExtendedSortedArrayList.sortedCopyOf(nodes, Id[]::new);
         this.maxFailures = maxToleratedFailures(nodes.size());
         this.fastPathElectorate = ImmutableSet.copyOf(fastPathElectorate);
         this.joining = checkArgument(ImmutableSet.copyOf(joining), Iterables.all(joining, nodes::contains),
@@ -124,6 +124,21 @@ public class Shard
         return s;
     }
 
+    public boolean contains(Id id)
+    {
+        return Collections.binarySearch(sortedNodes, id) >= 0;
+    }
+
+    public boolean containsAll(List<Id> ids)
+    {
+        for (int i = 0, max = ids.size() ; i < max ; ++i)
+        {
+            if (!contains(ids.get(i)))
+                return false;
+        }
+        return true;
+    }
+
     @Override
     public String toString()
     {
@@ -141,7 +156,6 @@ public class Shard
             && slowPathQuorumSize == shard.slowPathQuorumSize
             && range.equals(shard.range)
             && nodes.equals(shard.nodes)
-            && nodeSet.equals(shard.nodeSet)
             && fastPathElectorate.equals(shard.fastPathElectorate)
             && joining.equals(shard.joining);
     }

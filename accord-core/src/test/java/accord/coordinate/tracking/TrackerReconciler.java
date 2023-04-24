@@ -43,7 +43,7 @@ import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public abstract class TrackerReconciler<ST extends ShardTracker, T extends AbstractTracker<ST, ?>, E extends Enum<E>>
+public abstract class TrackerReconciler<ST extends ShardTracker, T extends AbstractTracker<ST>, E extends Enum<E>>
 {
     final RandomSource random;
     final E[] events;
@@ -95,7 +95,7 @@ public abstract class TrackerReconciler<ST extends ShardTracker, T extends Abstr
     abstract RequestStatus invoke(E event, T tracker, Id from);
     abstract void validate(RequestStatus status);
 
-    protected static <ST extends ShardTracker, T extends AbstractTracker<ST, ?>, E extends Enum<E>>
+    protected static <ST extends ShardTracker, T extends AbstractTracker<ST>, E extends Enum<E>>
     List<TrackerReconciler<ST, T, E>> generate(long seed, BiFunction<RandomSource, Topologies, ? extends TrackerReconciler<ST, T, E>> constructor)
     {
         System.out.println("seed: " + seed);
@@ -123,7 +123,7 @@ public abstract class TrackerReconciler<ST extends ShardTracker, T extends Abstr
         Deque<Topology> topologies = new ArrayDeque<>();
         topologies.add(topology);
         TopologyUpdates topologyUpdates = new TopologyUpdates(executor);
-        TopologyRandomizer configRandomizer = new TopologyRandomizer(() -> random, topology, topologyUpdates, (id, top) -> {});
+        TopologyRandomizer configRandomizer = new TopologyRandomizer(() -> random, topology, topologyUpdates, null);
         while (--count > 0)
         {
             Topology next = configRandomizer.updateTopology();

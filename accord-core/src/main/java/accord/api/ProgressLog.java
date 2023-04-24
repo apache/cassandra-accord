@@ -81,10 +81,13 @@ public interface ProgressLog
         Local,
 
         /* Designated Home (Global Progress) Shard (if local node is a replica of home key on coordination epoch) */
-        Home;
+        Home,
 
-        public boolean isHome() { return this == Home; }
-        public boolean isProgress() { return this.compareTo(Local) >= 0; }
+        /** A special variant of Home that is not managed by the progress log */
+        UnmanagedHome;
+
+        public boolean isHome() { return this.compareTo(Home) >= 0; }
+        public boolean isProgress() { return this.compareTo(Local) >= 0 && this.compareTo(Home) <= 0; }
     }
 
     /**

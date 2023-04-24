@@ -43,7 +43,7 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
         @Override
         public MessageType type()
         {
-            throw new UnsupportedOperationException();
+            return null;
         }
 
         @Override
@@ -57,7 +57,7 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
         @Override
         public MessageType type()
         {
-            throw new UnsupportedOperationException();
+            return null;
         }
 
         @Override
@@ -94,7 +94,7 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
         @Override
         public MessageType type()
         {
-            throw new UnsupportedOperationException();
+            return null;
         }
 
         @Override

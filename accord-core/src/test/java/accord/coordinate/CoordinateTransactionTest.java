@@ -44,7 +44,7 @@ import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Txn.Kind.Write;
 import static accord.utils.async.AsyncChains.getUninterruptibly;
 
-public class CoordinateTest
+public class CoordinateTransactionTest
 {
     @Test
     void simpleTest() throws Throwable
@@ -58,7 +58,7 @@ public class CoordinateTest
             Keys keys = keys(10);
             Txn txn = writeTxn(keys);
             FullKeyRoute route = keys.toRoute(keys.get(0).toUnseekable());
-            Result result = getUninterruptibly(Coordinate.coordinate(node, txnId, txn, route));
+            Result result = getUninterruptibly(CoordinateTransaction.coordinate(node, txnId, txn, route));
             Assertions.assertEquals(MockStore.RESULT, result);
         }
     }
@@ -75,7 +75,7 @@ public class CoordinateTest
             Ranges keys = ranges(range(1, 2));
             Txn txn = writeTxn(keys);
             FullRangeRoute route = keys.toRoute(keys.get(0).someIntersectingRoutingKey(null));
-            Result result = getUninterruptibly(Coordinate.coordinate(node, txnId, txn, route));
+            Result result = getUninterruptibly(CoordinateTransaction.coordinate(node, txnId, txn, route));
             Assertions.assertEquals(MockStore.RESULT, result);
         }
     }
@@ -97,7 +97,7 @@ public class CoordinateTest
                 Keys keys = keys(1);
                 Txn txn = writeTxn(keys);
                 FullKeyRoute route = keys.toRoute(keys.get(0).someIntersectingRoutingKey(null));
-                getUninterruptibly(Coordinate.coordinate(node, oldId1, txn, route));
+                getUninterruptibly(CoordinateTransaction.coordinate(node, oldId1, txn, route));
                 Assertions.fail();
             }
             catch (ExecutionException e)
@@ -108,7 +108,7 @@ public class CoordinateTest
             Keys keys = keys(2);
             Txn txn = writeTxn(keys);
             FullKeyRoute route = keys.toRoute(keys.get(0).someIntersectingRoutingKey(null));
-            getUninterruptibly(Coordinate.coordinate(node, oldId2, txn, route));
+            getUninterruptibly(CoordinateTransaction.coordinate(node, oldId2, txn, route));
         }
     }
 
@@ -133,7 +133,7 @@ public class CoordinateTest
         TxnId txnId = node.nextTxnId(Write, Key);
         txnId = new TxnId(txnId.epoch(), txnId.hlc() + clock, Write, Key, txnId.node);
         Txn txn = writeTxn(keys);
-        Result result = getUninterruptibly(Coordinate.coordinate(node, txnId, txn, node.computeRoute(txnId, txn.keys())));
+        Result result = getUninterruptibly(CoordinateTransaction.coordinate(node, txnId, txn, node.computeRoute(txnId, txn.keys())));
         Assertions.assertEquals(MockStore.RESULT, result);
         return txnId;
     }
@@ -198,7 +198,7 @@ public class CoordinateTest
             Keys oneKey = keys(10);
             Keys twoKeys = keys(10, 20);
             Txn txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.QUERY, MockStore.update(twoKeys));
-            Result result = getUninterruptibly(Coordinate.coordinate(node, txnId, txn, txn.keys().toRoute(oneKey.get(0).toUnseekable())));
+            Result result = getUninterruptibly(CoordinateTransaction.coordinate(node, txnId, txn, txn.keys().toRoute(oneKey.get(0).toUnseekable())));
             Assertions.assertEquals(MockStore.RESULT, result);
 
             txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.QUERY, MockStore.update(Keys.EMPTY));

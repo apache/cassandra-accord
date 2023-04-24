@@ -21,6 +21,7 @@ package accord.impl.basic;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -34,6 +35,8 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import org.junit.jupiter.api.Assertions;
+
 import accord.api.MessageSink;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
@@ -45,19 +48,34 @@ import accord.api.Scheduler;
 import accord.impl.list.ListStore;
 import accord.local.ShardDistributor;
 import accord.messages.SafeCallback;
+import accord.messages.MessageType;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.topology.TopologyRandomizer;
 import accord.topology.Topology;
 import accord.utils.RandomSource;
+import accord.utils.async.AsyncChains;
+import accord.utils.async.AsyncResult;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static java.util.stream.Collectors.toList;
 
 public class Cluster implements Scheduler
 {
     public static final Logger trace = LoggerFactory.getLogger("accord.impl.basic.Trace");
+
+    public static class Stats
+    {
+        int count;
+
+        public int count() { return count; }
+        public String toString() { return Integer.toString(count); }
+    }
+
+    EnumMap<MessageType, Stats> statsMap = new EnumMap<>(MessageType.class);
 
     final Function<Id, Node> lookup;
     final PendingQueue pending;
@@ -85,6 +103,9 @@ public class Cluster implements Scheduler
 
     private void add(Packet packet)
     {
+        MessageType type = packet.message.type();
+        if (type != null)
+            statsMap.computeIfAbsent(type, ignore -> new Stats()).count++;
         boolean isReply = packet.message instanceof Reply;
         if (trace.isTraceEnabled())
             trace.trace("{} {} {}", clock++, isReply ? "RPLY" : "SEND", packet);
@@ -194,9 +215,8 @@ public class Cluster implements Scheduler
         run.run();
     }
 
-    public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, AgentExecutor executor, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in)
+    public static EnumMap<MessageType, Stats> run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, AgentExecutor executor, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, Consumer<Runnable> noMoreWorkSignal)
     {
-
         Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> lookup = new LinkedHashMap<>();
         try
@@ -215,6 +235,11 @@ public class Cluster implements Scheduler
                                           SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending)));
             }
 
+            // startup
+            AsyncResult<?> startup = AsyncChains.reduce(lookup.values().stream().map(Node::start).collect(toList()), (a, b) -> null).beginAsResult();
+            while (sinks.processPending());
+            Assertions.assertTrue(startup.isDone());
+
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));
             RandomSource shuffleRandom = randomSupplier.get();
             Scheduled chaos = sinks.recurring(() -> {
@@ -222,7 +247,10 @@ public class Cluster implements Scheduler
                 int partitionSize = shuffleRandom.nextInt((topologyFactory.rf+1)/2);
                 sinks.partitionSet = new LinkedHashSet<>(nodesList.subList(0, partitionSize));
             }, 5L, SECONDS);
-            Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1L, SECONDS);
+
+            Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1, SECONDS);
+
+            noMoreWorkSignal.accept(reconfigure::cancel);
 
             Packet next;
             while ((next = in.get()) != null)
@@ -248,6 +276,8 @@ public class Cluster implements Scheduler
                 sinks.onDone.clear();
                 while (sinks.processPending());
             }
+
+            return sinks.statsMap;
         }
         finally
         {

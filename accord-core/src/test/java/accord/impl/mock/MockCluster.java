@@ -50,6 +50,7 @@ import java.util.function.LongSupplier;
 import static accord.Utils.*;
 import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Txn.Kind.Write;
+import static accord.utils.async.AsyncChains.awaitUninterruptibly;
 
 public class MockCluster implements Network, AutoCloseable, Iterable<Node>
 {
@@ -105,7 +106,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         MockStore store = new MockStore();
         MessageSink messageSink = messageSinkFactory.apply(id, this);
         MockConfigurationService configurationService = new MockConfigurationService(messageSink, onFetchTopology, topology);
-        return new Node(id,
+        Node node = new Node(id,
                         messageSink,
                         configurationService,
                         nowSupplier,
@@ -117,6 +118,8 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                         SizeOfIntersectionSorter.SUPPLIER,
                         SimpleProgressLog::new,
                         InMemoryCommandStores.SingleThread::new);
+        awaitUninterruptibly(node.start());
+        return node;
     }
 
     private void init(Topology topology)

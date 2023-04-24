@@ -23,6 +23,8 @@ import accord.topology.ShardSelection;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 
+// TODO (desired): introduce abstract sorter that is aware of bootstrap time and deprioritises replicas that may not
+//  have the transaction data, or may not be able to serve the read
 public interface TopologySorter
 {
     interface Supplier

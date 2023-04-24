@@ -24,8 +24,7 @@ import accord.local.Node.Id;
 import accord.local.Status.Durability;
 import accord.primitives.*;
 import accord.topology.Topologies;
-
-import java.util.Collections;
+import accord.utils.Invariants;
 
 import static accord.api.ProgressLog.ProgressShard.Adhoc;
 import static accord.api.ProgressLog.ProgressShard.Home;
@@ -64,15 +63,15 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     @Override
     public void process()
     {
-        Timestamp at = txnId;
         if (progressKey == null)
         {
             // we need to pick a progress log, but this node might not have participated in the coordination epoch
             // in this rare circumstance we simply pick a key to select some progress log to coordinate this
-            // TODO (required, consider): We might not replicate either txnId.epoch OR executeAt.epoch, but some inbetween.
-            //                            Do we need to receive this message in that case? If so, we need to account for this when selecting a progress key
-            at = executeAt;
-            progressKey = node.selectProgressKey(executeAt.epoch(), scope, scope.homeKey());
+            // TODO (expected, consider): We might not replicate either txnId.epoch OR executeAt.epoch, but some inbetween.
+            //                            Do we need to receive this message in that case? Should make this a bit cleaner either way.
+            for (long epoch = waitForEpoch; progressKey == null && epoch > txnId.epoch() ; --epoch)
+                progressKey = node.trySelectProgressKey(epoch, scope, scope.homeKey());
+            Invariants.checkState(progressKey != null);
             shard = Adhoc;
         }
         else
@@ -81,7 +80,8 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
         }
 
         // TODO (expected, efficiency): do not load from disk to perform this update
-        node.mapReduceConsumeLocal(contextFor(txnId), progressKey, at.epoch(), this);
+        // TODO (expected, consider): do we need to send this to all epochs in between, or just execution epoch?
+        node.mapReduceConsumeLocal(contextFor(txnId), progressKey, txnId.epoch(), waitForEpoch, this);
     }
 
     @Override
@@ -126,14 +126,8 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     }
 
     @Override
-    public Iterable<TxnId> txnIds()
+    public TxnId primaryTxnId()
     {
-        return Collections.singleton(txnId);
-    }
-
-    @Override
-    public Seekables<?, ?> keys()
-    {
-        return Keys.EMPTY;
+        return txnId;
     }
 }

@@ -18,7 +18,7 @@
 
 package accord.messages;
 
-import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 
 import accord.local.*;
@@ -26,6 +26,7 @@ import accord.local.SafeCommandStore.TestKind;
 
 import accord.local.Node.Id;
 import accord.messages.TxnRequest.WithUnsynced;
+import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.primitives.Timestamp;
 import javax.annotation.Nullable;
@@ -35,11 +36,7 @@ import accord.primitives.*;
 import accord.primitives.TxnId;
 
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
-import static accord.local.SafeCommandStore.TestKind.Any;
-import static accord.local.SafeCommandStore.TestKind.RorWs;
-import static accord.local.SafeCommandStore.TestKind.Ws;
 import static accord.local.SafeCommandStore.TestTimestamp.STARTED_BEFORE;
-import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 
 public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
 {
@@ -63,7 +60,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         this.route = scope.contains(scope.homeKey()) ? route : null;
     }
 
-    private PreAccept(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, long maxEpoch, PartialTxn partialTxn, @Nullable FullRoute<?> fullRoute)
+    PreAccept(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, long maxEpoch, PartialTxn partialTxn, @Nullable FullRoute<?> fullRoute)
     {
         super(txnId, scope, waitForEpoch, minEpoch, doNotComputeProgressKey);
         this.partialTxn = partialTxn;
@@ -72,9 +69,9 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     }
 
     @Override
-    public Iterable<TxnId> txnIds()
+    public TxnId primaryTxnId()
     {
-        return Collections.singleton(txnId);
+        return txnId;
     }
 
     @Override
@@ -89,6 +86,13 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         node.mapReduceConsumeLocal(this, minUnsyncedEpoch, maxEpoch, this);
     }
 
+    protected PreAcceptReply applyIfDoesNotCoordinate(SafeCommandStore safeStore)
+    {
+        // we only preaccept in the coordination epoch, but we might contact other epochs for dependencies
+        Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, txnId);
+        return new PreAcceptOk(txnId, txnId, calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, ranges));
+    }
+
     @Override
     public PreAcceptReply apply(SafeCommandStore safeStore)
     {
@@ -96,21 +100,22 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         // note: this diverges from the paper, in that instead of waiting for JoinShard,
         //       we PreAccept to both old and new topologies and require quorums in both.
         //       This necessitates sending to ALL replicas of old topology, not only electorate (as fast path may be unreachable).
-        if (minUnsyncedEpoch < txnId.epoch() && !safeStore.ranges().at(txnId.epoch()).intersects(scope))
-        {
-            // we only preaccept in the coordination epoch, but we might contact other epochs for dependencies
-            return new PreAcceptOk(txnId, txnId,
-                    calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().between(minUnsyncedEpoch, txnId.epoch())));
-        }
+        if (minUnsyncedEpoch < txnId.epoch() && !safeStore.ranges().coordinates(txnId).intersects(scope))
+            return applyIfDoesNotCoordinate(safeStore);
 
-        switch (Commands.preaccept(safeStore, txnId, partialTxn, route != null ? route : scope, progressKey))
+        switch (Commands.preaccept(safeStore, txnId, maxEpoch, partialTxn, route != null ? route : scope, progressKey))
         {
             default:
             case Success:
-            case Redundant:
+            case Redundant: // we might hit 'Redundant' if we have to contact later epochs and partially re-contact a node we already contacted
                 Command command = safeStore.command(txnId).current();
+                // for efficiency, we don't usually return dependencies newer than txnId as they aren't necessarily needed
+                // for recovery, and it's better to persist less data than more. However, for exclusive sync points we
+                // don't need to perform an Accept round, nor do we need to persist this state to aid recovery. We just
+                // want the issuer of the sync point to know which transactions to wait for before it can safely treat
+                // all transactions with lower txnId as expired.
                 return new PreAcceptOk(txnId, command.executeAt(),
-                        calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().between(minUnsyncedEpoch, txnId.epoch())));
+                        calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().allBetween(minUnsyncedEpoch, txnId)));
 
             case RejectedBallot:
                 return PreAcceptNack.INSTANCE;
@@ -125,10 +130,12 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         PreAcceptOk ok1 = (PreAcceptOk) r1;
         PreAcceptOk ok2 = (PreAcceptOk) r2;
         PreAcceptOk okMax = ok1.witnessedAt.compareTo(ok2.witnessedAt) >= 0 ? ok1 : ok2;
+        PreAcceptOk okMin = okMax == ok1 ? ok2 : ok1;
+
         PartialDeps deps = ok1.deps.with(ok2.deps);
         if (deps == okMax.deps)
             return okMax;
-        return new PreAcceptOk(txnId, okMax.witnessedAt, deps);
+        return new PreAcceptOk(txnId, okMax.witnessedAt.mergeFlags(okMin.witnessedAt), deps);
     }
 
     @Override
@@ -230,8 +237,10 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     private static <T extends Deps> T calculateDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Timestamp executeAt, Ranges ranges, Deps.AbstractBuilder<T> builder)
     {
         TestKind testKind = TestKind.conflicts(txnId.rw());
-        // could use MAY_EXECUTE_BEFORE to prune those we know execute later, but shouldn't usually be of much help
-        // and would need to supply !hasOrderedTxnId
+        // could use MAY_EXECUTE_BEFORE to prune those we know execute later.
+        // NOTE: ExclusiveSyncPoint *relies* on STARTED_BEFORE to ensure it reports a dependency on *every* earlier TxnId that may execute after it.
+        //       This is necessary for reporting to a bootstrapping replica which TxnId it must not prune from dependencies
+        //       i.e. the source replica reports to the target replica those TxnId that STARTED_BEFORE and EXECUTES_AFTER.
         commandStore.mapReduce(keys, ranges, testKind, STARTED_BEFORE, executeAt, ANY_DEPS, null, null, null,
                 (keyOrRange, testTxnId, testExecuteAt, in) -> {
                     // TODO (easy, efficiency): either pass txnId as parameter or encode this behaviour in a specialised builder to avoid extra allocations
@@ -240,6 +249,76 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
                     return in;
                 }, builder, null);
         return builder.build();
+    }
+
+    /**
+     * To simplify the implementation of bootstrap/range movements, we have coordinators abort transactions
+     * that span too many topology changes for any given shard. This means that we can always daisy-chain a replica
+     * that can inform a new/joining/bootstrapping replica of the data table state and relevant transaction
+     * history without peeking into the future.
+     *
+     * This is necessary because when we create an ExclusiveSyncPoint there may be some transactions that
+     * are captured by it as necessary to witness the result of, but that will execute after it at some arbitrary
+     * future point. For simplicity, we wait for these transactions to execute on the source replicas
+     * before streaming the table state to the target replicas. But if these execute in a future topology,
+     * there may not be a replica that is able to wait for and execute the transaction.
+     * So, we simply prohibit them from doing so.
+     *
+     * TODO (desired): it would be nice if this were enforced by some register on replicas that inform coordinators
+     * of the maximum permitted executeAt. But this would make ExclusiveSyncPoint more complicated to coordinate.
+     */
+    public static boolean rejectExecuteAt(TxnId txnId, Topologies topologies)
+    {
+        // for each superseding shard, mark any nodes removed in a long bitmap; once the number of removals
+        // is greater than the minimum maxFailures for any shard, we reject the executeAt.
+        // Note, this over-estimates the number of removals by counting removals from _any_ superseding shard
+        // (rather than counting each superseding shard separately)
+        int originalIndex = topologies.indexForEpoch(txnId.epoch());
+        if (originalIndex == 0)
+            return false;
+
+        List<Shard> originalShards = topologies.get(originalIndex).shards();
+        if (originalShards.stream().anyMatch(s -> s.sortedNodes.size() > 64))
+            return true;
+
+        long[] removals = new long[originalShards.size()];
+        int minMaxFailures = originalShards.stream().mapToInt(s -> s.maxFailures).min().getAsInt();
+        for (int i = originalIndex - 1 ; i >= 0 ; --i)
+        {
+            List<Shard> newShards = topologies.get(i).shards();
+            minMaxFailures = Math.min(minMaxFailures, newShards.stream().mapToInt(s -> s.maxFailures).min().getAsInt());
+            int n = 0, o = 0;
+            while (n < newShards.size() && o < originalShards.size())
+            {
+                Shard nv = newShards.get(n);
+                Shard ov = originalShards.get(o);
+                {
+                    int c = nv.range.compareIntersecting(ov.range);
+                    if (c < 0) { ++n; continue; }
+                    else if (c > 0) { ++o; continue; }
+                }
+                int nvi = 0, ovi = 0;
+                while (nvi < nv.sortedNodes.size() && ovi < ov.sortedNodes.size())
+                {
+                    int c = nv.sortedNodes.get(nvi).compareTo(ov.sortedNodes.get(ovi));
+                    if (c < 0) ++nvi;
+                    else if (c == 0) { ++nvi; ++ovi; }
+                    // TODO (required): consider if this needs to be >=
+                    //    consider case where one (or more) of the original nodes is bootstrapping from other original nodes
+                    else if (Long.bitCount(removals[o] |= 1L << ovi++) > minMaxFailures)
+                        return true;
+                }
+                while (ovi < ov.sortedNodes.size())
+                {
+                    if (Long.bitCount(removals[o] |= 1L << ovi++) > minMaxFailures)
+                        return true;
+                }
+                int c = nv.range.end().compareTo(ov.range.end());
+                if (c <= 0) ++n;
+                if (c >= 0) ++o;
+            }
+        }
+        return false;
     }
 
     @Override
