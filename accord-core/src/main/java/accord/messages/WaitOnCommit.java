@@ -18,7 +18,6 @@
 
 package accord.messages;
 
-import java.util.*;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import accord.local.*;
@@ -29,7 +28,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static accord.local.Status.Committed;
-import static accord.utils.Utils.listOf;
 import accord.topology.Topology;
 
 public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore, Void>, PreLoadContext, Command.TransientListener
@@ -124,8 +122,8 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
             case Invalidated:
         }
 
-        safeCommand.removeListener(this);
-        ack();
+        if (safeCommand.removeListener(this))
+            ack();
     }
 
     @Override
@@ -147,21 +145,15 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
     }
 
     @Override
-    public Iterable<TxnId> txnIds()
+    public TxnId primaryTxnId()
     {
-        return Collections.singleton(txnId);
-    }
-
-    @Override
-    public Seekables<?, ?> keys()
-    {
-        return Keys.EMPTY;
+        return txnId;
     }
 
     @Override
     public PreLoadContext listenerPreLoadContext(TxnId caller)
     {
-        return PreLoadContext.contextFor(listOf(txnId, caller), keys());
+        return PreLoadContext.contextFor(txnId, caller, keys());
     }
 
     @Override

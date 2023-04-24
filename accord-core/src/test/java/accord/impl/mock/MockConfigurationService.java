@@ -23,6 +23,10 @@ import accord.api.TestableConfigurationService;
 import accord.local.Node;
 import accord.topology.Topology;
 import accord.utils.EpochFunction;
+import accord.utils.async.AsyncChains;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
+
 import org.junit.jupiter.api.Assertions;
 
 import java.util.*;
@@ -31,6 +35,7 @@ public class MockConfigurationService implements TestableConfigurationService
 {
     private final MessageSink messageSink;
     private final List<Topology> epochs = new ArrayList<>();
+    private final List<AsyncResult<Void>> syncs = new ArrayList<>();
     private final List<Listener> listeners = new ArrayList<>();
     private final EpochFunction<MockConfigurationService> fetchTopologyHandler;
 
@@ -76,18 +81,29 @@ public class MockConfigurationService implements TestableConfigurationService
     }
 
     @Override
-    public void acknowledgeEpoch(long epoch)
+    public void acknowledgeEpoch(EpochReady epoch)
     {
     }
 
     @Override
-    public synchronized void reportTopology(Topology topology)
+    public synchronized AsyncResult<Void> reportTopology(Topology topology)
     {
+        if (topology.epoch() > epochs.size())
+            return syncs.get((int)topology.epoch() - 1);
+
         Assertions.assertEquals(topology.epoch(), epochs.size());
         epochs.add(topology);
 
+        List<AsyncResult<Void>> futures = new ArrayList<>();
         for (Listener listener : listeners)
-            listener.onTopologyUpdate(topology);
+            futures.add(listener.onTopologyUpdate(topology));
+
+        AsyncResult<Void> result = futures.isEmpty()
+           ? AsyncResults.success(null)
+           : AsyncChains.reduce(futures, (a, b) -> null).beginAsResult();
+
+        syncs.add(result);
+        return result;
     }
 
     public synchronized void reportSyncComplete(Node.Id node, long epoch)

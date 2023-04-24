@@ -108,9 +108,10 @@ public class ListRequest implements Request
             }
             else if (fail instanceof CoordinationFailed)
             {
+                RoutingKey homeKey = ((CoordinationFailed) fail).homeKey();
+                TxnId txnId = ((CoordinationFailed) fail).txnId();
+                node.reply(client, replyContext, new ListResult(client, ((Packet)replyContext).requestId, txnId, null, null, new int[0][], null));
                 ((Cluster)node.scheduler()).onDone(() -> {
-                    RoutingKey homeKey = ((CoordinationFailed) fail).homeKey();
-                    TxnId txnId = ((CoordinationFailed) fail).txnId();
                     node.commandStores()
                         .select(homeKey)
                         .execute(() -> CheckOnResult.checkOnResult(node, txnId, homeKey, (s, f) -> {
@@ -122,7 +123,7 @@ public class ListRequest implements Request
                                     node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, null, null));
                                     break;
                                 case Lost:
-                                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, new int[0][], null));
+                                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, new int[1][], null));
                                     break;
                                 case Neither:
                                     // currently caught elsewhere in response tracking, but might help to throw an exception here
@@ -148,7 +149,7 @@ public class ListRequest implements Request
     @Override
     public MessageType type()
     {
-        throw new UnsupportedOperationException();
+        return null;
     }
 
     @Override

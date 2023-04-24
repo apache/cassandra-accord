@@ -30,12 +30,14 @@ import java.util.Objects;
 public class Writes
 {
     public static final AsyncChain<Void> SUCCESS = AsyncChains.success(null);
+    public final TxnId txnId;
     public final Timestamp executeAt;
     public final Seekables<?, ?> keys;
     public final Write write;
 
-    public Writes(Timestamp executeAt, Seekables<?, ?> keys, Write write)
+    public Writes(TxnId txnId, Timestamp executeAt, Seekables<?, ?> keys, Write write)
     {
+        this.txnId = txnId;
         this.executeAt = executeAt;
         this.keys = keys;
         this.write = write;
@@ -61,13 +63,12 @@ public class Writes
         return Objects.hash(executeAt, keys, write);
     }
 
-    public AsyncChain<Void> apply(SafeCommandStore safeStore)
+    public AsyncChain<Void> apply(SafeCommandStore safeStore, Ranges ranges)
     {
         if (write == null)
             return SUCCESS;
 
-        Ranges ranges = safeStore.ranges().since(executeAt.epoch());
-        if (ranges == null)
+        if (ranges.isEmpty())
             return SUCCESS;
 
         List<AsyncChain<Void>> futures = Routables.foldl(keys, ranges, (key, accumulate, index) -> {

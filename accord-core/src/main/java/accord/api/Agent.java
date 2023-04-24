@@ -20,6 +20,7 @@ package accord.api;
 
 import accord.local.Command;
 import accord.local.Node;
+import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -48,6 +49,8 @@ public interface Agent extends UncaughtExceptionListener
      * Should throw an exception if the inconsistent timestamp should not be applied
      */
     void onInconsistentTimestamp(Command command, Timestamp prev, Timestamp next);
+
+    void onFailedBootstrap(String phase, Ranges ranges, Runnable retry, Throwable failure);
 
     @Override
     void onUncaughtException(Throwable t);

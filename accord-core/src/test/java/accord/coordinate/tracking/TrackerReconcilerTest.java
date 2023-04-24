@@ -56,7 +56,7 @@ public class TrackerReconcilerTest
         test(10000, InvalidationTrackerReconciler::new);
     }
 
-    static <ST extends ShardTracker, T extends AbstractTracker<ST, ?>, E extends Enum<E>>
+    static <ST extends ShardTracker, T extends AbstractTracker<ST>, E extends Enum<E>>
     void test(int count, BiFunction<RandomSource, Topologies, ? extends TrackerReconciler<ST, T, E>> constructor)
     {
         long seed = System.currentTimeMillis();
@@ -64,7 +64,7 @@ public class TrackerReconcilerTest
             test(seed++, constructor);
     }
 
-    static <ST extends ShardTracker, T extends AbstractTracker<ST, ?>, E extends Enum<E>>
+    static <ST extends ShardTracker, T extends AbstractTracker<ST>, E extends Enum<E>>
     void test(long seed, BiFunction<RandomSource, Topologies, ? extends TrackerReconciler<ST, T, E>> constructor)
     {
         for (TrackerReconciler<?, ?, ?> test : TrackerReconciler.generate(seed, constructor))

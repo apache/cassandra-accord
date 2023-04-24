@@ -36,7 +36,7 @@ public class CheckedCommands
 {
     public static void preaccept(SafeCommandStore safeStore, TxnId txnId, PartialTxn partialTxn, Route<?> route, @Nullable RoutingKey progressKey)
     {
-        Commands.AcceptOutcome result = Commands.preaccept(safeStore, txnId, partialTxn, route, progressKey);
+        Commands.AcceptOutcome result = Commands.preaccept(safeStore, txnId, txnId.epoch(), partialTxn, route, progressKey);
         if (result != Commands.AcceptOutcome.Success) throw new IllegalStateException("Command mutation rejected: " + result);
     }
 

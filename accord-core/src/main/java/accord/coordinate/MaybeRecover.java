@@ -100,6 +100,7 @@ public class MaybeRecover extends CheckShards
                     }
                 case OutcomeKnown:
                 case OutcomeApplied:
+                    // we have included the home key, and one that witnessed the definition has responded, so it should also know the full route
                     Invariants.checkState(Route.isFullRoute(merged.route));
                     if (hasMadeProgress(merged)) callback.accept(merged.toProgressToken(), null);
                     else node.recover(txnId, Route.castToFullRoute(merged.route)).addCallback(callback);

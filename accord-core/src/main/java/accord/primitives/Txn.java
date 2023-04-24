@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.Objects;
 
 import accord.api.*;
-import accord.local.Command;
 import accord.local.SafeCommandStore;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
@@ -31,12 +30,21 @@ import accord.utils.async.AsyncChains;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+
 public interface Txn
 {
     enum Kind
     {
         Read,
         Write,
+
+        /**
+         * A pseudo-transaction used only to find an executeAt that is higher than any transaction that could have
+         * reached consensus before it started.
+         *
+         * Invisible to other transactions.
+         */
+        NoOp,
 
         /**
          * A pseudo-transaction whose deps represent the complete set of transactions that may execute before it,
@@ -59,6 +67,8 @@ public interface Txn
          *
          * This all ensures the effect of this transaction on invalidation of earlier transactions is durable.
          * This is most useful for ExclusiveSyncPoint.
+         *
+         * Invisible to other transactions.
          */
         SyncPoint,
 
@@ -67,8 +77,19 @@ public interface Txn
          * that earlier TxnId that had not reached consensus before it did must be retried with a higher TxnId,
          * so that replicas that are bootstrapping may ignore lower TxnId and still be sure they have a complete
          * representation of the reified transaction log.
+         *
+         * Other transactions do not typically take a dependency upon an ExclusiveSyncPoint as part of coordination,
+         * however during execution on a bootstrapping replica the sync point may be inserted as a dependency until
+         * the bootstrap has progressed far enough to know which transactions will be executed before the bootstrap
+         * (and therefore should be pruned from dependencies, as their outcome will be included in the bootstrap)
+         * and those which will be executed after, on the replica (and therefore should be retained as dependencies).
+         *
+         * Invisible to other transactions.
          */
-        ExclusiveSyncPoint;
+        ExclusiveSyncPoint,
+
+        LocalOnly
+        ;
 
         // in future: BlindWrite, Interactive?
 
@@ -82,6 +103,11 @@ public interface Txn
         public boolean isRead()
         {
             return this == Read;
+        }
+
+        public boolean isLocal()
+        {
+            return this == LocalOnly;
         }
 
         /**
@@ -215,28 +241,32 @@ public interface Txn
         return kind().isWrite();
     }
 
-    default Result result(TxnId txnId, @Nullable Data data)
+    default Result result(TxnId txnId, Timestamp executeAt, @Nullable Data data)
     {
-        return query().compute(txnId, data, read(), update());
+        return query().compute(txnId, executeAt, data, read(), update());
     }
 
-    default Writes execute(Timestamp executeAt, @Nullable Data data)
+    default Writes execute(TxnId txnId, Timestamp executeAt, @Nullable Data data)
     {
         Update update = update();
         if (update == null)
-            return new Writes(executeAt, Keys.EMPTY, null);
+            return new Writes(txnId, executeAt, Keys.EMPTY, null);
 
-        return new Writes(executeAt, update.keys(), update.apply(data));
+        return new Writes(txnId, executeAt, update.keys(), update.apply(executeAt, data));
     }
 
-    default AsyncChain<Data> read(SafeCommandStore safeStore, Command.Committed command)
+    default AsyncChain<Data> read(SafeCommandStore safeStore, Timestamp executeAt)
     {
-        Ranges ranges = safeStore.ranges().at(command.executeAt().epoch());
-        List<AsyncChain<Data>> futures = Routables.foldlMinimal(keys(), ranges, (key, accumulate, index) -> {
-            AsyncChain<Data> result = read().read(key, kind(), safeStore, command.executeAt(), safeStore.dataStore());
+        Ranges ranges = safeStore.ranges().safeToReadAt(executeAt);
+        List<AsyncChain<Data>> chains = Routables.foldlMinimal(keys(), ranges, (key, accumulate, index) -> {
+            AsyncChain<Data> result = read().read(key, kind(), safeStore, executeAt, safeStore.dataStore());
             accumulate.add(result);
             return accumulate;
         }, new ArrayList<>());
-        return AsyncChains.reduce(futures, Data::merge);
+
+        if (chains.isEmpty())
+            return AsyncChains.success(null);
+
+        return AsyncChains.reduce(chains, Data::merge);
     }
 }

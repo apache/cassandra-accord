@@ -23,7 +23,6 @@ import accord.local.Command;
 import accord.local.Node;
 import accord.api.Agent;
 import accord.api.Result;
-import accord.local.Command;
 import accord.primitives.*;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -42,6 +41,12 @@ public class TestAgent implements Agent
 
     @Override
     public void onInconsistentTimestamp(Command command, Timestamp prev, Timestamp next)
+    {
+        throw new AssertionError();
+    }
+
+    @Override
+    public void onFailedBootstrap(String phase, Ranges ranges, Runnable retry, Throwable failure)
     {
         throw new AssertionError();
     }

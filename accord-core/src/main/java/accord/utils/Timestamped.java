@@ -18,6 +18,8 @@
 
 package accord.utils;
 
+import java.util.function.BiPredicate;
+
 import accord.primitives.Timestamp;
 
 public class Timestamped<T>
@@ -34,6 +36,13 @@ public class Timestamped<T>
     public static <T> Timestamped<T> merge(Timestamped<T> a, Timestamped<T> b)
     {
         return a.timestamp.compareTo(b.timestamp) >= 0 ? a : b;
+    }
+
+    public static <T> Timestamped<T> merge(Timestamped<T> a, Timestamped<T> b, BiPredicate<T, T> testEquality)
+    {
+        int c = a.timestamp.compareTo(b.timestamp);
+        if (c == 0) Invariants.checkArgument(testEquality.test(a.data, b.data));
+        return c >= 0 ? a : b;
     }
 
     @Override

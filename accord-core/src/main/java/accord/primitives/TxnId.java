@@ -27,6 +27,9 @@ import static accord.primitives.Txn.Kind.Write;
 
 public class TxnId extends Timestamp
 {
+    public static final TxnId NONE = new TxnId(0, 0, Id.NONE);
+    public static final TxnId MAX = new TxnId(Long.MAX_VALUE, Long.MAX_VALUE, Id.MAX);
+
     public static TxnId fromBits(long msb, long lsb, Id node)
     {
         return new TxnId(msb, lsb, node);
@@ -87,6 +90,11 @@ public class TxnId extends Timestamp
         return domain(flags());
     }
 
+    public TxnId as(Kind kind)
+    {
+        return new TxnId(epoch(), hlc(), kind, domain(), node);
+    }
+
     @Override
     public TxnId merge(Timestamp that)
     {
@@ -120,7 +128,7 @@ public class TxnId extends Timestamp
 
     private static int rwOrdinal(int flags)
     {
-        return (flags >> 1) & 3;
+        return (flags >> 1) & 7;
     }
 
     private static int domainOrdinal(int flags)

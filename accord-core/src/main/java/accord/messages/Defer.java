@@ -74,19 +74,22 @@ class Defer implements Command.TransientListener
         Ready ready = waitUntil.apply(command);
         if (ready == No) return;
 
-        safeCommand.removeListener(this);
+        if (!safeCommand.removeListener(this))
+            return;
 
         if (ready == Expired) return;
 
         int id = safeStore.commandStore().id();
-        if (!waitingOn.contains(id))
-            throw new IllegalStateException("Not waiting on CommandStore " + id);
+        // TODO (desired): it would be nice at least for transient listener lists to annotate that they are notifying a listener, to avoid redundant invocations
+        //    we can then impose this as an invariant check rather than an early abort
+        Invariants.checkState(waitingOn.contains(id));
         waitingOn.remove(id);
 
         ack();
     }
 
-    synchronized void ack() {
+    synchronized void ack()
+    {
         if (-1 == --waitingOnCount)
         {
             isDone = true;

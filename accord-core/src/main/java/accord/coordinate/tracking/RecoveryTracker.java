@@ -23,7 +23,7 @@ import accord.local.Node;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 
-public class RecoveryTracker extends AbstractTracker<RecoveryTracker.RecoveryShardTracker, Node.Id>
+public class RecoveryTracker extends AbstractTracker<RecoveryTracker.RecoveryShardTracker>
 {
     public static class RecoveryShardTracker extends QuorumShardTracker
     {

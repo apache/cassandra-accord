@@ -20,10 +20,11 @@ package accord.coordinate;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.function.BiConsumer;
 
 import accord.coordinate.tracking.FastPathTracker;
-import accord.coordinate.tracking.RequestStatus;
+import accord.coordinate.tracking.QuorumTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Callback;
@@ -31,12 +32,17 @@ import accord.messages.PreAccept;
 import accord.messages.PreAccept.PreAcceptOk;
 import accord.messages.PreAccept.PreAcceptReply;
 import accord.primitives.FullRoute;
+import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
-import accord.utils.async.AsyncResults;
+import accord.utils.Invariants;
+import accord.utils.async.AsyncResults.SettableResult;
 
-import static accord.utils.Invariants.checkState;
+import static accord.coordinate.tracking.RequestStatus.Failed;
+import static accord.coordinate.tracking.RequestStatus.Success;
+import static accord.primitives.Timestamp.mergeMax;
+import static accord.utils.Functions.foldl;
 
 /**
  * Perform initial rounds of PreAccept and Accept until we have reached agreement about when we should execute.
@@ -44,16 +50,75 @@ import static accord.utils.Invariants.checkState;
  *
  * TODO (desired, testing): dedicated burn test to validate outcomes
  */
-abstract class CoordinatePreAccept<T> extends AsyncResults.SettableResult<T> implements Callback<PreAcceptReply>, BiConsumer<T, Throwable>
+abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callback<PreAcceptReply>, BiConsumer<T, Throwable>
 {
+    class ExtraPreAccept implements Callback<PreAcceptReply>
+    {
+        final QuorumTracker tracker;
+        private boolean extraPreAcceptIsDone;
+
+        ExtraPreAccept(long fromEpoch, long toEpoch)
+        {
+            Topologies topologies = node.topology().preciseEpochs(route, fromEpoch, toEpoch);
+            this.tracker = new QuorumTracker(topologies);
+        }
+
+        void start()
+        {
+            // TODO (desired, efficiency): consider sending only to electorate of most recent topology (as only these PreAccept votes matter)
+            // note that we must send to all replicas of old topology, as electorate may not be reachable
+            contact(tracker.topologies().nodes(), this);
+        }
+
+        @Override
+        public void onFailure(Id from, Throwable failure)
+        {
+            synchronized (CoordinatePreAccept.this)
+            {
+                if (!extraPreAcceptIsDone && tracker.recordFailure(from) == Failed)
+                    setFailure(failure);
+            }
+        }
+
+        @Override
+        public void onCallbackFailure(Id from, Throwable failure)
+        {
+            CoordinatePreAccept.this.onCallbackFailure(from, failure);
+        }
+
+        public void onSuccess(Id from, PreAcceptReply reply)
+        {
+            synchronized (CoordinatePreAccept.this)
+            {
+                if (extraPreAcceptIsDone)
+                    return;
+
+                if (!reply.isOk())
+                {
+                    // we've been preempted by a recovery coordinator; defer to it, and wait to hear any result
+                    setFailure(new Preempted(txnId, route.homeKey()));
+                }
+                else
+                {
+                    PreAcceptOk ok = (PreAcceptOk) reply;
+                    successes.add(ok);
+                    if (tracker.recordSuccess(from) == Success)
+                        onPreAcceptedOrNewEpoch();
+                }
+            }
+        }
+    }
+
     final Node node;
     final TxnId txnId;
     final Txn txn;
     final FullRoute<?> route;
 
     final FastPathTracker tracker;
-    private boolean preAcceptIsDone;
+    private Topologies topologies;
     private final List<PreAcceptOk> successes;
+    private boolean initialPreAcceptIsDone;
+    private ExtraPreAccept extraPreAccept;
 
     CoordinatePreAccept(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
     {
@@ -61,23 +126,28 @@ abstract class CoordinatePreAccept<T> extends AsyncResults.SettableResult<T> imp
         this.txnId = txnId;
         this.txn = txn;
         this.route = route;
-        Topologies topologies = node.topology().withUnsyncedEpochs(route, txnId, txnId);
+        topologies = node.topology().withUnsyncedEpochs(route, txnId, txnId);
         this.tracker = new FastPathTracker(topologies);
-        this.successes = new ArrayList<>(tracker.topologies().estimateUniqueNodes());
+        this.successes = new ArrayList<>(topologies.estimateUniqueNodes());
     }
 
     void start()
     {
+        contact(topologies.nodes(), this);
+    }
+
+    private void contact(Set<Id> nodes, Callback<PreAcceptReply> callback)
+    {
         // TODO (desired, efficiency): consider sending only to electorate of most recent topology (as only these PreAccept votes matter)
         // note that we must send to all replicas of old topology, as electorate may not be reachable
-        node.send(tracker.nodes(), to -> new PreAccept(to, tracker.topologies(), txnId, txn, route),
-                  node.commandStores().select(route.homeKey()), this);
+        node.send(nodes, to -> new PreAccept(to, topologies, txnId, txn, route),
+                  node.commandStores().select(route.homeKey()), callback);
     }
 
     @Override
     public synchronized void onFailure(Id from, Throwable failure)
     {
-        if (preAcceptIsDone)
+        if (initialPreAcceptIsDone)
             return;
 
         switch (tracker.recordFailure(from))
@@ -86,51 +156,98 @@ abstract class CoordinatePreAccept<T> extends AsyncResults.SettableResult<T> imp
             case NoChange:
                 break;
             case Failed:
-                checkState(!preAcceptIsDone);
-                preAcceptIsDone = true;
-                tryFailure(new Timeout(txnId, route.homeKey()));
+                setFailure(new Timeout(txnId, route.homeKey()));
                 break;
             case Success:
-                checkState(!preAcceptIsDone);
-                preAcceptIsDone = true;
-                onPreAccepted(successes);
+                onPreAcceptedOrNewEpoch();
         }
     }
 
     @Override
-    public void onCallbackFailure(Id from, Throwable failure)
+    public synchronized void onCallbackFailure(Id from, Throwable failure)
     {
+        initialPreAcceptIsDone = true;
+        if (extraPreAccept != null)
+            extraPreAccept.extraPreAcceptIsDone = true;
+
         tryFailure(failure);
     }
 
     public synchronized void onSuccess(Id from, PreAcceptReply reply)
     {
-        if (preAcceptIsDone)
+        if (initialPreAcceptIsDone)
             return;
 
         if (!reply.isOk())
         {
             // we've been preempted by a recovery coordinator; defer to it, and wait to hear any result
-            tryFailure(new Preempted(txnId, route.homeKey()));
-            return;
+            setFailure(new Preempted(txnId, route.homeKey()));
         }
-
-        PreAcceptOk ok = (PreAcceptOk) reply;
-        successes.add(ok);
-
-        boolean fastPath = ok.witnessedAt.compareTo(txnId) == 0;
-        // TODO (desired, safety): update formalisation (and proof), as we do not seek additional pre-accepts from later epochs.
-        //                         instead we rely on accept to do our work: a quorum of accept in the later epoch
-        //                         and its effect on preaccepted timestamps and the deps it returns create our sync point.
-        if (tracker.recordSuccess(from, fastPath) == RequestStatus.Success)
+        else
         {
-            checkState(!preAcceptIsDone);
-            preAcceptIsDone = true;
-            onPreAccepted(successes);
+            PreAcceptOk ok = (PreAcceptOk) reply;
+            successes.add(ok);
+
+            boolean fastPath = ok.witnessedAt.compareTo(txnId) == 0;
+            if (tracker.recordSuccess(from, fastPath) == Success)
+                onPreAcceptedOrNewEpoch();
         }
     }
 
-    abstract void onPreAccepted(List<PreAcceptOk> successes);
+    public void setFailure(Throwable failure)
+    {
+        Invariants.checkState(!initialPreAcceptIsDone || (extraPreAccept != null && !extraPreAccept.extraPreAcceptIsDone));
+        initialPreAcceptIsDone = true;
+        if (extraPreAccept != null)
+            extraPreAccept.extraPreAcceptIsDone = true;
+        if (failure instanceof CoordinationFailed)
+            ((CoordinationFailed) failure).set(txnId, route.homeKey());
+        super.setFailure(failure);
+    }
+
+    void onPreAcceptedOrNewEpoch()
+    {
+        Invariants.checkState(!initialPreAcceptIsDone || (extraPreAccept != null && !extraPreAccept.extraPreAcceptIsDone));
+        initialPreAcceptIsDone = true;
+        if (extraPreAccept != null)
+            extraPreAccept.extraPreAcceptIsDone = true;
+
+        // if the epoch we are accepting in is later, we *must* contact the later epoch for pre-accept, as this epoch
+        // could have moved ahead, and the timestamp we may propose may be stale.
+        // Note that these future epochs are non-voting, they only serve to inform the timestamp we decide
+        Timestamp executeAt = foldl(successes, (ok, prev) -> mergeMax(ok.witnessedAt, prev), Timestamp.NONE);
+        if (executeAt.epoch() <= topologies.currentEpoch())
+            onPreAccepted(topologies, executeAt, successes);
+        else
+            onNewEpoch(topologies, executeAt, successes);
+    }
+
+    void onNewEpoch(Topologies prevTopologies, Timestamp executeAt, List<PreAcceptOk> successes)
+    {
+        // TODO (desired, efficiency): check if we have already have a valid quorum for the future epoch
+        //  (noting that nodes may have adopted new ranges, in which case they should be discounted, and quorums may have changed shape)
+        node.withEpoch(executeAt.epoch(), () -> {
+            synchronized (CoordinatePreAccept.this)
+            {
+                topologies = node.topology().withUnsyncedEpochs(route, txnId.epoch(), executeAt.epoch());
+                boolean equivalent = topologies.oldestEpoch() <= prevTopologies.currentEpoch();
+                for (long epoch = topologies.currentEpoch() ; equivalent && epoch > prevTopologies.currentEpoch() ; --epoch)
+                    equivalent = topologies.forEpoch(epoch).shards().equals(prevTopologies.current().shards());
+
+                if (equivalent)
+                {
+                    onPreAccepted(topologies, executeAt, successes);
+                }
+                else
+                {
+                    extraPreAccept = new ExtraPreAccept(prevTopologies.currentEpoch() + 1, executeAt.epoch());
+                    extraPreAccept.start();
+                }
+            }
+        });
+    }
+
+    abstract void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> successes);
 
     @Override
     public void accept(T success, Throwable failure)

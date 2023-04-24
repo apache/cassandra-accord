@@ -18,6 +18,7 @@
 
 package accord.coordinate;
 
+import java.util.Collection;
 import java.util.function.BiConsumer;
 
 import accord.local.*;
@@ -32,7 +33,6 @@ import accord.local.Node.Id;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.messages.CheckStatus.IncludeInfo;
-import com.google.common.collect.Iterables;
 
 import java.util.Collections;
 
@@ -161,12 +161,14 @@ public class CheckOn extends CheckShards
             Seekables<?, ?> keys = Keys.EMPTY;
             if (sufficientFor.definition.isKnown())
                 keys = partialTxn.keys();
+            else if (sufficientFor.deps.hasProposedOrDecidedDeps())
+                keys = partialDeps.keyDeps.keys();
 
-            Iterable<TxnId> txnIds = Collections.singleton(txnId);
+            Collection<TxnId> txnIds = Collections.emptyList();
             if (sufficientFor.deps.hasDecidedDeps())
-                txnIds = Iterables.concat(txnIds, partialDeps.txnIds());
+                txnIds = partialDeps.txnIds();
 
-            PreLoadContext loadContext = contextFor(txnIds, keys);
+            PreLoadContext loadContext = contextFor(txnId, txnIds, keys);
             node.mapReduceConsumeLocal(loadContext, route, txnId.epoch(), untilLocalEpoch, this);
         }
 
@@ -206,8 +208,9 @@ public class CheckOn extends CheckShards
                         break;
 
                 case PreAccepted:
-                    if (!safeStore.ranges().at(txnId.epoch()).isEmpty())
-                        Commands.preaccept(safeStore, txnId, partialTxn, maxRoute, progressKey);
+                    // only preaccept if we coordinate the transaction
+                    if (untilLocalEpoch <= txnId.epoch() || safeStore.ranges().coordinates(txnId).intersects(maxRoute))
+                        Commands.preaccept(safeStore, txnId, txnId.epoch(), partialTxn, maxRoute, progressKey);
                     break;
 
                 case NotWitnessed:
@@ -218,7 +221,7 @@ public class CheckOn extends CheckShards
             if (!merged.durability.isDurable() || homeKey == null)
                 return null;
 
-            if (!safeStore.ranges().at(txnId.epoch()).contains(homeKey))
+            if (!safeStore.ranges().coordinates(txnId).contains(homeKey))
                 return null;
 
             Timestamp executeAt = merged.saveStatus.known.executeAt.hasDecidedExecuteAt() ? merged.executeAt : null;

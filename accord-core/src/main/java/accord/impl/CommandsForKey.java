@@ -32,7 +32,6 @@ import java.util.stream.Stream;
 
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
-import static accord.local.SafeCommandStore.TestKind.Ws;
 import static accord.local.Status.PreAccepted;
 import static accord.local.Status.PreCommitted;
 import static accord.utils.Utils.*;
@@ -152,7 +151,7 @@ public class CommandsForKey
                 Timestamp executeAt = loader.executeAt(data);
                 SaveStatus status = loader.saveStatus(data);
                 List<TxnId> deps = loader.depsIds(data);
-                if (testKind == Ws && txnId.isRead()) continue;
+                if (!testKind.test(txnId.rw())) continue;
                 // If we don't have any dependencies, we treat a dependency filter as a mismatch
                 if (testDep != ANY_DEPS && (!status.known.deps.hasProposedOrDecidedDeps() || (deps.contains(depId) != (testDep == WITH))))
                     continue;

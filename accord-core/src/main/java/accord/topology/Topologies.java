@@ -34,7 +34,10 @@ public interface Topologies extends TopologySorter
 {
     Topology current();
 
+    int indexForEpoch(long epoch);
+
     Topology forEpoch(long epoch);
+    Topologies forEpochs(long minEpochInclusive, long maxEpochInclusive);
 
     long oldestEpoch();
 
@@ -135,11 +138,27 @@ public interface Topologies extends TopologySorter
         }
 
         @Override
+        public int indexForEpoch(long epoch)
+        {
+            if (topology.epoch != epoch)
+                throw new IndexOutOfBoundsException();
+            return 0;
+        }
+
+        @Override
         public Topology forEpoch(long epoch)
         {
             if (topology.epoch != epoch)
                 throw new IndexOutOfBoundsException();
             return topology;
+        }
+
+        @Override
+        public Topologies forEpochs(long minEpochInclusive, long maxEpochInclusive)
+        {
+            if (minEpochInclusive != topology.epoch || maxEpochInclusive != topology.epoch)
+                throw new IndexOutOfBoundsException();
+            return this;
         }
 
         @Override
@@ -231,6 +250,7 @@ public interface Topologies extends TopologySorter
 
     class Multi implements Topologies
     {
+        private final TopologySorter.Supplier supplier;
         private final TopologySorter sorter;
         private final List<Topology> topologies;
         private final int maxShardsPerEpoch;
@@ -238,6 +258,7 @@ public interface Topologies extends TopologySorter
         public Multi(TopologySorter.Supplier sorter, int initialCapacity)
         {
             this.topologies = new ArrayList<>(initialCapacity);
+            this.supplier = sorter;
             this.sorter = sorter.get(this);
             int maxShardsPerEpoch = 0;
             for (int i = 0 ; i < topologies.size() ; ++i)
@@ -252,6 +273,13 @@ public interface Topologies extends TopologySorter
                 add(topology);
         }
 
+        public Multi(TopologySorter.Supplier sorter, List<Topology> topologies)
+        {
+            this(sorter, topologies.size());
+            for (Topology topology : topologies)
+                add(topology);
+        }
+
         @Override
         public Topology current()
         {
@@ -259,12 +287,28 @@ public interface Topologies extends TopologySorter
         }
 
         @Override
-        public Topology forEpoch(long epoch)
+        public int indexForEpoch(long epoch)
         {
             long index = get(0).epoch - epoch;
             if (index < 0 || index > size())
                 throw new IndexOutOfBoundsException();
-            return get((int)index);
+            return (int)index;
+        }
+
+        @Override
+        public Topology forEpoch(long epoch)
+        {
+            return get(indexForEpoch(epoch));
+        }
+
+        @Override
+        public Topologies forEpochs(long minEpochInclusive, long maxEpochInclusive)
+        {
+            if (minEpochInclusive < oldestEpoch() || maxEpochInclusive > currentEpoch())
+                throw new IndexOutOfBoundsException();
+            if (minEpochInclusive == oldestEpoch() && maxEpochInclusive == currentEpoch())
+                return this;
+            return new Multi(supplier, topologies.subList(indexForEpoch(minEpochInclusive), 1 + indexForEpoch(maxEpochInclusive)));
         }
 
         @Override

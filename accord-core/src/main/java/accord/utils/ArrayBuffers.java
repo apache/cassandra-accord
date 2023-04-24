@@ -27,8 +27,6 @@ import java.lang.reflect.Array;
 import java.util.Arrays;
 import java.util.function.IntFunction;
 
-import static accord.utils.Invariants.checkArgument;
-
 /**
  * A set of utility classes and interfaces for managing a collection of buffers for arrays of certain types.
  *

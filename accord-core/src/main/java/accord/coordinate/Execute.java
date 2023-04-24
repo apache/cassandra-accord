@@ -24,17 +24,18 @@ import java.util.function.BiConsumer;
 import accord.api.Data;
 import accord.api.Result;
 import accord.local.Node;
-import accord.messages.ReadData;
+import accord.messages.ReadTxnData;
 import accord.messages.ReadData.ReadNack;
 import accord.messages.ReadData.ReadOk;
+import accord.messages.ReadData.ReadReply;
 import accord.primitives.*;
 import accord.topology.Topologies;
-import accord.messages.ReadData.ReadReply;
 import accord.local.Node.Id;
 import accord.messages.Commit;
 import accord.topology.Topology;
 
 import static accord.coordinate.ReadCoordinator.Action.Approve;
+import static accord.coordinate.ReadCoordinator.Action.ApprovePartial;
 import static accord.messages.Commit.Kind.Maximal;
 
 class Execute extends ReadCoordinator<ReadReply>
@@ -64,10 +65,10 @@ class Execute extends ReadCoordinator<ReadReply>
     {
         if (txn.read().keys().isEmpty())
         {
-            Topologies sendTo = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
             Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch());
-            Result result = txn.result(txnId, null);
-            Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, null), result);
+            Topologies persistTo = txnId.epoch() == executeAt.epoch() ? applyTo : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
+            Result result = txn.result(txnId, executeAt, null);
+            Persist.persist(node, persistTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, null), result);
             callback.accept(result, null);
         }
         else
@@ -86,7 +87,13 @@ class Execute extends ReadCoordinator<ReadReply>
     @Override
     public void contact(Id to)
     {
-        node.send(to, new ReadData(to, topologies(), txnId, readScope, executeAt), this);
+        node.send(to, new ReadTxnData(to, topologies(), txnId, readScope, executeAt), this);
+    }
+
+    @Override
+    protected Ranges unavailable(ReadReply reply)
+    {
+        return ((ReadOk)reply).unavailable;
     }
 
     @Override
@@ -94,10 +101,12 @@ class Execute extends ReadCoordinator<ReadReply>
     {
         if (reply.isOk())
         {
-            Data next = ((ReadOk) reply).data;
+            ReadOk ok = (ReadOk) reply;
+            Data next = ok.data;
             if (next != null)
                 data = data == null ? next : data.merge(next);
-            return Approve;
+
+            return ok.unavailable == null ? Approve : ApprovePartial;
         }
 
         ReadNack nack = (ReadNack) reply;
@@ -118,7 +127,7 @@ class Execute extends ReadCoordinator<ReadReply>
                 // also try sending a read command to another replica, in case they're ready to serve a response
                 return Action.TryAlternative;
             case Invalid:
-                onFailure(from, new IllegalStateException("Submitted a read command to a replica that did not own the range"));
+                callback.accept(null, new IllegalStateException("Submitted a read command to a replica that did not own the range"));
                 return Action.Abort;
         }
     }
@@ -129,11 +138,11 @@ class Execute extends ReadCoordinator<ReadReply>
     {
         if (failure == null)
         {
-            Result result = txn.result(txnId, data);
+            Result result = txn.result(txnId, executeAt, data);
             callback.accept(result, null);
             // avoid re-calculating topologies if it is unchanged
-            Topologies sendTo = txnId.epoch() == executeAt.epoch() ? applyTo : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
-            Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, data), result);
+            Topologies persistTo = txnId.epoch() == executeAt.epoch() ? applyTo : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
+            Persist.persist(node, persistTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, data), result);
         }
         else
         {

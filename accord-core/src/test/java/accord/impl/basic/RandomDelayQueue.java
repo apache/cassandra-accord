@@ -24,9 +24,9 @@ import java.util.PriorityQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
-public class RandomDelayQueue<T> implements PendingQueue
+public class RandomDelayQueue implements PendingQueue
 {
-    public static class Factory implements Supplier<PendingQueue>
+    public static class Factory implements Supplier<RandomDelayQueue>
     {
         final RandomSource seeds;
 
@@ -36,9 +36,9 @@ public class RandomDelayQueue<T> implements PendingQueue
         }
 
         @Override
-        public PendingQueue get()
+        public RandomDelayQueue get()
         {
-            return new RandomDelayQueue<>(seeds.fork());
+            return new RandomDelayQueue(seeds.fork());
         }
     }
 
@@ -106,5 +106,10 @@ public class RandomDelayQueue<T> implements PendingQueue
     public int size()
     {
         return queue.size();
+    }
+
+    public long nowInMillis()
+    {
+        return now;
     }
 }

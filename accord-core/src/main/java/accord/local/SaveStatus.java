@@ -108,9 +108,19 @@ public enum SaveStatus
 
     public static SaveStatus enrich(SaveStatus status, Known known)
     {
-        if (known.isSatisfiedBy(status.known))
-            return status;
-        return get(status.status, status.known.merge(known));
+        switch (status.status)
+        {
+            // most statuses already know everything they can
+            case Accepted:
+            case AcceptedInvalidate:
+            case PreCommitted:
+
+                if (known.isSatisfiedBy(status.known))
+                    return status;
+                return get(status.status, status.known.merge(known));
+        }
+
+        return status;
     }
 
     public static SaveStatus merge(SaveStatus a, Ballot acceptedA, SaveStatus b, Ballot acceptedB)

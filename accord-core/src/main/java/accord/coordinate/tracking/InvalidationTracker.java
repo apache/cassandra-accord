@@ -25,7 +25,7 @@ import accord.topology.Topologies;
 
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.*;
 
-public class InvalidationTracker extends AbstractTracker<InvalidationTracker.InvalidationShardTracker, Node.Id>
+public class InvalidationTracker extends AbstractTracker<InvalidationTracker.InvalidationShardTracker>
 {
     public static class InvalidationShardTracker extends ShardTracker implements ShardOutcome<InvalidationTracker>
     {

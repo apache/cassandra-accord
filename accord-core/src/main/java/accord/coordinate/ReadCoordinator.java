@@ -20,10 +20,12 @@ package accord.coordinate;
 
 import accord.coordinate.tracking.RequestStatus;
 import accord.messages.Callback;
+import com.google.common.collect.Lists;
 
 import accord.coordinate.tracking.ReadTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.primitives.Ranges;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
@@ -33,9 +35,9 @@ import java.util.*;
 import static accord.utils.Invariants.debug;
 import static com.google.common.collect.Sets.newHashSetWithExpectedSize;
 
-abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends ReadTracker implements Callback<Reply>
+public abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends ReadTracker implements Callback<Reply>
 {
-    protected enum Action
+    public enum Action
     {
         /**
          * Immediately fail the coordination
@@ -64,18 +66,26 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
          * This response is suitable by itself; if we receive such a response from each shard we will complete
          * successfully with Success.Success
          */
-        Approve
+        Approve,
+
+        /**
+         * This response is suitable by itself, but covers only a subset of the requested range; any implementation
+         * returning this must also implement {@link ReadCoordinator#unavailable}; the missing ranges will be tracked
+         * and once a response has arrived covering the full range of the query these responses will be treated as
+         * equivalent to Approve
+         */
+        ApprovePartial
     }
 
     protected enum Success { Quorum, Success }
 
-    final Node node;
-    final TxnId txnId;
+    protected final Node node;
+    protected final TxnId txnId;
     private boolean isDone;
     private Throwable failure;
     final Map<Id, Object> debug = debug() ? new HashMap<>() : null;
 
-    ReadCoordinator(Node node, Topologies topologies, TxnId txnId)
+    protected ReadCoordinator(Node node, Topologies topologies, TxnId txnId)
     {
         super(topologies);
         this.node = node;
@@ -85,12 +95,13 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
     protected abstract Action process(Id from, Reply reply);
     protected abstract void onDone(Success success, Throwable failure);
     protected abstract void contact(Id to);
+    protected Ranges unavailable(Reply reply) { throw new UnsupportedOperationException(); }
 
     @Override
     public void onSuccess(Id from, Reply reply)
     {
         if (debug != null)
-            debug.put(from, reply);
+            debug.merge(from, reply, (a, b) -> a instanceof List<?> ? ((List<Object>) a).add(b) : Lists.newArrayList(a, b));
 
         if (isDone)
             return;
@@ -117,6 +128,11 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
 
             case Approve:
                 handle(recordReadSuccess(from));
+                break;
+
+            case ApprovePartial:
+                handle(recordPartialReadSuccess(from, unavailable(reply)));
+                break;
         }
     }
 
@@ -130,7 +146,7 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
     public void onFailure(Id from, Throwable failure)
     {
         if (debug != null)
-            debug.put(from, null);
+            debug.merge(from, failure, (a, b) -> a instanceof List<?> ? ((List<Object>) a).add(b) : Lists.newArrayList(a, b));
 
         if (isDone)
             return;

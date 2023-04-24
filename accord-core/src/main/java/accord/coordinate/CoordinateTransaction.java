@@ -21,6 +21,8 @@ package accord.coordinate;
 import java.util.List;
 
 import accord.api.Result;
+import accord.messages.PreAccept;
+import accord.topology.Topologies;
 import accord.local.Node;
 import accord.messages.PreAccept.PreAcceptOk;
 import accord.primitives.Ballot;
@@ -29,7 +31,6 @@ import accord.primitives.FullRoute;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
-import accord.topology.Topologies;
 import accord.utils.async.AsyncResult;
 
 import static accord.coordinate.Propose.Invalidate.proposeAndCommitInvalidate;
@@ -41,21 +42,21 @@ import static accord.coordinate.ProposeAndExecute.proposeAndExecute;
  *
  * TODO (desired, testing): dedicated burn test to validate outcomes
  */
-public class Coordinate extends CoordinatePreAccept<Result>
+public class CoordinateTransaction extends CoordinatePreAccept<Result>
 {
-    private Coordinate(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
+    private CoordinateTransaction(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
     {
         super(node, txnId, txn, route);
     }
 
     public static AsyncResult<Result> coordinate(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
     {
-        Coordinate coordinate = new Coordinate(node, txnId, txn, route);
+        CoordinateTransaction coordinate = new CoordinateTransaction(node, txnId, txn, route);
         coordinate.start();
         return coordinate;
     }
 
-    void onPreAccepted(List<PreAcceptOk> successes)
+    void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> successes)
     {
         if (tracker.hasFastPathAccepted())
         {
@@ -65,12 +66,6 @@ public class Coordinate extends CoordinatePreAccept<Result>
         else
         {
             Deps deps = Deps.merge(successes, ok -> ok.deps);
-            Timestamp executeAt; {
-                Timestamp accumulate = Timestamp.NONE;
-                for (PreAcceptOk preAcceptOk : successes)
-                    accumulate = Timestamp.max(accumulate, preAcceptOk.witnessedAt);
-                executeAt = accumulate;
-            }
 
             // TODO (low priority, efficiency): perhaps don't submit Accept immediately if we almost have enough for fast-path,
             //                                  but by sending accept we rule out hybrid fast-path
@@ -82,11 +77,10 @@ public class Coordinate extends CoordinatePreAccept<Result>
             }
             else
             {
-                node.withEpoch(executeAt.epoch(), () -> {
-                    Topologies topologies = tracker.topologies();
-                    if (executeAt.epoch() > txnId.epoch())
-                        topologies = node.topology().withUnsyncedEpochs(route, txnId.epoch(), executeAt.epoch());
-                    proposeAndExecute(node, topologies, Ballot.ZERO, txnId, txn, route, executeAt, deps, this);                });
+                if (PreAccept.rejectExecuteAt(txnId, topologies))
+                    proposeAndCommitInvalidate(node, Ballot.ZERO, txnId, route.homeKey(), route, executeAt, this);
+                else
+                    proposeAndExecute(node, topologies, Ballot.ZERO, txnId, txn, route, executeAt, deps, this);
             }
         }
     }

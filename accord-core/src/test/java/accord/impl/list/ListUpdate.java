@@ -31,7 +31,10 @@ import accord.local.CommandStore;
 import accord.primitives.Keys;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.utils.Invariants;
 import accord.utils.async.AsyncExecutor;
+import accord.utils.Timestamped;
 
 public class ListUpdate extends TreeMap<Key, Integer> implements Update
 {
@@ -49,12 +52,16 @@ public class ListUpdate extends TreeMap<Key, Integer> implements Update
     }
 
     @Override
-    public ListWrite apply(Data read)
+    public ListWrite apply(Timestamp executeAt, Data read)
     {
         ListWrite write = new ListWrite(executor);
-        Map<Key, int[]> data = (ListData)read;
+        Map<Key, Timestamped<int[]>> data = (ListData)read;
         for (Map.Entry<Key, Integer> e : entrySet())
-            write.put(e.getKey(), append(data.get(e.getKey()), e.getValue()));
+        {
+            Timestamped<int[]> prev = data.get(e.getKey());
+            Invariants.checkState(prev.timestamp.compareTo(executeAt) < 0);
+            write.put(e.getKey(), append(prev.data, e.getValue()));
+        }
         return write;
     }
 

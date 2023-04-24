@@ -47,6 +47,7 @@ import static accord.Utils.writeTxn;
 import static accord.impl.InMemoryCommandStore.inMemory;
 import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Txn.Kind.Write;
+import static accord.utils.async.AsyncChains.awaitUninterruptibly;
 import static accord.utils.async.AsyncChains.getUninterruptibly;
 
 public class ImmutableCommandTest
@@ -95,9 +96,11 @@ public class ImmutableCommandTest
 
     private static Node createNode(Id id, CommandStoreSupport storeSupport)
     {
-        return new Node(id, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
+        Node node = new Node(id, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
                         new MockCluster.Clock(100), () -> storeSupport.data, new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), new TestAgent(), new DefaultRandom(), null,
                         SizeOfIntersectionSorter.SUPPLIER, ignore -> ignore2 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new);
+        awaitUninterruptibly(node.start());
+        return node;
     }
 
     @Test
@@ -117,7 +120,7 @@ public class ImmutableCommandTest
             Assertions.assertNull(command.executeAt());
         }
         SafeCommandStore safeStore = commands.beginOperation(PreLoadContext.contextFor(txnId, keys));
-        Commands.preaccept(safeStore, txnId, txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY);
+        Commands.preaccept(safeStore, txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY);
         Command command = safeStore.command(txnId).current();
         Assertions.assertEquals(Status.PreAccepted, command.status());
         Assertions.assertEquals(txnId, command.executeAt());
@@ -144,7 +147,7 @@ public class ImmutableCommandTest
         setTopologyEpoch(support.local, 2);
         ((TestableConfigurationService)node.configService()).reportTopology(support.local.get().withEpoch(2));
         Timestamp expectedTimestamp = Timestamp.fromValues(2, 110, ID1);
-        getUninterruptibly(commands.execute(context, (Consumer<? super SafeCommandStore>) store -> Commands.preaccept(store, txnId, txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY)));
+        getUninterruptibly(commands.execute(context, (Consumer<? super SafeCommandStore>) store -> Commands.preaccept(store, txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY)));
         commands.execute(PreLoadContext.contextFor(txnId, txn.keys()), safeStore -> {
             Command command = safeStore.command(txnId).current();
             Assertions.assertEquals(Status.PreAccepted, command.status());

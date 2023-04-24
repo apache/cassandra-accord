@@ -22,6 +22,8 @@ import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 
+import accord.coordinate.tracking.ReadTracker.ReadShardTracker.PartialReadSuccess;
+import accord.primitives.Ranges;
 import accord.topology.Shard;
 import accord.topology.ShardSelection;
 import com.google.common.annotations.VisibleForTesting;
@@ -31,9 +33,10 @@ import accord.local.Node.Id;
 import accord.topology.Topologies;
 
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.*;
+import static accord.primitives.Routables.Slice.Minimal;
 import static com.google.common.collect.Sets.newHashSetWithExpectedSize;
 
-public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, Boolean>
+public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
 {
     private static final ShardOutcome<ReadTracker> DataSuccess = (tracker, shardIndex) -> {
         --tracker.waitingOnData;
@@ -47,6 +50,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
         protected int inflight;
         protected int contacted;
         protected int slow;
+        protected Ranges unavailable;
 
         public ReadShardTracker(Shard shard)
         {
@@ -81,7 +85,41 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
             --inflight;
             if (isSlow) --slow;
             hasData = true;
+            if (unavailable != null) unavailable = Ranges.EMPTY;
             return hadSucceeded ? NoChange : DataSuccess;
+        }
+
+        static class PartialReadSuccess
+        {
+            final boolean isSlow;
+            final Ranges unavailable;
+
+            PartialReadSuccess(boolean isSlow, Ranges unavailable)
+            {
+                this.isSlow = isSlow;
+                this.unavailable = unavailable;
+            }
+        }
+        /**
+         * Have received a requested data payload with desired contents
+         */
+        public ShardOutcome<? super ReadTracker> recordPartialReadSuccess(PartialReadSuccess partialSuccess)
+        {
+            Invariants.checkState(inflight > 0);
+            boolean hadSucceeded = hasSucceeded();
+            --inflight;
+            if (partialSuccess.isSlow) --slow;
+            if (hadSucceeded)
+                return NoChange;
+
+            // TODO (low priority, efficiency): support slice method accepting a single Range
+            if (unavailable == null) unavailable = partialSuccess.unavailable.slice(Ranges.of(shard.range));
+            else unavailable = unavailable.slice(partialSuccess.unavailable, Minimal);
+            if (!unavailable.isEmpty())
+                return ensureProgressOrFail();
+
+            hasData = true;
+            return DataSuccess;
         }
 
         public ShardOutcome<? super ReadTracker> recordQuorumReadSuccess(boolean isSlow)
@@ -211,6 +249,15 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
     protected RequestStatus recordReadSuccess(Id from)
     {
         return recordResponse(from, ReadShardTracker::recordReadSuccess);
+    }
+
+    /**
+     * Record a response that immediately satisfies the criteria for the shards the node participates in
+     */
+    protected RequestStatus recordPartialReadSuccess(Id from, Ranges unavailable)
+    {
+        boolean isSlow = receiveResponseIsSlow(from);
+        return recordResponse(this, from, ReadShardTracker::recordPartialReadSuccess, new PartialReadSuccess(isSlow, unavailable));
     }
 
     /**

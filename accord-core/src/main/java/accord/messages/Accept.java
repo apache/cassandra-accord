@@ -31,7 +31,6 @@ import accord.primitives.PartialDeps;
 import accord.primitives.FullRoute;
 import accord.primitives.Ballot;
 
-import java.util.Collections;
 import accord.primitives.Deps;
 import accord.primitives.TxnId;
 
@@ -79,11 +78,12 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     @Override
     public synchronized AcceptReply apply(SafeCommandStore safeStore)
     {
+        // TODO (now): we previously checked isAffectedByBootstrap(txnId) here and took this branch also, try to remember why
         if (minUnsyncedEpoch < txnId.epoch())
         {
             // if we include unsync'd epochs, check if we intersect the ranges for coordination or execution;
             // if not, we're just providing dependencies, and we can do that without updating our state
-            Ranges acceptRanges = safeStore.ranges().between(txnId.epoch(), executeAt.epoch());
+            Ranges acceptRanges = safeStore.ranges().allBetween(txnId, executeAt);
             if (!acceptRanges.intersects(scope))
                 return new AcceptReply(calculatePartialDeps(safeStore));
         }
@@ -104,7 +104,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
 
     private PartialDeps calculatePartialDeps(SafeCommandStore safeStore)
     {
-        return PreAccept.calculatePartialDeps(safeStore, txnId, keys, executeAt, safeStore.ranges().between(minUnsyncedEpoch, executeAt.epoch()));
+        return PreAccept.calculatePartialDeps(safeStore, txnId, keys, executeAt, safeStore.ranges().allBetween(minUnsyncedEpoch, executeAt));
     }
 
     @Override
@@ -132,9 +132,9 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     }
 
     @Override
-    public Iterable<TxnId> txnIds()
+    public TxnId primaryTxnId()
     {
-        return Collections.singleton(txnId);
+        return txnId;
     }
 
     @Override

@@ -24,9 +24,10 @@ import accord.primitives.*;
 import accord.local.Node.Id;
 import accord.api.Result;
 import accord.topology.Topologies;
-import com.google.common.collect.Iterables;
 
+import java.util.Collection;
 import java.util.Collections;
+
 import accord.messages.Apply.ApplyReply;
 
 import static accord.local.PreLoadContext.empty;
@@ -55,7 +56,8 @@ public class Apply extends TxnRequest<ApplyReply>
         super(to, sendTo, route, txnId);
         this.untilEpoch = untilEpoch;
         Ranges slice = applyTo == sendTo ? scope.covering() : applyTo.computeRangesForNode(to);
-
+        // TODO (desired): it's wasteful to encode the full set of ranges owned by the recipient node;
+        //     often it will be cheaper to include the FullRoute for Deps scope (or come up with some other safety-preserving encoding scheme)
         this.deps = deps.slice(slice);
         this.keys = txn.keys().slice(slice);
         this.executeAt = executeAt;
@@ -107,23 +109,25 @@ public class Apply extends TxnRequest<ApplyReply>
     {
         if (reply == ApplyReply.Applied)
         {
-            node.ifLocal(empty(), scope.homeKey(), txnId.epoch(), instance -> {
-                node.withEpoch(executeAt.epoch(), () -> instance.progressLog().durableLocal(txnId));
-            }).begin(node.agent());
+            node.withEpoch(executeAt.epoch(), () -> {
+                node.ifLocal(empty(), scope.homeKey(), txnId.epoch(), safeStore -> safeStore.progressLog().durableLocal(txnId))
+                    .begin(node.agent());
+            });
         }
         node.reply(replyTo, replyContext, reply);
     }
 
     @Override
-    public Iterable<TxnId> txnIds()
+    public TxnId primaryTxnId()
     {
-        return Iterables.concat(Collections.singleton(txnId), deps.txnIds());
+        return txnId;
     }
 
     @Override
-    public Seekables<?, ?> keys()
+    public Collection<TxnId> additionalTxnIds()
     {
-        return keys;
+        // TODO (expected): do not load into memory just so can register listeners etc.
+        return Collections.emptyList();
     }
 
     @Override

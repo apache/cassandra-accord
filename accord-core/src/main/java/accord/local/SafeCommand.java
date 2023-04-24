@@ -40,7 +40,7 @@ public abstract class SafeCommand
     public abstract void invalidate();
     public abstract boolean invalidated();
     public abstract void addListener(Command.TransientListener listener);
-    public abstract void removeListener(Command.TransientListener listener);
+    public abstract boolean removeListener(Command.TransientListener listener);
     public abstract Collection<Command.TransientListener> transientListeners();
 
     public boolean isEmpty()

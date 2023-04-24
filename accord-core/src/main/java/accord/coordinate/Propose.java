@@ -65,7 +65,7 @@ abstract class Propose<R> implements Callback<AcceptReply>
     final BiConsumer<? super R, Throwable> callback;
     private boolean isDone;
 
-    Propose(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Deps deps, Timestamp executeAt, BiConsumer<? super R, Throwable> callback)
+    Propose(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback)
     {
         this.node = node;
         this.ballot = ballot;

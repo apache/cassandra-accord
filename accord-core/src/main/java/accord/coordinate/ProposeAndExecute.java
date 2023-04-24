@@ -34,7 +34,7 @@ class ProposeAndExecute extends Propose<Result>
 {
     ProposeAndExecute(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Deps deps, Timestamp executeAt, BiConsumer<Result, Throwable> callback)
     {
-        super(node, topologies, ballot, txnId, txn, route, deps, executeAt, callback);
+        super(node, topologies, ballot, txnId, txn, route, executeAt, deps, callback);
     }
 
     public static void proposeAndExecute(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route,

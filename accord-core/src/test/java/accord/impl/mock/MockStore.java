@@ -25,6 +25,7 @@ import accord.api.Result;
 import accord.api.DataStore;
 import accord.api.Update;
 import accord.api.Write;
+import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.primitives.*;
 import accord.primitives.Ranges;
@@ -32,6 +33,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
+import accord.utils.async.AsyncResults;
 
 public class MockStore implements DataStore
 {
@@ -44,7 +46,7 @@ public class MockStore implements DataStore
     };
 
     public static final Result RESULT = new Result() {};
-    public static final Query QUERY = (txnId, data, read, update) -> RESULT;
+    public static final Query QUERY = (txnId, executeAt, data, read, update) -> RESULT;
     public static final Write WRITE = (key, commandStore, executeAt, store) -> Writes.SUCCESS;
 
     public static Read read(Seekables<?, ?> keys)
@@ -94,7 +96,7 @@ public class MockStore implements DataStore
             }
 
             @Override
-            public Write apply(Data data)
+            public Write apply(Timestamp executeAt, Data data)
             {
                 return WRITE;
             }
@@ -117,5 +119,19 @@ public class MockStore implements DataStore
                 return keys.toString();
             }
         };
+    }
+
+    static class ImmediateFetchFuture extends AsyncResults.SettableResult<Ranges> implements FetchResult
+    {
+        ImmediateFetchFuture(Ranges ranges) { setSuccess(ranges); }
+        @Override public void abort(Ranges abort) { }
+    }
+
+    @Override
+    public FetchResult fetch(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges callback)
+    {
+        callback.starting(ranges).started(Timestamp.NONE);
+        callback.fetched(ranges);
+        return new ImmediateFetchFuture(ranges);
     }
 }

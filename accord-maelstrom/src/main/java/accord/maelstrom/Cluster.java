@@ -55,6 +55,10 @@ import accord.messages.Request;
 import accord.api.Scheduler;
 import accord.topology.Topology;
 import accord.utils.RandomSource;
+import accord.utils.async.AsyncChains;
+import accord.utils.async.AsyncResult;
+
+import static java.util.stream.Collectors.toList;
 
 // TODO (low priority, testing): merge with accord.impl.basic.Cluster
 public class Cluster implements Scheduler
@@ -306,6 +310,10 @@ public class Cluster implements Scheduler
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
                                           SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new));
             }
+
+            AsyncResult<?> startup = AsyncChains.reduce(lookup.values().stream().map(Node::start).collect(toList()), (a, b) -> null).beginAsResult();
+            while (sinks.processPending());
+            if (!startup.isDone()) throw new AssertionError();
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));
             sinks.recurring(() ->

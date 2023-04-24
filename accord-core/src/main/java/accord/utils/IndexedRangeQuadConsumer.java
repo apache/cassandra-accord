@@ -16,25 +16,15 @@
  * limitations under the License.
  */
 
-package accord.coordinate;
+package accord.utils;
 
-import accord.api.RoutingKey;
-import accord.primitives.TxnId;
-
-import javax.annotation.Nullable;
-
-/**
- * Thrown when a transaction exceeds its specified timeout for obtaining a result for a client
- */
-public class Exhausted extends CoordinationFailed
+public interface IndexedRangeQuadConsumer<P1, P2, P3, P4>
 {
-    public Exhausted(TxnId txnId, @Nullable RoutingKey homeKey)
-    {
-        super(txnId, homeKey);
-    }
-
-    public Exhausted(TxnId txnId, @Nullable RoutingKey homeKey, String message)
-    {
-        super(txnId, homeKey, message);
-    }
+    /**
+     * Consume some object parameters associated with a range of indexes from a collection.
+     *
+     * The first parameter is typically used to convey some container the indexes refer to,
+     * with the others providing other configuration.
+     */
+    void accept(P1 p1, P2 p2, P3 p3, P4 p4, int fromIndex, int toIndex);
 }

@@ -24,6 +24,7 @@ import java.util.*;
 import accord.api.RoutingKey;
 import accord.local.Node;
 import accord.api.Result;
+import accord.messages.ReadData.ReadOk;
 import accord.primitives.*;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -33,7 +34,6 @@ import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
 import accord.local.Node.Id;
 import accord.api.Key;
-import accord.messages.ReadData.ReadOk;
 
 public class Json
 {
@@ -408,6 +408,8 @@ public class Json
                 return;
             }
             out.beginObject();
+            out.name("txnId");
+            GSON.toJson(value.txnId, TxnId.class, out);
             out.name("executeAt");
             GSON.toJson(value.executeAt, Timestamp.class, out);
             out.name("keys");
@@ -433,6 +435,7 @@ public class Json
                 return null;
 
             in.beginObject();
+            TxnId txnId = null;
             Timestamp executeAt = null;
             Keys keys = null;
             List<Value> writes = null;
@@ -441,6 +444,9 @@ public class Json
                 switch (in.nextName())
                 {
                     default: throw new IllegalStateException();
+                    case "txnId":
+                        txnId = GSON.fromJson(in, TxnId.class);
+                        break;
                     case "executeAt":
                         executeAt = GSON.fromJson(in, Timestamp.class);
                         break;
@@ -467,7 +473,7 @@ public class Json
                         write.put(keys.get(i), writes.get(i));
                 }
             }
-            return new Writes(executeAt, keys, write);
+            return new Writes(txnId, executeAt, keys, write);
         }
     };
 
@@ -504,7 +510,7 @@ public class Json
                 in.endArray();
             }
             in.endArray();
-            return new ReadOk(result);
+            return new ReadOk(Ranges.EMPTY, result);
         }
     };
 

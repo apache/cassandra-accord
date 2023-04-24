@@ -20,6 +20,8 @@ package accord.api;
 
 import accord.local.Node;
 import accord.topology.Topology;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 
 /**
  * ConfigurationService is responsible for:
@@ -36,7 +38,7 @@ import accord.topology.Topology;
  *  - ConfigurationService notifies the node of the new configuration service by calling
  *      {@link accord.api.ConfigurationService.Listener#onTopologyUpdate(accord.topology.Topology)}
  *
- *  - Once the node has setup the new topology, it will call {@link accord.api.ConfigurationService#acknowledgeEpoch(long)}
+ *  - Once the node has setup the new topology, it will call {@link accord.api.ConfigurationService#acknowledgeEpoch(EpochReady)}
  *      which indicates the node will no longer create txnIds for the previous epoch, and it's commits can now be synced
  *      with other replicas.
  *
@@ -53,19 +55,67 @@ import accord.topology.Topology;
  */
 public interface ConfigurationService
 {
+    /**
+     *
+     */
+    class EpochReady
+    {
+        public static final AsyncResult<Void> DONE = AsyncResults.success(null);
+
+        public final long epoch;
+
+        /**
+         * The new epoch has been setup locally and the node is ready to process commands for it.
+         */
+        public final AsyncResult<Void> metadata;
+
+        /**
+         * The node has retrieved enough remote information to become a coordinator for the new epoch.
+         */
+        public final AsyncResult<Void> coordination;
+
+        /**
+         * The node has successfully replicated the underlying DataStore information for the new epoch, but may need
+         * to perform some additional coordination before it can execute the read portion of a transaction.
+         */
+        public final AsyncResult<Void> data;
+
+        /**
+         * The node has retrieved enough remote information to safely process reads, including replicating all
+         * necessary DataStore information, and any additional transactions necessary for consistency.
+         */
+        public final AsyncResult<Void> reads;
+
+        public EpochReady(long epoch, AsyncResult<Void> metadata, AsyncResult<Void> coordination, AsyncResult<Void> data, AsyncResult<Void> reads)
+        {
+            this.epoch = epoch;
+            this.metadata = metadata;
+            this.coordination = coordination;
+            this.data = data;
+            this.reads = reads;
+        }
+
+        public static EpochReady done(long epoch)
+        {
+            return new EpochReady(epoch, DONE, DONE, DONE, DONE);
+        }
+    }
+
+
+    // TODO (exepected): do we need two implementations of this? Can't we drive it all through Node?
     interface Listener
     {
         /**
          * Informs listeners of new topology. This is guaranteed to be called sequentially for each epoch after
          * the initial topology returned by `currentTopology` on startup.
+         *
+         * TODO (required): document what this Future represents, or maybe refactor it away - only used for testing
          */
-        void onTopologyUpdate(Topology topology);
+        AsyncResult<Void> onTopologyUpdate(Topology topology);
 
         /**
-         * Called when accord data associated with a superseded epoch has been sync'd across current replicas. Before
-         * calling this, implementations need to ensure any new electorates are aware of all fast path decisions made
-         * in previous epochs, and that replicas of new ranges have learned of the transaction history for their
-         * replicated ranges.
+         * Called when accord data associated with a superseded epoch has been sync'd from previous replicas.
+         * This should be invoked on each replica once EpochReady.coordination has returned on a replica.
          */
         void onEpochSyncComplete(Node.Id node, long epoch);
     }
@@ -100,8 +150,9 @@ public interface ConfigurationService
     }
 
     /**
-     * Called after this node learns of an epoch as part of the {@code Listener#onTopologyUpdate} call. Indicates
-     * the new epoch has been setup locally and the node is ready to process commands for it.
+     * Called after this node learns of an epoch as part of the {@code Listener#onTopologyUpdate} call.
+     * On invocation the system is not necessarily ready to process the epoch, and the BootstrapReady parameter
+     * provides indications of when the bootstrap has completed various phases of setup.
      */
-    void acknowledgeEpoch(long epoch);
+    void acknowledgeEpoch(EpochReady ready);
 }

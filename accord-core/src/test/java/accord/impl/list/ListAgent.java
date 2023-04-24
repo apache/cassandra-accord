@@ -37,11 +37,13 @@ public class ListAgent implements Agent
 {
     final long timeout;
     final Consumer<Throwable> onFailure;
+    final Consumer<Runnable> retryBootstrap;
 
-    public ListAgent(long timeout, Consumer<Throwable> onFailure)
+    public ListAgent(long timeout, Consumer<Throwable> onFailure, Consumer<Runnable> retryBootstrap)
     {
         this.timeout = timeout;
         this.onFailure = onFailure;
+        this.retryBootstrap = retryBootstrap;
     }
 
     @Override
@@ -50,7 +52,8 @@ public class ListAgent implements Agent
         if (success != null)
         {
             ListResult result = (ListResult) success;
-            node.reply(result.client, Network.replyCtxFor(result.requestId), result);
+            if (result.requestId > Integer.MIN_VALUE)
+                node.reply(result.client, Network.replyCtxFor(result.requestId), result);
         }
     }
 
@@ -58,6 +61,12 @@ public class ListAgent implements Agent
     public void onInconsistentTimestamp(Command command, Timestamp prev, Timestamp next)
     {
         throw new AssertionError("Inconsistent execution timestamp detected for txnId " + command.txnId() + ": " + prev + " != " + next);
+    }
+
+    @Override
+    public void onFailedBootstrap(String phase, Ranges ranges, Runnable retry, Throwable failure)
+    {
+        retryBootstrap.accept(retry);
     }
 
     @Override

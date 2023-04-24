@@ -18,6 +18,7 @@
 
 package accord.coordinate.tracking;
 
+import accord.coordinate.tracking.QuorumTracker.QuorumShardTracker;
 import accord.local.Node;
 import accord.topology.Shard;
 import accord.topology.Topologies;
@@ -30,17 +31,50 @@ import java.util.function.BiFunction;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.*;
 
 // TODO (desired, efficiency): if any shard *cannot* take the fast path, and all shards have accepted, terminate
-public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathShardTracker, Node.Id>
+public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathQuorumShardTracker>
 {
     private static final ShardOutcome<FastPathTracker> NewFastPathSuccess = (tracker, shardIndex) -> {
         --tracker.waitingOnFastPathSuccess;
         return --tracker.waitingOnShards == 0 ? Success : NoChange;
     };
 
-    public static class FastPathShardTracker extends ShardTracker
+    public static class FastPathQuorumShardTracker extends QuorumShardTracker
     {
-        protected int fastPathAccepts, accepts;
-        protected int fastPathFailures, failures;
+        public FastPathQuorumShardTracker(Shard shard)
+        {
+            super(shard);
+        }
+
+        public ShardOutcome<? super FastPathTracker> onQuorumSuccess(Node.Id node)
+        {
+            return super.onSuccess(node);
+        }
+
+        public ShardOutcome<? super FastPathTracker> onMaybeFastPathSuccess(Node.Id node)
+        {
+            return super.onSuccess(node);
+        }
+
+        public ShardOutcome<? super FastPathTracker> onFailure(@Nonnull Node.Id from)
+        {
+            return super.onFailure(from);
+        }
+
+        public boolean hasRejectedFastPath()
+        {
+            return false;
+        }
+
+        public boolean hasMetFastPathCriteria()
+        {
+            return true;
+        }
+    }
+
+    public static class FastPathShardTracker extends FastPathQuorumShardTracker
+    {
+        protected int fastPathAccepts;
+        protected int fastPathFailures;
 
         public FastPathShardTracker(Shard shard)
         {
@@ -50,7 +84,7 @@ public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathSha
         // return NewQuorumSuccess ONLY once fast path is rejected
         public ShardOutcome<? super FastPathTracker> onQuorumSuccess(Node.Id node)
         {
-            ++accepts;
+            ++successes;
             if (!shard.fastPathElectorate.contains(node))
                 return quorumIfRejectsFastPath();
 
@@ -66,7 +100,7 @@ public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathSha
 
         public ShardOutcome<? super FastPathTracker> onMaybeFastPathSuccess(Node.Id node)
         {
-            ++accepts;
+            ++successes;
             if (shard.fastPathElectorate.contains(node))
             {
                 ++fastPathAccepts;
@@ -84,7 +118,7 @@ public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathSha
             if (shard.fastPathElectorate.contains(from)) {
                 ++fastPathFailures;
 
-                if (isNewFastPathReject() && accepts >= shard.slowPathQuorumSize)
+                if (isNewFastPathReject() && successes >= shard.slowPathQuorumSize)
                     return Success;
             }
 
@@ -98,7 +132,7 @@ public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathSha
 
         private boolean isNewSlowPathSuccess()
         {
-            return accepts == shard.slowPathQuorumSize;
+            return successes == shard.slowPathQuorumSize;
         }
 
         private boolean isNewFastPathReject()
@@ -122,44 +156,29 @@ public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathSha
         {
             return shard.rejectsFastPath(fastPathFailures);
         }
-
-        boolean hasInFlight()
-        {
-            return accepts + failures < shard.rf();
-        }
-
-        boolean hasReachedQuorum()
-        {
-            return accepts >= shard.slowPathQuorumSize;
-        }
-
-        boolean hasFailed()
-        {
-            return failures > shard.maxFailures;
-        }
     }
 
-    int waitingOnFastPathSuccess; // if we reach zero, we have determined the fast path outcome of every shard
+    int waitingOnFastPathSuccess; // if we reach zero, we have succeeded on the fast path outcome for every shard
     public FastPathTracker(Topologies topologies)
     {
-        super(topologies, FastPathShardTracker[]::new, FastPathShardTracker::new);
-        this.waitingOnFastPathSuccess = super.waitingOnShards;
+        super(topologies, FastPathQuorumShardTracker[]::new, (i, shard) -> i == 0 ? new FastPathShardTracker(shard) : new FastPathQuorumShardTracker(shard));
+        this.waitingOnFastPathSuccess = topologies.current().size();
     }
 
     public RequestStatus recordSuccess(Node.Id from, boolean withFastPathTimestamp)
     {
         if (withFastPathTimestamp)
-            return recordResponse(from, FastPathShardTracker::onMaybeFastPathSuccess);
+            return recordResponse(from, FastPathQuorumShardTracker::onMaybeFastPathSuccess);
 
-        return recordResponse(from, FastPathShardTracker::onQuorumSuccess);
+        return recordResponse(from, FastPathQuorumShardTracker::onQuorumSuccess);
     }
 
     public RequestStatus recordFailure(Node.Id from)
     {
-        return recordResponse(from, FastPathShardTracker::onFailure);
+        return recordResponse(from, FastPathQuorumShardTracker::onFailure);
     }
 
-    protected RequestStatus recordResponse(Node.Id node, BiFunction<? super FastPathShardTracker, Node.Id, ? extends ShardOutcome<? super FastPathTracker>> function)
+    protected RequestStatus recordResponse(Node.Id node, BiFunction<? super FastPathQuorumShardTracker, Node.Id, ? extends ShardOutcome<? super FastPathTracker>> function)
     {
         return recordResponse(this, node, function, node);
     }
@@ -171,16 +190,16 @@ public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathSha
 
     public boolean hasFailed()
     {
-        return any(FastPathShardTracker::hasFailed);
+        return any(FastPathQuorumShardTracker::hasFailed);
     }
 
     public boolean hasInFlight()
     {
-        return any(FastPathShardTracker::hasInFlight);
+        return any(FastPathQuorumShardTracker::hasInFlight);
     }
 
     public boolean hasReachedQuorum()
     {
-        return all(FastPathShardTracker::hasReachedQuorum);
+        return all(FastPathQuorumShardTracker::hasReachedQuorum);
     }
 }

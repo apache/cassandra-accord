@@ -18,7 +18,6 @@
 
 package accord.messages;
 
-import java.util.Collections;
 import java.util.Set;
 
 import accord.local.*;
@@ -45,7 +44,7 @@ public class Commit extends TxnRequest<ReadNack>
 
     public static class SerializerSupport
     {
-        public static Commit create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData read)
+        public static Commit create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadTxnData read)
         {
             return new Commit(txnId, scope, waitForEpoch, executeAt, partialTxn, partialDeps, fullRoute, read);
         }
@@ -55,7 +54,7 @@ public class Commit extends TxnRequest<ReadNack>
     public final @Nullable PartialTxn partialTxn;
     public final PartialDeps partialDeps;
     public final @Nullable FullRoute<?> route;
-    public final ReadData read;
+    public final ReadTxnData read;
 
     @SuppressWarnings("MismatchedQueryAndUpdateOfCollection")
     private transient Defer defer;
@@ -90,10 +89,10 @@ public class Commit extends TxnRequest<ReadNack>
         this.partialTxn = partialTxn;
         this.partialDeps = deps.slice(scope.covering());
         this.route = sendRoute;
-        this.read = read ? new ReadData(to, topologies, txnId, readScope, executeAt) : null;
+        this.read = read ? new ReadTxnData(to, topologies, txnId, readScope, executeAt) : null;
     }
 
-    Commit(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData read)
+    Commit(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadTxnData read)
     {
         super(txnId, scope, waitForEpoch);
         this.executeAt = executeAt;
@@ -131,9 +130,9 @@ public class Commit extends TxnRequest<ReadNack>
     }
 
     @Override
-    public Iterable<TxnId> txnIds()
+    public TxnId primaryTxnId()
     {
-        return Collections.singleton(txnId);
+        return txnId;
     }
 
     @Override
@@ -267,15 +266,9 @@ public class Commit extends TxnRequest<ReadNack>
         }
 
         @Override
-        public Iterable<TxnId> txnIds()
+        public TxnId primaryTxnId()
         {
-            return Collections.singleton(txnId);
-        }
-
-        @Override
-        public Seekables<?, ?> keys()
-        {
-            return Keys.EMPTY;
+            return txnId;
         }
 
         @Override

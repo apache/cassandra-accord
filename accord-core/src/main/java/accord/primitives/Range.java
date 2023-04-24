@@ -280,6 +280,11 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         return newRange(cs >= 0 ? start : truncateTo.start, ce <= 0 ? end : truncateTo.end);
     }
 
+    public int compareTo(Range range)
+    {
+        return compare(range);
+    }
+
     public boolean intersects(AbstractKeys<?, ?> keys)
     {
         return SortedArrays.binarySearch(keys.keys, 0, keys.size(), this, Range::compareTo, FAST) >= 0;

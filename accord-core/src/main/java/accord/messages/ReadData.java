@@ -19,14 +19,8 @@
 package accord.messages;
 
 import java.util.BitSet;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
+import javax.annotation.Nullable;
 
-import accord.local.Command.TransientListener;
-import accord.primitives.*;
-
-import accord.local.*;
 import accord.api.Data;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
@@ -34,75 +28,50 @@ import accord.utils.Invariants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
+import accord.local.CommandStore;
+import accord.local.Node;
+import accord.local.SafeCommandStore;
+import accord.primitives.PartialTxn;
+import accord.primitives.Ranges;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 
-import static accord.local.Status.Committed;
 import static accord.messages.MessageType.READ_RSP;
-import static accord.messages.ReadData.ReadNack.NotCommitted;
-import static accord.messages.ReadData.ReadNack.Redundant;
-import static accord.messages.TxnRequest.*;
-import static accord.utils.MapReduceConsume.forEach;
+import static accord.messages.TxnRequest.computeScope;
+import static accord.messages.TxnRequest.computeWaitForEpoch;
+import static accord.messages.TxnRequest.latestRelevantEpochIndex;
 
 // TODO (required, efficiency): dedup - can currently have infinite pending reads that will be executed independently
-public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements TransientListener
+public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
 {
     private static final Logger logger = LoggerFactory.getLogger(ReadData.class);
 
-    public static class SerializerSupport
-    {
-        public static ReadData create(TxnId txnId, Seekables<?, ?> scope, long executeAtEpoch, long waitForEpoch)
-        {
-            return new ReadData(txnId, scope, executeAtEpoch, waitForEpoch);
-        }
-    }
-    private class ObsoleteTracker implements TransientListener
-    {
-        @Override
-        public void onChange(SafeCommandStore safeStore, SafeCommand safeCommand)
-        {
-            switch (safeCommand.current().status())
-            {
-                case PreApplied:
-                case Applied:
-                case Invalidated:
-                    obsolete();
-                    safeCommand.removeListener(this);
-            }
-        }
-
-        @Override
-        public PreLoadContext listenerPreLoadContext(TxnId caller)
-        {
-            return ReadData.this.listenerPreLoadContext(caller);
-        }
-    }
-
-    private final ObsoleteTracker obsoleteTracker = new ObsoleteTracker();
-    public final long executeAtEpoch;
     public final Seekables<?, ?> readScope; // TODO (low priority, efficiency): this should be RoutingKeys, as we have the Keys locally, but for simplicity we use this to implement keys()
     private final long waitForEpoch;
     private Data data;
-    private enum State { PENDING, RETURNED, OBSOLETE }
-    private transient State state = State.PENDING; // TODO (low priority, semantics): respond with the Executed result we have stored?
-    private transient BitSet waitingOn;
-    private transient int waitingOnCount;
+    transient BitSet waitingOn;
+    transient int waitingOnCount;
+    transient Ranges unavailable;
 
-    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Seekables<?, ?> readScope, Timestamp executeAt)
+    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Seekables<?, ?> readScope)
     {
         super(txnId);
-        this.executeAtEpoch = executeAt.epoch();
         int startIndex = latestRelevantEpochIndex(to, topologies, readScope);
         this.readScope = computeScope(to, topologies, (Seekables)readScope, startIndex, Seekables::slice, Seekables::with);
         this.waitForEpoch = computeWaitForEpoch(to, topologies, startIndex);
     }
 
-    ReadData(TxnId txnId, Seekables<?, ?> readScope, long executeAtEpoch, long waitForEpoch)
+    protected ReadData(TxnId txnId, Seekables<?, ?> readScope, long waitForEpoch)
     {
         super(txnId);
-        this.executeAtEpoch = executeAtEpoch;
         this.readScope = readScope;
         this.waitForEpoch = waitForEpoch;
     }
+
+    protected abstract void cancel();
+    protected abstract long executeAtEpoch();
+    protected abstract void reply(@Nullable Ranges unavailable, @Nullable Data data);
 
     @Override
     public long waitForEpoch()
@@ -114,101 +83,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
     protected void process()
     {
         waitingOn = new BitSet();
-        node.mapReduceConsumeLocal(this, readScope, executeAtEpoch, executeAtEpoch, this);
-    }
-
-    @Override
-    public PreLoadContext listenerPreLoadContext(TxnId caller)
-    {
-        Set<TxnId> ids = new HashSet<>();
-        ids.add(txnId);
-        ids.add(caller);
-        return PreLoadContext.contextFor(ids, keys());
-    }
-
-    @Override
-    public synchronized void onChange(SafeCommandStore safeStore, SafeCommand safeCommand)
-    {
-        Command command = safeCommand.current();
-        logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
-                this, command.txnId(), command.status(), command);
-        switch (command.status())
-        {
-            default: throw new AssertionError();
-            case NotWitnessed:
-            case PreAccepted:
-            case Accepted:
-            case AcceptedInvalidate:
-            case PreCommitted:
-            case Committed:
-                return;
-
-            case PreApplied:
-            case Applied:
-            case Invalidated:
-                obsolete();
-            case ReadyToExecute:
-        }
-
-        safeCommand.removeListener(this);
-        maybeRead(safeStore, safeCommand);
-    }
-
-    @Override
-    public synchronized ReadNack apply(SafeCommandStore safeStore)
-    {
-        SafeCommand safeCommand = safeStore.command(txnId);
-        Status status = safeCommand.current().status();
-        logger.trace("{}: setting up read with status {} on {}", txnId, status, safeStore);
-        switch (status) {
-            default:
-                throw new AssertionError("Unknown status: " + status);
-            case Committed:
-            case NotWitnessed:
-            case PreAccepted:
-            case Accepted:
-            case AcceptedInvalidate:
-            case PreCommitted:
-                waitingOn.set(safeStore.commandStore().id());
-                ++waitingOnCount;
-
-                safeCommand.addListener(this);
-
-                if (status == Committed)
-                    return null;
-
-                safeStore.progressLog().waiting(txnId, Committed.minKnown, readScope.toUnseekables());
-                return NotCommitted;
-
-            case ReadyToExecute:
-                waitingOn.set(safeStore.commandStore().id());
-                ++waitingOnCount;
-                maybeRead(safeStore, safeCommand);
-                return null;
-
-            case PreApplied:
-            case Applied:
-            case Invalidated:
-                state = State.OBSOLETE;
-                return Redundant;
-        }
-    }
-
-    private void maybeRead(SafeCommandStore safeStore, SafeCommand safeCommand)
-    {
-        switch (state)
-        {
-            case PENDING:
-                read(safeStore, safeCommand, safeCommand.current().asCommitted());
-                break;
-            case OBSOLETE:
-                // nothing to see here
-                break;
-            case RETURNED:
-                throw new IllegalStateException("ReadOk was sent, yet ack called again");
-            default:
-                throw new AssertionError("Unknown state: " + state);
-        }
+        node.mapReduceConsumeLocal(this, readScope, executeAtEpoch(), executeAtEpoch(), this);
     }
 
     @Override
@@ -217,11 +92,6 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
         return r1 == null || r2 == null
                 ? r1 == null ? r2 : r1
                 : r1.compareTo(r2) >= 0 ? r1 : r2;
-    }
-
-    private void removeListener(SafeCommandStore safeStore, TxnId txnId)
-    {
-        safeStore.command(txnId).removeListener(this);
     }
 
     @Override
@@ -238,39 +108,31 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
             data = null;
             // TODO (expected, exceptions): probably a better way to handle this, as might not be uncaught
             node.agent().onUncaughtException(failure);
-            node.commandStores().mapReduceConsume(this, waitingOn.stream(), forEach(in -> removeListener(in, txnId), node.agent()));
+            cancel();
         }
         else
         {
-            ack();
+            ack(null);
         }
     }
 
-    private void ack()
+    private void ack(@Nullable Ranges newUnavailable)
     {
+        if (newUnavailable != null && !newUnavailable.isEmpty())
+        {
+            newUnavailable = newUnavailable.intersecting(readScope);
+            if (this.unavailable == null) this.unavailable = newUnavailable;
+            else this.unavailable = newUnavailable.with(this.unavailable);
+        }
+
         // wait for -1 to ensure the setup phase has also completed. Setup calls ack in its callback
         // and prevents races where we respond before dispatching all the required reads (if the reads are
         // completing faster than the reads can be setup on all required shards)
         if (-1 == --waitingOnCount)
-        {
-            switch (state)
-            {
-                case RETURNED:
-                    throw new IllegalStateException("ReadOk was sent, yet ack called again");
-                case OBSOLETE:
-                    logger.trace("After the read completed for txn {}, the result was marked obsolete", txnId);
-                    break;
-                case PENDING:
-                    state = State.RETURNED;
-                    node.reply(replyTo, replyContext, new ReadOk(data));
-                    break;
-                default:
-                    throw new AssertionError("Unknown state: " + state);
-            }
-        }
+            reply(this.unavailable, data);
     }
 
-    private synchronized void readComplete(CommandStore commandStore, Data result)
+    protected synchronized void readComplete(CommandStore commandStore, Data result, Ranges unavailable)
     {
         Invariants.checkState(waitingOn.get(commandStore.id()), "Txn %s's waiting on does not contain store %d; waitingOn=%s", txnId, commandStore.id(), waitingOn);
         logger.trace("{}: read completed on {}", txnId, commandStore);
@@ -278,15 +140,15 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
             data = data == null ? result : data.merge(result);
 
         waitingOn.clear(commandStore.id());
-        ack();
+        ack(unavailable);
     }
 
-    private void read(SafeCommandStore safeStore, SafeCommand safeCommand, Command.Committed command)
+    void read(SafeCommandStore safeStore, Timestamp executeAt, PartialTxn txn)
     {
-        safeCommand.addListener(obsoleteTracker);
         CommandStore unsafeStore = safeStore.commandStore();
-        logger.trace("{}: executing read", command.txnId());
-        command.read(safeStore).begin((next, throwable) -> {
+        Ranges unavailable = safeStore.ranges().unsafeToReadAt(executeAt);
+
+        txn.read(safeStore, executeAt).begin((next, throwable) -> {
             if (throwable != null)
             {
                 // TODO (expected, exceptions): should send exception to client, and consistency handle/propagate locally
@@ -294,29 +156,14 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
                 node.reply(replyTo, replyContext, ReadNack.Error);
             }
             else
-                readComplete(unsafeStore, next);
+                readComplete(unsafeStore, next, unavailable);
         });
     }
 
-    synchronized void obsolete()
-    {
-        if (state == State.PENDING)
-        {
-            state = State.OBSOLETE;
-            node.reply(replyTo, replyContext, Redundant);
-        }
-    }
-
     @Override
-    public Iterable<TxnId> txnIds()
+    public TxnId primaryTxnId()
     {
-        return Collections.singleton(txnId);
-    }
-
-    @Override
-    public Seekables<?, ?> keys()
-    {
-        return Keys.EMPTY;
+        return txnId;
     }
 
     @Override
@@ -361,17 +208,26 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
 
     public static class ReadOk implements ReadReply
     {
+        /**
+         * if the replica we contacted was unable to fully answer the query, due to bootstrapping some portion,
+         * this is set to the ranges that were unavailable
+         *
+         * TODO (required): narrow to only the *intersecting* ranges that are unavailable, or do so on the recipient
+         */
+        public final @Nullable Ranges unavailable;
+
         public final @Nullable Data data;
 
-        public ReadOk(@Nullable Data data)
+        public ReadOk(@Nullable Ranges unavailable, @Nullable Data data)
         {
+            this.unavailable = unavailable;
             this.data = data;
         }
 
         @Override
         public String toString()
         {
-            return "ReadOk{" + data + '}';
+            return "ReadOk{" + data + (unavailable == null ? "" : ", unavailable:" + unavailable) + '}';
         }
 
         @Override
@@ -385,13 +241,5 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
         {
             return true;
         }
-    }
-
-    @Override
-    public String toString()
-    {
-        return "ReadData{" +
-               "txnId:" + txnId +
-               '}';
     }
 }

@@ -19,6 +19,7 @@
 package accord.local;
 
 import accord.api.*;
+import accord.api.ConfigurationService.EpochReady;
 import accord.primitives.*;
 import accord.api.RoutingKey;
 import accord.topology.Topology;
@@ -35,24 +36,30 @@ import accord.utils.async.AsyncChains;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import javax.annotation.Nonnull;
+
+import static accord.api.ConfigurationService.EpochReady.done;
 import static accord.local.PreLoadContext.empty;
+import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.checkArgument;
+import static java.util.stream.Collectors.toList;
 
 /**
  * Manages the single threaded metadata shards
  */
-public abstract class CommandStores<S extends CommandStore>
+public abstract class CommandStores
 {
     public interface Factory
     {
-        CommandStores<?> create(NodeTimeService time,
+        CommandStores create(NodeTimeService time,
                                 Agent agent,
                                 DataStore store,
                                 RandomSource random,
@@ -60,7 +67,7 @@ public abstract class CommandStores<S extends CommandStore>
                                 ProgressLog.Factory progressLogFactory);
     }
 
-    private static class Supplier
+    private static class StoreSupplier
     {
         private final NodeTimeService time;
         private final Agent agent;
@@ -69,7 +76,7 @@ public abstract class CommandStores<S extends CommandStore>
         private final CommandStore.Factory shardFactory;
         private final RandomSource random;
 
-        Supplier(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
+        StoreSupplier(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
         {
             this.time = time;
             this.agent = agent;
@@ -113,23 +120,31 @@ public abstract class CommandStores<S extends CommandStore>
         {
             return ranges.current;
         }
+
+        public String toString()
+        {
+            return store.id() + " " + ranges.current;
+        }
     }
 
     public static class RangesForEpoch
     {
         final long[] epochs;
         final Ranges[] ranges;
+        final CommandStore store;
 
-        public RangesForEpoch(long epoch, Ranges ranges)
+        public RangesForEpoch(long epoch, Ranges ranges, CommandStore store)
         {
             this.epochs = new long[] { epoch };
             this.ranges = new Ranges[] { ranges };
+            this.store = store;
         }
 
-        public RangesForEpoch(long[] epochs, Ranges[] ranges)
+        public RangesForEpoch(long[] epochs, Ranges[] ranges, CommandStore store)
         {
             this.epochs = epochs;
             this.ranges = ranges;
+            this.store = store;
         }
 
         public RangesForEpoch withRanges(long epoch, Ranges ranges)
@@ -138,10 +153,30 @@ public abstract class CommandStores<S extends CommandStore>
             Ranges[] newRanges = Arrays.copyOf(this.ranges, this.ranges.length + 1);
             newEpochs[this.epochs.length] = epoch;
             newRanges[this.ranges.length] = ranges;
-            return new RangesForEpoch(newEpochs, newRanges);
+            return new RangesForEpoch(newEpochs, newRanges, store);
         }
 
-        public Ranges at(long epoch)
+        public @Nonnull Ranges coordinates(TxnId txnId)
+        {
+            return allAt(txnId);
+        }
+
+        public @Nonnull Ranges safeToReadAt(Timestamp at)
+        {
+            return allAt(at).slice(store.safeToReadAt(at), Minimal);
+        }
+
+        public @Nonnull Ranges unsafeToReadAt(Timestamp at)
+        {
+            return allAt(at).difference(store.safeToReadAt(at));
+        }
+
+        public @Nonnull Ranges allAt(Timestamp at)
+        {
+            return allAt(at.epoch());
+        }
+
+        public @Nonnull Ranges allAt(long epoch)
         {
             int i = Arrays.binarySearch(epochs, epoch);
             if (i < 0) i = -2 -i;
@@ -149,13 +184,23 @@ public abstract class CommandStores<S extends CommandStore>
             return ranges[i];
         }
 
-        public Ranges between(long fromInclusive, long toInclusive)
+        public @Nonnull Ranges allBetween(Timestamp fromInclusive, Timestamp toInclusive)
+        {
+            return allBetween(fromInclusive.epoch(), toInclusive.epoch());
+        }
+
+        public @Nonnull Ranges allBetween(long fromInclusive, Timestamp toInclusive)
+        {
+            return allBetween(fromInclusive, toInclusive.epoch());
+        }
+
+        public @Nonnull Ranges allBetween(long fromInclusive, long toInclusive)
         {
             if (fromInclusive > toInclusive)
                 throw new IndexOutOfBoundsException();
 
             if (fromInclusive == toInclusive)
-                return at(fromInclusive);
+                return allAt(fromInclusive);
 
             int i = Arrays.binarySearch(epochs, fromInclusive);
             if (i < 0) i = -2 - i;
@@ -168,39 +213,62 @@ public abstract class CommandStores<S extends CommandStore>
             Ranges result = ranges[i++];
             while (i <= j)
                 result = result.with(ranges[i++]);
+
             return result;
         }
 
-        public Ranges since(long epoch)
+        public @Nonnull Ranges allSince(long fromInclusive)
         {
-            int i = Arrays.binarySearch(epochs, epoch);
+            int i = Arrays.binarySearch(epochs, fromInclusive);
             if (i < 0) i = Math.max(0, -2 -i);
+
             Ranges result = ranges[i++];
             while (i < ranges.length)
                 result = ranges[i++].with(result);
+
             return result;
         }
 
-        int indexForEpoch(long epoch)
+        public @Nonnull Ranges all()
         {
-            int i = Arrays.binarySearch(epochs, epoch);
-            if (i < 0) i = -2 -i;
-            return i;
+            if (ranges.length == 0)
+                return Ranges.EMPTY;
+
+            Ranges result = ranges[0];
+            for (int i = 1; i < ranges.length ; ++i)
+                result = ranges[i].with(result);
+
+            return result;
         }
 
-        public boolean intersects(long epoch, Routables<?, ?> routables)
+        public @Nonnull Ranges allBefore(long toExclusive)
         {
-            return at(epoch).intersects(routables);
+            int limit = Arrays.binarySearch(epochs, toExclusive);
+            if (limit < 0) limit = Math.max(0, -1 -limit);
+            if (limit == 0) return Ranges.EMPTY;
+
+            Ranges result = ranges[0];
+            for (int i = 1 ; i < limit; ++i)
+                result = ranges[i].with(result);
+
+            return result;
         }
 
-        public Ranges currentRanges()
+        public @Nonnull Ranges applyRanges(Timestamp executeAt)
+        {
+            // Note: we COULD slice to only those ranges we haven't bootstrapped, but no harm redundantly writing
+            return allSince(executeAt.epoch());
+        }
+
+        public @Nonnull Ranges currentRanges()
         {
             return ranges[ranges.length - 1];
         }
 
-        public Ranges maximalRanges()
+        public String toString()
         {
-            return ranges[0];
+            return IntStream.range(0, ranges.length).mapToObj(i -> epochs[i] + ": " + ranges[i])
+                            .collect(Collectors.joining(", "));
         }
     }
 
@@ -222,12 +290,12 @@ public abstract class CommandStores<S extends CommandStore>
         }
     }
 
-    final Supplier supplier;
+    final StoreSupplier supplier;
     final ShardDistributor shardDistributor;
     volatile Snapshot current;
     int nextId;
 
-    private CommandStores(Supplier supplier, ShardDistributor shardDistributor)
+    private CommandStores(StoreSupplier supplier, ShardDistributor shardDistributor)
     {
         this.supplier = supplier;
         this.shardDistributor = shardDistributor;
@@ -237,7 +305,7 @@ public abstract class CommandStores<S extends CommandStore>
     public CommandStores(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor,
                          ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
     {
-        this(new Supplier(time, agent, store, random, progressLogFactory, shardFactory), shardDistributor);
+        this(new StoreSupplier(time, agent, store, random, progressLogFactory, shardFactory), shardDistributor);
     }
 
     public Topology local()
@@ -245,39 +313,54 @@ public abstract class CommandStores<S extends CommandStore>
         return current.local;
     }
 
-    public Topology global()
+    static class TopologyUpdate
     {
-        return current.global;
+        final Snapshot snapshot;
+        final Supplier<EpochReady> bootstrap;
+
+        TopologyUpdate(Snapshot snapshot, Supplier<EpochReady> bootstrap)
+        {
+            this.snapshot = snapshot;
+            this.bootstrap = bootstrap;
+        }
     }
 
-    private synchronized Snapshot updateTopology(Snapshot prev, Topology newTopology)
+    private synchronized TopologyUpdate updateTopology(Node node, Snapshot prev, Topology newTopology)
     {
         checkArgument(!newTopology.isSubset(), "Use full topology for CommandStores.updateTopology");
 
         long epoch = newTopology.epoch();
         if (epoch <= prev.global.epoch())
-            return prev;
+            return new TopologyUpdate(prev, () -> done(epoch));
 
         Topology newLocalTopology = newTopology.forNode(supplier.time.id()).trim();
         Ranges added = newLocalTopology.ranges().difference(prev.local.ranges());
         Ranges subtracted = prev.local.ranges().difference(newLocalTopology.ranges());
 
         if (added.isEmpty() && subtracted.isEmpty())
-            return new Snapshot(prev.shards, newLocalTopology, newTopology);
-
-        List<ShardHolder> result = new ArrayList<>(prev.shards.length + added.size());
-        if (subtracted.isEmpty())
         {
-            Collections.addAll(result, prev.shards);
+            Supplier<EpochReady> epochReady = () -> done(epoch);
+            // even though we haven't changed our replication, we need to check if the membership of our shard has changed
+            if (newLocalTopology.shards().equals(prev.local.shards()))
+                return new TopologyUpdate(new Snapshot(prev.shards, newLocalTopology, newTopology), epochReady);
+            // if it has, we still need to make sure we have witnessed the transactions of the majority of prior epoch
+            // which we do by fetching deps and replicating them to CommandsForKey/historicalRangeCommands
         }
-        else
+
+        List<Supplier<EpochReady>> bootstrapUpdates = new ArrayList<>();
+        List<ShardHolder> result = new ArrayList<>(prev.shards.length + added.size());
+        for (ShardHolder shard : prev.shards)
         {
-            for (ShardHolder shard : prev.shards)
+            if (subtracted.intersects(shard.ranges().currentRanges()))
             {
-                if (subtracted.intersects(shard.ranges().currentRanges()))
-                    shard.ranges.current = shard.ranges().withRanges(newTopology.epoch(), shard.ranges().currentRanges().difference(subtracted));
-                result.add(shard);
+                RangesForEpoch newRanges = shard.ranges().withRanges(newTopology.epoch(), shard.ranges().currentRanges().difference(subtracted));
+                shard.ranges.current = newRanges;
+                bootstrapUpdates.add(shard.store.interruptBootstraps(epoch, newRanges.currentRanges()));
             }
+            // TODO (desired): only sync affected shards
+            if (epoch > 1)
+                bootstrapUpdates.add(shard.store.sync(node, shard.ranges().currentRanges(), epoch));
+            result.add(shard);
         }
 
         if (!added.isEmpty())
@@ -286,13 +369,27 @@ public abstract class CommandStores<S extends CommandStore>
             for (Ranges add : shardDistributor.split(added))
             {
                 RangesForEpochHolder rangesHolder = new RangesForEpochHolder();
-                rangesHolder.current = new RangesForEpoch(epoch, add);
-                result.add(new ShardHolder(supplier.create(nextId++, rangesHolder), rangesHolder));
+                ShardHolder shardHolder = new ShardHolder(supplier.create(nextId++, rangesHolder), rangesHolder);
+                rangesHolder.current = new RangesForEpoch(epoch, add, shardHolder.store);
+                // the first epoch we assume is either empty, or correctly initialised by whatever system is migrating
+                if (epoch == 1) bootstrapUpdates.add(() -> shardHolder.store.initialise(epoch, add));
+                else bootstrapUpdates.add(shardHolder.store.bootstrapper(node, add, newLocalTopology.epoch()));
+                result.add(shardHolder);
             }
         }
 
-        return new Snapshot(result.toArray(new ShardHolder[0]), newLocalTopology, newTopology);
+        Supplier<EpochReady> bootstrap = bootstrapUpdates.isEmpty() ? () -> done(epoch) : () -> {
+            List<EpochReady> list = bootstrapUpdates.stream().map(Supplier::get).collect(toList());
+            return new EpochReady(epoch,
+                AsyncChains.reduce(list.stream().map(b -> b.metadata).collect(toList()), (a, b) -> null).beginAsResult(),
+                AsyncChains.reduce(list.stream().map(b -> b.coordination).collect(toList()), (a, b) -> null).beginAsResult(),
+                AsyncChains.reduce(list.stream().map(b -> b.data).collect(toList()), (a, b) -> null).beginAsResult(),
+                AsyncChains.reduce(list.stream().map(b -> b.reads).collect(toList()), (a, b) -> null).beginAsResult()
+            );
+        };
+        return new TopologyUpdate(new Snapshot(result.toArray(new ShardHolder[0]), newLocalTopology, newTopology), bootstrap);
     }
+
 
     public AsyncChain<Void> forEach(Consumer<SafeCommandStore> forEach)
     {
@@ -380,7 +477,7 @@ public abstract class CommandStores<S extends CommandStore>
         for (ShardHolder shard : shards)
         {
             // TODO (urgent, efficiency): range map for intersecting ranges (e.g. that to be introduced for range dependencies)
-            Ranges shardRanges = shard.ranges().between(minEpoch, maxEpoch);
+            Ranges shardRanges = shard.ranges().allBetween(minEpoch, maxEpoch);
             if (!shardRanges.intersects(keys))
                 continue;
 
@@ -409,9 +506,11 @@ public abstract class CommandStores<S extends CommandStore>
         return chain;
     }
 
-    public synchronized void updateTopology(Topology newTopology)
+    public synchronized Supplier<EpochReady> updateTopology(Node node, Topology newTopology)
     {
-        current = updateTopology(current, newTopology);
+        TopologyUpdate update = updateTopology(node, current, newTopology);
+        current = update.snapshot;
+        return update.bootstrap;
     }
 
     public synchronized void shutdown()
@@ -423,6 +522,11 @@ public abstract class CommandStores<S extends CommandStore>
     public CommandStore select(RoutingKey key)
     {
         return  select(ranges -> ranges.contains(key));
+    }
+
+    public CommandStore select(Route<?> route)
+    {
+        return  select(ranges -> ranges.intersects(route));
     }
 
     private CommandStore select(Predicate<Ranges> fn)

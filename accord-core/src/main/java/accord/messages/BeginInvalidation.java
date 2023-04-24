@@ -28,7 +28,6 @@ import accord.primitives.Route;
 import accord.primitives.TxnId;
 
 import javax.annotation.Nullable;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -89,15 +88,9 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
     }
 
     @Override
-    public Iterable<TxnId> txnIds()
+    public TxnId primaryTxnId()
     {
-        return Collections.singleton(txnId);
-    }
-
-    @Override
-    public Seekables<?, ?> keys()
-    {
-        return Keys.EMPTY;
+        return txnId;
     }
 
     @Override

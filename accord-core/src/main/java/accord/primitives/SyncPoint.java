@@ -38,4 +38,10 @@ public class SyncPoint
         this.waitFor = waitFor;
         this.route = route;
     }
+
+    public long sourceEpoch()
+    {
+        TxnId maxDep = waitFor.maxTxnId();
+        return TxnId.nonNullOrMax(maxDep, syncId).epoch();
+    }
 }

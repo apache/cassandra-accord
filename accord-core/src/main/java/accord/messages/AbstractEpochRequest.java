@@ -21,12 +21,8 @@ package accord.messages;
 import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
-import accord.primitives.Keys;
-import accord.primitives.Seekables;
 import accord.primitives.TxnId;
 import accord.utils.MapReduceConsume;
-
-import java.util.Collections;
 
 public abstract class AbstractEpochRequest<R extends Reply> implements PreLoadContext, Request, MapReduceConsume<SafeCommandStore, R>
 {
@@ -64,14 +60,8 @@ public abstract class AbstractEpochRequest<R extends Reply> implements PreLoadCo
     }
 
     @Override
-    public Iterable<TxnId> txnIds()
+    public TxnId primaryTxnId()
     {
-        return Collections.singleton(txnId);
-    }
-
-    @Override
-    public Seekables<?, ?> keys()
-    {
-        return Keys.EMPTY;
+        return txnId;
     }
 }

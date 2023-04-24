@@ -108,7 +108,7 @@ public abstract class IntHashKey implements RoutableKey
     {
         public Hash(int hash)
         {
-            super(Integer.MIN_VALUE, hash);
+            super(hash, true);
         }
 
         @Override
@@ -158,14 +158,16 @@ public abstract class IntHashKey implements RoutableKey
 
     private IntHashKey(int key)
     {
+        if (key == Integer.MIN_VALUE)
+            throw new IllegalArgumentException();
         this.key = key;
         this.hash = hash(key);
     }
 
-    private IntHashKey(int key, int hash)
+    private IntHashKey(int hash, boolean isHash)
     {
-        assert key == Integer.MIN_VALUE || hash != hash(key);
-        this.key = key;
+        assert isHash;
+        this.key = Integer.MIN_VALUE;
         this.hash = hash;
     }
 

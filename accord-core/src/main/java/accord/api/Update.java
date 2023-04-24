@@ -20,6 +20,7 @@ package accord.api;
 
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
 
 import javax.annotation.Nullable;
 
@@ -32,7 +33,7 @@ public interface Update
 {
     Seekables<?, ?> keys();
     // null is provided only if nothing was read
-    Write apply(@Nullable Data data);
+    Write apply(Timestamp executeAt, @Nullable Data data);
     Update slice(Ranges ranges);
     Update merge(Update other);
 }

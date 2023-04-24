@@ -50,13 +50,13 @@ public class TopologyChangeTest
         Keys keys = keys(150);
         Range range = range(100, 200);
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
-        Topology topology2 = topology(2, shard(range, idList(4, 5, 6), idSet(4, 5)));
+        Topology topology2 = topology(2, shard(range, idList(3, 4, 5), idSet(4, 5)));
         EpochFunction<MockConfigurationService> fetchTopology = (epoch, service) -> {
             Assertions.assertEquals(2, epoch);
             service.reportTopology(topology2);
         };
         try (MockCluster cluster = MockCluster.builder()
-                                              .nodes(6)
+                                              .nodes(5)
                                               .topology(topology1)
                                               .setOnFetchTopology(fetchTopology)
                                               .build())
@@ -70,15 +70,24 @@ public class TopologyChangeTest
                 Assertions.assertTrue(command.partialDeps().isEmpty());
             }));
 
-            cluster.configServices(4, 5, 6).forEach(config -> config.reportTopology(topology2));
+            cluster.configServices(4).forEach(config -> {
+                try
+                {
+                    getUninterruptibly(config.reportTopology(topology2));
+                }
+                catch (ExecutionException e)
+                {
+                    throw new AssertionError(e);
+                }
+            });
 
             Node node4 = cluster.get(4);
             TxnId txnId2 = node4.nextTxnId(Write, Key);
             Txn txn2 = writeTxn(keys);
             getUninterruptibly(node4.coordinate(txnId2, txn2));
 
-            // new nodes should have the previous epochs operation as a dependency
-            cluster.nodes(4, 5, 6).forEach(node -> {
+            // new nodes should have the previous epoch's operation as a dependency
+            cluster.nodes(4, 5).forEach(node -> {
                 try
                 {
                     getUninterruptibly(node.commandStores().forEach(contextFor(txnId1, txnId2), keys, 2, 2, commands -> {
