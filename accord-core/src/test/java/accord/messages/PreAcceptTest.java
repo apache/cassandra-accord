@@ -26,14 +26,9 @@ import accord.impl.IntKey.Raw;
 import accord.impl.mock.*;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.api.MessageSink;
-import accord.api.Scheduler;
 import accord.impl.mock.MockCluster.Clock;
 import accord.primitives.*;
 import accord.topology.Topology;
-import accord.utils.DefaultRandom;
-import accord.utils.EpochFunction;
-import accord.utils.ThreadPoolScheduler;
 import accord.local.*;
 
 import org.junit.jupiter.api.Assertions;
@@ -51,6 +46,7 @@ import static accord.impl.mock.MockCluster.configService;
 import static accord.primitives.Routable.Domain.Key;
 import static accord.primitives.Txn.Kind.Write;
 import static accord.utils.Utils.listOf;
+import static org.assertj.core.api.Assertions.assertThat;
 
 public class PreAcceptTest
 {
@@ -129,6 +125,41 @@ public class PreAcceptTest
             Txn txn = writeTxn(Keys.of(key));
             PreAccept preAccept = preAccept(txnId, txn, key.toUnseekable());
             preAccept.process(node, ID2, REPLY_CONTEXT);
+        }
+        finally
+        {
+            node.shutdown();
+        }
+    }
+
+    @Test
+    void invalidatedTest()
+    {
+        RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
+        Clock clock = new Clock(100);
+        Node node = createNode(ID1, TOPOLOGY, messageSink, clock);
+        try
+        {
+            Raw key = IntKey.key(10);
+            CommandStore commandStore = node.unsafeForKey(key);
+            Assertions.assertFalse(inMemory(commandStore).hasCommandsForKey(key));
+
+            TxnId txnId = clock.idForNode(1, ID2);
+            Txn txn = writeTxn(Keys.of(key));
+
+            Unseekables<?, ?> invalidateWith = txn.keys().toUnseekables();
+            BeginInvalidation invalidate = new BeginInvalidation(ID1, node.topology().forEpoch(invalidateWith, txnId.epoch()), txnId, invalidateWith, Ballot.fromValues(txnId.epoch(), txnId.hlc(), txnId.node));
+            invalidate.process(node, ID2, REPLY_CONTEXT);
+
+            messageSink.assertHistorySizes(0, 1);
+            assertThat(messageSink.responses.get(0).payload).isEqualTo(new BeginInvalidation.InvalidateReply(null, Ballot.ZERO, Status.NotWitnessed, false, null, null));
+            messageSink.clearHistory();
+
+            PreAccept preAccept = preAccept(txnId, txn, key.toUnseekable());
+            preAccept.process(node, ID2, REPLY_CONTEXT);
+
+            messageSink.assertHistorySizes(0, 1);
+            assertThat(messageSink.responses.get(0).payload).isEqualTo(PreAccept.PreAcceptNack.INSTANCE);
         }
         finally
         {
