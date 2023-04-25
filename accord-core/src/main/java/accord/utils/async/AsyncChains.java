@@ -351,14 +351,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
                             callback.accept(null, t);
                             return;
                         }
-                        try
-                        {
-                            callback.accept(value, null);
-                        }
-                        catch (Throwable t)
-                        {
-                            // TODO (low priority, correctness): if callback fails there is no source to fallback to
-                        }
+                        callback.accept(value, null);
                     });
                 }
                 catch (Throwable t)
