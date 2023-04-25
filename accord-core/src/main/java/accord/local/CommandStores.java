@@ -188,9 +188,9 @@ public abstract class CommandStores<S extends CommandStore>
             return i;
         }
 
-        public boolean intersects(long epoch, AbstractKeys<?, ?> keys)
+        public boolean intersects(long epoch, Routables<?, ?> routables)
         {
-            return at(epoch).intersects(keys);
+            return at(epoch).intersects(routables);
         }
 
         public Ranges currentRanges()

@@ -57,7 +57,7 @@ public interface SafeCommandStore
         PreLoadContext context = PreLoadContext.contextFor(listOf(txnId, listenerId), Keys.EMPTY);
         commandStore().execute(context, safeStore -> {
             SafeCommand safeCommand = safeStore.command(txnId);
-            CommandListener listener = new Command.Listener(listenerId);
+            Command.ProxyListener listener = new Command.ProxyListener(listenerId);
             safeCommand.addListener(listener);
             listener.onChange(safeStore, safeCommand);
         }).begin(agent());
@@ -101,26 +101,53 @@ public interface SafeCommandStore
 
     default void notifyListeners(SafeCommand safeCommand)
     {
-        TxnId txnId = safeCommand.txnId();
         Command command = safeCommand.current();
-        for (CommandListener listener : command.listeners())
+        for (Command.DurableAndIdempotentListener listener : command.durableListeners())
+            notifyListener(this, safeCommand, command, listener);
+
+        for (Command.TransientListener listener : safeCommand.transientListeners())
+            notifyListener(this, safeCommand, command, listener);
+    }
+
+    static void notifyListener(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, Command.TransientListener listener)
+    {
+        if (!safeCommand.transientListeners().contains(listener))
+            return;
+
+        PreLoadContext context = listener.listenerPreLoadContext(command.txnId());
+        if (safeStore.canExecuteWith(context))
         {
-            if (!safeCommand.current().listeners().contains(listener))
-            {
-                // notifyListeners is done for every mutation, which can cause listeners to be different depending on
-                // where you are in the stack frame...
-                // To simplify listeners, double check that this wasn't changed before calling again
-                continue;
-            }
-            PreLoadContext context = listener.listenerPreLoadContext(command.txnId());
-            if (canExecuteWith(context))
-            {
-                listener.onChange(this, safeCommand);
-            }
-            else
-            {
-                commandStore().execute(context, safeStore -> listener.onChange(safeStore, safeStore.command(txnId))).begin(agent());
-            }
+            listener.onChange(safeStore, safeCommand);
+        }
+        else
+        {
+            TxnId txnId = command.txnId();
+            safeStore.commandStore()
+                     .execute(context, safeStore2 -> {
+                         SafeCommand safeCommand2 = safeStore2.command(txnId);
+                         // listeners invocations may be triggered more than once asynchronously for different changes
+                         // so one pending invocation may unregister the listener prior to the second invocation running
+                         // so we check if the listener is still valid before running
+                         if (safeCommand2.transientListeners().contains(listener))
+                            listener.onChange(safeStore2, safeCommand2);
+                     })
+                     .begin(safeStore.agent());
+        }
+    }
+
+    static void notifyListener(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, Command.DurableAndIdempotentListener listener)
+    {
+        PreLoadContext context = listener.listenerPreLoadContext(command.txnId());
+        if (safeStore.canExecuteWith(context))
+        {
+            listener.onChange(safeStore, safeCommand);
+        }
+        else
+        {
+            TxnId txnId = command.txnId();
+            safeStore.commandStore()
+                     .execute(context, safeStore2 -> listener.onChange(safeStore2, safeStore2.command(txnId)))
+                     .begin(safeStore.agent());
         }
     }
 }

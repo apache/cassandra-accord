@@ -40,6 +40,72 @@ import static java.lang.String.format;
 
 public abstract class Command implements CommonAttributes
 {
+    interface Listener
+    {
+        void onChange(SafeCommandStore safeStore, SafeCommand safeCommand);
+
+        /**
+         * Scope needed to run onChange
+         */
+        PreLoadContext listenerPreLoadContext(TxnId caller);
+    }
+
+    public interface DurableAndIdempotentListener extends Listener
+    {
+    }
+
+    public interface TransientListener extends Listener
+    {
+    }
+
+    public static class ProxyListener implements DurableAndIdempotentListener
+    {
+        protected final TxnId listenerId;
+
+        public ProxyListener(TxnId listenerId)
+        {
+            this.listenerId = listenerId;
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            ProxyListener that = (ProxyListener) o;
+            return listenerId.equals(that.listenerId);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(listenerId);
+        }
+
+        @Override
+        public String toString()
+        {
+            return "ListenerProxy{" + listenerId + '}';
+        }
+
+        public TxnId txnId()
+        {
+            return listenerId;
+        }
+
+        @Override
+        public void onChange(SafeCommandStore safeStore, SafeCommand safeCommand)
+        {
+            Commands.listenerUpdate(safeStore, safeStore.command(listenerId), safeCommand);
+        }
+
+        @Override
+        public PreLoadContext listenerPreLoadContext(TxnId caller)
+        {
+            return PreLoadContext.contextFor(Utils.listOf(listenerId, caller), Keys.EMPTY);
+        }
+    }
+
     static PreLoadContext contextForCommand(Command command)
     {
         Invariants.checkState(command.hasBeen(Status.PreAccepted) && command.partialTxn() != null);
@@ -116,54 +182,6 @@ public abstract class Command implements CommonAttributes
         }
     }
 
-    public static class Listener implements CommandListener
-    {
-        protected final TxnId listenerId;
-
-        public Listener(TxnId listenerId)
-        {
-            this.listenerId = listenerId;
-        }
-
-        @Override
-        public boolean equals(Object o)
-        {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            Listener that = (Listener) o;
-            return listenerId.equals(that.listenerId);
-        }
-
-        @Override
-        public int hashCode()
-        {
-            return Objects.hash(listenerId);
-        }
-
-        @Override
-        public String toString()
-        {
-            return "ListenerProxy{" + listenerId + '}';
-        }
-
-        public TxnId txnId()
-        {
-            return listenerId;
-        }
-
-        @Override
-        public void onChange(SafeCommandStore safeStore, SafeCommand safeCommand)
-        {
-            Commands.listenerUpdate(safeStore, safeStore.command(listenerId), safeCommand);
-        }
-
-        @Override
-        public PreLoadContext listenerPreLoadContext(TxnId caller)
-        {
-            return PreLoadContext.contextFor(Utils.listOf(listenerId, caller), Keys.EMPTY);
-        }
-    }
-
     private abstract static class AbstractCommand extends Command
     {
         private final TxnId txnId;
@@ -196,7 +214,7 @@ public abstract class Command implements CommonAttributes
             this.progressKey = common.progressKey();
             this.route = common.route();
             this.promised = promised;
-            this.listeners = common.listeners();
+            this.listeners = common.durableListeners();
         }
 
         @Override
@@ -212,7 +230,7 @@ public abstract class Command implements CommonAttributes
                     && Objects.equals(progressKey, command.progressKey())
                     && Objects.equals(route, command.route())
                     && Objects.equals(promised, command.promised())
-                    && listeners.equals(command.listeners());
+                    && listeners.equals(command.durableListeners());
         }
 
         @Override
@@ -258,7 +276,7 @@ public abstract class Command implements CommonAttributes
         }
 
         @Override
-        public Listeners.Immutable listeners()
+        public Listeners.Immutable durableListeners()
         {
             if (listeners == null)
                 return Listeners.Immutable.EMPTY;
@@ -311,7 +329,7 @@ public abstract class Command implements CommonAttributes
     public abstract TxnId txnId();
     public abstract Ballot promised();
     public abstract Status.Durability durability();
-    public abstract Listeners.Immutable listeners();
+    public abstract Listeners.Immutable durableListeners();
     public abstract SaveStatus saveStatus();
 
     static boolean isSameClass(Command command, Class<? extends Command> klass)
@@ -407,9 +425,9 @@ public abstract class Command implements CommonAttributes
         return status() == status;
     }
 
-    public final CommandListener asListener()
+    public final ProxyListener asListener()
     {
-        return new Listener(txnId());
+        return new ProxyListener(txnId());
     }
 
     public final boolean isWitnessed()
@@ -511,6 +529,13 @@ public abstract class Command implements CommonAttributes
         public Timestamp executeAt()
         {
             return null;
+        }
+
+        @Override
+        public Ballot promised()
+        {
+            // we can be preacceptedInvalidated, so can be promised even if not witnessed
+            return super.promised;
         }
 
         @Override
@@ -922,13 +947,13 @@ public abstract class Command implements CommonAttributes
         }
     }
 
-    static Command addListener(Command command, CommandListener listener)
+    static Command addListener(Command command, DurableAndIdempotentListener listener)
     {
         CommonAttributes attrs = command.mutable().addListener(listener);
         return command.updateAttributes(attrs);
     }
 
-    static Command removeListener(Command command, CommandListener listener)
+    static Command removeListener(Command command, Listener listener)
     {
         CommonAttributes attrs = command.mutable().removeListener(listener);
         return command.updateAttributes(attrs);

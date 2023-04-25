@@ -187,7 +187,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                 CommonAttributes.Mutable mutable = attrs.mutable();
                 forEach(keysOrRanges, slice, key -> {
                     SafeCommandsForKey cfk = safeStore.commandsForKey(key);
-                    CommandListener listener = cfk.register(command.current()).asListener();
+                    Command.DurableAndIdempotentListener listener = cfk.register(command.current()).asListener();
                     mutable.addListener(listener);
                 });
                 return mutable;
@@ -207,7 +207,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                 CommonAttributes.Mutable mutable = attrs.mutable();
                 forEach(keyOrRange, slice, key -> {
                     SafeCommandsForKey cfk = safeStore.commandsForKey(key);
-                    CommandListener listener = cfk.register(command.current()).asListener();
+                    Command.DurableAndIdempotentListener listener = cfk.register(command.current()).asListener();
                     mutable.addListener(listener);
                 });
                 return mutable;
@@ -475,6 +475,7 @@ public abstract class InMemoryCommandStore extends CommandStore
     public static class GlobalCommand extends GlobalState<Command>
     {
         private final TxnId txnId;
+        private Listeners<Command.TransientListener> transientListeners = null;
 
         public GlobalCommand(TxnId txnId)
         {
@@ -484,6 +485,23 @@ public abstract class InMemoryCommandStore extends CommandStore
         public InMemorySafeCommand createSafeReference()
         {
             return new InMemorySafeCommand(txnId, this);
+        }
+
+        public void addListener(Command.TransientListener listener)
+        {
+            if (transientListeners == null) transientListeners = new Listeners<>();
+            else transientListeners.add(listener);
+        }
+
+        public void removeListener(Command.TransientListener listener)
+        {
+            if (transientListeners != null && transientListeners.remove(listener) && transientListeners.isEmpty())
+                transientListeners = null;
+        }
+
+        public Collection<Command.TransientListener> transientListeners()
+        {
+            return transientListeners == null ? Collections.emptySet() : transientListeners;
         }
     }
 

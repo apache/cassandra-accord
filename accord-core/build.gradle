@@ -39,7 +39,7 @@ dependencies {
 }
 
 task burn(type: JavaExec) {
-    classpath sourceSets.main.runtimeClasspath, sourceSets.test.output
+    classpath sourceSets.main.runtimeClasspath, sourceSets.test.runtimeClasspath
     mainClass = 'accord.burn.BurnTest'
     jvmArgs '-Dlogback.configurationFile=burn-logback.xml'
     args = ['-c', '1']
@@ -103,7 +103,7 @@ task burnforkloop {
 task burnloop {
     doLast {
         javaexec {
-            classpath sourceSets.main.runtimeClasspath, sourceSets.test.output
+            classpath sourceSets.main.runtimeClasspath, sourceSets.test.runtimeClasspath
             mainClass = 'accord.burn.BurnTest'
             jvmArgs '-Dlogback.configurationFile=burn-logback.xml'
             args = ['-c', project.hasProperty('burnTimes') ? project.getProperty('burnTimes') : '1000000']

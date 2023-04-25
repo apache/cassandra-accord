@@ -117,7 +117,9 @@ public class Coordinate extends AsyncResults.SettableResult<Result> implements C
 
         if (!reply.isOk())
         {
+            // TODO (expected): reads should not be recovered, so should not be preempted
             // we've been preempted by a recovery coordinator; defer to it, and wait to hear any result
+            preAcceptIsDone = true;
             tryFailure(new Preempted(txnId, route.homeKey()));
             return;
         }

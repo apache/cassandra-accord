@@ -30,7 +30,7 @@ import static accord.messages.Defer.Ready.Expired;
 import static accord.messages.Defer.Ready.No;
 import static accord.messages.Defer.Ready.Yes;
 
-class Defer implements CommandListener
+class Defer implements Command.TransientListener
 {
     public enum Ready { No, Yes, Expired }
 
@@ -99,12 +99,6 @@ class Defer implements CommandListener
     {
         Invariants.checkState(caller.equals(request.txnId));
         return request;
-    }
-
-    @Override
-    public boolean isTransient()
-    {
-        return true;
     }
 }
 
