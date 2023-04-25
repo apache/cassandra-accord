@@ -23,18 +23,18 @@ import accord.utils.DeterministicIdentitySet;
 import java.util.Collection;
 import java.util.function.Predicate;
 
-public class Listeners extends DeterministicIdentitySet<CommandListener>
+public class Listeners<L extends Command.Listener> extends DeterministicIdentitySet<L>
 {
     public Listeners()
     {
     }
 
-    public Listeners(Listeners copy)
+    public Listeners(Listeners<L> copy)
     {
         super(copy);
     }
 
-    public static class Immutable extends Listeners
+    public static class Immutable extends Listeners<Command.DurableAndIdempotentListener>
     {
         public static final Immutable EMPTY = new Immutable();
 
@@ -43,18 +43,18 @@ public class Listeners extends DeterministicIdentitySet<CommandListener>
             super();
         }
 
-        public Immutable(Listeners listeners)
+        public Immutable(Listeners<Command.DurableAndIdempotentListener> listeners)
         {
             super(listeners);
         }
 
-        Listeners mutable()
+        Listeners<Command.DurableAndIdempotentListener> mutable()
         {
-            return new Listeners(this);
+            return new Listeners<>(this);
         }
 
         @Override
-        public boolean add(CommandListener item)
+        public boolean add(Command.DurableAndIdempotentListener item)
         {
             throw new UnsupportedOperationException("Cannot modify immutable set");
         }
@@ -72,7 +72,7 @@ public class Listeners extends DeterministicIdentitySet<CommandListener>
         }
 
         @Override
-        public boolean addAll(Collection<? extends CommandListener> c)
+        public boolean addAll(Collection<? extends Command.DurableAndIdempotentListener> c)
         {
             throw new UnsupportedOperationException("Cannot modify immutable set");
         }
@@ -84,7 +84,7 @@ public class Listeners extends DeterministicIdentitySet<CommandListener>
         }
 
         @Override
-        public boolean removeIf(Predicate<? super CommandListener> filter)
+        public boolean removeIf(Predicate<? super Command.DurableAndIdempotentListener> filter)
         {
             throw new UnsupportedOperationException("Cannot modify immutable set");
         }

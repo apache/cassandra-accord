@@ -31,4 +31,5 @@ rat {
     // List of Gradle exclude directives, defaults to ['**/.gradle/**']
     excludes.add("**/build/**")
     excludes.add(".idea/**")
+    excludeFile.set(layout.projectDirectory.file(".rat-excludes.txt"))
 }

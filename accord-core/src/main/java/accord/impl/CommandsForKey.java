@@ -41,9 +41,9 @@ public class CommandsForKey
 {
     public static class SerializerSupport
     {
-        public static CommandsForKey.Listener listener(Key key)
+        public static Listener listener(Key key)
         {
-            return new CommandsForKey.Listener(key);
+            return new Listener(key);
         }
 
         public static  <D> CommandsForKey create(Key key, Timestamp max,
@@ -229,7 +229,7 @@ public class CommandsForKey
         }
     }
 
-    public static class Listener implements CommandListener
+    public static class Listener implements Command.DurableAndIdempotentListener
     {
         protected final Key listenerKey;
 
@@ -354,7 +354,7 @@ public class CommandsForKey
         throw new UnsupportedOperationException();
     }
 
-    public final CommandListener asListener()
+    public final Command.DurableAndIdempotentListener asListener()
     {
         return new Listener(key());
     }

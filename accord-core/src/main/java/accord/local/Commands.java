@@ -317,7 +317,7 @@ public class Commands
                     case PreCommitted:
                         // we don't know when these dependencies will execute, and cannot execute until we do
 
-                        command = safeCommand.addListener(new Command.Listener(txnId));
+                        command = safeCommand.addListener(new Command.ProxyListener(txnId));
                         update.addWaitingOnCommit(command.txnId());
                         break;
                     case Committed:
@@ -328,7 +328,7 @@ public class Commands
                     case ReadyToExecute:
                     case PreApplied:
                     case Applied:
-                        command = safeCommand.addListener(new Command.Listener(txnId));
+                        command = safeCommand.addListener(new Command.ProxyListener(txnId));
                         insertPredecessor(txnId, executeAt, update, command);
                     case Invalidated:
                         break;

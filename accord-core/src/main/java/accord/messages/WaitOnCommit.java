@@ -32,7 +32,7 @@ import static accord.local.Status.Committed;
 import static accord.utils.Utils.listOf;
 import accord.topology.Topology;
 
-public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore, Void>, PreLoadContext, CommandListener
+public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore, Void>, PreLoadContext, Command.TransientListener
 {
     private static final Logger logger = LoggerFactory.getLogger(WaitOnCommit.class);
 
@@ -144,12 +144,6 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
     {
         if (waitingOnUpdater.decrementAndGet(this) == -1)
             node.reply(replyTo, replyContext, WaitOnCommitOk.INSTANCE);
-    }
-
-    @Override
-    public boolean isTransient()
-    {
-        return true;
     }
 
     @Override
