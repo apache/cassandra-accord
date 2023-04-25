@@ -68,8 +68,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
     public static class DelayedCommandStore extends InMemoryCommandStore
     {
         private final SimulatedDelayedExecutorService executor;
-        private final Queue<Pending> pending = new LinkedList<>();
-        private Task<?> scheduled = null;
+        private final Queue<Task<?>> pending = new LinkedList<>();
 
         public DelayedCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder, SimulatedDelayedExecutorService executor)
         {
@@ -104,36 +103,40 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         public <T> AsyncChain<T> submit(Callable<T> fn)
         {
             Task<T> task = new Task<>(() -> Unsafe.runWith(this, fn));
-            task.addCallback(agent()); // used to track unexpected exceptions and notify simulations
-            // add continuation
-            task.addCallback(() -> {
-                scheduled = null;
-                Pending next = pending.poll();
-                if (next == null)
-                    return;
-                scheduled = next.task;
-                executor.executeWithObservedDelay(next.task, executor.nowMillis() - next.nowMillis, TimeUnit.MILLISECONDS);
-            });
-
-            if (scheduled == null)
-            {
-                scheduled = task;
-                executor.execute(task);
-            }
-            else
-            {
-                // SimulatedDelayedExecutorService can interleave tasks and is global; this violates a requirement for
-                // CommandStore; single threaded with ordered execution!  To simulate this behavior, add the task to the
-                // FIFO queue
-                pending.add(new Pending(task, executor.nowMillis()));
-            }
+            boolean wasEmpty = pending.isEmpty();
+            pending.add(task);
+            if (wasEmpty)
+                runNextTask();
             return task;
+        }
+
+        private void runNextTask()
+        {
+            Task<?> next = pending.peek();
+            if (next == null)
+                return;
+
+            next.addCallback(agent()); // used to track unexpected exceptions and notify simulations
+            next.addCallback(this::afterExecution);
+            executor.execute(next);
+        }
+
+        private void afterExecution()
+        {
+            pending.poll();
+            runNextTask();
         }
 
         @Override
         public void shutdown()
         {
 
+        }
+
+        @Override
+        public void register()
+        {
+            // no-op; due to the nature of this class, this is handled while executing the task
         }
     }
 }
