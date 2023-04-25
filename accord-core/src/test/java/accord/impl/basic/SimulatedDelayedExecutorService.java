@@ -63,13 +63,4 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService
     {
         pending.add(task, jitterInNano.getLong(random), TimeUnit.NANOSECONDS);
     }
-
-    public void executeWithObservedDelay(Task<?> task, long observed, TimeUnit unit)
-    {
-        long observedDelayNanos = unit.toNanos(observed);
-        long desiredDelayNanos = jitterInNano.getLong(random);
-        long delayNanos = observedDelayNanos >= desiredDelayNanos ? 0
-                                                                  : desiredDelayNanos - observedDelayNanos;
-        pending.add(task, delayNanos, TimeUnit.NANOSECONDS);
-    }
 }
