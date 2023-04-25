@@ -40,17 +40,17 @@ public class SafeCallback<T extends Reply>
 
     public void success(Node.Id src, T reply)
     {
-        safeCall(src, () -> callback.onSuccess(src, reply));
+        safeCall(src, reply, Callback::onSuccess);
     }
 
     public void slowResponse(Node.Id src)
     {
-        safeCall(src, () -> callback.onSlowResponse(src));
+        safeCall(src, null, (callback, id, ignore) -> callback.onSlowResponse(id));
     }
 
     public void failure(Node.Id to, Throwable t)
     {
-        safeCall(to, () -> callback.onFailure(to, t));
+        safeCall(to, t, Callback::onFailure);
     }
 
     public void timeout(Node.Id to)
@@ -58,12 +58,17 @@ public class SafeCallback<T extends Reply>
         failure(to, new Timeout(null, null));
     }
 
-    private void safeCall(Node.Id src, Runnable fn)
+    private interface SafeCall<T, P>
+    {
+        void accept(Callback<T> callback, Node.Id id, P param) throws Throwable;
+    }
+
+    private <P> void safeCall(Node.Id src, P param, SafeCall<T, P> call)
     {
         executor.execute(() -> {
             try
             {
-                fn.run();
+                call.accept(callback, src, param);
             }
             catch (Throwable t)
             {
@@ -71,8 +76,9 @@ public class SafeCallback<T extends Reply>
                 {
                     callback.onCallbackFailure(src, t);
                 }
-                finally
+                catch (Throwable t2)
                 {
+                    t.addSuppressed(t2);
                     agent.onUncaughtException(t);
                 }
             }
