@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
+import accord.local.Command.TransientListener;
 import accord.primitives.*;
 
 import accord.local.*;
@@ -43,7 +44,7 @@ import static accord.messages.TxnRequest.*;
 import static accord.utils.MapReduceConsume.forEach;
 
 // TODO (required, efficiency): dedup - can currently have infinite pending reads that will be executed independently
-public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements CommandListener
+public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements TransientListener
 {
     private static final Logger logger = LoggerFactory.getLogger(ReadData.class);
 
@@ -54,7 +55,7 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
             return new ReadData(txnId, scope, executeAtEpoch, waitForEpoch);
         }
     }
-    private class ObsoleteTracker implements CommandListener
+    private class ObsoleteTracker implements TransientListener
     {
         @Override
         public void onChange(SafeCommandStore safeStore, SafeCommand safeCommand)
@@ -73,12 +74,6 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
         public PreLoadContext listenerPreLoadContext(TxnId caller)
         {
             return ReadData.this.listenerPreLoadContext(caller);
-        }
-
-        @Override
-        public boolean isTransient()
-        {
-            return true;
         }
     }
 
@@ -129,12 +124,6 @@ public class ReadData extends AbstractEpochRequest<ReadData.ReadNack> implements
         ids.add(txnId);
         ids.add(caller);
         return PreLoadContext.contextFor(ids, keys());
-    }
-
-    @Override
-    public boolean isTransient()
-    {
-        return true;
     }
 
     @Override

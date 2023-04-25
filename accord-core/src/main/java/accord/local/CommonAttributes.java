@@ -35,7 +35,7 @@ public interface CommonAttributes
     Route<?> route();
     PartialTxn partialTxn();
     PartialDeps partialDeps();
-    Listeners.Immutable listeners();
+    Listeners.Immutable durableListeners();
 
     default Mutable mutable()
     {
@@ -67,7 +67,7 @@ public interface CommonAttributes
             this.route = attributes.route();
             this.partialTxn = attributes.partialTxn();
             this.partialDeps = attributes.partialDeps();
-            this.listeners = attributes.listeners();
+            this.listeners = attributes.durableListeners();
         }
 
         @Override
@@ -162,7 +162,7 @@ public interface CommonAttributes
         }
 
         @Override
-        public Listeners.Immutable listeners()
+        public Listeners.Immutable durableListeners()
         {
             if (listeners == null || listeners.isEmpty())
                 return Listeners.Immutable.EMPTY;
@@ -171,7 +171,7 @@ public interface CommonAttributes
             return new Listeners.Immutable(listeners);
         }
 
-        public Mutable addListener(CommandListener listener)
+        public Mutable addListener(Command.DurableAndIdempotentListener listener)
         {
             if (listeners == null)
                 listeners = new Listeners();
@@ -181,7 +181,7 @@ public interface CommonAttributes
             return this;
         }
 
-        public Mutable removeListener(CommandListener listener)
+        public Mutable removeListener(Command.Listener listener)
         {
             if (listener == null || listeners.isEmpty())
                 return this;

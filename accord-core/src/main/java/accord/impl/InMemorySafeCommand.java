@@ -18,6 +18,8 @@
 
 package accord.impl;
 
+import java.util.Collection;
+
 import accord.impl.InMemoryCommandStore.GlobalCommand;
 import accord.local.Command;
 import accord.local.SafeCommand;
@@ -46,6 +48,24 @@ public class InMemorySafeCommand extends SafeCommand implements SafeState<Comman
     {
         checkNotInvalidated();
         global.value(update);
+    }
+
+    @Override
+    public void addListener(Command.TransientListener listener)
+    {
+        global.addListener(listener);
+    }
+
+    @Override
+    public void removeListener(Command.TransientListener listener)
+    {
+        global.removeListener(listener);
+    }
+
+    @Override
+    public Collection<Command.TransientListener> transientListeners()
+    {
+        return global.transientListeners();
     }
 
     @Override

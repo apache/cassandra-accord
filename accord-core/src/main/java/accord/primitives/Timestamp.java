@@ -42,7 +42,7 @@ public class Timestamp implements Comparable<Timestamp>
 
     public static Timestamp maxForEpoch(long epoch)
     {
-        return new Timestamp(epochMsb(epoch) | 0xffff, Long.MAX_VALUE, Id.MAX);
+        return new Timestamp(epochMsb(epoch) | 0x7fff, Long.MAX_VALUE, Id.MAX);
     }
 
     public static Timestamp minForEpoch(long epoch)
@@ -50,6 +50,7 @@ public class Timestamp implements Comparable<Timestamp>
         return new Timestamp(epochMsb(epoch), 0, Id.NONE);
     }
 
+    // TODO (expected): we can only use 63 bits for HLC as we don't support negative timestamps, so can use 49 bits for epoch
     public static final long MAX_EPOCH = (1L << 48) - 1;
     private static final long HLC_INCR = 1L << 16;
     private static final long MAX_FLAGS = HLC_INCR - 1;
@@ -61,6 +62,7 @@ public class Timestamp implements Comparable<Timestamp>
 
     Timestamp(long epoch, long hlc, int flags, Id node)
     {
+        Invariants.checkArgument(hlc >= 0);
         Invariants.checkArgument(epoch <= MAX_EPOCH);
         Invariants.checkArgument(flags <= MAX_FLAGS);
         this.msb = epochMsb(epoch) | hlcMsb(hlc);
@@ -183,12 +185,12 @@ public class Timestamp implements Comparable<Timestamp>
 
     private static long epoch(long msb)
     {
-        return msb >>> 16;
+        return msb >>> 15;
     }
 
     private static long epochMsb(long epoch)
     {
-        return epoch << 16;
+        return epoch << 15;
     }
 
     private static long hlcMsb(long hlc)
@@ -203,7 +205,7 @@ public class Timestamp implements Comparable<Timestamp>
 
     private static long highHlc(long msb)
     {
-        return msb << 48;
+        return (msb & 0x7fff) << 48;
     }
 
     private static long lowHlc(long lsb)

@@ -3,3 +3,4 @@
 build/
 accord-core/build/
 accord-maelstrom/build/
+.rat-excludes.txt
