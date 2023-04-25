@@ -56,11 +56,6 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService
         return Math.toIntExact(TimeUnit.MICROSECONDS.toNanos(value));
     }
 
-    public long nowMillis()
-    {
-        return pending.nowMillis();
-    }
-
     @Override
     public void execute(Task<?> task)
     {

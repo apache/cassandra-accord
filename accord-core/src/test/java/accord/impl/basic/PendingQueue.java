@@ -24,7 +24,6 @@ public interface PendingQueue
 {
     void add(Pending item);
     void add(Pending item, long delay, TimeUnit units);
-    long nowMillis();
     Pending poll();
     int size();
 }
