@@ -98,8 +98,8 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
                 // SimulatedDelayedExecutorService can interleave tasks and is global; this violates a requirement for
                 // CommandStore; single threaded with ordered execution!  To simulate this behavior, add the callback
                 // to enqueue once the "previous" task completes.
-                long nowMilis = executor.nowMillis();
-                previous.addCallback((i1, i2) -> executor.executeWithObservedDelay(task, executor.nowMillis() - nowMilis, TimeUnit.MILLISECONDS));
+                long nowMillis = executor.nowMillis();
+                previous.addCallback((i1, i2) -> executor.executeWithObservedDelay(task, executor.nowMillis() - nowMillis, TimeUnit.MILLISECONDS));
             }
             previous = task;
             return task;
