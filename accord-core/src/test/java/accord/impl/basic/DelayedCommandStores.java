@@ -18,6 +18,8 @@
 
 package accord.impl.basic;
 
+import java.util.LinkedList;
+import java.util.Queue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -28,6 +30,7 @@ import accord.api.DataStore;
 import accord.api.ProgressLog;
 import accord.impl.InMemoryCommandStore;
 import accord.impl.InMemoryCommandStores;
+import accord.impl.basic.TaskExecutorService.Task;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
 import accord.local.NodeTimeService;
@@ -50,10 +53,23 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
                new DelayedCommandStores(time, agent, store, random, shardDistributor, progressLogFactory, new SimulatedDelayedExecutorService(pending, random));
     }
 
+    private static class Pending
+    {
+        final Task<?> task;
+        final long nowMillis;
+
+        private Pending(Task<?> task, long nowMillis)
+        {
+            this.task = task;
+            this.nowMillis = nowMillis;
+        }
+    }
+
     public static class DelayedCommandStore extends InMemoryCommandStore
     {
         private final SimulatedDelayedExecutorService executor;
-        private TaskExecutorService.Task<?> previous = null;
+        private final Queue<Pending> pending = new LinkedList<>();
+        private Task<?> scheduled = null;
 
         public DelayedCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder, SimulatedDelayedExecutorService executor)
         {
@@ -87,21 +103,30 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         @Override
         public <T> AsyncChain<T> submit(Callable<T> fn)
         {
-            TaskExecutorService.Task<T> task = new TaskExecutorService.Task<>(() -> Unsafe.runWith(this, fn));
+            Task<T> task = new Task<>(() -> Unsafe.runWith(this, fn));
             task.addCallback(agent()); // used to track unexpected exceptions and notify simulations
-            if (previous == null || previous.isDone())
+            // add continuation
+            task.addCallback(() -> {
+                scheduled = null;
+                Pending next = pending.poll();
+                if (next == null)
+                    return;
+                scheduled = next.task;
+                executor.executeWithObservedDelay(next.task, executor.nowMillis() - next.nowMillis, TimeUnit.MILLISECONDS);
+            });
+
+            if (scheduled == null)
             {
+                scheduled = task;
                 executor.execute(task);
             }
             else
             {
                 // SimulatedDelayedExecutorService can interleave tasks and is global; this violates a requirement for
-                // CommandStore; single threaded with ordered execution!  To simulate this behavior, add the callback
-                // to enqueue once the "previous" task completes.
-                long nowMillis = executor.nowMillis();
-                previous.addCallback((i1, i2) -> executor.executeWithObservedDelay(task, executor.nowMillis() - nowMillis, TimeUnit.MILLISECONDS));
+                // CommandStore; single threaded with ordered execution!  To simulate this behavior, add the task to the
+                // FIFO queue
+                pending.add(new Pending(task, executor.nowMillis()));
             }
-            previous = task;
             return task;
         }
 
