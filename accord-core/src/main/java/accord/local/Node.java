@@ -23,7 +23,6 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -374,7 +373,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         messageSink.send(to, send, executor, callback);
     }
 
-    private void checkStore(Executor executor)
+    private void checkStore(AgentExecutor executor)
     {
         CommandStore current = CommandStore.Unsafe.maybeCurrent();
         if (current != null && current != executor)
