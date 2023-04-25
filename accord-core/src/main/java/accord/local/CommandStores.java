@@ -422,11 +422,6 @@ public abstract class CommandStores<S extends CommandStore>
             shard.store.shutdown();
     }
 
-    public CommandStore from(Routables<?, ?> routables)
-    {
-        return from(routables::intersects);
-    }
-
     public CommandStore from(RoutingKey key)
     {
         return  from(ranges -> ranges.contains(key));
