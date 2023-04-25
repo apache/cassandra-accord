@@ -20,10 +20,10 @@ package accord.impl.basic;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
+import accord.local.AgentExecutor;
 import accord.messages.SafeCallback;
 import accord.utils.RandomSource;
 import accord.local.Node;
@@ -61,10 +61,10 @@ public class NodeSink implements MessageSink
     }
 
     @Override
-    public void send(Id to, Request send, Executor executor, Callback callback)
+    public void send(Id to, Request send, AgentExecutor executor, Callback callback)
     {
         long messageId = nextMessageId++;
-        SafeCallback sc = new SafeCallback(executor, lookup.apply(self).agent(), callback);
+        SafeCallback sc = new SafeCallback(executor, callback);
         callbacks.put(messageId, sc);
         parent.add(self, to, messageId, send);
         parent.pending.add((PendingRunnable) () -> {

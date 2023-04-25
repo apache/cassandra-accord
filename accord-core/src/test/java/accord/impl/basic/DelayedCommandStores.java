@@ -21,7 +21,6 @@ package accord.impl.basic;
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -50,7 +49,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
     public static CommandStores.Factory factory(PendingQueue pending)
     {
         return (time, agent, store, random, shardDistributor, progressLogFactory) ->
-               new DelayedCommandStores(time, agent, store, random, shardDistributor, progressLogFactory, new SimulatedDelayedExecutorService(pending, random));
+               new DelayedCommandStores(time, agent, store, random, shardDistributor, progressLogFactory, new SimulatedDelayedExecutorService(pending, agent, random));
     }
 
     private static class Pending

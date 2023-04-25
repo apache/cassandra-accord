@@ -21,6 +21,7 @@ package accord.burn;
 import accord.api.TestableConfigurationService;
 import accord.impl.InMemoryCommandStore;
 import accord.coordinate.FetchData;
+import accord.local.AgentExecutor;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.Commands;
@@ -43,7 +44,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -147,7 +147,7 @@ public class TopologyUpdates
     }
 
     private final Set<Long> pendingTopologies = Sets.newConcurrentHashSet();
-    private final Executor executor;
+    private final AgentExecutor executor;
 
     public static <T> BiConsumer<T, Throwable> dieOnException()
     {
@@ -167,7 +167,7 @@ public class TopologyUpdates
         return stage;
     }
 
-    public TopologyUpdates(Executor executor)
+    public TopologyUpdates(AgentExecutor executor)
     {
         this.executor = executor;
     }

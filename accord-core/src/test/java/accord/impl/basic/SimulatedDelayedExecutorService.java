@@ -20,6 +20,7 @@ package accord.impl.basic;
 
 import java.util.concurrent.TimeUnit;
 
+import accord.api.Agent;
 import accord.burn.random.FrequentLargeRange;
 import accord.burn.random.RandomLong;
 import accord.burn.random.RandomWalkRange;
@@ -28,12 +29,14 @@ import accord.utils.RandomSource;
 public class SimulatedDelayedExecutorService extends TaskExecutorService
 {
     private final PendingQueue pending;
+    private final Agent agent;
     private final RandomSource random;
     private final RandomLong jitterInNano;
 
-    public SimulatedDelayedExecutorService(PendingQueue pending, RandomSource random)
+    public SimulatedDelayedExecutorService(PendingQueue pending, Agent agent, RandomSource random)
     {
         this.pending = pending;
+        this.agent = agent;
         this.random = random;
         // this is different from Apache Cassandra Simulator as this is computed differently for each executor
         // rather than being a global config
@@ -62,5 +65,11 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService
     public void execute(Task<?> task)
     {
         pending.add(task, jitterInNano.getLong(random), TimeUnit.NANOSECONDS);
+    }
+
+    @Override
+    public Agent agent()
+    {
+        return agent;
     }
 }

@@ -49,6 +49,7 @@ import accord.impl.basic.PendingQueue;
 import accord.impl.basic.PropagatingPendingQueue;
 import accord.impl.basic.RandomDelayQueue.Factory;
 import accord.impl.basic.SimulatedDelayedExecutorService;
+import accord.impl.list.ListAgent;
 import accord.impl.list.ListQuery;
 import accord.impl.list.ListRead;
 import accord.impl.list.ListRequest;
@@ -199,7 +200,8 @@ public class BurnTest
     {
         List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
         PendingQueue queue = new PropagatingPendingQueue(failures, new Factory(random).get());
-        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, random.fork());
+        ListAgent agent = new ListAgent(30L, failures::add);
+        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, agent, random.fork());
 
         StrictSerializabilityVerifier strictSerializable = new StrictSerializabilityVerifier(keyCount);
         Function<CommandStore, AsyncExecutor> executor = ignore -> globalExecutor;
@@ -276,7 +278,7 @@ public class BurnTest
         try
         {
             Cluster.run(toArray(nodes, Id[]::new), () -> queue,
-                        responseSink, failures::add,
+                        responseSink, globalExecutor,
                         () -> random.fork(),
                         () -> new AtomicLong()::incrementAndGet,
                         topologyFactory, () -> null);

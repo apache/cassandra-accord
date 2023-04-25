@@ -19,6 +19,7 @@
 package accord.burn;
 
 import accord.api.TestableConfigurationService;
+import accord.local.AgentExecutor;
 import accord.utils.RandomSource;
 import accord.local.Node;
 import accord.messages.*;
@@ -33,7 +34,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executor;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -42,7 +42,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
     private static final Logger logger = LoggerFactory.getLogger(BurnTestConfigurationService.class);
 
     private final Node.Id node;
-    private final Executor executor;
+    private final AgentExecutor executor;
     private final Function<Node.Id, Node> lookup;
     private final Supplier<RandomSource> randomSupplier;
     private final Map<Long, FetchTopology> pendingEpochs = new HashMap<>();
@@ -128,7 +128,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         }
     }
 
-    public BurnTestConfigurationService(Node.Id node, Executor executor, Supplier<RandomSource> randomSupplier, Topology topology, Function<Node.Id, Node> lookup, TopologyUpdates topologyUpdates)
+    public BurnTestConfigurationService(Node.Id node, AgentExecutor executor, Supplier<RandomSource> randomSupplier, Topology topology, Function<Node.Id, Node> lookup, TopologyUpdates topologyUpdates)
     {
         this.node = node;
         this.executor = executor;

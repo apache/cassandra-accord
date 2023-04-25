@@ -25,7 +25,6 @@ import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
@@ -35,6 +34,7 @@ import accord.coordinate.Timeout;
 import accord.impl.SimpleProgressLog;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.SizeOfIntersectionSorter;
+import accord.local.AgentExecutor;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Scheduler;
@@ -113,7 +113,7 @@ public class Main
         }
 
         @Override
-        public void send(Id to, Request send, Executor ignored, Callback callback)
+        public void send(Id to, Request send, AgentExecutor ignored, Callback callback)
         {
             // Executor is ignored due to the fact callbacks are applied in a single thread already
             long messageId = nextMessageId.incrementAndGet();

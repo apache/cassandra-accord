@@ -19,8 +19,10 @@
 package accord.coordinate.tracking;
 
 import accord.burn.TopologyUpdates;
+import accord.impl.TestAgent;
 import accord.impl.basic.RandomDelayQueue;
 import accord.impl.basic.SimulatedDelayedExecutorService;
+import accord.local.AgentExecutor;
 import accord.utils.DefaultRandom;
 import accord.utils.RandomSource;
 import accord.impl.IntHashKey;
@@ -37,7 +39,6 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.EnumMap;
 import java.util.List;
-import java.util.concurrent.Executor;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -99,14 +100,14 @@ public abstract class TrackerReconciler<ST extends ShardTracker, T extends Abstr
     {
         System.out.println("seed: " + seed);
         RandomSource random = new DefaultRandom(seed);
-        Executor executor = new SimulatedDelayedExecutorService(new RandomDelayQueue.Factory(random).get(), random);
+        SimulatedDelayedExecutorService executor = new SimulatedDelayedExecutorService(new RandomDelayQueue.Factory(random).get(), new TestAgent(), random);
         return topologies(random, executor).map(topologies -> constructor.apply(random, topologies))
                 .collect(Collectors.toList());
     }
 
     // TODO (required, testing): generalise and parameterise topology generation a bit more
     //                           also, select a subset of the generated topologies to correctly simulate topology consumption logic
-    private static Stream<Topologies> topologies(RandomSource random, Executor executor)
+    private static Stream<Topologies> topologies(RandomSource random, AgentExecutor executor)
     {
         TopologyFactory factory = new TopologyFactory(2 + random.nextInt(3), IntHashKey.ranges(4 + random.nextInt(12)));
         List<Id> nodes = cluster(factory.rf * (1 + random.nextInt(factory.shardRanges.length - 1)));

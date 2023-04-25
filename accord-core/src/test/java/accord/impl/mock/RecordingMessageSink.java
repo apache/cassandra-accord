@@ -18,6 +18,7 @@
 
 package accord.impl.mock;
 
+import accord.local.AgentExecutor;
 import accord.local.Node;
 import accord.messages.Callback;
 import accord.messages.Reply;
@@ -29,7 +30,6 @@ import org.junit.jupiter.api.Assertions;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.Executor;
 
 public class RecordingMessageSink extends SimpleMessageSink
 {
@@ -63,7 +63,7 @@ public class RecordingMessageSink extends SimpleMessageSink
     }
 
     @Override
-    public void send(Node.Id to, Request request, Executor executor, Callback callback)
+    public void send(Node.Id to, Request request, AgentExecutor executor, Callback callback)
     {
         requests.add(new Envelope<>(to, request, callback));
         super.send(to, request, executor, callback);

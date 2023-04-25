@@ -28,7 +28,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -39,10 +38,10 @@ import accord.api.MessageSink;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
 import accord.impl.*;
+import accord.local.AgentExecutor;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Scheduler;
-import accord.impl.list.ListAgent;
 import accord.impl.list.ListStore;
 import accord.local.ShardDistributor;
 import accord.messages.SafeCallback;
@@ -195,7 +194,7 @@ public class Cluster implements Scheduler
         run.run();
     }
 
-    public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, Consumer<Throwable> onFailure, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in)
+    public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, AgentExecutor executor, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in)
     {
 
         Topology topology = topologyFactory.toTopology(nodes);
@@ -203,7 +202,6 @@ public class Cluster implements Scheduler
         try
         {
             Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink);
-            Executor executor = new SimulatedDelayedExecutorService(sinks.pending, randomSupplier.get().fork());
             TopologyUpdates topologyUpdates = new TopologyUpdates(executor);
             TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, lookup::get);
             for (Id node : nodes)
@@ -212,7 +210,7 @@ public class Cluster implements Scheduler
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(node, executor, randomSupplier, topology, lookup::get, topologyUpdates);
                 lookup.put(node, new Node(node, messageSink, configService, nowSupplier.get(),
                                           () -> new ListStore(node), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
-                                          new ListAgent(30L, onFailure),
+                                          executor.agent(),
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
                                           SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending)));
             }

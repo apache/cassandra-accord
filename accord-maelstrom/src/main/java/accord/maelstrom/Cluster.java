@@ -33,7 +33,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -43,6 +42,7 @@ import java.util.function.Supplier;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.SimpleProgressLog;
 import accord.impl.InMemoryCommandStores;
+import accord.local.AgentExecutor;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.MessageSink;
@@ -97,10 +97,10 @@ public class Cluster implements Scheduler
         }
 
         @Override
-        public void send(Id to, Request send, Executor executor, Callback callback)
+        public void send(Id to, Request send, AgentExecutor executor, Callback callback)
         {
             long messageId = nextMessageId++;
-            SafeCallback sc = new SafeCallback(executor, lookup.apply(self).agent(), callback);
+            SafeCallback sc = new SafeCallback(executor, callback);
             callbacks.put(messageId, sc);
             parent.add(self, to, messageId, send);
             parent.pending.add((Runnable)() -> {

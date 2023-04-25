@@ -19,9 +19,9 @@
 package accord.impl.mock;
 
 import accord.NetworkFilter;
-import accord.api.Agent;
 import accord.api.MessageSink;
 import accord.impl.*;
+import accord.local.AgentExecutor;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.ShardDistributor;
@@ -42,7 +42,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
@@ -142,7 +141,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
     }
 
     @Override
-    public void send(Id from, Id to, Request request, Executor executor, Callback callback)
+    public void send(Id from, Id to, Request request, AgentExecutor executor, Callback callback)
     {
         Node node = nodes.get(to);
         if (node == null)
@@ -151,13 +150,11 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
             return;
         }
 
-        Agent agent = nodes.get(from).agent();
-
         if (networkFilter.shouldDiscard(from, to, request))
         {
             // TODO (desired, testing): more flexible timeouts
             if (callback != null)
-                new SafeCallback(executor, agent, callback).timeout(to);
+                new SafeCallback(executor, callback).timeout(to);
             logger.info("discarding filtered message from {} to {}: {}", from, to, request);
             return;
         }
@@ -165,7 +162,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         long messageId = nextMessageId();
         if (callback != null)
         {
-            SafeCallback sc = new SafeCallback(executor, agent, callback);
+            SafeCallback sc = new SafeCallback(executor, callback);
             callbacks.put(messageId, sc);
             node.scheduler().once(() -> {
                 if (callbacks.remove(messageId, sc))

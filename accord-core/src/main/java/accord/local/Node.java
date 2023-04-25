@@ -315,7 +315,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         send(shard, send, CommandStore.current(), callback);
     }
 
-    private void send(Shard shard, Request send, Executor executor, Callback callback)
+    private void send(Shard shard, Request send, AgentExecutor executor, Callback callback)
     {
         checkStore(executor);
         shard.nodes.forEach(node -> messageSink.send(node, send, executor, callback));
@@ -344,7 +344,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         send(to, send, CommandStore.current(), callback);
     }
 
-    public <T> void send(Collection<Id> to, Request send, Executor executor, Callback<T> callback)
+    public <T> void send(Collection<Id> to, Request send, AgentExecutor executor, Callback<T> callback)
     {
         checkStore(executor);
         to.forEach(dst -> messageSink.send(dst, send, executor, callback));
@@ -355,7 +355,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         send(to, requestFactory, CommandStore.current(), callback);
     }
 
-    public <T> void send(Collection<Id> to, Function<Id, Request> requestFactory, Executor executor, Callback<T> callback)
+    public <T> void send(Collection<Id> to, Function<Id, Request> requestFactory, AgentExecutor executor, Callback<T> callback)
     {
         checkStore(executor);
         to.forEach(dst -> messageSink.send(dst, requestFactory.apply(dst), executor, callback));
@@ -368,7 +368,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     }
 
     // send to a specific node
-    public <T> void send(Id to, Request send, Executor executor, Callback<T> callback)
+    public <T> void send(Id to, Request send, AgentExecutor executor, Callback<T> callback)
     {
         checkStore(executor);
         messageSink.send(to, send, executor, callback);

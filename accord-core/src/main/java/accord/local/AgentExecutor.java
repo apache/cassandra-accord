@@ -16,18 +16,18 @@
  * limitations under the License.
  */
 
-package accord.api;
+package accord.local;
 
-import accord.local.AgentExecutor;
-import accord.local.Node.Id;
-import accord.messages.Callback;
-import accord.messages.Reply;
-import accord.messages.ReplyContext;
-import accord.messages.Request;
+import accord.api.Agent;
+import accord.utils.async.AsyncExecutor;
 
-public interface MessageSink
+public interface AgentExecutor extends AsyncExecutor
 {
-    void send(Id to, Request request);
-    void send(Id to, Request request, AgentExecutor executor, Callback callback);
-    void reply(Id replyingToNode, ReplyContext replyContext, Reply reply);
+    Agent agent();
+
+    @Override
+    default void execute(Runnable command)
+    {
+        submit(command).begin(agent());
+    }
 }
