@@ -514,12 +514,6 @@ public abstract class Command implements CommonAttributes
         }
 
         @Override
-        public Ballot promised()
-        {
-            return Ballot.ZERO;
-        }
-
-        @Override
         public Ballot accepted()
         {
             return Ballot.ZERO;

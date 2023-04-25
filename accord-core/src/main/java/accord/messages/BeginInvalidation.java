@@ -30,6 +30,7 @@ import accord.primitives.TxnId;
 import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 import static accord.primitives.Route.castToFullRoute;
 import static accord.primitives.Route.isFullRoute;
@@ -142,6 +143,21 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
         public boolean isPromised()
         {
             return supersededBy == null;
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            InvalidateReply that = (InvalidateReply) o;
+            return acceptedFastPath == that.acceptedFastPath && Objects.equals(supersededBy, that.supersededBy) && Objects.equals(accepted, that.accepted) && status == that.status && Objects.equals(route, that.route) && Objects.equals(homeKey, that.homeKey);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(supersededBy, accepted, status, acceptedFastPath, route, homeKey);
         }
 
         @Override
