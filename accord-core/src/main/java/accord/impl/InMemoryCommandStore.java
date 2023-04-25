@@ -847,6 +847,12 @@ public abstract class InMemoryCommandStore implements CommandStore
 
         @Override
         public void shutdown() {}
+
+        @Override
+        public void register()
+        {
+            // no-op; due to the nature of this class, this is handled while executing the task
+        }
     }
 
     public static class SingleThread extends InMemoryCommandStore

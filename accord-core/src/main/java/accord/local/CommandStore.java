@@ -141,4 +141,8 @@ public interface CommandStore extends AsyncExecutor
     }
 
     void shutdown();
+    default void register()
+    {
+        execute(() -> CommandStore.register(this));
+    }
 }
