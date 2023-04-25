@@ -112,7 +112,7 @@ public class ListRequest implements Request
                     RoutingKey homeKey = ((CoordinateFailed) fail).homeKey();
                     TxnId txnId = ((CoordinateFailed) fail).txnId();
                     node.commandStores()
-                        .from(homeKey)
+                        .select(homeKey)
                         .execute(() -> CheckOnResult.checkOnResult(node, txnId, homeKey, (s, f) -> {
                             if (f != null)
                                 return;

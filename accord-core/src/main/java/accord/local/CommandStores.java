@@ -422,12 +422,12 @@ public abstract class CommandStores<S extends CommandStore>
             shard.store.shutdown();
     }
 
-    public CommandStore from(RoutingKey key)
+    public CommandStore select(RoutingKey key)
     {
-        return  from(ranges -> ranges.contains(key));
+        return  select(ranges -> ranges.contains(key));
     }
 
-    private CommandStore from(Predicate<Ranges> fn)
+    private CommandStore select(Predicate<Ranges> fn)
     {
         ShardHolder[] shards = current.shards;
         for (ShardHolder holder : shards)

@@ -73,7 +73,7 @@ public class Coordinate extends AsyncResults.SettableResult<Result> implements C
         // TODO (desired, efficiency): consider sending only to electorate of most recent topology (as only these PreAccept votes matter)
         // note that we must send to all replicas of old topology, as electorate may not be reachable
         node.send(tracker.nodes(), to -> new PreAccept(to, tracker.topologies(), txnId, txn, route),
-                  node.commandStores().from(route.homeKey()), this);
+                  node.commandStores().select(route.homeKey()), this);
     }
 
     public static AsyncResult<Result> coordinate(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
