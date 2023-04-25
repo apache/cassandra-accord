@@ -381,6 +381,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
                 }
                 catch (Throwable t)
                 {
+                    // TODO (low priority, correctness): If the executor is shutdown then the callback may run in an unexpected thread, which may not be thread safe
                     callback.accept(null, t);
                 }
             }
