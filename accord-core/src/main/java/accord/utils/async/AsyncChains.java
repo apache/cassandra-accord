@@ -341,18 +341,29 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
                 try
                 {
                     executor.execute(() -> {
+                        T value;
                         try
                         {
-                            callback.accept(mapper.apply(v), null);
+                            value = mapper.apply(v);
                         }
                         catch (Throwable t)
                         {
                             callback.accept(null, t);
+                            return;
+                        }
+                        try
+                        {
+                            callback.accept(value, null);
+                        }
+                        catch (Throwable t)
+                        {
+                            // TODO (low priority, correctness): if callback fails there is no source to fallback to
                         }
                     });
                 }
                 catch (Throwable t)
                 {
+                    // TODO (low priority, correctness): If the executor is shutdown then the callback may run in an unexpected thread, which may not be thread safe
                     callback.accept(null, t);
                 }
             }
