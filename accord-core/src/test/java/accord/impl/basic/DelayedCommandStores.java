@@ -52,18 +52,6 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
                new DelayedCommandStores(time, agent, store, random, shardDistributor, progressLogFactory, new SimulatedDelayedExecutorService(pending, agent, random));
     }
 
-    private static class Pending
-    {
-        final Task<?> task;
-        final long nowMillis;
-
-        private Pending(Task<?> task, long nowMillis)
-        {
-            this.task = task;
-            this.nowMillis = nowMillis;
-        }
-    }
-
     public static class DelayedCommandStore extends InMemoryCommandStore
     {
         private final SimulatedDelayedExecutorService executor;
