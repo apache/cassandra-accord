@@ -958,9 +958,16 @@ public abstract class InMemoryCommandStore implements CommandStore
             }
         }
 
-        public Debug(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
+        private Debug(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
         {
             super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
+        }
+
+        public static Debug create(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
+        {
+            Debug debug = new Debug(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
+            debug.execute(() -> CommandStore.register(debug));
+            return debug;
         }
 
         @Override

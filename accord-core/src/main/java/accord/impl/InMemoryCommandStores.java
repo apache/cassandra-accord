@@ -52,7 +52,7 @@ public class InMemoryCommandStores
     {
         public Debug(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory)
         {
-            super(time, agent, store, random, shardDistributor, progressLogFactory, InMemoryCommandStore.Debug::new);
+            super(time, agent, store, random, shardDistributor, progressLogFactory, InMemoryCommandStore.Debug::create);
         }
     }
 }
