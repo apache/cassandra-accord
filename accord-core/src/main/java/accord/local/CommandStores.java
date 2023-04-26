@@ -81,9 +81,7 @@ public abstract class CommandStores<S extends CommandStore>
 
         CommandStore create(int id, RangesForEpochHolder rangesForEpoch)
         {
-            CommandStore store = shardFactory.create(id, time, agent, this.store, progressLogFactory, rangesForEpoch);
-            store.register();
-            return store;
+            return shardFactory.create(id, time, agent, this.store, progressLogFactory, rangesForEpoch);
         }
     }
 

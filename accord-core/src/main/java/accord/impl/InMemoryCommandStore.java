@@ -847,12 +847,6 @@ public abstract class InMemoryCommandStore implements CommandStore
 
         @Override
         public void shutdown() {}
-
-        @Override
-        public void register()
-        {
-            // no-op; due to the nature of this class, this is handled while executing the task
-        }
     }
 
     public static class SingleThread extends InMemoryCommandStore
@@ -860,20 +854,22 @@ public abstract class InMemoryCommandStore implements CommandStore
         private Thread thread; // when run in the executor this will be non-null, null implies not running in this store
         private final ExecutorService executor;
 
-        public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
+        private SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
         {
-            this(id, time, agent, store, progressLogFactory, rangesForEpochHolder, Executors.newSingleThreadExecutor(r -> {
+            super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
+            this.executor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
                 thread.setName(CommandStore.class.getSimpleName() + '[' + time.id() + ']');
                 return thread;
-            }));
+            });
+            executor.execute(() -> thread = Thread.currentThread());
         }
 
-        public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder, ExecutorService executor)
+        public static SingleThread create(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
         {
-            super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
-            this.executor = executor;
-            executor.execute(() -> thread = Thread.currentThread());
+            SingleThread st = new SingleThread(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
+            st.executor.execute(() -> CommandStore.register(st));
+            return st;
         }
 
         void assertThread()

@@ -133,8 +133,4 @@ public interface CommandStore extends AgentExecutor
     <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);
 
     void shutdown();
-    default void register()
-    {
-        execute(() -> CommandStore.register(this));
-    }
 }

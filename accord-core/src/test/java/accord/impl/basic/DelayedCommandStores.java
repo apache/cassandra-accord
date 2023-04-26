@@ -119,11 +119,5 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         {
 
         }
-
-        @Override
-        public void register()
-        {
-            // no-op; due to the nature of this class, this is handled while executing the task
-        }
     }
 }

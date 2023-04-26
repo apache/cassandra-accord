@@ -39,7 +39,7 @@ public class InMemoryCommandStores
     {
         public SingleThread(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory)
         {
-            super(time, agent, store, random, shardDistributor, progressLogFactory, InMemoryCommandStore.SingleThread::new);
+            super(time, agent, store, random, shardDistributor, progressLogFactory, InMemoryCommandStore.SingleThread::create);
         }
 
         public SingleThread(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
