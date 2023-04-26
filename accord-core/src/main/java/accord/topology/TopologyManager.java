@@ -267,7 +267,7 @@ public class TopologyManager implements ConfigurationService.Listener
         {
             result = epochs.awaitEpoch(epoch);
         }
-        CommandStore current = CommandStore.Unsafe.maybeCurrent();
+        CommandStore current = CommandStore.maybeCurrent();
         return current == null || result.isDone() ? result : result.withExecutor(current);
     }
 

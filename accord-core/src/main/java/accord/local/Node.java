@@ -375,7 +375,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     private void checkStore(AgentExecutor executor)
     {
-        CommandStore current = CommandStore.Unsafe.maybeCurrent();
+        CommandStore current = CommandStore.maybeCurrent();
         if (current != null && current != executor)
             throw new IllegalStateException(String.format("Used wrong CommandStore %s; current is %s", executor, current));
     }

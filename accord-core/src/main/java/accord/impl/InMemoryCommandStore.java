@@ -44,16 +44,9 @@ import static accord.local.SafeCommandStore.TestKind.Ws;
 import static accord.local.Status.*;
 import static accord.primitives.Routables.Slice.Minimal;
 
-public abstract class InMemoryCommandStore implements CommandStore
+public abstract class InMemoryCommandStore extends CommandStore
 {
     private static final Logger logger = LoggerFactory.getLogger(InMemoryCommandStore.class);
-
-    private final int id;
-    private final NodeTimeService time;
-    private final Agent agent;
-    private final DataStore store;
-    private final ProgressLog progressLog;
-    private final RangesForEpochHolder rangesForEpochHolder;
 
     private final NavigableMap<TxnId, GlobalCommand> commands = new TreeMap<>();
     private final NavigableMap<RoutableKey, GlobalCommandsForKey> commandsForKey = new TreeMap<>();
@@ -66,12 +59,7 @@ public abstract class InMemoryCommandStore implements CommandStore
 
     public InMemoryCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
     {
-        this.id = id;
-        this.time = time;
-        this.agent = agent;
-        this.store = store;
-        this.progressLog = progressLogFactory.create(this);
-        this.rangesForEpochHolder = rangesForEpochHolder;
+        super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
     }
 
     @Override
@@ -775,7 +763,7 @@ public abstract class InMemoryCommandStore implements CommandStore
             active = queue.poll();
             while (active != null)
             {
-                CommandStore.Unsafe.runWith(this, () -> {
+                this.unsafeRunIn(() -> {
                     try
                     {
                         active.run();
@@ -800,7 +788,7 @@ public abstract class InMemoryCommandStore implements CommandStore
         @Override
         public boolean inStore()
         {
-            return CommandStore.Unsafe.maybeCurrent() == this;
+            return CommandStore.maybeCurrent() == this;
         }
 
         @Override
@@ -868,7 +856,7 @@ public abstract class InMemoryCommandStore implements CommandStore
         public static SingleThread create(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
         {
             SingleThread st = new SingleThread(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
-            st.executor.execute(() -> CommandStore.register(st));
+            st.execute(() -> CommandStore.register(st));
             return st;
         }
 

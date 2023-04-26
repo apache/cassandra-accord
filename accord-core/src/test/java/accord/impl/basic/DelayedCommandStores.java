@@ -71,7 +71,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         @Override
         public boolean inStore()
         {
-            return CommandStore.Unsafe.maybeCurrent() == this;
+            return CommandStore.maybeCurrent() == this;
         }
 
         @Override
@@ -89,7 +89,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         @Override
         public <T> AsyncChain<T> submit(Callable<T> fn)
         {
-            Task<T> task = new Task<>(() -> Unsafe.runWith(this, fn));
+            Task<T> task = new Task<>(() -> this.unsafeRunIn(fn));
             boolean wasEmpty = pending.isEmpty();
             pending.add(task);
             if (wasEmpty)

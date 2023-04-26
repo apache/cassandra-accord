@@ -30,14 +30,12 @@ import java.util.function.Function;
 
 import javax.annotation.Nullable;
 
-import com.google.common.annotations.VisibleForTesting;
-
 /**
  * Single threaded internal shard of accord transaction metadata
  */
-public interface CommandStore extends AgentExecutor
+public abstract class CommandStore implements AgentExecutor
 {
-    interface Factory
+    public interface Factory
     {
         CommandStore create(int id,
                             NodeTimeService time,
@@ -47,90 +45,113 @@ public interface CommandStore extends AgentExecutor
                             RangesForEpochHolder rangesForEpoch);
     }
 
-    @VisibleForTesting
-    class Unsafe
+    @Nullable
+    public static CommandStore maybeCurrent()
     {
-        private static final ThreadLocal<CommandStore> CURRENT_STORE = new ThreadLocal<>();
-
-        @Nullable
-        public static CommandStore maybeCurrent()
-        {
-            return CURRENT_STORE.get();
-        }
-
-        private static void register(CommandStore store)
-        {
-            CURRENT_STORE.set(store);
-        }
-
-        private static void remove()
-        {
-            CURRENT_STORE.remove();
-        }
-
-        public static void runWith(CommandStore store, Runnable fn)
-        {
-            CommandStore prev = maybeCurrent();
-            register(store);
-            try
-            {
-                fn.run();
-            }
-            finally
-            {
-                if (prev == null) remove();
-                else register(prev);
-            }
-        }
-
-        public static <T> T runWith(CommandStore store, Callable<T> fn) throws Exception
-        {
-            CommandStore prev = maybeCurrent();
-            register(store);
-            try
-            {
-                return fn.call();
-            }
-            finally
-            {
-                if (prev == null) remove();
-                else register(prev);
-            }
-        }
+        return CURRENT_STORE.get();
     }
 
-    static CommandStore current()
+    public static CommandStore current()
     {
-        CommandStore cs = Unsafe.CURRENT_STORE.get();
+        CommandStore cs = maybeCurrent();
         if (cs == null)
             throw new IllegalStateException("Attempted to access current CommandStore, but not running in a CommandStore");
         return cs;
     }
 
-    static void register(CommandStore store)
+    protected static void register(CommandStore store)
     {
         if (!store.inStore())
             throw new IllegalStateException("Unable to register a CommandStore when not running in it; store " + store);
-        Unsafe.CURRENT_STORE.set(store);
+        CURRENT_STORE.set(store);
     }
 
-    static void checkInStore()
+    public static void checkInStore()
     {
-        CommandStore store = Unsafe.maybeCurrent();
+        CommandStore store = maybeCurrent();
         if (store == null) throw new IllegalStateException("Expected to be running in a CommandStore but is not");
     }
 
-    static void checkNotInStore()
+    public static void checkNotInStore()
     {
-        CommandStore store = Unsafe.maybeCurrent();
+        CommandStore store = maybeCurrent();
         if (store != null)
             throw new IllegalStateException("Expected to not be running in a CommandStore, but running in " + store);
     }
 
-    int id();
-    boolean inStore();
-    AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer);
-    <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);
+    private static final ThreadLocal<CommandStore> CURRENT_STORE = new ThreadLocal<>();
 
-    void shutdown();
+    protected final int id;
+    protected final NodeTimeService time;
+    protected final Agent agent;
+    protected final DataStore store;
+    protected final ProgressLog progressLog;
+    protected final RangesForEpochHolder rangesForEpochHolder;
+
+    protected CommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
+    {
+        this.id = id;
+        this.time = time;
+        this.agent = agent;
+        this.store = store;
+        this.progressLog = progressLogFactory.create(this);
+        this.rangesForEpochHolder = rangesForEpochHolder;
+    }
+
+    public int id()
+    {
+        return id;
+    }
+
+    @Override
+    public Agent agent()
+    {
+        return agent;
+    }
+
+    public abstract boolean inStore();
+
+    public abstract AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer);
+
+    public abstract <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);
+
+    public abstract void shutdown();
+
+    protected void unsafeRunIn(Runnable fn)
+    {
+        CommandStore prev = maybeCurrent();
+        CURRENT_STORE.set(this);
+        try
+        {
+            fn.run();
+        }
+        finally
+        {
+            if (prev == null) CURRENT_STORE.remove();
+            else CURRENT_STORE.set(prev);
+        }
+    }
+
+    protected <T> T unsafeRunIn(Callable<T> fn) throws Exception
+    {
+        CommandStore prev = maybeCurrent();
+        CURRENT_STORE.set(this);
+        try
+        {
+            return fn.call();
+        }
+        finally
+        {
+            if (prev == null) CURRENT_STORE.remove();
+            else CURRENT_STORE.set(prev);
+        }
+    }
+
+    @Override
+    public String toString()
+    {
+        return getClass().getSimpleName() + "{" +
+               "id=" + id +
+               '}';
+    }
 }
