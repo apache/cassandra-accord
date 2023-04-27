@@ -39,7 +39,7 @@ public class InMemoryCommandStores
     {
         public SingleThread(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory)
         {
-            super(time, agent, store, random, shardDistributor, progressLogFactory, InMemoryCommandStore.SingleThread::create);
+            super(time, agent, store, random, shardDistributor, progressLogFactory, InMemoryCommandStore.SingleThread::new);
         }
 
         public SingleThread(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
@@ -52,7 +52,7 @@ public class InMemoryCommandStores
     {
         public Debug(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory)
         {
-            super(time, agent, store, random, shardDistributor, progressLogFactory, InMemoryCommandStore.Debug::create);
+            super(time, agent, store, random, shardDistributor, progressLogFactory, InMemoryCommandStore.Debug::new);
         }
     }
 }

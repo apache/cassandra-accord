@@ -842,7 +842,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         private Thread thread; // when run in the executor this will be non-null, null implies not running in this store
         private final ExecutorService executor;
 
-        private SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
+        public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
         {
             super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
             this.executor = Executors.newSingleThreadExecutor(r -> {
@@ -850,14 +850,10 @@ public abstract class InMemoryCommandStore extends CommandStore
                 thread.setName(CommandStore.class.getSimpleName() + '[' + time.id() + ']');
                 return thread;
             });
+            // "this" is leaked before constructor is completed, but since all fields are "final" and set before "this"
+            // is leaked, then visibility should not be an issue.
             executor.execute(() -> thread = Thread.currentThread());
-        }
-
-        public static SingleThread create(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
-        {
-            SingleThread st = new SingleThread(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
-            st.execute(() -> CommandStore.register(st));
-            return st;
+            executor.execute(() -> CommandStore.register(this));
         }
 
         void assertThread()
@@ -946,16 +942,9 @@ public abstract class InMemoryCommandStore extends CommandStore
             }
         }
 
-        private Debug(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
+        public Debug(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
         {
             super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
-        }
-
-        public static Debug create(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
-        {
-            Debug debug = new Debug(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
-            debug.execute(() -> CommandStore.register(debug));
-            return debug;
         }
 
         @Override
