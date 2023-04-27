@@ -45,40 +45,6 @@ public abstract class CommandStore implements AgentExecutor
                             RangesForEpochHolder rangesForEpoch);
     }
 
-    @Nullable
-    public static CommandStore maybeCurrent()
-    {
-        return CURRENT_STORE.get();
-    }
-
-    public static CommandStore current()
-    {
-        CommandStore cs = maybeCurrent();
-        if (cs == null)
-            throw new IllegalStateException("Attempted to access current CommandStore, but not running in a CommandStore");
-        return cs;
-    }
-
-    protected static void register(CommandStore store)
-    {
-        if (!store.inStore())
-            throw new IllegalStateException("Unable to register a CommandStore when not running in it; store " + store);
-        CURRENT_STORE.set(store);
-    }
-
-    public static void checkInStore()
-    {
-        CommandStore store = maybeCurrent();
-        if (store == null) throw new IllegalStateException("Expected to be running in a CommandStore but is not");
-    }
-
-    public static void checkNotInStore()
-    {
-        CommandStore store = maybeCurrent();
-        if (store != null)
-            throw new IllegalStateException("Expected to not be running in a CommandStore, but running in " + store);
-    }
-
     private static final ThreadLocal<CommandStore> CURRENT_STORE = new ThreadLocal<>();
 
     protected final int id;
@@ -153,5 +119,39 @@ public abstract class CommandStore implements AgentExecutor
         return getClass().getSimpleName() + "{" +
                "id=" + id +
                '}';
+    }
+
+    @Nullable
+    public static CommandStore maybeCurrent()
+    {
+        return CURRENT_STORE.get();
+    }
+
+    public static CommandStore current()
+    {
+        CommandStore cs = maybeCurrent();
+        if (cs == null)
+            throw new IllegalStateException("Attempted to access current CommandStore, but not running in a CommandStore");
+        return cs;
+    }
+
+    protected static void register(CommandStore store)
+    {
+        if (!store.inStore())
+            throw new IllegalStateException("Unable to register a CommandStore when not running in it; store " + store);
+        CURRENT_STORE.set(store);
+    }
+
+    public static void checkInStore()
+    {
+        CommandStore store = maybeCurrent();
+        if (store == null) throw new IllegalStateException("Expected to be running in a CommandStore but is not");
+    }
+
+    public static void checkNotInStore()
+    {
+        CommandStore store = maybeCurrent();
+        if (store != null)
+            throw new IllegalStateException("Expected to not be running in a CommandStore, but running in " + store);
     }
 }
