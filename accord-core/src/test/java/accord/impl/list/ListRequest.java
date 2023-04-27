@@ -111,21 +111,23 @@ public class ListRequest implements Request
                 ((Cluster)node.scheduler()).onDone(() -> {
                     RoutingKey homeKey = ((CoordinateFailed) fail).homeKey();
                     TxnId txnId = ((CoordinateFailed) fail).txnId();
-                    CheckOnResult.checkOnResult(node, txnId, homeKey, (s, f) -> {
-                        if (f != null)
-                            return;
-                        switch (s)
-                        {
-                            case Invalidated:
-                                node.reply(client, replyContext, new ListResult(client, ((Packet)replyContext).requestId, txnId, null, null, null, null));
-                                break;
-                            case Lost:
-                                node.reply(client, replyContext, new ListResult(client, ((Packet)replyContext).requestId, txnId, null, null, new int[0][], null));
-                                break;
-                            case Neither:
-                                // currently caught elsewhere in response tracking, but might help to throw an exception here
-                        }
-                    });
+                    node.commandStores()
+                        .select(homeKey)
+                        .execute(() -> CheckOnResult.checkOnResult(node, txnId, homeKey, (s, f) -> {
+                            if (f != null)
+                                return;
+                            switch (s)
+                            {
+                                case Invalidated:
+                                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, null, null));
+                                    break;
+                                case Lost:
+                                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, new int[0][], null));
+                                    break;
+                                case Neither:
+                                    // currently caught elsewhere in response tracking, but might help to throw an exception here
+                            }
+                        }));
                 });
             }
         }

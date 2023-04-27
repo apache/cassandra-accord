@@ -38,13 +38,13 @@ import accord.api.MessageSink;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
 import accord.impl.*;
+import accord.local.AgentExecutor;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.api.Scheduler;
-import accord.impl.list.ListAgent;
 import accord.impl.list.ListStore;
 import accord.local.ShardDistributor;
-import accord.messages.Callback;
+import accord.messages.SafeCallback;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.topology.TopologyRandomizer;
@@ -150,24 +150,12 @@ public class Cluster implements Scheduler
             if (deliver.message instanceof Reply)
             {
                 Reply reply = (Reply) deliver.message;
-                Callback callback = reply.isFinal()
-                        ? sinks.get(deliver.dst).callbacks.remove(deliver.replyId)
-                        : sinks.get(deliver.dst).callbacks.get(deliver.replyId);
+                SafeCallback callback = reply.isFinal()
+                                        ? sinks.get(deliver.dst).callbacks.remove(deliver.replyId)
+                                        : sinks.get(deliver.dst).callbacks.get(deliver.replyId);
 
                 if (callback != null)
-                {
-                    on.scheduler().now(() -> {
-                        try
-                        {
-                            callback.onSuccess(deliver.src, reply);
-                        }
-                        catch (Throwable t)
-                        {
-                            callback.onCallbackFailure(deliver.src, t);
-                            on.agent().onUncaughtException(t);
-                        }
-                    });
-                }
+                    callback.success(deliver.src, reply);
             }
             else on.receive((Request) deliver.message, deliver.src, deliver);
         }
@@ -206,24 +194,25 @@ public class Cluster implements Scheduler
         run.run();
     }
 
-    public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, Consumer<Throwable> onFailure, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in)
+    public static void run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, AgentExecutor executor, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in)
     {
-        TopologyUpdates topologyUpdates = new TopologyUpdates();
+
         Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> lookup = new LinkedHashMap<>();
-        TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, lookup::get);
         try
         {
             Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink);
+            TopologyUpdates topologyUpdates = new TopologyUpdates(executor);
+            TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, lookup::get);
             for (Id node : nodes)
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
-                BurnTestConfigurationService configService = new BurnTestConfigurationService(node, messageSink, randomSupplier, topology, lookup::get, topologyUpdates);
+                BurnTestConfigurationService configService = new BurnTestConfigurationService(node, executor, randomSupplier, topology, lookup::get, topologyUpdates);
                 lookup.put(node, new Node(node, messageSink, configService, nowSupplier.get(),
                                           () -> new ListStore(node), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
-                                          new ListAgent(30L, onFailure),
+                                          executor.agent(),
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
-                                          SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending, randomSupplier.get())));
+                                          SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending)));
             }
 
             List<Id> nodesList = new ArrayList<>(Arrays.asList(nodes));

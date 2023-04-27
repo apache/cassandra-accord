@@ -21,8 +21,9 @@ package accord.burn;
 import accord.api.TestableConfigurationService;
 import accord.impl.InMemoryCommandStore;
 import accord.coordinate.FetchData;
-import accord.impl.InMemoryCommandStores;
+import accord.local.AgentExecutor;
 import accord.local.Command;
+import accord.local.CommandStore;
 import accord.local.Commands;
 import accord.local.Node;
 import accord.local.Status;
@@ -43,7 +44,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -53,7 +53,6 @@ import static accord.coordinate.Invalidate.invalidate;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.local.Status.*;
 import static accord.local.Status.Known.*;
-import static accord.utils.async.AsyncChains.getUninterruptibly;
 
 public class TopologyUpdates
 {
@@ -91,7 +90,7 @@ public class TopologyUpdates
             if (!node.topology().hasEpoch(toEpoch))
             {
                 node.configService().fetchTopologyForEpoch(toEpoch);
-                node.topology().awaitEpoch(toEpoch).addCallback(() -> process(node, onDone));
+                node.topology().awaitEpoch(toEpoch).addCallback(() -> process(node, onDone)).begin(node.agent());
                 return;
             }
 
@@ -142,19 +141,21 @@ public class TopologyUpdates
                         dieExceptionally(invalidate.addCallback(((unused, failure) -> onDone.accept(failure == null))).beginAsResult());
                 }
                 return null;
-            }).beginAsResult();
+            }, node.commandStores().any()).beginAsResult();
             dieExceptionally(sync);
         }
     }
 
     private final Set<Long> pendingTopologies = Sets.newConcurrentHashSet();
+    private final AgentExecutor executor;
 
     public static <T> BiConsumer<T, Throwable> dieOnException()
     {
         return (result, throwable) -> {
             if (throwable != null)
             {
-                logger.error("", throwable);
+                logger.error("Unexpected exception", throwable);
+                logger.error("", new Throwable("Shutting down test"));
                 System.exit(1);
             }
         };
@@ -166,10 +167,16 @@ public class TopologyUpdates
         return stage;
     }
 
+    public TopologyUpdates(AgentExecutor executor)
+    {
+        this.executor = executor;
+    }
+
     public MessageTask notify(Node originator, Collection<Node.Id> cluster, Topology update)
     {
         pendingTopologies.add(update.epoch());
-        return MessageTask.begin(originator, cluster, "TopologyNotify:" + update.epoch(), (node, from, onDone) -> {
+        CommandStore.checkNotInStore();
+        return MessageTask.begin(originator, cluster, executor, "TopologyNotify:" + update.epoch(), (node, from, onDone) -> {
             long nodeEpoch = node.topology().epoch();
             if (nodeEpoch + 1 < update.epoch())
                 onDone.accept(false);
@@ -186,7 +193,7 @@ public class TopologyUpdates
         return result;
     }
 
-    private static AsyncChain<Stream<MessageTask>> syncEpochCommands(Node node, long srcEpoch, Ranges ranges, Function<CommandSync, Collection<Node.Id>> recipients, long trgEpoch, boolean committedOnly)
+    private AsyncChain<Stream<MessageTask>> syncEpochCommands(Node node, long srcEpoch, Ranges ranges, Function<CommandSync, Collection<Node.Id>> recipients, long trgEpoch, boolean committedOnly)
     {
         Map<TxnId, CheckStatusOk> syncMessages = new ConcurrentHashMap<>();
         Consumer<Command> commandConsumer = command -> syncMessages.merge(command.txnId(), new CheckStatusOk(node, command), CheckStatusOk::merge);
@@ -198,7 +205,7 @@ public class TopologyUpdates
 
         return start.map(ignore -> syncMessages.entrySet().stream().map(e -> {
             CommandSync sync = new CommandSync(e.getKey(), e.getValue(), srcEpoch, trgEpoch);
-            return MessageTask.of(node, recipients.apply(sync), sync.toString(), sync::process);
+            return MessageTask.of(node, recipients.apply(sync), executor, sync.toString(), sync::process);
         }));
     }
 
@@ -208,13 +215,14 @@ public class TopologyUpdates
     /**
      * Syncs all replicated commands. Overkill, but useful for confirming issues in optimizedSync
      */
-    private static AsyncChain<Stream<MessageTask>> thoroughSync(Node node, long syncEpoch)
+    private AsyncChain<Stream<MessageTask>> thoroughSync(Node node, long syncEpoch)
     {
         Topology syncTopology = node.configService().getTopologyForEpoch(syncEpoch);
         Topology localTopology = syncTopology.forNode(node.id());
         Function<CommandSync, Collection<Node.Id>> allNodes = cmd -> node.topology().withUnsyncedEpochs(cmd.route, syncEpoch + 1).nodes();
 
         Ranges ranges = localTopology.ranges();
+
         List<AsyncChain<Stream<MessageTask>>> work = new ArrayList<>();
         for (long epoch=1; epoch<=syncEpoch; epoch++)
             work.add(syncEpochCommands(node, epoch, ranges, allNodes, syncEpoch, COMMITTED_ONLY));
@@ -224,7 +232,7 @@ public class TopologyUpdates
     /**
      * Syncs all newly replicated commands when nodes are gaining ranges and the current epoch
      */
-    private static AsyncChain<Stream<MessageTask>> optimizedSync(Node node, long srcEpoch)
+    private AsyncChain<Stream<MessageTask>> optimizedSync(Node node, long srcEpoch)
     {
         long trgEpoch = srcEpoch + 1;
         Topology syncTopology = node.configService().getTopologyForEpoch(srcEpoch);
@@ -264,7 +272,7 @@ public class TopologyUpdates
         return AsyncChains.reduce(work, Stream.empty(), Stream::concat);
     }
 
-    private static AsyncChain<Void> sync(Node node, long syncEpoch)
+    private AsyncChain<Void> sync(Node node, long syncEpoch)
     {
         return optimizedSync(node, syncEpoch)
                 .flatMap(messageStream -> {
@@ -288,7 +296,7 @@ public class TopologyUpdates
     public AsyncResult<Void> syncEpoch(Node originator, long epoch, Collection<Node.Id> cluster)
     {
         AsyncResult<Void> result = dieExceptionally(sync(originator, epoch)
-                .flatMap(v -> MessageTask.apply(originator, cluster, "SyncComplete:" + epoch, (node, from, onDone) -> {
+                                                    .flatMap(v -> MessageTask.apply(originator, cluster, executor, "SyncComplete:" + epoch, (node, from, onDone) -> {
                     node.onEpochSyncComplete(originator.id(), epoch);
                     onDone.accept(true);
                 })).beginAsResult());

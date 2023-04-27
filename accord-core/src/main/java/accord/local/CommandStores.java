@@ -26,6 +26,8 @@ import accord.utils.MapReduce;
 import accord.utils.MapReduceConsume;
 
 import com.google.common.annotations.VisibleForTesting;
+
+import accord.utils.RandomSource;
 import org.agrona.collections.Hashing;
 import org.agrona.collections.Int2ObjectHashMap;
 import accord.utils.async.AsyncChain;
@@ -35,10 +37,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
-import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.IntStream;
 
 import static accord.local.PreLoadContext.empty;
@@ -54,6 +55,7 @@ public abstract class CommandStores<S extends CommandStore>
         CommandStores<?> create(NodeTimeService time,
                                 Agent agent,
                                 DataStore store,
+                                RandomSource random,
                                 ShardDistributor shardDistributor,
                                 ProgressLog.Factory progressLogFactory);
     }
@@ -65,19 +67,21 @@ public abstract class CommandStores<S extends CommandStore>
         private final DataStore store;
         private final ProgressLog.Factory progressLogFactory;
         private final CommandStore.Factory shardFactory;
+        private final RandomSource random;
 
-        Supplier(NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
+        Supplier(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
         {
             this.time = time;
             this.agent = agent;
             this.store = store;
+            this.random = random;
             this.progressLogFactory = progressLogFactory;
             this.shardFactory = shardFactory;
         }
 
         CommandStore create(int id, RangesForEpochHolder rangesForEpoch)
         {
-            return shardFactory.create(id, time, agent, store, progressLogFactory, rangesForEpoch);
+            return shardFactory.create(id, time, agent, this.store, progressLogFactory, rangesForEpoch);
         }
     }
 
@@ -230,10 +234,10 @@ public abstract class CommandStores<S extends CommandStore>
         this.current = new Snapshot(new ShardHolder[0], Topology.EMPTY, Topology.EMPTY);
     }
 
-    public CommandStores(NodeTimeService time, Agent agent, DataStore store, ShardDistributor shardDistributor,
+    public CommandStores(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor,
                          ProgressLog.Factory progressLogFactory, CommandStore.Factory shardFactory)
     {
-        this(new Supplier(time, agent, store, progressLogFactory, shardFactory), shardDistributor);
+        this(new Supplier(time, agent, store, random, progressLogFactory, shardFactory), shardDistributor);
     }
 
     public Topology local()
@@ -414,6 +418,30 @@ public abstract class CommandStores<S extends CommandStore>
     {
         for (ShardHolder shard : current.shards)
             shard.store.shutdown();
+    }
+
+    public CommandStore select(RoutingKey key)
+    {
+        return  select(ranges -> ranges.contains(key));
+    }
+
+    private CommandStore select(Predicate<Ranges> fn)
+    {
+        ShardHolder[] shards = current.shards;
+        for (ShardHolder holder : shards)
+        {
+            if (fn.test(holder.ranges().currentRanges()))
+                return holder.store;
+        }
+        return any();
+    }
+
+    @VisibleForTesting
+    public CommandStore any()
+    {
+        ShardHolder[] shards = current.shards;
+        if (shards.length == 0) throw new IllegalStateException("Unable to get CommandStore; non defined");
+        return shards[supplier.random.nextInt(shards.length)].store;
     }
 
     public CommandStore forId(int id)

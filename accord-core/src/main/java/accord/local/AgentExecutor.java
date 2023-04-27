@@ -16,30 +16,18 @@
  * limitations under the License.
  */
 
-package accord.impl.list;
+package accord.local;
 
-import java.util.Arrays;
-import java.util.TreeMap;
-import java.util.stream.Collectors;
+import accord.api.Agent;
+import accord.utils.async.AsyncExecutor;
 
-import accord.api.Data;
-import accord.api.Key;
-
-public class ListData extends TreeMap<Key, int[]> implements Data
+public interface AgentExecutor extends AsyncExecutor
 {
-    @Override
-    public Data merge(Data data)
-    {
-        if (data != null)
-            this.putAll(((ListData)data));
-        return this;
-    }
+    Agent agent();
 
     @Override
-    public String toString()
+    default void execute(Runnable command)
     {
-        return entrySet().stream()
-                         .map(e -> e.getKey() + "=" + Arrays.toString(e.getValue()))
-                         .collect(Collectors.joining(", ", "{", "}"));
+        submit(command).begin(agent());
     }
 }

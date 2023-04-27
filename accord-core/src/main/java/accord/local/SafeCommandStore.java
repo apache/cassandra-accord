@@ -105,6 +105,13 @@ public interface SafeCommandStore
         Command command = safeCommand.current();
         for (CommandListener listener : command.listeners())
         {
+            if (!safeCommand.current().listeners().contains(listener))
+            {
+                // notifyListeners is done for every mutation, which can cause listeners to be different depending on
+                // where you are in the stack frame...
+                // To simplify listeners, double check that this wasn't changed before calling again
+                continue;
+            }
             PreLoadContext context = listener.listenerPreLoadContext(command.txnId());
             if (canExecuteWith(context))
             {

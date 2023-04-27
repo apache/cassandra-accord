@@ -23,7 +23,6 @@ import javax.annotation.Nullable;
 import accord.api.Query;
 import accord.api.Read;
 import accord.api.Update;
-import accord.utils.Invariants;
 
 public interface PartialTxn extends Txn
 {

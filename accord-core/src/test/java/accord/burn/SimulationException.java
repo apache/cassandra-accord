@@ -16,30 +16,29 @@
  * limitations under the License.
  */
 
-package accord.impl.list;
+package accord.burn;
 
-import java.util.Arrays;
-import java.util.TreeMap;
-import java.util.stream.Collectors;
-
-import accord.api.Data;
-import accord.api.Key;
-
-public class ListData extends TreeMap<Key, int[]> implements Data
+public class SimulationException extends RuntimeException
 {
-    @Override
-    public Data merge(Data data)
+    public SimulationException(long seed, Throwable t)
     {
-        if (data != null)
-            this.putAll(((ListData)data));
-        return this;
+        super(createMsg(seed, null), t, true, false);
     }
 
-    @Override
-    public String toString()
+    public SimulationException(long seed, String msg, Throwable t)
     {
-        return entrySet().stream()
-                         .map(e -> e.getKey() + "=" + Arrays.toString(e.getValue()))
-                         .collect(Collectors.joining(", ", "{", "}"));
+        super(createMsg(seed, msg), t, true, false);
+    }
+
+    private static String createMsg(long seed, String msg)
+    {
+        return String.format("Failed on seed %d%s", seed, msg == null ? "" : "; " + msg);
+    }
+
+    public static SimulationException wrap(long seed, Throwable t)
+    {
+        if (t instanceof SimulationException)
+            return (SimulationException) t;
+        return new SimulationException(seed, t);
     }
 }

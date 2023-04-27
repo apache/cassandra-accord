@@ -38,7 +38,6 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Accept;
 import accord.messages.Accept.AcceptReply;
-import accord.utils.Invariants;
 
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
 import static accord.coordinate.tracking.RequestStatus.Failed;

@@ -331,6 +331,67 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         return new Immediate<>(failure);
     }
 
+    public static <V, T> AsyncChain<T> map(AsyncChain<V> chain, Function<? super V, ? extends T> mapper, Executor executor)
+    {
+        return chain.flatMap(v -> new Head<T>()
+        {
+            @Override
+            protected void start(BiConsumer<? super T, Throwable> callback)
+            {
+                try
+                {
+                    executor.execute(() -> {
+                        T value;
+                        try
+                        {
+                            value = mapper.apply(v);
+                        }
+                        catch (Throwable t)
+                        {
+                            callback.accept(null, t);
+                            return;
+                        }
+                        callback.accept(value, null);
+                    });
+                }
+                catch (Throwable t)
+                {
+                    // TODO (low priority, correctness): If the executor is shutdown then the callback may run in an unexpected thread, which may not be thread safe
+                    callback.accept(null, t);
+                }
+            }
+        });
+    }
+
+    public static <V, T> AsyncChain<T> flatMap(AsyncChain<V> chain, Function<? super V, ? extends AsyncChain<T>> mapper, Executor executor)
+    {
+        return chain.flatMap(v -> new Head<T>()
+        {
+            @Override
+            protected void start(BiConsumer<? super T, Throwable> callback)
+            {
+                try
+                {
+                    executor.execute(() -> {
+                        try
+                        {
+                            mapper.apply(v).addCallback(callback);
+                        }
+                        catch (Throwable t)
+                        {
+                            callback.accept(null, t);
+                        }
+                    });
+                }
+                catch (Throwable t)
+                {
+                    // TODO (low priority, correctness): If the executor is shutdown then the callback may run in an unexpected thread, which may not be thread safe
+                    callback.accept(null, t);
+                }
+            }
+        });
+    }
+
     public static <V> AsyncChain<V> ofCallable(Executor executor, Callable<V> callable)
     {
         return new Head<V>()

@@ -32,10 +32,20 @@ public interface AsyncChain<V>
      */
     <T> AsyncChain<T> map(Function<? super V, ? extends T> mapper);
 
+    default <T> AsyncChain<T> map(Function<? super V, ? extends T> mapper, Executor executor)
+    {
+        return AsyncChains.map(this, mapper, executor);
+    }
+
     /**
      * Support {@link com.google.common.util.concurrent.Futures#transform(ListenableFuture, com.google.common.base.Function, Executor)} natively
      */
     <T> AsyncChain<T> flatMap(Function<? super V, ? extends AsyncChain<T>> mapper);
+
+    default <T> AsyncChain<T> flatMap(Function<? super V, ? extends AsyncChain<T>> mapper, Executor executor)
+    {
+        return AsyncChains.flatMap(this, mapper, executor);
+    }
 
     default AsyncChain<Void> accept(Consumer<? super V> action)
     {
@@ -43,6 +53,21 @@ public interface AsyncChain<V>
             action.accept(r);
             return null;
         });
+    }
+
+    default AsyncChain<Void> accept(Consumer<? super V> action, Executor executor)
+    {
+        return map(r -> {
+            action.accept(r);
+            return null;
+        }, executor);
+    }
+
+    default AsyncChain<V> withExecutor(Executor e)
+    {
+        // since a chain runs as a sequence of callbacks, by adding a callback that moves to this executor any new actions
+        // will be run on that desired executor.
+        return map(a -> a, e);
     }
 
     /**

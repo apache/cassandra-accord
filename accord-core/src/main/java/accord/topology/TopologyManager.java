@@ -22,6 +22,7 @@ import accord.api.ConfigurationService;
 import accord.api.RoutingKey;
 import accord.api.TopologySorter;
 import accord.coordinate.tracking.QuorumTracker;
+import accord.local.CommandStore;
 import accord.local.Node.Id;
 import accord.messages.Request;
 import accord.primitives.*;
@@ -259,9 +260,15 @@ public class TopologyManager implements ConfigurationService.Listener
             toComplete.trySuccess(null);
     }
 
-    public synchronized AsyncResult<Void> awaitEpoch(long epoch)
+    public AsyncChain<Void> awaitEpoch(long epoch)
     {
-        return epochs.awaitEpoch(epoch);
+        AsyncResult<Void> result;
+        synchronized (this)
+        {
+            result = epochs.awaitEpoch(epoch);
+        }
+        CommandStore current = CommandStore.maybeCurrent();
+        return current == null || result.isDone() ? result : result.withExecutor(current);
     }
 
     @Override
@@ -399,7 +406,10 @@ public class TopologyManager implements ConfigurationService.Listener
 
     public Topology localForEpoch(long epoch)
     {
-        return epochs.get(epoch).local();
+        EpochState epochState = epochs.get(epoch);
+        if (epochState == null)
+            throw new IllegalStateException("Unknown epoch " + epoch);
+        return epochState.local();
     }
 
     public Ranges localRangesForEpoch(long epoch)

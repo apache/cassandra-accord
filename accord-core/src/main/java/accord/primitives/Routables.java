@@ -26,10 +26,6 @@ import accord.utils.IndexedRangeFoldToLong;
 import accord.utils.SortedArrays;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
-import java.util.function.BiFunction;
-import java.util.function.Function;
-
-import static accord.primitives.Routables.Slice.Overlapping;
 import static accord.utils.SortedArrays.Search.FLOOR;
 
 /**

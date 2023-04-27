@@ -35,8 +35,6 @@ import java.util.function.Predicate;
 import static accord.utils.ArrayBuffers.*;
 import static accord.utils.RelationMultiMap.*;
 import static accord.utils.RelationMultiMap.remove;
-import static accord.utils.SearchableRangeListBuilder.Links.LINKS;
-import static accord.utils.SearchableRangeListBuilder.Strategy.ACCURATE;
 import static accord.utils.SortedArrays.Search.CEIL;
 
 /**

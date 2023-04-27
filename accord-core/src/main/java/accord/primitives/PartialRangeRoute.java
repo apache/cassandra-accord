@@ -22,7 +22,6 @@ import accord.api.RoutingKey;
 import accord.utils.Invariants;
 
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_OVERLAPPING;
-import static accord.primitives.Routables.Slice.Overlapping;
 
 /**
  * A slice of a Route that covers

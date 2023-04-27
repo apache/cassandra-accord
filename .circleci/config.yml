@@ -81,7 +81,7 @@ jobs:
           key: v1-dependencies-{{ checksum "build.gradle" }}-{{ checksum "accord-core/build.gradle" }}-{{ checksum "accord-maelstrom/build.gradle" }}-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}
 
       # run tests!
-      - run: ./gradlew test
+      - run: ./gradlew check
       - run:
           name: Save Test Results
           command: |
@@ -90,3 +90,9 @@ jobs:
           when: always
       - store_test_results:
           path: test-results
+
+workflows:
+  version: 2
+  main:
+    jobs:
+      - build: {}

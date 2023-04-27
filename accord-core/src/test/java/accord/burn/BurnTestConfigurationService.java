@@ -18,8 +18,8 @@
 
 package accord.burn;
 
-import accord.api.MessageSink;
 import accord.api.TestableConfigurationService;
+import accord.local.AgentExecutor;
 import accord.utils.RandomSource;
 import accord.local.Node;
 import accord.messages.*;
@@ -42,7 +42,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
     private static final Logger logger = LoggerFactory.getLogger(BurnTestConfigurationService.class);
 
     private final Node.Id node;
-    private final MessageSink messageSink;
+    private final AgentExecutor executor;
     private final Function<Node.Id, Node> lookup;
     private final Supplier<RandomSource> randomSupplier;
     private final Map<Long, FetchTopology> pendingEpochs = new HashMap<>();
@@ -128,10 +128,10 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         }
     }
 
-    public BurnTestConfigurationService(Node.Id node, MessageSink messageSink, Supplier<RandomSource> randomSupplier, Topology topology, Function<Node.Id, Node> lookup, TopologyUpdates topologyUpdates)
+    public BurnTestConfigurationService(Node.Id node, AgentExecutor executor, Supplier<RandomSource> randomSupplier, Topology topology, Function<Node.Id, Node> lookup, TopologyUpdates topologyUpdates)
     {
         this.node = node;
-        this.messageSink = messageSink;
+        this.executor = executor;
         this.randomSupplier = randomSupplier;
         this.lookup = lookup;
         this.topologyUpdates = topologyUpdates;
@@ -218,10 +218,10 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         {
             this.request = new FetchTopologyRequest(epoch);
             this.candidates = new ArrayList<>();
-            sendNext();
+            executor.execute(this::sendNext);
         }
 
-        synchronized void sendNext()
+        void sendNext()
         {
             if (candidates.isEmpty())
             {
@@ -230,7 +230,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
             }
             int idx = randomSupplier.get().nextInt(candidates.size());
             Node.Id node = candidates.remove(idx);
-            messageSink.send(node, request, this);
+            originator().send(node, request, executor, this);
         }
 
         @Override
@@ -243,7 +243,7 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
         }
 
         @Override
-        public synchronized void onFailure(Node.Id from, Throwable failure)
+        public void onFailure(Node.Id from, Throwable failure)
         {
             sendNext();
         }
@@ -269,8 +269,13 @@ public class BurnTestConfigurationService implements TestableConfigurationServic
     {
         epochs.acknowledge(epoch);
         Topology topology = getTopologyForEpoch(epoch);
-        Node originator = lookup.apply(node);
+        Node originator = originator();
         topologyUpdates.syncEpoch(originator, epoch - 1, topology.nodes());
+    }
+
+    private Node originator()
+    {
+        return lookup.apply(node);
     }
 
     @Override
