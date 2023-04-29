@@ -67,7 +67,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         this.values = values;
     }
 
-    public V reduceValues(BiFunction<V, V, V> reduce)
+    public V foldl(BiFunction<V, V, V> reduce)
     {
         V result = values[0];
         for (int i = 1; i < values.length; ++i)
@@ -309,7 +309,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
             if (sameAsTailKey || sameAsTailValue)
             {
                 if (sameAsTailValue) ends.set(tailIdx, end);
-                else values.set(tailIdx, reduce.apply(value, values.get(tailIdx)));
+                else values.set(tailIdx, reduce.apply(values.get(tailIdx), value));
             }
             else
             {

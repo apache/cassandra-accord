@@ -324,7 +324,7 @@ public class Commands
             return WaitingOn.EMPTY;
 
         WaitingOn.Update update = new WaitingOn.Update();
-        partialDeps.forEach(ranges, depId -> {
+        partialDeps.forEachUniqueTxnId(ranges, depId -> {
             SafeCommand safeCommand = safeStore.ifLoaded(depId);
             if (safeCommand == null)
             {

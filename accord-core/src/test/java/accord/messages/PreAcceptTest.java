@@ -35,6 +35,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 import java.util.function.BiFunction;
 import java.util.stream.Stream;
 
@@ -71,7 +72,7 @@ public class PreAcceptTest
     }
 
     @Test
-    void initialCommandTest()
+    void initialCommandTest() throws ExecutionException
     {
         RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
         Clock clock = new Clock(100);
@@ -110,7 +111,7 @@ public class PreAcceptTest
     }
 
     @Test
-    void nackTest()
+    void nackTest() throws ExecutionException
     {
         RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
         Clock clock = new Clock(100);
@@ -173,7 +174,7 @@ public class PreAcceptTest
     }
 
     @Test
-    void multiKeyTimestampUpdate()
+    void multiKeyTimestampUpdate() throws ExecutionException
     {
         RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
         Clock clock = new Clock(100);
@@ -209,7 +210,7 @@ public class PreAcceptTest
      * with the proposed timestamp
      */
     @Test
-    void singleKeyNewerTimestamp()
+    void singleKeyNewerTimestamp() throws ExecutionException
     {
         RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
         Clock clock = new Clock(100);
@@ -236,7 +237,7 @@ public class PreAcceptTest
     }
 
     @Test
-    void supersedingEpochPrecludesFastPath()
+    void supersedingEpochPrecludesFastPath() throws ExecutionException
     {
         RecordingMessageSink messageSink = new RecordingMessageSink(ID1, Network.BLACK_HOLE);
         Clock clock = new Clock(100);

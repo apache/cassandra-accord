@@ -91,7 +91,7 @@ public class CoordinateTest
             TxnId oldId1 = node.nextTxnId(Write, Key);
             TxnId oldId2 = node.nextTxnId(Write, Key);
 
-            getUninterruptibly(CoordinateSyncPoint.exclusive(node, ranges(range(1, 2))));
+            getUninterruptibly(CoordinateSyncPoint.exclusive(node, ranges(range(0, 1))));
             try
             {
                 Keys keys = keys(1);

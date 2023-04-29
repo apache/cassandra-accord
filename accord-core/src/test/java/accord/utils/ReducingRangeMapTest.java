@@ -31,6 +31,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.LongStream;
+
+import com.google.common.util.concurrent.MoreExecutors;
 
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -319,6 +322,12 @@ public class ReducingRangeMapTest
     }
 
     @Test
+    public void testOne()
+    {
+        testRandomAdds(-4183621399247163772L, 3, 100, 3, 0.010000f, 0.010000f);
+    }
+
+    @Test
     public void testRandomAdds() throws ExecutionException, InterruptedException
     {
         ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
@@ -436,16 +445,16 @@ public class ReducingRangeMapTest
 
     static class RandomWithCanonical extends RandomMap
     {
+        // confusingly, we use lower bounds here since we copied over from C*
         NavigableMap<RoutingKey, Timestamp> canonical = new TreeMap<>();
         {
             canonical.put(MINIMUM_EXCL, none());
+            canonical.put(MAXIMUM_EXCL, none());
         }
 
         Timestamp get(RoutingKey rk)
         {
-            return canonical
-                    .floorEntry(decr(rk))
-                    .getValue();
+            return canonical.ceilingEntry(rk).getValue();
         }
 
         RandomWithCanonical merge(RandomWithCanonical other)
@@ -454,12 +463,11 @@ public class ReducingRangeMapTest
             result.test = ReducingRangeMap.merge(test, other.test, Timestamp::max);
             result.canonical = new TreeMap<>();
             result.canonical.putAll(canonical);
+            RoutingKey prev = null;
             for (Map.Entry<RoutingKey, Timestamp> entry : other.canonical.entrySet())
             {
-                RoutingKey left = entry.getKey();
-                RoutingKey right = other.canonical.higherKey(left);
-                if (right == null) right = MAXIMUM_EXCL;
-                result.addCanonical(r(left, right), entry.getValue());
+                if (prev != null) result.addCanonical(r(prev, entry.getKey()), entry.getValue());
+                prev = entry.getKey();
             }
             return result;
         }
@@ -480,10 +488,10 @@ public class ReducingRangeMapTest
 
         void addCanonical(Range range, Timestamp timestamp)
         {
-            canonical.put(range.start(), canonical.floorEntry(range.start()).getValue());
-            canonical.put(range.end(), canonical.floorEntry(range.end()).getValue());
+            canonical.put(range.start(), canonical.ceilingEntry(range.start()).getValue());
+            canonical.put(range.end(), canonical.ceilingEntry(range.end()).getValue());
 
-            canonical.subMap(range.start(), true, range.end(), false)
+            canonical.subMap(range.start(), false, range.end(), true)
                     .entrySet().forEach(e -> e.setValue(Timestamp.max(e.getValue(), timestamp)));
         }
 
@@ -557,9 +565,9 @@ public class ReducingRangeMapTest
                     canonFoldl.clear();
                     for (Range range : ranges)
                     {
-                        RoutingKey start = canonical.floorKey(range.start());
-                        RoutingKey end = canonical.floorKey(range.end());
-                        for (Timestamp next : canonical.subMap(start, true, end, false).values())
+                        RoutingKey start = canonical.higherKey(range.start());
+                        RoutingKey end = canonical.ceilingKey(range.end());
+                        for (Timestamp next : canonical.subMap(start, true, end, true).values())
                         {
                             if (canonFoldl.isEmpty() || !canonFoldl.get(canonFoldl.size() - 1).equals(next))
                                 canonFoldl.add(next);
@@ -567,8 +575,6 @@ public class ReducingRangeMapTest
                     }
                     Assertions.assertEquals(canonFoldl, foldl, id);
                 }
-
-
             }
         }
     }

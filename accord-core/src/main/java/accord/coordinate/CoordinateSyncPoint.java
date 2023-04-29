@@ -22,6 +22,7 @@ import java.util.List;
 
 import accord.local.Node;
 import accord.messages.Apply;
+import accord.messages.Commit;
 import accord.messages.PreAccept.PreAcceptOk;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
@@ -32,6 +33,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.Txn.Kind;
 import accord.primitives.TxnId;
+import accord.topology.Topologies;
 import accord.utils.async.AsyncResult;
 
 import static accord.coordinate.Propose.Invalidate.proposeAndCommitInvalidate;
@@ -91,8 +93,12 @@ public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
                 @Override
                 void onAccepted()
                 {
-                    node.send(tracker.nodes(), id -> new Apply(id, tracker.topologies(), tracker.topologies(), txnId.epoch(), txnId, route, txn, txnId, deps, txn.execute(txnId, null), txn.result(txnId, null)));
-                    accept(new SyncPoint(txnId, deps), null);
+                    Topologies commit = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
+                    Topologies latest = commit.size() == 1 ? commit : node.topology().forEpoch(route, executeAt.epoch());
+                    if (latest != commit)
+                        node.send(commit.nodes(), id -> new Commit(Commit.Kind.Maximal, id, commit.forEpoch(txnId.epoch()), commit, txnId, txn, route, null, executeAt, deps, false));
+                    node.send(latest.nodes(), id -> new Apply(id, latest, latest, executeAt.epoch(), txnId, route, txn, executeAt, deps, txn.execute(txnId, null), txn.result(txnId, null)));
+                    accept(new SyncPoint(txnId, deps, route), null);
                 }
             }.start();
         }

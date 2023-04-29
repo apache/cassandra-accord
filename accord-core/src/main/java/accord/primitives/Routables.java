@@ -279,12 +279,15 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 m = (int)(im >>> 32);
 
                 Range mv = ms.get(m);
-                int nexti = Helper.findLimit(is, i, ms, m);
-                while (i < nexti)
+                int nexti = Helper.findLimit(is, i, ms, m) - 1;
+                while (true)
                 {
                     accumulator = fold.apply(is.get(i).slice(mv), accumulator, i);
-                    ++i;
+                    if (i < nexti) ++i;
+                    else break;
                 }
+                if (!(is.get(i) instanceof Range) || ((Range)is.get(i)).end().compareTo(mv.end()) <= 0) ++i;
+                else ++m;
             }
 
             return accumulator;

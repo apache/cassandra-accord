@@ -21,6 +21,8 @@ package accord.primitives;
 import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.utils.ArrayBuffers;
+import accord.utils.IndexedBiConsumer;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.SymmetricComparator;
 
 import java.util.*;
@@ -170,7 +172,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
             return new KeyDeps(Keys.EMPTY, NO_TXNIDS, NO_INTS);
 
         if (select.size() == keys.size())
-            return new KeyDeps(keys, txnIds, keysToTxnIds);
+            return this;
 
         int i = 0;
         int offset = select.size();
@@ -316,42 +318,47 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
      */
     public void forEachUniqueTxnId(Ranges ranges, Consumer<TxnId> forEach)
     {
-        // Find all keys within the ranges, but record existence within an int64 bitset.  Since the bitset is limited
-        // to 64, this search must be called multiple times searching for different TxnIds in txnIds; this also has
-        // the property that forEach is called in TxnId order.
-        //TODO (expected, efficiency): reconsider this, probably not worth trying to save allocations at cost of multiple loop
-        //                             use BitSet, or perhaps extend so we can have no nested allocations when few bits
-        for (int offset = 0 ; offset < txnIds.length ; offset += 64)
+        if (txnIds.length == 0)
+            return;
+
+        if (txnIds.length <= 64)
         {
-            long bitset = Routables.foldl(keys, ranges, (key, off, value, keyIndex) -> {
+            long bitset = Routables.foldl(keys, ranges, (key, ignore, value, keyIndex) -> {
                 int index = startOffset(keyIndex);
                 int end = endOffset(keyIndex);
-                if (off > 0)
-                {
-                    // TODO (low priority, efficiency): interpolation search probably great here
-                    index = Arrays.binarySearch(keysToTxnIds, index, end, (int)off);
-                    if (index < 0)
-                        index = -1 - index;
-                }
 
                 while (index < end)
                 {
-                    long next = keysToTxnIds[index++] - off;
+                    long next = keysToTxnIds[index++];
                     if (next >= 64)
                         break;
                     value |= 1L << next;
                 }
 
                 return value;
-            }, offset, 0, -1L);
+            }, 0, 0, -1L >>> (64 - txnIds.length));
 
             while (bitset != 0)
             {
                 int i = Long.numberOfTrailingZeros(bitset);
-                TxnId txnId = txnIds[offset + i];
+                TxnId txnId = txnIds[i];
                 forEach.accept(txnId);
                 bitset ^= Long.lowestOneBit(bitset);
             }
+        }
+        else
+        {
+            BitSet bitset = Routables.foldl(keys, ranges, (key, value, keyIndex) -> {
+                int index = startOffset(keyIndex);
+                int end = endOffset(keyIndex);
+                while (index < end)
+                    value.set(keysToTxnIds[index++]);
+                return value;
+            }, new BitSet(txnIds.length));
+
+            int i = -1;
+            while ((i = bitset.nextSetBit(i + 1)) >= 0)
+                forEach.accept(txnIds[i]);
         }
     }
 
@@ -365,6 +372,29 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         int end = endOffset(keyIndex);
         while (index < end)
             forEach.accept(txnIds[keysToTxnIds[index++]]);
+    }
+
+    public <P> void forEach(Ranges ranges, IndexedBiConsumer<P, TxnId> forEach, P param)
+    {
+        for (int i = 0; i < ranges.size(); ++i)
+        {
+            Range range = ranges.get(i);
+            int start = keys.indexOf(range.start());
+            if (start < 0) start = -1 - start;
+            else if (!range.startInclusive()) ++start;
+            start = startOffset(start);
+
+            int end = keys.indexOf(range.end());
+            if (end < 0) end = -1 - end;
+            else if (range.endInclusive()) ++end;
+            end = startOffset(end);
+
+            while (start < end)
+            {
+                int txnIdx = keysToTxnIds[start++];
+                forEach.accept(param, txnIds[txnIdx], txnIdx);
+            }
+        }
     }
 
     public Keys keys()
@@ -387,9 +417,9 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return txnIds[i];
     }
 
-    public Collection<TxnId> txnIds()
+    public SortedArrayList<TxnId> txnIds()
     {
-        return Arrays.asList(txnIds);
+        return new SortedArrayList<>(txnIds);
     }
 
     public List<TxnId> txnIds(Key key)

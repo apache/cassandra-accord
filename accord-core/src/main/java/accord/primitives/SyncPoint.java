@@ -18,14 +18,24 @@
 
 package accord.primitives;
 
+/**
+ * Defines an inequality point in the processing of the distributed transaction log, which is to say that
+ * this is able to say that the point has passed, or that it has not yet passed, but it is unable to
+ * guarantee that it is processed at the precise moment given by {@code at}. This is because we do not
+ * expect the whole cluster to process these, and we do not want transaction processing to be held up,
+ * so while these are processed much like a transaction, they are invisible to real transactions which
+ * may proceed before this is witnessed by the node processing it.
+ */
 public class SyncPoint
 {
-    public final Timestamp at;
+    public final TxnId syncId;
     public final Deps waitFor;
+    public final Route<?> route;
 
-    public SyncPoint(Timestamp at, Deps waitFor)
+    public SyncPoint(TxnId syncId, Deps waitFor, Route<?> route)
     {
-        this.at = at;
+        this.syncId = syncId;
         this.waitFor = waitFor;
+        this.route = route;
     }
 }

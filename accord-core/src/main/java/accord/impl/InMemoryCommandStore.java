@@ -541,7 +541,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         public void addListener(Command.TransientListener listener)
         {
             if (transientListeners == null) transientListeners = new Listeners<>();
-            else transientListeners.add(listener);
+            transientListeners.add(listener);
         }
 
         public void removeListener(Command.TransientListener listener)
