@@ -18,16 +18,21 @@
 
 package accord.coordinate.tracking;
 
-import accord.local.Node;
-import accord.topology.Shard;
-import accord.topology.Topologies;
-import com.google.common.annotations.VisibleForTesting;
-
+import java.util.function.BiFunction;
 import javax.annotation.Nonnull;
 
-import java.util.function.BiFunction;
+import com.google.common.annotations.VisibleForTesting;
 
-import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.*;
+import accord.local.Node;
+import accord.primitives.DataConsistencyLevel;
+import accord.topology.Shard;
+import accord.topology.Topologies;
+
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.NoChange;
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Success;
+import static accord.primitives.DataConsistencyLevel.INVALID;
+import static accord.utils.Invariants.checkArgument;
 
 // TODO (desired, efficiency): if any shard *cannot* take the fast path, and all shards have accepted, terminate
 public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathShardTracker, Node.Id>
@@ -42,9 +47,10 @@ public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathSha
         protected int fastPathAccepts, accepts;
         protected int fastPathFailures, failures;
 
-        public FastPathShardTracker(Shard shard)
+        public FastPathShardTracker(Shard shard, DataConsistencyLevel dataCL)
         {
-            super(shard);
+            super(shard, dataCL);
+            checkArgument(dataCL == INVALID);
         }
 
         // return NewQuorumSuccess ONLY once fast path is rejected
@@ -142,7 +148,7 @@ public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathSha
     int waitingOnFastPathSuccess; // if we reach zero, we have determined the fast path outcome of every shard
     public FastPathTracker(Topologies topologies)
     {
-        super(topologies, FastPathShardTracker[]::new, FastPathShardTracker::new);
+        super(topologies, INVALID, FastPathShardTracker[]::new, FastPathShardTracker::new);
         this.waitingOnFastPathSuccess = super.waitingOnShards;
     }
 

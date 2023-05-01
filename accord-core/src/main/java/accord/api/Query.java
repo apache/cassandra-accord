@@ -18,11 +18,9 @@
 
 package accord.api;
 
-import accord.primitives.Seekable;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 

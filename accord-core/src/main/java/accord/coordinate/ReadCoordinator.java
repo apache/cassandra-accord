@@ -18,20 +18,34 @@
 
 package accord.coordinate;
 
-import accord.coordinate.tracking.RequestStatus;
-import accord.messages.Callback;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import javax.annotation.Nullable;
 
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.ImmutableListMultimap;
+import com.google.common.collect.ListMultimap;
+
+import accord.api.RoutingKey;
 import accord.coordinate.tracking.ReadTracker;
+import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.messages.Callback;
+import accord.primitives.DataConsistencyLevel;
+import accord.primitives.RoutingKeys;
 import accord.primitives.TxnId;
+import accord.topology.Shard;
 import accord.topology.Topologies;
+import accord.topology.Topology;
 import accord.utils.Invariants;
 
-import java.util.*;
-
+import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.debug;
-import static com.google.common.collect.Sets.newHashSetWithExpectedSize;
+import static accord.utils.Invariants.nonNull;
+import static com.google.common.collect.Maps.newHashMapWithExpectedSize;
 
 abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends ReadTracker implements Callback<Reply>
 {
@@ -75,15 +89,16 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
     private Throwable failure;
     final Map<Id, Object> debug = debug() ? new HashMap<>() : null;
 
-    ReadCoordinator(Node node, Topologies topologies, TxnId txnId)
+    ReadCoordinator(Node node, Topologies topologies, TxnId txnId, DataConsistencyLevel cl)
     {
-        super(topologies);
+        super(topologies, cl);
         this.node = node;
         this.txnId = txnId;
     }
 
     protected abstract Action process(Id from, Reply reply);
     protected abstract void onDone(Success success, Throwable failure);
+
     protected abstract void contact(Id to);
 
     @Override
@@ -182,18 +197,55 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
         }
     }
 
-    protected void start(Set<Id> to)
+    /**
+     * Send the read (which may not be a read of data but of Accord metadata) to the specified nodes.
+     *
+     * The value Keys is only for data reads and specifies which keys read from the node should be data reads.
+     * An empty Keys indicates all reads should be digest reads be data reads vs digest reads.
+     */
+    protected void sendInitialReads(Map<Id, RoutingKeys> to)
     {
-        to.forEach(this::contact);
+        to.forEach((id, dataReadKeys) -> {
+            checkArgument(dataReadKeys.isEmpty() , "Don't support data read keys here");
+            contact(id);
+        });
     }
 
     public void start()
     {
-        Set<Id> contact = newHashSetWithExpectedSize(maxShardsPerEpoch());
-        if (trySendMore(Set::add, contact) != RequestStatus.NoChange)
-            throw new IllegalStateException();
-        start(contact);
+        start(null);
     }
+
+    /**
+     * Start the read process by calculating which nodes to contact.
+     * readDataKeys is only valid when reading actual data where digest vs data reads
+     * matter and the ReadCoordinator needs to make sure at least one data read is sent for each
+     * key.
+     */
+    public void start(@Nullable RoutingKeys dataReadKeys)
+    {
+        Map<Id, RoutingKeys> contact = newHashMapWithExpectedSize(maxShardsPerEpoch());
+        if (trySendMore(Map::put, contact, getShardToKeys(dataReadKeys)) != RequestStatus.NoChange)
+            throw new IllegalStateException();
+        sendInitialReads(contact);
+    }
+
+    private ListMultimap<Shard, RoutingKey> getShardToKeys(@Nullable RoutingKeys dataReadKeys)
+    {
+        if (dataCL.requiresDigestReads)
+        {
+            nonNull(dataReadKeys, "dataReadKeys should not be null digest reads are required");
+            checkArgument(!dataReadKeys.isEmpty(), "dataReadKeys shouldn't be empty if digest reads are required");
+            ListMultimap<Shard, RoutingKey> shardToKeys = ArrayListMultimap.create();
+            // Reads of user data only ever have one topology
+            Topology topology = topologies().get(0);
+            for (RoutingKey k : dataReadKeys)
+                shardToKeys.put(topology.forKey(k), k);
+            return shardToKeys;
+        }
+        return ImmutableListMultimap.of();
+    }
+
 
     @Override
     protected RequestStatus trySendMore()
@@ -202,9 +254,10 @@ abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends Read
         //                      so onFailure is invoked immediately, for the moment we copy nodes to an intermediate list.
         //                      would be better to prevent reentrancy either by detecting this inside trySendMore or else
         //                      queueing callbacks externally, so two may not be in-flight at once
-        List<Id> contact = new ArrayList<>(1);
-        RequestStatus status = trySendMore(List::add, contact);
-        contact.forEach(this::contact);
+        List<Id> contacts = new ArrayList<>(1);
+        RequestStatus status = trySendMore((list, id, dataReadKeys) -> list.add(id), contacts);
+        for (Id contact : contacts)
+            contact(contact);
         return status;
     }
 }

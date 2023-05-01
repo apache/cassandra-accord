@@ -18,15 +18,20 @@
 
 package accord.maelstrom;
 
-import accord.api.*;
+import accord.api.DataStore;
+import accord.api.Key;
+import accord.api.Read;
+import accord.api.UnresolvedData;
 import accord.local.SafeCommandStore;
-import accord.primitives.*;
-import accord.primitives.Ranges;
 import accord.primitives.Keys;
+import accord.primitives.Ranges;
+import accord.primitives.Seekable;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
+
+import static com.google.common.base.Preconditions.checkArgument;
 
 public class MaelstromRead implements Read
 {
@@ -46,8 +51,9 @@ public class MaelstromRead implements Read
     }
 
     @Override
-    public AsyncChain<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
+    public AsyncChain<UnresolvedData> read(Seekable key, boolean digestRead, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
     {
+        checkArgument(!digestRead, "Digest reads are unsupported");
         MaelstromStore s = (MaelstromStore)store;
         MaelstromData result = new MaelstromData();
         result.put((Key)key, s.get((Key)key));

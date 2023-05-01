@@ -19,7 +19,7 @@
 package accord.messages;
 
 import java.util.Collections;
-import java.util.Set;
+import java.util.Map;
 import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
@@ -40,6 +40,7 @@ import accord.primitives.PartialDeps;
 import accord.primitives.PartialRoute;
 import accord.primitives.PartialTxn;
 import accord.primitives.Ranges;
+import accord.primitives.RoutingKeys;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -85,9 +86,9 @@ public class Commit extends TxnRequest<ExecuteNack>
         this(kind, to, coordinateTopology, topologies, txnId, txn, route, executeAt, deps, (u1, u2, u3) -> read);
     }
 
-    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, @Nullable Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, boolean read)
+    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, @Nullable Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, @Nullable RoutingKeys dataReadKeys)
     {
-        this(kind, to, coordinateTopology, topologies, txnId, txn, route, executeAt, deps, read ? new ReadData(to, topologies, txnId, readScope, executeAt) : null);
+        this(kind, to, coordinateTopology, topologies, txnId, txn, route, executeAt, deps, dataReadKeys != null ? new ReadData(to, topologies, txnId, readScope, executeAt, dataReadKeys, null) : null);
     }
 
     public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, TriFunction<Txn, PartialRoute<?>, PartialDeps, WhenReadyToExecute> toExecuteFactory)
@@ -131,7 +132,7 @@ public class Commit extends TxnRequest<ExecuteNack>
 
     // TODO (low priority, clarity): accept Topology not Topologies
     // TODO (desired, efficiency): do not commit if we're already ready to execute (requires extra info in Accept responses)
-    public static void commitMinimalAndRead(Node node, Topologies executeTopologies, TxnId txnId, Txn txn, FullRoute<?> route, Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, Set<Id> readSet, Callback<ExecuteReply> callback)
+    public static void commitMinimalAndRead(Node node, Topologies executeTopologies, TxnId txnId, Txn txn, FullRoute<?> route, Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, Map<Id, RoutingKeys> readSet, Callback<ExecuteReply> callback)
     {
         Topologies allTopologies = executeTopologies;
         if (txnId.epoch() != executeAt.epoch())
@@ -141,17 +142,19 @@ public class Commit extends TxnRequest<ExecuteNack>
         Topology coordinateTopology = allTopologies.forEpoch(txnId.epoch());
         for (Node.Id to : executeTopology.nodes())
         {
-            boolean read = readSet.contains(to);
-            Commit send = new Commit(Kind.Minimal, to, coordinateTopology, allTopologies, txnId, txn, route, readScope, executeAt, deps, read);
-            if (read) node.send(to, send, callback);
+            RoutingKeys dataReadKeys = readSet.get(to);
+            Commit send = new Commit(Kind.Minimal, to, coordinateTopology, allTopologies, txnId, txn, route, readScope, executeAt, deps, dataReadKeys);
+            if (dataReadKeys != null) node.send(to, send, callback);
             else node.send(to, send);
         }
         if (coordinateTopology != executeTopology)
         {
             for (Node.Id to : allTopologies.nodes())
             {
+                // Null data keys means don't read, specifically in the context of sending Commit, but when constructing
+                // ReadData it means all reads are data reads
                 if (!executeTopology.contains(to))
-                    node.send(to, new Commit(Kind.Minimal, to, coordinateTopology, allTopologies, txnId, txn, route, readScope, executeAt, deps, false));
+                    node.send(to, new Commit(Kind.Minimal, to, coordinateTopology, allTopologies, txnId, txn, route, readScope, executeAt, deps, null));
             }
         }
     }
@@ -169,7 +172,7 @@ public class Commit extends TxnRequest<ExecuteNack>
                     Kind.Minimal, to, topology, topologies, txnId,
                     txn, route, txnId, deps,
                     // TODO is this slice to get the keys correct?
-                    (maybePartialTransaction, partialRoute, partialDeps) -> new WaitForDependenciesThenApply(txnId, partialRoute, partialDeps, maybePartialTransaction.keys().slice(partialDeps.covering), txn.execute(txnId, null), txn.result(txnId, txnId, null), notifyAgent));
+                    (maybePartialTransaction, partialRoute, partialDeps) -> new WaitForDependenciesThenApply(txnId, partialRoute, partialDeps, maybePartialTransaction.keys().slice(partialDeps.covering), txn.execute(txnId, null, null), txn.result(txnId, txnId, null), notifyAgent));
             node.send(to, commit, callback);
         }
     }

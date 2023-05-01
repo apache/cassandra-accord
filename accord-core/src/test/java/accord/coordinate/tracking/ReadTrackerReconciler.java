@@ -18,14 +18,16 @@
 
 package accord.coordinate.tracking;
 
-import accord.utils.RandomSource;
-import accord.coordinate.tracking.ReadTracker.ReadShardTracker;
-import accord.local.Node;
-import accord.topology.Topologies;
-import org.junit.jupiter.api.Assertions;
-
 import java.util.ArrayList;
 import java.util.List;
+
+import org.junit.jupiter.api.Assertions;
+
+import accord.coordinate.tracking.ReadTracker.ReadShardTracker;
+import accord.local.Node;
+import accord.local.Node.Id;
+import accord.topology.Topologies;
+import accord.utils.RandomSource;
 
 public class ReadTrackerReconciler extends TrackerReconciler<ReadShardTracker, ReadTracker, ReadTrackerReconciler.Rsp>
 {
@@ -33,7 +35,7 @@ public class ReadTrackerReconciler extends TrackerReconciler<ReadShardTracker, R
 
     static class InFlightCapturingReadTracker extends ReadTracker
     {
-        final List<Node.Id> inflight = new ArrayList<>();
+        final List<Id> inflight = new ArrayList<>();
         public InFlightCapturingReadTracker(Topologies topologies)
         {
             super(topologies);
@@ -42,7 +44,7 @@ public class ReadTrackerReconciler extends TrackerReconciler<ReadShardTracker, R
         @Override
         protected RequestStatus trySendMore()
         {
-            return super.trySendMore(List::add, inflight);
+            return super.trySendMore((list, to, dataKeys) -> list.add(to), inflight);
         }
     }
 

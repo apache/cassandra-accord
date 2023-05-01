@@ -18,24 +18,39 @@
 
 package accord.local;
 
-import accord.api.Data;
-import accord.api.Result;
-import accord.api.RoutingKey;
-import accord.api.VisibleForImplementation;
-import accord.primitives.*;
-import accord.utils.Invariants;
-import accord.utils.Utils;
-import accord.utils.async.AsyncChain;
+import java.util.NavigableMap;
+import java.util.NavigableSet;
+import java.util.Objects;
+import javax.annotation.Nullable;
+
 import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.ImmutableSortedSet;
 
-import javax.annotation.Nullable;
-import java.util.*;
+import accord.api.Read;
+import accord.api.Result;
+import accord.api.RoutingKey;
+import accord.api.UnresolvedData;
+import accord.api.VisibleForImplementation;
+import accord.primitives.Ballot;
+import accord.primitives.Keys;
+import accord.primitives.PartialDeps;
+import accord.primitives.PartialRoute;
+import accord.primitives.PartialTxn;
+import accord.primitives.Route;
+import accord.primitives.RoutingKeys;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
+import accord.primitives.Writes;
+import accord.utils.Invariants;
+import accord.utils.Utils;
+import accord.utils.async.AsyncChain;
 
 import static accord.local.Status.Durability.Local;
 import static accord.local.Status.Durability.NotDurable;
 import static accord.local.Status.Known.DefinitionOnly;
-import static accord.utils.Utils.*;
+import static accord.utils.Utils.ensureSortedImmutable;
+import static accord.utils.Utils.ensureSortedMutable;
 import static java.lang.String.format;
 
 public abstract class Command implements CommonAttributes
@@ -716,9 +731,9 @@ public abstract class Command implements CommonAttributes
             return new Committed(common, status, executeAt, promised, accepted, waitingOnCommit, waitingOnApply);
         }
 
-        public AsyncChain<Data> read(SafeCommandStore safeStore)
+        public AsyncChain<UnresolvedData> read(SafeCommandStore safeStore, @Nullable RoutingKeys dataReadKeys, @Nullable Read followupRead)
         {
-            return partialTxn().read(safeStore, this);
+            return partialTxn().read(safeStore, dataReadKeys, followupRead, this);
         }
 
         public WaitingOn waitingOn()

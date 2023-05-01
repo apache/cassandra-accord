@@ -22,21 +22,36 @@ import java.util.Arrays;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
-import accord.api.Key;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import accord.api.DataStore;
+import accord.api.Key;
+import accord.api.RepairWrites;
 import accord.api.Write;
 import accord.local.SafeCommandStore;
+import accord.primitives.Keys;
 import accord.primitives.Seekable;
+import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Writes;
 import accord.utils.Timestamped;
 import accord.utils.async.AsyncChain;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-public class ListWrite extends TreeMap<Key, int[]> implements Write
+public class ListWrite extends TreeMap<Key, int[]> implements Write, RepairWrites
 {
     private static final Logger logger = LoggerFactory.getLogger(ListWrite.class);
+
+    public Seekables<?, ?> keys()
+    {
+        return Keys.of(keySet());
+    }
+
+    @Override
+    public Write toWrite()
+    {
+        return this;
+    }
 
     @Override
     public AsyncChain<Void> apply(Seekable key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)

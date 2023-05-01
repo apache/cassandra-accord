@@ -78,7 +78,7 @@ public class TestAgent implements Agent
     @Override
     public Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
     {
-        return new Txn.InMemory(kind, keysOrRanges, MockStore.read(Keys.EMPTY), MockStore.QUERY, null);
+        return new Txn.InMemory(kind, keysOrRanges, MockStore.read(Keys.EMPTY), MockStore.READ_RESOLVER, MockStore.QUERY, null);
     }
 
     @Override

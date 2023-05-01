@@ -32,8 +32,11 @@ import accord.messages.Commit;
 import accord.messages.Commit.Kind;
 import accord.messages.InformHomeDurable;
 import accord.primitives.Deps;
+import accord.primitives.FullRoute;
+import accord.primitives.Timestamp;
 import accord.primitives.Txn;
-import accord.primitives.*;
+import accord.primitives.TxnId;
+import accord.primitives.Writes;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 
@@ -107,7 +110,7 @@ public class Persist implements Callback<ApplyReply>
             case Insufficient:
                 Topologies topologies = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
                 // TODO (easy, cleanup): use static method in Commit
-                node.send(from, new Commit(Kind.Maximal, from, topologies.forEpoch(txnId.epoch()), topologies, txnId, txn, route, null, executeAt, deps, false));
+                node.send(from, new Commit(Kind.Maximal, from, topologies.forEpoch(txnId.epoch()), topologies, txnId, txn, route, null, executeAt, deps, null));
         }
     }
 

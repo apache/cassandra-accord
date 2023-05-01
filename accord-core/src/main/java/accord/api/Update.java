@@ -18,11 +18,11 @@
 
 package accord.api;
 
-import accord.primitives.Ranges;
-import accord.primitives.Keys;
-import accord.primitives.Seekables;
-
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+
+import accord.primitives.Ranges;
+import accord.primitives.Seekables;
 
 /**
  * A client-defined update operation (the write equivalent of a query).
@@ -33,7 +33,7 @@ public interface Update
 {
     Seekables<?, ?> keys();
     // null is provided only if nothing was read
-    Write apply(@Nullable Data data);
+    Write apply(@Nullable Data data, @Nonnull RepairWrites repairWrites);
     Update slice(Ranges ranges);
     Update merge(Update other);
 }

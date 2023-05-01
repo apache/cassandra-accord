@@ -18,14 +18,18 @@
 
 package accord.messages;
 
+import javax.annotation.Nullable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import accord.api.Data;
+import accord.api.Read;
+import accord.api.UnresolvedData;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
+import accord.primitives.RoutingKeys;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -37,22 +41,38 @@ public class ReadData extends WhenReadyToExecute
 
     public static class SerializerSupport
     {
-        public static ReadData create(TxnId txnId, Seekables<?, ?> scope, long executeAtEpoch, long waitForEpoch)
+        public static ReadData create(TxnId txnId, Seekables<?, ?> scope, long executeAtEpoch, long waitForEpoch, @Nullable RoutingKeys dataKeys, @Nullable Read followupRead)
         {
-            return new ReadData(txnId, scope, executeAtEpoch, waitForEpoch);
+            return new ReadData(txnId, scope, executeAtEpoch, waitForEpoch, dataKeys, followupRead);
         }
     }
 
-    private Data data;
+    /**
+     * A read generated during execution that isn't part of the original command
+     * If not null then this is the read that should be performed instead of the one in the command
+     */
+    public final Read followupRead;
 
-    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Seekables<?, ?> readScope, Timestamp executeAt)
+    /**
+     * The keys that should be read as data reads instead of digest reads
+     * Empty collection means all digest reads, null means all data reads.
+     */
+    public @Nullable final RoutingKeys dataReadKeys;
+
+    private UnresolvedData unresolvedData;
+
+    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Seekables<?, ?> readScope, Timestamp executeAt, @Nullable RoutingKeys dataReadKeys, @Nullable Read followupRead)
     {
         super(to, topologies, txnId, readScope, executeAt);
+        this.followupRead = followupRead;
+        this.dataReadKeys = dataReadKeys;
     }
 
-    ReadData(TxnId txnId, Seekables<?, ?> readScope, long executeAtEpoch, long waitForEpoch)
+    ReadData(TxnId txnId, Seekables<?, ?> readScope, long executeAtEpoch, long waitForEpoch, @Nullable RoutingKeys dataReadKeys, @Nullable Read followupRead)
     {
         super(txnId, readScope, executeAtEpoch, waitForEpoch);
+        this.followupRead = followupRead;
+        this.dataReadKeys = dataReadKeys;
     }
 
     @Override
@@ -66,9 +86,10 @@ public class ReadData extends WhenReadyToExecute
     {
         CommandStore unsafeStore = safeStore.commandStore();
         logger.trace("{}: executing read", command.txnId());
-        command.read(safeStore).begin((next, throwable) -> {
+        command.read(safeStore, dataReadKeys, followupRead).begin((next, throwable) -> {
             if (throwable != null)
             {
+                throwable.printStackTrace();
                 // TODO (expected, exceptions): should send exception to client, and consistency handle/propagate locally
                 logger.trace("{}: read failed for {}: {}", txnId, unsafeStore, throwable);
                 node.reply(replyTo, replyContext, ExecuteNack.Error);
@@ -78,7 +99,7 @@ public class ReadData extends WhenReadyToExecute
                 synchronized (ReadData.this)
                 {
                     if (next != null)
-                        data = data == null ? next : data.merge(next);
+                        unresolvedData = unresolvedData == null ? next : unresolvedData.merge(next);
                     onExecuteComplete(unsafeStore);
                 }
             }
@@ -88,13 +109,13 @@ public class ReadData extends WhenReadyToExecute
     @Override
     protected void failed()
     {
-        data = null;
+        unresolvedData = null;
     }
 
     @Override
     protected void sendSuccessReply()
     {
-        node.reply(replyTo, replyContext, new ExecuteOk(data));
+        node.reply(replyTo, replyContext, new ExecuteOk(unresolvedData));
     }
 
     @Override

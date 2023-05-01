@@ -19,21 +19,37 @@
 package accord.maelstrom;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.NavigableSet;
+import java.util.TreeSet;
+import java.util.concurrent.ExecutionException;
 
+import accord.api.Key;
+import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.local.Node;
-import accord.api.Result;
-import accord.primitives.*;
+import accord.local.Node.Id;
+import accord.messages.WhenReadyToExecute.ExecuteOk;
+import accord.primitives.Ballot;
+import accord.primitives.Deps;
+import accord.primitives.KeyDeps;
+import accord.primitives.Keys;
+import accord.primitives.Range;
+import accord.primitives.RangeDeps;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
+import accord.primitives.Writes;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
-import accord.local.Node.Id;
-import accord.api.Key;
-import accord.messages.WhenReadyToExecute.ExecuteOk;
+
+import static accord.utils.async.AsyncChains.getUninterruptibly;
 
 public class Json
 {
@@ -307,7 +323,7 @@ public class Json
             MaelstromRead read = new MaelstromRead(readKeys, keys);
             MaelstromQuery query = new MaelstromQuery(client, requestId);
 
-            return new Txn.InMemory(keys, read, query, update);
+            return new Txn.InMemory(keys, read, MaelstromResolver.INSTANCE, query, update);
         }
     };
 
@@ -477,12 +493,20 @@ public class Json
         public void write(JsonWriter out, ExecuteOk value) throws IOException
         {
             out.beginArray();
-            for (Map.Entry<Key, Value> e : ((MaelstromData)value.data).entrySet())
+
+            try
             {
-                out.beginArray();
-                ((MaelstromKey)e.getKey()).datum.write(out);
-                e.getValue().write(out);
-                out.endArray();
+                for (Map.Entry<Key, Value> e : ((MaelstromData)getUninterruptibly(MaelstromResolver.INSTANCE.resolve(null, value.unresolvedData, null)).data).entrySet())
+                {
+                    out.beginArray();
+                    ((MaelstromKey)e.getKey()).datum.write(out);
+                    e.getValue().write(out);
+                    out.endArray();
+                }
+            }
+            catch (ExecutionException e)
+            {
+                throw new IOException(e);
             }
             out.endArray();
         }

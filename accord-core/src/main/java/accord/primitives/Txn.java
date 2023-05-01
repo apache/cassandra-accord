@@ -21,15 +21,24 @@ package accord.primitives;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
-import accord.api.*;
+import accord.api.Data;
+import accord.api.DataResolver;
+import accord.api.Key;
+import accord.api.Query;
+import accord.api.Read;
+import accord.api.RepairWrites;
+import accord.api.Result;
+import accord.api.UnresolvedData;
+import accord.api.Update;
 import accord.local.Command;
 import accord.local.SafeCommandStore;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
+import static accord.utils.Invariants.nonNull;
 
 public interface Txn
 {
@@ -107,32 +116,39 @@ public interface Txn
         private final Kind kind;
         private final Seekables<?, ?> keys;
         private final Read read;
+        private final DataResolver readResolver;
         private final Query query;
         private final Update update;
 
-        public InMemory(@Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nonnull Query query)
+        public InMemory(@Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nonnull DataResolver readResolver, @Nonnull Query query)
         {
+            nonNull(readResolver, "readResolver is null");
             this.kind = Kind.Read;
             this.keys = keys;
             this.read = read;
             this.query = query;
+            this.readResolver = readResolver;
             this.update = null;
         }
 
-        public InMemory(@Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nonnull Query query, @Nullable Update update)
+        public InMemory(@Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nonnull DataResolver readResolver, @Nonnull Query query, @Nullable Update update)
         {
+            nonNull(readResolver, "readResolver is null");
             this.kind = Kind.Write;
             this.keys = keys;
             this.read = read;
+            this.readResolver = readResolver;
             this.update = update;
             this.query = query;
         }
 
-        public InMemory(@Nonnull Kind kind, @Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nullable Query query, @Nullable Update update)
+        public InMemory(@Nonnull Kind kind, @Nonnull Seekables<?, ?> keys, @Nonnull Read read, @Nonnull DataResolver readResolver, @Nullable Query query, @Nullable Update update)
         {
+            nonNull(readResolver, "readResolver is null");
             this.kind = kind;
             this.keys = keys;
             this.read = read;
+            this.readResolver = readResolver;
             this.update = update;
             this.query = query;
         }
@@ -142,7 +158,7 @@ public interface Txn
         {
             return new PartialTxn.InMemory(
                     ranges, kind(), keys().slice(ranges),
-                    read().slice(ranges), includeQuery ? query() : null,
+                    read().slice(ranges), readResolver(), includeQuery ? query() : null,
                     update() == null ? null : update().slice(ranges)
             );
         }
@@ -176,6 +192,12 @@ public interface Txn
         {
             return update;
         }
+        
+        @Override
+        public DataResolver readResolver()
+        {
+            return readResolver;
+        }
 
         @Override
         public boolean equals(Object o)
@@ -205,6 +227,8 @@ public interface Txn
     @Nonnull Kind kind();
     @Nonnull Seekables<?, ?> keys();
     @Nonnull Read read();
+    @Nonnull
+    DataResolver readResolver();
     @Nullable Query query(); // may be null only in PartialTxn
     @Nullable Update update();
 
@@ -220,23 +244,30 @@ public interface Txn
         return query().compute(txnId, executeAt, keys(), data, read(), update());
     }
 
-    default Writes execute(Timestamp executeAt, @Nullable Data data)
+    default Writes execute(Timestamp executeAt, @Nullable Data data, @Nullable RepairWrites repairWrites)
     {
         Update update = update();
         if (update == null)
-            return new Writes(executeAt, Keys.EMPTY, null);
+            return new Writes(executeAt, repairWrites.keys(), repairWrites.toWrite());
 
-        return new Writes(executeAt, update.keys(), update.apply(data));
+        // Update keys might not include keys needing repair
+        Seekables keys = update.keys();
+        if (repairWrites != null)
+            keys = keys.with(repairWrites.keys());
+
+        return new Writes(executeAt, keys, update.apply(data, repairWrites));
     }
 
-    default AsyncChain<Data> read(SafeCommandStore safeStore, Command.Committed command)
+    default AsyncChain<UnresolvedData> read(SafeCommandStore safeStore, @Nullable RoutingKeys dataReadKeys, @Nullable Read followupRead, Command.Committed command)
     {
         Ranges ranges = safeStore.ranges().at(command.executeAt().epoch());
-        List<AsyncChain<Data>> futures = Routables.foldlMinimal(keys(), ranges, (key, accumulate, index) -> {
-            AsyncChain<Data> result = read().read(key, kind(), safeStore, command.executeAt(), safeStore.dataStore());
+        List<AsyncChain<UnresolvedData>> futures = Routables.foldlMinimal(keys(), ranges, (key, accumulate, index) -> {
+            Read read = followupRead != null ? followupRead : read();
+            boolean digestRead = dataReadKeys != null && !dataReadKeys.contains(((Key)key).toUnseekable());
+            AsyncChain<UnresolvedData> result = read.read(key, digestRead, kind(), safeStore, command.executeAt(), safeStore.dataStore());
             accumulate.add(result);
             return accumulate;
         }, new ArrayList<>());
-        return AsyncChains.reduce(futures, Data::merge);
+        return AsyncChains.reduce(futures, UnresolvedData::merge);
     }
 }

@@ -22,14 +22,21 @@ import java.util.TreeMap;
 
 import accord.api.Data;
 import accord.api.Key;
+import accord.api.UnresolvedData;
 
-public class MaelstromData extends TreeMap<Key, Value> implements Data
+public class MaelstromData extends TreeMap<Key, Value> implements Data, UnresolvedData
 {
     @Override
-    public Data merge(Data data)
+    public MaelstromData merge(Data data)
     {
         if (data != null)
             this.putAll(((MaelstromData)data));
         return this;
+    }
+
+    @Override
+    public UnresolvedData merge(UnresolvedData unresolvedData)
+    {
+        return merge((Data)unresolvedData);
     }
 }

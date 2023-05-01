@@ -24,8 +24,11 @@ import accord.messages.CheckStatus;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.CheckStatusReply;
 import accord.messages.CheckStatus.IncludeInfo;
-import accord.primitives.*;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.topology.Topologies;
+
+import static accord.primitives.DataConsistencyLevel.INVALID;
 
 /**
  * A result of null indicates the transaction is globally persistent
@@ -46,7 +49,9 @@ public abstract class CheckShards extends ReadCoordinator<CheckStatusReply>
 
     protected CheckShards(Node node, TxnId txnId, Unseekables<?, ?> contact, long srcEpoch, IncludeInfo includeInfo)
     {
-        super(node, topologyFor(node, txnId, contact, srcEpoch), txnId);
+        // CL.ONE doesn't mean much since none of the children of CheckShards read non-Accord state, but if they did
+        // they would need to specify the correct CL.
+        super(node, topologyFor(node, txnId, contact, srcEpoch), txnId, INVALID);
         this.untilRemoteEpoch = srcEpoch;
         this.contact = contact;
         this.includeInfo = includeInfo;

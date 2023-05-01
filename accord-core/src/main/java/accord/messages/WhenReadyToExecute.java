@@ -22,13 +22,12 @@ import java.util.BitSet;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
-import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import accord.api.Data;
+import accord.api.UnresolvedData;
 import accord.local.Command;
 import accord.local.CommandListener;
 import accord.local.CommandStore;
@@ -42,6 +41,7 @@ import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
+import javax.annotation.Nullable;
 
 import static accord.local.Status.Committed;
 import static accord.messages.MessageType.EXECUTE_RSP;
@@ -229,6 +229,10 @@ public abstract class WhenReadyToExecute extends AbstractEpochRequest<WhenReadyT
     @Override
     public synchronized void accept(ExecuteNack reply, Throwable failure)
     {
+        if (failure != null)
+        {
+            System.out.println("oops");
+        }
         if (reply != null)
         {
             node.reply(replyTo, replyContext, reply);
@@ -338,17 +342,17 @@ public abstract class WhenReadyToExecute extends AbstractEpochRequest<WhenReadyT
 
     public static class ExecuteOk implements ExecuteReply
     {
-        public final @Nullable Data data;
+        public final @Nullable UnresolvedData unresolvedData;
 
-        public ExecuteOk(@Nullable Data data)
+        public ExecuteOk(@Nullable UnresolvedData unresolvedData)
         {
-            this.data = data;
+            this.unresolvedData = unresolvedData;
         }
 
         @Override
         public String toString()
         {
-            return "ExecuteOk{" + data + '}';
+            return "ExecuteOk{" + unresolvedData + '}';
         }
 
         @Override

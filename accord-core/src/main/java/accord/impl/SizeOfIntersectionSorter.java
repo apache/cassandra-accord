@@ -65,6 +65,6 @@ public class SizeOfIntersectionSorter implements TopologySorter
 
     private static int count(Node.Id node, ShardSelection shards, int offset, Topology topology)
     {
-        return topology.foldlIntOn(node, (shard, v, index) -> shard.get(index) ? v + 1 : v, shards, offset, 0, 0);
+        return topology.foldlIntOn(node, (shard, v, index) -> shard.get(index) > 0 ? v + 1 : v, shards, offset, 0, 0);
     }
 }

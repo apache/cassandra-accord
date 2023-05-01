@@ -20,6 +20,7 @@ package accord.api;
 
 import accord.local.SafeCommandStore;
 import accord.primitives.Seekable;
+import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.utils.async.AsyncChain;
 
@@ -30,5 +31,6 @@ import accord.utils.async.AsyncChain;
  */
 public interface Write
 {
+    Seekables<?, ?> keys();
     AsyncChain<Void> apply(Seekable key, SafeCommandStore safeStore, Timestamp executeAt, DataStore store);
 }

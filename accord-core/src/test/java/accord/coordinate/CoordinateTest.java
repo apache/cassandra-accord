@@ -274,7 +274,7 @@ public class CoordinateTest
                     depsBuilder.add(key, blockingTxnId);
                     PartialDeps partialDeps = depsBuilder.build();
                     Commands.commit(store, txnId, route, command.progressKey(), command.partialTxn(), txnId, partialDeps);
-                    Commands.apply(store, txnId, txnId.epoch(), route, txnId, partialDeps, txn.execute(txnId, null), txn.query().compute(txnId, txnId, keys, null, null, null));
+                    Commands.apply(store, txnId, txnId.epoch(), route, txnId, partialDeps, txn.execute(txnId, null, null), txn.query().compute(txnId, txnId, keys, null, null, null));
                 }));
 
             Barrier listeningLocalBarrier = Barrier.barrier(node, Seekables.of(key), node.epoch(), BarrierType.local);
@@ -288,7 +288,7 @@ public class CoordinateTest
             // Apply the blockingTxn to unblock the rest
             for (Node n : cluster)
                 assertEquals(ApplyOutcome.Success, getUninterruptibly(n.unsafeForKey(key).submit(blockingTxnContext, store -> {
-                    return Commands.apply(store, blockingTxnId, blockingTxnId.epoch(), route, blockingTxnId, PartialDeps.builder(store.ranges().at(blockingTxnId.epoch())).build(), blockingTxn.execute(blockingTxnId, null), blockingTxn.query().compute(blockingTxnId, blockingTxnId, keys, null, null, null));
+                    return Commands.apply(store, blockingTxnId, blockingTxnId.epoch(), route, blockingTxnId, PartialDeps.builder(store.ranges().at(blockingTxnId.epoch())).build(), blockingTxn.execute(blockingTxnId, null, null), blockingTxn.query().compute(blockingTxnId, blockingTxnId, keys, null, null, null));
                 })));
             // Global sync should be unblocked
             syncPoint = getUninterruptibly(syncInclusiveSyncFuture);
@@ -356,7 +356,7 @@ public class CoordinateTest
             assertNotNull(node);
 
             Keys keys = keys(10);
-            Txn txn = new Txn.InMemory(keys, MockStore.read(Keys.EMPTY), MockStore.QUERY, MockStore.update(keys));
+            Txn txn = new Txn.InMemory(keys, MockStore.read(Keys.EMPTY), MockStore.READ_RESOLVER, MockStore.QUERY, MockStore.update(keys));
             Result result = getUninterruptibly(cluster.get(id(1)).coordinate(txn));
             assertEquals(MockStore.RESULT, result);
         }
@@ -373,7 +373,7 @@ public class CoordinateTest
             assertNotNull(node);
 
             Keys keys = keys(10);
-            Txn txn = new Txn.InMemory(keys, MockStore.read(keys), MockStore.QUERY, MockStore.update(Keys.EMPTY));
+            Txn txn = new Txn.InMemory(keys, MockStore.read(keys), MockStore.READ_RESOLVER, MockStore.QUERY, MockStore.update(Keys.EMPTY));
             Result result = getUninterruptibly(cluster.get(id(1)).coordinate(txn));
             assertEquals(MockStore.RESULT, result);
         }
@@ -390,11 +390,11 @@ public class CoordinateTest
             TxnId txnId = node.nextTxnId(Write, Key);
             Keys oneKey = keys(10);
             Keys twoKeys = keys(10, 20);
-            Txn txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.QUERY, MockStore.update(twoKeys));
+            Txn txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.READ_RESOLVER, MockStore.QUERY, MockStore.update(twoKeys));
             Result result = getUninterruptibly(Coordinate.coordinate(node, txnId, txn, txn.keys().toRoute(oneKey.get(0).toUnseekable())));
             assertEquals(MockStore.RESULT, result);
 
-            txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.QUERY, MockStore.update(Keys.EMPTY));
+            txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.READ_RESOLVER, MockStore.QUERY, MockStore.update(Keys.EMPTY));
             result = getUninterruptibly(cluster.get(id(1)).coordinate(txn));
             assertEquals(MockStore.RESULT, result);
         }

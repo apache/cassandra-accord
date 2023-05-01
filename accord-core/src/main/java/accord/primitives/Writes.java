@@ -18,19 +18,20 @@
 
 package accord.primitives;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
 import accord.api.Write;
 import accord.local.SafeCommandStore;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
-
 public class Writes
 {
     public static final AsyncChain<Void> SUCCESS = AsyncChains.success(null);
     public final Timestamp executeAt;
+    // TODO don't these have to be keys so why Seekables?
     public final Seekables<?, ?> keys;
     public final Write write;
 

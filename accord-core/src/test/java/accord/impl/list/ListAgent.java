@@ -20,17 +20,18 @@ package accord.impl.list;
 
 import java.util.function.Consumer;
 
+import accord.api.Agent;
+import accord.api.Result;
 import accord.impl.mock.Network;
 import accord.local.Command;
 import accord.local.Node;
-import accord.api.Agent;
-import accord.api.Result;
-import accord.local.Command;
-import accord.primitives.*;
+import accord.primitives.Keys;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
 
 import static accord.local.Node.Id.NONE;
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
 
 public class ListAgent implements Agent
 {
@@ -80,6 +81,6 @@ public class ListAgent implements Agent
     @Override
     public Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
     {
-        return new Txn.InMemory(kind, keysOrRanges, new ListRead(Keys.EMPTY, Keys.EMPTY), new ListQuery(NONE, -1), null);
+        return new Txn.InMemory(kind, keysOrRanges, new ListRead(Keys.EMPTY, Keys.EMPTY), ListResolver.INSTANCE, new ListQuery(NONE, -1), null);
     }
 }

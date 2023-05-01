@@ -18,20 +18,35 @@
 
 package accord.maelstrom;
 
-import accord.api.Key;
+import java.util.TreeMap;
+
 import accord.api.DataStore;
+import accord.api.Key;
+import accord.api.RepairWrites;
 import accord.api.Write;
 import accord.local.SafeCommandStore;
+import accord.primitives.Keys;
 import accord.primitives.Seekable;
+import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Writes;
 import accord.utils.Timestamped;
 import accord.utils.async.AsyncChain;
 
-import java.util.TreeMap;
-
-public class MaelstromWrite extends TreeMap<Key, Value> implements Write
+public class MaelstromWrite extends TreeMap<Key, Value> implements Write, RepairWrites
 {
+    @Override
+    public Seekables<?, ?> keys()
+    {
+        return Keys.of(keySet());
+    }
+
+    @Override
+    public Write toWrite()
+    {
+        return this;
+    }
+
     @Override
     public AsyncChain<Void> apply(Seekable key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
     {

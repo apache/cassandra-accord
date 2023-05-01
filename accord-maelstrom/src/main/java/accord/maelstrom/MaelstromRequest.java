@@ -23,17 +23,17 @@ import java.util.NavigableSet;
 import java.util.TreeSet;
 
 import accord.api.Key;
+import accord.local.Node;
+import accord.local.Node.Id;
+import accord.maelstrom.Packet.Type;
 import accord.messages.MessageType;
 import accord.messages.ReplyContext;
+import accord.messages.Request;
 import accord.primitives.Keys;
+import accord.primitives.Txn;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
-import accord.local.Node;
-import accord.local.Node.Id;
-import accord.primitives.Txn;
-import accord.maelstrom.Packet.Type;
-import accord.messages.Request;
 
 public class MaelstromRequest extends Body implements Request
 {
@@ -138,7 +138,7 @@ public class MaelstromRequest extends Body implements Request
         MaelstromRead read = new MaelstromRead(readKeys, keys);
         MaelstromQuery query = new MaelstromQuery(client, requestId);
 
-        return new Txn.InMemory(keys, read, query, update);
+        return new Txn.InMemory(keys, read, MaelstromResolver.INSTANCE, query, update);
     }
 
 }

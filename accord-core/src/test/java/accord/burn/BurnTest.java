@@ -35,28 +35,32 @@ import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 
-import accord.utils.DefaultRandom;
-import accord.utils.RandomSource;
-import accord.impl.IntHashKey;
-import accord.impl.basic.Cluster;
-import accord.impl.basic.PropagatingPendingQueue;
-import accord.impl.basic.RandomDelayQueue.Factory;
-import accord.impl.TopologyFactory;
-import accord.impl.basic.Packet;
-import accord.impl.basic.PendingQueue;
-import accord.impl.list.ListQuery;
-import accord.impl.list.ListRead;
-import accord.impl.list.ListRequest;
-import accord.impl.list.ListResult;
-import accord.impl.list.ListUpdate;
-import accord.local.Node.Id;
-import accord.api.Key;
-import accord.primitives.*;
-import accord.verify.StrictSerializabilityVerifier;
-
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import accord.api.Key;
+import accord.impl.IntHashKey;
+import accord.impl.TopologyFactory;
+import accord.impl.basic.Cluster;
+import accord.impl.basic.Packet;
+import accord.impl.basic.PendingQueue;
+import accord.impl.basic.PropagatingPendingQueue;
+import accord.impl.basic.RandomDelayQueue.Factory;
+import accord.impl.list.ListQuery;
+import accord.impl.list.ListRead;
+import accord.impl.list.ListRequest;
+import accord.impl.list.ListResolver;
+import accord.impl.list.ListResult;
+import accord.impl.list.ListUpdate;
+import accord.local.Node.Id;
+import accord.primitives.Keys;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.Txn;
+import accord.utils.DefaultRandom;
+import accord.utils.RandomSource;
+import accord.verify.StrictSerializabilityVerifier;
 
 import static accord.impl.IntHashKey.forHash;
 import static accord.utils.Utils.toArray;
@@ -92,7 +96,7 @@ public class BurnTest
                 Ranges ranges = Ranges.of(requestRanges.toArray(new Range[0]));
                 ListRead read = new ListRead(ranges, ranges);
                 ListQuery query = new ListQuery(client, count);
-                ListRequest request = new ListRequest(new Txn.InMemory(ranges, read, query, null));
+                ListRequest request = new ListRequest(new Txn.InMemory(ranges, read, ListResolver.INSTANCE, query, null));
                 packets.add(new Packet(client, node, count, request));
 
 
@@ -119,7 +123,7 @@ public class BurnTest
                     requestKeys.addAll(update.keySet());
                 ListRead read = new ListRead(readKeys, new Keys(requestKeys));
                 ListQuery query = new ListQuery(client, count);
-                ListRequest request = new ListRequest(new Txn.InMemory(new Keys(requestKeys), read, query, update));
+                ListRequest request = new ListRequest(new Txn.InMemory(new Keys(requestKeys), read, ListResolver.INSTANCE, query, update));
                 packets.add(new Packet(client, node, count, request));
             }
         }

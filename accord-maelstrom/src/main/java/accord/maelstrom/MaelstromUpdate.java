@@ -21,11 +21,12 @@ package accord.maelstrom;
 import java.util.Map;
 import java.util.TreeMap;
 
-import accord.api.Key;
 import accord.api.Data;
+import accord.api.Key;
+import accord.api.RepairWrites;
 import accord.api.Update;
-import accord.primitives.Ranges;
 import accord.primitives.Keys;
+import accord.primitives.Ranges;
 
 public class MaelstromUpdate extends TreeMap<Key, Value> implements Update
 {
@@ -36,9 +37,13 @@ public class MaelstromUpdate extends TreeMap<Key, Value> implements Update
     }
 
     @Override
-    public MaelstromWrite apply(Data read)
+    public MaelstromWrite apply(Data read, RepairWrites repairWrites)
     {
         MaelstromWrite write = new MaelstromWrite();
+
+        // Put repair writes first so they are overwritten by txn replacement data
+        ((MaelstromWrite)repairWrites).entrySet().forEach(e -> write.putIfAbsent(e.getKey(), e.getValue()));
+
         Map<Key, Value> data = (MaelstromData)read;
         for (Map.Entry<Key, Value> e : entrySet())
             write.put(e.getKey(), data.get(e.getKey()).append(e.getValue()));

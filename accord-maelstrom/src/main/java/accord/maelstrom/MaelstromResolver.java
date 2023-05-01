@@ -16,21 +16,24 @@
  * limitations under the License.
  */
 
-package accord.coordinate.tracking;
+package accord.maelstrom;
 
-import accord.primitives.DataConsistencyLevel;
-import accord.topology.Shard;
+import accord.api.Data;
+import accord.api.DataResolver;
+import accord.api.Read;
+import accord.api.ResolveResult;
+import accord.api.UnresolvedData;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 
-public abstract class ShardTracker
+public class MaelstromResolver implements DataResolver
 {
-    public final Shard shard;
-    // TODO if ReadTracker.ReadShardTracker were no longer static it could get the dataCL from ReadTracker
-    // but going forward more cases like commit consistency might need it?
-    public final DataConsistencyLevel dataCL;
+    public static final MaelstromResolver INSTANCE = new MaelstromResolver();
+    private MaelstromResolver() {}
 
-    public ShardTracker(Shard shard, DataConsistencyLevel dataCL)
+    @Override
+    public AsyncChain<ResolveResult> resolve(Read read, UnresolvedData unresolvedData, FollowupReader followupReader)
     {
-        this.shard = shard;
-        this.dataCL = dataCL;
+        return AsyncChains.success(new ResolveResult((Data)unresolvedData, null));
     }
 }

@@ -16,21 +16,27 @@
  * limitations under the License.
  */
 
-package accord.coordinate.tracking;
+package accord.api;
 
-import accord.primitives.DataConsistencyLevel;
-import accord.topology.Shard;
+import accord.local.Node.Id;
+import accord.messages.Callback;
+import accord.utils.async.AsyncChain;
 
-public abstract class ShardTracker
+/**
+ * Process the result of Accord having performed a read and merge the results
+ * producing any repair writes necessary for the read to be monotonic.
+ *
+ * May repeat the read in order to produce the repair writes.
+ */
+public interface DataResolver
 {
-    public final Shard shard;
-    // TODO if ReadTracker.ReadShardTracker were no longer static it could get the dataCL from ReadTracker
-    // but going forward more cases like commit consistency might need it?
-    public final DataConsistencyLevel dataCL;
-
-    public ShardTracker(Shard shard, DataConsistencyLevel dataCL)
+    /**
+     * Allow the resolver to request additional or redundant/repeated data reads from specific nodes
+     * in order to support things like read repair and short read protection.
+     */
+    interface FollowupReader
     {
-        this.shard = shard;
-        this.dataCL = dataCL;
+        void read(Read read, Id id, Callback<UnresolvedData> callback);
     }
+    AsyncChain<ResolveResult> resolve(Read read, UnresolvedData unresolvedData, FollowupReader followUpReader);
 }

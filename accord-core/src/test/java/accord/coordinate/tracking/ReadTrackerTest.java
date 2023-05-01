@@ -18,21 +18,23 @@
 
 package accord.coordinate.tracking;
 
-import accord.impl.TopologyUtils;
-import accord.local.Node.Id;
-import accord.local.Node;
-import accord.primitives.Ranges;
-import accord.topology.Shard;
-import accord.topology.Topologies;
-import accord.topology.Topology;
+import java.util.HashSet;
+import java.util.Set;
+
 import com.google.common.collect.Sets;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import java.util.HashSet;
-import java.util.Set;
+import accord.impl.TopologyUtils;
+import accord.local.Node.Id;
+import accord.primitives.Ranges;
+import accord.topology.Shard;
+import accord.topology.Topologies;
+import accord.topology.Topology;
 
-import static accord.Utils.*;
+import static accord.Utils.ids;
+import static accord.Utils.topologies;
+import static accord.Utils.topology;
 import static accord.utils.Utils.toArray;
 
 public class ReadTrackerTest
@@ -55,7 +57,7 @@ public class ReadTrackerTest
         @Override
         public RequestStatus trySendMore()
         {
-            return super.trySendMore(Set::add, inflight);
+            return super.trySendMore((inflight, id, dataReadSeekables) -> inflight.add(id), inflight);
         }
     }
 
@@ -174,7 +176,7 @@ public class ReadTrackerTest
         assertResponseState(responses, false, false);
         try
         {
-            responses.trySendMore((i,j)->{}, null);
+            responses.trySendMore((i,j,k)->{}, null);
             Assertions.fail();
         }
         catch (IllegalStateException t)
@@ -188,7 +190,7 @@ public class ReadTrackerTest
     private static void assertContacts(Set<Id> expect, ReadTracker tracker)
     {
         Set<Id> actual = new HashSet<>();
-        tracker.trySendMore(Set::add, actual);
+        tracker.trySendMore((set, to, dataKeys) -> set.add(to), actual);
         Assertions.assertEquals(expect, actual);
     }
 }

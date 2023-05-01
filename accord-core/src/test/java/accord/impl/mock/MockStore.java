@@ -19,19 +19,23 @@
 package accord.impl.mock;
 
 import accord.api.Data;
+import accord.api.DataResolver;
+import accord.api.DataStore;
 import accord.api.Query;
 import accord.api.Read;
+import accord.api.RepairWrites;
+import accord.api.ResolveResult;
 import accord.api.Result;
-import accord.api.DataStore;
+import accord.api.UnresolvedData;
 import accord.api.Update;
 import accord.api.Write;
 import accord.local.SafeCommandStore;
-import accord.primitives.*;
 import accord.primitives.Ranges;
-import accord.primitives.Keys;
+import accord.primitives.Seekable;
+import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
-import accord.primitives.*;
+import accord.primitives.Writes;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
@@ -44,10 +48,16 @@ public class MockStore implements DataStore
             return DATA;
         }
     };
-
+    public static final UnresolvedData READ_RESULT = new UnresolvedData() {
+        @Override
+        public UnresolvedData merge(UnresolvedData data)
+        {
+            return READ_RESULT;
+        }
+    };
     public static final Result RESULT = new Result() {};
     public static final Query QUERY = (txnId, executeAtEpoch, keys, data, read, update) -> RESULT;
-    public static final Write WRITE = (key, commandStore, executeAt, store) -> Writes.SUCCESS;
+    public static final DataResolver READ_RESOLVER = (read, readResults, followupReader) -> AsyncChains.success(new ResolveResult(DATA, null));
 
     public static Read read(Seekables<?, ?> keys)
     {
@@ -60,9 +70,9 @@ public class MockStore implements DataStore
             }
 
             @Override
-            public AsyncChain<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
+            public AsyncChain<UnresolvedData> read(Seekable key, boolean digestRead, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
             {
-                return AsyncChains.success(DATA);
+                return AsyncChains.success(READ_RESULT);
             }
 
             @Override
@@ -96,9 +106,22 @@ public class MockStore implements DataStore
             }
 
             @Override
-            public Write apply(Data data)
+            public Write apply(Data data, RepairWrites repairWrites)
             {
-                return WRITE;
+                return new Write() {
+
+                    @Override
+                    public Seekables<?, ?> keys()
+                    {
+                        return keys;
+                    }
+
+                    @Override
+                    public AsyncChain<Void> apply(Seekable key, SafeCommandStore safeStore, Timestamp executeAt, DataStore store)
+                    {
+                        return Writes.SUCCESS;
+                    }
+                };
             }
 
             @Override

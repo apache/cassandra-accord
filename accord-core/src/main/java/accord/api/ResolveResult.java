@@ -16,21 +16,29 @@
  * limitations under the License.
  */
 
-package accord.coordinate.tracking;
+package accord.api;
 
-import accord.primitives.DataConsistencyLevel;
-import accord.topology.Shard;
+import javax.annotation.Nonnull;
 
-public abstract class ShardTracker
+import static accord.utils.Invariants.nonNull;
+
+/**
+ * Result of resolving the ReadResults and fetching the full Data in ReadResolver
+ *
+ * May contain repair writes which need to be persisted before any writes of this transaction
+ * and acknowledging the txn as committed.
+ */
+public class ResolveResult
 {
-    public final Shard shard;
-    // TODO if ReadTracker.ReadShardTracker were no longer static it could get the dataCL from ReadTracker
-    // but going forward more cases like commit consistency might need it?
-    public final DataConsistencyLevel dataCL;
+    public final Data data;
+    @Nonnull
+    public final RepairWrites repairWrites;
 
-    public ShardTracker(Shard shard, DataConsistencyLevel dataCL)
+    public ResolveResult(@Nonnull Data data, @Nonnull RepairWrites repairWrites)
     {
-        this.shard = shard;
-        this.dataCL = dataCL;
+        nonNull(data);
+        nonNull(repairWrites);
+        this.data = data;
+        this.repairWrites = repairWrites;
     }
 }

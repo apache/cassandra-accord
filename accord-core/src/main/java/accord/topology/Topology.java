@@ -18,16 +18,34 @@
 
 package accord.topology;
 
-import java.util.*;
+import java.util.AbstractCollection;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
 import accord.api.RoutingKey;
 import accord.local.Node.Id;
-import accord.primitives.*;
-import accord.utils.*;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.Routables;
+import accord.primitives.Unseekables;
+import accord.utils.ArrayBuffers;
 import accord.utils.ArrayBuffers.IntBuffers;
+import accord.utils.IndexedBiFunction;
+import accord.utils.IndexedConsumer;
+import accord.utils.IndexedIntFunction;
+import accord.utils.IndexedPredicate;
+import accord.utils.IndexedTriFunction;
 
 import static accord.utils.SortedArrays.Search.FLOOR;
 import static accord.utils.SortedArrays.exponentialSearch;

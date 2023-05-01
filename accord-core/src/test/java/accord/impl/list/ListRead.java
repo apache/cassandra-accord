@@ -18,19 +18,26 @@
 
 package accord.impl.list;
 
-import accord.api.*;
+import java.util.Map;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import accord.api.DataStore;
+import accord.api.Key;
+import accord.api.Read;
+import accord.api.UnresolvedData;
 import accord.local.SafeCommandStore;
-import accord.primitives.*;
+import accord.primitives.Range;
 import accord.primitives.Ranges;
-import accord.primitives.Keys;
+import accord.primitives.Seekable;
+import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import java.util.Map;
+import static com.google.common.base.Preconditions.checkArgument;
 
 public class ListRead implements Read
 {
@@ -52,8 +59,9 @@ public class ListRead implements Read
     }
 
     @Override
-    public AsyncChain<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
+    public AsyncChain<UnresolvedData> read(Seekable key, boolean digestRead, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
     {
+        checkArgument(!digestRead, "Digest reads are unsupported");
         ListStore s = (ListStore)store;
         ListData result = new ListData();
         switch (key.domain())

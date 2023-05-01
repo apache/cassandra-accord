@@ -19,10 +19,15 @@
 package accord.coordinate.tracking;
 
 import accord.local.Node;
+import accord.primitives.DataConsistencyLevel;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 
-import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.*;
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.NoChange;
+import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Success;
+import static accord.primitives.DataConsistencyLevel.INVALID;
+import static accord.utils.Invariants.checkArgument;
 
 public class QuorumTracker extends AbstractTracker<QuorumTracker.QuorumShardTracker, Object>
 {
@@ -31,9 +36,13 @@ public class QuorumTracker extends AbstractTracker<QuorumTracker.QuorumShardTrac
         protected int successes;
         protected int failures;
 
-        public QuorumShardTracker(Shard shard)
+        // TODO not great that AbstractTracker requires a dataCL from things that don't rely on dataCL
+        // Every instance using QuorumTracker is exclusively about Accord metadata
+        // and doesn't need dataCL for non-Accord data
+        public QuorumShardTracker(Shard shard, DataConsistencyLevel dataCL)
         {
-            super(shard);
+            super(shard, dataCL);
+            checkArgument(dataCL == INVALID);
         }
 
         public ShardOutcomes onSuccess(Object ignore)
@@ -70,7 +79,7 @@ public class QuorumTracker extends AbstractTracker<QuorumTracker.QuorumShardTrac
 
     public QuorumTracker(Topologies topologies)
     {
-        super(topologies, QuorumShardTracker[]::new, QuorumShardTracker::new);
+        super(topologies, INVALID, QuorumShardTracker[]::new, QuorumShardTracker::new);
     }
 
     public RequestStatus recordSuccess(Node.Id node)
