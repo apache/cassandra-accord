@@ -18,15 +18,16 @@
 
 package accord.primitives;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
 import accord.api.Write;
 import accord.local.SafeCommandStore;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
 import javax.annotation.Nullable;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
 
 public class Writes
 {
@@ -50,7 +51,7 @@ public class Writes
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         Writes writes = (Writes) o;
-        return executeAt.equals(writes.executeAt) && keys.equals(writes.keys) && Objects.equals(write, writes.write);
+        return txnId.equals(writes.txnId) && executeAt.equals(writes.executeAt) && keys.equals(writes.keys) && Objects.equals(write, writes.write);
     }
 
     public boolean isEmpty()
@@ -61,7 +62,7 @@ public class Writes
     @Override
     public int hashCode()
     {
-        return Objects.hash(executeAt, keys, write);
+        return Objects.hash(txnId, executeAt, keys, write);
     }
 
     public AsyncChain<Void> apply(SafeCommandStore safeStore, Ranges ranges, PartialTxn txn)
@@ -83,7 +84,8 @@ public class Writes
     public String toString()
     {
         return "TxnWrites{" +
-               "executeAt:" + executeAt +
+               "txnId:" + txnId +
+               ", executeAt:" + executeAt +
                ", keys:" + keys +
                ", write:" + write +
                '}';

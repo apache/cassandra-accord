@@ -146,6 +146,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
         catch (ExecutionException e)
         {
             tryFailure(e);
+            return;
         }
         coordinateSyncPoint.addCallback((syncPoint, syncPointFailure) -> {
             if (syncPointFailure != null)

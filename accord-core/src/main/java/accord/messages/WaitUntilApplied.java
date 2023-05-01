@@ -45,6 +45,9 @@ import static accord.messages.ReadData.ReadNack.NotCommitted;
 import static accord.messages.ReadData.ReadNack.Redundant;
 import static accord.utils.MapReduceConsume.forEach;
 
+/**
+ * Wait until the dependencies for this transaction are Applied. Does not wait until this transaction is Applied.
+ */
 // TODO (required, efficiency): dedup - can currently have infinite pending reads that will be executed independently
 public class WaitUntilApplied extends ReadData implements Command.TransientListener, EpochSupplier
 {
@@ -234,7 +237,9 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
 
     private void removeListener(SafeCommandStore safeStore, TxnId txnId)
     {
-        safeStore.get(txnId, this, readScope).removeListener(this);
+        SafeCommand safeCommand = safeStore.ifInitialised(txnId);
+        if (safeCommand != null)
+            safeCommand.removeListener(this);
     }
 
     @Override
@@ -258,7 +263,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
     @Override
     public String toString()
     {
-        return "WaitForApply{" +
+        return "WaitUntilApplied{" +
                "txnId:" + txnId +
                '}';
     }

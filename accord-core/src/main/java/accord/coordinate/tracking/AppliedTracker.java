@@ -26,7 +26,7 @@ import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.NoChange;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Success;
 
-public class AppliedTracker extends AbstractTracker<AppliedTracker.AppliedShardTracker>
+public class AppliedTracker extends AbstractTracker<AppliedTracker.AppliedShardTracker> implements ResponseTracker
 {
     public static class AppliedShardTracker extends ShardTracker
     {

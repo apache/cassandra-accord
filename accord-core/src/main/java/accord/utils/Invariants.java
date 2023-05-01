@@ -18,10 +18,10 @@
 
 package accord.utils;
 
-import net.nicoulaj.compilecommand.annotations.Inline;
-
-import javax.annotation.Nullable;
 import java.util.function.Predicate;
+import javax.annotation.Nullable;
+
+import net.nicoulaj.compilecommand.annotations.Inline;
 
 import static java.lang.String.format;
 
@@ -143,6 +143,13 @@ public class Invariants
     {
         if (param == null)
             throw new NullPointerException();
+        return param;
+    }
+
+    public static <T> T nonNull(T param, String message)
+    {
+        if (param == null)
+            throw new NullPointerException(message);
         return param;
     }
 

@@ -19,15 +19,20 @@
 package accord.impl.mock;
 
 import accord.api.Data;
+import accord.api.DataStore;
 import accord.api.Query;
 import accord.api.Read;
 import accord.api.Result;
-import accord.api.DataStore;
 import accord.api.Update;
 import accord.api.Write;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
-import accord.primitives.*;
+import accord.primitives.Ranges;
+import accord.primitives.Seekable;
+import accord.primitives.Seekables;
+import accord.primitives.SyncPoint;
+import accord.primitives.Timestamp;
+import accord.primitives.Writes;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResults;
@@ -57,7 +62,7 @@ public class MockStore implements DataStore
             }
 
             @Override
-            public AsyncChain<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
+            public AsyncChain<Data> read(Seekable key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
             {
                 return AsyncChains.success(DATA);
             }

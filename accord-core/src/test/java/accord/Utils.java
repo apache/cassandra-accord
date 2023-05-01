@@ -18,6 +18,7 @@
 
 package accord;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -25,10 +26,10 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Sets;
 
-import java.time.Duration;
-
 import accord.api.MessageSink;
 import accord.api.Scheduler;
+import accord.coordinate.TxnExecute;
+import accord.coordinate.TxnPersist;
 import accord.config.LocalConfig;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.IntKey;
@@ -41,6 +42,7 @@ import accord.impl.mock.MockStore;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
+import accord.messages.Apply;
 import accord.config.MutableLocalConfig;
 import accord.messages.LocalMessage;
 import accord.primitives.Keys;
@@ -54,7 +56,6 @@ import accord.utils.DefaultRandom;
 import accord.utils.EpochFunction;
 import accord.utils.Invariants;
 import accord.utils.ThreadPoolScheduler;
-
 import org.awaitility.Awaitility;
 import org.awaitility.core.ThrowingRunnable;
 
@@ -112,7 +113,6 @@ public class Utils
     {
         return new Txn.InMemory(keys, MockStore.read(keys), MockStore.QUERY, MockStore.update(keys));
     }
-
     public static Txn writeTxn(Ranges ranges)
     {
         return new Txn.InMemory(ranges, MockStore.read(ranges), MockStore.QUERY, MockStore.update(ranges));
@@ -161,7 +161,7 @@ public class Utils
                              scheduler,
                              SizeOfIntersectionSorter.SUPPLIER,
                              SimpleProgressLog::new,
-                             InMemoryCommandStores.Synchronized::new,
+                             InMemoryCommandStores.Synchronized::new, TxnExecute.FACTORY, TxnPersist.FACTORY, Apply.FACTORY,
                              localConfig);
         awaitUninterruptibly(node.unsafeStart());
         return node;

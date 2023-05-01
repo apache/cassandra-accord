@@ -18,6 +18,8 @@
 
 package accord.primitives;
 
+import java.util.Collection;
+
 import accord.api.RoutingKey;
 import accord.utils.SortedArrays;
 
@@ -38,6 +40,8 @@ public class RoutingKeys extends AbstractUnseekableKeys implements Unseekables<R
 
     public static final RoutingKeys EMPTY = new RoutingKeys(new RoutingKey[0]);
 
+    private static final RoutingKey[] EMPTY_KEYS_ARRAY = new RoutingKey[0];
+
     RoutingKeys(RoutingKey[] keys)
     {
         super(keys);
@@ -46,6 +50,13 @@ public class RoutingKeys extends AbstractUnseekableKeys implements Unseekables<R
     public static RoutingKeys of(RoutingKey ... keys)
     {
         return new RoutingKeys(toUnique(sort(keys)));
+    }
+
+    public static RoutingKeys of(Collection<? extends RoutingKey> keys)
+    {
+        if (keys.isEmpty())
+            return EMPTY;
+        return of(keys.toArray(EMPTY_KEYS_ARRAY));
     }
 
     public static RoutingKeys ofSortedUnique(RoutingKey ... keys)

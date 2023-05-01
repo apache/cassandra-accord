@@ -18,11 +18,23 @@
 
 package accord.api;
 
+import static accord.utils.Invariants.checkState;
+
 /**
  * The result of some (potentially partial) {@link Read} from some {@link DataStore}
  */
 public interface Data
 {
+    Data NOOP_DATA = new Data()
+    {
+        @Override
+        public Data merge(Data data)
+        {
+            checkState(data == null || data == NOOP_DATA, "Can't mix no op Data with other implementations of Data");
+            return NOOP_DATA;
+        }
+    };
+
     /**
      * Combine the contents of the parameter with this object and return the resultant object.
      * This method may modify the current object and return itself.

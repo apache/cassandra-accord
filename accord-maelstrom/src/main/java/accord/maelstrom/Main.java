@@ -35,6 +35,8 @@ import accord.api.Scheduler;
 import accord.config.LocalConfig;
 import accord.config.MutableLocalConfig;
 import accord.coordinate.Timeout;
+import accord.coordinate.TxnExecute;
+import accord.coordinate.TxnPersist;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
@@ -44,6 +46,7 @@ import accord.local.Node.Id;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
 import accord.maelstrom.Packet.Type;
+import accord.messages.Apply;
 import accord.messages.Callback;
 import accord.messages.LocalMessage;
 import accord.messages.Reply;
@@ -180,7 +183,8 @@ public class Main
                           System::currentTimeMillis, NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, System::currentTimeMillis),
                           MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                           MaelstromAgent.INSTANCE, new DefaultRandom(), scheduler, SizeOfIntersectionSorter.SUPPLIER,
-                          SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new, localConfig);
+                          SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new, TxnExecute.FACTORY, TxnPersist.FACTORY, Apply.FACTORY,
+                          localConfig);
             awaitUninterruptibly(on.unsafeStart());
             err.println("Initialized node " + init.self);
             err.flush();

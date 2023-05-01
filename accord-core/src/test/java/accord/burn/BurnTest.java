@@ -21,8 +21,8 @@ package accord.burn;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.TreeSet;
@@ -53,13 +53,14 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.Key;
 import accord.impl.IntHashKey;
+import accord.impl.TopologyFactory;
 import accord.impl.basic.Cluster;
+import accord.impl.basic.Cluster.Stats;
+import accord.impl.basic.Packet;
 import accord.impl.basic.PendingRunnable;
 import accord.impl.basic.PropagatingPendingQueue;
 import accord.impl.basic.RandomDelayQueue;
 import accord.impl.basic.RandomDelayQueue.Factory;
-import accord.impl.TopologyFactory;
-import accord.impl.basic.Packet;
 import accord.impl.basic.SimulatedDelayedExecutorService;
 import accord.impl.list.ListAgent;
 import accord.impl.list.ListQuery;
@@ -307,7 +308,7 @@ public class BurnTest
             }
         };
 
-        EnumMap<MessageType, Cluster.Stats> messageStatsMap;
+        Map<MessageType, Stats> messageStatsMap;
         try
         {
             messageStatsMap = Cluster.run(toArray(nodes, Id[]::new), listener, () -> queue, queue::checkFailures,

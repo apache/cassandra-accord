@@ -18,26 +18,47 @@
 
 package accord.messages;
 
-import accord.api.RoutingKey;
-import accord.impl.*;
-import accord.impl.CommandTimeseries.CommandLoader;
-import accord.impl.IntKey.Raw;
-import accord.impl.mock.*;
-import accord.local.Node.Id;
-import accord.impl.mock.MockCluster.Clock;
-import accord.primitives.*;
-import accord.topology.Topology;
-import accord.local.*;
-
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.function.BiFunction;
 import java.util.stream.Stream;
 
-import static accord.Utils.*;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+import accord.api.RoutingKey;
+import accord.impl.AbstractSafeCommandStore;
+import accord.impl.CommandTimeseries;
+import accord.impl.CommandTimeseries.CommandLoader;
+import accord.impl.CommandsForKey;
+import accord.impl.IntKey;
+import accord.impl.IntKey.Raw;
+import accord.impl.TopologyFactory;
+import accord.impl.mock.MockCluster.Clock;
+import accord.impl.mock.Network;
+import accord.impl.mock.RecordingMessageSink;
+import accord.local.Command;
+import accord.local.CommandStore;
+import accord.local.Node;
+import accord.local.Node.Id;
+import accord.local.PreLoadContext;
+import accord.local.Status;
+import accord.primitives.Ballot;
+import accord.primitives.FullRoute;
+import accord.primitives.KeyDeps;
+import accord.primitives.Keys;
+import accord.primitives.PartialDeps;
+import accord.primitives.Participants;
+import accord.primitives.RangeDeps;
+import accord.primitives.Ranges;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
+import accord.topology.Topology;
+
+import static accord.Utils.createNode;
+import static accord.Utils.id;
+import static accord.Utils.writeTxn;
 import static accord.impl.InMemoryCommandStore.inMemory;
 import static accord.impl.IntKey.range;
 import static accord.impl.IntKey.routing;

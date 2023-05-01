@@ -58,6 +58,7 @@ import accord.primitives.PartialTxn;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Routable;
+import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -101,7 +102,8 @@ class ReadDataTest
         Read read = Mockito.mock(Read.class);
         Mockito.when(read.slice(any())).thenReturn(read);
         Mockito.when(read.merge(any())).thenReturn(read);
-        Mockito.when(read.read(any(), any(), any(), any(), any())).thenAnswer(new Answer<AsyncChain<Data>>()
+        Mockito.when(read.keys()).thenReturn((Seekables)keys);
+        Mockito.when(read.read(any(), any(), any(), any())).thenAnswer(new Answer<AsyncChain<Data>>()
         {
             private final boolean called = false;
             @Override

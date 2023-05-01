@@ -20,6 +20,7 @@ package accord.coordinate;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.function.BiConsumer;
 
 import accord.api.Result;
 import accord.coordinate.tracking.QuorumTracker;
@@ -29,7 +30,14 @@ import accord.messages.Apply;
 import accord.messages.Apply.ApplyReply;
 import accord.messages.Callback;
 import accord.messages.InformDurable;
-import accord.primitives.*;
+import accord.primitives.Deps;
+import accord.primitives.FullRoute;
+import accord.primitives.PartialTxn;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
+import accord.primitives.Writes;
 import accord.topology.Topologies;
 
 import static accord.coordinate.tracking.RequestStatus.Success;
@@ -37,50 +45,56 @@ import static accord.local.Status.Durability.Majority;
 import static accord.messages.Apply.executes;
 import static accord.messages.Apply.participates;
 
-public class Persist implements Callback<ApplyReply>
+public abstract class Persist implements Callback<ApplyReply>
 {
-    final Node node;
-    final TxnId txnId;
-    final FullRoute<?> route;
-    final Txn txn;
-    final Timestamp executeAt;
-    final Deps deps;
-    final Writes writes;
-    final Result result;
-    final QuorumTracker tracker;
-    final Set<Id> persistedOn;
-    boolean isDone;
-
-    public static void persist(Node node, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    public interface Factory
     {
-        Topologies executes = executes(node, route, executeAt);
-        persist(node, executes, txnId, route, txn, executeAt, deps, writes, result);
+        Persist create(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result);
     }
 
-    public static void persist(Node node, Topologies executes, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    protected final Node node;
+    protected final TxnId txnId;
+    protected final FullRoute<?> route;
+    protected final Txn txn;
+    protected final Timestamp executeAt;
+    protected final Deps deps;
+    protected final Writes writes;
+    protected final Result result;
+    protected final Topologies topologies;
+    protected final QuorumTracker tracker;
+    protected final Set<Id> persistedOn;
+    boolean isDone;
+
+    public static void persist(Node node, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, BiConsumer<? super Result, Throwable> clientCallback)
+    {
+        Topologies executes = executes(node, route, executeAt);
+        persist(node, executes, txnId, route, txn, executeAt, deps, writes, result, clientCallback);
+    }
+
+    public static void persist(Node node, Topologies executes, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, BiConsumer<? super Result, Throwable> clientCallback)
     {
         Topologies participates = participates(node, route, txnId, executeAt, executes);
-        Persist persist = new Persist(node, executes, txnId, route, txn, executeAt, deps, writes, result);
-        node.send(participates.nodes(), to -> Apply.applyMinimal(to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), persist);
+        node.persistFactory().create(node, executes, txnId, route, txn, executeAt, deps, writes, result)
+                             .applyMinimal(participates, executes, writes, result, clientCallback);
     }
 
     public static void persistMaximal(Node node, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         Topologies executes = executes(node, route, executeAt);
         Topologies participates = participates(node, route, txnId, executeAt, executes);
-        Persist persist = new Persist(node, participates, txnId, route, txn, executeAt, deps, writes, result);
-        node.send(participates.nodes(), to -> Apply.applyMaximal(to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), persist);
+        node.persistFactory().create(node, participates, txnId, route, txn, executeAt, deps, writes, result)
+                             .applyMaximal(participates, executes, writes, result, null);
     }
 
     public static void persistPartialMaximal(Node node, TxnId txnId, Unseekables<?> sendTo, FullRoute<?> route, PartialTxn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         Topologies executes = executes(node, sendTo, executeAt);
         Topologies participates = participates(node, sendTo, txnId, executeAt, executes);
-        Persist persist = new Persist(node, participates, txnId, route, txn, executeAt, deps, writes, result);
-        node.send(participates.nodes(), to -> Apply.applyMaximal(to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), persist);
+        Persist persist = node.persistFactory().create(node, participates, txnId, route, txn, executeAt, deps, writes, result);
+        node.send(participates.nodes(), to -> Apply.applyMaximal(Apply.FACTORY, to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), persist);
     }
 
-    private Persist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    protected Persist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         this.node = node;
         this.txnId = txnId;
@@ -90,6 +104,7 @@ public class Persist implements Callback<ApplyReply>
         this.deps = deps;
         this.writes = writes;
         this.result = result;
+        this.topologies = topologies;
         this.tracker = new QuorumTracker(topologies);
         this.persistedOn = new HashSet<>();
     }
@@ -128,4 +143,19 @@ public class Persist implements Callback<ApplyReply>
     public void onCallbackFailure(Id from, Throwable failure)
     {
     }
+
+    public void applyMinimal(Topologies participates, Topologies executes, Writes writes, Result result, BiConsumer<? super Result, Throwable> clientCallback)
+    {
+        registerClientCallback(writes, result, clientCallback);
+        // applyMinimal is used for transaction execution by the original coordinator so it's important to use
+        // Node's Apply factory in case the factory has to do synchronous Apply.
+        node.send(participates.nodes(), to -> Apply.applyMinimal(node.applyFactory(), to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), this);
+    }
+    public void applyMaximal(Topologies participates, Topologies executes, Writes writes, Result result, BiConsumer<? super Result, Throwable> clientCallback)
+    {
+        registerClientCallback(writes, result, clientCallback);
+        node.send(participates.nodes(), to -> Apply.applyMaximal(Apply.FACTORY, to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), this);
+    }
+
+    public abstract void registerClientCallback(Writes writes, Result result, BiConsumer<? super Result, Throwable> clientCallback);
 }

@@ -39,9 +39,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.api.Agent;
-import accord.api.ConfigurationService;
-
 import accord.api.BarrierType;
+import accord.api.ConfigurationService;
 import accord.api.ConfigurationService.EpochReady;
 import accord.api.DataStore;
 import accord.api.Key;
@@ -51,11 +50,15 @@ import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.api.Scheduler;
 import accord.api.TopologySorter;
+import accord.coordinate.Barrier;
 import accord.config.LocalConfig;
 import accord.coordinate.CoordinateTransaction;
+import accord.coordinate.Execute;
 import accord.coordinate.MaybeRecover;
 import accord.coordinate.Outcome;
+import accord.coordinate.Persist;
 import accord.coordinate.RecoverWithRoute;
+import accord.messages.Apply;
 import accord.messages.Callback;
 import accord.messages.LocalMessage;
 import accord.messages.Reply;
@@ -68,7 +71,6 @@ import accord.primitives.FullRoute;
 import accord.primitives.ProgressToken;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
-import accord.coordinate.Barrier;
 import accord.primitives.Routable.Domain;
 import accord.primitives.Routables;
 import accord.primitives.Route;
@@ -143,6 +145,9 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private final ConfigurationService configService;
     private final TopologyManager topology;
     private final CommandStores commandStores;
+    private final Execute.Factory executionFactory;
+    private final Persist.Factory persistFactory;
+    private final Apply.Factory applyFactory;
 
     private final LongSupplier nowSupplier;
     private final ToLongFunction<TimeUnit> nowTimeUnit;
@@ -160,13 +165,17 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     public Node(Id id, MessageSink messageSink, LocalMessage.Handler localMessageHandler,
                 ConfigurationService configService, LongSupplier nowSupplier, ToLongFunction<TimeUnit> nowTimeUnit,
                 Supplier<DataStore> dataSupplier, ShardDistributor shardDistributor, Agent agent, RandomSource random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
-                Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory, LocalConfig localConfig)
+                Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory, Execute.Factory executionFactory, Persist.Factory persistFactory, Apply.Factory applyFactory,
+                LocalConfig localConfig)
     {
         this.id = id;
         this.localConfig = localConfig;
         this.messageSink = messageSink;
         this.localMessageHandler = localMessageHandler;
         this.configService = configService;
+        this.executionFactory = executionFactory;
+        this.persistFactory = persistFactory;
+        this.applyFactory = applyFactory;
         this.topology = new TopologyManager(topologySorter, id);
         this.nowSupplier = nowSupplier;
         this.nowTimeUnit = nowTimeUnit;
@@ -677,11 +686,6 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public void receive (Request request, Id from, ReplyContext replyContext)
     {
-        receive(request, from, replyContext, 0);
-    }
-
-    public void receive (Request request, Id from, ReplyContext replyContext, long delayNanos)
-    {
         long knownEpoch = request.knownEpoch();
         if (knownEpoch > topology.epoch())
         {
@@ -703,10 +707,22 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
                 reply(from, replyContext, null, t);
             }
         };
-        if (delayNanos > 0)
-            scheduler.once(processMsg, delayNanos, TimeUnit.NANOSECONDS);
-        else
-            scheduler.now(processMsg);
+        scheduler.now(processMsg);
+    }
+
+    public Execute.Factory executionFactory()
+    {
+        return executionFactory;
+    }
+
+    public Persist.Factory persistFactory()
+    {
+        return persistFactory;
+    }
+
+    public Apply.Factory applyFactory()
+    {
+        return applyFactory;
     }
 
     public Scheduler scheduler()

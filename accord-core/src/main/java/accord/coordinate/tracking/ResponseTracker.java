@@ -16,23 +16,12 @@
  * limitations under the License.
  */
 
-package accord.api;
+package accord.coordinate.tracking;
 
-import accord.local.SafeCommandStore;
-import accord.primitives.Ranges;
-import accord.primitives.Seekable;
-import accord.primitives.Seekables;
-import accord.primitives.Timestamp;
-import accord.utils.async.AsyncChain;
+import accord.local.Node;
 
-/**
- * A read to be performed on potentially multiple shards, the inputs of which may be fed to a {@link Query}
- */
-public interface Read
+public interface ResponseTracker
 {
-    Seekables<?, ?> keys();
-    AsyncChain<Data> read(Seekable key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store);
-    Read slice(Ranges ranges);
-    Read merge(Read other);
-    default boolean isEqualOrFuller(Read other) { return true; }
+    RequestStatus recordSuccess(Node.Id node);
+    RequestStatus recordFailure(Node.Id node);
 }

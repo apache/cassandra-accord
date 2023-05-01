@@ -21,12 +21,6 @@ package accord.impl.list;
 import java.util.Map;
 import java.util.function.Function;
 
-import accord.local.SafeCommandStore;
-import accord.primitives.Ranges;
-import accord.primitives.Timestamp;
-import accord.primitives.Txn;
-import accord.utils.async.AsyncChain;
-import accord.utils.Timestamped;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,9 +29,14 @@ import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.Read;
 import accord.local.CommandStore;
+import accord.local.SafeCommandStore;
 import accord.primitives.Range;
+import accord.primitives.Ranges;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.utils.Timestamped;
+import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncExecutor;
 
 public class ListRead implements Read
@@ -62,7 +61,7 @@ public class ListRead implements Read
     }
 
     @Override
-    public AsyncChain<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
+    public AsyncChain<Data> read(Seekable key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
     {
         ListStore s = (ListStore)store;
         return executor.apply(commandStore.commandStore()).submit(() -> {

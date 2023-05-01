@@ -21,15 +21,17 @@ package accord.primitives;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-
-import accord.api.*;
-import accord.local.SafeCommandStore;
-import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncChains;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import accord.api.Data;
+import accord.api.Query;
+import accord.api.Read;
+import accord.api.Result;
+import accord.api.Update;
+import accord.local.SafeCommandStore;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 
 public interface Txn
 {
@@ -268,8 +270,8 @@ public interface Txn
     default AsyncChain<Data> read(SafeCommandStore safeStore, Timestamp executeAt)
     {
         Ranges ranges = safeStore.ranges().safeToReadAt(executeAt);
-        List<AsyncChain<Data>> chains = Routables.foldlMinimal(keys(), ranges, (key, accumulate, index) -> {
-            AsyncChain<Data> result = read().read(key, kind(), safeStore, executeAt, safeStore.dataStore());
+        List<AsyncChain<Data>> chains = Routables.foldlMinimal(read().keys(), ranges, (key, accumulate, index) -> {
+            AsyncChain<Data> result = read().read(key, safeStore, executeAt, safeStore.dataStore());
             accumulate.add(result);
             return accumulate;
         }, new ArrayList<>());

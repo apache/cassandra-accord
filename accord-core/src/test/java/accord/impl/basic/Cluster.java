@@ -21,7 +21,6 @@ package accord.impl.basic;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -45,6 +44,8 @@ import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
+import accord.coordinate.TxnExecute;
+import accord.coordinate.TxnPersist;
 import accord.impl.CoordinateDurabilityScheduling;
 import accord.impl.IntHashKey;
 import accord.impl.SimpleProgressLog;
@@ -56,6 +57,7 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
+import accord.messages.Apply;
 import accord.config.MutableLocalConfig;
 import accord.messages.LocalMessage;
 import accord.messages.MessageType;
@@ -84,7 +86,7 @@ public class Cluster implements Scheduler
         public String toString() { return Integer.toString(count); }
     }
 
-    EnumMap<MessageType, Stats> statsMap = new EnumMap<>(MessageType.class);
+    Map<MessageType, Stats> statsMap = new HashMap<>();
 
     final RandomSource randomSource;
     final Function<Id, Node> lookup;
@@ -216,7 +218,7 @@ public class Cluster implements Scheduler
         run.run();
     }
 
-    public static EnumMap<MessageType, Stats> run(Id[] nodes, MessageListener messageListener, Supplier<PendingQueue> queueSupplier, Runnable checkFailures, Consumer<Packet> responseSink, AgentExecutor executor, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplierSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, Consumer<Runnable> noMoreWorkSignal)
+    public static Map<MessageType, Stats> run(Id[] nodes, MessageListener messageListener, Supplier<PendingQueue> queueSupplier, Runnable checkFailures, Consumer<Packet> responseSink, AgentExecutor executor, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplierSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, Consumer<Runnable> noMoreWorkSignal)
     {
         Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> lookup = new LinkedHashMap<>();
@@ -236,7 +238,8 @@ public class Cluster implements Scheduler
                                      () -> new ListStore(id), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
                                      executor.agent(),
                                      randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
-                                     SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending), localConfig);
+                                     SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending), TxnExecute.FACTORY, TxnPersist.FACTORY, Apply.FACTORY,
+                                     localConfig);
                 lookup.put(id, node);
                 CoordinateDurabilityScheduling durability = new CoordinateDurabilityScheduling(node);
                 // TODO (desired): randomise

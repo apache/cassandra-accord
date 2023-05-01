@@ -36,12 +36,14 @@ import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
+import accord.utils.async.AsyncChain;
 
 import static accord.messages.MessageType.READ_RSP;
 import static accord.messages.TxnRequest.computeWaitForEpoch;
 import static accord.messages.TxnRequest.latestRelevantEpochIndex;
 
 // TODO (required, efficiency): dedup - can currently have infinite pending reads that will be executed independently
+// TODO (review) this is really more at its core Execute rather than read because we use it to execute all kinds of things now and we should maybe rename it?
 public abstract class ReadData extends AbstractEpochRequest<ReadNack>
 {
     private static final Logger logger = LoggerFactory.getLogger(ReadData.class);
@@ -56,11 +58,10 @@ public abstract class ReadData extends AbstractEpochRequest<ReadNack>
 
         ReadType(int val)
         {
-            this.val = (byte)val;
+            this.val = (byte) val;
         }
 
-        @SuppressWarnings("unused")
-        public static ReadType fromValue(byte val)
+        public static ReadType valueOf(int val)
         {
             switch (val)
             {
@@ -79,6 +80,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadNack>
     // TODO (expected, cleanup): should this be a Route?
     public final Participants<?> readScope;
     private final long waitForEpoch;
+
     private Data data;
     transient BitSet waitingOn;
     transient int waitingOnCount;
@@ -144,10 +146,10 @@ public abstract class ReadData extends AbstractEpochRequest<ReadNack>
             node.agent().onUncaughtException(failure);
             cancel();
         }
-        else
-        {
+
+        // Unless failed always ack to indicate setup has completed otherwise the counter never gets to -1
+        if (failure == null)
             ack(null);
-        }
     }
 
     private void ack(@Nullable Ranges newUnavailable)
@@ -180,12 +182,17 @@ public abstract class ReadData extends AbstractEpochRequest<ReadNack>
         ack(unavailable);
     }
 
+    protected AsyncChain<Data> execute(SafeCommandStore safeStore, Timestamp executeAt, PartialTxn txn)
+    {
+        return txn.read(safeStore, executeAt);
+    }
+
     void read(SafeCommandStore safeStore, Timestamp executeAt, PartialTxn txn)
     {
         CommandStore unsafeStore = safeStore.commandStore();
         Ranges unavailable = safeStore.ranges().unsafeToReadAt(executeAt);
 
-        txn.read(safeStore, executeAt).begin((next, throwable) -> {
+        execute(safeStore, executeAt, txn).begin((next, throwable) -> {
             if (throwable != null)
             {
                 // TODO (expected, exceptions): should send exception to client, and consistency handle/propagate locally

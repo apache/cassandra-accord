@@ -38,6 +38,8 @@ import accord.primitives.Writes;
 /*
  * Used by local and global inclusive sync points to effect the sync point at each node
  * Combines commit, execute (with nothing really to execute), and apply into one request/response
+ *
+ * This returns when the dependencies are Applied, but doesn't wait for this transaction to be Applied.
  */
 public class ApplyThenWaitUntilApplied extends WaitUntilApplied
 {

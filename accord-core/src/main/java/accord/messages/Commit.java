@@ -50,6 +50,7 @@ import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.TriFunction;
 
+import static accord.messages.Commit.Kind.Maximal;
 import static accord.utils.Invariants.checkArgument;
 
 public class Commit extends TxnRequest<ReadNack>
@@ -116,7 +117,7 @@ public class Commit extends TxnRequest<ReadNack>
         this.readData = toExecuteFactory.apply(partialTxn != null ? partialTxn : txn, scope, partialDeps);
     }
 
-    Commit(Kind kind, TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
+    protected Commit(Kind kind, TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
     {
         super(txnId, scope, waitForEpoch);
         this.kind = kind;
@@ -171,6 +172,14 @@ public class Commit extends TxnRequest<ReadNack>
                     (maybePartialTransaction, partialRoute, partialDeps) -> new ApplyThenWaitUntilApplied(txnId, partialRoute, partialDeps, maybePartialTransaction.keys().slice(partialDeps.covering), txn.execute(txnId, txnId, null), txn.result(txnId, txnId, null), notifyAgent));
             node.send(to, commit, callback);
         }
+    }
+
+    public static void commitMaximal(Node node, Node.Id to, Txn txn, TxnId txnId, Timestamp executeAt, FullRoute<?> route, Deps deps, Participants<?> readScope)
+    {
+        // the replica may be missing the original commit, or the additional commit, so send everything
+        Topologies topology = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
+        Topology coordinateTopology = topology.forEpoch(txnId.epoch());
+        node.send(to, new Commit(Maximal, to, coordinateTopology, topology, txnId, txn, route, readScope, executeAt, deps, false));
     }
 
     @Override

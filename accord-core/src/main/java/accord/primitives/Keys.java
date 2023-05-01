@@ -18,12 +18,17 @@
 
 package accord.primitives;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+import java.util.Set;
+import java.util.SortedSet;
 import java.util.function.Function;
 
 import accord.api.Key;
-import accord.utils.*;
+import accord.utils.ArrayBuffers;
 import accord.utils.ArrayBuffers.ObjectBuffers;
+import accord.utils.SortedArrays;
 
 import static accord.utils.ArrayBuffers.cachedKeys;
 import static accord.utils.SortedArrays.isSortedUnique;
@@ -40,6 +45,8 @@ public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
     }
 
     public static final Keys EMPTY = new Keys(new Key[0]);
+
+    private static final Key[] EMPTY_KEYS_ARRAY = new Key[0];
 
     public Keys(SortedSet<? extends Key> keys)
     {
@@ -115,7 +122,9 @@ public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
 
     public static Keys of(Collection<? extends Key> keys)
     {
-        return of(keys.toArray(new Key[0]));
+        if (keys.isEmpty())
+            return Keys.EMPTY;
+        return of(keys.toArray(EMPTY_KEYS_ARRAY));
     }
 
     public static <V> Keys of(Collection<V> input, Function<? super V, ? extends Key> transform)
