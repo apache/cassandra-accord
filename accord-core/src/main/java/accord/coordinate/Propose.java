@@ -124,6 +124,7 @@ abstract class Propose<R> implements Callback<AcceptReply>
     @Override
     public void onCallbackFailure(Id from, Throwable failure)
     {
+        failure.printStackTrace();
         isDone = true;
         callback.accept(null, failure);
     }

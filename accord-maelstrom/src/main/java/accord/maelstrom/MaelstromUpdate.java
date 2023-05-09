@@ -41,12 +41,13 @@ public class MaelstromUpdate extends TreeMap<Key, Value> implements Update
     {
         MaelstromWrite write = new MaelstromWrite();
 
-        // Put repair writes first so they are overwritten by txn replacement data
-        ((MaelstromWrite)repairWrites).entrySet().forEach(e -> write.putIfAbsent(e.getKey(), e.getValue()));
+        if (repairWrites != null)
+            ((MaelstromWrite)repairWrites).entrySet().forEach(e -> write.putIfAbsent(e.getKey(), e.getValue()));
 
         Map<Key, Value> data = (MaelstromData)read;
         for (Map.Entry<Key, Value> e : entrySet())
             write.put(e.getKey(), data.get(e.getKey()).append(e.getValue()));
+
         return write;
     }
 

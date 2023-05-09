@@ -19,8 +19,8 @@
 package accord.api;
 
 /**
- * The result of some having read from some nodes and then resolving differences in any data
- * not written by or Accord, or the result computed by a txn.
+ * The result of having read from some nodes and then resolving differences in any data
+ * not written by Accord, or the result computed by a txn.
  */
 public interface Data
 {

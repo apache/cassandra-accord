@@ -42,6 +42,8 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write, RepairWrite
 {
     private static final Logger logger = LoggerFactory.getLogger(ListWrite.class);
 
+    public static final ListWrite EMPTY = new ListWrite();
+
     public Seekables<?, ?> keys()
     {
         return Keys.of(keySet());

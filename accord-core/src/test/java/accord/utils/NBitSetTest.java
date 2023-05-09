@@ -18,12 +18,11 @@
 
 package accord.utils;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-import static junit.framework.TestCase.assertEquals;
-import static junit.framework.TestCase.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.psjava.util.AssertStatus.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class NBitSetTest
 {
@@ -134,6 +133,19 @@ public class NBitSetTest
                 else
                     assertEquals(0, test.get(j));
             }
+        }
+    }
+    
+    private static void assertThrows(Class<? extends Throwable> clazz, Runnable r)
+    {
+        try
+        {
+            r.run();
+        }
+        catch (Throwable t)
+        {
+            if (!clazz.equals(t.getClass()))
+                throw t;
         }
     }
 }

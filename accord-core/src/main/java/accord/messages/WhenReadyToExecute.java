@@ -22,6 +22,7 @@ import java.util.BitSet;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
+import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
@@ -41,7 +42,6 @@ import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
-import javax.annotation.Nullable;
 
 import static accord.local.Status.Committed;
 import static accord.messages.MessageType.EXECUTE_RSP;
@@ -230,15 +230,14 @@ public abstract class WhenReadyToExecute extends AbstractEpochRequest<WhenReadyT
     public synchronized void accept(ExecuteNack reply, Throwable failure)
     {
         if (failure != null)
-        {
-            System.out.println("oops");
-        }
+            failure.printStackTrace();
         if (reply != null)
         {
             node.reply(replyTo, replyContext, reply);
         }
         else if (failure != null)
         {
+            logger.warn("Error executing", failure);
             // TODO (expected, testing): test
             node.reply(replyTo, replyContext, ExecuteNack.Error);
             failed();

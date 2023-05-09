@@ -81,6 +81,6 @@ public class ListAgent implements Agent
     @Override
     public Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
     {
-        return new Txn.InMemory(kind, keysOrRanges, new ListRead(Keys.EMPTY, Keys.EMPTY), ListResolver.INSTANCE, new ListQuery(NONE, -1), null);
+        return new Txn.InMemory(kind, keysOrRanges, new ListRead(Keys.EMPTY, Keys.EMPTY), ListData.EMPTY, new ListQuery(NONE, -1), null);
     }
 }

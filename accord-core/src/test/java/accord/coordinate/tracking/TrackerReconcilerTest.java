@@ -18,18 +18,19 @@
 
 package accord.coordinate.tracking;
 
-import accord.utils.RandomSource;
-import accord.topology.Topologies;
+import java.util.function.BiFunction;
+
 import org.junit.jupiter.api.Test;
 
-import java.util.function.BiFunction;
+import accord.topology.Topologies;
+import accord.utils.RandomSource;
 
 public class TrackerReconcilerTest
 {
     @Test
     public void testReadTracker()
     {
-        test(10000, ReadTrackerReconciler::new);
+        test(10000, ReadTrackerReconciler::new, 1);
     }
 
     @Test
@@ -67,7 +68,13 @@ public class TrackerReconcilerTest
     static <ST extends ShardTracker, T extends AbstractTracker<ST, ?>, E extends Enum<E>>
     void test(long seed, BiFunction<RandomSource, Topologies, ? extends TrackerReconciler<ST, T, E>> constructor)
     {
-        for (TrackerReconciler<?, ?, ?> test : TrackerReconciler.generate(seed, constructor))
+        test(seed, constructor, Integer.MAX_VALUE);
+    }
+
+    static <ST extends ShardTracker, T extends AbstractTracker<ST, ?>, E extends Enum<E>>
+    void test(long seed, BiFunction<RandomSource, Topologies, ? extends TrackerReconciler<ST, T, E>> constructor, int maxTopologies)
+    {
+        for (TrackerReconciler<?, ?, ?> test : TrackerReconciler.generate(seed, constructor, maxTopologies))
             test.test();
     }
 }

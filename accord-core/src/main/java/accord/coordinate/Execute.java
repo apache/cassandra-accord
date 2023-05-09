@@ -20,11 +20,15 @@ package accord.coordinate;
 
 import java.util.Map;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.api.Data;
+import accord.api.DataResolver.FollowupReader;
+import accord.api.Key;
+import accord.api.RepairWrites;
 import accord.api.ResolveResult;
 import accord.api.Result;
 import accord.api.UnresolvedData;
@@ -38,6 +42,7 @@ import accord.messages.WhenReadyToExecute.ExecuteOk;
 import accord.messages.WhenReadyToExecute.ExecuteReply;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
+import accord.primitives.RoutableKey;
 import accord.primitives.RoutingKeys;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
@@ -52,6 +57,7 @@ import static accord.coordinate.ReadCoordinator.Action.Approve;
 import static accord.coordinate.ReadCoordinator.Action.ApproveIfQuorum;
 import static accord.messages.Commit.Kind.Maximal;
 import static accord.utils.Invariants.checkArgument;
+import static accord.utils.Invariants.checkState;
 
 class Execute extends ReadCoordinator<ExecuteReply>
 {
@@ -94,13 +100,14 @@ class Execute extends ReadCoordinator<ExecuteReply>
             Topologies sendTo = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
             Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch());
             Result result = txn.result(txnId, executeAt, null);
-            Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, null, null), result);
+            // TODO When support commit/write CL need to add the callback here
+            Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, null, RepairWrites.EMPTY), result, null);
             callback.accept(result, null);
         }
         else
         {
             Execute execute = new Execute(node, txnId, txn, route, txn.keys(), executeAt, deps, callback);
-            execute.start((RoutingKeys)txn.read().keys().toUnseekables());
+            execute.start(txn.read().keys().toUnseekables());
         }
     }
 
@@ -150,53 +157,93 @@ class Execute extends ReadCoordinator<ExecuteReply>
         }
     }
 
-    @Override
-    protected void onDone(Success success, Throwable failure)
+    private void onDataResolutionDone(ResolveResult resolveResult, Throwable failure)
     {
         if (failure == null)
         {
-            AsyncChain<ResolveResult> resolveResultChain = txn.readResolver().resolve(txn.read(), unresolvedData, (read, to, callback) -> {
-                node.send(to, new ReadData(to, topologies(), txnId, read.keys(), executeAt, null, read), new Callback<ExecuteReply>() {
-
-                    @Override
-                    public void onSuccess(Id from, ExecuteReply reply)
-                    {
-                        logger.info("Got repair response back");
-                        callback.onSuccess(from, ((ExecuteOk)reply).unresolvedData);
-                    }
-
-                    @Override
-                    public void onFailure(Id from, Throwable failure)
-                    {
-                        callback.onFailure(from, failure);
-                    }
-
-                    @Override
-                    public void onCallbackFailure(Id from, Throwable failure)
-                    {
-                        failure.printStackTrace();
-                    }
-                });
-            });
-            resolveResultChain.begin((resolveResult, failure2) -> {
-                if (failure2 == null)
-                {
-                    Data data = resolveResult.data;
-                    Result result = txn.result(txnId, executeAt, data);
-                    callback.accept(result, null);
-                    // avoid re-calculating topologies if it is unchanged
-                    Topologies sendTo = txnId.epoch() == executeAt.epoch() ? applyTo : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
-                    Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, data, resolveResult.repairWrites), result);
-                }
-                else
-                {
-                    callback.accept(null, failure2);
-                }
-            });
+            Data data = resolveResult.data;
+            Result result = txn.result(txnId, executeAt, data);
+            // If this transaction generates repair writes then we don't want to acknowledge it until the writes are committed
+            // to make sure the transaction's reads are monotonic from the perspective of the caller
+            Consumer<Throwable> onAppliedToQuorum = null;
+            // TODO when supporting commit/write CL need to also not invoke the callback here
+            if (resolveResult.repairWrites.isEmpty())
+                callback.accept(result, null);
+            else
+                onAppliedToQuorum = (applyFailure) -> callback.accept(applyFailure == null ? result : null, applyFailure);
+            // avoid re-calculating topologies if it is unchanged
+            Topologies sendTo = txnId.epoch() == executeAt.epoch() ? applyTo : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
+            Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, data, resolveResult.repairWrites), result, onAppliedToQuorum);
         }
         else
         {
             callback.accept(null, failure);
         }
+    }
+
+    @Override
+    protected void onDone(Success success, Throwable failure)
+    {
+        if (failure == null)
+        {
+            AsyncChain<ResolveResult> resolveResultChain = txn.readResolver().resolve(executeAt, txn.read(), unresolvedData, getFollowupReader());
+            resolveResultChain.begin(this::onDataResolutionDone);
+        }
+        else
+        {
+            callback.accept(null, failure);
+        }
+    }
+
+    private FollowupReader getFollowupReader()
+    {
+        return (read, to, callback) -> {
+            // It's possible for the follow up read to be sent to the wrong replica
+            // if the integration has a different view of cluster metadata during txn resolution
+            // Definitely need to validate before reading and the txn resolver should attempt to use the correct
+            // epoch when picking which nodes to contact
+            Topology executeTopology = topologies().get(0);
+            if (!executeTopology.contains(to))
+            {
+                callback.onFailure(null, new IllegalArgumentException(to + " is not a replica in executeAt epoch" + executeAt.epoch()));
+                return;
+            }
+            Seekables keys = read.keys();
+            checkState(keys.size() == 1, "Multiple keys are not expected");
+            Key key = (Key)read.keys().get(0);
+            RoutableKey routableKey = key.toUnseekable();
+            if (!executeTopology.rangesForNode(to).contains(routableKey))
+            {
+                callback.onFailure(null, new IllegalArgumentException(key + " is not replicated by node " + to + " in executeAt epoch " + executeAt.epoch()));
+                return;
+            }
+            if (!txn.read().keys().contains(routableKey))
+            {
+                callback.onFailure(null, new IllegalArgumentException(key + " is not one of the read keys for this transaction"));
+                return;
+            }
+
+            node.send(to, new ReadData(to, topologies(), txnId, read.keys(), executeAt, null, read), new Callback<ExecuteReply>() {
+                @Override
+                public void onSuccess(Id from, ExecuteReply reply)
+                {
+                    callback.onSuccess(from, ((ExecuteOk)reply).unresolvedData);
+                }
+
+                // TODO slow response?
+
+                @Override
+                public void onFailure(Id from, Throwable failure)
+                {
+                    callback.onFailure(from, failure);
+                }
+
+                @Override
+                public void onCallbackFailure(Id from, Throwable failure)
+                {
+                    failure.printStackTrace();
+                }
+            });
+        };
     }
 }

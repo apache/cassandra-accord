@@ -39,14 +39,13 @@ import accord.primitives.RoutingKeys;
 import accord.topology.Shard;
 import accord.topology.ShardSelection;
 import accord.topology.Topologies;
-import net.openhft.chronicle.wire.TriConsumer;
+import accord.utils.TriConsumer;
 
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.NoChange;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.SendMore;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Success;
 import static accord.primitives.DataConsistencyLevel.INVALID;
-import static accord.primitives.DataConsistencyLevel.UNSPECIFIED;
 import static accord.utils.Invariants.checkState;
 import static accord.utils.Invariants.nonNull;
 import static com.google.common.collect.Sets.newHashSetWithExpectedSize;
@@ -79,10 +78,11 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
          * reads sent since that is based on consistency level.
          */
         protected boolean hasDataOrSufficientResponse = false;
-        protected int quorum; // if !hasData, a slowPathQuorum will trigger success
+        protected int quorum; // if !hasDataOrSufficientResponse, a slowPathQuorum will trigger success
         protected int inflight;
         protected int contacted;
         protected int slow;
+        private boolean succeeded = false;
 
         public ReadShardTracker(Shard shard, DataConsistencyLevel dataCL)
         {
@@ -112,18 +112,23 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
          */
         public ShardOutcome<? super ReadTracker> recordReadSuccess(boolean isSlow)
         {
+            checkState(!dataCL.requiresDigestReads, "Don't use recordReadSuccess to track data responses with digest reads");
             checkState(inflight > 0);
-            boolean hadSucceeded = hasSucceeded();
             --inflight;
             if (isSlow) --slow;
+
             hasDataOrSufficientResponse = true;
-            return hadSucceeded ? NoChange : DataSuccess;
+
+            if (succeeded)
+                return NoChange;
+
+            succeeded = true;
+            return DataSuccess;
         }
 
         public ShardOutcome<? super ReadTracker> recordQuorumReadSuccess(boolean isSlow, boolean isDigestReadOrInsufficient)
         {
             checkState(inflight > 0);
-            boolean hadSucceeded = hasSucceeded();
             --inflight;
             ++quorum;
             if (isSlow) --slow;
@@ -131,11 +136,14 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
             if (!isDigestReadOrInsufficient)
                 hasDataOrSufficientResponse = true;
 
-            if (hadSucceeded)
+            if (succeeded)
                 return NoChange;
 
-            if (quorum == quorumSize())
+            if (hasSucceeded())
+            {
+                succeeded = true;
                 return Success;
+            }
 
             return ensureProgressOrFail();
         }
@@ -190,9 +198,9 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
         {
             if (dataCL.requiresDigestReads)
                 // Both are required when sending digest reads
-                return hasData() && hasReachedQuorum();
+                return hasDataOrSufficientResponse() && hasReachedQuorum();
             else
-                return hasData() || hasReachedQuorum();
+                return hasDataOrSufficientResponse() || hasReachedQuorum();
         }
 
         boolean hasInFlight()
@@ -202,7 +210,10 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
 
         public boolean shouldRead()
         {
-            return !hasSucceeded() && inflight == slow;
+            return !hasSucceeded()
+                    && (dataCL.requiresDigestReads
+                        ? (quorumSize() - quorum) > (inflight - slow)
+                        : inflight == slow);
         }
 
         public boolean canRead()
@@ -212,10 +223,10 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
 
         public boolean hasFailed()
         {
-            return !hasData() && inflight == 0 && contacted == shard.nodes.size() && !hasReachedQuorum();
+            return !hasDataOrSufficientResponse() && inflight == 0 && contacted == shard.nodes.size() && !hasReachedQuorum();
         }
 
-        public boolean hasData()
+        public boolean hasDataOrSufficientResponse()
         {
             return hasDataOrSufficientResponse;
         }
@@ -240,7 +251,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
     public ReadTracker(Topologies topologies, DataConsistencyLevel dataCL)
     {
         super(topologies, dataCL, ReadShardTracker[]::new, ReadShardTracker::new);
-        checkState((topologies.size() == 1 || (dataCL == INVALID || dataCL == UNSPECIFIED)), "Data reads should only have a single topology");
+        checkState(topologies.size() == 1 || dataCL == INVALID, "Data reads should only have a single topology");
         this.candidates = new ArrayList<>(topologies.nodes()); // TODO (low priority, efficiency): copyOfNodesAsList to avoid unnecessary copies
         this.dataCL = dataCL;
         this.inflight = newHashSetWithExpectedSize(maxShardsPerEpoch());
@@ -255,7 +266,6 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
     @VisibleForTesting
     protected void recordInFlightRead(Id node)
     {
-        // TODO does Keys.EMPTY work ok here? We never cared about the value before
         if (!inflight.add(node))
             throw new IllegalStateException(node + " already in flight");
 
@@ -367,7 +377,10 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
                 if (tmp == null)
                     tmp = new ShardSelection(); // determinism
 
-                tmp.set(i, tracker.quorumSize());
+                int numToContact = 1;
+                if (!shardToDataReadKeys.isEmpty())
+                    numToContact = tracker.quorumSize();
+                tmp.set(i, numToContact);
             }
             toRead = tmp;
         }
@@ -414,7 +427,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
         {
             Id candidate = candidates.get(j);
             recordInFlightRead(candidate);
-            contact.accept(with, candidate, RoutingKeys.of(contactedToDataReadKeys.getOrDefault(candidate, ImmutableList.of())));
+            contact.consume(with, candidate, RoutingKeys.of(contactedToDataReadKeys.getOrDefault(candidate, ImmutableList.of())));
             candidates.remove(j);
         }
         return RequestStatus.NoChange;
@@ -422,7 +435,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
 
     public boolean hasData()
     {
-        return all(ReadShardTracker::hasData);
+        return all(ReadShardTracker::hasDataOrSufficientResponse);
     }
 
     public boolean hasFailed()

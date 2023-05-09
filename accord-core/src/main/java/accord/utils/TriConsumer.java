@@ -16,24 +16,9 @@
  * limitations under the License.
  */
 
-package accord.impl.list;
+package accord.utils;
 
-import accord.api.Data;
-import accord.api.DataResolver;
-import accord.api.Read;
-import accord.api.ResolveResult;
-import accord.api.UnresolvedData;
-import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncChains;
-
-public class ListResolver implements DataResolver
+public interface TriConsumer<P1, P2, P3>
 {
-    public static final ListResolver INSTANCE = new ListResolver();
-    private ListResolver() {}
-
-    @Override
-    public AsyncChain<ResolveResult> resolve(Read read, UnresolvedData unresolvedData, FollowupReader followupReader)
-    {
-        return AsyncChains.success(new ResolveResult((Data)unresolvedData, null));
-    }
+    void consume(P1 p1, P2 p2, P3 p3);
 }

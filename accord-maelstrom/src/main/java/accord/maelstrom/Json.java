@@ -323,7 +323,7 @@ public class Json
             MaelstromRead read = new MaelstromRead(readKeys, keys);
             MaelstromQuery query = new MaelstromQuery(client, requestId);
 
-            return new Txn.InMemory(keys, read, MaelstromResolver.INSTANCE, query, update);
+            return new Txn.InMemory(keys, read, MaelstromData.EMPTY, query, update);
         }
     };
 
@@ -496,7 +496,7 @@ public class Json
 
             try
             {
-                for (Map.Entry<Key, Value> e : ((MaelstromData)getUninterruptibly(MaelstromResolver.INSTANCE.resolve(null, value.unresolvedData, null)).data).entrySet())
+                for (Map.Entry<Key, Value> e : ((MaelstromData)getUninterruptibly(MaelstromData.EMPTY.resolve(null, null, value.unresolvedData, null)).data).entrySet())
                 {
                     out.beginArray();
                     ((MaelstromKey)e.getKey()).datum.write(out);

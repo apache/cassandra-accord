@@ -21,12 +21,16 @@ package accord.coordinate.tracking;
 import java.util.HashSet;
 import java.util.Set;
 
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Sets;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import accord.api.RoutingKey;
 import accord.impl.TopologyUtils;
 import accord.local.Node.Id;
+import accord.primitives.DataConsistencyLevel;
 import accord.primitives.Ranges;
 import accord.topology.Shard;
 import accord.topology.Topologies;
@@ -63,15 +67,31 @@ public class ReadTrackerTest
 
     static class TestReadTracker extends ReadTracker
     {
+        private final boolean quorum;
         public TestReadTracker(Topologies topologies)
         {
-            super(topologies);
+            this(topologies, false);
+        }
+
+        public TestReadTracker(Topologies topologies, boolean quorum)
+        {
+            super(topologies, quorum ? DataConsistencyLevel.QUORUM : DataConsistencyLevel.INVALID);
+            this.quorum = quorum;
         }
 
         @Override
         public RequestStatus trySendMore()
         {
             return RequestStatus.NoChange;
+        }
+
+        @Override
+        protected RequestStatus recordReadSuccess(Id from)
+        {
+            if (quorum)
+                return recordQuorumReadSuccess(from);
+            else
+                return super.recordReadSuccess(from);
         }
     }
 
@@ -187,10 +207,83 @@ public class ReadTrackerTest
         assertResponseState(responses, true, false);
     }
 
+    @Test
+    void multiShardQuorumAndDigestFailure()
+    {
+        multishardQuorumAndDigest(true);
+    }
+
+    @Test
+    void multiShardQuorumAndDigestSuccess()
+    {
+        multishardQuorumAndDigest(false);
+    }
+
+    private void multishardQuorumAndDigest(boolean fail)
+    {
+        Id[] ids = toArray(ids(8), Id[]::new);
+        Ranges ranges = TopologyUtils.initialRanges(8, 500);
+        Topology topology = TopologyUtils.initialTopology(ids, ranges, 3);
+
+        Topology subTopology = new Topology(1, new Shard[]{topology.get(0), topology.get(1), topology.get(5)});
+        ReadTracker responses = new TestReadTracker(topologies(subTopology), true);
+
+        assertInitialContacts(Sets.newHashSet(ids[1], ids[2], ids[6], ids[7]), responses);
+
+        assertResponseState(responses, false, false);
+
+        responses.recordReadFailure(ids[1]);
+        assertResponseState(responses, false, false);
+
+        assertContacts(Sets.newHashSet(ids[0], ids[3]), responses);
+        assertResponseState(responses, false, false);
+
+        responses.recordReadFailure(ids[7]);
+        assertContacts(Sets.newHashSet(ids[5]), responses);
+
+        responses.recordReadSuccess(ids[2]);
+        assertResponseState(responses, false, false);
+        try
+        {
+            responses.trySendMore((i,j,k)->{}, null);
+            Assertions.fail();
+        }
+        catch (IllegalStateException t)
+        {
+        }
+
+        responses.recordReadSuccess(ids[0]);
+        assertResponseState(responses, false, false);
+        responses.recordReadSuccess(ids[5]);
+        assertResponseState(responses, false, false);
+        responses.recordReadSuccess(ids[6]);
+        assertResponseState(responses, false, false);
+        if (fail)
+        {
+            responses.recordReadFailure(ids[3]);
+            assertResponseState(responses, false, true);
+        }
+        else
+        {
+            responses.recordReadSuccess(ids[3]);
+            assertResponseState(responses, true, false);
+        }
+    }
+
+
     private static void assertContacts(Set<Id> expect, ReadTracker tracker)
     {
         Set<Id> actual = new HashSet<>();
         tracker.trySendMore((set, to, dataKeys) -> set.add(to), actual);
+        Assertions.assertEquals(expect, actual);
+    }
+
+    private static void assertInitialContacts(Set<Id> expect, ReadTracker tracker)
+    {
+        ListMultimap<Shard, RoutingKey> shardToDataReadKeys = ArrayListMultimap.create();
+        tracker.topologies.get(0).shards().forEach(s -> shardToDataReadKeys.put(s, s.range.start()));
+        Set<Id> actual = new HashSet<>();
+        tracker.trySendMore((set, to, dataKeys) -> set.add(to), actual, shardToDataReadKeys);
         Assertions.assertEquals(expect, actual);
     }
 }

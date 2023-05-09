@@ -49,8 +49,6 @@ public abstract class CheckShards extends ReadCoordinator<CheckStatusReply>
 
     protected CheckShards(Node node, TxnId txnId, Unseekables<?, ?> contact, long srcEpoch, IncludeInfo includeInfo)
     {
-        // CL.ONE doesn't mean much since none of the children of CheckShards read non-Accord state, but if they did
-        // they would need to specify the correct CL.
         super(node, topologyFor(node, txnId, contact, srcEpoch), txnId, INVALID);
         this.untilRemoteEpoch = srcEpoch;
         this.contact = contact;

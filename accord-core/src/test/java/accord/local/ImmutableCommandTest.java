@@ -18,29 +18,42 @@
 
 package accord.local;
 
-import accord.api.ProgressLog;
-import accord.api.RoutingKey;
-import accord.api.TestableConfigurationService;
-import accord.impl.*;
-import accord.impl.mock.MockCluster;
-import accord.impl.mock.MockConfigurationService;
-import accord.impl.mock.MockStore;
-import accord.local.Node.Id;
-import accord.local.Status.Known;
-import accord.primitives.*;
-import accord.topology.Topology;
-import com.google.common.collect.Lists;
-import accord.utils.DefaultRandom;
-
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-
-import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import javax.annotation.Nullable;
+
+import com.google.common.collect.Lists;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+import accord.api.ProgressLog;
+import accord.api.RoutingKey;
+import accord.api.TestableConfigurationService;
+import accord.impl.InMemoryCommandStore;
+import accord.impl.InMemoryCommandStores;
+import accord.impl.IntKey;
+import accord.impl.SizeOfIntersectionSorter;
+import accord.impl.TestAgent;
+import accord.impl.TopologyFactory;
+import accord.impl.mock.MockCluster;
+import accord.impl.mock.MockConfigurationService;
+import accord.impl.mock.MockStore;
+import accord.local.Node.Id;
+import accord.local.Status.Known;
+import accord.primitives.FullKeyRoute;
+import accord.primitives.Keys;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.RoutingKeys;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
+import accord.topology.Topology;
+import accord.utils.DefaultRandom;
 
 import static accord.Utils.id;
 import static accord.Utils.writeTxn;
@@ -65,7 +78,6 @@ public class ImmutableCommandTest
     private static class CommandStoreSupport
     {
         final AtomicReference<Topology> local = new AtomicReference<>(TOPOLOGY);
-        final MockStore data = new MockStore();
     }
 
     private static void setTopologyEpoch(AtomicReference<Topology> topology, long epoch)
@@ -96,7 +108,7 @@ public class ImmutableCommandTest
     private static Node createNode(Id id, CommandStoreSupport storeSupport)
     {
         return new Node(id, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
-                        new MockCluster.Clock(100), () -> storeSupport.data, new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), new TestAgent(), new DefaultRandom(), null,
+                        new MockCluster.Clock(100), () -> new MockStore(id), new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), new TestAgent(), new DefaultRandom(), null,
                         SizeOfIntersectionSorter.SUPPLIER, ignore -> ignore2 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new);
     }
 

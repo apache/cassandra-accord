@@ -36,10 +36,22 @@ import static accord.primitives.DataConsistencyLevel.UNSPECIFIED;
 public interface Read
 {
     Seekables<?, ?> keys();
+
+    /**
+     *  Perform a read for specific key, optionally executing the read as a digest read to increase performance
+     */
     AsyncChain<UnresolvedData> read(Seekable key, boolean digestRead, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store);
     Read slice(Ranges ranges);
     Read merge(Read other);
 
+    /**
+     * The consistency level Accord should perform the read at, meaning Accord
+     * should ensure it reads from a certain number of replicas, and request digest reads
+     * to improve performance.
+     *
+     * If unspecified then Accord will only read from the replicas it needs to in order to read
+     * data written by Accord.
+     */
     default DataConsistencyLevel readDataCL()
     {
         return UNSPECIFIED;

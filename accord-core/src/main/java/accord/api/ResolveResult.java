@@ -23,13 +23,15 @@ import javax.annotation.Nonnull;
 import static accord.utils.Invariants.nonNull;
 
 /**
- * Result of resolving the ReadResults and fetching the full Data in ReadResolver
+ * Result of resolving UnresolvedData and fetching the full Data in DataResolver
  *
  * May contain repair writes which need to be persisted before any writes of this transaction
- * and acknowledging the txn as committed.
+ * and acknowledging the txn as committed. The transaction should not be acknowledged until the repair
+ * writes are applied at the requested read consistency level.
  */
 public class ResolveResult
 {
+    @Nonnull
     public final Data data;
     @Nonnull
     public final RepairWrites repairWrites;

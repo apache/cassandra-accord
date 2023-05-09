@@ -18,6 +18,9 @@
 
 package accord.coordinate;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -32,13 +35,18 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.Agent;
 import accord.api.BarrierType;
+import accord.api.RepairWrites;
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.impl.IntKey;
 import accord.impl.SimpleProgressLog;
 import accord.impl.TestAgent;
 import accord.impl.mock.MockCluster;
+import accord.impl.mock.MockCluster.RecordedReply;
 import accord.impl.mock.MockStore;
+import accord.impl.mock.MockStore.MockData;
+import accord.impl.mock.MockStore.MockFollowupRead;
+import accord.impl.mock.MockStore.MockResolver;
 import accord.local.Command;
 import accord.local.CommandListener;
 import accord.local.Commands;
@@ -49,19 +57,24 @@ import accord.local.Node.Id;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
+import accord.messages.Apply.ApplyReply;
 import accord.messages.WhenReadyToExecute.ExecuteOk;
+import accord.primitives.DataConsistencyLevel;
 import accord.primitives.FullKeyRoute;
 import accord.primitives.FullRangeRoute;
 import accord.primitives.Keys;
 import accord.primitives.PartialDeps;
 import accord.primitives.Ranges;
+import accord.primitives.Seekable;
 import accord.primitives.Seekables;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import org.assertj.core.util.Throwables;
 
 import static accord.Utils.id;
+import static accord.Utils.idSet;
 import static accord.Utils.ids;
 import static accord.Utils.ranges;
 import static accord.Utils.spinUntilSuccess;
@@ -77,6 +90,7 @@ import static accord.utils.Invariants.checkState;
 import static accord.utils.async.AsyncChains.getUninterruptibly;
 import static com.google.common.base.Predicates.alwaysTrue;
 import static java.lang.Thread.sleep;
+import static java.util.Collections.synchronizedList;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -274,7 +288,7 @@ public class CoordinateTest
                     depsBuilder.add(key, blockingTxnId);
                     PartialDeps partialDeps = depsBuilder.build();
                     Commands.commit(store, txnId, route, command.progressKey(), command.partialTxn(), txnId, partialDeps);
-                    Commands.apply(store, txnId, txnId.epoch(), route, txnId, partialDeps, txn.execute(txnId, null, null), txn.query().compute(txnId, txnId, keys, null, null, null));
+                    Commands.apply(store, txnId, txnId.epoch(), route, txnId, partialDeps, txn.execute(txnId, null, RepairWrites.EMPTY), txn.query().compute(txnId, txnId, keys, null, null, null));
                 }));
 
             Barrier listeningLocalBarrier = Barrier.barrier(node, Seekables.of(key), node.epoch(), BarrierType.local);
@@ -288,7 +302,7 @@ public class CoordinateTest
             // Apply the blockingTxn to unblock the rest
             for (Node n : cluster)
                 assertEquals(ApplyOutcome.Success, getUninterruptibly(n.unsafeForKey(key).submit(blockingTxnContext, store -> {
-                    return Commands.apply(store, blockingTxnId, blockingTxnId.epoch(), route, blockingTxnId, PartialDeps.builder(store.ranges().at(blockingTxnId.epoch())).build(), blockingTxn.execute(blockingTxnId, null, null), blockingTxn.query().compute(blockingTxnId, blockingTxnId, keys, null, null, null));
+                    return Commands.apply(store, blockingTxnId, blockingTxnId.epoch(), route, blockingTxnId, PartialDeps.builder(store.ranges().at(blockingTxnId.epoch())).build(), blockingTxn.execute(blockingTxnId, null, RepairWrites.EMPTY), blockingTxn.query().compute(blockingTxnId, blockingTxnId, keys, null, null, null));
                 })));
             // Global sync should be unblocked
             syncPoint = getUninterruptibly(syncInclusiveSyncFuture);
@@ -356,7 +370,7 @@ public class CoordinateTest
             assertNotNull(node);
 
             Keys keys = keys(10);
-            Txn txn = new Txn.InMemory(keys, MockStore.read(Keys.EMPTY), MockStore.READ_RESOLVER, MockStore.QUERY, MockStore.update(keys));
+            Txn txn = new Txn.InMemory(keys, MockStore.read(Keys.EMPTY), MockStore.RESOLVER, MockStore.QUERY, MockStore.update(keys));
             Result result = getUninterruptibly(cluster.get(id(1)).coordinate(txn));
             assertEquals(MockStore.RESULT, result);
         }
@@ -373,7 +387,7 @@ public class CoordinateTest
             assertNotNull(node);
 
             Keys keys = keys(10);
-            Txn txn = new Txn.InMemory(keys, MockStore.read(keys), MockStore.READ_RESOLVER, MockStore.QUERY, MockStore.update(Keys.EMPTY));
+            Txn txn = new Txn.InMemory(keys, MockStore.read(keys), MockStore.RESOLVER, MockStore.QUERY, MockStore.update(Keys.EMPTY));
             Result result = getUninterruptibly(cluster.get(id(1)).coordinate(txn));
             assertEquals(MockStore.RESULT, result);
         }
@@ -390,12 +404,172 @@ public class CoordinateTest
             TxnId txnId = node.nextTxnId(Write, Key);
             Keys oneKey = keys(10);
             Keys twoKeys = keys(10, 20);
-            Txn txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.READ_RESOLVER, MockStore.QUERY, MockStore.update(twoKeys));
+            Txn txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.RESOLVER, MockStore.QUERY, MockStore.update(twoKeys));
             Result result = getUninterruptibly(Coordinate.coordinate(node, txnId, txn, txn.keys().toRoute(oneKey.get(0).toUnseekable())));
             assertEquals(MockStore.RESULT, result);
 
-            txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.READ_RESOLVER, MockStore.QUERY, MockStore.update(Keys.EMPTY));
+            txn = new Txn.InMemory(oneKey, MockStore.read(oneKey), MockStore.RESOLVER, MockStore.QUERY, MockStore.update(Keys.EMPTY));
             result = getUninterruptibly(cluster.get(id(1)).coordinate(txn));
+            assertEquals(MockStore.RESULT, result);
+        }
+    }
+
+    @Test
+    void quorumReadTest() throws Throwable
+    {
+        quorumReadTest(false, false, false, false, false);
+    }
+
+    @Test
+    void quorumReadTestWithFailedNode() throws Throwable
+    {
+        quorumReadTest(true, false, false, false, false);
+    }
+
+    @Test
+    void quorumReadTestFollowupWrongNode() throws Throwable
+    {
+        quorumReadTest(false, true, false, false, false);
+    }
+
+    @Test
+    void quorumReadTestFollowupWrongKey() throws Throwable
+    {
+        quorumReadTest(false, false, true, false, false);
+    }
+
+    @Test
+    void quorumReadTestFollowupKeyNotInRead() throws Throwable
+    {
+        quorumReadTest(false, false, false, true, false);
+    }
+
+    @Test
+    void quorumReadTestReadRepair() throws Throwable
+    {
+        quorumReadTest(false, false, false, false, true);
+        quorumReadTest(true, false, false, false, true);
+    }
+
+    private void quorumReadTest(boolean withFailedNode, boolean failOnFollowupWrongNode, boolean failOnFollowupWrongKey, boolean failOnKeyNotInRead, boolean includeRepairWrites) throws Throwable
+    {
+        try (MockCluster cluster = MockCluster.builder().recordMessages().build())
+        {
+            Node node = cluster.get(1);
+            // Force an additional read to be sent to verify that additional reads are always data reads
+            if (withFailedNode)
+                cluster.networkFilter.isolate(id(2));
+
+            // Add slight delay so the test has a chance to see if the callback is invoked
+            // without waiting on a quorum of applies
+            for (Node n : cluster)
+                cluster.networkFilter.delay(n.id(), 20, TimeUnit.MILLISECONDS);
+            assertNotNull(node);
+
+            TxnId txnId = node.nextTxnId(Read, Key);
+            Keys oneKey = keys(10);
+            List<Boolean> digestReads = synchronizedList(new ArrayList<>());
+            accord.api.Read read = MockStore.read(oneKey, digestReads::add, DataConsistencyLevel.QUORUM);
+
+            // For forcing follow up reads that should generate errors
+            MockFollowupRead mockFollowupRead = null;
+            if (failOnFollowupWrongNode)
+                mockFollowupRead = new MockFollowupRead(id(-42), oneKey);
+            if (failOnFollowupWrongKey)
+                mockFollowupRead = new MockFollowupRead(id(2), keys(-1));
+            if (failOnKeyNotInRead)
+                mockFollowupRead = new MockFollowupRead(id(2), keys(11));
+
+            // id in repair writes means nothing it just makes isEmpty false
+            MockData repairWrites = includeRepairWrites ? new MockData(id(2), oneKey) : null;
+            MockResolver mockResolver = new MockResolver(true, repairWrites, mockFollowupRead);
+            Txn txn = new Txn.InMemory(oneKey, read, mockResolver, MockStore.QUERY_RETURNING_INPUT);
+
+            Result result = null;
+            try
+            {
+                result = getUninterruptibly(Coordinate.coordinate(node, txnId, txn, txn.keys().toRoute(oneKey.get(0).toUnseekable())));
+                if (failOnFollowupWrongKey || failOnFollowupWrongNode || failOnKeyNotInRead)
+                    fail("Query should have failed");
+            }
+            catch (Throwable t)
+            {
+                if (failOnFollowupWrongKey || failOnFollowupWrongNode || failOnKeyNotInRead)
+                {
+                    Throwable cause = Throwables.getRootCause(t);
+                    if (failOnFollowupWrongNode)
+                        assertEquals("java.lang.IllegalArgumentException: -42 is not a replica in executeAt epoch1", cause.toString());
+                    if (failOnFollowupWrongKey)
+                        assertEquals("java.lang.IllegalArgumentException: -1 is not replicated by node 2 in executeAt epoch 1", cause.toString());
+                    if (failOnKeyNotInRead)
+                        assertEquals("java.lang.IllegalArgumentException: 11 is not one of the read keys for this transaction", cause.toString());
+                    return;
+                }
+                throw t;
+            }
+
+            // With the delay it should usually be observable if the apply responses were sent before the transaction was acked
+            // If no repairs were generated then it is safe to ack before apply
+            if (includeRepairWrites)
+            {
+                int successfulApply = 0;
+                for (Object message : cluster.recordedMessages)
+                    if (message instanceof RecordedReply && ((RecordedReply) message).reply == ApplyReply.Applied)
+                        successfulApply++;
+                if (withFailedNode)
+                {
+                    assertEquals(2, repairWrites.appliedKeys.size());
+                    assertEquals(2, successfulApply);
+                }
+                else
+                {
+                    assertTrue(successfulApply >= 2);
+                    assertTrue(repairWrites.appliedKeys.size() >= 2);
+                }
+                Set<Seekable> keySet = ImmutableSet.copyOf(repairWrites.appliedKeys);
+                assertEquals(1, keySet.size());
+                assertEquals(oneKey.get(0), repairWrites.appliedKeys.get(0));
+            }
+
+            MockData mockData = (MockData)result;
+            System.out.println(digestReads);
+            if (withFailedNode)
+            {
+                // With a failed node there will be no recorded digest reads because the node that got the digest read is failed and the added read due to
+                // failure response should always be a data read
+                assertTrue(digestReads.stream().allMatch(Boolean.FALSE::equals));
+            }
+            else
+            {
+                // The initial read should have a data read and a digest read, and the follow up reads (last 2) should always be data reads
+                assertEquals(1, digestReads.stream().filter(Boolean.TRUE::equals).count());
+                assertTrue(digestReads.get(0) == true || digestReads.get(1) == true);
+            }
+
+            Set<Id> expectedContacts = withFailedNode ? idSet(1, 3) : idSet(3, 2);
+            // The initial reads should contact two different nodes
+            assertEquals(2, ((MockData)mockResolver.unresolvedData).size());
+            assertEquals(expectedContacts, ImmutableSet.copyOf((MockData)mockResolver.unresolvedData));
+            // The follow up reads should contact the same two nodes just because that is what the mock chooses
+            assertEquals(2, mockData.size());
+            assertEquals(expectedContacts, ImmutableSet.copyOf(mockData));
+        }
+    }
+
+    @Test
+    void testNonQuorumCallbackInvokedBeforeApply() throws Throwable
+    {
+        try (MockCluster cluster = MockCluster.builder().build())
+        {
+            Node node = cluster.get(1);
+            cluster.networkFilter.addFilter(alwaysTrue(), alwaysTrue(), message -> message instanceof ApplyReply);
+            assertNotNull(node);
+
+            TxnId txnId = node.nextTxnId(Write, Key);
+            Keys keys = keys(10);
+            Txn txn = writeTxn(keys);
+            FullKeyRoute route = keys.toRoute(keys.get(0).toUnseekable());
+            Result result = getUninterruptibly(Coordinate.coordinate(node, txnId, txn, route));
             assertEquals(MockStore.RESULT, result);
         }
     }

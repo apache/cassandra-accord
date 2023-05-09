@@ -84,7 +84,6 @@ public class Apply extends TxnRequest<ApplyReply>
         this.result = result;
     }
 
-
     @Override
     public void process()
     {
@@ -116,6 +115,11 @@ public class Apply extends TxnRequest<ApplyReply>
     @Override
     public void accept(ApplyReply reply, Throwable failure)
     {
+        //TODO failure is ignored here
+        if (failure != null)
+        {
+            failure.printStackTrace();
+        }
         if (reply == ApplyReply.Applied)
         {
             node.ifLocal(empty(), scope.homeKey(), txnId.epoch(), instance -> {

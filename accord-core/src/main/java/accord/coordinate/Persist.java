@@ -20,9 +20,12 @@ package accord.coordinate;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.function.Consumer;
+import javax.annotation.Nullable;
 
 import accord.api.Result;
 import accord.coordinate.tracking.QuorumTracker;
+import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Apply;
@@ -54,11 +57,16 @@ public class Persist implements Callback<ApplyReply>
     final Deps deps;
     final QuorumTracker tracker;
     final Set<Id> persistedOn;
+    // Quorum is the only CL supported right now
+    // Deferring handle other consistency levels to LOCAL_* support
+    @Nullable
+    final Consumer<Throwable> onAppliedToQuorum;
     boolean isDone;
+    Throwable fail;
 
-    public static void persist(Node node, Topologies sendTo, Topologies applyTo, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    public static void persist(Node node, Topologies sendTo, Topologies applyTo, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, @Nullable Consumer<Throwable> onAppliedToQuorum)
     {
-        Persist persist = new Persist(node, applyTo, txnId, route, txn, executeAt, deps);
+        Persist persist = new Persist(node, applyTo, txnId, route, txn, executeAt, deps, onAppliedToQuorum);
         node.send(sendTo.nodes(), to -> new Apply(to, sendTo, applyTo, executeAt.epoch(), txnId, route, txn, executeAt, deps, writes, result), persist);
     }
 
@@ -66,11 +74,11 @@ public class Persist implements Callback<ApplyReply>
     {
         Topologies sendTo = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
         Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch());
-        Persist persist = new Persist(node, sendTo, txnId, route, txn, executeAt, deps);
+        Persist persist = new Persist(node, sendTo, txnId, route, txn, executeAt, deps, null);
         node.send(sendTo.nodes(), to -> new Apply(to, sendTo, applyTo, executeAt.epoch(), txnId, route, txn, executeAt, deps, writes, result), persist);
     }
 
-    private Persist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps)
+    private Persist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, @Nullable Consumer<Throwable> onAppliedToQuorum)
     {
         this.node = node;
         this.txnId = txnId;
@@ -80,6 +88,7 @@ public class Persist implements Callback<ApplyReply>
         this.tracker = new QuorumTracker(topologies);
         this.executeAt = executeAt;
         this.persistedOn = new HashSet<>();
+        this.onAppliedToQuorum = onAppliedToQuorum;
     }
 
     @Override
@@ -95,6 +104,8 @@ public class Persist implements Callback<ApplyReply>
                 {
                     if (!isDone)
                     {
+                        if (onAppliedToQuorum != null)
+                            onAppliedToQuorum.accept(null);
                         // TODO (low priority, consider, efficiency): send to non-home replicas also, so they may clear their log more easily?
                         Shard homeShard = node.topology().forEpochIfKnown(route.homeKey(), txnId.epoch());
                         node.send(homeShard, new InformHomeDurable(txnId, route.homeKey(), executeAt, Durable, persistedOn));
@@ -117,6 +128,19 @@ public class Persist implements Callback<ApplyReply>
     @Override
     public void onFailure(Id from, Throwable failure)
     {
+        if (fail == null)
+            fail = failure;
+        else
+            fail.addSuppressed(failure);
+
+        // Now that the transaction result callback may not be invoked until Persist it's important to invoke the callback on failure
+        // so Node can clean up the transaction state
+        RequestStatus status = tracker.recordFailure(from);
+        if (!isDone && status == RequestStatus.Failed)
+        {
+            isDone = true;
+            onAppliedToQuorum.accept(fail);
+        }
         // TODO (desired, consider): send knowledge of partial persistence?
     }
 

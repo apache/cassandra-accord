@@ -31,7 +31,7 @@ import accord.primitives.Txn;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
-import static com.google.common.base.Preconditions.checkArgument;
+import static accord.utils.Invariants.checkArgument;
 
 public class MaelstromRead implements Read
 {

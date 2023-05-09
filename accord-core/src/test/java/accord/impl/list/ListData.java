@@ -23,11 +23,19 @@ import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 import accord.api.Data;
+import accord.api.DataResolver;
 import accord.api.Key;
+import accord.api.Read;
+import accord.api.ResolveResult;
 import accord.api.UnresolvedData;
+import accord.primitives.Timestamp;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 
-public class ListData extends TreeMap<Key, int[]> implements Data, UnresolvedData
+public class ListData extends TreeMap<Key, int[]> implements Data, UnresolvedData, DataResolver
 {
+    public static final ListData EMPTY = new ListData();
+
     @Override
     public ListData merge(Data data)
     {
@@ -48,5 +56,11 @@ public class ListData extends TreeMap<Key, int[]> implements Data, UnresolvedDat
     public UnresolvedData merge(UnresolvedData unresolvedData)
     {
         return merge((Data)unresolvedData);
+    }
+
+    @Override
+    public AsyncChain<ResolveResult> resolve(Timestamp executeAt, Read read, UnresolvedData unresolvedData, FollowupReader followUpReader)
+    {
+        return AsyncChains.success(new ResolveResult((ListData)unresolvedData, ListWrite.EMPTY));
     }
 }

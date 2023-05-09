@@ -19,7 +19,7 @@
 package accord.api;
 
 /**
- * The result of having performed a read at some node and potentially read incomplete data
+ * The result of having performed a read at some node and potentially reading incomplete data
  * not written by Accord
  */
 public interface UnresolvedData

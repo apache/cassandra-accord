@@ -21,11 +21,16 @@ package accord.coordinate.tracking;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.ListMultimap;
 import org.junit.jupiter.api.Assertions;
 
+import accord.api.RoutingKey;
 import accord.coordinate.tracking.ReadTracker.ReadShardTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.primitives.DataConsistencyLevel;
+import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.utils.RandomSource;
 
@@ -36,21 +41,41 @@ public class ReadTrackerReconciler extends TrackerReconciler<ReadShardTracker, R
     static class InFlightCapturingReadTracker extends ReadTracker
     {
         final List<Id> inflight = new ArrayList<>();
-        public InFlightCapturingReadTracker(Topologies topologies)
+        final boolean quorumRead;
+        public InFlightCapturingReadTracker(boolean quorumRead, Topologies topologies)
         {
-            super(topologies);
+            super(topologies, quorumRead ? DataConsistencyLevel.QUORUM : DataConsistencyLevel.INVALID);
+            this.quorumRead = quorumRead;
         }
 
         @Override
         protected RequestStatus trySendMore()
         {
-            return super.trySendMore((list, to, dataKeys) -> list.add(to), inflight);
+            if (quorumRead)
+            {
+                ListMultimap<Shard, RoutingKey> shardToDataReadKeys = ArrayListMultimap.create();
+                topologies.get(0).shards().forEach(s -> shardToDataReadKeys.put(s, s.range.start()));
+                return super.trySendMore((list, to, dataKeys) -> list.add(to), inflight, shardToDataReadKeys);
+            }
+            else
+            {
+                return super.trySendMore((list, to, dataKeys) -> list.add(to), inflight);
+            }
+        }
+
+        @Override
+        protected RequestStatus recordReadSuccess(Id from)
+        {
+            if (quorumRead)
+                return recordQuorumReadSuccess(from);
+            else
+                return super.recordReadSuccess(from);
         }
     }
 
     ReadTrackerReconciler(RandomSource random, Topologies topologies)
     {
-        this(random, new InFlightCapturingReadTracker(topologies));
+        this(random, new InFlightCapturingReadTracker(random.nextBoolean(), topologies));
     }
 
     private ReadTrackerReconciler(RandomSource random, InFlightCapturingReadTracker tracker)
@@ -84,6 +109,8 @@ public class ReadTrackerReconciler extends TrackerReconciler<ReadShardTracker, R
         switch (status)
         {
             case Failed:
+                if (!tracker.any(ReadShardTracker::hasFailed))
+                    System.out.println("woops");
                 Assertions.assertTrue(tracker.any(ReadShardTracker::hasFailed));
                 Assertions.assertFalse(tracker.all(ReadShardTracker::hasSucceeded));
                 break;

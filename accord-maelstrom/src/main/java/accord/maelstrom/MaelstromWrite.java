@@ -35,6 +35,8 @@ import accord.utils.async.AsyncChain;
 
 public class MaelstromWrite extends TreeMap<Key, Value> implements Write, RepairWrites
 {
+    public static final MaelstromWrite EMPTY = new MaelstromWrite();
+
     @Override
     public Seekables<?, ?> keys()
     {

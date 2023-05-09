@@ -20,6 +20,7 @@ package accord.api;
 
 import accord.local.Node.Id;
 import accord.messages.Callback;
+import accord.primitives.Timestamp;
 import accord.utils.async.AsyncChain;
 
 /**
@@ -38,5 +39,6 @@ public interface DataResolver
     {
         void read(Read read, Id id, Callback<UnresolvedData> callback);
     }
-    AsyncChain<ResolveResult> resolve(Read read, UnresolvedData unresolvedData, FollowupReader followUpReader);
+
+    AsyncChain<ResolveResult> resolve(Timestamp executeAt, Read read, UnresolvedData unresolvedData, FollowupReader followUpReader);
 }

@@ -35,9 +35,11 @@ import accord.api.UnresolvedData;
 import accord.api.Update;
 import accord.local.Command;
 import accord.local.SafeCommandStore;
+import accord.primitives.Routable.Domain;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
+import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.nonNull;
 
 public interface Txn
@@ -244,15 +246,20 @@ public interface Txn
         return query().compute(txnId, executeAt, keys(), data, read(), update());
     }
 
-    default Writes execute(Timestamp executeAt, @Nullable Data data, @Nullable RepairWrites repairWrites)
+    default Writes execute(Timestamp executeAt, @Nullable Data data, @Nonnull RepairWrites repairWrites)
     {
         Update update = update();
         if (update == null)
-            return new Writes(executeAt, repairWrites.keys(), repairWrites.toWrite());
+        {
+            if (!repairWrites.isEmpty())
+                return new Writes(executeAt, repairWrites.keys(), repairWrites.toWrite());
+            else
+                return new Writes(executeAt, Keys.EMPTY, null);
+        }
 
         // Update keys might not include keys needing repair
         Seekables keys = update.keys();
-        if (repairWrites != null)
+        if (!repairWrites.isEmpty())
             keys = keys.with(repairWrites.keys());
 
         return new Writes(executeAt, keys, update.apply(data, repairWrites));
@@ -263,7 +270,10 @@ public interface Txn
         Ranges ranges = safeStore.ranges().at(command.executeAt().epoch());
         List<AsyncChain<UnresolvedData>> futures = Routables.foldlMinimal(keys(), ranges, (key, accumulate, index) -> {
             Read read = followupRead != null ? followupRead : read();
-            boolean digestRead = dataReadKeys != null && !dataReadKeys.contains(((Key)key).toUnseekable());
+            checkArgument(dataReadKeys == null || key.domain() == Domain.Key || !read().readDataCL().requiresDigestReads, "Digest reads are unsupported for ranges");
+            boolean digestRead = read().readDataCL().requiresDigestReads
+                                 && dataReadKeys != null
+                                 && !dataReadKeys.contains(((Key)key).toUnseekable());
             AsyncChain<UnresolvedData> result = read.read(key, digestRead, kind(), safeStore, command.executeAt(), safeStore.dataStore());
             accumulate.add(result);
             return accumulate;

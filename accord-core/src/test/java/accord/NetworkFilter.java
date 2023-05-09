@@ -18,13 +18,6 @@
 
 package accord;
 
-import accord.local.Node.Id;
-import accord.messages.Message;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.ArrayDeque;
 import java.util.Map;
 import java.util.Queue;
@@ -32,6 +25,14 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
+
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import accord.local.Node.Id;
+import accord.messages.Message;
 
 public class NetworkFilter
 {
@@ -58,10 +59,9 @@ public class NetworkFilter
         return delayedNodes.getOrDefault(id, 0L);
     }
 
-    // TODO didn't end up using this, should it be removed?
-    public long delay(Id node, long delay, TimeUnit unit)
+    public void delay(Id node, long delay, TimeUnit unit)
     {
-        return delayedNodes.put(node,  unit.toNanos(delay));
+        delayedNodes.put(node, unit.toNanos(delay));
     }
 
     // TODO Also didn't end up using cork
