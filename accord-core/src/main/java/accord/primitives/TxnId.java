@@ -35,6 +35,13 @@ public class TxnId extends Timestamp
         return new TxnId(msb, lsb, node);
     }
 
+    public static TxnId fromTimestamp(Timestamp t)
+    {
+        if (t instanceof TxnId)
+            return (TxnId) t;
+        return new TxnId(t.epoch(), t.hlc(), t.flags(), t.node);
+    }
+
     public static TxnId fromValues(long epoch, long hlc, Id node)
     {
         return new TxnId(epoch, hlc, 0, node);

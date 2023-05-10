@@ -345,4 +345,14 @@ public class Timestamp implements Comparable<Timestamp>
     {
         return "[" + epoch() + ',' + hlc() + ',' + flags() + ',' + node + ']';
     }
+
+    public static Timestamp fromString(String string)
+    {
+        String[] split = string.replaceFirst("\\[", "").replaceFirst("\\]", "").split(",");
+        assert split.length == 4;
+        return Timestamp.fromValues(Long.parseLong(split[0]),
+                                    Long.parseLong(split[1]),
+                                    Integer.parseInt(split[2]),
+                                    new Id(Integer.parseInt(split[3])));
+    }
 }

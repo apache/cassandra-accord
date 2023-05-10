@@ -554,6 +554,18 @@ public abstract class CommandStores
         return snapshot.byId.get(id);
     }
 
+    public int[] ids()
+    {
+        Snapshot snapshot = current;
+        Int2ObjectHashMap<CommandStore>.KeySet set = snapshot.byId.keySet();
+        int[] ids = new int[set.size()];
+        int idx = 0;
+        for (int a : set)
+            ids[idx++] = a;
+        Arrays.sort(ids);
+        return ids;
+    }
+
     public int count()
     {
         return current.shards.length;
