@@ -25,7 +25,6 @@ import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import accord.api.RepairWrites;
 import accord.local.Commands;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -175,7 +174,7 @@ public class Commit extends TxnRequest<ExecuteNack>
                     Kind.Minimal, to, topology, topologies, txnId,
                     txn, route, txnId, deps,
                     // TODO is this slice to get the keys correct?
-                    (maybePartialTransaction, partialRoute, partialDeps) -> new WaitForDependenciesThenApply(txnId, partialRoute, partialDeps, maybePartialTransaction.keys().slice(partialDeps.covering), txn.execute(txnId, null, RepairWrites.EMPTY), txn.result(txnId, txnId, null), notifyAgent));
+                    (maybePartialTransaction, partialRoute, partialDeps) -> new WaitForDependenciesThenApply(txnId, partialRoute, partialDeps, maybePartialTransaction.keys().slice(partialDeps.covering), txn.execute(txnId, null, null), txn.result(txnId, txnId, null), notifyAgent));
 
             node.send(to, commit, callback);
         }

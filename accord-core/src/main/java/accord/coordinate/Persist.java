@@ -21,7 +21,6 @@ package accord.coordinate;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Consumer;
-import javax.annotation.Nullable;
 
 import accord.api.Result;
 import accord.coordinate.tracking.QuorumTracker;
@@ -42,6 +41,7 @@ import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.topology.Shard;
 import accord.topology.Topologies;
+import javax.annotation.Nullable;
 
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.local.Status.Durability.Durable;
@@ -139,7 +139,8 @@ public class Persist implements Callback<ApplyReply>
         if (!isDone && status == RequestStatus.Failed)
         {
             isDone = true;
-            onAppliedToQuorum.accept(fail);
+            if (onAppliedToQuorum != null)
+                onAppliedToQuorum.accept(fail);
         }
         // TODO (desired, consider): send knowledge of partial persistence?
     }

@@ -21,10 +21,13 @@ package accord.impl.mock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import accord.api.Data;
 import accord.api.DataResolver;
 import accord.api.DataStore;
+import accord.api.Key;
 import accord.api.Query;
 import accord.api.Read;
 import accord.api.RepairWrites;
@@ -49,6 +52,7 @@ import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResults.SettableResult;
 
 import static java.util.Collections.synchronizedList;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 public class MockStore implements DataStore
 {
@@ -59,11 +63,39 @@ public class MockStore implements DataStore
         this.nodeId = nodeId;
     }
 
-    public static class MockData extends ArrayList<Id> implements Data, UnresolvedData, RepairWrites, Result
+    public static class MockRepairWrites implements RepairWrites
+    {
+        private final Seekables keys;
+        private final Write write;
+
+        public MockRepairWrites(Keys keys, Write write)
+        {
+            this.keys = keys;
+            this.write = write;
+        }
+
+        @Override
+        public Seekables<?, ?> keys()
+        {
+            return keys;
+        }
+
+        @Override
+        public Write toWrite()
+        {
+            return write;
+        }
+
+        @Override
+        public boolean isEmpty()
+        {
+            return keys().isEmpty();
+        }
+    }
+
+    public static class MockData extends ArrayList<Id> implements Data, UnresolvedData, Result
     {
         private Seekables keys;
-
-        public List<Seekable> appliedKeys = synchronizedList(new ArrayList<>());
 
         public MockData()
         {
@@ -83,8 +115,9 @@ public class MockStore implements DataStore
         @Override
         public Data merge(Data data)
         {
-            addAll((MockData)data);
-            this.keys = keys.with(((MockData)data).keys);
+            MockData mockData = (MockData)data;
+            addAll(mockData);
+            this.keys = keys.with(mockData.keys);
             return this;
         }
 
@@ -93,32 +126,12 @@ public class MockStore implements DataStore
         {
             return (MockData)merge((Data)data);
         }
-
-        @Override
-        public Seekables<?, ?> keys()
-        {
-            return keys;
-        }
-
-        @Override
-        public Write toWrite()
-        {
-            return new Write() {
-
-                @Override
-                public AsyncChain<Void> apply(Seekable key, SafeCommandStore safeStore, Timestamp executeAt, DataStore store)
-                {
-                    appliedKeys.add(key);
-                    return AsyncChains.success(null);
-                }
-            };
-        }
     };
 
-    public static final MockData EMPTY = new MockData();
-    public static final Result RESULT = EMPTY;
+    public static final MockData EMPTY_DATA = new MockData();
+    public static final Result RESULT = EMPTY_DATA;
     public static final Query QUERY = (txnId, executeAtEpoch, keys, data, read, update) -> RESULT;
-    public static final DataResolver RESOLVER = new MockResolver(false, EMPTY, null);
+    public static final DataResolver RESOLVER = new MockResolver(false, null, null);
 
     public static final Query QUERY_RETURNING_INPUT = (txnId, executeAtEpoch, keys, data, read, update) -> (MockData)data;
 
@@ -209,7 +222,7 @@ public class MockStore implements DataStore
         public MockResolver(boolean alwaysFollowup, RepairWrites repairWrites, MockFollowupRead mockFollowupRead)
         {
             this.alwaysFollowup = alwaysFollowup;
-            this.repairWrites = repairWrites != null ? repairWrites : EMPTY;
+            this.repairWrites = repairWrites != null ? repairWrites : null;
             this.mockFollowupRead = mockFollowupRead;
         }
 
@@ -248,25 +261,29 @@ public class MockStore implements DataStore
                 for (Id id : mockData)
                 {
                     SettableResult<UnresolvedData> result = new SettableResult<>();
-                    followUpReader.read(read, id, new Callback<UnresolvedData>(){
-                        @Override
-                        public void onSuccess(Id from, UnresolvedData reply)
+                    for (Key key : (Keys)read.keys())
+                    {
+                        followUpReader.read(read.slice(Ranges.of(key.toUnseekable().asRange())), id, new Callback<UnresolvedData>()
                         {
-                            result.trySuccess(reply);
-                        }
+                            @Override
+                            public void onSuccess(Id from, UnresolvedData reply)
+                            {
+                                result.trySuccess(reply);
+                            }
 
-                        @Override
-                        public void onFailure(Id from, Throwable failure)
-                        {
-                            result.tryFailure(failure);
-                        }
+                            @Override
+                            public void onFailure(Id from, Throwable failure)
+                            {
+                                result.tryFailure(failure);
+                            }
 
-                        @Override
-                        public void onCallbackFailure(Id from, Throwable failure)
-                        {
-                            failure.printStackTrace();
-                        }
-                    });
+                            @Override
+                            public void onCallbackFailure(Id from, Throwable failure)
+                            {
+                                failure.printStackTrace();
+                            }
+                        });
+                    }
                     followupData.add(result);
                 }
                 return AsyncChains.reduce(followupData, UnresolvedData::merge).map(unresolve -> new ResolveResult((Data)unresolvedData, repairWrites));
@@ -275,45 +292,63 @@ public class MockStore implements DataStore
         }
     }
 
+    public static class MockWrite implements Write
+    {
+        public final List<Key> appliedKeys = synchronizedList(new ArrayList<>());
+        
+        @Override
+        public synchronized AsyncChain<Void> apply(Seekable key, SafeCommandStore safeStore, Timestamp executeAt, DataStore store)
+        {
+            appliedKeys.add((Key)key);
+            return AsyncChains.success(null);
+        }
+    }
+
+    public static class MockUpdate implements Update
+    {
+        final Write write;
+        final Seekables keys;
+
+        Data data;
+        RepairWrites repairWrites;
+
+        public MockUpdate(Seekables keys, Write write)
+        {
+            this.keys = keys;
+            this.write = write;
+        }
+
+        @Override
+        public Seekables<?, ?> keys()
+        {
+            return keys;
+        }
+
+        @Override
+        public Write apply(@Nullable Data data, @Nonnull RepairWrites repairWrites)
+        {
+            assertNull(this.data);
+            assertNull(this.repairWrites);
+            this.data = data;
+            this.repairWrites = repairWrites;
+            return write;
+        }
+
+        @Override
+        public Update slice(Ranges ranges)
+        {
+            return this;
+        }
+
+        @Override
+        public Update merge(Update other)
+        {
+            return this;
+        }
+    }
+
     public static Update update(Seekables<?, ?> keys)
     {
-        return new Update()
-        {
-            @Override
-            public Seekables<?, ?> keys()
-            {
-                return keys;
-            }
-
-            @Override
-            public Write apply(Data data, RepairWrites repairWrites)
-            {
-                return new Write() {
-                    @Override
-                    public AsyncChain<Void> apply(Seekable key, SafeCommandStore safeStore, Timestamp executeAt, DataStore store)
-                    {
-                        return Writes.SUCCESS;
-                    }
-                };
-            }
-
-            @Override
-            public Update slice(Ranges ranges)
-            {
-                return MockStore.update(keys.slice(ranges));
-            }
-
-            @Override
-            public Update merge(Update other)
-            {
-                return MockStore.update(((Seekables)keys).with(other.keys()));
-            }
-
-            @Override
-            public String toString()
-            {
-                return keys.toString();
-            }
-        };
+        return new MockUpdate(keys, (key, commandStore, executeAt, store) -> Writes.SUCCESS);
     }
 }

@@ -24,11 +24,10 @@ import java.util.Objects;
 
 import accord.api.RoutingKey;
 import accord.local.ShardDistributor;
-import accord.primitives.RoutableKey;
 import accord.primitives.Keys;
+import accord.primitives.RoutableKey;
 import accord.primitives.RoutingKeys;
 import accord.utils.Invariants;
-
 import javax.annotation.Nonnull;
 
 import static accord.utils.Utils.toArray;

@@ -19,6 +19,7 @@
 package accord.messages;
 
 import java.util.Collections;
+import java.util.concurrent.RejectedExecutionException;
 
 import com.google.common.collect.Iterables;
 
@@ -116,7 +117,7 @@ public class Apply extends TxnRequest<ApplyReply>
     public void accept(ApplyReply reply, Throwable failure)
     {
         //TODO failure is ignored here
-        if (failure != null)
+        if (failure != null && !(failure instanceof RejectedExecutionException))
         {
             failure.printStackTrace();
         }

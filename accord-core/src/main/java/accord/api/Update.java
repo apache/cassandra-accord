@@ -18,10 +18,17 @@
 
 package accord.api;
 
+import java.util.Collection;
 import javax.annotation.Nullable;
 
+import com.google.common.collect.ImmutableList;
+
+import accord.local.Node.Id;
+import accord.primitives.DataConsistencyLevel;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
+
+import static accord.primitives.DataConsistencyLevel.UNSPECIFIED;
 
 /**
  * A client-defined update operation (the write equivalent of a query).
@@ -35,4 +42,13 @@ public interface Update
     Write apply(@Nullable Data data, @Nullable RepairWrites repairWrites);
     Update slice(Ranges ranges);
     Update merge(Update other);
+    default DataConsistencyLevel writeDataCl()
+    {
+        return UNSPECIFIED;
+    }
+
+    default Collection<Id> requiredContacts()
+    {
+        return ImmutableList.of();
+    }
 }

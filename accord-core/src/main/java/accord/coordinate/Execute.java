@@ -28,7 +28,6 @@ import org.slf4j.LoggerFactory;
 import accord.api.Data;
 import accord.api.DataResolver.FollowupReader;
 import accord.api.Key;
-import accord.api.RepairWrites;
 import accord.api.ResolveResult;
 import accord.api.Result;
 import accord.api.UnresolvedData;
@@ -42,7 +41,6 @@ import accord.messages.WhenReadyToExecute.ExecuteOk;
 import accord.messages.WhenReadyToExecute.ExecuteReply;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
-import accord.primitives.RoutableKey;
 import accord.primitives.RoutingKeys;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
@@ -57,7 +55,6 @@ import static accord.coordinate.ReadCoordinator.Action.Approve;
 import static accord.coordinate.ReadCoordinator.Action.ApproveIfQuorum;
 import static accord.messages.Commit.Kind.Maximal;
 import static accord.utils.Invariants.checkArgument;
-import static accord.utils.Invariants.checkState;
 
 class Execute extends ReadCoordinator<ExecuteReply>
 {
@@ -73,12 +70,12 @@ class Execute extends ReadCoordinator<ExecuteReply>
     final BiConsumer<? super Result, Throwable> callback;
     private UnresolvedData unresolvedData;
 
-    private Execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
+    private Execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
     {
-        super(node, node.topology().forEpoch(readScope.toUnseekables(), executeAt.epoch()), txnId, txn.read().readDataCL());
+        super(node, node.topology().forEpoch(txn.keys().toUnseekables(), executeAt.epoch()), txnId, txn.read().readDataCL());
         this.txn = txn;
         this.route = route;
-        this.readScope = readScope;
+        this.readScope = txn.read().keys();
         this.executeAt = executeAt;
         this.deps = deps;
         this.applyTo = node.topology().forEpoch(route, executeAt.epoch());
@@ -87,6 +84,7 @@ class Execute extends ReadCoordinator<ExecuteReply>
 
     public static void execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
     {
+        Seekables<?, ?> readScope = txn.read().keys();
         // Recovery calls execute and we would like execute to run BlockOnDeps because that will notify the agent
         // of the local barrier
         // TODO we don't really need to run BlockOnDeps, executing the empty txn would also be fine
@@ -95,19 +93,25 @@ class Execute extends ReadCoordinator<ExecuteReply>
             checkArgument(txnId.equals(executeAt));
             BlockOnDeps.blockOnDeps(node, txnId, txn, route, deps, callback);
         }
-        else if (txn.read().keys().isEmpty())
+        else if (readScope.isEmpty())
         {
             Topologies sendTo = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
             Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch());
             Result result = txn.result(txnId, executeAt, null);
+            Consumer<Throwable> onAppliedToQuorum = null;
+            // TODO when supporting commit/write CL need to also not invoke the callback here
+            // TODO Digest reads doesn't make much sense considering this is a writeDataCL
+            if (!txn.update().writeDataCl().requiresDigestReads)
+                callback.accept(result, null);
+            else
+                onAppliedToQuorum = (applyFailure) -> callback.accept(applyFailure == null ? result : null, applyFailure);
             // TODO When support commit/write CL need to add the callback here
-            Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, null, RepairWrites.EMPTY), result, null);
-            callback.accept(result, null);
+            Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, null, null), result, onAppliedToQuorum);
         }
         else
         {
-            Execute execute = new Execute(node, txnId, txn, route, txn.keys(), executeAt, deps, callback);
-            execute.start(txn.read().keys().toUnseekables());
+            Execute execute = new Execute(node, txnId, txn, route, executeAt, deps, callback);
+            execute.start(readScope.toUnseekables());
         }
     }
 
@@ -165,9 +169,11 @@ class Execute extends ReadCoordinator<ExecuteReply>
             Result result = txn.result(txnId, executeAt, data);
             // If this transaction generates repair writes then we don't want to acknowledge it until the writes are committed
             // to make sure the transaction's reads are monotonic from the perspective of the caller
+            // If the transaction specified a writeDataCL then we don't want to acknowledge until the CL is met
             Consumer<Throwable> onAppliedToQuorum = null;
             // TODO when supporting commit/write CL need to also not invoke the callback here
-            if (resolveResult.repairWrites.isEmpty())
+            // TODO Digest reads doesn't make much sense considering this is a writeDataCL
+            if (resolveResult.repairWrites == null && !txn.update().writeDataCl().requiresDigestReads)
                 callback.accept(result, null);
             else
                 onAppliedToQuorum = (applyFailure) -> callback.accept(applyFailure == null ? result : null, applyFailure);
@@ -209,17 +215,20 @@ class Execute extends ReadCoordinator<ExecuteReply>
                 return;
             }
             Seekables keys = read.keys();
-            checkState(keys.size() == 1, "Multiple keys are not expected");
-            Key key = (Key)read.keys().get(0);
-            RoutableKey routableKey = key.toUnseekable();
-            if (!executeTopology.rangesForNode(to).contains(routableKey))
+            if (keys.size() > 1)
             {
-                callback.onFailure(null, new IllegalArgumentException(key + " is not replicated by node " + to + " in executeAt epoch " + executeAt.epoch()));
+                callback.onFailure(to, new IllegalArgumentException("Multiple keys are not expected"));
                 return;
             }
-            if (!txn.read().keys().contains(routableKey))
+            Key key = (Key)read.keys().get(0);
+            if (!executeTopology.rangesForNode(to).contains(key.toUnseekable()))
             {
-                callback.onFailure(null, new IllegalArgumentException(key + " is not one of the read keys for this transaction"));
+                callback.onFailure(to, new IllegalArgumentException(key + " is not replicated by node " + to + " in executeAt epoch " + executeAt.epoch()));
+                return;
+            }
+            if (!readScope.contains(key))
+            {
+                callback.onFailure(to, new IllegalArgumentException(key + " is not one of the read keys for this transaction"));
                 return;
             }
 

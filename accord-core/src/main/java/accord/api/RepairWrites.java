@@ -25,27 +25,6 @@ import accord.primitives.Seekables;
  */
 public interface RepairWrites
 {
-    RepairWrites EMPTY = new RepairWrites()
-    {
-        @Override
-        public Seekables<?, ?> keys()
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public Write toWrite()
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public boolean isEmpty()
-        {
-            return true;
-        }
-    };
-
     Seekables<?, ?> keys();
 
     Write toWrite();

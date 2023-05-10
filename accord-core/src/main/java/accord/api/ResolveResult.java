@@ -19,7 +19,9 @@
 package accord.api;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
+import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.nonNull;
 
 /**
@@ -33,13 +35,13 @@ public class ResolveResult
 {
     @Nonnull
     public final Data data;
-    @Nonnull
+    @Nullable
     public final RepairWrites repairWrites;
 
-    public ResolveResult(@Nonnull Data data, @Nonnull RepairWrites repairWrites)
+    public ResolveResult(@Nonnull Data data, @Nullable RepairWrites repairWrites)
     {
         nonNull(data);
-        nonNull(repairWrites);
+        checkArgument(repairWrites == null || !repairWrites.isEmpty());
         this.data = data;
         this.repairWrites = repairWrites;
     }

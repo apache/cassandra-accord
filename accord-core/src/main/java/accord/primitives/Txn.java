@@ -246,12 +246,13 @@ public interface Txn
         return query().compute(txnId, executeAt, keys(), data, read(), update());
     }
 
-    default Writes execute(Timestamp executeAt, @Nullable Data data, @Nonnull RepairWrites repairWrites)
+    default Writes execute(Timestamp executeAt, @Nullable Data data, @Nullable RepairWrites repairWrites)
     {
+        checkArgument(repairWrites == null || !repairWrites.isEmpty());
         Update update = update();
         if (update == null)
         {
-            if (!repairWrites.isEmpty())
+            if (repairWrites != null)
                 return new Writes(executeAt, repairWrites.keys(), repairWrites.toWrite());
             else
                 return new Writes(executeAt, Keys.EMPTY, null);
@@ -259,7 +260,7 @@ public interface Txn
 
         // Update keys might not include keys needing repair
         Seekables keys = update.keys();
-        if (!repairWrites.isEmpty())
+        if (repairWrites != null)
             keys = keys.with(repairWrites.keys());
 
         return new Writes(executeAt, keys, update.apply(data, repairWrites));
@@ -268,7 +269,7 @@ public interface Txn
     default AsyncChain<UnresolvedData> read(SafeCommandStore safeStore, @Nullable RoutingKeys dataReadKeys, @Nullable Read followupRead, Command.Committed command)
     {
         Ranges ranges = safeStore.ranges().at(command.executeAt().epoch());
-        List<AsyncChain<UnresolvedData>> futures = Routables.foldlMinimal(keys(), ranges, (key, accumulate, index) -> {
+        List<AsyncChain<UnresolvedData>> futures = Routables.foldlMinimal(read().keys(), ranges, (key, accumulate, index) -> {
             Read read = followupRead != null ? followupRead : read();
             checkArgument(dataReadKeys == null || key.domain() == Domain.Key || !read().readDataCL().requiresDigestReads, "Digest reads are unsupported for ranges");
             boolean digestRead = read().readDataCL().requiresDigestReads

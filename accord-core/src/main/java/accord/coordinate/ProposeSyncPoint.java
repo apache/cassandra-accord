@@ -24,7 +24,6 @@ import java.util.function.BiConsumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import accord.api.RepairWrites;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Apply;
@@ -69,7 +68,7 @@ public class ProposeSyncPoint extends Propose<SyncPoint>
         {
             // TODO I changed this to acceptTracker instead of the FastPathTracker from CoordinateSyncPoint, is that safe/correct?
             // Looks to be fine
-            node.send(acceptTracker.nodes(), id -> new Apply(id, acceptTracker.topologies(), acceptTracker.topologies(), txnId.epoch(), txnId, route, txn, txnId, deps, txn.execute(txnId, null, RepairWrites.EMPTY), txn.result(txnId, txnId, null)));
+            node.send(acceptTracker.nodes(), id -> new Apply(id, acceptTracker.topologies(), acceptTracker.topologies(), txnId.epoch(), txnId, route, txn, txnId, deps, txn.execute(txnId, null, null), txn.result(txnId, txnId, null)));
             callback.accept(new SyncPoint(txnId, route.homeKey(), deps, true), null);
         }
         else

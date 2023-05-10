@@ -20,11 +20,13 @@ package accord.messages;
 
 import java.util.Set;
 
+import com.google.common.collect.ImmutableSet;
+
 import accord.api.RoutingKey;
 import accord.local.Commands;
-import accord.local.SafeCommand;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.local.SafeCommand;
 import accord.local.Status.Durability;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -45,7 +47,7 @@ public class InformHomeDurable implements Request
         this.homeKey = homeKey;
         this.executeAt = executeAt;
         this.durability = durability;
-        this.persistedOn = persistedOn;
+        this.persistedOn = ImmutableSet.copyOf(persistedOn); // Persisted on might be mutated later
     }
 
     @Override
