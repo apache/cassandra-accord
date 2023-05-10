@@ -148,17 +148,17 @@ public class CommandsForKey
             for (D data : (testTimestamp == TestTimestamp.BEFORE ? commands.headMap(timestamp, false) : commands.tailMap(timestamp, false)).values())
             {
                 TxnId txnId = loader.txnId(data);
-                Timestamp executeAt = loader.executeAt(data);
-                SaveStatus status = loader.saveStatus(data);
-                List<TxnId> deps = loader.depsIds(data);
                 if (!testKind.test(txnId.rw())) continue;
-                // If we don't have any dependencies, we treat a dependency filter as a mismatch
-                if (testDep != ANY_DEPS && (!status.known.deps.hasProposedOrDecidedDeps() || (deps.contains(depId) != (testDep == WITH))))
-                    continue;
+                SaveStatus status = loader.saveStatus(data);
                 if (minStatus != null && minStatus.compareTo(status.status) > 0)
                     continue;
                 if (maxStatus != null && maxStatus.compareTo(status.status) < 0)
                     continue;
+                List<TxnId> deps = loader.depsIds(data);
+                // If we don't have any dependencies, we treat a dependency filter as a mismatch
+                if (testDep != ANY_DEPS && (!status.known.deps.hasProposedOrDecidedDeps() || (deps.contains(depId) != (testDep == WITH))))
+                    continue;
+                Timestamp executeAt = loader.executeAt(data);
                 initialValue = map.apply(key, txnId, executeAt, initialValue);
                 if (initialValue.equals(terminalValue))
                     break;
