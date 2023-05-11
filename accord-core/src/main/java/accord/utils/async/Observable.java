@@ -29,7 +29,7 @@ import java.util.function.Function;
  */
 public interface Observable<T>
 {
-    void onNext(T value);
+    void onNext(T value) throws Exception;
     default void onError(Throwable t) {}
     default void onCompleted() {}
 
@@ -41,7 +41,7 @@ public interface Observable<T>
         return new Observable<R>()
         {
             @Override
-            public void onNext(R value)
+            public void onNext(R value) throws Exception
             {
                 self.onNext(mapper.apply(value));
             }
