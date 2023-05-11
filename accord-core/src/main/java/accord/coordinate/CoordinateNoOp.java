@@ -71,6 +71,7 @@ public class CoordinateNoOp extends CoordinatePreAccept<Timestamp>
         return coordinate;
     }
 
+    @Override
     void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> successes)
     {
         if (executeAt.isRejected())
@@ -91,7 +92,7 @@ public class CoordinateNoOp extends CoordinatePreAccept<Timestamp>
                     // TODO (now): permit Apply to Commit in these cases
                     Set<Node.Id> nodes = persistTo.nodes();
                     node.send(nodes, id -> new Commit(Maximal, id, persistTo.forEpoch(txnId.epoch()), persistTo, txnId, txn, route, Ranges.EMPTY, executeAt, deps, false));
-                    node.send(nodes, id -> new Apply(id, persistTo, applyTo, executeAt.epoch(), txnId, route, txn, executeAt, deps, writes, result));
+                    node.send(nodes, id -> new Apply(id, persistTo, applyTo, txnId, route, txn, executeAt, deps, writes, result));
                     accept(executeAt, null);
                 }
             }.start();

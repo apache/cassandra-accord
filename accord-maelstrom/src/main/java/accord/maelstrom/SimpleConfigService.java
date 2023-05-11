@@ -19,6 +19,7 @@
 package accord.maelstrom;
 
 import accord.api.ConfigurationService;
+import accord.primitives.Ranges;
 import accord.topology.Topology;
 
 public class SimpleConfigService implements ConfigurationService
@@ -52,13 +53,21 @@ public class SimpleConfigService implements ConfigurationService
     @Override
     public void fetchTopologyForEpoch(long epoch)
     {
-        return;
     }
 
     @Override
     public void acknowledgeEpoch(EpochReady ready)
     {
+    }
 
+    @Override
+    public void reportEpochClosed(Ranges ranges, long epoch)
+    {
+    }
+
+    @Override
+    public void reportEpochRedundant(Ranges ranges, long epoch)
+    {
     }
 }
 

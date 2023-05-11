@@ -30,9 +30,6 @@ import accord.primitives.*;
 import static accord.local.Node.Id.NONE;
 import static com.google.common.base.Functions.identity;
 
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
-
 public class ListAgent implements Agent
 {
     final long timeout;

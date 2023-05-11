@@ -86,6 +86,7 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
             CoordinatePreAccept.this.onCallbackFailure(from, failure);
         }
 
+        @Override
         public void onSuccess(Id from, PreAcceptReply reply)
         {
             synchronized (CoordinatePreAccept.this)
@@ -122,11 +123,16 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
 
     CoordinatePreAccept(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
     {
+        this(node, txnId, txn, route, node.topology().withUnsyncedEpochs(route, txnId, txnId));
+    }
+
+    CoordinatePreAccept(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Topologies topologies)
+    {
         this.node = node;
         this.txnId = txnId;
         this.txn = txn;
         this.route = route;
-        topologies = node.topology().withUnsyncedEpochs(route, txnId, txnId);
+        this.topologies = topologies;
         this.tracker = new FastPathTracker(topologies);
         this.successes = new ArrayList<>(topologies.estimateUniqueNodes());
     }
@@ -173,6 +179,7 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
         tryFailure(failure);
     }
 
+    @Override
     public synchronized void onSuccess(Id from, PreAcceptReply reply)
     {
         if (initialPreAcceptIsDone)
@@ -194,6 +201,7 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
         }
     }
 
+    @Override
     public void setFailure(Throwable failure)
     {
         Invariants.checkState(!initialPreAcceptIsDone || (extraPreAccept != null && !extraPreAccept.extraPreAcceptIsDone));

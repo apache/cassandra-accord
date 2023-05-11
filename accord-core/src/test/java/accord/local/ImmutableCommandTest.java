@@ -35,9 +35,7 @@ import accord.utils.DefaultRandom;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import javax.annotation.Nullable;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -81,16 +79,14 @@ public class ImmutableCommandTest
 
     private static class NoOpProgressLog implements ProgressLog
     {
-        @Override public void unwitnessed(TxnId txnId, RoutingKey homeKey, ProgressShard shard) {}
+        @Override public void unwitnessed(TxnId txnId, ProgressShard shard) {}
         @Override public void preaccepted(Command command, ProgressShard shard) {}
         @Override public void accepted(Command command, ProgressShard shard) {}
         @Override public void committed(Command command, ProgressShard shard) {}
         @Override public void readyToExecute(Command command, ProgressShard shard) {}
         @Override public void executed(Command command, ProgressShard shard) {}
         @Override public void invalidated(Command command, ProgressShard shard) {}
-        @Override public void durableLocal(TxnId txnId) {}
-        @Override public void durable(Command command, @Nullable Set<Id> persistedOn) {}
-        @Override public void durable(TxnId txnId, @Nullable Unseekables<?, ?> unseekables, ProgressShard shard) {}
+        @Override public void durable(Command command) {}
         @Override public void waiting(TxnId blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn) {}
     }
 
@@ -115,9 +111,9 @@ public class ImmutableCommandTest
         Txn txn = writeTxn(keys);
 
         {
-            Command command = Command.NotWitnessed.notWitnessed(txnId);
+            Command command = Command.NotDefined.uninitialised(txnId);
             Assertions.assertNull(inMemory(commands).command(txnId).value());
-            Assertions.assertEquals(Status.NotWitnessed, command.status());
+            Assertions.assertEquals(Status.NotDefined, command.status());
             Assertions.assertNull(command.executeAt());
         }
         SafeCommandStore safeStore = commands.beginOperation(PreLoadContext.contextFor(txnId, keys));
@@ -138,9 +134,9 @@ public class ImmutableCommandTest
         Txn txn = writeTxn(keys);
 
         {
-            Command command = Command.NotWitnessed.notWitnessed(txnId);
+            Command command = Command.NotDefined.uninitialised(txnId);
             Assertions.assertNull(inMemory(commands).command(txnId).value());
-            Assertions.assertEquals(Status.NotWitnessed, command.status());
+            Assertions.assertEquals(Status.NotDefined, command.status());
             Assertions.assertNull(command.executeAt());
         }
         PreLoadContext context = PreLoadContext.contextFor(txnId, keys);

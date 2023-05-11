@@ -24,7 +24,6 @@ import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.ProgressLog;
 import accord.primitives.Deps;
-import accord.primitives.Keys;
 import accord.primitives.Ranges;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
@@ -58,21 +57,6 @@ public interface SafeCommandStore
 
     boolean canExecuteWith(PreLoadContext context);
 
-    /**
-     * Register a listener against the given TxnId, then load the associated transaction and invoke the listener
-     * with its current state.
-     */
-    default void addAndInvokeListener(TxnId txnId, TxnId listenerId)
-    {
-        PreLoadContext context = PreLoadContext.contextFor(txnId, listenerId, Keys.EMPTY);
-        commandStore().execute(context, safeStore -> {
-            SafeCommand safeCommand = safeStore.command(txnId);
-            Command.ProxyListener listener = new Command.ProxyListener(listenerId);
-            safeCommand.addListener(listener);
-            listener.onChange(safeStore, safeCommand);
-        }).begin(agent());
-    }
-
     interface CommandFunction<I, O>
     {
         O apply(Seekable keyOrRange, TxnId txnId, Timestamp executeAt, I in);
@@ -90,6 +74,7 @@ public interface SafeCommandStore
     {
         Ws, RorWs, WsOrSyncPoint, SyncPoints, Any;
 
+        @Override
         public boolean test(Kind kind)
         {
             switch (this)

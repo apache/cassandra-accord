@@ -24,6 +24,8 @@ import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.coordinate.CheckShards;
 import accord.coordinate.CoordinationFailed;
+import accord.coordinate.Invalidated;
+import accord.coordinate.Truncated;
 import accord.impl.basic.Cluster;
 import accord.impl.basic.Packet;
 import accord.local.Node;
@@ -39,10 +41,11 @@ import accord.messages.Request;
 import accord.primitives.TxnId;
 
 import static accord.local.Status.PreApplied;
+import static accord.local.Status.PreCommitted;
 
 public class ListRequest implements Request
 {
-    enum Outcome { Invalidated, Lost, Neither }
+    enum Outcome { Invalidated, Lost, Truncated, Other }
 
     static class CheckOnResult extends CheckShards
     {
@@ -50,7 +53,7 @@ public class ListRequest implements Request
         int count = 0;
         protected CheckOnResult(Node node, TxnId txnId, RoutingKey homeKey, BiConsumer<Outcome, Throwable> callback)
         {
-            super(node, txnId, RoutingKeys.of(homeKey), txnId.epoch(), IncludeInfo.All);
+            super(node, txnId, RoutingKeys.of(homeKey), IncludeInfo.All);
             this.callback = callback;
         }
 
@@ -71,9 +74,11 @@ public class ListRequest implements Request
         protected void onDone(CheckShards.Success done, Throwable failure)
         {
             if (failure != null) callback.accept(null, failure);
-            else if (merged.saveStatus.hasBeen(Status.Invalidated)) callback.accept(Outcome.Invalidated, null);
+            else if (merged.saveStatus.is(Status.Invalidated)) callback.accept(Outcome.Invalidated, null);
+            else if (merged.saveStatus.is(Status.Truncated)) callback.accept(Outcome.Truncated, null);
+            else if (!merged.saveStatus.hasBeen(PreCommitted) && merged.truncated) callback.accept(Outcome.Truncated, null);
             else if (count == nodes().size()) callback.accept(Outcome.Lost, null);
-            else callback.accept(Outcome.Neither, null);
+            else callback.accept(Outcome.Other, null);
         }
 
         @Override
@@ -110,22 +115,33 @@ public class ListRequest implements Request
             {
                 RoutingKey homeKey = ((CoordinationFailed) fail).homeKey();
                 TxnId txnId = ((CoordinationFailed) fail).txnId();
+                if (fail instanceof Invalidated)
+                {
+                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, null, null));
+                    return;
+                }
                 node.reply(client, replyContext, new ListResult(client, ((Packet)replyContext).requestId, txnId, null, null, new int[0][], null));
                 ((Cluster)node.scheduler()).onDone(() -> {
                     node.commandStores()
                         .select(homeKey)
                         .execute(() -> CheckOnResult.checkOnResult(node, txnId, homeKey, (s, f) -> {
                             if (f != null)
+                            {
+                                node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, f instanceof Truncated ? new int[2][] : new int[3][], null));
                                 return;
+                            }
                             switch (s)
                             {
+                                case Truncated:
+                                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, new int[2][], null));
+                                    break;
                                 case Invalidated:
                                     node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, null, null));
                                     break;
                                 case Lost:
                                     node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, new int[1][], null));
                                     break;
-                                case Neither:
+                                case Other:
                                     // currently caught elsewhere in response tracking, but might help to throw an exception here
                             }
                         }));
@@ -141,6 +157,7 @@ public class ListRequest implements Request
         this.txn = txn;
     }
 
+    @Override
     public void process(Node node, Id client, ReplyContext replyContext)
     {
         node.coordinate(txn).addCallback(new ResultCallback(node, client, replyContext, txn));

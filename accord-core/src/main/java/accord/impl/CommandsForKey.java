@@ -106,6 +106,7 @@ public class CommandsForKey implements CommandTimeseriesHolder
     private final long lastExecutedMicros;
     private final Timestamp lastWriteTimestamp;
     private final CommandTimeseries<?> byId;
+    // TODO (expected): we probably do not need to separately maintain byExecuteAt - probably better to just filter byId
     private final CommandTimeseries<?> byExecuteAt;
 
     <D> CommandsForKey(Key key, Timestamp max,
@@ -218,6 +219,16 @@ public class CommandsForKey implements CommandTimeseriesHolder
         return byExecuteAt;
     }
 
+    public CommandsForKey withoutRedundant(TxnId redundantBefore)
+    {
+        Timestamp removeExecuteAt = byId.maxExecuteAtBefore(redundantBefore);
+
+        return new CommandsForKey(key, max, lastExecutedTimestamp, lastExecutedMicros, lastWriteTimestamp,
+                                  (CommandTimeseries)byId.beginUpdate().removeBefore(redundantBefore).build(),
+                                  (CommandTimeseries)byExecuteAt.beginUpdate().removeBefore(removeExecuteAt).build()
+                                 );
+    }
+
     public void forWitnessed(Timestamp minTs, Timestamp maxTs, Consumer<TxnId> consumer)
     {
         byId.between(minTs, maxTs, status -> status.hasBeen(PreAccepted)).forEach(consumer);
@@ -228,7 +239,6 @@ public class CommandsForKey implements CommandTimeseriesHolder
     {
         return timestamp.hlc();
     }
-
 
     private void validateExecuteAtTime(Timestamp executeAt, boolean isForWriteTxn)
     {

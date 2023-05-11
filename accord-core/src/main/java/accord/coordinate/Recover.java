@@ -66,7 +66,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
         AwaitCommit(Node node, TxnId txnId, Unseekables<?, ?> unseekables)
         {
-            Topology topology = node.topology().globalForEpoch(txnId.epoch()).forSelection(unseekables, Topology.OnUnknown.REJECT);
+            Topology topology = node.topology().globalForEpoch(txnId.epoch()).forSelection(unseekables);
             this.tracker = new QuorumTracker(new Topologies.Single(node.topology().sorter(), topology));
             node.send(topology.nodes(), to -> new WaitOnCommit(to, topology, txnId, unseekables), this);
         }
@@ -211,6 +211,10 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             switch (acceptOrCommit.status)
             {
                 default: throw new IllegalStateException();
+                case Truncated:
+                    callback.accept(ProgressToken.TRUNCATED, null);
+                    return;
+
                 case Invalidated:
                 {
                     commitInvalidate();
@@ -218,6 +222,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 }
 
                 case Applied:
+                case Applying:
                 case PreApplied:
                 {
                     Deps committedDeps = tryMergeCommittedDeps();
@@ -284,7 +289,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                     return;
                 }
 
-                case NotWitnessed:
+                case NotDefined:
                 case PreAccepted:
                     throw new IllegalStateException("Should only be possible to have Accepted or later commands");
             }

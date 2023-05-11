@@ -25,7 +25,7 @@ import static accord.local.Status.Definition.DefinitionKnown;
 import static accord.local.Status.Definition.DefinitionUnknown;
 import static accord.local.Status.KnownDeps.*;
 import static accord.local.Status.KnownExecuteAt.*;
-import static accord.local.Status.Outcome.OutcomeUnknown;
+import static accord.local.Status.Outcome.Unknown;
 
 /**
  * Identical to Status but preserves whether we have previously been PreAccepted and therefore know the definition
@@ -35,21 +35,27 @@ import static accord.local.Status.Outcome.OutcomeUnknown;
  */
 public enum SaveStatus
 {
-    NotWitnessed                    (Status.NotWitnessed),
+    // TODO (expected): erase Uninitialised in Context once command finishes
+    // TODO (expected): we can use Uninitialised in several places to simplify/better guarantee correct behaviour with truncation
+    Uninitialised                   (Status.NotDefined),
+    NotDefined                      (Status.NotDefined),
     PreAccepted                     (Status.PreAccepted),
     AcceptedInvalidate              (Status.AcceptedInvalidate),
-    AcceptedInvalidateWithDefinition(Status.AcceptedInvalidate,    DefinitionKnown,   ExecuteAtUnknown,  DepsUnknown,  OutcomeUnknown),
+    AcceptedInvalidateWithDefinition(Status.AcceptedInvalidate, DefinitionKnown, ExecuteAtUnknown, DepsUnknown, Unknown),
     Accepted                        (Status.Accepted),
-    AcceptedWithDefinition          (Status.Accepted,              DefinitionKnown,   ExecuteAtProposed, DepsProposed, OutcomeUnknown),
+    AcceptedWithDefinition          (Status.Accepted, DefinitionKnown, ExecuteAtProposed, DepsProposed, Unknown),
     PreCommitted                    (Status.PreCommitted),
-    PreCommittedWithAcceptedDeps    (Status.PreCommitted,          DefinitionUnknown, ExecuteAtKnown,    DepsProposed, OutcomeUnknown),
-    PreCommittedWithDefinition      (Status.PreCommitted,          DefinitionKnown,   ExecuteAtKnown,    DepsUnknown,  OutcomeUnknown),
-    PreCommittedWithDefinitionAndAcceptedDeps(Status.PreCommitted, DefinitionKnown,   ExecuteAtKnown,    DepsProposed, OutcomeUnknown),
+    PreCommittedWithAcceptedDeps    (Status.PreCommitted, DefinitionUnknown, ExecuteAtKnown, DepsProposed, Unknown),
+    PreCommittedWithDefinition      (Status.PreCommitted, DefinitionKnown, ExecuteAtKnown, DepsUnknown, Unknown),
+    PreCommittedWithDefinitionAndAcceptedDeps(Status.PreCommitted, DefinitionKnown, ExecuteAtKnown, DepsProposed, Unknown),
     Committed                       (Status.Committed),
     ReadyToExecute                  (Status.ReadyToExecute),
     PreApplied                      (Status.PreApplied),
+    Applying                        (Status.Applying),
     Applied                         (Status.Applied),
-    Invalidated                     (Status.Invalidated);
+    Truncated                       (Status.Truncated),
+    Invalidated                     (Status.Invalidated),
+    ;
     
     public final Status status;
     public final Phase phase;
@@ -57,8 +63,13 @@ public enum SaveStatus
 
     SaveStatus(Status status)
     {
+        this(status, status.phase);
+    }
+
+    SaveStatus(Status status, Phase phase)
+    {
         this.status = status;
-        this.phase = status.phase;
+        this.phase = phase;
         this.known = status.minKnown;
     }
 
@@ -67,6 +78,11 @@ public enum SaveStatus
         this.status = status;
         this.phase = status.phase;
         this.known = new Known(definition, executeAt, deps, outcome);
+    }
+
+    public boolean is(Status status)
+    {
+        return this.status.equals(status);
     }
 
     public boolean hasBeen(Status status)
@@ -92,7 +108,7 @@ public enum SaveStatus
         switch (status)
         {
             default: throw new AssertionError();
-            case NotWitnessed: return NotWitnessed;
+            case NotDefined: return NotDefined;
             case PreAccepted: return PreAccepted;
             case AcceptedInvalidate:
                 // AcceptedInvalidate logically clears any proposed deps and executeAt
@@ -113,6 +129,7 @@ public enum SaveStatus
             case Committed: return Committed;
             case ReadyToExecute: return ReadyToExecute;
             case PreApplied: return PreApplied;
+            case Applying: return Applying;
             case Applied: return Applied;
             case Invalidated: return Invalidated;
         }
@@ -135,12 +152,16 @@ public enum SaveStatus
         return status;
     }
 
-    public static SaveStatus merge(SaveStatus a, Ballot acceptedA, SaveStatus b, Ballot acceptedB)
+    public static SaveStatus merge(SaveStatus a, Ballot acceptedA, SaveStatus b, Ballot acceptedB, boolean preferKnowledge)
     {
+        if (a == b) return a;
         SaveStatus prefer;
         if (a.phase != b.phase) prefer = a.phase.compareTo(b.phase) >= 0 ? a : b;
         else if (a.phase == Phase.Accept) prefer = acceptedA.compareTo(acceptedB) >= 0 ? a : b;
         else prefer = a.compareTo(b) >= 0 ? a : b;
-        return SaveStatus.enrich(prefer, (prefer == a ? b : a).known);
+        SaveStatus defer = prefer == a ? b : a;
+        if (prefer.is(Status.Truncated) && !defer.is(Status.Truncated) && !defer.is(Status.NotDefined) && preferKnowledge)
+            return defer;
+        return SaveStatus.enrich(prefer, defer.known);
     }
 }

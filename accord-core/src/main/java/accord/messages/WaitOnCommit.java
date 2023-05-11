@@ -80,7 +80,10 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
         switch (command.status())
         {
             default: throw new AssertionError();
-            case NotWitnessed:
+            case NotDefined:
+                // TODO (expected): this could be Uninitialised and logically Truncated;
+                //    can detect truncation beforehand or, better, we can pass scope to safeStore.command
+                //    and have it yield a stock Truncated SafeCommand if it has been truncated
             case PreAccepted:
             case Accepted:
             case AcceptedInvalidate:
@@ -92,8 +95,10 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
 
             case Committed:
             case PreApplied:
+            case Applying:
             case Applied:
             case Invalidated:
+            case Truncated:
             case ReadyToExecute:
         }
         return null;
@@ -108,7 +113,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
         switch (command.status())
         {
             default: throw new AssertionError();
-            case NotWitnessed:
+            case NotDefined:
             case PreAccepted:
             case Accepted:
             case AcceptedInvalidate:
@@ -118,7 +123,9 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
             case Committed:
             case ReadyToExecute:
             case PreApplied:
+            case Applying:
             case Applied:
+            case Truncated:
             case Invalidated:
         }
 

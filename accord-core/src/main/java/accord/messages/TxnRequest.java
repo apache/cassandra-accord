@@ -29,10 +29,6 @@ import accord.api.RoutingKey;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.PreLoadContext;
-import accord.primitives.Ranges;
-import accord.primitives.PartialRoute;
-import accord.primitives.Route;
-import accord.primitives.FullRoute;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 

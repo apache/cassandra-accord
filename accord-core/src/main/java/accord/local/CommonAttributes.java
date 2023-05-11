@@ -18,21 +18,19 @@
 
 package accord.local;
 
-import accord.api.RoutingKey;
+import accord.api.ProgressLog.ProgressShard;
 import accord.api.VisibleForImplementation;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Route;
 import accord.primitives.TxnId;
-import accord.utils.Invariants;
 
 public interface CommonAttributes
 {
     TxnId txnId();
     Status.Durability durability();
-    RoutingKey homeKey();
-    RoutingKey progressKey();
     Route<?> route();
+    ProgressShard progressShard();
     PartialTxn partialTxn();
     PartialDeps partialDeps();
     Listeners.Immutable durableListeners();
@@ -46,25 +44,18 @@ public interface CommonAttributes
     {
         private TxnId txnId;
         private Status.Durability durability;
-        private RoutingKey homeKey;
-        private RoutingKey progressKey;
         private Route<?> route;
+        private ProgressShard progressShard;
         private PartialTxn partialTxn;
         private PartialDeps partialDeps;
         private Listeners listeners;
-
-        public Mutable(TxnId txnId)
-        {
-            this.txnId = txnId;
-        }
 
         public Mutable(CommonAttributes attributes)
         {
             this.txnId = attributes.txnId();
             this.durability = attributes.durability();
-            this.homeKey = attributes.homeKey();
-            this.progressKey = attributes.progressKey();
             this.route = attributes.route();
+            this.progressShard = attributes.progressShard();
             this.partialTxn = attributes.partialTxn();
             this.partialDeps = attributes.partialDeps();
             this.listeners = attributes.durableListeners();
@@ -101,31 +92,6 @@ public interface CommonAttributes
         }
 
         @Override
-        public RoutingKey homeKey()
-        {
-            return homeKey;
-        }
-
-        public Mutable homeKey(RoutingKey homeKey)
-        {
-            this.homeKey = homeKey;
-            return this;
-        }
-
-        @Override
-        public RoutingKey progressKey()
-        {
-            return progressKey;
-        }
-
-        public Mutable progressKey(RoutingKey progressKey)
-        {
-            Invariants.checkArgument(progressKey == null || progressKey.equals(progressKey));
-            this.progressKey = progressKey;
-            return this;
-        }
-
-        @Override
         public Route<?> route()
         {
             return route;
@@ -134,6 +100,18 @@ public interface CommonAttributes
         public Mutable route(Route<?> route)
         {
             this.route = route;
+            return this;
+        }
+
+        @Override
+        public ProgressShard progressShard()
+        {
+            return progressShard;
+        }
+
+        public Mutable progressShard(ProgressShard progressShard)
+        {
+            this.progressShard = progressShard;
             return this;
         }
 

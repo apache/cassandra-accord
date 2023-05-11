@@ -35,4 +35,11 @@ public abstract class AbstractUnseekableKeys<KS extends Unseekables<RoutingKey, 
     {
         return Arrays.binarySearch(keys, key);
     }
+
+    @Override
+    public Unseekables<RoutingKey, ?> subtract(Ranges ranges)
+    {
+        RoutingKey[] output = subtract(ranges, RoutingKey[]::new);
+        return output == keys ? this : new RoutingKeys(output);
+    }
 }

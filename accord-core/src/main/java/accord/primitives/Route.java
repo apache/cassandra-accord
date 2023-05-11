@@ -25,6 +25,8 @@ import javax.annotation.Nullable;
 public interface Route<K extends Unseekable> extends Unseekables<K, Route<K>>
 {
     RoutingKey homeKey();
+    // true iff homeKey() is not involved in the transaction, only in its coordination
+    boolean isParticipatingHomeKey();
 
     default boolean isRoute() { return true; }
 
@@ -44,11 +46,22 @@ public interface Route<K extends Unseekable> extends Unseekables<K, Route<K>>
     PartialRoute<K> sliceStrict(Ranges ranges);
     Ranges sliceCovering(Ranges ranges, Slice slice);
 
+    Route<K> withHomeKey();
+
     /**
-     * @return a PureRoutables that includes every shard we know of, not just those we contact
-     * (i.e., includes the homeKey if not already included)
+     * Do any of the parts of the route that are not exclusively a homeKey intersect with the provided ranges
      */
-    Unseekables<K, ?> toMaximalUnseekables();
+    boolean participatesIn(Ranges ranges);
+
+    /**
+     * Return the unseekables excluding any coordination-only home key
+     */
+    Unseekables<K, ?> participants();
+
+    default boolean hasParticipants()
+    {
+        return size() > (isParticipatingHomeKey() || !contains(homeKey()) ? 0 : 1);
+    }
 
     // this method exists solely to circumvent JDK bug with testing and casting interfaces
     static boolean isFullRoute(@Nullable Unseekables<?, ?> unseekables) { return unseekables != null && unseekables.kind().isFullRoute(); }

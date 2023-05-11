@@ -20,7 +20,6 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
-import accord.api.RoutingKey;
 import accord.local.Node;
 import accord.local.Status;
 import accord.messages.CheckStatus.CheckStatusOk;
@@ -32,7 +31,7 @@ import static accord.primitives.Route.isFullRoute;
 /**
  * Find the Route of a known (txnId, homeKey) pair
  */
-public class FindRoute extends CheckShards
+public class FindRoute extends CheckShards<Route<?>>
 {
     public static class Result
     {
@@ -53,15 +52,15 @@ public class FindRoute extends CheckShards
     }
 
     final BiConsumer<Result, Throwable> callback;
-    FindRoute(Node node, TxnId txnId, RoutingKey homeKey, BiConsumer<Result, Throwable> callback)
+    FindRoute(Node node, TxnId txnId, Route<?> someRoute, BiConsumer<Result, Throwable> callback)
     {
-        super(node, txnId, RoutingKeys.of(homeKey), txnId.epoch(), IncludeInfo.Route);
+        super(node, txnId, someRoute, IncludeInfo.Route);
         this.callback = callback;
     }
 
-    public static FindRoute findRoute(Node node, TxnId txnId, RoutingKey homeKey, BiConsumer<Result, Throwable> callback)
+    public static FindRoute findRoute(Node node, TxnId txnId, Route<?> someRoute, BiConsumer<Result, Throwable> callback)
     {
-        FindRoute findRoute = new FindRoute(node, txnId, homeKey, callback);
+        FindRoute findRoute = new FindRoute(node, txnId, someRoute, callback);
         findRoute.start();
         return findRoute;
     }

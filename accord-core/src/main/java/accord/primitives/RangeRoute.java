@@ -29,11 +29,14 @@ import static accord.primitives.Routables.Slice.Overlapping;
 public abstract class RangeRoute extends AbstractRanges<Route<Range>> implements Route<Range>
 {
     public final RoutingKey homeKey;
+    public final boolean isParticipatingHomeKey;
 
-    RangeRoute(@Nonnull RoutingKey homeKey, Range[] ranges)
+    RangeRoute(@Nonnull RoutingKey homeKey, boolean isParticipatingHomeKey, Range[] ranges)
     {
         super(ranges);
         this.homeKey = Invariants.nonNull(homeKey);
+        this.isParticipatingHomeKey = isParticipatingHomeKey;
+        Invariants.checkArgument(isParticipatingHomeKey || !contains(homeKey) || get(indexOf(homeKey)).equals(homeKey.asRange()));
     }
 
     @Override
@@ -46,8 +49,12 @@ public abstract class RangeRoute extends AbstractRanges<Route<Range>> implements
                 (left, right, rs) -> Ranges.ofSortedAndDeoverlapped(rs));
     }
 
+    @Override
     public Unseekables<Range, ?> with(RoutingKey withKey)
     {
+        if (withKey.equals(homeKey))
+            return withHomeKey();
+
         if (contains(withKey))
             return this;
 
@@ -55,9 +62,45 @@ public abstract class RangeRoute extends AbstractRanges<Route<Range>> implements
     }
 
     @Override
+    public boolean participatesIn(Ranges ranges)
+    {
+        if (isParticipatingHomeKey())
+            return intersects(ranges);
+
+        long ij = findNextIntersection(0, ranges, 0);
+        if (ij < 0)
+            return false;
+
+        int i = (int)ij;
+        if (!get(i).contains(homeKey))
+            return true;
+
+        Invariants.checkState(get(i).equals(homeKey.asRange()));
+        int j = (int)(ij >>> 32);
+        return findNextIntersection(i + 1, ranges, j) >= 0;
+    }
+
+    @Override
     public PartialRangeRoute slice(Ranges ranges)
     {
-        return slice(ranges, Overlapping, this, homeKey, PartialRangeRoute::new);
+        return slice(ranges, Overlapping, this, homeKey,
+                     isParticipatingHomeKey ? PartialRangeRoute::withParticipatingHomeKey
+                                            : PartialRangeRoute::withNonParticipatingHomeKey);
+    }
+
+    @Override
+    public Unseekables<Range, ?> participants()
+    {
+        if (isParticipatingHomeKey || !contains(homeKey))
+            return this;
+
+        // TODO (desired): efficiency (lots of unnecessary allocations)
+        return ranges().subtract(Ranges.of(homeKey().asRange()));
+    }
+
+    public Ranges ranges()
+    {
+        return Ranges.ofSortedAndDeoverlapped(ranges);
     }
 
     @Override
@@ -67,8 +110,15 @@ public abstract class RangeRoute extends AbstractRanges<Route<Range>> implements
     }
 
     @Override
+    public boolean isParticipatingHomeKey()
+    {
+        return isParticipatingHomeKey;
+    }
+
+    @Override
     public boolean equals(Object that)
     {
         return super.equals(that) && homeKey.equals(((RangeRoute)that).homeKey);
     }
+
 }

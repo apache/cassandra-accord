@@ -24,6 +24,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -64,10 +65,13 @@ import accord.primitives.Ranges;
 import accord.primitives.Routable;
 import accord.primitives.RoutableKey;
 import accord.primitives.Routables;
+import accord.primitives.Route;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
+import accord.utils.Functions;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
@@ -76,24 +80,27 @@ import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static accord.local.Command.Truncated.truncated;
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.Status.Committed;
-import static accord.local.Status.PreAccepted;
+import static accord.local.Status.Invalidated;
 import static accord.local.Status.PreCommitted;
+import static accord.local.Status.Applied;
+import static accord.local.Status.Truncated;
 import static accord.primitives.Routables.Slice.Minimal;
 
 public abstract class InMemoryCommandStore extends CommandStore
 {
     private static final Logger logger = LoggerFactory.getLogger(InMemoryCommandStore.class);
 
-    private final NavigableMap<TxnId, GlobalCommand> commands = new TreeMap<>();
+    final NavigableMap<TxnId, GlobalCommand> commands = new TreeMap<>();
     private final NavigableMap<RoutableKey, GlobalCommandsForKey> commandsForKey = new TreeMap<>();
-    private final CFKLoader cfkLoader = new CFKLoader();
     // TODO (find library, efficiency): this is obviously super inefficient, need some range map
 
     private final TreeMap<TxnId, RangeCommand> rangeCommands = new TreeMap<>();
     private final TreeMap<TxnId, Ranges> historicalRangeCommands = new TreeMap<>();
+    private Timestamp maxEvicted = Timestamp.NONE;
 
     private InMemorySafeStore current;
 
@@ -153,80 +160,6 @@ public abstract class InMemoryCommandStore extends CommandStore
     public boolean hasCommandsForKey(Key key)
     {
         return commandsForKey.containsKey(key);
-    }
-
-    public CFKLoader cfkLoader()
-    {
-        return cfkLoader;
-    }
-
-    public void forEpochCommands(Ranges ranges, long epoch, Consumer<Command> consumer)
-    {
-        Timestamp minTimestamp = Timestamp.minForEpoch(epoch);
-        Timestamp maxTimestamp = Timestamp.maxForEpoch(epoch);
-        for (Range range : ranges)
-        {
-            Iterable<GlobalCommandsForKey> keyCommands = commandsForKey.subMap(range.start(), range.startInclusive(),
-                                                                                 range.end(), range.endInclusive()).values();
-
-            for (GlobalCommandsForKey commands : keyCommands)
-            {
-                if (commands.isEmpty())
-                    continue;
-                commands.value().forWitnessed(minTimestamp, maxTimestamp, txnId -> consumer.accept(command(txnId).value()));
-            }
-
-            rangeCommands.forEach((txnId, rangeCommand) -> {
-                if (!rangeCommand.ranges.intersects(range))
-                    return;
-                Command command = rangeCommand.command.value();
-                Invariants.nonNull(command);
-                if (!command.hasBeen(PreAccepted))
-                    return;
-
-                Timestamp timestamp = command.hasBeen(PreCommitted) ? command.executeAt() : txnId;
-                if (timestamp.compareTo(maxTimestamp) > 0)
-                    return;
-                if (timestamp.compareTo(minTimestamp) < 0)
-                    return;
-                consumer.accept(command);
-            });
-        }
-    }
-
-    public void forCommittedInEpoch(Ranges ranges, long epoch, Consumer<Command> consumer)
-    {
-        Timestamp minTimestamp = Timestamp.minForEpoch(epoch);
-        Timestamp maxTimestamp = Timestamp.maxForEpoch(epoch);
-        for (Range range : ranges)
-        {
-            Iterable<GlobalCommandsForKey> keyCommands = commandsForKey.subMap(range.start(),
-                                                                                 range.startInclusive(),
-                                                                                 range.end(),
-                                                                                 range.endInclusive()).values();
-            for (GlobalCommandsForKey commands : keyCommands)
-            {
-                if (commands.isEmpty())
-                    continue;
-                commands.value().byExecuteAt()
-                        .between(minTimestamp, maxTimestamp, status -> status.hasBeen(Committed))
-                        .forEach(txnId -> consumer.accept(command(txnId).value()));
-            }
-
-            rangeCommands.forEach((txnId, rangeCommand) -> {
-                if (!rangeCommand.ranges.intersects(range))
-                    return;
-                Command command = rangeCommand.command.value();
-                if (command == null || !command.hasBeen(Committed))
-                    return;
-                Timestamp executeAt = command.executeAt();
-                if (executeAt.compareTo(maxTimestamp) > 0)
-                    return;
-                if (executeAt.compareTo(minTimestamp) < 0)
-                    return;
-                consumer.accept(command);
-            });
-        }
     }
 
     public CommonAttributes register(InMemorySafeStore safeStore, Seekables<?, ?> keysOrRanges, Ranges slice, SafeCommand command, CommonAttributes attrs)
@@ -342,9 +275,126 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
     }
 
+    @Override
+    protected void setTruncatedBefore(NavigableMap<TxnId, Ranges> newTruncatedAt)
+    {
+        super.setTruncatedBefore(newTruncatedAt);
+        List<GlobalCommand> maybeTruncate = new ArrayList<>(commands.values());
+        for (GlobalCommand global : maybeTruncate)
+        {
+            Command command = global.value();
+            TxnId txnId = command.txnId();
+
+            // TODO (required): we aren't currently evicting commands that are invalidated whose definition is unknown
+            //  as we don't know if they're fully covered. Once the owned range is fully truncated, can erase everything.
+            // TODO (expected): we also might have orphaned future PreAccept and Accept state, i.e. in epochs we
+            //  ultimately did not decide to execute in; we need to ensure these are cleaned up
+
+            Map.Entry<TxnId, Ranges> entry = newTruncatedAt.higherEntry(txnId);
+            if (entry == null)
+                continue;
+
+            Ranges truncated = entry.getValue();
+            if (isTruncated(command, truncated))
+                truncate(command, global, truncated);
+        }
+    }
+
+    @Override
+    protected void setRedundantBefore(NavigableMap<TxnId, Ranges> newRedundantBefore)
+    {
+        NavigableMap<TxnId, Ranges> oldRedundantBefore = getRedundantBefore();
+        super.setRedundantBefore(newRedundantBefore);
+        for (Map.Entry<TxnId, Ranges> entry : newRedundantBefore.entrySet())
+        {
+            Ranges existing = oldRedundantBefore.get(entry.getKey());
+            if (existing != null && existing.containsAll(entry.getValue()))
+                continue;
+
+            TxnId syncId = entry.getKey();
+            Ranges ranges = entry.getValue();
+            if (!rangeCommands.containsKey(entry.getKey()))
+                historicalRangeCommands.put(entry.getKey(), entry.getValue());
+
+            {
+                Iterator<Map.Entry<TxnId, Ranges>> iterator = historicalRangeCommands.entrySet().iterator();
+                while (iterator.hasNext())
+                {
+                    Map.Entry<TxnId, Ranges> next = iterator.next();
+                    if (next.getKey().compareTo(syncId) < 0 && next.getValue().intersects(ranges))
+                        iterator.remove();
+                }
+            }
+
+            ranges.forEach(r -> {
+                commandsForKey.subMap(r.start(), r.startInclusive(), r.end(), r.endInclusive()).values().forEach(forKey -> {
+                    if (!forKey.isEmpty())
+                        forKey.value(forKey.value().withoutRedundant(syncId));
+                });
+            });
+        }
+    }
+
+    @Override
+    protected Command.Truncated truncate(SafeCommand command, Ranges truncated)
+    {
+        return truncate(command.current(), ((InMemorySafeCommand)command).global(), truncated);
+    }
+
+    private Command.Truncated truncate(Command command, GlobalCommand global, Ranges truncated)
+    {
+        RangesForEpoch rangesForEpoch = rangesForEpochHolder.get();
+        Ranges coordinateRanges = rangesForEpoch.allAt(command.txnId().epoch());
+        Timestamp executeAt = command.executeAt();
+        Ranges additionalRanges = executeAt != null && !executeAt.equals(Timestamp.NONE) && executeAt.epoch() != command.txnId().epoch()
+                                  ? rangesForEpoch.allAt(executeAt.epoch()) : Ranges.EMPTY;
+
+        Invariants.checkState(!command.hasBeen(PreCommitted) || command.hasBeen(Applied) || !command.partialTxn().keys().intersects(coordinateRanges.with(additionalRanges)));
+
+        Command.Truncated result;
+        if (!command.hasBeen(Truncated))
+        {
+            // TODO (expected): is it certain partialTxn != null? might be a home shard that witnesses only accept and durable but nothing else
+            // we expect that
+            //   1) a command has been applied; or
+            //   2) has been coordinated but *will not* be applied (we just haven't witnessed the invalidation yet); or
+            //   3) a command is durably decided and this shard only hosts its home data, so no explicit truncation is necessary to remove it
+            // TODO (desired): consider if there are better invariants we can impose for undecided transactions, to verify they aren't later committed (should be detected already, but more is better)
+            Invariants.checkState(command.hasBeen(Applied) || !command.hasBeen(PreCommitted) || command.partialTxn().keys().isEmpty());
+            ((SimpleProgressLog.Instance)progressLog).clear(command.txnId());
+
+            global.value(result = truncated(command));
+        }
+        else
+        {
+            result = (Command.Truncated) command;
+        }
+
+        // TODO (now): add Route to Known, and add an InvalidatedWithRoute state
+        Route<?> route = result.route();
+        if (Route.isFullRoute(route))
+        {
+            route = route.slice(coordinateRanges.with(additionalRanges));
+            if (route.covers(coordinateRanges) && route.covers(additionalRanges) && truncated.containsAll(route))
+            {
+                maxEvicted = Timestamp.max(maxEvicted, Functions.reduceNonNull(Timestamp::max, command.txnId(), executeAt));
+                commands.remove(result.txnId());
+                return result;
+            }
+        }
+
+        if (truncated.containsAll(coordinateRanges) && truncated.containsAll(additionalRanges))
+        {
+            maxEvicted = Timestamp.max(maxEvicted, Functions.reduceNonNull(Timestamp::max, command.txnId(), executeAt));
+            commands.remove(result.txnId());
+        }
+
+        return result;
+    }
+
     protected InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys)
     {
-        return new InMemorySafeStore(this, cfkLoader, ranges, context, commands, commandsForKeys);
+        return new InMemorySafeStore(this, ranges, context, commands, commandsForKeys);
     }
 
     protected final InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges)
@@ -461,12 +511,20 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     class CFKLoader implements CommandLoader<TxnId>
     {
-        private Command loadForCFK(TxnId data)
+        final RoutableKey key;
+        CFKLoader(RoutableKey key)
         {
-            GlobalCommand globalCommand = ifPresent(data);
+            this.key = key;
+        }
+
+        private Command loadForCFK(TxnId txnId)
+        {
+            GlobalCommand globalCommand = ifPresent(txnId);
             if (globalCommand != null)
                 return globalCommand.value();
-            throw new IllegalStateException("Could not find command for CFK for " + data);
+            // can only be missing because of truncation
+            // TODO (now): can we do better than this, and provide stronger guarantees?
+            return Command.NotDefined.uninitialised(txnId);
         }
 
         @Override
@@ -559,6 +617,12 @@ public abstract class InMemoryCommandStore extends CommandStore
             return true;
         }
 
+        @Override
+        public GlobalState<Command> value(Command value)
+        {
+            return super.value(value);
+        }
+
         public Collection<Command.TransientListener> transientListeners()
         {
             return transientListeners == null ? Collections.emptySet() : transientListeners;
@@ -586,16 +650,14 @@ public abstract class InMemoryCommandStore extends CommandStore
         private final Map<TxnId, InMemorySafeCommand> commands;
         private final Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKey;
         private final RangesForEpoch ranges;
-        private final CFKLoader cfkLoader;
 
-        public InMemorySafeStore(InMemoryCommandStore commandStore, CFKLoader cfkLoader, RangesForEpoch ranges, PreLoadContext context, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKey)
+        public InMemorySafeStore(InMemoryCommandStore commandStore, RangesForEpoch ranges, PreLoadContext context, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKey)
         {
             super(context);
             this.commandStore = commandStore;
             this.commands = commands;
             this.commandsForKey = commandsForKey;
             this.ranges = Invariants.nonNull(ranges);
-            this.cfkLoader = cfkLoader;
         }
 
         @Override
@@ -619,7 +681,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         @Override
         protected void addCommandsForKeyInternal(InMemorySafeCommandsForKey cfk)
         {
-            commandsForKey.put(cfk.key(), (InMemorySafeCommandsForKey) cfk);
+            commandsForKey.put(cfk.key(), cfk);
         }
 
         @Override
@@ -669,16 +731,17 @@ public abstract class InMemoryCommandStore extends CommandStore
         @Override
         public Timestamp maxConflict(Seekables<?, ?> keysOrRanges, Ranges slice)
         {
-            Timestamp timestamp = commandStore.mapReduceForKey(this, keysOrRanges, slice, (forKey, prev) -> Timestamp.max(forKey.max(), prev), Timestamp.NONE, null);
+            Timestamp timestamp = commandStore.mapReduceForKey(this, keysOrRanges, slice, (forKey, prev) -> Timestamp.nonNullOrMax(forKey.max(), prev), Timestamp.NONE, null);
             Seekables<?, ?> sliced = keysOrRanges.slice(slice, Minimal);
             for (RangeCommand command : commandStore.rangeCommands.values())
             {
                 if (command.ranges.intersects(sliced))
-                    timestamp = Timestamp.max(timestamp, command.command.value().executeAt());
+                    timestamp = Timestamp.nonNullOrMax(timestamp, command.command.value().executeAt());
             }
-            return timestamp;
+            return Timestamp.nonNullOrMax(timestamp, commandStore.maxEvicted);
         }
 
+        // TODO (preferable): this can have protected visibility if under CommandStore, and this is perhaps a better place to put it also
         @Override
         public void registerHistoricalTransactions(Deps deps)
         {
@@ -759,6 +822,10 @@ public abstract class InMemoryCommandStore extends CommandStore
             Map<Range, List<Map.Entry<TxnId, Timestamp>>> collect = new TreeMap<>(Range::compare);
             commandStore.rangeCommands.forEach(((txnId, rangeCommand) -> {
                 Command command = rangeCommand.command.value();
+                // TODO (now): probably this isn't safe - want to ensure we take dependency on any relevant syncId
+                if (command.is(Truncated))
+                    return;
+
                 Invariants.nonNull(command);
                 switch (testTimestamp)
                 {
@@ -810,7 +877,6 @@ public abstract class InMemoryCommandStore extends CommandStore
 
             if (minStatus == null && testDep == ANY_DEPS)
             {
-
                 commandStore.historicalRangeCommands.forEach(((txnId, ranges) -> {
                     switch (testTimestamp)
                     {
@@ -866,9 +932,9 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        public CommandLoader<?> cfkLoader()
+        public CommandLoader<?> cfkLoader(RoutableKey key)
         {
-            return cfkLoader;
+            return commandStore.new CFKLoader(key);
         }
 
         @Override
@@ -1042,9 +1108,9 @@ public abstract class InMemoryCommandStore extends CommandStore
     {
         class DebugSafeStore extends InMemorySafeStore
         {
-            public DebugSafeStore(InMemoryCommandStore commandStore, CFKLoader cfkLoader, RangesForEpoch ranges, PreLoadContext context, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKey)
+            public DebugSafeStore(InMemoryCommandStore commandStore, RangesForEpoch ranges, PreLoadContext context, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKey)
             {
-                super(commandStore, cfkLoader, ranges, context, commands, commandsForKey);
+                super(commandStore, ranges, context, commands, commandsForKey);
             }
 
             @Override
@@ -1091,7 +1157,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         @Override
         protected InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys)
         {
-            return new DebugSafeStore(this, cfkLoader(), ranges, context, commands, commandsForKeys);
+            return new DebugSafeStore(this, ranges, context, commands, commandsForKeys);
         }
 
     }
@@ -1164,8 +1230,8 @@ public abstract class InMemoryCommandStore extends CommandStore
                 if (level == 0 || verbose || !committed.isWaitingOnDependency())
                     log(prefix, suffix, command);
 
-                Set<TxnId> waitingOnCommit = committed.waitingOnCommit();
-                Set<TxnId> waitingOnApply = new HashSet<>(committed.waitingOnApply().values());
+                Set<TxnId> waitingOnCommit = committed.waitingOn.computeWaitingOnCommit();
+                Set<TxnId> waitingOnApply = committed.waitingOn.computeWaitingOnApply();
 
                 if (committed.isWaitingOnDependency() && !previouslyVisited)
                     deps.forEach(depId -> logDependencyGraph(commandStore, depId, visited, verbose, level+1, waitingOnCommit.contains(depId), waitingOnApply.contains(depId)));

@@ -249,8 +249,14 @@ public class Cluster implements Scheduler
             }, 5L, SECONDS);
 
             Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1, SECONDS);
+            Scheduled rangeDurable = sinks.recurring(configRandomizer::rangeDurable, 1, SECONDS);
+            Scheduled globallyDurable = sinks.recurring(configRandomizer::globallyDurable, 1, SECONDS);
 
-            noMoreWorkSignal.accept(reconfigure::cancel);
+            noMoreWorkSignal.accept(() -> {
+                reconfigure.cancel();
+                rangeDurable.cancel();
+                globallyDurable.cancel();
+            });
 
             Packet next;
             while ((next = in.get()) != null)
@@ -260,6 +266,8 @@ public class Cluster implements Scheduler
 
             chaos.cancel();
             reconfigure.cancel();
+            rangeDurable.cancel();
+            globallyDurable.cancel();
             sinks.partitionSet = Collections.emptySet();
 
             // give progress log et al a chance to finish

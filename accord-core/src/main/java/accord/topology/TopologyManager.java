@@ -27,13 +27,14 @@ import accord.primitives.*;
 import accord.topology.Topologies.Single;
 import com.google.common.annotations.VisibleForTesting;
 import accord.utils.Invariants;
-import accord.primitives.Timestamp;
 import accord.utils.async.*;
 
 import java.util.*;
+import java.util.function.Function;
 
 import static accord.coordinate.tracking.RequestStatus.Success;
 
+import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.nonNull;
 
@@ -59,40 +60,75 @@ public class TopologyManager
         private final Topology global;
         private final Topology local;
         private final QuorumTracker syncTracker;
-        private boolean syncComplete;
-        private boolean prevSynced;
+        private final boolean[] curShardSyncComplete;
+        private final Ranges newRanges;
+        private Ranges curSyncComplete, prevSyncComplete, syncComplete;
+        Ranges closed = Ranges.EMPTY, complete = Ranges.EMPTY;
 
-        EpochState(Id node, Topology global, TopologySorter sorter, boolean syncComplete, boolean prevSynced)
+        EpochState(Id node, Topology global, TopologySorter sorter, Ranges prevRanges, Ranges prevSyncComplete)
         {
             this.self = node;
             this.global = checkArgument(global, !global.isSubset());
             this.local = global.forNode(node).trim();
             Invariants.checkArgument(!global().isSubset());
-            // TODO: can we just track sync for local ranges here?
-            if (global().size() > 0)
+            this.curShardSyncComplete = new boolean[global.shards.length];
+            this.syncTracker = new QuorumTracker(new Single(sorter, global()));
+            this.prevSyncComplete = prevSyncComplete;
+            this.newRanges = global.ranges.subtract(prevRanges);
+            this.curSyncComplete = this.syncComplete = newRanges;
+        }
+
+        boolean markPrevSynced(Ranges newPrevSyncComplete)
+        {
+            if (prevSyncComplete.containsAll(newPrevSyncComplete))
+                return false;
+            Invariants.checkState(newPrevSyncComplete.containsAll(prevSyncComplete));
+            prevSyncComplete = newPrevSyncComplete;
+            syncComplete = curSyncComplete.slice(newPrevSyncComplete, Minimal).with(newRanges);
+            return true;
+        }
+
+        public boolean recordSyncComplete(Id node)
+        {
+            if (syncTracker.recordSuccess(node) == Success)
             {
-                this.syncTracker = new QuorumTracker(new Single(sorter, global()));
-                this.syncComplete = syncComplete;
-                this.prevSynced = prevSynced;
+                curSyncComplete = global.ranges;
+                syncComplete = prevSyncComplete;
+                return true;
             }
             else
             {
-                // if topology is empty, there is nothing to sync
-                this.syncTracker = null;
-                this.syncComplete = true;
-                this.prevSynced = true;
+                boolean updated = false;
+                // loop over each current shard, and test if its ranges are complete
+                for (int i = 0 ; i < global.shards.length ; ++i)
+                {
+                    if (syncTracker.get(i).hasReachedQuorum() && !curShardSyncComplete[i])
+                    {
+                        curSyncComplete = curSyncComplete.with(Ranges.of(global.shards[i].range));
+                        syncComplete = curSyncComplete.slice(prevSyncComplete, Minimal);
+                        curShardSyncComplete[i] = true;
+                        updated = true;
+                    }
+                }
+                return updated;
             }
         }
 
-        void markPrevSynced()
+        boolean recordClosed(Ranges ranges)
         {
-            prevSynced = true;
+            if (closed.containsAll(ranges))
+                return false;
+            closed = closed.with(ranges);
+            return true;
         }
 
-        public void recordSyncComplete(Id node)
+        boolean recordComplete(Ranges ranges)
         {
-            if (syncTracker.recordSuccess(node) == Success)
-                syncComplete = true;
+            if (complete.containsAll(ranges))
+                return false;
+            closed = closed.with(ranges);
+            complete = complete.with(ranges);
+            return true;
         }
 
         Topology global()
@@ -112,7 +148,7 @@ public class TopologyManager
 
         boolean syncComplete()
         {
-            return prevSynced && syncComplete;
+            return syncComplete.containsAll(global.ranges);
         }
 
         /**
@@ -120,26 +156,18 @@ public class TopologyManager
          */
         boolean syncCompleteFor(Unseekables<?, ?> intersect)
         {
-            if (!prevSynced)
-                return false;
-            if (syncComplete)
-                return true;
-            Boolean result = global().foldl(intersect, (shard, acc, i) -> {
-                if (acc == Boolean.FALSE)
-                    return acc;
-                return syncTracker.get(i).hasReachedQuorum();
-            }, Boolean.TRUE);
-            return result == Boolean.TRUE;
-        }
-
-        boolean shardIsUnsynced(int idx)
-        {
-            return !prevSynced || (!syncComplete && !syncTracker.get(idx).hasReachedQuorum());
+            return syncComplete.containsAll(intersect);
         }
     }
 
     private static class Epochs
     {
+        static class Notifications
+        {
+            final Set<Id> syncComplete = new TreeSet<>();
+            Ranges closed = Ranges.EMPTY, complete = Ranges.EMPTY;
+        }
+
         private static final Epochs EMPTY = new Epochs(new EpochState[0]);
         private final long currentEpoch;
         private final EpochState[] epochs;
@@ -147,17 +175,17 @@ public class TopologyManager
         // Pending sync notifications are indexed by epoch, with the current epoch as index[0], and future epochs
         // as index[epoch - currentEpoch]. Sync complete notifications for the current epoch are marked pending
         // until the superseding epoch has been applied
-        private final List<Set<Id>> pendingSyncComplete;
+        private final List<Notifications> pending;
 
         // list of promises to be completed as newer epochs become active. This is to support processes that
         // are waiting on future epochs to begin (ie: txn requests from futures epochs). Index 0 is for
         // currentEpoch + 1
         private final List<AsyncResult.Settable<Void>> futureEpochFutures;
 
-        private Epochs(EpochState[] epochs, List<Set<Id>> pendingSyncComplete, List<AsyncResult.Settable<Void>> futureEpochFutures)
+        private Epochs(EpochState[] epochs, List<Notifications> pending, List<AsyncResult.Settable<Void>> futureEpochFutures)
         {
             this.currentEpoch = epochs.length > 0 ? epochs[0].epoch() : 0;
-            this.pendingSyncComplete = pendingSyncComplete;
+            this.pending = pending;
             this.futureEpochFutures = futureEpochFutures;
             for (int i=1; i<epochs.length; i++)
                 checkArgument(epochs[i].epoch() == epochs[i-1].epoch() - 1);
@@ -212,32 +240,86 @@ public class TopologyManager
             checkArgument(epoch > 0);
             if (epoch > currentEpoch)
             {
-                int idx = (int) (epoch - (1 + currentEpoch));
-                for (int i=pendingSyncComplete.size(); i<=idx; i++)
-                    pendingSyncComplete.add(new HashSet<>());
-
-                pendingSyncComplete.get(idx).add(node);
+                pending(epoch).syncComplete.add(node);
             }
             else
             {
-                EpochState state = get(epoch);
-                if (state == null)
+                int i = indexOf(epoch);
+                if (i < 0 || !epochs[i].recordSyncComplete(node))
                     return;
-                state.recordSyncComplete(node);
-                for (epoch++ ; state.syncComplete() && epoch <= currentEpoch; epoch++)
-                {
-                    state = get(epoch);
-                    state.markPrevSynced();
-                }
+
+                while (--i >= 0 && epochs[i].markPrevSynced(epochs[i + 1].syncComplete)) {}
             }
+        }
+
+        /**
+         * Mark sync complete for the given node/epoch, and if this epoch
+         * is now synced, update the prevSynced flag on superseding epochs
+         */
+        public void epochClosed(Ranges ranges, long epoch)
+        {
+            checkArgument(epoch > 0);
+            int i;
+            if (epoch > currentEpoch)
+            {
+                Notifications notifications = pending(epoch);
+                notifications.closed = notifications.closed.with(ranges);
+                i = 0;
+            }
+            else
+            {
+                i = indexOf(epoch);
+            }
+            while (epochs[i].recordClosed(ranges) && ++i < epochs.length) {}
+        }
+
+        /**
+         * Mark sync complete for the given node/epoch, and if this epoch
+         * is now synced, update the prevSynced flag on superseding epochs
+         */
+        public void epochRedundant(Ranges ranges, long epoch)
+        {
+            checkArgument(epoch > 0);
+            int i;
+            if (epoch > currentEpoch)
+            {
+                Notifications notifications = pending(epoch);
+                notifications.complete = notifications.complete.with(ranges);
+                i = 0; // record these ranges as complete for all earlier epochs as well
+            }
+            else
+            {
+                i = indexOf(epoch);
+                if (i < 0)
+                    return;
+            }
+            while (epochs[i].recordComplete(ranges) && ++i < epochs.length) {}
+        }
+
+        private Notifications pending(long epoch)
+        {
+            int idx = (int) (epoch - (1 + currentEpoch));
+            for (int i = pending.size(); i <= idx; i++)
+                pending.add(new Notifications());
+
+            return pending.get(idx);
         }
 
         private EpochState get(long epoch)
         {
-            if (epoch > currentEpoch || epoch <= currentEpoch - epochs.length)
+            int index = indexOf(epoch);
+            if (index < 0)
                 return null;
 
-            return epochs[(int) (currentEpoch - epoch)];
+            return epochs[index];
+        }
+
+        private int indexOf(long epoch)
+        {
+            if (epoch > currentEpoch || epoch <= currentEpoch - epochs.length)
+                return -1;
+
+            return (int) (currentEpoch - epoch);
         }
     }
 
@@ -259,28 +341,26 @@ public class TopologyManager
         checkArgument(topology.epoch == current.nextEpoch() || epochs == Epochs.EMPTY,
                       "Expected topology update %d to be %d", topology.epoch, current.nextEpoch());
         EpochState[] nextEpochs = new EpochState[current.epochs.length + 1];
-        List<Set<Id>> pendingSync = new ArrayList<>(current.pendingSyncComplete);
-        Set<Id> alreadySyncd = Collections.emptySet();
-        if (!pendingSync.isEmpty())
-        {
-            // if empty, then notified about an epoch from a peer before first epoch seen
-            if (current.epochs.length != 0)
-            {
-                EpochState currentEpoch = current.epochs[0];
-                if (currentEpoch.syncComplete())
-                    currentEpoch.markPrevSynced();
-                alreadySyncd = pendingSync.remove(0);
-            }
-        }
+        List<Epochs.Notifications> pending = new ArrayList<>(current.pending);
+        Epochs.Notifications notifications = pending.isEmpty() ? new Epochs.Notifications() : pending.remove(0);
+
         System.arraycopy(current.epochs, 0, nextEpochs, 1, current.epochs.length);
 
-        boolean prevSynced = current.epochs.length == 0 || current.epochs[0].syncComplete();
-        nextEpochs[0] = new EpochState(node, topology, sorter.get(topology), topology.epoch == 1, prevSynced);
-        alreadySyncd.forEach(nextEpochs[0]::recordSyncComplete);
+        Ranges prevSynced, prevAll;
+        if (current.epochs.length == 0) prevSynced = prevAll = Ranges.EMPTY;
+        else
+        {
+            prevSynced = current.epochs[0].syncComplete;
+            prevAll = current.epochs[0].global.ranges;
+        }
+        nextEpochs[0] = new EpochState(node, topology, sorter.get(topology), prevAll, prevSynced);
+        notifications.syncComplete.forEach(nextEpochs[0]::recordSyncComplete);
+        nextEpochs[0].recordClosed(notifications.closed);
+        nextEpochs[0].recordComplete(notifications.complete);
 
         List<AsyncResult.Settable<Void>> futureEpochFutures = new ArrayList<>(current.futureEpochFutures);
         AsyncResult.Settable<Void> toComplete = !futureEpochFutures.isEmpty() ? futureEpochFutures.remove(0) : null;
-        epochs = new Epochs(nextEpochs, pendingSync, futureEpochFutures);
+        epochs = new Epochs(nextEpochs, pending, futureEpochFutures);
         if (toComplete != null)
             toComplete.trySuccess(null);
     }
@@ -312,8 +392,19 @@ public class TopologyManager
         int newLen = current.epochs.length - (int) (epoch - current.minEpoch());
         Invariants.checkState(current.epochs[newLen - 1].syncComplete(), "Epoch %d's sync is not complete", current.epochs[newLen - 1].epoch());
 
-        epochs = new Epochs(Arrays.copyOfRange(current.epochs, 0, newLen),
-                            current.pendingSyncComplete, current.futureEpochFutures);
+        EpochState[] nextEpochs = new EpochState[newLen];
+        System.arraycopy(current.epochs, 0, nextEpochs, 0, newLen);
+        epochs = new Epochs(nextEpochs, current.pending, current.futureEpochFutures);
+    }
+
+    public void onEpochClosed(Ranges ranges, long epoch)
+    {
+        epochs.epochClosed(ranges, epoch);
+    }
+
+    public void onEpochRedundant(Ranges ranges, long epoch)
+    {
+        epochs.epochRedundant(ranges, epoch);
     }
 
     public TopologySorter.Supplier sorter()
@@ -337,14 +428,9 @@ public class TopologyManager
         return epochs.get(epoch);
     }
 
-    public Topologies withUnsyncedEpochs(Unseekables<?, ?> select, Timestamp at)
+    public Topologies preciseEpochs(long epoch)
     {
-        return withUnsyncedEpochs(select, at.epoch());
-    }
-
-    public Topologies withUnsyncedEpochs(Unseekables<?, ?> select, long epoch)
-    {
-        return withUnsyncedEpochs(select, epoch, epoch);
+        return new Single(sorter, epochs.get(epoch).global);
     }
 
     public Topologies withUnsyncedEpochs(Unseekables<?, ?> select, Timestamp min, Timestamp max)
@@ -355,68 +441,76 @@ public class TopologyManager
     public Topologies withUnsyncedEpochs(Unseekables<?, ?> select, long minEpoch, long maxEpoch)
     {
         Invariants.checkArgument(minEpoch <= maxEpoch, "min epoch %d > max %d", minEpoch, maxEpoch);
+        return withSufficientEpochs(select, minEpoch, maxEpoch, epochState -> epochState.syncComplete);
+    }
+
+    public Topologies withOpenEpochs(Unseekables<?, ?> select, Timestamp min, Timestamp max)
+    {
+        return withSufficientEpochs(select, min.epoch(), max.epoch(), epochState -> epochState.closed);
+    }
+
+    private Topologies withSufficientEpochs(Unseekables<?, ?> select, long minEpoch, long maxEpoch, Function<EpochState, Ranges> isSufficientFor)
+    {
+        Invariants.checkArgument(minEpoch <= maxEpoch);
         Epochs snapshot = epochs;
 
         if (maxEpoch == Long.MAX_VALUE) maxEpoch = snapshot.currentEpoch;
         else Invariants.checkState(snapshot.currentEpoch >= maxEpoch, "current epoch %d < max %d", snapshot.currentEpoch, maxEpoch);
 
         EpochState maxEpochState = nonNull(snapshot.get(maxEpoch));
-        if (minEpoch == maxEpoch && maxEpochState.syncCompleteFor(select))
-            return new Single(sorter, maxEpochState.global.forSelection(select, Topology.OnUnknown.REJECT));
+        if (minEpoch == maxEpoch && isSufficientFor.apply(maxEpochState).containsAll(select))
+            return new Single(sorter, maxEpochState.global.forSelection(select));
 
-        int start = (int)(snapshot.currentEpoch - maxEpoch);
-        int limit = (int)(Math.min(1 + snapshot.currentEpoch - minEpoch, snapshot.epochs.length));
-        int count = limit - start;
-        while (limit < snapshot.epochs.length && !snapshot.epochs[limit - 1].syncCompleteFor(select))
+        int i = (int)(snapshot.currentEpoch - maxEpoch);
+        int maxi = (int)(Math.min(1 + snapshot.currentEpoch - minEpoch, snapshot.epochs.length));
+        Topologies.Multi topologies = new Topologies.Multi(sorter, maxi - i);
+
+        Unseekables<?, ?> remaining = select;
+        while (i < maxi)
         {
-            ++count;
-            ++limit;
+            EpochState epochState = snapshot.epochs[i++];
+            topologies.add(epochState.global.forSelection(select));
+            remaining = remaining.subtract(epochState.newRanges);
         }
 
-        // We need to ensure we include ownership information in every epoch for all nodes we contact in any epoch
-        // So we first collect the set of nodes we will contact, before selecting the affected shards and nodes in each epoch
-        Set<Id> nodes = new LinkedHashSet<>();
-        for (int i = start; i < limit ; ++i)
-        {
-            EpochState epochState = snapshot.epochs[i];
-            if (epochState.epoch() < minEpoch)
-                epochState.global.visitNodeForKeysOnceOrMore(select, Topology.OnUnknown.IGNORE, EpochState::shardIsUnsynced, epochState, nodes::add);
-            else
-                epochState.global.visitNodeForKeysOnceOrMore(select, Topology.OnUnknown.IGNORE, nodes::add);
-        }
-        Invariants.checkState(!nodes.isEmpty(), "Unable to find an epoch that contained %s", select);
+        if (i == snapshot.epochs.length)
+            return topologies;
 
-        Topologies.Multi topologies = new Topologies.Multi(sorter, count);
-        for (int i = start; i < limit ; ++i)
+        // include any additional epochs to reach sufficiency
+        EpochState prev = snapshot.epochs[maxi - 1];
+        do
         {
-            EpochState epochState = snapshot.epochs[i];
-            if (epochState.epoch() < minEpoch)
-                topologies.add(epochState.global.forSelection(select, Topology.OnUnknown.IGNORE, nodes, EpochState::shardIsUnsynced, epochState));
-            else
-                topologies.add(epochState.global.forSelection(select, Topology.OnUnknown.IGNORE, nodes, (ignore, idx) -> true, null));
-        }
-        Invariants.checkState(!topologies.isEmpty(), "Unable to find an epoch that contained %s", select);
+            Ranges sufficient = isSufficientFor.apply(prev);
+            remaining = remaining.subtract(sufficient);
+            if (remaining.isEmpty())
+                return topologies;
+
+            EpochState next = snapshot.epochs[i++];
+            topologies.add(next.global.forSelection(remaining));
+            prev = next;
+        } while (i < snapshot.epochs.length);
 
         return topologies;
     }
 
-    public Topologies preciseEpochs(Unseekables<?, ?> keys, long minEpoch, long maxEpoch)
+    public Topologies preciseEpochs(Unseekables<?, ?> select, long minEpoch, long maxEpoch)
     {
         Epochs snapshot = epochs;
 
         if (minEpoch == maxEpoch)
-            return new Single(sorter, snapshot.get(minEpoch).global.forSelection(keys, Topology.OnUnknown.REJECT));
+            return new Single(sorter, snapshot.get(minEpoch).global.forSelection(select));
 
-        Set<Id> nodes = new LinkedHashSet<>();
         int count = (int)(1 + maxEpoch - minEpoch);
-        for (int i = count - 1 ; i >= 0 ; --i)
-            snapshot.get(minEpoch + i).global().visitNodeForKeysOnceOrMore(keys, Topology.OnUnknown.IGNORE, nodes::add);
-        Invariants.checkState(!nodes.isEmpty(), "Unable to find an epoch that contained %s", keys);
-
         Topologies.Multi topologies = new Topologies.Multi(sorter, count);
         for (int i = count - 1 ; i >= 0 ; --i)
-            topologies.add(snapshot.get(minEpoch + i).global.forSelection(keys, Topology.OnUnknown.IGNORE, nodes));
-        Invariants.checkState(!topologies.isEmpty(), "Unable to find an epoch that contained %s", keys);
+        {
+            EpochState epochState = snapshot.get(minEpoch + i);
+            topologies.add(epochState.global.forSelection(select));
+            select = select.subtract(epochState.newRanges);
+        }
+
+        for (int i = count - 1 ; i >= 0 ; --i)
+        Invariants.checkState(!topologies.isEmpty(), "Unable to find an epoch that contained %s", select);
 
         return topologies;
     }
@@ -424,7 +518,7 @@ public class TopologyManager
     public Topologies forEpoch(Unseekables<?, ?> select, long epoch)
     {
         EpochState state = epochs.get(epoch);
-        return new Single(sorter, state.global.forSelection(select, Topology.OnUnknown.REJECT));
+        return new Single(sorter, state.global.forSelection(select));
     }
 
     public Shard forEpochIfKnown(RoutingKey key, long epoch)

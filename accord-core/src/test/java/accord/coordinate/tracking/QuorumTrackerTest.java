@@ -22,13 +22,11 @@ import accord.impl.TopologyUtils;
 import accord.local.Node;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
-import accord.topology.Shard;
 import accord.topology.Topology;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import static accord.Utils.*;
-import static accord.Utils.idSet;
 import static accord.impl.IntKey.range;
 import static accord.utils.Utils.toArray;
 
@@ -107,7 +105,7 @@ public class QuorumTrackerTest
     @Test
     void multiShard()
     {
-        Topology subTopology = new Topology(1, new Shard[]{topology.get(0), topology.get(1), topology.get(2)});
+        Topology subTopology = new Topology(1, topology.get(0), topology.get(1), topology.get(2));
         QuorumTracker responses = new QuorumTracker(topologies(subTopology));
         /*
         (000, 100](100, 200](200, 300]

@@ -22,7 +22,6 @@ import accord.local.*;
 import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.ProgressLog;
-import accord.local.CommandStore;
 import accord.utils.RandomSource;
 
 public class InMemoryCommandStores

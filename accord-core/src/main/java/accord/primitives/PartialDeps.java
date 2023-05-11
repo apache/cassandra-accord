@@ -43,6 +43,7 @@ public class PartialDeps extends Deps
         }
     }
 
+    // TODO (expected): we no longer need this if everyone has a FullRoute
     public final Ranges covering;
 
     public PartialDeps(Ranges covering, KeyDeps keyDeps, RangeDeps rangeDeps)

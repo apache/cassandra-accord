@@ -23,6 +23,7 @@ import javax.annotation.Nullable;
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.primitives.Ballot;
+import accord.primitives.FullRoute;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialRoute;
 import accord.primitives.PartialTxn;
@@ -34,7 +35,7 @@ import accord.primitives.Writes;
 
 public class CheckedCommands
 {
-    public static void preaccept(SafeCommandStore safeStore, TxnId txnId, PartialTxn partialTxn, Route<?> route, @Nullable RoutingKey progressKey)
+    public static void preaccept(SafeCommandStore safeStore, TxnId txnId, PartialTxn partialTxn, FullRoute<?> route, @Nullable RoutingKey progressKey)
     {
         Commands.AcceptOutcome result = Commands.preaccept(safeStore, txnId, txnId.epoch(), partialTxn, route, progressKey);
         if (result != Commands.AcceptOutcome.Success) throw new IllegalStateException("Command mutation rejected: " + result);
@@ -52,9 +53,9 @@ public class CheckedCommands
         if (result != Commands.CommitOutcome.Success) throw new IllegalStateException("Command mutation rejected: " + result);
     }
 
-    public static void apply(SafeCommandStore safeStore, TxnId txnId, long untilEpoch, Route<?> route, Timestamp executeAt, @Nullable PartialDeps partialDeps, Writes writes, Result result)
+    public static void apply(SafeCommandStore safeStore, TxnId txnId, Route<?> route, @Nullable RoutingKey progressKey, Timestamp executeAt, @Nullable PartialDeps partialDeps, Writes writes, Result result)
     {
-        Commands.ApplyOutcome outcome = Commands.apply(safeStore, txnId, untilEpoch, route, executeAt, partialDeps, writes, result);
+        Commands.ApplyOutcome outcome = Commands.apply(safeStore, txnId, route, progressKey, executeAt, partialDeps, writes, result);
         if (outcome != Commands.ApplyOutcome.Success) throw new IllegalStateException("Command mutation rejected: " + outcome);
     }
 }

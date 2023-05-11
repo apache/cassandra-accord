@@ -201,24 +201,14 @@ public class Topology
         return forSubset(EMPTY_SUBSET);
     }
 
-    public Topology forSelection(Unseekables<?, ?> select, OnUnknown onUnknown)
+    public Topology forSelection(Unseekables<?, ?> select)
     {
-        return forSelection(select, onUnknown, (ignore, index) -> true, null);
+        return forSubset(subsetFor(select));
     }
 
-    public <P1> Topology forSelection(Unseekables<?, ?> select, OnUnknown onUnknown, IndexedPredicate<P1> predicate, P1 param)
+    public Topology forSelection(Unseekables<?, ?> select, Collection<Id> nodes)
     {
-        return forSubset(subsetFor(select, predicate, param, onUnknown));
-    }
-
-    public Topology forSelection(Unseekables<?, ?> select, OnUnknown onUnknown, Collection<Id> nodes)
-    {
-        return forSelection(select, onUnknown, nodes, (ignore, index) -> true, null);
-    }
-
-    public <P1> Topology forSelection(Unseekables<?, ?> select, OnUnknown onUnknown, Collection<Id> nodes, IndexedPredicate<P1> predicate, P1 param)
-    {
-        return forSubset(subsetFor(select, predicate, param, onUnknown), nodes);
+        return forSubset(subsetFor(select), nodes);
     }
 
     private Topology forSubset(int[] newSubset)
@@ -244,9 +234,7 @@ public class Topology
         return new Topology(epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
     }
 
-    public enum OnUnknown { REJECT, IGNORE }
-
-    private <P1> int[] subsetFor(Unseekables<?, ?> select, IndexedPredicate<P1> predicate, P1 param, OnUnknown onUnknown)
+    private int[] subsetFor(Unseekables<?, ?> select)
     {
         int count = 0;
         IntBuffers cachedInts = ArrayBuffers.cachedInts();
@@ -268,40 +256,18 @@ public class Topology
                     if (abi < 0)
                     {
                         if (ailim < as.size())
-                        {
-                            switch (onUnknown)
-                            {
-                                case REJECT: throw new IllegalArgumentException("Range not found for " + as.get(ailim));
-                                case IGNORE:
-                                    break;
-                                default:
-                                    throw new IllegalArgumentException("Unknown option: " + onUnknown);
-                            }
-                        }
+                            throw new IllegalArgumentException("Range not found for " + as.get(ailim));
                         break;
                     }
 
                     ai = (int)abi;
-                    boolean skip = false;
                     if (ailim < ai)
-                    {
-                        switch (onUnknown)
-                        {
-                            default:
-                                throw new IllegalArgumentException("Unknown option: " + onUnknown);
-                            case REJECT: throw new IllegalArgumentException("Range not found for " + as.get(ailim));
-                            case IGNORE:
-                                skip = true;
-                        }
-                    }
+                        throw new IllegalArgumentException("Range not found for " + as.get(ailim));
 
                     bi = (int)(abi >>> 32);
-                    if (!skip && predicate.test(param, bi))
-                    {
-                        if (count == newSubset.length)
-                            newSubset = cachedInts.resize(newSubset, count, count * 2);
-                        newSubset[count++] = bi;
-                    }
+                    if (count == newSubset.length)
+                        newSubset = cachedInts.resize(newSubset, count, count * 2);
+                    newSubset[count++] = bi;
 
                     ailim = as.findNext(ai + 1, bs.get(bi), FLOOR);
                     if (ailim < 0) ailim = -1 - ailim;
@@ -318,8 +284,7 @@ public class Topology
                         break;
 
                     bi = (int)(abi >>> 32);
-                    if (predicate.test(param, bi))
-                        newSubset[count++] = bi;
+                    newSubset[count++] = bi;
 
                     ++bi;
                 }
@@ -334,14 +299,9 @@ public class Topology
         return cachedInts.completeAndDiscard(newSubset, count);
     }
 
-    public <P1> void visitNodeForKeysOnceOrMore(Unseekables<?, ?> select, OnUnknown onUnknown, Consumer<Id> nodes)
+    public <P1> void visitNodeForKeysOnceOrMore(Unseekables<?, ?> select, Consumer<Id> nodes)
     {
-        visitNodeForKeysOnceOrMore(select, onUnknown, (i1, i2) -> true, null, nodes);
-    }
-
-    public <P1> void visitNodeForKeysOnceOrMore(Unseekables<?, ?> select, OnUnknown onUnknown, IndexedPredicate<P1> predicate, P1 param, Consumer<Id> nodes)
-    {
-        for (int shardIndex : subsetFor(select, predicate, param, onUnknown))
+        for (int shardIndex : subsetFor(select))
         {
             Shard shard = shards[shardIndex];
             for (Id id : shard.nodes)

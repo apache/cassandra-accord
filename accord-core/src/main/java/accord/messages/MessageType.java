@@ -42,13 +42,18 @@ public enum MessageType
     BEGIN_INVALIDATE_RSP    (false),
     WAIT_ON_COMMIT_REQ      (false),
     WAIT_ON_COMMIT_RSP      (false),
+    WAIT_ON_APPLY_REQ       (false),
     INFORM_OF_TXN_REQ       (true ),
     INFORM_DURABLE_REQ      (true ),
     INFORM_HOME_DURABLE_REQ (true ),
     CHECK_STATUS_REQ        (false),
     CHECK_STATUS_RSP        (false),
     FETCH_DATA_REQ          (false),
-    FETCH_DATA_RSP          (false)
+    FETCH_DATA_RSP          (false),
+    SET_LOCALLY_DURABLE_REQ (true),
+    SET_GLOBALLY_DURABLE_REQ(true),
+    QUERY_DURABLE_BEFORE_REQ(false),
+    QUERY_DURABLE_BEFORE_RSP(false),
     ;
 
     /**

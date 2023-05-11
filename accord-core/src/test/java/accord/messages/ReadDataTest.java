@@ -103,7 +103,7 @@ class ReadDataTest
         Mockito.when(read.merge(any())).thenReturn(read);
         Mockito.when(read.read(any(), any(), any(), any(), any())).thenAnswer(new Answer<AsyncChain<Data>>()
         {
-            private boolean called = false;
+            private final boolean called = false;
             @Override
             public AsyncChain<Data> answer(InvocationOnMock ignore) throws Throwable
             {
@@ -181,7 +181,7 @@ class ReadDataTest
             store = stores.get(1);
             check(store.execute(PreLoadContext.contextFor(state.txnId, state.keys), safe -> {
                 SafeCommand command = safe.command(state.txnId);
-                command.commitInvalidated(command.current(), state.executeAt);
+                command.commitInvalidated();
             }));
 
             ReplyContext replyContext = state.process();
@@ -197,7 +197,7 @@ class ReadDataTest
             List<CommandStore> stores = stores(state);
             stores.forEach(store -> check(store.execute(PreLoadContext.contextFor(state.txnId, state.keys), safe -> {
                 SafeCommand command = safe.command(state.txnId);
-                command.commitInvalidated(command.current(), state.executeAt);
+                command.commitInvalidated();
             })));
             ReplyContext replyContext = state.process();
 
@@ -290,7 +290,7 @@ class ReadDataTest
             Writes writes = new Writes(txnId, executeAt, keys, write);
 
             forEach(store -> check(store.execute(PreLoadContext.contextFor(txnId, keys), safe -> {
-                CheckedCommands.apply(safe, txnId, safe.latestEpoch(), route, executeAt, deps, writes, Mockito.mock(Result.class));
+                CheckedCommands.apply(safe, txnId, route, progressKey, executeAt, deps, writes, Mockito.mock(Result.class));
             })));
             return writeResult;
         }
@@ -298,7 +298,7 @@ class ReadDataTest
         ReplyContext process()
         {
             ReplyContext replyContext = Mockito.mock(ReplyContext.class);
-            ReadData readData = new ReadTxnData(node.id(), TOPOLOGIES, txnId, keys, txnId);
+            ReadData readData = new ReadTxnData(node.id(), TOPOLOGIES, txnId, keys.toUnseekables(), txnId);
             readData.process(node, node.id(), replyContext);
             return replyContext;
         }

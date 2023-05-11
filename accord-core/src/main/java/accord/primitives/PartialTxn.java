@@ -26,6 +26,7 @@ import accord.api.Update;
 
 public interface PartialTxn extends Txn
 {
+    // TODO (expected): we no longer need this if everyone has a FullRoute
     Ranges covering();
     // TODO (low priority, efficiency): efficient merge when more than one input
     PartialTxn with(PartialTxn add);

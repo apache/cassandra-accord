@@ -64,7 +64,7 @@ public class ListResult implements Result, Reply
                + "requestId:" + requestId + ", "
                + "txnId:" + txnId + ", "
                + (responseKeys == null
-                  ? "invalidated!}"
+                  ? (read == null ? "invalidated!}" : read.length == 0 ? "unknown}" : "lost}")
                   : "reads:" + IntStream.range(0, responseKeys.size())
                                       .mapToObj(i -> responseKeys.get(i) + ":" + Arrays.toString(read[i]))
                                       .collect(Collectors.joining(", ", "{", "}")) + ", "

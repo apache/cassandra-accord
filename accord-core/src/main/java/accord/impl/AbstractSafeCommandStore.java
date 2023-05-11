@@ -102,7 +102,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
         if (command == null)
             return null;
         if (command.isEmpty())
-            command.notWitnessed();
+            command.uninitialised();
         return command;
     }
 
@@ -113,11 +113,11 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
         if (command == null)
             throw new IllegalStateException(String.format("%s was not specified in PreLoadContext", txnId));
         if (command.isEmpty())
-            command.notWitnessed();
+            command.uninitialised();
         return command;
     }
 
-    protected abstract CommandLoader<?> cfkLoader();
+    protected abstract CommandLoader<?> cfkLoader(RoutableKey key);
 
     public CommandsForKeyType ifLoaded(RoutableKey key)
     {
@@ -125,7 +125,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
         if (cfk == null)
             return null;
         if (cfk.isEmpty())
-            cfk.initialize(cfkLoader());
+            cfk.initialize(cfkLoader(key));
         return cfk;
     }
 
@@ -135,7 +135,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
         if (cfk == null)
             throw new IllegalStateException(String.format("%s was not specified in PreLoadContext", key));
         if (cfk.isEmpty())
-            cfk.initialize(cfkLoader());
+            cfk.initialize(cfkLoader(key));
         return cfk;
     }
 

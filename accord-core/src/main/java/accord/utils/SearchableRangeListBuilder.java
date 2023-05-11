@@ -242,10 +242,7 @@ public class SearchableRangeListBuilder
         if (scan.mustCheckpointToScanTenured(atIndex, maxScanDistance()))
             return true;
 
-        if (scan.hasMaybeDivergedFromMatchSize(tenured))
-            return true;
-
-        return false;
+        return scan.hasMaybeDivergedFromMatchSize(tenured);
     }
 
     /**

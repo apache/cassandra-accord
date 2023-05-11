@@ -95,6 +95,10 @@ abstract class Propose<R> implements Callback<AcceptReply>
         switch (reply.outcome())
         {
             default: throw new IllegalStateException();
+            case Truncated:
+                isDone = true;
+                callback.accept(null, new Truncated(txnId, route.homeKey()));
+                break;
             case Redundant:
             case RejectedBallot:
                 isDone = true;
@@ -135,8 +139,9 @@ abstract class Propose<R> implements Callback<AcceptReply>
         final Node node;
         final Ballot ballot;
         final TxnId txnId;
-        final RoutingKey invalidateWithKey;
+        final RoutingKey invalidateWithKey; // TODO (required): should this be a participating key, to ensure truncation is correctly determined?
         final BiConsumer<Void, Throwable> callback;
+        final Map<Id, AcceptReply> debug = debug() ? new HashMap<>() : null;
 
         private final QuorumShardTracker acceptTracker;
         private boolean isDone;
@@ -181,6 +186,8 @@ abstract class Propose<R> implements Callback<AcceptReply>
         {
             if (isDone)
                 return;
+
+            if (debug != null) debug.put(from, reply);
 
             if (!reply.isOk())
             {

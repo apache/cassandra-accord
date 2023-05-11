@@ -34,7 +34,7 @@ public class ListData extends TreeMap<Key, Timestamped<int[]>> implements Data
         if (data != null)
         {
             ((ListData)data).forEach((k, v) -> {
-                merge(k, v, (a, b) -> a == null ? b : b == null ? a : Timestamped.merge(a, b, Arrays::equals));
+                merge(k, v, (a, b) -> a == null ? b : b == null ? a : Timestamped.mergeEqual(a, b, Arrays::equals));
             });
         }
         return this;

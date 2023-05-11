@@ -272,6 +272,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         return that.start.compareTo(this.start) >= 0 && that.end.compareTo(this.end) <= 0;
     }
 
+    @Override
     public Range slice(Range truncateTo)
     {
         int cs = start.compareTo(truncateTo.start);

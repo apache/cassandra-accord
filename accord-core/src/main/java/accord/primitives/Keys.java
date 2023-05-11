@@ -65,6 +65,7 @@ public class Keys extends AbstractKeys<Key, Keys> implements Seekables<Key, Keys
         return Arrays.equals(keys, keys1.keys);
     }
 
+    @Override
     public Keys with(Keys that)
     {
         return wrap(SortedArrays.linearUnion(keys, that.keys, cachedKeys()), that);

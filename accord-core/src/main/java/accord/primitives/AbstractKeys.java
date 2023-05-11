@@ -174,11 +174,15 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     }
 
 
-
     // TODO (expected, efficiency): accept cached buffers
     protected K[] slice(Ranges ranges, IntFunction<K[]> factory)
     {
         return SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareTo(k), Range::compareTo);
+    }
+
+    protected K[] subtract(Ranges ranges, IntFunction<K[]> factory)
+    {
+        return SortedArrays.subtractWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareTo(k), Range::compareTo);
     }
 
     public boolean any(Ranges ranges, Predicate<? super K> predicate)
@@ -229,39 +233,58 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     public final FullKeyRoute toRoute(RoutingKey homeKey)
     {
         if (isEmpty())
-            return new FullKeyRoute(homeKey, new RoutingKey[] { homeKey });
+            return new FullKeyRoute(homeKey, false, new RoutingKey[] { homeKey });
 
         RoutingKey[] result = toRoutingKeysArray(homeKey);
         int pos = Arrays.binarySearch(result, homeKey);
-        return new FullKeyRoute(result[pos], result);
+        return new FullKeyRoute(result[pos], contains(homeKey), result);
     }
 
     protected RoutingKey[] toRoutingKeysArray(RoutingKey withKey)
     {
-        RoutingKey[] result;
-        int resultCount;
         int insertPos = Arrays.binarySearch(keys, withKey);
-        if (insertPos < 0)
-            insertPos = -1 - insertPos;
 
-        if (insertPos < keys.length && keys[insertPos].toUnseekable().equals(withKey))
+        if (keys.getClass() == RoutingKey[].class)
         {
-            result = new RoutingKey[keys.length];
-            resultCount = copyToRoutingKeys(keys, 0, result, 0, keys.length);
+            if (insertPos >= 0)
+            {
+                Invariants.checkState(keys[insertPos].equals(withKey));
+                return (RoutingKey[]) keys;
+            }
+
+            insertPos = -1 - insertPos;
+            RoutingKey[] result = new RoutingKey[1 + keys.length];
+            System.arraycopy(keys, 0, result, 0, insertPos);
+            result[insertPos] = withKey;
+            System.arraycopy(keys, insertPos, result, insertPos + 1, keys.length - insertPos);
+            return result;
         }
         else
         {
-            result = new RoutingKey[1 + keys.length];
-            resultCount = copyToRoutingKeys(keys, 0, result, 0, insertPos);
-            if (resultCount == 0 || !withKey.equals(result[resultCount - 1]))
-                result[resultCount++] = withKey;
-            resultCount += copyToRoutingKeys(keys, insertPos, result, resultCount, keys.length - insertPos);
+            RoutingKey[] result;
+            int resultCount;
+            if (insertPos < 0)
+                insertPos = -1 - insertPos;
+
+            if (insertPos < keys.length && keys[insertPos].toUnseekable().equals(withKey))
+            {
+                result = new RoutingKey[keys.length];
+                resultCount = copyToRoutingKeys(keys, 0, result, 0, keys.length);
+            }
+            else
+            {
+                result = new RoutingKey[1 + keys.length];
+                resultCount = copyToRoutingKeys(keys, 0, result, 0, insertPos);
+                if (resultCount == 0 || !withKey.equals(result[resultCount - 1]))
+                    result[resultCount++] = withKey;
+                resultCount += copyToRoutingKeys(keys, insertPos, result, resultCount, keys.length - insertPos);
+            }
+
+            if (resultCount < result.length)
+                result = Arrays.copyOf(result, resultCount);
+
+            return result;
         }
-
-        if (resultCount < result.length)
-            result = Arrays.copyOf(result, resultCount);
-
-        return result;
     }
 
     public final RoutingKeys toUnseekables()

@@ -137,7 +137,7 @@ public abstract class IntHashKey implements RoutableKey
             int endHash = ((IntHashKey)end()).hash;
             int currentSize = endHash - startHash;
             if (currentSize < count)
-                return Ranges.of(new accord.primitives.Range[]{this});
+                return Ranges.of(this);
             int interval =  currentSize / count;
 
             int last = 0;

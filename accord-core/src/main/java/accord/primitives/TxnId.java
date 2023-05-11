@@ -135,4 +135,9 @@ public class TxnId extends Timestamp
     {
         return flags & 1;
     }
+
+    public static TxnId maxForEpoch(long epoch)
+    {
+        return new TxnId(epochMsb(epoch) | 0x7fff, Long.MAX_VALUE, Id.MAX);
+    }
 }

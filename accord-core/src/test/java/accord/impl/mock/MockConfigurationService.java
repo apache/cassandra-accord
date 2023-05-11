@@ -21,6 +21,7 @@ package accord.impl.mock;
 import accord.api.MessageSink;
 import accord.api.TestableConfigurationService;
 import accord.local.Node;
+import accord.primitives.Ranges;
 import accord.topology.Topology;
 import accord.utils.EpochFunction;
 import accord.utils.async.AsyncChains;
@@ -91,6 +92,16 @@ public class MockConfigurationService implements TestableConfigurationService
     public synchronized EpochReady ackFor(long epoch)
     {
         return acks.get(epoch);
+    }
+
+    @Override
+    public void reportEpochClosed(Ranges ranges, long epoch)
+    {
+    }
+
+    @Override
+    public void reportEpochRedundant(Ranges ranges, long epoch)
+    {
     }
 
     @Override

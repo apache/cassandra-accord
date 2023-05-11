@@ -18,11 +18,9 @@
 
 package accord.impl;
 
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
@@ -40,32 +38,26 @@ import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResult;
 
 import accord.api.ProgressLog;
-import accord.api.RoutingKey;
-import accord.local.Node.Id;
-import accord.messages.Callback;
-import accord.messages.InformDurable;
-import accord.messages.SimpleReply;
-import accord.topology.Topologies;
 
 import static accord.api.ProgressLog.ProgressShard.Home;
 import static accord.api.ProgressLog.ProgressShard.Unsure;
 import static accord.coordinate.InformHomeOfTxn.inform;
 import static accord.impl.SimpleProgressLog.CoordinateStatus.ReadyToExecute;
 import static accord.impl.SimpleProgressLog.CoordinateStatus.Uncommitted;
-import static accord.impl.SimpleProgressLog.DisseminateStatus.NotExecuted;
 import static accord.impl.SimpleProgressLog.Progress.Done;
 import static accord.impl.SimpleProgressLog.Progress.Expected;
 import static accord.impl.SimpleProgressLog.Progress.Investigating;
 import static accord.impl.SimpleProgressLog.Progress.NoProgress;
 import static accord.impl.SimpleProgressLog.Progress.NoneExpected;
 import static accord.local.PreLoadContext.contextFor;
-import static accord.local.Status.Durability.Durable;
+import static accord.local.PreLoadContext.empty;
+import static accord.local.Status.Durability.Majority;
 import static accord.local.Status.Known.Nothing;
 import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
-import static accord.primitives.Route.isFullRoute;
 
 // TODO (desired, consider): consider propagating invalidations in the same way as we do applied
+// TODO (expected): report long-lived recurring transactions / operations
 public class SimpleProgressLog implements ProgressLog.Factory
 {
     enum Progress { NoneExpected, Expected, NoProgress, Investigating, Done }
@@ -84,8 +76,6 @@ public class SimpleProgressLog implements ProgressLog.Factory
             return compareTo(CoordinateStatus.Committed) >= 0;
         }
     }
-
-    enum DisseminateStatus { NotExecuted, Durable, Done }
 
     final Node node;
     final List<Instance> instances = new CopyOnWriteArrayList<>();
@@ -124,6 +114,12 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     }
                 }
 
+                void ensureDone()
+                {
+                    if (progress != Done)
+                        setProgress(Done);
+                }
+
                 boolean shouldRun()
                 {
                     switch (progress)
@@ -144,7 +140,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     }
                 }
 
-                abstract void run(Command command);
+                abstract void run(SafeCommandStore safeStore, Command command);
 
                 Progress progress()
                 {
@@ -208,8 +204,9 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 }
 
                 @Override
-                void run(Command command)
+                void run(SafeCommandStore safeStore, Command command)
                 {
+                    Invariants.checkState(!commandStore.isTruncated(command));
                     setProgress(Investigating);
                     switch (status)
                     {
@@ -219,17 +216,31 @@ public class SimpleProgressLog implements ProgressLog.Factory
                         case Done: // shouldn't be trying to make progress, as we're done
                             throw new IllegalStateException("Unexpected status: " + status);
 
-                        case Uncommitted:
                         case ReadyToExecute:
-                        {
-                            if (status.isAtLeastCommitted() && command.durability().isDurable())
+                            if (command.durability().isDurableOrInvalidated())
                             {
-                                // must also be committed, as at the time of writing we do not guarantee dissemination of Commit
-                                // records to the home shard, so we only know the executeAt shards will have witnessed this
-                                // if the home shard is at an earlier phase, it must run recovery
-                                long epoch = command.executeAt().epoch();
-                                node.withEpoch(epoch, () -> debugInvestigating = FetchData.fetch(PreApplied.minKnown, node, txnId, command.route(), epoch, (success, fail) -> {
-                                    commandStore.execute(PreLoadContext.empty(), ignore -> {
+                                // should not reach here with an invalidated state
+                                Invariants.checkState(command.durability().isDurable());
+                                durableGlobal();
+                                return;
+                            }
+
+                        case Uncommitted:
+                        {
+                            Invariants.checkState(token.status != Status.Invalidated);
+                            // TODO (expected): this should be encapsulated in Recover/FetchData
+                            if (!command.durability().isDurable() && token.durability.isDurableOrInvalidated() && (token.durability.isDurable() || command.hasBeen(PreCommitted)))
+                                command = Commands.setDurability(safeStore, txnId, Majority);
+
+                            if (command.durability().isDurable())
+                            {
+                                // not guaranteed to know the execution epoch, as might have received durability info obliquely
+                                Timestamp executeAt = command.known().executeAt.hasDecidedExecuteAt() ? command.executeAt() : null;
+                                long epoch = executeAt == null ? txnId.epoch() : executeAt.epoch();
+                                Route<?> route = command.route();
+
+                                node.withEpoch(epoch, () -> debugInvestigating = FetchData.fetch(PreApplied.minKnown, node, txnId, route, executeAt, (success, fail) -> {
+                                    commandStore.execute(empty(), ignore -> {
                                         // should have found enough information to apply the result, but in case we did not reset progress
                                         if (progress() == Investigating)
                                             setProgress(Expected);
@@ -238,30 +249,25 @@ public class SimpleProgressLog implements ProgressLog.Factory
                             }
                             else
                             {
-                                RoutingKey homeKey = command.homeKey();
+                                Route<?> route = Invariants.nonNull(command.maxRoute());
                                 node.withEpoch(txnId.epoch(), () -> {
-
-                                    AsyncResult<? extends Outcome> recover = node.maybeRecover(txnId, homeKey, command.route(), token);
+                                    AsyncResult<? extends Outcome> recover = node.maybeRecover(txnId, route, token);
                                     recover.addCallback((success, fail) -> {
-                                        commandStore.execute(PreLoadContext.empty(), ignore -> {
+                                        // TODO (expected): callback should be on safeStore, and should provide safeStore as a parameter
+                                        commandStore.execute(contextFor(txnId), safeStore0 -> {
                                             if (status.isAtMostReadyToExecute() && progress() == Investigating)
                                             {
                                                 setProgress(Expected);
                                                 if (fail != null)
                                                     return;
 
-                                                ProgressToken token = success.asProgressToken();
-                                                if (token.durability.isDurable())
-                                                {
-                                                    commandStore.execute(contextFor(txnId), safeStore -> {
-                                                        Command cmd = Commands.setDurability(safeStore, txnId, token.durability, homeKey, null);
-                                                        safeStore.progressLog().durable(txnId, cmd.maxUnseekables(), null);
-                                                    }).begin(commandStore.agent());
-                                                }
-
-                                                updateMax(token);
+                                                ProgressToken progressToken = success.asProgressToken();
+                                                // TODO (expected): this should be encapsulated in Recover/FetchData
+                                                if (progressToken.status == Status.Invalidated)
+                                                    Commands.commitInvalidate(safeStore0, txnId);
+                                                updateMax(success.asProgressToken());
                                             }
-                                        }).begin(commandStore.agent());
+                                        });
                                     });
 
                                     debugInvestigating = recover;
@@ -269,179 +275,6 @@ public class SimpleProgressLog implements ProgressLog.Factory
                             }
                         }
                     }
-                }
-
-                @Override
-                public String toString()
-                {
-                    return "{" + status + ',' + progress() + '}';
-                }
-            }
-
-            // exists only on home shard
-            class DisseminateState extends State.Monitoring
-            {
-                class CoordinateAwareness implements Callback<SimpleReply>
-                {
-                    @Override
-                    public void onSuccess(Id from, SimpleReply reply)
-                    {
-                        // TODO (required, efficiency): callbacks should be associated with a commandStore for processing to avoid this
-                        commandStore.execute(PreLoadContext.empty(), ignore -> {
-                            if (progress() == Done)
-                                return;
-
-                            notAwareOfDurability.remove(from);
-                            maybeDone();
-                        }).begin(commandStore.agent());
-                    }
-
-                    @Override
-                    public void onFailure(Id from, Throwable failure)
-                    {
-                    }
-
-                    @Override
-                    public void onCallbackFailure(Id from, Throwable failure)
-                    {
-                    }
-                }
-
-                DisseminateStatus status = NotExecuted;
-                Set<Id> notAwareOfDurability; // TODO (easy, efficiency): use Agrona's IntHashSet as soon as Node.Id switches from long to int
-                Set<Id> notPersisted;         // TODO (easy, efficiency): use Agrona's IntHashSet as soon as Node.Id switches from long to int
-
-                List<Runnable> whenReady;
-
-                CoordinateAwareness investigating;
-
-                private void whenReady(Node node, Command command, Runnable runnable)
-                {
-                    if (notAwareOfDurability != null || maybeReady(node, command))
-                    {
-                        runnable.run();
-                    }
-                    else
-                    {
-                        if (whenReady == null)
-                            whenReady = new ArrayList<>();
-                        whenReady.add(runnable);
-                    }
-                }
-
-                private void whenReady(Runnable runnable)
-                {
-                    if (notAwareOfDurability != null)
-                    {
-                        runnable.run();
-                    }
-                    else
-                    {
-                        if (whenReady == null)
-                            whenReady = new ArrayList<>();
-                        whenReady.add(runnable);
-                    }
-                }
-
-                // must know the epoch information, and have a valid Route
-                private boolean maybeReady(Node node, Command command)
-                {
-                    if (!command.status().hasBeen(Status.PreCommitted))
-                        return false;
-
-                    if (!isFullRoute(command.route()))
-                        return false;
-
-                    if (!node.topology().hasEpoch(command.executeAt().epoch()))
-                        return false;
-
-                    Topologies topology = node.topology().preciseEpochs(command.route(), command.txnId().epoch(), command.executeAt().epoch());
-                    notAwareOfDurability = topology.copyOfNodes();
-                    notPersisted = topology.copyOfNodes();
-                    if (whenReady != null)
-                    {
-                        whenReady.forEach(Runnable::run);
-                        whenReady = null;
-                    }
-
-                    return shouldRun();
-                }
-
-                private void maybeDone()
-                {
-                    if (progress() != Done && notAwareOfDurability.isEmpty())
-                    {
-                        status = DisseminateStatus.Done;
-                        setProgress(Done);
-                    }
-                }
-
-                void durableGlobal(Node node, Command command, @Nullable Set<Id> persistedOn)
-                {
-                    if (status == DisseminateStatus.Done)
-                        return;
-
-                    status = DisseminateStatus.Durable;
-                    setProgress(Expected);
-                    if (persistedOn == null)
-                        return;
-
-                    whenReady(node, command, () -> {
-                        notPersisted.removeAll(persistedOn);
-                        notAwareOfDurability.removeAll(persistedOn);
-                        maybeDone();
-                    });
-                }
-
-                void durableLocal(Node node)
-                {
-                    if (status == DisseminateStatus.Done)
-                        return;
-
-                    status = DisseminateStatus.Durable;
-                    setProgress(Expected);
-
-                    whenReady(() -> {
-                        notPersisted.remove(node.id());
-                        notAwareOfDurability.remove(node.id());
-                        maybeDone();
-                    });
-                }
-
-                @Override
-                void run(Command command)
-                {
-                    switch (status)
-                    {
-                        default: throw new IllegalStateException();
-                        case NotExecuted:
-                        case Done:
-                            return;
-                        case Durable:
-                    }
-
-                    if (notAwareOfDurability == null && !maybeReady(node, command))
-                        return;
-
-                    // whenReady callbacks may run in maybeReady method, and those callbacks may set the progress to Done,
-                    // in which case this logic should no-op
-                    if (progress() == Done)
-                        return;
-
-                    setProgress(Investigating);
-                    if (notAwareOfDurability.isEmpty())
-                    {
-                        // TODO (required, consider): also track actual durability
-                        status = DisseminateStatus.Done;
-                        setProgress(Done);
-                        return;
-                    }
-
-                    FullRoute<?> route = Route.castToFullRoute(command.route());
-                    Timestamp executeAt = command.executeAt();
-                    investigating = new CoordinateAwareness();
-                    Topologies topologies = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
-                    node.send(notAwareOfDurability, to -> new InformDurable(to, topologies, route, txnId, executeAt, Durable), investigating);
                 }
 
                 @Override
@@ -461,7 +294,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                 void recordBlocking(Known blockedUntil, Unseekables<?, ?> blockedOn)
                 {
-                    Invariants.checkState(!blockedOn.isEmpty());
+                    Invariants.checkState(!blockedOn.isEmpty() || Route.isRoute(blockedOn));
                     if (this.blockedOn == null) this.blockedOn = blockedOn;
                     else this.blockedOn = Unseekables.merge(this.blockedOn, (Unseekables)blockedOn);
                     if (!blockedUntil.isSatisfiedBy(this.blockedUntil))
@@ -483,7 +316,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 }
 
                 @Override
-                void run(Command command)
+                void run(SafeCommandStore safeStore, Command command)
                 {
                     if (command.has(blockedUntil))
                     {
@@ -493,49 +326,56 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                     setProgress(Investigating);
                     // first make sure we have enough information to obtain the command locally
-                    Timestamp executeAt = command.hasBeen(PreCommitted) ? command.executeAt() : null;
-                    long srcEpoch = (executeAt != null ? executeAt : txnId).epoch();
-                    // TODO (desired, consider): compute fromEpoch, the epoch we already have this txn replicated until
-                    long toEpoch = Math.max(srcEpoch, node.topology().epoch());
-                    Unseekables<?, ?> someKeys = unseekables(command);
+                    Timestamp executeAt = command.known().executeAt.hasDecidedExecuteAt() ? command.executeAt() : null;
+                    Unseekables<?, ?> invalidateKeys = maxUnseekables(command);
+                    // we want to fetch a route if we have it, so that we can go to our neighbouring shards for info
+                    // (rather than the home shard, which may have GC'd its state if the result is durable)
+                    Unseekables<?, ?> fetchKeys = maxRoute(command);
 
                     BiConsumer<Known, Throwable> callback = (success, fail) -> {
-                        commandStore.execute(PreLoadContext.empty(), ignore -> {
+                        // TODO (expected): this should be invoked on this commandStore
+                        commandStore.execute(contextFor(txnId), safeStore0 -> {
                             if (progress() != Investigating)
                                 return;
 
                             setProgress(Expected);
                             if (fail == null)
                             {
-                                if (!success.isDefinitionKnown()) invalidate(node, txnId, someKeys);
-                                else record(success);
+                                if (success.canProposeInvalidation())
+                                    invalidate(node, txnId, invalidateKeys);
+                                else
+                                    record(success);
                             }
-                        }).begin(commandStore.agent());
+                        });
                     };
 
-                    node.withEpoch(toEpoch, () -> {
-                            debugInvestigating = FetchData.fetch(blockedUntil, node, txnId, someKeys, executeAt, toEpoch, callback);
+                    node.withEpoch(blockedUntil.fetchEpoch(txnId, executeAt), () -> {
+                        debugInvestigating = FetchData.fetch(blockedUntil, node, txnId, fetchKeys, executeAt, callback);
                     });
                 }
 
-                private Unseekables<?, ?> unseekables(Command command)
+                private Unseekables<?, ?> maxRoute(Command command)
                 {
-                    return Unseekables.merge((Route)command.route(), blockedOn);
+                    return Unseekables.merge((Route)command.maxRoute(), blockedOn);
+                }
+
+                private Unseekables<?, ?> maxUnseekables(Command command)
+                {
+                    return Unseekables.merge((Unseekables)command.maxRoute(), blockedOn);
                 }
 
                 private void invalidate(Node node, TxnId txnId, Unseekables<?, ?> someKeys)
                 {
                     setProgress(Investigating);
-                    RoutingKey someKey = Route.isRoute(someKeys) ? (Route.castToRoute(someKeys)).homeKey() : someKeys.get(0).someIntersectingRoutingKey(null);
-                    someKeys = someKeys.with(someKey);
+                    if (Route.isRoute(someKeys))
+                        someKeys = Route.castToRoute(someKeys).withHomeKey();
                     debugInvestigating = Invalidate.invalidate(node, txnId, someKeys, (success, fail) -> {
-                        commandStore.execute(PreLoadContext.empty(), ignore -> {
+                        commandStore.execute(contextFor(txnId), safeStore -> {
                             if (progress() != Investigating)
                                 return;
 
                             setProgress(Expected);
-                            if (fail == null && success.asProgressToken().durability.isDurable())
-                                setProgress(NoneExpected);
+                            record(safeStore.command(txnId).current().known());
                         }).begin(commandStore.agent());
                     });
                 }
@@ -561,12 +401,12 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 }
 
                 @Override
-                void run(Command command)
+                void run(SafeCommandStore safeStore, Command command)
                 {
                     // make sure a quorum of the home shard is aware of the transaction, so we can rely on it to ensure progress
-                    AsyncChain<Void> inform = inform(node, txnId, command.homeKey());
+                    AsyncChain<Void> inform = inform(node, txnId, command.maxRoute());
                     inform.begin((success, fail) -> {
-                        commandStore.execute(PreLoadContext.empty(), ignore -> {
+                        commandStore.execute(empty(), ignore -> {
                             if (progress() == Done)
                                 return;
 
@@ -585,7 +425,6 @@ public class SimpleProgressLog implements ProgressLog.Factory
             final TxnId txnId;
 
             CoordinateState coordinateState;
-            DisseminateState disseminateState;
             NonHomeState nonHomeState;
             BlockingState blockingState;
 
@@ -594,12 +433,12 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 this.txnId = txnId;
             }
 
-            void recordBlocking(TxnId txnId, Known waitingFor, Unseekables<?, ?> routables)
+            void recordBlocking(TxnId txnId, Known waitingFor, Unseekables<?, ?> unseekables)
             {
                 Invariants.checkArgument(txnId.equals(this.txnId));
                 if (blockingState == null)
                     blockingState = new BlockingState();
-                blockingState.recordBlocking(waitingFor, routables);
+                blockingState.recordBlocking(waitingFor, unseekables);
             }
 
             CoordinateState local()
@@ -607,13 +446,6 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 if (coordinateState == null)
                     coordinateState = new CoordinateState();
                 return coordinateState;
-            }
-
-            DisseminateState global()
-            {
-                if (disseminateState == null)
-                    disseminateState = new DisseminateState();
-                return disseminateState;
             }
 
             void ensureAtLeast(Command command, CoordinateStatus newStatus, Progress newProgress)
@@ -650,7 +482,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
         }
 
         final CommandStore commandStore;
-        final Map<TxnId, State> stateMap = new HashMap<>();
+        final Map<TxnId, State> stateMap = new TreeMap<>();
         boolean isScheduled;
 
         Instance(CommandStore commandStore)
@@ -703,7 +535,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
         }
 
         @Override
-        public void unwitnessed(TxnId txnId, RoutingKey homeKey, ProgressShard shard)
+        public void unwitnessed(TxnId txnId, ProgressShard shard)
         {
             if (shard.isHome())
                 ensure(txnId).ensureAtLeast(Uncommitted, Expected);
@@ -765,29 +597,28 @@ public class SimpleProgressLog implements ProgressLog.Factory
             }
         }
 
-        @Override
-        public void durableLocal(TxnId txnId)
+        public void clear(TxnId txnId)
         {
-            State state = ensure(txnId);
-            state.global().durableLocal(node);
+            State state = stateMap.remove(txnId);
+            if (state == null)
+                return;
+
+            if (state.blockingState != null)
+                state.blockingState.ensureDone();
+            if (state.nonHomeState != null)
+                state.nonHomeState.ensureDone();
+            if (state.coordinateState != null)
+                state.coordinateState.durableGlobal();
         }
 
         @Override
-        public void durable(Command command, @Nullable Set<Id> persistedOn)
+        public void durable(Command command)
         {
             State state = ensure(command.txnId());
-            if (!command.status().hasBeen(PreApplied))
-                state.recordBlocking(command.txnId(), PreApplied.minKnown, command.maxUnseekables());
-            state.local().durableGlobal();
-            state.global().durableGlobal(node, command, persistedOn);
-        }
-
-        @Override
-        public void durable(TxnId txnId, Unseekables<?, ?> unseekables, ProgressShard shard)
-        {
-            State state = ensure(txnId);
-            // TODO (desirable, efficiency): we can probably simplify things by requiring (empty) Apply messages to be sent also to the coordinating topology
-            state.recordBlocking(txnId, PreApplied.minKnown, unseekables);
+            if (!command.status().hasBeen(PreApplied) && command.route() != null)
+                state.recordBlocking(command.txnId(), PreApplied.minKnown, command.route());
+            if (command.progressShard() == Home)
+                state.local().durableGlobal();
         }
 
         @Override
@@ -825,7 +656,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 return;
 
             isScheduled = true;
-            node.scheduler().once(() -> commandStore.execute(PreLoadContext.empty(), ignore -> run()).begin(commandStore.agent()), 1L, TimeUnit.SECONDS);
+            node.scheduler().once(() -> commandStore.execute(empty(), ignore -> run()).begin(commandStore.agent()), 1L, TimeUnit.SECONDS);
         }
 
         @Override
@@ -840,7 +671,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     {
                         commandStore.execute(contextFor(run.txnId()), safeStore -> {
                             if (run.shouldRun()) // could have been completed by a callback
-                                run.run(safeStore.command(run.txnId()).current());
+                                run.run(safeStore, safeStore.command(run.txnId()).current());
                         }).begin(commandStore.agent());
                     }
                 }

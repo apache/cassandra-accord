@@ -18,15 +18,13 @@
 
 package accord.api;
 
-import java.util.Set;
-
 import javax.annotation.Nullable;
 
 import accord.coordinate.InformHomeOfTxn;
 import accord.local.Command;
 import accord.local.CommandStore;
-import accord.local.Node.Id;
 import accord.local.Status.Known;
+import accord.primitives.Route;
 import accord.primitives.Unseekables;
 import accord.primitives.TxnId;
 
@@ -96,7 +94,7 @@ public interface ProgressLog
      * A home shard should monitor this transaction for global progress.
      * A non-home shard should not receive this message.
      */
-    void unwitnessed(TxnId txnId, RoutingKey homeKey, ProgressShard shard);
+    void unwitnessed(TxnId txnId, ProgressShard shard);
 
     /**
      * Has been pre-accepted.
@@ -148,13 +146,6 @@ public interface ProgressLog
     void invalidated(Command command, ProgressShard shard);
 
     /**
-     * The transaction's outcome has been durably recorded (but not necessarily applied) locally at all shards.
-     *
-     * This is only invoked on the home shard, once all local shards have successfully applied.
-     */
-    void durableLocal(TxnId txnId);
-
-    /**
      * The transaction's outcome has been durably recorded (but not necessarily applied) at a quorum of all shards,
      * including at least those node's ids that are provided.
      *
@@ -164,15 +155,7 @@ public interface ProgressLog
      * Otherwise, this transaction no longer needs to be monitored, but implementations may wish to ensure that
      * the result is propagated to every live replica.
      */
-    void durable(Command command, @Nullable Set<Id> persistedOn);
-
-    /**
-     * The transaction's outcome has been durably recorded (but not necessarily applied) at a quorum of all shards.
-     *
-     * If this replica has not witnessed the outcome of the transaction, it should poll a majority of each shard
-     * for its outcome, using the provided route (if any).
-     */
-    void durable(TxnId txnId, @Nullable Unseekables<?, ?> unseekables, ProgressShard shard);
+    void durable(Command command);
 
     /**
      * The parameter is a command that some other command's execution is most proximally blocked by.

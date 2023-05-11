@@ -19,6 +19,10 @@
 package accord.topology;
 
 import accord.burn.TopologyUpdates;
+import accord.coordinate.CoordinateGloballyDurable;
+import accord.coordinate.CoordinateShardDurable;
+import accord.coordinate.CoordinateSyncPoint;
+import accord.primitives.SyncPoint;
 import accord.utils.RandomSource;
 import accord.impl.IntHashKey;
 import accord.impl.IntHashKey.Hash;
@@ -32,6 +36,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -257,7 +262,7 @@ public class TopologyRandomizer
             Ranges prev = current.rangesForNode(node);
             if (prev == null) prev = Ranges.EMPTY;
 
-            Ranges added = next.rangesForNode(node).difference(prev);
+            Ranges added = next.rangesForNode(node).subtract(prev);
             if (added.isEmpty())
                 continue;
 
@@ -279,13 +284,78 @@ public class TopologyRandomizer
         return false;
     }
 
-    public synchronized void maybeUpdateTopology() {
+    public synchronized void maybeUpdateTopology()
+    {
         // if we don't limit the number of pending topology changes in flight,
         // the topology randomizer will keep the burn test busy indefinitely
         if (topologyUpdates.pendingTopologies() > 5)
             return;
 
         updateTopology();
+    }
+
+    public synchronized void rangeDurable()
+    {
+        Invariants.checkState(nodeLookup != null);
+        Topology current = epochs.get(epochs.size() - 1);
+        List<Node.Id> nodes = new ArrayList<>(current.nodes());
+        Node.Id nodeId = nodes.get(random.nextInt(nodes.size()));
+        Node node = nodeLookup.apply(nodeId);
+        Ranges ranges = selectRanges(current.forNode(nodeId).ranges);
+        CoordinateSyncPoint.exclusive(node, ranges)
+                           .addCallback((success, fail) -> {
+                            if (success != null)
+                                coordinateDurable(node, success);
+        });
+    }
+
+    private static void coordinateDurable(Node node, SyncPoint exclusiveSyncPoint)
+    {
+        CoordinateShardDurable.coordinate(node, exclusiveSyncPoint, Collections.emptySet())
+                              .addCallback((success0, fail0) -> {
+                                  if (fail0 != null) coordinateDurable(node, exclusiveSyncPoint);
+                              });
+    }
+
+    public synchronized void globallyDurable()
+    {
+        Invariants.checkState(nodeLookup != null);
+        Topology current = epochs.get(epochs.size() - 1);
+        List<Node.Id> nodes = new ArrayList<>(current.nodes());
+        Node.Id nodeId = nodes.get(random.nextInt(nodes.size()));
+        Node node = nodeLookup.apply(nodeId);
+        long epoch = current.epoch == 1 ? 1 : 1 + random.nextInt((int)current.epoch - 1);
+        node.withEpoch(epoch, () -> {
+            node.commandStores().any().execute(() -> CoordinateGloballyDurable.coordinate(node, epoch));
+        });
+    }
+
+    private Ranges selectRanges(Ranges ranges)
+    {
+        if (random.nextFloat() < 0.1f)
+            return ranges;
+
+        int count = ranges.size() == 1 ? 1 : 1 + random.nextInt(Math.min(3, ranges.size() - 1));
+        Range[] out = new Range[count];
+        while (count-- > 0)
+        {
+            int idx = random.nextInt(ranges.size());
+            out[count] = subRange(ranges.get(idx));
+        }
+        return Ranges.of(out);
+    }
+
+    private Range subRange(Range range)
+    {
+        IntHashKey minBound = (IntHashKey) range.start();
+        IntHashKey maxBound = (IntHashKey) range.end();
+        if (minBound.hash + 3 >= maxBound.hash)
+            return range;
+
+        Hash lb = IntHashKey.forHash(minBound.hash + 1 + random.nextInt(maxBound.hash - (2 + minBound.hash)));
+        int length = Math.min(1 + (int)((0.05f + (0.1f * random.nextFloat())) * (maxBound.hash - (1 + minBound.hash))), maxBound.hash - lb.hash);
+        Hash ub = IntHashKey.forHash(lb.hash + length);
+        return range.newRange(lb, ub);
     }
 
     public synchronized Topology updateTopology()
@@ -327,7 +397,6 @@ public class TopologyRandomizer
 
 //        logger.debug("topology update to: {} from: {}", nextTopology, current);
         epochs.add(nextTopology);
-
 
         if (nodeLookup != null)
         {

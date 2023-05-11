@@ -21,10 +21,8 @@ package accord.messages;
 import accord.api.RoutingKey;
 import accord.impl.*;
 import accord.impl.CommandTimeseries.CommandLoader;
-import accord.impl.CommandTimeseries;
 import accord.impl.IntKey.Raw;
 import accord.impl.mock.*;
-import accord.local.Node;
 import accord.local.Node.Id;
 import accord.impl.mock.MockCluster.Clock;
 import accord.primitives.*;
@@ -153,7 +151,7 @@ public class PreAcceptTest
             invalidate.process(node, ID2, REPLY_CONTEXT);
 
             messageSink.assertHistorySizes(0, 1);
-            assertThat(messageSink.responses.get(0).payload).isEqualTo(new BeginInvalidation.InvalidateReply(null, Ballot.ZERO, Status.NotWitnessed, false, null, null));
+            assertThat(messageSink.responses.get(0).payload).isEqualTo(new BeginInvalidation.InvalidateReply(null, Ballot.ZERO, Status.NotDefined, false, null, null));
             messageSink.clearHistory();
 
             PreAccept preAccept = preAccept(txnId, txn, key.toUnseekable());

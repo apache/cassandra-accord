@@ -176,7 +176,7 @@ public class KeyDepsTest
     public void testForEachOnUniqueEndInclusive()
     {
         qt().forAll(Gen.of(Deps::generate).filter(d -> d.test.keys().size() >= 2)).check(deps -> {
-            Keys keys = (Keys)deps.test.keys();
+            Keys keys = deps.test.keys();
             Key start = keys.get(0);
             Key end = keys.get(keys.size() - 1);
             if (start.equals(end))
@@ -202,7 +202,7 @@ public class KeyDepsTest
     public void testForEachOnUniqueStartInclusive()
     {
         qt().forAll(Gen.of(Deps::generate).filter(d -> d.test.keys().size() >= 2)).check(deps -> {
-            Keys keys = (Keys)deps.test.keys();
+            Keys keys = deps.test.keys();
             Key start = keys.get(0);
             Key end = keys.get(keys.size() - 1);
 
@@ -226,7 +226,7 @@ public class KeyDepsTest
     public void testForEachOnUniqueNoMatch()
     {
         qt().forAll(Gen.of(Deps::generate).filter(d -> d.test.keys().size() >= 2)).check(deps -> {
-            Keys keys = (Keys)deps.test.keys();
+            Keys keys = deps.test.keys();
             Hash start = IntHashKey.forHash(Integer.MIN_VALUE);
             Key end = keys.get(0);
 
@@ -286,7 +286,7 @@ public class KeyDepsTest
     public void builder()
     {
         qt().forAll(Deps::generate, Gens.random()).check((deps, random) -> {
-            try (Builder builder = accord.primitives.KeyDeps.builder();)
+            try (Builder builder = accord.primitives.KeyDeps.builder())
             {
                 for (Key key : deps.canonical.keySet())
                 {
@@ -398,7 +398,7 @@ public class KeyDepsTest
 
         void testSimpleEquality()
         {
-            Assertions.assertArrayEquals(canonical.keySet().toArray(new Key[0]), ((Keys)test.keys()).stream().toArray(Key[]::new));
+            Assertions.assertArrayEquals(canonical.keySet().toArray(new Key[0]), test.keys().stream().toArray(Key[]::new));
             for (Map.Entry<Key, NavigableSet<TxnId>> e : canonical.entrySet())
             {
                 List<TxnId> canonical = new ArrayList<>(e.getValue());

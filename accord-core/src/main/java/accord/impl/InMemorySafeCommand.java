@@ -23,6 +23,7 @@ import java.util.function.Supplier;
 
 import accord.impl.InMemoryCommandStore.GlobalCommand;
 import accord.local.Command;
+import accord.local.CommandStore;
 import accord.local.SafeCommand;
 import accord.primitives.TxnId;
 
@@ -98,5 +99,11 @@ public class InMemorySafeCommand extends SafeCommand implements SafeState<Comman
             global = lazy.get();
             lazy = null;
         }
+    }
+
+    GlobalCommand global()
+    {
+        touch();
+        return global;
     }
 }

@@ -35,27 +35,29 @@ import accord.topology.Topologies;
 
 import javax.annotation.Nullable;
 
+import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
+import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
 import static accord.messages.Commit.Invalidate.commitInvalidate;
 import static accord.primitives.ProgressToken.APPLIED;
+import static accord.primitives.ProgressToken.DURABLE;
 import static accord.primitives.ProgressToken.INVALIDATED;
+import static accord.primitives.ProgressToken.TRUNCATED;
 import static accord.primitives.Route.castToFullRoute;
 
-public class RecoverWithRoute extends CheckShards
+public class RecoverWithRoute extends CheckShards<FullRoute<?>>
 {
     final @Nullable Ballot promisedBallot; // if non-null, has already been promised by some shard
-    final FullRoute<?> route;
     final BiConsumer<Outcome, Throwable> callback;
     final Status witnessedByInvalidation;
 
     private RecoverWithRoute(Node node, Topologies topologies, @Nullable Ballot promisedBallot, TxnId txnId, FullRoute<?> route, Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
-        super(node, txnId, route, txnId.epoch(), IncludeInfo.All);
+        super(node, txnId, route, IncludeInfo.All);
         // if witnessedByInvalidation == AcceptedInvalidate then we cannot assume its definition was known, and our comparison with the status is invalid
         Invariants.checkState(witnessedByInvalidation != Status.AcceptedInvalidate);
         // if witnessedByInvalidation == Invalidated we should anyway not be recovering
         Invariants.checkState(witnessedByInvalidation != Status.Invalidated);
         this.promisedBallot = promisedBallot;
-        this.route = route;
         this.callback = callback;
         this.witnessedByInvalidation = witnessedByInvalidation;
         assert topologies.oldestEpoch() == topologies.currentEpoch() && topologies.currentEpoch() == txnId.epoch();
@@ -85,13 +87,13 @@ public class RecoverWithRoute extends CheckShards
 
     private FullRoute<?> route()
     {
-        return castToFullRoute(contact);
+        return castToFullRoute(this.route);
     }
 
     @Override
     public void contact(Id to)
     {
-        node.send(to, new CheckStatus(to, topologies(), txnId, route, IncludeInfo.All), this);
+        node.send(to, new CheckStatus(to, topologies(), txnId, route, sourceEpoch, IncludeInfo.All), this);
     }
 
     @Override
@@ -111,7 +113,7 @@ public class RecoverWithRoute extends CheckShards
     protected boolean isSufficient(Route<?> route, CheckStatusOk ok)
     {
         CheckStatusOkFull full = (CheckStatusOkFull)ok;
-        Known sufficientTo = full.sufficientFor(route);
+        Known sufficientTo = full.sufficientFor(route, NoQuorum);
         if (!sufficientTo.isDefinitionKnown())
             return false;
 
@@ -132,11 +134,11 @@ public class RecoverWithRoute extends CheckShards
         }
 
         CheckStatusOkFull merged = (CheckStatusOkFull) this.merged;
-        Known known = merged.sufficientFor(route);
+        Known known = merged.sufficientFor(route, success == Success.Quorum ? HasQuorum : NoQuorum);
         switch (known.outcome)
         {
             default: throw new AssertionError();
-            case OutcomeUnknown:
+            case Unknown:
                 if (known.definition.isKnown())
                 {
                     Txn txn = merged.partialTxn.reconstitute(route);
@@ -150,8 +152,15 @@ public class RecoverWithRoute extends CheckShards
                 }
                 break;
 
-            case OutcomeApplied:
-            case OutcomeKnown:
+            case TruncatedApply:
+                if (!known.definition.isKnown() || !known.executeAt.hasDecidedExecuteAt() || !known.deps.hasDecidedDeps())
+                {
+                    callback.accept(DURABLE, null);
+                    break;
+                }
+
+            case Applying:
+            case Applied:
                 Invariants.checkState(known.definition.isKnown());
                 Invariants.checkState(known.executeAt.hasDecidedExecuteAt());
                 // TODO (required): we might not be able to reconstitute Txn if we have GC'd on some shards
@@ -170,13 +179,17 @@ public class RecoverWithRoute extends CheckShards
                 }
                 break;
 
-            case InvalidationApplied:
+            case Invalidate:
                 if (witnessedByInvalidation != null && witnessedByInvalidation.hasBeen(Status.PreCommitted))
                     throw new IllegalStateException("We previously invalidated, finding a status that should be recoverable");
 
                 long untilEpoch = node.topology().epoch();
                 commitInvalidate(node, txnId, route, untilEpoch);
                 callback.accept(INVALIDATED, null);
+                break;
+
+            case Truncated:
+                callback.accept(TRUNCATED, null);
                 break;
         }
     }

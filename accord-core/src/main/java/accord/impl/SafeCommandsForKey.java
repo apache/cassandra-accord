@@ -29,7 +29,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static accord.local.Command.NotWitnessed.notWitnessed;
+import static accord.local.Command.NotDefined.uninitialised;
 
 public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
 {
@@ -113,8 +113,8 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
                                          current.lastExecutedTimestamp(),
                                          current.lastExecutedMicros(),
                                          current.lastWriteTimestamp(),
-                                         byId.add(txnId, notWitnessed(txnId)).build(),
-                                         byExecuteAt.add(txnId, notWitnessed(txnId)).build()));
+                                         byId.add(txnId, uninitialised(txnId)).build(),
+                                         byExecuteAt.add(txnId, uninitialised(txnId)).build()));
     }
 
     public <D> CommandsForKey listenerUpdate(Command command)
@@ -133,7 +133,7 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
         {
             default: throw new AssertionError();
             case PreAccepted:
-            case NotWitnessed:
+            case NotDefined:
             case Accepted:
             case AcceptedInvalidate:
             case PreCommitted:
@@ -141,6 +141,7 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
                 byExecuteAt.add(command.txnId(), command);
                 break;
             case Applied:
+            case Applying:
             case PreApplied:
             case Committed:
             case ReadyToExecute:
@@ -151,6 +152,7 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
             case Invalidated:
                 byId.remove(command.txnId());
                 byExecuteAt.remove(command.txnId());
+            case Truncated:
                 break;
         }
 

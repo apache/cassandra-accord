@@ -18,6 +18,8 @@
 
 package accord.primitives;
 
+import java.util.Arrays;
+
 import accord.utils.Invariants;
 
 import accord.api.RoutingKey;
@@ -30,17 +32,31 @@ import static accord.utils.ArrayBuffers.cachedRoutingKeys;
 public abstract class KeyRoute extends AbstractUnseekableKeys<Route<RoutingKey>> implements Route<RoutingKey>
 {
     public final RoutingKey homeKey;
+    public final boolean isParticipatingHomeKey;
 
-    KeyRoute(@Nonnull RoutingKey homeKey, RoutingKey[] keys)
+    KeyRoute(@Nonnull RoutingKey homeKey, boolean isParticipatingHomeKey, RoutingKey[] keys)
     {
         super(keys);
         this.homeKey = Invariants.nonNull(homeKey);
+        this.isParticipatingHomeKey = isParticipatingHomeKey;
     }
 
     @Override
-    public Unseekables<RoutingKey, ?> toMaximalUnseekables()
+    public boolean participatesIn(Ranges ranges)
     {
-        return new RoutingKeys(SortedArrays.insert(keys, homeKey, RoutingKey[]::new));
+        if (isParticipatingHomeKey())
+            return intersects(ranges);
+
+        long ij = findNextIntersection(0, ranges, 0);
+        if (ij < 0)
+            return false;
+
+        int i = (int)ij;
+        if (!get(i).equals(homeKey))
+            return true;
+
+        int j = (int)(ij >>> 32);
+        return findNextIntersection(i + 1, ranges, j) >= 0;
     }
 
     @Override
@@ -51,9 +67,31 @@ public abstract class KeyRoute extends AbstractUnseekableKeys<Route<RoutingKey>>
     }
 
     @Override
+    public Unseekables<RoutingKey, ?> participants()
+    {
+        if (isParticipatingHomeKey)
+            return this;
+
+        int removePos = Arrays.binarySearch(keys, homeKey);
+        if (removePos < 0)
+            return this;
+
+        RoutingKey[] result = new RoutingKey[keys.length - 1];
+        System.arraycopy(keys, 0, result, 0, removePos);
+        System.arraycopy(keys, removePos + 1, result, removePos, keys.length - (1 + removePos));
+        return new RoutingKeys(result);
+    }
+
+    @Override
     public RoutingKey homeKey()
     {
         return homeKey;
+    }
+
+    @Override
+    public boolean isParticipatingHomeKey()
+    {
+        return isParticipatingHomeKey;
     }
 
     @Override

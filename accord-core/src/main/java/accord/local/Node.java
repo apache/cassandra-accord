@@ -44,28 +44,13 @@ import com.google.common.annotations.VisibleForTesting;
 
 import accord.api.*;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import accord.api.Agent;
-import accord.api.Key;
-import accord.api.MessageSink;
-import accord.api.Result;
-import accord.api.ProgressLog;
-import accord.api.Scheduler;
-import accord.api.DataStore;
-import accord.messages.Callback;
-import accord.messages.ReplyContext;
-import accord.messages.Request;
-import accord.messages.Reply;
-import accord.coordinate.RecoverWithRoute;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.topology.TopologyManager;
 import net.nicoulaj.compilecommand.annotations.Inline;
-import accord.primitives.Ballot;
-import accord.primitives.Timestamp;
-import accord.primitives.Txn;
-import accord.primitives.TxnId;
 
 public class Node implements ConfigurationService.Listener, NodeTimeService
 {
@@ -205,6 +190,18 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         topology.truncateTopologyUntil(epoch);
     }
 
+    @Override
+    public void onEpochClosed(Ranges ranges, long epoch)
+    {
+        topology.onEpochClosed(ranges, epoch);
+    }
+
+    @Override
+    public void onEpochRedundant(Ranges ranges, long epoch)
+    {
+        topology.onEpochRedundant(ranges, epoch);
+    }
+
     public void withEpoch(long epoch, Runnable runnable)
     {
         if (topology.hasEpoch(epoch))
@@ -329,6 +326,11 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     public <T> void mapReduceConsumeLocal(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<SafeCommandStore, T> mapReduceConsume)
     {
         commandStores.mapReduceConsume(context, keys, minEpoch, maxEpoch, mapReduceConsume);
+    }
+
+    public <T> void mapReduceConsumeAllLocal(PreLoadContext context, MapReduceConsume<SafeCommandStore, T> mapReduceConsume)
+    {
+        commandStores.mapReduceConsume(context, mapReduceConsume);
     }
 
     // send to every node besides ourselves
@@ -544,14 +546,14 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     }
 
     // TODO (low priority, API/efficiency): coalesce maybeRecover calls? perhaps have mutable knownStatuses so we can inject newer ones?
-    public AsyncResult<? extends Outcome> maybeRecover(TxnId txnId, RoutingKey homeKey, @Nullable Route<?> route, ProgressToken prevProgress)
+    public AsyncResult<? extends Outcome> maybeRecover(TxnId txnId, @Nonnull Route<?> someRoute, ProgressToken prevProgress)
     {
         AsyncResult<? extends Outcome> result = coordinating.get(txnId);
         if (result != null)
             return result;
 
         RecoverFuture<Outcome> future = new RecoverFuture<>();
-        MaybeRecover.maybeRecover(this, txnId, homeKey, route, prevProgress, future);
+        MaybeRecover.maybeRecover(this, txnId, someRoute, prevProgress, future);
         return future;
     }
 

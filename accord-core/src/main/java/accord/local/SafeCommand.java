@@ -57,6 +57,7 @@ public abstract class SafeCommand
 
     private <C extends Command> C update(C update)
     {
+        Invariants.checkState(current() == null || !CommandStore.current().isTruncated(current()));
         set(update);
         return update;
     }
@@ -68,6 +69,9 @@ public abstract class SafeCommand
 
     public Command removeListener(Command.DurableAndIdempotentListener listener)
     {
+        Command current = current();
+        if (!current.durableListeners().contains(listener))
+            return current;
         return update(Command.removeListener(current(), listener));
     }
 
@@ -111,14 +115,18 @@ public abstract class SafeCommand
         return update(Command.commit(current(), attrs, executeAt, waitingOn));
     }
 
+    public Command.Truncated commitInvalidated()
+    {
+        Command current = current();
+        if (current.hasBeen(Status.Truncated))
+            return (Command.Truncated) current;
+
+        return update(Command.Truncated.invalidated(current));
+    }
+
     public Command precommit(Timestamp executeAt)
     {
         return update(Command.precommit(current(), executeAt));
-    }
-
-    public Command.Committed commitInvalidated(CommonAttributes attrs, Timestamp executeAt)
-    {
-        return update(Command.commitInvalidated(current(), attrs, executeAt));
     }
 
     public Command.Committed readyToExecute()
@@ -131,14 +139,19 @@ public abstract class SafeCommand
         return update(Command.preapplied(current(), attrs, executeAt, waitingOn, writes, result));
     }
 
+    public Command.Executed applying()
+    {
+        return update(Command.applying(current().asExecuted()));
+    }
+
     public Command.Executed applied()
     {
         return update(Command.applied(current().asExecuted()));
     }
 
-    public Command.NotWitnessed notWitnessed()
+    public Command.NotDefined uninitialised()
     {
         Invariants.checkArgument(current() == null);
-        return update(Command.NotWitnessed.notWitnessed(txnId));
+        return update(Command.NotDefined.uninitialised(txnId));
     }
 }

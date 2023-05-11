@@ -32,7 +32,6 @@ import accord.api.DataStore;
 import accord.coordinate.FetchCoordinator;
 import accord.local.CommandStore;
 import accord.local.Node;
-import accord.local.Status;
 import accord.messages.Callback;
 import accord.messages.MessageType;
 import accord.messages.ReadData;
@@ -159,7 +158,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
                         inflight.remove(key).cancel();
                         return;
                     }
-                    received = ranges.difference(ok.unavailable);
+                    received = ranges.subtract(ok.unavailable);
                 }
                 else
                 {
@@ -224,15 +223,15 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
 
         public FetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
         {
-            super(ranges, sourceEpoch, Status.Applied, partialDeps, Timestamp.MAX, syncId, partialTxn);
+            super(syncId, ranges, sourceEpoch, sourceEpoch, partialTxn);
             this.partialDeps = partialDeps;
         }
 
         @Override
         protected void readComplete(CommandStore commandStore, Data result, Ranges unavailable)
         {
-            Ranges slice = commandStore.rangesForEpochHolder().get().allAt(executeReadAt).difference(unavailable);
-            commandStore.maxAppliedFor(readScope, slice).begin((newMaxApplied, failure) -> {
+            Ranges slice = commandStore.rangesForEpochHolder().get().allAt(txnId).subtract(unavailable);
+            commandStore.maxAppliedFor((Ranges)readScope, slice).begin((newMaxApplied, failure) -> {
                 if (failure != null)
                 {
                     commandStore.agent().onUncaughtException(failure);

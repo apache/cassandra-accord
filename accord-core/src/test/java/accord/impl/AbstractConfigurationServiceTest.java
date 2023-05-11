@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import accord.api.ConfigurationService.EpochReady;
+import accord.primitives.Ranges;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import com.google.common.collect.ImmutableList;
@@ -80,6 +81,16 @@ public class AbstractConfigurationServiceTest
         {
             if (!truncates.add(epoch))
                 Assertions.fail(String.format("Recieved multiple truncates for epoch", epoch));
+        }
+
+        @Override
+        public void onEpochClosed(Ranges ranges, long epoch)
+        {
+        }
+
+        @Override
+        public void onEpochRedundant(Ranges ranges, long epoch)
+        {
         }
 
         public void assertNoTruncates()
@@ -140,6 +151,16 @@ public class AbstractConfigurationServiceTest
         protected void topologyUpdatePostListenerNotify(Topology topology)
         {
             acknowledgeEpoch(EpochReady.done(topology.epoch()));
+        }
+
+        @Override
+        public void reportEpochClosed(Ranges ranges, long epoch)
+        {
+        }
+
+        @Override
+        public void reportEpochRedundant(Ranges ranges, long epoch)
+        {
         }
     }
 

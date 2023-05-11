@@ -29,7 +29,6 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import static accord.Utils.*;
-import static accord.Utils.idSet;
 import static accord.impl.IntKey.keys;
 import static accord.impl.IntKey.range;
 import static accord.impl.IntKey.scope;

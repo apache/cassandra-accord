@@ -21,6 +21,7 @@ package accord.burn;
 import accord.api.TestableConfigurationService;
 import accord.local.AgentExecutor;
 import accord.impl.AbstractConfigurationService;
+import accord.primitives.Ranges;
 import accord.utils.RandomSource;
 import accord.local.Node;
 import accord.messages.*;
@@ -175,5 +176,19 @@ public class BurnTestConfigurationService extends AbstractConfigurationService.M
     private Node originator()
     {
         return lookup.apply(localId);
+    }
+
+    @Override
+    public void reportEpochClosed(Ranges ranges, long epoch)
+    {
+        Topology topology = lookup.apply(localId).topology().globalForEpoch(epoch);
+        topologyUpdates.epochClosed(lookup.apply(localId), topology.nodes(), ranges, epoch);
+    }
+
+    @Override
+    public void reportEpochRedundant(Ranges ranges, long epoch)
+    {
+        Topology topology = lookup.apply(localId).topology().globalForEpoch(epoch);
+        topologyUpdates.epochRedundant(lookup.apply(localId), topology.nodes(), ranges, epoch);
     }
 }

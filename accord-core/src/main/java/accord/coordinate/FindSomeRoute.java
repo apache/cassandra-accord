@@ -20,30 +20,45 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
-import accord.api.RoutingKey;
 import accord.local.Node;
+import accord.local.Status.Known;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
+import accord.primitives.Route;
 import accord.primitives.Unseekables;
 import accord.primitives.TxnId;
+
+import static accord.local.Status.Known.Nothing;
 
 /**
  * Find the homeKey of a txnId with some known keys
  */
-public class FindHomeKey extends CheckShards
+public class FindSomeRoute extends CheckShards<Unseekables<?, ?>>
 {
-    final BiConsumer<RoutingKey, Throwable> callback;
-    FindHomeKey(Node node, TxnId txnId, Unseekables<?, ?> unseekables, BiConsumer<RoutingKey, Throwable> callback)
+    static class Result
     {
-        super(node, txnId, unseekables, txnId.epoch(), IncludeInfo.No);
+        public final Route<?> route;
+        public final Known known;
+
+        Result(Route<?> route, Known known)
+        {
+            this.route = route;
+            this.known = known;
+        }
+    }
+
+    final BiConsumer<Result, Throwable> callback;
+    FindSomeRoute(Node node, TxnId txnId, Unseekables<?, ?> unseekables, BiConsumer<Result, Throwable> callback)
+    {
+        super(node, txnId, unseekables, IncludeInfo.Route);
         this.callback = callback;
     }
 
-    public static FindHomeKey findHomeKey(Node node, TxnId txnId, Unseekables<?, ?> unseekables, BiConsumer<RoutingKey, Throwable> callback)
+    public static FindSomeRoute findSomeRoute(Node node, TxnId txnId, Unseekables<?, ?> unseekables, BiConsumer<Result, Throwable> callback)
     {
-        FindHomeKey findHomeKey = new FindHomeKey(node, txnId, unseekables, callback);
-        findHomeKey.start();
-        return findHomeKey;
+        FindSomeRoute findSomeRoute = new FindSomeRoute(node, txnId, unseekables, callback);
+        findSomeRoute.start();
+        return findSomeRoute;
     }
 
     @Override
@@ -56,6 +71,7 @@ public class FindHomeKey extends CheckShards
     protected void onDone(Success success, Throwable failure)
     {
         if (failure != null) callback.accept(null, failure);
-        else callback.accept(merged == null ? null : merged.homeKey, null);
+        else if (merged == null) callback.accept(new Result(null, Nothing), null);
+        else callback.accept(new Result(merged.route, merged.ifKnownInvalidOrTruncated(success.withQuorum)), null);
     }
 }

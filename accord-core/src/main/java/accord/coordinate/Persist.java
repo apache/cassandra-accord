@@ -29,16 +29,12 @@ import accord.messages.Apply;
 import accord.messages.Apply.ApplyReply;
 import accord.messages.Callback;
 import accord.messages.Commit;
-import accord.messages.InformHomeDurable;
-import accord.primitives.Deps;
-import accord.primitives.Txn;
+import accord.messages.InformDurable;
 import accord.primitives.*;
-import accord.topology.Shard;
 import accord.topology.Topologies;
 
 import static accord.coordinate.tracking.RequestStatus.Success;
-import static accord.local.Status.Durability.Durable;
-import static accord.local.Status.Durability.Universal;
+import static accord.local.Status.Durability.Majority;
 import static accord.messages.Commit.Kind.Maximal;
 
 public class Persist implements Callback<ApplyReply>
@@ -58,7 +54,7 @@ public class Persist implements Callback<ApplyReply>
     public static void persist(Node node, Topologies persistTo, Topologies appliesTo, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         Persist persist = new Persist(node, appliesTo, txnId, route, txn, executeAt, deps);
-        node.send(persistTo.nodes(), to -> new Apply(to, persistTo, appliesTo, executeAt.epoch(), txnId, route, txn, executeAt, deps, writes, result), persist);
+        node.send(persistTo.nodes(), to -> new Apply(to, persistTo, appliesTo, txnId, route, txn, executeAt, deps, writes, result), persist);
     }
 
     public static void persistAndCommitMaximal(Node node, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
@@ -67,8 +63,8 @@ public class Persist implements Callback<ApplyReply>
         Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch());
         Topologies persistTo = txnId.epoch() == executeAt.epoch() ? applyTo : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
         Persist persist = new Persist(node, persistTo, txnId, route, txn, executeAt, deps);
-        node.send(persistTo.nodes(), to -> new Commit(Maximal, to, coordinate.current(), persistTo, txnId, txn, route, null, executeAt, deps, false), persist);
-        node.send(applyTo.nodes(), to -> new Apply(to, persistTo, applyTo, executeAt.epoch(), txnId, route, txn, executeAt, deps, writes, result), persist);
+        node.send(persistTo.nodes(), to -> new Commit(Maximal, to, coordinate.current(), persistTo, txnId, txn, route, null, executeAt, deps, false));
+        node.send(applyTo.nodes(), to -> new Apply(to, persistTo, applyTo, txnId, route, txn, executeAt, deps, writes, result), persist);
     }
 
     private Persist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps)
@@ -96,15 +92,9 @@ public class Persist implements Callback<ApplyReply>
                 {
                     if (!isDone)
                     {
-                        // TODO (low priority, consider, efficiency): send to non-home replicas also, so they may clear their log more easily?
-                        Shard homeShard = node.topology().forEpochIfKnown(route.homeKey(), txnId.epoch());
-                        node.send(homeShard, new InformHomeDurable(txnId, route.homeKey(), executeAt, Durable, new HashSet<>(persistedOn)));
                         isDone = true;
-                    }
-                    else if (!tracker.hasInFlight() && !tracker.hasFailures())
-                    {
-                        Shard homeShard = node.topology().forEpochIfKnown(route.homeKey(), txnId.epoch());
-                        node.send(homeShard, new InformHomeDurable(txnId, route.homeKey(), executeAt, Universal, new HashSet<>(persistedOn)));
+                        Topologies topologies = tracker.topologies();
+                        node.send(topologies.nodes(), to -> new InformDurable(to, topologies, route, txnId, executeAt, Majority));
                     }
                 }
                 break;

@@ -141,9 +141,9 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
      *   }
      * }
      */
-    final int[] keysToTxnIds; // Key -> [TxnId]
-    // Lazy loaded in ensureTxnIdToKey()
-    int[] txnIdsToKeys; // TxnId -> [Key] TODO (low priority, efficiency): this could be a BTree?
+    // TODO (expected): support deserializing to one or the other
+    int[] keysToTxnIds; // Key -> [TxnId]
+    int[] txnIdsToKeys; // TxnId -> [Key]
 
     KeyDeps(Key[] keys, TxnId[] txnIds, int[] keysToTxnIds)
     {
@@ -250,7 +250,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         if (txnIdIndex < 0)
             return Keys.EMPTY;
 
-        ensureTxnIdToKey();
+        int[] txnIdsToKeys = txnIdsToKeys();
 
         int start = txnIdIndex == 0 ? txnIds.length : txnIdsToKeys[txnIdIndex - 1];
         int end = txnIdsToKeys[txnIdIndex];
@@ -269,7 +269,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         if (txnIdIndex < 0)
             throw new IllegalStateException("Cannot create a RouteFragment without any keys");
 
-        ensureTxnIdToKey();
+        int[] txnIdsToKeys = txnIdsToKeys();
 
         int start = txnIdIndex == 0 ? txnIds.length : txnIdsToKeys[txnIdIndex - 1];
         int end = txnIdsToKeys[txnIdIndex];
@@ -291,16 +291,23 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return new RoutingKeys(result);
     }
 
-    void ensureTxnIdToKey()
+    int[] txnIdsToKeys()
     {
-        if (txnIdsToKeys != null)
-            return;
+        if (txnIdsToKeys == null)
+            txnIdsToKeys = invert(keysToTxnIds, keysToTxnIds.length, keys.size(), txnIds.length);
+        return txnIdsToKeys;
+    }
 
-        txnIdsToKeys = invert(keysToTxnIds, keysToTxnIds.length, keys.size(), txnIds.length);
+    int[] keysToTxnIds()
+    {
+        if (keysToTxnIds == null)
+            keysToTxnIds = invert(txnIdsToKeys, txnIdsToKeys.length, txnIds.length, keys.size());
+        return keysToTxnIds;
     }
 
     public void forEach(Ranges ranges, BiConsumer<Key, TxnId> forEach)
     {
+        int[] keysToTxnIds = keysToTxnIds();
         Routables.foldl(keys, ranges, (key, value, index) -> {
             for (int t = startOffset(index), end = endOffset(index); t < end ; ++t)
             {
@@ -321,6 +328,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         if (txnIds.length == 0)
             return;
 
+        int[] keysToTxnIds = keysToTxnIds();
         if (txnIds.length <= 64)
         {
             long bitset = Routables.foldl(keys, ranges, (key, ignore, value, keyIndex) -> {
@@ -368,14 +376,16 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         if (keyIndex < 0)
             return;
 
+        int[] keysToTxnIds = keysToTxnIds();
         int index = startOffset(keyIndex);
         int end = endOffset(keyIndex);
         while (index < end)
             forEach.accept(txnIds[keysToTxnIds[index++]]);
     }
 
-    public <P> void forEach(Ranges ranges, IndexedBiConsumer<P, TxnId> forEach, P param)
+    public <P1, P2> void forEach(Ranges ranges, int inclIdx, int exclIdx, P1 p1, P2 p2, IndexedBiConsumer<P1, P2> forEach)
     {
+        int[] keysToTxnIds = keysToTxnIds();
         for (int i = 0; i < ranges.size(); ++i)
         {
             Range range = ranges.get(i);
@@ -392,7 +402,8 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
             while (start < end)
             {
                 int txnIdx = keysToTxnIds[start++];
-                forEach.accept(param, txnIds[txnIdx], txnIdx);
+                if (txnIdx >= inclIdx && txnIdx < exclIdx)
+                    forEach.accept(p1, p2, txnIdx);
             }
         }
     }
@@ -424,6 +435,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
 
     public List<TxnId> txnIds(Key key)
     {
+        int[] keysToTxnIds = keysToTxnIds();
         int keyIndex = keys.indexOf(key);
         if (keyIndex < 0)
             return Collections.emptyList();
@@ -447,6 +459,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         if (startIndex == endIndex)
             return Collections.emptyList();
 
+        int[] keysToTxnIds = keysToTxnIds();
         int maxLength = Math.min(txnIds.length, startOffset(endIndex) - startOffset(startIndex));
         int[] scratch = cachedInts().getInts(maxLength);
         int count = 0;

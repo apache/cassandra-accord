@@ -42,7 +42,9 @@ public interface Unseekables<K extends Unseekable, U extends Unseekables<K, ?>> 
 
     @Override
     U slice(Ranges ranges);
+    @Override
     Unseekables<K, ?> slice(Ranges ranges, Slice slice);
+    Unseekables<K, ?> subtract(Ranges ranges);
 
     /**
      * Return an object containing any {@code K} present in either of the original collections.

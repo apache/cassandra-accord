@@ -46,7 +46,7 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     public final Durability durability;
     private transient ProgressShard shard;
 
-    public InformDurable(Id to, Topologies topologies, Route<?> route, TxnId txnId, Timestamp executeAt, Durability durability)
+    public InformDurable(Id to, Topologies topologies, FullRoute<?> route, TxnId txnId, Timestamp executeAt, Durability durability)
     {
         super(to, topologies, route, txnId);
         this.executeAt = executeAt;
@@ -87,8 +87,13 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     @Override
     public Reply apply(SafeCommandStore safeStore)
     {
-        Commands.setDurability(safeStore, txnId, durability, scope.homeKey(), executeAt);
-        safeStore.progressLog().durable(txnId, scope, shard);
+        if (safeStore.commandStore().isTruncated(txnId, txnId, scope))
+            return Ok;
+
+        if (safeStore.command(txnId).current().is(Status.Truncated))
+            return Ok;
+
+        Commands.setDurability(safeStore, txnId, durability, scope, executeAt);
         return Ok;
     }
 

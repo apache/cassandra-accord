@@ -78,7 +78,8 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
     @Override
     public void accept(PartialDeps result, Throwable failure)
     {
-        node.reply(replyTo, replyContext, new GetDepsOk(result));
+        if (result == null) node.agent().onUncaughtException(failure); // TODO (expected): propagate failures to coordinator
+        else node.reply(replyTo, replyContext, new GetDepsOk(result));
     }
 
     @Override

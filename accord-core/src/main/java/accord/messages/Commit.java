@@ -21,7 +21,6 @@ package accord.messages;
 import java.util.Set;
 
 import accord.local.*;
-import accord.local.PreLoadContext;
 import accord.messages.ReadData.ReadNack;
 import accord.messages.ReadData.ReadReply;
 import accord.primitives.*;
@@ -56,14 +55,13 @@ public class Commit extends TxnRequest<ReadNack>
     public final @Nullable FullRoute<?> route;
     public final ReadTxnData read;
 
-    @SuppressWarnings("MismatchedQueryAndUpdateOfCollection")
     private transient Defer defer;
 
     public enum Kind { Minimal, Maximal }
 
     // TODO (low priority, clarity): cleanup passing of topologies here - maybe fetch them afresh from Node?
     //                               Or perhaps introduce well-named classes to represent different topology combinations
-    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, @Nullable Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, boolean read)
+    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, @Nullable Unseekables<?, ?> readScope, Timestamp executeAt, Deps deps, boolean read)
     {
         super(to, topologies, route, txnId);
 
@@ -71,16 +69,16 @@ public class Commit extends TxnRequest<ReadNack>
         PartialTxn partialTxn = null;
         if (kind == Kind.Maximal)
         {
-            boolean isHome = coordinateTopology.rangesForNode(to).contains(route.homeKey());
-            partialTxn = txn.slice(scope.covering(), isHome);
-            if (isHome)
-                sendRoute = route;
+//            boolean isHome = coordinateTopology.rangesForNode(to).contains(route.homeKey());
+            // TODO (expected): only includeQuery if isHome; this affects state eviction and is low priority given size in C*
+            partialTxn = txn.slice(scope.covering(), true);
+            sendRoute = route;
         }
         else if (executeAt.epoch() != txnId.epoch())
         {
             Ranges coordinateRanges = coordinateTopology.rangesForNode(to);
             Ranges executeRanges = topologies.computeRangesForNode(to);
-            Ranges extraRanges = executeRanges.difference(coordinateRanges);
+            Ranges extraRanges = executeRanges.subtract(coordinateRanges);
             if (!extraRanges.isEmpty())
                 partialTxn = txn.slice(extraRanges, coordinateRanges.contains(route.homeKey()));
         }
@@ -104,7 +102,7 @@ public class Commit extends TxnRequest<ReadNack>
 
     // TODO (low priority, clarity): accept Topology not Topologies
     // TODO (desired, efficiency): do not commit if we're already ready to execute (requires extra info in Accept responses)
-    public static void commitMinimalAndRead(Node node, Topologies executeTopologies, TxnId txnId, Txn txn, FullRoute<?> route, Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, Set<Id> readSet, Callback<ReadReply> callback)
+    public static void commitMinimalAndRead(Node node, Topologies executeTopologies, TxnId txnId, Txn txn, FullRoute<?> route, Unseekables<?, ?> readScope, Timestamp executeAt, Deps deps, Set<Id> readSet, Callback<ReadReply> callback)
     {
         Topologies allTopologies = executeTopologies;
         if (txnId.epoch() != executeAt.epoch())
@@ -151,6 +149,9 @@ public class Commit extends TxnRequest<ReadNack>
     @Override
     public synchronized ReadNack apply(SafeCommandStore safeStore)
     {
+        if (safeStore.commandStore().isTruncated(txnId, executeAt, scope))
+            return ReadNack.Redundant;
+
         switch (Commands.commit(safeStore, txnId, route != null ? route : scope, progressKey, partialTxn, executeAt, partialDeps))
         {
             default:
@@ -280,9 +281,12 @@ public class Commit extends TxnRequest<ReadNack>
         @Override
         public void process(Node node, Id from, ReplyContext replyContext)
         {
-            node.forEachLocal(this, scope, txnId.epoch(), invalidateUntilEpoch,
-                            safeStore -> Commands.commitInvalidate(safeStore, txnId))
-                    .begin(node.agent());
+            node.forEachLocal(this, scope, txnId.epoch(), invalidateUntilEpoch, safeStore -> {
+                if (safeStore.commandStore().isTruncatedAt(txnId, txnId.epoch(), scope))
+                    return;
+
+                Commands.commitInvalidate(safeStore, txnId);
+            }).begin(node.agent());
         }
 
         @Override

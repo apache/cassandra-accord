@@ -22,6 +22,11 @@ public enum SimpleReply implements Reply
 {
     Ok, Nack;
 
+    public SimpleReply merge(SimpleReply that)
+    {
+        return this == that ? this : Nack;
+    }
+
     @Override
     public MessageType type()
     {

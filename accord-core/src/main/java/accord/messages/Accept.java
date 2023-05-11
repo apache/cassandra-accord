@@ -27,12 +27,6 @@ import accord.local.Node.Id;
 import accord.topology.Topologies;
 
 import accord.api.RoutingKey;
-import accord.primitives.PartialDeps;
-import accord.primitives.FullRoute;
-import accord.primitives.Ballot;
-
-import accord.primitives.Deps;
-import accord.primitives.TxnId;
 
 import javax.annotation.Nonnull;
 
@@ -88,10 +82,15 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
                 return new AcceptReply(calculatePartialDeps(safeStore));
         }
 
+        if (safeStore.commandStore().isTruncated(txnId, executeAt, scope))
+            return AcceptReply.REDUNDANT;
+
         // only accept if we actually participate in the ranges - otherwise we're just looking
         switch (Commands.accept(safeStore, txnId, ballot, scope, keys, progressKey, executeAt, partialDeps))
         {
             default: throw new IllegalStateException();
+            case Truncated:
+                return AcceptReply.TRUNCATED;
             case Redundant:
                 return AcceptReply.REDUNDANT;
             case RejectedBallot:
@@ -162,6 +161,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     {
         public static final AcceptReply ACCEPT_INVALIDATE = new AcceptReply(Success);
         public static final AcceptReply REDUNDANT = new AcceptReply(Redundant);
+        public static final AcceptReply TRUNCATED = new AcceptReply(Truncated);
 
         public final AcceptOutcome outcome;
         public final Ballot supersededBy;
@@ -241,10 +241,15 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         @Override
         public AcceptReply apply(SafeCommandStore safeStore)
         {
+            if (safeStore.commandStore().isTruncated(txnId, someKey))
+                return AcceptReply.TRUNCATED;
+
             SafeCommand safeCommand = safeStore.command(txnId);
             switch (Commands.acceptInvalidate(safeStore, safeCommand, ballot))
             {
                 default:
+                case Truncated:
+                    return AcceptReply.TRUNCATED;
                 case Redundant:
                     return AcceptReply.REDUNDANT;
                 case Success:

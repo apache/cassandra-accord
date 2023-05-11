@@ -51,6 +51,7 @@ public class LinearizabilityVerifier
         }
 
         // computes a PARTIAL ORDER on when the outcome occurred, i.e. for many pair-wise comparisons the answer is 0
+        @Override
         public int compareTo(Observation that)
         {
             if (this.end < that.start)

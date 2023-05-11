@@ -28,7 +28,10 @@ import javax.annotation.Nonnull;
 import java.util.*;
 import java.util.function.Function;
 
+import static accord.primitives.Ranges.EMPTY;
+import static accord.primitives.Ranges.ofSortedAndDeoverlappedUnchecked;
 import static accord.utils.ArrayBuffers.cachedRanges;
+import static accord.utils.SortedArrays.Search.CEIL;
 import static accord.utils.SortedArrays.Search.FAST;
 import static accord.utils.SortedArrays.swapHighLow32b;
 
@@ -183,6 +186,76 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     public final int findNext(int thisIndex, RoutableKey find, SortedArrays.Search search)
     {
         return SortedArrays.exponentialSearch(ranges, thisIndex, size(), find, (k, r) -> -r.compareTo(k), search);
+    }
+
+    /**
+     * Subtracts the given set of ranges from this
+     */
+    public Ranges subtract(Ranges that)
+    {
+        if (that.isEmpty())
+            return this instanceof Ranges ? (Ranges)this : ofSortedAndDeoverlappedUnchecked(ranges);
+
+        if (isEmpty() || that == this)
+            return EMPTY;
+
+        ObjectBuffers<Range> cachedRanges = cachedRanges();
+        Range[] result = null;
+
+        int count = 0;
+        int i = 0, j = 0;
+        Range iv = ranges[0];
+        while (true)
+        {
+            j = that.findNext(j, iv, CEIL);
+            if (j < 0)
+            {
+                j = -1 - j;
+                int nexti = j == that.size() ? size() : findNext(i + 1, that.ranges[j], CEIL);
+                if (nexti < 0) nexti = -1 - nexti;
+                if (count == 0)
+                    result = cachedRanges.get(1 + (this.size() - i) + (that.size() - j));
+                else if (count == result.length)
+                    result = cachedRanges.resize(result, count, count * 2);
+
+                result[count] = iv;
+                if (nexti > i + 1)
+                    System.arraycopy(ranges, i + 1, result, count + 1, nexti - (i + 1));
+                count += nexti - i;
+
+                if (nexti == ranges.length)
+                    break;
+                iv = ranges[i = nexti];
+                continue;
+            }
+
+            Range jv = that.ranges[j];
+            if (jv.start().compareTo(iv.start()) > 0)
+            {
+                if (count == 0)
+                    result = cachedRanges.get(1 + (this.size() - i) + (that.size() - j));
+                else if (count == result.length)
+                    result = cachedRanges.resize(result, count, count * 2);
+
+                result[count++] = iv.newRange(iv.start(), jv.start());
+            }
+
+            if (jv.end().compareTo(iv.end()) >= 0)
+            {
+                if (++i == ranges.length)
+                    break;
+                iv = ranges[i];
+            }
+            else
+            {
+                iv = iv.newRange(jv.end(), iv.end());
+            }
+        }
+
+        if (count == 0)
+            return EMPTY;
+
+        return ofSortedAndDeoverlappedUnchecked(cachedRanges.completeAndDiscard(result, count));
     }
 
     /**
@@ -379,7 +452,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         return ((long)ai << 32) | bi;
     }
 
-    interface UnionConstructor<P1, P2, RS extends AbstractRanges<?>>
+    interface UnionConstructor<P1, P2, RS>
     {
         RS construct(P1 param1, P2 param2, Range[] ranges);
     }
@@ -389,7 +462,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     /**
      * @return the union of {@code left} and {@code right}, returning one of the two inputs if possible
      */
-    static <P1, P2, RS extends AbstractRanges<?>> RS union(UnionMode mode, AbstractRanges<?> left, AbstractRanges<?> right, P1 param1, P2 param2, UnionConstructor<P1, P2, RS> constructor)
+    static <P1, P2, RS> RS union(UnionMode mode, AbstractRanges<?> left, AbstractRanges<?> right, P1 param1, P2 param2, UnionConstructor<P1, P2, RS> constructor)
     {
         if (left == right || right.isEmpty()) return constructor.construct(param1, param2, left.ranges);
         if (left.isEmpty()) return constructor.construct(param1, param2, right.ranges);
@@ -608,6 +681,9 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
                 ranges[i - (1 + removed)] = prev;
             prev = next;
         }
+
+        if (removed > 0)
+            ranges[count - (1 + removed)] = prev;
 
         count -= removed;
         if (count != ranges.length)

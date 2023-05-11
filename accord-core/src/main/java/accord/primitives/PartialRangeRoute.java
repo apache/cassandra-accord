@@ -18,6 +18,8 @@
 
 package accord.primitives;
 
+import javax.annotation.Nonnull;
+
 import accord.api.RoutingKey;
 import accord.utils.Invariants;
 
@@ -30,23 +32,18 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
 {
     public static class SerializationSupport
     {
-        public static PartialRangeRoute create(Ranges covering, RoutingKey homeKey, Range[] ranges)
+        public static PartialRangeRoute create(Ranges covering, RoutingKey homeKey, boolean isParticipatingHomeKey, Range[] ranges)
         {
-            return new PartialRangeRoute(covering, homeKey, ranges);
+            return new PartialRangeRoute(covering, homeKey, isParticipatingHomeKey, ranges);
         }
     }
 
     public final Ranges covering;
 
-    public PartialRangeRoute(Ranges covering, RoutingKey homeKey, Range[] ranges)
+    public PartialRangeRoute(Ranges covering, RoutingKey homeKey, boolean isParticipatingHomeKey, Range[] ranges)
     {
-        super(homeKey, ranges);
+        super(homeKey, isParticipatingHomeKey, ranges);
         this.covering = covering;
-    }
-
-    public static PartialRangeRoute empty(RoutingKey homeKey)
-    {
-        return new PartialRangeRoute(Ranges.EMPTY, homeKey, NO_RANGES);
     }
 
     @Override
@@ -68,18 +65,22 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
     }
 
     @Override
-    public Unseekables<Range, ?> toMaximalUnseekables()
-    {
-        return with(homeKey);
-    }
-
-    @Override
     public PartialRangeRoute sliceStrict(Ranges newRanges)
     {
         if (!covering.containsAll(newRanges))
             throw new IllegalArgumentException("Not covered");
 
         return slice(newRanges);
+    }
+
+    @Override
+    public PartialRangeRoute withHomeKey()
+    {
+        if (contains(homeKey))
+            return this;
+
+        Ranges with = Ranges.of(homeKey.asRange());
+        return new PartialRangeRoute(covering.with(with), homeKey, isParticipatingHomeKey, union(MERGE_OVERLAPPING, this, with, null, null, (i1, i2, rs) -> rs));
     }
 
     @Override
@@ -101,12 +102,24 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
         if (covering == this.covering) return this;
         else if (covering == that.covering) return that;
 
-        return union(MERGE_OVERLAPPING, this, that, covering, homeKey, PartialRangeRoute::new);
+        return union(MERGE_OVERLAPPING, this, that, covering, homeKey,
+                     isParticipatingHomeKey ? PartialRangeRoute::withParticipatingHomeKey
+                                            : PartialRangeRoute::withNonParticipatingHomeKey);
     }
 
     @Override
     public boolean equals(Object that)
     {
         return super.equals(that) && covering.equals(((PartialRangeRoute)that).covering);
+    }
+
+    static PartialRangeRoute withParticipatingHomeKey(Ranges covering, @Nonnull RoutingKey homeKey, Range[] ranges)
+    {
+        return new PartialRangeRoute(covering, homeKey, true, ranges);
+    }
+
+    static PartialRangeRoute withNonParticipatingHomeKey(Ranges covering, @Nonnull RoutingKey homeKey, Range[] ranges)
+    {
+        return new PartialRangeRoute(covering, homeKey, false, ranges);
     }
 }

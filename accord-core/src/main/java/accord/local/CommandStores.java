@@ -21,7 +21,6 @@ package accord.local;
 import accord.api.*;
 import accord.api.ConfigurationService.EpochReady;
 import accord.primitives.*;
-import accord.api.RoutingKey;
 import accord.topology.Topology;
 import accord.utils.MapReduce;
 import accord.utils.MapReduceConsume;
@@ -169,7 +168,7 @@ public abstract class CommandStores
 
         public @Nonnull Ranges unsafeToReadAt(Timestamp at)
         {
-            return allAt(at).difference(store.safeToReadAt(at));
+            return allAt(at).subtract(store.safeToReadAt(at));
         }
 
         public @Nonnull Ranges allAt(Timestamp at)
@@ -203,53 +202,48 @@ public abstract class CommandStores
             if (fromInclusive == toInclusive)
                 return allAt(fromInclusive);
 
-            int i = Arrays.binarySearch(epochs, fromInclusive);
-            if (i < 0) i = -2 - i;
-            if (i < 0) i = 0;
-
-            int j = Arrays.binarySearch(epochs, toInclusive);
-            if (j < 0) j = -2 - j;
-            if (i > j) return Ranges.EMPTY;
-
-            Ranges result = ranges[i++];
-            while (i <= j)
-                result = result.with(ranges[i++]);
-
-            return result;
+            return allInternal(floorIndex(fromInclusive), 1 + floorIndex(toInclusive));
         }
 
         public @Nonnull Ranges allSince(long fromInclusive)
         {
-            int i = Arrays.binarySearch(epochs, fromInclusive);
-            if (i < 0) i = Math.max(0, -2 -i);
-
-            Ranges result = ranges[i++];
-            while (i < ranges.length)
-                result = ranges[i++].with(result);
-
-            return result;
+            return allInternal(floorIndex(fromInclusive), ranges.length);
         }
 
         public @Nonnull Ranges all()
         {
-            if (ranges.length == 0)
-                return Ranges.EMPTY;
-
-            Ranges result = ranges[0];
-            for (int i = 1; i < ranges.length ; ++i)
-                result = ranges[i].with(result);
-
-            return result;
+            return allInternal(0, ranges.length);
         }
 
         public @Nonnull Ranges allBefore(long toExclusive)
         {
-            int limit = Arrays.binarySearch(epochs, toExclusive);
-            if (limit < 0) limit = Math.max(0, -1 -limit);
-            if (limit == 0) return Ranges.EMPTY;
+            return allInternal(0, ceilIndex(toExclusive));
+        }
 
-            Ranges result = ranges[0];
-            for (int i = 1 ; i < limit; ++i)
+        public @Nonnull Ranges allUntil(long toInclusive)
+        {
+            return allInternal(0, 1 + floorIndex(toInclusive));
+        }
+
+        private int floorIndex(long epoch)
+        {
+            int i = Arrays.binarySearch(epochs, epoch);
+            if (i < 0) i = -2 - i;
+            return i;
+        }
+
+        private int ceilIndex(long epoch)
+        {
+            int i = Arrays.binarySearch(epochs, epoch);
+            if (i < 0) i = -1 - i;
+            return i;
+        }
+
+        private @Nonnull Ranges allInternal(int startIndex, int endIndex)
+        {
+            if (startIndex >= endIndex) return Ranges.EMPTY;
+            Ranges result = ranges[startIndex];
+            for (int i = 1 ; i < endIndex; ++i)
                 result = ranges[i].with(result);
 
             return result;
@@ -258,7 +252,7 @@ public abstract class CommandStores
         public @Nonnull Ranges applyRanges(Timestamp executeAt)
         {
             // Note: we COULD slice to only those ranges we haven't bootstrapped, but no harm redundantly writing
-            return allSince(executeAt.epoch());
+            return allAt(executeAt.epoch());
         }
 
         public @Nonnull Ranges currentRanges()
@@ -340,8 +334,8 @@ public abstract class CommandStores
             return new TopologyUpdate(prev, () -> done(epoch));
 
         Topology newLocalTopology = newTopology.forNode(supplier.time.id()).trim();
-        Ranges added = newLocalTopology.ranges().difference(prev.local.ranges());
-        Ranges subtracted = prev.local.ranges().difference(newLocalTopology.ranges());
+        Ranges added = newLocalTopology.ranges().subtract(prev.local.ranges());
+        Ranges subtracted = prev.local.ranges().subtract(newLocalTopology.ranges());
 
         if (added.isEmpty() && subtracted.isEmpty())
         {
@@ -359,7 +353,7 @@ public abstract class CommandStores
         {
             if (subtracted.intersects(shard.ranges().currentRanges()))
             {
-                RangesForEpoch newRanges = shard.ranges().withRanges(newTopology.epoch(), shard.ranges().currentRanges().difference(subtracted));
+                RangesForEpoch newRanges = shard.ranges().withRanges(newTopology.epoch(), shard.ranges().currentRanges().subtract(subtracted));
                 shard.ranges.current = newRanges;
                 bootstrapUpdates.add(shard.store.interruptBootstraps(epoch, newRanges.currentRanges()));
             }
@@ -509,6 +503,28 @@ public abstract class CommandStores
         for (int id : ids)
         {
             CommandStore commandStore = forId(id);
+            AsyncChain<O> next = commandStore.submit(context, mapReduce);
+            chain = chain != null ? AsyncChains.reduce(chain, next, reducer) : next;
+        }
+        if (chain == null)
+            return AsyncChains.success(null);
+        return chain;
+    }
+
+    public <O> void mapReduceConsume(PreLoadContext context, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
+    {
+        AsyncChain<O> reduced = mapReduce(context, mapReduceConsume);
+        reduced.begin(mapReduceConsume);
+    }
+
+    protected <O> AsyncChain<O> mapReduce(PreLoadContext context, MapReduce<? super SafeCommandStore, O> mapReduce)
+    {
+        // TODO (low priority, efficiency): avoid using an array, or use a scratch buffer
+        AsyncChain<O> chain = null;
+        BiFunction<O, O, O> reducer = mapReduce::reduce;
+        for (ShardHolder shardHolder : current.shards)
+        {
+            CommandStore commandStore = shardHolder.store;
             AsyncChain<O> next = commandStore.submit(context, mapReduce);
             chain = chain != null ? AsyncChains.reduce(chain, next, reducer) : next;
         }

@@ -20,29 +20,32 @@ package accord.messages;
 
 import java.util.Set;
 
-import accord.api.RoutingKey;
 import accord.local.Commands;
-import accord.local.SafeCommand;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.local.Status;
 import accord.local.Status.Durability;
+import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
+import static accord.api.ProgressLog.ProgressShard.Home;
 import static accord.local.PreLoadContext.contextFor;
 
 public class InformHomeDurable implements Request
 {
     public final TxnId txnId;
-    public final RoutingKey homeKey;
+    // we send a partial route covering this node, because we otherwise can't know if the command may have been truncated;
+    // since the homeKey isn't something we truncate on (as it's not
+    public final Route<?> route;
     public final Timestamp executeAt;
     public final Durability durability;
     public final Set<Id> persistedOn;
 
-    public InformHomeDurable(TxnId txnId, RoutingKey homeKey, Timestamp executeAt, Durability durability, Set<Id> persistedOn)
+    public InformHomeDurable(TxnId txnId, Route<?> route, Timestamp executeAt, Durability durability, Set<Id> persistedOn)
     {
         this.txnId = txnId;
-        this.homeKey = homeKey;
+        this.route = route;
         this.executeAt = executeAt;
         this.durability = durability;
         this.persistedOn = persistedOn;
@@ -52,10 +55,14 @@ public class InformHomeDurable implements Request
     public void process(Node node, Id replyToNode, ReplyContext replyContext)
     {
         // TODO (expected, efficiency): do not load txnId first
-        node.ifLocal(contextFor(txnId), homeKey, txnId.epoch(), safeStore -> {
-            SafeCommand safeCommand = safeStore.command(txnId);
-            Commands.setDurability(safeStore, txnId, durability, homeKey, executeAt);
-            safeStore.progressLog().durable(safeCommand.current(), persistedOn);
+        node.ifLocal(contextFor(txnId), route.homeKey(), txnId.epoch(), safeStore -> {
+            if (safeStore.commandStore().isTruncated(txnId, txnId, route))
+                return;
+
+            if (safeStore.command(txnId).current().is(Status.Truncated))
+                return;
+
+            Commands.setDurability(safeStore, txnId, durability, route, executeAt);
         }).begin(node.agent());
     }
 

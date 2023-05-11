@@ -22,6 +22,7 @@ import java.util.BitSet;
 import javax.annotation.Nullable;
 
 import accord.api.Data;
+import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 
@@ -33,7 +34,6 @@ import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.primitives.PartialTxn;
 import accord.primitives.Ranges;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
@@ -47,22 +47,23 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
 {
     private static final Logger logger = LoggerFactory.getLogger(ReadData.class);
 
-    public final Seekables<?, ?> readScope; // TODO (low priority, efficiency): this should be RoutingKeys, as we have the Keys locally, but for simplicity we use this to implement keys()
+    // TODO (expected, cleanup): should this be a Route?
+    public final Unseekables<?, ?> readScope;
     private final long waitForEpoch;
     private Data data;
     transient BitSet waitingOn;
     transient int waitingOnCount;
     transient Ranges unavailable;
 
-    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Seekables<?, ?> readScope)
+    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Unseekables<?, ?> readScope)
     {
         super(txnId);
         int startIndex = latestRelevantEpochIndex(to, topologies, readScope);
-        this.readScope = computeScope(to, topologies, (Seekables)readScope, startIndex, Seekables::slice, Seekables::with);
+        this.readScope = computeScope(to, topologies, (Unseekables)readScope, startIndex, Unseekables::slice, Unseekables::with);
         this.waitForEpoch = computeWaitForEpoch(to, topologies, startIndex);
     }
 
-    protected ReadData(TxnId txnId, Seekables<?, ?> readScope, long waitForEpoch)
+    protected ReadData(TxnId txnId, Unseekables<?, ?> readScope, long waitForEpoch)
     {
         super(txnId);
         this.readScope = readScope;
@@ -132,7 +133,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
             reply(this.unavailable, data);
     }
 
-    protected synchronized void readComplete(CommandStore commandStore, Data result, Ranges unavailable)
+    protected synchronized void readComplete(CommandStore commandStore, @Nullable Data result, @Nullable Ranges unavailable)
     {
         Invariants.checkState(waitingOn.get(commandStore.id()), "Txn %s's waiting on does not contain store %d; waitingOn=%s", txnId, commandStore.id(), waitingOn);
         logger.trace("{}: read completed on {}", txnId, commandStore);
@@ -164,12 +165,6 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
     public TxnId primaryTxnId()
     {
         return txnId;
-    }
-
-    @Override
-    public MessageType type()
-    {
-        return MessageType.READ_REQ;
     }
 
     public interface ReadReply extends Reply

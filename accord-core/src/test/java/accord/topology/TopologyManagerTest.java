@@ -164,14 +164,14 @@ public class TopologyManagerTest
         Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
 
         RoutingKeys keys = keys(150).toUnseekables();
-        Assertions.assertEquals(topologies(topology3.forSelection(keys, Topology.OnUnknown.REJECT), topology2.forSelection(keys, Topology.OnUnknown.REJECT), topology1.withEmptySubset()),
+        Assertions.assertEquals(topologies(topology3.forSelection(keys), topology2.forSelection(keys), topology1.withEmptySubset()),
                                 service.withUnsyncedEpochs(keys, 3, 3));
 
         service.onEpochSyncComplete(id(2), 2);
         service.onEpochSyncComplete(id(3), 2);
         service.onEpochSyncComplete(id(2), 3);
         service.onEpochSyncComplete(id(3), 3);
-        Assertions.assertEquals(topologies(topology3.forSelection(keys, Topology.OnUnknown.REJECT)),
+        Assertions.assertEquals(topologies(topology3.forSelection(keys)),
                                 service.withUnsyncedEpochs(keys, 3, 3));
     }
 

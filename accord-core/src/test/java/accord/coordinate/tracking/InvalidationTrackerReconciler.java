@@ -46,10 +46,10 @@ public class InvalidationTrackerReconciler extends TrackerReconciler<Invalidatio
         switch (event)
         {
             default: throw new AssertionError();
-            case PROMISED_FAST: inflight.remove(from); return tracker.recordSuccess(from, true, true);
-            case PROMISED_SLOW: inflight.remove(from); return tracker.recordSuccess(from, true, false);
-            case NOT_PROMISED_FAST: inflight.remove(from); return tracker.recordSuccess(from, false, true);
-            case NOT_PROMISED_SLOW: inflight.remove(from); return tracker.recordSuccess(from, false, false);
+            case PROMISED_FAST: inflight.remove(from); return tracker.recordSuccess(from, true, false, true);
+            case PROMISED_SLOW: inflight.remove(from); return tracker.recordSuccess(from, true, false, false);
+            case NOT_PROMISED_FAST: inflight.remove(from); return tracker.recordSuccess(from, false, false, true);
+            case NOT_PROMISED_SLOW: inflight.remove(from); return tracker.recordSuccess(from, false, false, false);
             case FAIL: inflight.remove(from); return tracker.recordFailure(from);
         }
     }
@@ -60,7 +60,7 @@ public class InvalidationTrackerReconciler extends TrackerReconciler<Invalidatio
         switch (status)
         {
             case Failed:
-                Assertions.assertTrue(tracker.all(InvalidationShardTracker::isDecided));
+                Assertions.assertTrue(tracker.all(InvalidationShardTracker::isFinal));
                 Assertions.assertTrue(tracker.any(InvalidationShardTracker::isPromiseRejected));
                 Assertions.assertFalse(tracker.any(InvalidationShardTracker::isPromised) && tracker.any(InvalidationShardTracker::isFastPathRejected));
                 break;
@@ -78,7 +78,7 @@ public class InvalidationTrackerReconciler extends TrackerReconciler<Invalidatio
                         && tracker.any(InvalidationShardTracker::isFastPathRejected));
                 // TODO (low priority): it would be nice for InvalidationShardTracker to respond as soon as no shards are able to promise, but would require significant refactoring
 //                Assertions.assertTrue(tracker.any(InvalidationShardTracker::canPromise));
-                Assertions.assertFalse(tracker.all(InvalidationShardTracker::isDecided));
+                Assertions.assertFalse(tracker.all(InvalidationShardTracker::isFinal));
         }
     }
 }

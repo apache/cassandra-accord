@@ -26,13 +26,15 @@ import accord.messages.Commit;
 import accord.messages.PreAccept.PreAcceptOk;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
+import accord.primitives.FullRangeRoute;
 import accord.primitives.FullRoute;
-import accord.primitives.Seekables;
+import accord.primitives.Ranges;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.Txn.Kind;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.async.AsyncResult;
 import accord.utils.Invariants;
@@ -50,39 +52,44 @@ import static accord.utils.Functions.foldl;
  */
 public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
 {
-    private CoordinateSyncPoint(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
+    final Ranges ranges;
+    private CoordinateSyncPoint(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Ranges ranges)
     {
-        super(node, txnId, txn, route);
+        super(node, txnId, txn, route, node.topology().withOpenEpochs(route, txnId, txnId));
+        this.ranges = ranges;
     }
 
-    public static AsyncResult<SyncPoint> exclusive(Node node, Seekables<?, ?> keysOrRanges)
+    public static AsyncResult<SyncPoint> exclusive(Node node, Ranges keysOrRanges)
     {
         return coordinate(node, ExclusiveSyncPoint, keysOrRanges);
     }
 
-    public static AsyncResult<SyncPoint> inclusive(Node node, Seekables<?, ?> keysOrRanges)
+    public static AsyncResult<SyncPoint> inclusive(Node node, Ranges keysOrRanges)
     {
         return coordinate(node, Kind.SyncPoint, keysOrRanges);
     }
 
-    private static AsyncResult<SyncPoint> coordinate(Node node, Kind kind, Seekables<?, ?> keysOrRanges)
+    private static AsyncResult<SyncPoint> coordinate(Node node, Kind kind, Ranges ranges)
     {
-        TxnId txnId = node.nextTxnId(kind, keysOrRanges.domain());
-        FullRoute<?> route = node.computeRoute(txnId, keysOrRanges);
-        CoordinateSyncPoint coordinate = new CoordinateSyncPoint(node, txnId, node.agent().emptyTxn(kind, keysOrRanges), route);
-        coordinate.start();
-        return coordinate;
+        TxnId txnId = node.nextTxnId(kind, ranges.domain());
+        return node.withEpoch(txnId.epoch(), () -> {
+            FullRangeRoute route = (FullRangeRoute) node.computeRoute(txnId, ranges);
+            CoordinateSyncPoint coordinate = new CoordinateSyncPoint(node, txnId, node.agent().emptyTxn(kind, ranges), route, ranges);
+            coordinate.start();
+            return coordinate;
+        }).beginAsResult();
     }
 
-    public static AsyncResult<SyncPoint> coordinate(Node node, TxnId txnId, Seekables<?, ?> keysOrRanges)
+    public static AsyncResult<SyncPoint> coordinate(Node node, TxnId txnId, Ranges ranges)
     {
         Invariants.checkState(txnId.rw() == Kind.SyncPoint || txnId.rw() == ExclusiveSyncPoint);
-        FullRoute<?> route = node.computeRoute(txnId, keysOrRanges);
-        CoordinateSyncPoint coordinate = new CoordinateSyncPoint(node, txnId, node.agent().emptyTxn(txnId.rw(), keysOrRanges), route);
+        FullRangeRoute route = (FullRangeRoute) node.computeRoute(txnId, ranges);
+        CoordinateSyncPoint coordinate = new CoordinateSyncPoint(node, txnId, node.agent().emptyTxn(txnId.rw(), ranges), route, ranges);
         coordinate.start();
         return coordinate;
     }
 
+    @Override
     void onNewEpoch(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> successes)
     {
         // SyncPoint transactions always propose their own txnId as their executeAt, as they are not really executed.
@@ -93,6 +100,7 @@ public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
         onPreAccepted(topologies, executeAt, successes);
     }
 
+    @Override
     void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> successes)
     {
         Deps deps = Deps.merge(successes, ok -> ok.deps);
@@ -115,10 +123,24 @@ public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
                     Topologies latest = commit.size() == 1 ? commit : node.topology().forEpoch(route, executeAt.epoch());
                     if (latest != commit)
                         node.send(commit.nodes(), id -> new Commit(Commit.Kind.Maximal, id, commit.forEpoch(txnId.epoch()), commit, txnId, txn, route, null, executeAt, deps, false));
-                    node.send(latest.nodes(), id -> new Apply(id, latest, latest, executeAt.epoch(), txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null)));
-                    accept(new SyncPoint(txnId, deps, route), null);
+                    node.send(latest.nodes(), id -> new Apply(id, latest, latest, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null)));
+                    node.configService().reportEpochClosed(ranges, txnId.epoch());
+                    accept(new SyncPoint(txnId, deps, ranges, (FullRangeRoute) route), null);
                 }
             }.start();
         }
+    }
+
+    static void sendApply(Node node, Node.Id to, Unseekables<?, ?> scope, SyncPoint syncPoint)
+    {
+        TxnId txnId = syncPoint.syncId;
+        Timestamp executeAt = txnId;
+        Txn txn = node.agent().emptyTxn(txnId.rw(), syncPoint.ranges);
+        Deps deps = syncPoint.waitFor;
+        Topologies commit = node.topology().preciseEpochs(scope, txnId.epoch(), executeAt.epoch());
+        Topologies latest = commit.size() == 1 ? commit : node.topology().forEpoch(scope, executeAt.epoch());
+        if (latest != commit)
+            node.send(to, new Commit(Commit.Kind.Maximal, to, commit.forEpoch(txnId.epoch()), commit, txnId, txn, syncPoint.route(), null, executeAt, deps, false));
+        node.send(to, new Apply(to, latest, latest, txnId, syncPoint.route(), txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null)));
     }
 }

@@ -31,37 +31,45 @@ import accord.topology.Topologies;
  * A result of null indicates the transaction is globally persistent
  * A result of CheckStatusOk indicates the maximum status found for the transaction, which may be used to assess progress
  */
-public abstract class CheckShards extends ReadCoordinator<CheckStatusReply>
+public abstract class CheckShards<U extends Unseekables<?, ?>> extends ReadCoordinator<CheckStatusReply>
 {
-    final Unseekables<?, ?> contact;
+    final U route;
 
     /**
-     * The epoch until which we want to fetch data from remotely
-     * TODO (required, consider): configure the epoch we want to start with
+     * The epoch we want to fetch data from remotely
+     * Either txnId.epoch() or executeAt.epoch()
      */
-    final long untilRemoteEpoch;
+    final long sourceEpoch;
     final IncludeInfo includeInfo;
 
     protected CheckStatusOk merged;
+    protected boolean truncated;
 
-    protected CheckShards(Node node, TxnId txnId, Unseekables<?, ?> contact, long srcEpoch, IncludeInfo includeInfo)
+    // srcEpoch is either txnId.epoch() or executeAt.epoch()
+    protected CheckShards(Node node, TxnId txnId, U route, IncludeInfo includeInfo)
     {
-        super(node, topologyFor(node, txnId, contact, srcEpoch), txnId);
-        this.untilRemoteEpoch = srcEpoch;
-        this.contact = contact;
+        this(node, txnId, route, txnId.epoch(), includeInfo);
+    }
+
+    protected CheckShards(Node node, TxnId txnId, U route, long srcEpoch, IncludeInfo includeInfo)
+    {
+        super(node, topologyFor(node, txnId, route, srcEpoch), txnId);
+        this.sourceEpoch = srcEpoch;
+        this.route = route;
         this.includeInfo = includeInfo;
     }
 
     private static Topologies topologyFor(Node node, TxnId txnId, Unseekables<?, ?> contact, long epoch)
     {
+        // TODO (expected): only fetch data from source epoch
         return node.topology().preciseEpochs(contact, txnId.epoch(), epoch);
     }
 
     @Override
     protected void contact(Id id)
     {
-        Unseekables<?, ?> unseekables = contact.slice(topologies().computeRangesForNode(id));
-        node.send(id, new CheckStatus(txnId, unseekables, txnId.epoch(), untilRemoteEpoch, includeInfo), this);
+        Unseekables<?, ?> unseekables = route.slice(topologies().computeRangesForNode(id));
+        node.send(id, new CheckStatus(txnId, unseekables, sourceEpoch, includeInfo), this);
     }
 
     protected boolean isSufficient(Id from, CheckStatusOk ok) { return isSufficient(ok); }
@@ -86,13 +94,27 @@ public abstract class CheckShards extends ReadCoordinator<CheckStatusReply>
             CheckStatusOk ok = (CheckStatusOk) reply;
             if (merged == null) merged = ok;
             else merged = merged.merge(ok);
+            if (merged.truncated)
+                truncated = true;
 
             return checkSufficient(from, ok);
         }
         else
         {
-            onFailure(from, new IllegalStateException("Submitted command to a replica that did not own the range"));
-            return Action.Abort;
+            switch ((CheckStatus.CheckStatusNack)reply)
+            {
+                default: throw new AssertionError();
+                case NotOwned:
+                    finishOnFailure(new IllegalStateException("Submitted command to a replica that did not own the range"), true);
+                    return Action.Aborted;
+            }
         }
+    }
+
+    @Override
+    protected void finishOnExhaustion()
+    {
+        if (truncated) finishOnFailure(new Truncated(txnId, null), false);
+        else super.finishOnExhaustion();
     }
 }

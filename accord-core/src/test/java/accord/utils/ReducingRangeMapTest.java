@@ -476,6 +476,7 @@ public class ReducingRangeMapTest
 //            test = tmp;
 //        }
 
+        @Override
         void add(Ranges addRanges, Timestamp timestamp)
         {
             super.add(addRanges, timestamp);

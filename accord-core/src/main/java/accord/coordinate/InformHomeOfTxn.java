@@ -18,13 +18,13 @@
 
 package accord.coordinate;
 
-import accord.api.RoutingKey;
 import accord.coordinate.tracking.QuorumTracker.QuorumShardTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Callback;
 import accord.messages.InformOfTxnId;
 import accord.messages.SimpleReply;
+import accord.primitives.Route;
 import accord.topology.Shard;
 import accord.primitives.TxnId;
 import accord.utils.async.AsyncChain;
@@ -36,23 +36,23 @@ import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Success;
 public class InformHomeOfTxn extends AsyncResults.SettableResult<Void> implements Callback<SimpleReply>
 {
     final TxnId txnId;
-    final RoutingKey homeKey;
+    final Route<?> someRoute;
     final QuorumShardTracker tracker;
     Throwable failure;
 
-    InformHomeOfTxn(TxnId txnId, RoutingKey homeKey, Shard homeShard)
+    InformHomeOfTxn(TxnId txnId, Route<?> someRoute, Shard homeShard)
     {
         this.txnId = txnId;
-        this.homeKey = homeKey;
+        this.someRoute = someRoute;
         this.tracker = new QuorumShardTracker(homeShard);
     }
 
-    public static AsyncChain<Void> inform(Node node, TxnId txnId, RoutingKey homeKey)
+    public static AsyncChain<Void> inform(Node node, TxnId txnId, Route<?> someRoute)
     {
         return node.withEpoch(txnId.epoch(), () -> {
-            Shard homeShard = node.topology().forEpoch(homeKey, txnId.epoch());
-            InformHomeOfTxn inform = new InformHomeOfTxn(txnId, homeKey, homeShard);
-            node.send(homeShard.nodes, new InformOfTxnId(txnId, homeKey), inform);
+            Shard homeShard = node.topology().forEpoch(someRoute.homeKey(), txnId.epoch());
+            InformHomeOfTxn inform = new InformHomeOfTxn(txnId, someRoute, homeShard);
+            node.send(homeShard.nodes, new InformOfTxnId(txnId, someRoute), inform);
             return inform;
         });
     }

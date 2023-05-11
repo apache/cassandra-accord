@@ -19,31 +19,40 @@
 package accord.local;
 
 import accord.api.Data;
+import accord.api.ProgressLog.ProgressShard;
 import accord.primitives.Ballot;
+import accord.primitives.Deps;
 import accord.primitives.Keys;
 import accord.primitives.PartialDeps;
-import accord.primitives.PartialRoute;
 import accord.primitives.PartialTxn;
 import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.primitives.Writes;
+import accord.utils.ImmutableBitSet;
+import accord.utils.IndexedQuadConsumer;
 import accord.utils.Invariants;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.api.VisibleForImplementation;
+import accord.utils.SimpleBitSet;
 import accord.utils.async.AsyncChain;
-import com.google.common.collect.ImmutableSortedMap;
+
 import com.google.common.collect.ImmutableSortedSet;
 
 import java.util.*;
 
+import static accord.api.ProgressLog.ProgressShard.Unsure;
+import static accord.local.Listeners.Immutable.EMPTY;
+import static accord.local.SaveStatus.Uninitialised;
+import static accord.local.Status.Durability.DurableOrInvalidated;
 import static accord.local.Status.Durability.Local;
 import static accord.local.Status.Durability.NotDurable;
+import static accord.utils.SortedArrays.forEachIntersection;
 import static accord.utils.Utils.*;
 import static java.lang.String.format;
 
@@ -131,9 +140,9 @@ public abstract class Command implements CommonAttributes
     @VisibleForImplementation
     public static class SerializerSupport
     {
-        public static NotWitnessed notWitnessed(CommonAttributes attributes, Ballot promised)
+        public static NotDefined notDefined(CommonAttributes attributes, Ballot promised)
         {
-            return NotWitnessed.notWitnessed(attributes, promised);
+            return NotDefined.notDefined(attributes, promised);
         }
 
         public static PreAccepted preaccepted(CommonAttributes common, Timestamp executeAt, Ballot promised)
@@ -146,14 +155,14 @@ public abstract class Command implements CommonAttributes
             return Accepted.accepted(common, status, executeAt, promised, accepted);
         }
 
-        public static Committed committed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply)
+        public static Committed committed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOn waitingOn)
         {
-            return Committed.committed(common, status, executeAt, promised, accepted, waitingOnCommit, waitingOnApply);
+            return Committed.committed(common, status, executeAt, promised, accepted, waitingOn);
         }
 
-        public static Executed executed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply, Writes writes, Result result)
+        public static Executed executed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOn waitingOn, Writes writes, Result result)
         {
-            return Executed.executed(common, status, executeAt, promised, accepted, waitingOnCommit, waitingOnApply, writes, result);
+            return Executed.executed(common, status, executeAt, promised, accepted, waitingOn, writes, result);
         }
     }
 
@@ -171,8 +180,8 @@ public abstract class Command implements CommonAttributes
     {
         switch (status.status)
         {
-            case NotWitnessed:
-                return validateCommandClass(status, NotWitnessed.class, klass);
+            case NotDefined:
+                return validateCommandClass(status, NotDefined.class, klass);
             case PreAccepted:
                 return validateCommandClass(status, PreAccepted.class, klass);
             case AcceptedInvalidate:
@@ -183,9 +192,12 @@ public abstract class Command implements CommonAttributes
             case ReadyToExecute:
                 return validateCommandClass(status, Committed.class, klass);
             case PreApplied:
+            case Applying:
             case Applied:
-            case Invalidated:
                 return validateCommandClass(status, Executed.class, klass);
+            case Invalidated:
+            case Truncated:
+                return validateCommandClass(status, Truncated.class, klass);
             default:
                 throw new IllegalStateException("Unhandled status " + status);
         }
@@ -196,20 +208,18 @@ public abstract class Command implements CommonAttributes
         private final TxnId txnId;
         private final SaveStatus status;
         private final Status.Durability durability;
-        private final RoutingKey homeKey;
-        private final RoutingKey progressKey;
         private final Route<?> route;
+        private final ProgressShard progressShard;
         private final Ballot promised;
         private final Listeners.Immutable listeners;
 
-        private AbstractCommand(TxnId txnId, SaveStatus status, Status.Durability durability, RoutingKey homeKey, RoutingKey progressKey, Route<?> route, Ballot promised, Listeners.Immutable listeners)
+        private AbstractCommand(TxnId txnId, SaveStatus status, Status.Durability durability, Route<?> route, ProgressShard progressShard, Ballot promised, Listeners.Immutable listeners)
         {
             this.txnId = txnId;
             this.status = validateCommandClass(status, getClass());
             this.durability = durability;
-            this.homeKey = homeKey;
-            this.progressKey = progressKey;
             this.route = route;
+            this.progressShard = progressShard;
             this.promised = promised;
             this.listeners = listeners;
         }
@@ -219,9 +229,8 @@ public abstract class Command implements CommonAttributes
             this.txnId = common.txnId();
             this.status = validateCommandClass(status, getClass());
             this.durability = common.durability();
-            this.homeKey = common.homeKey();
-            this.progressKey = common.progressKey();
             this.route = common.route();
+            this.progressShard = common.progressShard();
             this.promised = promised;
             this.listeners = common.durableListeners();
         }
@@ -235,9 +244,8 @@ public abstract class Command implements CommonAttributes
             return txnId.equals(command.txnId())
                     && status == command.saveStatus()
                     && durability == command.durability()
-                    && Objects.equals(homeKey, command.homeKey())
-                    && Objects.equals(progressKey, command.progressKey())
                     && Objects.equals(route, command.route())
+                    && Objects.equals(progressShard, command.progressShard())
                     && Objects.equals(promised, command.promised())
                     && listeners.equals(command.durableListeners());
         }
@@ -255,21 +263,15 @@ public abstract class Command implements CommonAttributes
         }
 
         @Override
-        public final RoutingKey homeKey()
-        {
-            return homeKey;
-        }
-
-        @Override
-        public final RoutingKey progressKey()
-        {
-            return progressKey;
-        }
-
-        @Override
         public final Route<?> route()
         {
             return route;
+        }
+
+        @Override
+        public final @Nonnull ProgressShard progressShard()
+        {
+            return progressShard;
         }
 
         @Override
@@ -288,7 +290,7 @@ public abstract class Command implements CommonAttributes
         public Listeners.Immutable durableListeners()
         {
             if (listeners == null)
-                return Listeners.Immutable.EMPTY;
+                return EMPTY;
             return listeners;
         }
 
@@ -306,38 +308,37 @@ public abstract class Command implements CommonAttributes
     }
 
     /**
-     * If this is the home shard, we require that this is a Route for all states &gt; NotWitnessed;
-     * otherwise for the local progress shard this is ordinarily a PartialRoute, and for other shards this is not set,
-     * so that there is only one copy per node that can be consulted to construct the full set of involved keys.
+     * We require that this is a FullRoute for all states where isDefinitionKnown().
+     * In some cases, the home shard will contain an arbitrary slice of the Route where !isDefinitionKnown(),
+     * i.e. when a non-home shard informs the home shards of a transaction to ensure forward progress.
      *
      * If hasBeen(Committed) this must contain the keys for both txnId.epoch and executeAt.epoch
-     */
-    public abstract Route<?> route();
-
-    /**
-     * A key nominated to be the primary shard within this node for managing progress of the command.
-     * It is nominated only as of txnId.epoch, and may be null (indicating that this node does not monitor
-     * the progress of this command).
      *
-     * Preferentially, this is homeKey on nodes that replicate it, and otherwise any key that is replicated, as of txnId.epoch
+     * TODO (expected): audit uses; do not assume null means it is a complete route for the shard
      */
-    public abstract RoutingKey progressKey();
+    @Override
+    public abstract Route<?> route();
 
     /**
      * homeKey is a global value that defines the home shard - the one tasked with ensuring the transaction is finished.
      * progressKey is a local value that defines the local shard responsible for ensuring progress on the transaction.
      * This will be homeKey if it is owned by the node, and some other key otherwise. If not the home shard, the progress
      * shard has much weaker responsibilities, only ensuring that the home shard has durably witnessed the txnId.
-     *
-     * TODO (expected, efficiency): we probably do not want to save this on its own, as we probably want to
-     *  minimize IO interactions and discrete registers, so will likely reference commit log entries directly
-     *  At which point we may impose a requirement that only a Route can be saved, not a homeKey on its own.
-     *  Once this restriction is imposed, we no longer need to pass around Routable.Domain with TxnId.
      */
-    public abstract RoutingKey homeKey();
+    public RoutingKey homeKey()
+    {
+        Route<?> route = route();
+        return route == null ? null : route.homeKey();
+    }
+
+    @Override
+    public abstract ProgressShard progressShard();
+    @Override
     public abstract TxnId txnId();
     public abstract Ballot promised();
+    @Override
     public abstract Status.Durability durability();
+    @Override
     public abstract Listeners.Immutable durableListeners();
     public abstract SaveStatus saveStatus();
 
@@ -369,24 +370,13 @@ public abstract class Command implements CommonAttributes
     }
 
     // TODO (low priority, progress): callers should try to consult the local progress shard (if any) to obtain the full set of keys owned locally
-    public final Route<?> someRoute()
+    public Route<?> maxRoute()
     {
-        if (route() != null)
-            return route();
-
-        if (homeKey() != null)
-            return PartialRoute.empty(txnId().domain(), homeKey());
-
-        return null;
-    }
-
-    public Unseekables<?, ?> maxUnseekables()
-    {
-        Route<?> route = someRoute();
+        Route<?> route = route();
         if (route == null)
             return null;
 
-        return route.toMaximalUnseekables();
+        return route.withHomeKey();
     }
 
     public PreLoadContext contextForSelf()
@@ -396,7 +386,9 @@ public abstract class Command implements CommonAttributes
 
     public abstract Timestamp executeAt();
     public abstract Ballot accepted();
+    @Override
     public abstract PartialTxn partialTxn();
+    @Override
     public abstract @Nullable PartialDeps partialDeps();
 
     public final Status status()
@@ -439,7 +431,7 @@ public abstract class Command implements CommonAttributes
         return new ProxyListener(txnId());
     }
 
-    public final boolean isWitnessed()
+    public final boolean isDefined()
     {
         boolean result = status().hasBeen(Status.PreAccepted);
         Invariants.checkState(result == (this instanceof PreAccepted));
@@ -477,7 +469,7 @@ public abstract class Command implements CommonAttributes
 
     public final boolean isExecuted()
     {
-        boolean result = status().hasBeen(Status.PreApplied);
+        boolean result = hasBeen(Status.PreApplied) && !hasBeen(Status.Truncated);
         Invariants.checkState(result == (this instanceof Executed));
         return result;
     }
@@ -499,14 +491,14 @@ public abstract class Command implements CommonAttributes
         return updateAttributes(this, promised);
     }
 
-    public static final class NotWitnessed extends AbstractCommand
+    public static final class NotDefined extends AbstractCommand
     {
-        NotWitnessed(TxnId txnId, SaveStatus status, Status.Durability durability, RoutingKey homeKey, RoutingKey progressKey, Route<?> route, Ballot promised, Listeners.Immutable listeners)
+        NotDefined(TxnId txnId, SaveStatus status, Status.Durability durability, Route<?> route, ProgressShard progressShard, Ballot promised, Listeners.Immutable listeners)
         {
-            super(txnId, status, durability, homeKey, progressKey, route, promised, listeners);
+            super(txnId, status, durability, route, progressShard, promised, listeners);
         }
 
-        NotWitnessed(CommonAttributes common, SaveStatus status, Ballot promised)
+        NotDefined(CommonAttributes common, SaveStatus status, Ballot promised)
         {
             super(common, status, promised);
         }
@@ -514,24 +506,17 @@ public abstract class Command implements CommonAttributes
         @Override
         public Command updateAttributes(CommonAttributes attrs, Ballot promised)
         {
-            return new NotWitnessed(attrs, saveStatus(), promised);
+            return new NotDefined(attrs, initialise(saveStatus()), promised);
         }
 
-        public static NotWitnessed notWitnessed(CommonAttributes common, Ballot promised)
+        public static NotDefined notDefined(CommonAttributes common, Ballot promised)
         {
-            return new NotWitnessed(common, SaveStatus.NotWitnessed, promised);
+            return new NotDefined(common, SaveStatus.NotDefined, promised);
         }
 
-        public static NotWitnessed notWitnessed(TxnId txnId)
+        public static NotDefined uninitialised(TxnId txnId)
         {
-            return new NotWitnessed(txnId, SaveStatus.NotWitnessed, NotDurable, null, null, null, Ballot.ZERO, null);
-        }
-
-        public static NotWitnessed notWitnessed(NotWitnessed command, CommonAttributes common, Ballot promised)
-        {
-            checkSameClass(command, NotWitnessed.class, "Cannot update");
-            Invariants.checkArgument(command.txnId().equals(common.txnId()));
-            return new NotWitnessed(common, command.saveStatus(), promised);
+            return new NotDefined(txnId, Uninitialised, NotDurable, null, Unsure, Ballot.ZERO, null);
         }
 
         @Override
@@ -563,6 +548,68 @@ public abstract class Command implements CommonAttributes
         public @Nullable PartialDeps partialDeps()
         {
             return null;
+        }
+
+        private static SaveStatus initialise(SaveStatus saveStatus)
+        {
+            return saveStatus == Uninitialised ? SaveStatus.NotDefined : saveStatus;
+        }
+    }
+
+    public static final class Truncated extends AbstractCommand
+    {
+        final Timestamp executeAt;
+        public Truncated(TxnId txnId, SaveStatus saveStatus, Route<?> route, ProgressShard progressShard, Timestamp executeAt, Listeners.Immutable listeners)
+        {
+            super(txnId, saveStatus, DurableOrInvalidated, route, progressShard, Ballot.MAX, listeners);
+            this.executeAt = executeAt;
+        }
+
+        public static Truncated truncated(Command command)
+        {
+            return new Truncated(command.txnId(), SaveStatus.Truncated, command.route(), command.progressShard(), command.known().executeAt.hasDecidedExecuteAt() ? command.executeAt() : null, EMPTY);
+        }
+
+        public static Truncated truncated(Command command, Route<?> route, ProgressShard progressShard, Timestamp executeAt)
+        {
+            return new Truncated(command.txnId(), SaveStatus.Truncated, route, progressShard, executeAt, EMPTY);
+        }
+
+        public static Truncated invalidated(Command command)
+        {
+            Invariants.checkState(!command.hasBeen(Status.PreCommitted));
+            return new Truncated(command.txnId(), SaveStatus.Invalidated, null, command.progressShard(), Timestamp.NONE, command.durableListeners());
+        }
+
+        @Override
+        public Timestamp executeAt()
+        {
+            return executeAt;
+        }
+
+        @Override
+        public Ballot accepted()
+        {
+            return Ballot.MAX;
+        }
+
+        @Override
+        public PartialTxn partialTxn()
+        {
+            return null;
+        }
+
+        @Override
+        public @Nullable PartialDeps partialDeps()
+        {
+            return null;
+        }
+
+        @Override
+        public Command updateAttributes(CommonAttributes attrs, Ballot promised)
+        {
+            // TODO (now): invoke listeners precisely once when we adopt this state, then we can simply return `this`
+            return new Truncated(txnId(), saveStatus(), attrs.route(), attrs.progressShard(), executeAt, attrs.durableListeners());
         }
     }
 
@@ -685,25 +732,18 @@ public abstract class Command implements CommonAttributes
 
     public static class Committed extends Accepted
     {
-        private final ImmutableSortedSet<TxnId> waitingOnCommit;
-        private final ImmutableSortedMap<Timestamp, TxnId> waitingOnApply;
-
-        private Committed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply)
-        {
-            super(common, status, executeAt, promised, accepted);
-            this.waitingOnCommit = waitingOnCommit;
-            this.waitingOnApply = waitingOnApply;
-        }
-
+        public final WaitingOn waitingOn;
         private Committed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOn waitingOn)
         {
-            this(common, status, executeAt, promised, accepted, waitingOn.waitingOnCommit, waitingOn.waitingOnApply);
+            super(common, status, executeAt, promised, accepted);
+            this.waitingOn = waitingOn;
+            Invariants.checkState(waitingOn.deps.equals(common.partialDeps()));
         }
 
         @Override
         public Command updateAttributes(CommonAttributes attrs, Ballot promised)
         {
-            return new Committed(attrs, saveStatus(), executeAt(), promised, accepted(), waitingOnCommit(), waitingOnApply());
+            return new Committed(attrs, saveStatus(), executeAt(), promised, accepted(), waitingOn());
         }
 
         @Override
@@ -713,35 +753,34 @@ public abstract class Command implements CommonAttributes
             if (o == null || getClass() != o.getClass()) return false;
             if (!super.equals(o)) return false;
             Committed committed = (Committed) o;
-            return Objects.equals(waitingOnCommit, committed.waitingOnCommit)
-                    && Objects.equals(waitingOnApply, committed.waitingOnApply);
+            return Objects.equals(waitingOn, committed.waitingOn);
         }
 
-        private static Committed committed(Committed command, CommonAttributes common, Ballot promised, SaveStatus status, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply)
+        private static Committed committed(Committed command, CommonAttributes common, Ballot promised, SaveStatus status, WaitingOn waitingOn)
         {
             checkPromised(command, promised);
             checkSameClass(command, Committed.class, "Cannot update");
-            return new Committed(common, status, command.executeAt(), promised, command.accepted(), waitingOnCommit, waitingOnApply);
+            return new Committed(common, status, command.executeAt(), promised, command.accepted(), waitingOn);
         }
 
         static Committed committed(Committed command, CommonAttributes common, Ballot promised)
         {
-            return committed(command, common, promised, command.saveStatus(), command.waitingOnCommit(), command.waitingOnApply());
+            return committed(command, common, promised, command.saveStatus(), command.waitingOn());
         }
 
         static Committed committed(Committed command, CommonAttributes common, SaveStatus status)
         {
-            return committed(command, common, command.promised(), status, command.waitingOnCommit(), command.waitingOnApply());
+            return committed(command, common, command.promised(), status, command.waitingOn());
         }
 
         static Committed committed(Committed command, CommonAttributes common, WaitingOn waitingOn)
         {
-            return committed(command, common, command.promised(), command.saveStatus(), waitingOn.waitingOnCommit, waitingOn.waitingOnApply);
+            return committed(command, common, command.promised(), command.saveStatus(), waitingOn);
         }
 
-        static Committed committed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply)
+        static Committed committed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOn waitingOn)
         {
-            return new Committed(common, status, executeAt, promised, accepted, waitingOnCommit, waitingOnApply);
+            return new Committed(common, status, executeAt, promised, accepted, waitingOn);
         }
 
         public AsyncChain<Data> read(SafeCommandStore safeStore)
@@ -751,37 +790,17 @@ public abstract class Command implements CommonAttributes
 
         public WaitingOn waitingOn()
         {
-            return new WaitingOn(waitingOnCommit, waitingOnApply);
-        }
-
-        public ImmutableSortedSet<TxnId> waitingOnCommit()
-        {
-            return waitingOnCommit;
+            return waitingOn;
         }
 
         public boolean isWaitingOnCommit()
         {
-            return waitingOnCommit != null && !waitingOnCommit.isEmpty();
-        }
-
-        public TxnId firstWaitingOnCommit()
-        {
-            return isWaitingOnCommit() ? waitingOnCommit.first() : null;
-        }
-
-        public ImmutableSortedMap<Timestamp, TxnId> waitingOnApply()
-        {
-            return waitingOnApply;
+            return waitingOn.isWaitingOnCommit();
         }
 
         public boolean isWaitingOnApply()
         {
-            return waitingOnApply != null && !waitingOnApply.isEmpty();
-        }
-
-        public TxnId firstWaitingOnApply()
-        {
-            return isWaitingOnApply() ? waitingOnApply.firstEntry().getValue() : null;
+            return waitingOn.isWaitingOnApply();
         }
 
         public boolean isWaitingOnDependency()
@@ -795,13 +814,6 @@ public abstract class Command implements CommonAttributes
         private final Writes writes;
         private final Result result;
 
-        public Executed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply, Writes writes, Result result)
-        {
-            super(common, status, executeAt, promised, accepted, waitingOnCommit, waitingOnApply);
-            this.writes = writes;
-            this.result = result;
-        }
-
         public Executed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOn waitingOn, Writes writes, Result result)
         {
             super(common, status, executeAt, promised, accepted, waitingOn);
@@ -812,7 +824,7 @@ public abstract class Command implements CommonAttributes
         @Override
         public Command updateAttributes(CommonAttributes attrs, Ballot promised)
         {
-            return new Executed(attrs, saveStatus(), executeAt(), promised, accepted(), waitingOnCommit(), waitingOnApply(), writes, result);
+            return new Executed(attrs, saveStatus(), executeAt(), promised, accepted(), waitingOn(), writes, result);
         }
 
         @Override
@@ -826,35 +838,30 @@ public abstract class Command implements CommonAttributes
                     && Objects.equals(result, executed.result);
         }
 
-        public static Executed executed(Executed command, CommonAttributes common, SaveStatus status, Ballot promised, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply)
+        public static Executed executed(Executed command, CommonAttributes common, SaveStatus status, Ballot promised, WaitingOn waitingOn)
         {
             checkSameClass(command, Executed.class, "Cannot update");
-            return new Executed(common, status, command.executeAt(), promised, command.accepted(), waitingOnCommit, waitingOnApply, command.writes(), command.result());
+            return new Executed(common, status, command.executeAt(), promised, command.accepted(), waitingOn, command.writes(), command.result());
         }
 
         public static Executed executed(Executed command, CommonAttributes common, SaveStatus status)
         {
-            return executed(command, common, status, command.promised(), command.waitingOnCommit(), command.waitingOnApply());
+            return executed(command, common, status, command.promised(), command.waitingOn());
         }
 
         public static Executed executed(Executed command, CommonAttributes common, WaitingOn waitingOn)
         {
-            return executed(command, common, command.saveStatus(), command.promised(), waitingOn.waitingOnCommit, waitingOn.waitingOnApply);
+            return executed(command, common, command.saveStatus(), command.promised(), waitingOn);
         }
 
         public static Executed executed(Executed command, CommonAttributes common, Ballot promised)
         {
-            return executed(command, common, command.saveStatus(), promised, command.waitingOnCommit(), command.waitingOnApply());
-        }
-
-        public static Executed executed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply, Writes writes, Result result)
-        {
-            return new Executed(common, status, executeAt, promised, accepted, waitingOnCommit, waitingOnApply, writes, result);
+            return executed(command, common, command.saveStatus(), promised, command.waitingOn());
         }
 
         public static Executed executed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOn waitingOn, Writes writes, Result result)
         {
-            return new Executed(common, status, executeAt, promised, accepted, waitingOn.waitingOnCommit, waitingOn.waitingOnApply, writes, result);
+            return new Executed(common, status, executeAt, promised, accepted, waitingOn, writes, result);
         }
 
         public Writes writes()
@@ -870,88 +877,236 @@ public abstract class Command implements CommonAttributes
 
     public static class WaitingOn
     {
-        public static final WaitingOn EMPTY = new WaitingOn(ImmutableSortedSet.of(), ImmutableSortedMap.of());
-        public final ImmutableSortedSet<TxnId> waitingOnCommit;
-        public final ImmutableSortedMap<Timestamp, TxnId> waitingOnApply;
+        public static final WaitingOn EMPTY = new WaitingOn(Deps.NONE, ImmutableBitSet.EMPTY, ImmutableBitSet.EMPTY, ImmutableBitSet.EMPTY);
 
-        public WaitingOn(ImmutableSortedSet<TxnId> waitingOnCommit, ImmutableSortedMap<Timestamp, TxnId> waitingOnApply)
+        public final Deps deps;
+        // note that transactions default to waitingOnCommit, so presence in the set does not mean the transaction is uncommitted
+        public final ImmutableBitSet waitingOnCommit, waitingOnApply, appliedOrInvalidated;
+
+        public WaitingOn(Deps deps)
         {
+            this.deps = deps;
+            this.waitingOnCommit = new ImmutableBitSet(deps.txnIdCount(), true);
+            this.waitingOnApply = new ImmutableBitSet(deps.txnIdCount(), false);
+            this.appliedOrInvalidated = new ImmutableBitSet(deps.txnIdCount(), false);
+        }
+
+        public WaitingOn(Deps deps, ImmutableBitSet waitingOnCommit, ImmutableBitSet waitingOnApply, ImmutableBitSet appliedOrInvalidated)
+        {
+            this.deps = deps;
             this.waitingOnCommit = waitingOnCommit;
             this.waitingOnApply = waitingOnApply;
+            this.appliedOrInvalidated = appliedOrInvalidated;
+        }
+
+        public boolean isWaitingOnCommit()
+        {
+            return !waitingOnCommit.isEmpty();
+        }
+
+        public boolean isWaitingOnApply()
+        {
+            return !waitingOnApply.isEmpty();
+        }
+
+        public boolean isWaitingOn(TxnId txnId)
+        {
+            int index = deps.indexOf(txnId);
+            return index >= 0 && (waitingOnCommit.get(index) || waitingOnApply.get(index));
+        }
+
+        public TxnId nextWaitingOnCommit()
+        {
+            int i = waitingOnCommit.prevSetBit(waitingOnCommit.size() - 1);
+            return i < 0 ? null : deps.txnId(i);
+        }
+
+        public TxnId nextWaitingOnApply()
+        {
+            int i = waitingOnApply.prevSetBit(waitingOnApply.size() - 1);
+            return i < 0 ? null : deps.txnId(i);
+        }
+
+        public TxnId nextWaitingOn()
+        {
+            TxnId next = nextWaitingOnApply();
+            return next != null ? next : nextWaitingOnCommit();
+        }
+
+        public TxnId minWaitingOnTxnId()
+        {
+            return minWaitingOnTxnId(deps, waitingOnCommit, waitingOnApply);
+        }
+
+        static TxnId minWaitingOnTxnId(Deps deps, SimpleBitSet waitingOnCommit, SimpleBitSet waitingOnApply)
+        {
+            int keyDepsCount = deps.keyDeps.txnIdCount();
+            int minWaitingOnKeys = Math.min(waitingOnCommit.nextSetBitBefore(0, keyDepsCount, Integer.MAX_VALUE), waitingOnApply.nextSetBitBefore(0, keyDepsCount, Integer.MAX_VALUE));
+            int minWaitingOnRanges = Math.min(waitingOnCommit.nextSetBit(keyDepsCount, Integer.MAX_VALUE), waitingOnApply.nextSetBit(keyDepsCount, Integer.MAX_VALUE));
+            return TxnId.nonNullOrMin(minWaitingOnKeys == Integer.MAX_VALUE ? null : deps.txnId(minWaitingOnKeys),
+                                      minWaitingOnRanges == Integer.MAX_VALUE ? null : deps.txnId(minWaitingOnRanges));
+        }
+
+        public ImmutableSortedSet<TxnId> computeWaitingOnCommit()
+        {
+            ImmutableSortedSet.Builder<TxnId> builder = new ImmutableSortedSet.Builder<>(TxnId::compareTo);
+            waitingOnCommit.forEach(builder, deps, (b, d, i) -> b.add(d.txnId(i)));
+            return builder.build();
+        }
+
+        public ImmutableSortedSet<TxnId> computeWaitingOnApply()
+        {
+            ImmutableSortedSet.Builder<TxnId> builder = new ImmutableSortedSet.Builder<>(TxnId::compareTo);
+            waitingOnApply.forEach(builder, deps, waitingOnCommit, (b, d, s, i) -> {
+                if (!s.get(i))
+                    b.add(d.txnId(i));
+            });
+            return builder.build();
+        }
+
+        public String toString()
+        {
+            return "onApply=" + computeWaitingOnApply().descendingSet() + ", onCommit=" + computeWaitingOnCommit().descendingSet();
         }
 
         public static class Update
         {
-            private boolean hasChanges = false;
-            private NavigableSet<TxnId> waitingOnCommit;
-            private NavigableMap<Timestamp, TxnId> waitingOnApply;
-
-            public Update()
-            {
-
-            }
+            final Deps deps;
+            private SimpleBitSet waitingOnCommit, waitingOnApply, appliedOrInvalidated;
 
             public Update(WaitingOn waitingOn)
             {
+                this.deps = waitingOn.deps;
                 this.waitingOnCommit = waitingOn.waitingOnCommit;
                 this.waitingOnApply = waitingOn.waitingOnApply;
+                this.appliedOrInvalidated = waitingOn.appliedOrInvalidated;
             }
 
             public Update(Committed committed)
             {
-                this.waitingOnCommit = committed.waitingOnCommit();
-                this.waitingOnApply = committed.waitingOnApply();
+                this(committed.waitingOn);
             }
 
             public boolean hasChanges()
             {
-                return hasChanges;
+                return !(waitingOnCommit instanceof ImmutableBitSet)
+                       || !(waitingOnApply instanceof ImmutableBitSet)
+                       || !(appliedOrInvalidated instanceof ImmutableBitSet);
             }
 
-            public void addWaitingOnCommit(TxnId txnId)
+            public boolean removeWaitingOnCommit(TxnId txnId)
             {
-                waitingOnCommit = ensureSortedMutable(waitingOnCommit);
-                waitingOnCommit.add(txnId);
-                hasChanges = true;
+                int index = deps.indexOf(txnId);
+                if (!waitingOnCommit.get(index))
+                    return false;
+
+                waitingOnCommit = ensureMutable(waitingOnCommit);
+                waitingOnCommit.unset(index);
+                return true;
             }
 
-            public void removeWaitingOnCommit(TxnId txnId)
+            public boolean addWaitingOnApply(TxnId txnId)
             {
-                if (waitingOnApply == null)
-                    return;
-                waitingOnCommit = ensureSortedMutable(waitingOnCommit);
-                waitingOnCommit.remove(txnId);
-                hasChanges = true;
+                int index = deps.indexOf(txnId);
+                if (waitingOnApply.get(index))
+                    return false;
+
+                waitingOnApply = ensureMutable(waitingOnApply);
+                waitingOnApply.set(index);
+                return true;
             }
 
-            public void addWaitingOnApply(TxnId txnId, Timestamp executeAt)
+            public boolean removeWaitingOnApply(TxnId txnId)
             {
-                waitingOnApply = ensureSortedMutable(waitingOnApply);
-                waitingOnApply.put(executeAt, txnId);
-                hasChanges = true;
+                int index = deps.indexOf(txnId);
+                if (!waitingOnApply.get(index))
+                    return false;
+
+                waitingOnApply = ensureMutable(waitingOnApply);
+                waitingOnApply.unset(index);
+                return true;
             }
 
-            public void removeWaitingOnApply(TxnId txnId, Timestamp executeAt)
+            public boolean removeWaitingOn(TxnId txnId)
             {
-                if (waitingOnApply == null)
-                    return;
-                waitingOnApply = ensureSortedMutable(waitingOnApply);
-                waitingOnApply.remove(executeAt);
-                hasChanges = true;
+                return removeWaitingOnCommit(txnId) || removeWaitingOnApply(txnId);
             }
 
-            public void removeWaitingOn(TxnId txnId, Timestamp executeAt)
+            public boolean removeInvalidatedOrTruncated(TxnId txnId)
             {
-                removeWaitingOnCommit(txnId);
-                removeWaitingOnApply(txnId, executeAt);
-                hasChanges = true;
+                int index = this.deps.indexOf(txnId);
+                return setAppliedOrInvalidated(index);
+            }
+
+            public boolean isEmpty()
+            {
+                return waitingOnApply.isEmpty() && waitingOnCommit.isEmpty();
+            }
+
+            public boolean removeApplied(TxnId txnId, WaitingOn propagate)
+            {
+                int index = this.deps.indexOf(txnId);
+                if (!setAppliedOrInvalidated(index))
+                    return false;
+
+                if (!propagate.appliedOrInvalidated.isEmpty())
+                {
+                    forEachIntersection(propagate.deps.keyDeps.txnIds(), deps.keyDeps.txnIds(),
+                                        (from, to, ignore, i1, i2) -> {
+                                            if (from.get(i1))
+                                                to.setAppliedOrInvalidated(i2);
+                                        }, propagate.appliedOrInvalidated, this, null);
+
+                    forEachIntersection(propagate.deps.rangeDeps.txnIds(), propagate.deps.keyDeps.txnIdCount(), deps.rangeDeps.txnIds(), deps.keyDeps.txnIdCount(),
+                                        (from, to, ignore, i1, i2) -> {
+                                            if (from.get(i1))
+                                                to.setAppliedOrInvalidated(i2);
+                                        }, propagate.appliedOrInvalidated, this, null);
+                }
+
+                return true;
+            }
+
+            public TxnId minWaitingOnTxnId()
+            {
+                return WaitingOn.minWaitingOnTxnId(deps, waitingOnCommit, waitingOnApply);
+            }
+
+            boolean setAppliedOrInvalidated(int i)
+            {
+                if (appliedOrInvalidated.get(i))
+                    return false;
+
+                appliedOrInvalidated = ensureMutable(appliedOrInvalidated);
+                appliedOrInvalidated.set(i);
+
+                if (waitingOnCommit.get(i))
+                {
+                    waitingOnCommit = ensureMutable(waitingOnCommit);
+                    waitingOnCommit.unset(i);
+                }
+                else
+                {
+                    Invariants.checkState(waitingOnApply.get(i));
+                    waitingOnApply = ensureMutable(waitingOnApply);
+                    waitingOnApply.unset(i);
+                }
+                return true;
+            }
+
+            public <P1, P2, P3, P4> void forEachWaitingOnCommit(P1 p1, P2 p2, P3 p3, P4 p4, IndexedQuadConsumer<P1, P2, P3, P4> forEach)
+            {
+                waitingOnCommit.reverseForEach(p1, p2, p3, p4, forEach);
+            }
+
+            public <P1, P2, P3, P4> void forEachWaitingOnApply(P1 p1, P2 p2, P3 p3, P4 p4, IndexedQuadConsumer<P1, P2, P3, P4> forEach)
+            {
+                waitingOnApply.reverseForEach(p1, p2, p3, p4, forEach);
             }
 
             public WaitingOn build()
             {
-                if ((waitingOnCommit == null || waitingOnCommit.isEmpty()) && (waitingOnApply == null || waitingOnApply.isEmpty()))
-                    return EMPTY;
-                return new WaitingOn(ensureSortedImmutable(waitingOnCommit), ensureSortedImmutable(waitingOnApply));
+                return new WaitingOn(deps, ensureImmutable(waitingOnCommit), ensureImmutable(waitingOnApply), ensureImmutable(appliedOrInvalidated));
             }
         }
     }
@@ -980,7 +1135,7 @@ public abstract class Command implements CommonAttributes
 
     static Command.PreAccepted preaccept(Command command, CommonAttributes attrs, Timestamp executeAt, Ballot ballot)
     {
-        if (command.status() == Status.NotWitnessed)
+        if (command.status() == Status.NotDefined)
         {
             return Command.PreAccepted.preAccepted(attrs, executeAt, ballot);
         }
@@ -1010,23 +1165,18 @@ public abstract class Command implements CommonAttributes
 
     static Command.Accepted acceptInvalidated(Command command, Ballot ballot)
     {
-        Timestamp executeAt = command.isWitnessed() ? command.asWitnessed().executeAt() : null;
+        Timestamp executeAt = command.isDefined() ? command.asWitnessed().executeAt() : null;
         return new Command.Accepted(command, SaveStatus.get(Status.AcceptedInvalidate, command.known()), executeAt, ballot, ballot);
     }
 
     static Command.Committed commit(Command command, CommonAttributes attrs, Timestamp executeAt, Command.WaitingOn waitingOn)
     {
-        return Command.Committed.committed(attrs, SaveStatus.get(Status.Committed, command.known()), executeAt, command.promised(), command.accepted(), waitingOn.waitingOnCommit, waitingOn.waitingOnApply);
+        return Command.Committed.committed(attrs, SaveStatus.get(Status.Committed, command.known()), executeAt, command.promised(), command.accepted(), waitingOn);
     }
 
     static Command precommit(Command command, Timestamp executeAt)
     {
         return new Command.Accepted(command, SaveStatus.get(Status.PreCommitted, command.known()), executeAt, command.promised(), command.accepted());
-    }
-
-    static Command.Committed commitInvalidated(Command command, CommonAttributes attrs, Timestamp executeAt)
-    {
-        return Command.Executed.executed(attrs, SaveStatus.get(Status.Invalidated, command.known()), executeAt, command.promised(), command.accepted(), Command.WaitingOn.EMPTY, null, null);
     }
 
     static Command.Committed readyToExecute(Command.Committed command)
@@ -1037,6 +1187,11 @@ public abstract class Command implements CommonAttributes
     static Command.Executed preapplied(Command command, CommonAttributes attrs, Timestamp executeAt, Command.WaitingOn waitingOn, Writes writes, Result result)
     {
         return Command.Executed.executed(attrs, SaveStatus.get(Status.PreApplied, command.known()), executeAt, command.promised(), command.accepted(), waitingOn, writes, result);
+    }
+
+    static Command.Executed applying(Command.Executed command)
+    {
+        return Command.Executed.executed(command, command, SaveStatus.get(Status.Applying, command.known()));
     }
 
     static Command.Executed applied(Command.Executed command)

@@ -141,8 +141,6 @@ class Bootstrap
                        return AsyncResults.success(Ranges.EMPTY);
 
                    Commands.commitRecipientLocalSyncPoint(safeStore1, localSyncId, syncPoint, valid);
-                   // TODO (now): this should use a dedicated local id, distinct from the one we use to coordinate globally, as this may also be committed and applied locally
-                   // TODO (now): should we even be putting any partialDeps here? Doesn't seem like it, as they're handled on source nodes.
                    safeStore1.registerHistoricalTransactions(syncPoint.waitFor);
                    return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this);
                })))
@@ -164,7 +162,7 @@ class Bootstrap
                 if (!valid.intersects(invalidate))
                     return;
 
-                valid = valid.difference(invalidate);
+                valid = valid.subtract(invalidate);
                 abort = fetch;
                 // only cancel the outer future if we have no more ranges to fetch
                 cancel = valid.isEmpty() ? this.cancel : null;
@@ -326,7 +324,7 @@ class Bootstrap
                 if (newFailures.isEmpty())
                     return;
 
-                valid = valid.difference(newFailures);
+                valid = valid.subtract(newFailures);
                 hasFailed = valid.isEmpty();
             }
 
@@ -349,7 +347,7 @@ class Bootstrap
             if (state.safeToReadAt == null)
                 return;
 
-            Ranges newDone = fetched.slice(state.ranges.difference(fetchedAndSafeToRead), Minimal);
+            Ranges newDone = fetched.slice(state.ranges.subtract(fetchedAndSafeToRead), Minimal);
             if (newDone.isEmpty())
                 return;
 
@@ -359,7 +357,7 @@ class Bootstrap
                 // then we are not a definitive bound for safely starting reads, so remove the range
                 if (overlap.startedAt > state.startedAt)
                 {
-                    newDone = newDone.difference(overlap.ranges);
+                    newDone = newDone.subtract(overlap.ranges);
                     if (newDone.isEmpty())
                         return;
                 }
@@ -402,7 +400,7 @@ class Bootstrap
                 if (!fetchedAndSafeToRead.containsAll(fetchCompleted ? fetched : valid))
                     return;
 
-                retry = valid.difference(fetchedAndSafeToRead);
+                retry = valid.subtract(fetchedAndSafeToRead);
                 completed = true;
             }
 
@@ -461,7 +459,7 @@ class Bootstrap
         Invariants.checkArgument(inProgress.contains(attempt));
         Invariants.checkArgument(attempt.fetched.equals(attempt.fetchedAndSafeToRead));
         inProgress.remove(attempt);
-        remaining = remaining.difference(attempt.fetched);
+        remaining = remaining.subtract(attempt.fetched);
         if (inProgress.isEmpty() && remaining.isEmpty())
         {
             // TODO (now): this waits too long?
@@ -475,8 +473,8 @@ class Bootstrap
     // distinct from abort as triggered by ourselves when we no longer own the range
     synchronized void invalidate(Ranges invalidate)
     {
-        allValid = allValid.difference(invalidate);
-        remaining = remaining.difference(invalidate);
+        allValid = allValid.subtract(invalidate);
+        remaining = remaining.subtract(invalidate);
         for (Attempt attempt : inProgress)
             attempt.invalidate(invalidate);
     }

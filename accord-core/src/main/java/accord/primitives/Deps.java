@@ -23,6 +23,7 @@ import accord.utils.Invariants;
 
 import java.util.AbstractList;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -138,6 +139,21 @@ public class Deps
         return keyDeps.txnIdCount() + rangeDeps.txnIdCount();
     }
 
+    public int indexOf(TxnId txnId)
+    {
+        switch (txnId.domain())
+        {
+            default: throw new AssertionError();
+            case Key:
+                return Arrays.binarySearch(keyDeps.txnIds, txnId);
+            case Range:
+                int i = Arrays.binarySearch(rangeDeps.txnIds, txnId);
+                if (i < 0) i -= keyDeps.txnIdCount();
+                else i += keyDeps.txnIdCount();
+                return i;
+        }
+    }
+
     public TxnId txnId(int i)
     {
         return i < keyDeps.txnIdCount()
@@ -217,10 +233,12 @@ public class Deps
 
     public Unseekables<?, ?> someUnseekables(TxnId txnId)
     {
-        if (keyDeps.contains(txnId))
-            return keyDeps.someUnseekables(txnId);
-        else
-            return rangeDeps.someUnseekables(txnId);
+        switch (txnId.domain())
+        {
+            default:    throw new AssertionError();
+            case Key:   return keyDeps.someUnseekables(txnId);
+            case Range: return rangeDeps.someUnseekables(txnId);
+        }
     }
 
     // NOTE: filter only applied to keyDeps

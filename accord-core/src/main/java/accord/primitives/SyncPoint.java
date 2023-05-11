@@ -18,6 +18,9 @@
 
 package accord.primitives;
 
+import accord.api.RoutingKey;
+import accord.utils.Invariants;
+
 /**
  * Defines an inequality point in the processing of the distributed transaction log, which is to say that
  * this is able to say that the point has passed, or that it has not yet passed, but it is unable to
@@ -30,13 +33,21 @@ public class SyncPoint
 {
     public final TxnId syncId;
     public final Deps waitFor;
-    public final Route<?> route;
+    public final Ranges ranges;
+    public final RoutingKey homeKey;
 
-    public SyncPoint(TxnId syncId, Deps waitFor, Route<?> route)
+    public SyncPoint(TxnId syncId, Deps waitFor, Ranges ranges, FullRangeRoute route)
     {
+        Invariants.checkArgument(ranges.toRoute(route.homeKey).equals(route));
         this.syncId = syncId;
         this.waitFor = waitFor;
-        this.route = route;
+        this.ranges = ranges;
+        this.homeKey = route.homeKey();
+    }
+
+    public FullRangeRoute route()
+    {
+        return ranges.toRoute(homeKey);
     }
 
     public long sourceEpoch()

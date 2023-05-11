@@ -20,8 +20,6 @@ package accord.primitives;
 
 import accord.api.Key;
 import accord.utils.*;
-import accord.utils.RelationMultiMap.AbstractBuilder;
-import accord.utils.RelationMultiMap.Adapter;
 import accord.utils.SortedArrays.SortedArrayList;
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import net.nicoulaj.compilecommand.annotations.Inline;
@@ -35,7 +33,6 @@ import java.util.function.Predicate;
 
 import static accord.utils.ArrayBuffers.*;
 import static accord.utils.RelationMultiMap.*;
-import static accord.utils.RelationMultiMap.remove;
 import static accord.utils.SortedArrays.Search.CEIL;
 
 /**
@@ -229,7 +226,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     /**
      * The same TxnId may be provided as a parameter multiple times
      */
-    public <P> void forEach(Ranges ranges, IndexedConsumer<P> forEach, P param)
+    public <P> void forEach(Ranges ranges, P param, IndexedConsumer<P> forEach)
     {
         int minIndex = 0;
         for (int i = 0; i < ranges.size() ; ++i)

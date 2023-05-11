@@ -277,6 +277,11 @@ public class Timestamp implements Comparable<Timestamp>
         return a == null ? b : b == null ? a : max(a, b);
     }
 
+    public static <T extends Timestamp> T nonNullOrMin(T a, T b)
+    {
+        return a == null ? b : b == null ? a : min(a, b);
+    }
+
     public static <T extends Timestamp> T min(T a, T b)
     {
         return a.compareTo(b) <= 0 ? a : b;
@@ -287,7 +292,7 @@ public class Timestamp implements Comparable<Timestamp>
         return msb >>> 15;
     }
 
-    private static long epochMsb(long epoch)
+    static long epochMsb(long epoch)
     {
         return epoch << 15;
     }

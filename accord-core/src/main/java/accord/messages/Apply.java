@@ -18,19 +18,14 @@
 
 package accord.messages;
 
-import accord.local.SafeCommandStore;
 import accord.local.*;
 import accord.primitives.*;
 import accord.local.Node.Id;
 import accord.api.Result;
 import accord.topology.Topologies;
 
-import java.util.Collection;
-import java.util.Collections;
-
 import accord.messages.Apply.ApplyReply;
 
-import static accord.local.PreLoadContext.empty;
 import static accord.messages.MessageType.APPLY_REQ;
 import static accord.messages.MessageType.APPLY_RSP;
 
@@ -38,23 +33,21 @@ public class Apply extends TxnRequest<ApplyReply>
 {
     public static class SerializationSupport
     {
-        public static Apply create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long untilEpoch, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, Writes writes, Result result)
+        public static Apply create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, Writes writes, Result result)
         {
-            return new Apply(txnId, scope, waitForEpoch, untilEpoch, keys, executeAt, deps, writes, result);
+            return new Apply(txnId, scope, waitForEpoch, keys, executeAt, deps, writes, result);
         }
     }
 
-    public final long untilEpoch;
     public final Timestamp executeAt;
     public final PartialDeps deps;
     public final Seekables<?, ?> keys;
     public final Writes writes;
     public final Result result;
 
-    public Apply(Id to, Topologies sendTo, Topologies applyTo, long untilEpoch, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    public Apply(Id to, Topologies sendTo, Topologies applyTo, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         super(to, sendTo, route, txnId);
-        this.untilEpoch = untilEpoch;
         Ranges slice = applyTo == sendTo ? scope.covering() : applyTo.computeRangesForNode(to);
         // TODO (desired): it's wasteful to encode the full set of ranges owned by the recipient node;
         //     often it will be cheaper to include the FullRoute for Deps scope (or come up with some other safety-preserving encoding scheme)
@@ -65,10 +58,9 @@ public class Apply extends TxnRequest<ApplyReply>
         this.result = result;
     }
 
-    private Apply(TxnId txnId, PartialRoute<?> route, long waitForEpoch, long untilEpoch, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, Writes writes, Result result)
+    private Apply(TxnId txnId, PartialRoute<?> route, long waitForEpoch, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, Writes writes, Result result)
     {
         super(txnId, route, waitForEpoch);
-        this.untilEpoch = untilEpoch;
         this.executeAt = executeAt;
         this.deps = deps;
         this.keys = keys;
@@ -80,13 +72,16 @@ public class Apply extends TxnRequest<ApplyReply>
     public void process()
     {
         // note, we do not also commit here if txnId.epoch != executeAt.epoch, as the scope() for a commit would be different
-        node.mapReduceConsumeLocal(this, txnId.epoch(), untilEpoch, this);
+        node.mapReduceConsumeLocal(this, txnId.epoch(), executeAt.epoch(), this);
     }
 
     @Override
     public ApplyReply apply(SafeCommandStore safeStore)
     {
-        switch (Commands.apply(safeStore, txnId, untilEpoch, scope, executeAt, deps, writes, result))
+        if (safeStore.commandStore().isTruncated(txnId, executeAt, scope))
+            return ApplyReply.Redundant;
+
+        switch (Commands.apply(safeStore, txnId, scope, progressKey, executeAt, deps, writes, result))
         {
             default:
             case Insufficient:
@@ -107,13 +102,6 @@ public class Apply extends TxnRequest<ApplyReply>
     @Override
     public void accept(ApplyReply reply, Throwable failure)
     {
-        if (reply == ApplyReply.Applied)
-        {
-            node.withEpoch(executeAt.epoch(), () -> {
-                node.ifLocal(empty(), scope.homeKey(), txnId.epoch(), safeStore -> safeStore.progressLog().durableLocal(txnId))
-                    .begin(node.agent());
-            });
-        }
         node.reply(replyTo, replyContext, reply);
     }
 
@@ -121,13 +109,6 @@ public class Apply extends TxnRequest<ApplyReply>
     public TxnId primaryTxnId()
     {
         return txnId;
-    }
-
-    @Override
-    public Collection<TxnId> additionalTxnIds()
-    {
-        // TODO (expected): do not load into memory just so can register listeners etc.
-        return Collections.emptyList();
     }
 
     @Override

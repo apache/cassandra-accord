@@ -97,4 +97,14 @@ public class Utils
             return new HashSet<>();
         return set instanceof ImmutableSet ? new HashSet<>(set) : set;
     }
+
+    public static SimpleBitSet ensureMutable(SimpleBitSet set)
+    {
+        return set instanceof ImmutableBitSet ? new SimpleBitSet(set) : set;
+    }
+
+    public static ImmutableBitSet ensureImmutable(SimpleBitSet set)
+    {
+        return set instanceof ImmutableBitSet ? (ImmutableBitSet) set : new ImmutableBitSet(set);
+    }
 }

@@ -20,12 +20,12 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
-import accord.api.RoutingKey;
 import accord.local.Node;
 import accord.local.Status;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
-import accord.primitives.RoutingKeys;
+import accord.primitives.ProgressToken;
+import accord.primitives.Route;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
 
@@ -36,27 +36,25 @@ import static accord.primitives.Route.isFullRoute;
  * A result of null indicates the transaction is globally persistent
  * A result of CheckStatusOk indicates the maximum status found for the transaction, which may be used to assess progress
  */
-public class RecoverWithHomeKey extends CheckShards implements BiConsumer<Object, Throwable>
+public class RecoverWithSomeRoute extends CheckShards<Route<?>> implements BiConsumer<Object, Throwable>
 {
-    final RoutingKey homeKey;
     final BiConsumer<Outcome, Throwable> callback;
     final Status witnessedByInvalidation;
 
-    RecoverWithHomeKey(Node node, TxnId txnId, RoutingKey homeKey, Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
+    RecoverWithSomeRoute(Node node, TxnId txnId, Route<?> someRoute, Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
-        super(node, txnId, RoutingKeys.of(homeKey), txnId.epoch(), IncludeInfo.Route);
+        super(node, txnId, someRoute.withHomeKey(), IncludeInfo.Route);
         this.witnessedByInvalidation = witnessedByInvalidation;
         // if witnessedByInvalidation == AcceptedInvalidate then we cannot assume its definition was known, and our comparison with the status is invalid
         Invariants.checkState(witnessedByInvalidation != Status.AcceptedInvalidate);
         // if witnessedByInvalidation == Invalidated we should anyway not be recovering
         Invariants.checkState(witnessedByInvalidation != Status.Invalidated);
-        this.homeKey = homeKey;
         this.callback = callback;
     }
 
-    public static RecoverWithHomeKey recover(Node node, TxnId txnId, RoutingKey homeKey, Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
+    public static RecoverWithSomeRoute recover(Node node, TxnId txnId, Route<?> route, Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
-        RecoverWithHomeKey maybeRecover = new RecoverWithHomeKey(node, txnId, homeKey, witnessedByInvalidation, callback);
+        RecoverWithSomeRoute maybeRecover = new RecoverWithSomeRoute(node, txnId, route, witnessedByInvalidation, callback);
         maybeRecover.start();
         return maybeRecover;
     }
@@ -91,9 +89,16 @@ public class RecoverWithHomeKey extends CheckShards implements BiConsumer<Object
                     callback.accept(null, new IllegalStateException());
                     return;
                 case Quorum:
-                    if (witnessedByInvalidation != null && witnessedByInvalidation.compareTo(Status.PreAccepted) > 0)
-                        throw new IllegalStateException("We previously invalidated, finding a status that should be recoverable");
-                    Invalidate.invalidate(node, txnId, contact.with(homeKey), true, callback);
+                    if (merged != null && merged.truncated)
+                    {
+                        callback.accept(ProgressToken.TRUNCATED, null);
+                    }
+                    else
+                    {
+                        if (witnessedByInvalidation != null && witnessedByInvalidation.compareTo(Status.PreAccepted) > 0)
+                            throw new IllegalStateException("We previously invalidated, finding a status that should be recoverable");
+                        Invalidate.invalidate(node, txnId, route.withHomeKey(), true, callback);
+                    }
             }
         }
         else

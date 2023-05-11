@@ -23,9 +23,6 @@ import accord.local.*;
 import accord.local.Node.Id;
 import accord.primitives.*;
 import accord.topology.Topologies;
-import accord.primitives.Ballot;
-import accord.primitives.Route;
-import accord.primitives.TxnId;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -61,13 +58,17 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
     }
 
     @Override
-    public InvalidateReply apply(SafeCommandStore instance)
+    public InvalidateReply apply(SafeCommandStore safeStore)
     {
-        boolean isOk = Commands.preacceptInvalidate(instance, txnId, ballot);
-        SafeCommand safeCommand = instance.command(txnId);
+        if (safeStore.commandStore().isTruncatedAt(txnId, txnId.epoch(), someUnseekables))
+            return new InvalidateReply(Ballot.MAX, Ballot.MAX, Status.Truncated, false, null, null);
+
+        boolean acceptedFastPath = false;
+        SafeCommand safeCommand = safeStore.command(txnId);
+        boolean preaccepted = Commands.preacceptInvalidate(safeCommand, txnId, ballot);
         Command command = safeCommand.current();
-        Ballot supersededBy = isOk ? null : command.promised();
-        boolean acceptedFastPath = command.executeAt() != null && command.executeAt().equals(command.txnId());
+        acceptedFastPath = command.executeAt() != null && command.executeAt().equals(command.txnId());
+        Ballot supersededBy = preaccepted ? null : safeCommand.current().promised();
         return new InvalidateReply(supersededBy, command.accepted(), command.status(), acceptedFastPath, command.route(), command.homeKey());
     }
 
@@ -83,7 +84,7 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
         boolean acceptedFastPath = o1.acceptedFastPath && o2.acceptedFastPath;
         Route<?> route =  Route.merge((Route)o1.route, o2.route);
         RoutingKey homeKey = o1.homeKey != null ? o1.homeKey : o2.homeKey != null ? o2.homeKey : null;
-        InvalidateReply maxStatus = Status.max(o1, o1.status, o1.accepted, o2, o2.status, o2.accepted);
+        InvalidateReply maxStatus = Status.max(o1, o1.status, o1.accepted, o2, o2.status, o2.accepted, false);
         return new InvalidateReply(supersededBy, maxStatus.accepted, maxStatus.status, acceptedFastPath, route, homeKey);
     }
 
@@ -116,14 +117,14 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
 
     public static class InvalidateReply implements Reply
     {
-        public final Ballot supersededBy;
+        public final @Nullable Ballot supersededBy;
         public final Ballot accepted;
         public final Status status;
         public final boolean acceptedFastPath;
         public final @Nullable Route<?> route;
         public final @Nullable RoutingKey homeKey;
 
-        public InvalidateReply(Ballot supersededBy, Ballot accepted, Status status, boolean acceptedFastPath, @Nullable Route<?> route, @Nullable RoutingKey homeKey)
+        public InvalidateReply(@Nullable Ballot supersededBy, Ballot accepted, Status status, boolean acceptedFastPath, @Nullable Route<?> route, @Nullable RoutingKey homeKey)
         {
             this.supersededBy = supersededBy;
             this.accepted = accepted;
@@ -131,6 +132,11 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
             this.acceptedFastPath = acceptedFastPath;
             this.route = route;
             this.homeKey = homeKey;
+        }
+
+        public boolean hasDecision()
+        {
+            return status.hasBeen(Status.PreCommitted);
         }
 
         public boolean isPromised()
@@ -181,6 +187,11 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
         }
 
         public static InvalidateReply max(List<InvalidateReply> invalidateReplies)
+        {
+            return Status.max(invalidateReplies, r -> r.status, r -> r.accepted, invalidateReply -> true);
+        }
+
+        public static InvalidateReply maxNotTruncated(List<InvalidateReply> invalidateReplies)
         {
             return Status.max(invalidateReplies, r -> r.status, r -> r.accepted, invalidateReply -> true);
         }

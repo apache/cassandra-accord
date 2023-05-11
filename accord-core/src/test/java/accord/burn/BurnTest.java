@@ -216,6 +216,8 @@ public class BurnTest
         AtomicInteger acks = new AtomicInteger();
         AtomicInteger nacks = new AtomicInteger();
         AtomicInteger lost = new AtomicInteger();
+        AtomicInteger truncated = new AtomicInteger();
+        AtomicInteger failedToCheck = new AtomicInteger();
         AtomicInteger clock = new AtomicInteger();
         AtomicInteger requestIndex = new AtomicInteger();
         Queue<Packet> initialRequests = new ArrayDeque<>();
@@ -256,6 +258,8 @@ public class BurnTest
                 {
                     if (reply.read == null) nacks.incrementAndGet();
                     else if (reply.read.length == 1) lost.incrementAndGet();
+                    else if (reply.read.length == 2) truncated.incrementAndGet();
+                    else if (reply.read.length == 3) failedToCheck.incrementAndGet();
                     else throw new AssertionError();
                     return;
                 }
@@ -305,7 +309,7 @@ public class BurnTest
             throw t;
         }
 
-        logger.info("Received {} acks, {} nacks and {} lost ({} total) to {} operations", acks.get(), nacks.get(), lost.get(), acks.get() + nacks.get() + lost.get(), operations);
+        logger.info("Received {} acks, {} nacks, {} lost, {} truncated ({} total) to {} operations", acks.get(), nacks.get(), lost.get(), truncated.get(), acks.get() + nacks.get() + lost.get() + truncated.get(), operations);
         logger.info("Message counts: {}", messageStatsMap.entrySet());
         if (clock.get() != operations * 2)
         {
@@ -322,7 +326,7 @@ public class BurnTest
     {
         int count = 1;
         int operations = 1000;
-        Long overrideSeed = -3309027396608571728L;
+        Long overrideSeed = -3734695499364004280L;
         LongSupplier seedGenerator = ThreadLocalRandom.current()::nextLong;
         for (int i = 0 ; i < args.length ; i += 2)
         {

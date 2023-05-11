@@ -195,6 +195,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
             super(inclusiveEnds, capacity);
         }
 
+        @Override
         ReducingRangeMap<V> buildInternal()
         {
             return new ReducingRangeMap<>(inclusiveEnds, ends.toArray(new RoutingKey[0]), (V[])values.toArray(new Object[0]));

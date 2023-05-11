@@ -23,8 +23,6 @@ import accord.local.Node;
 import accord.api.Agent;
 import accord.api.Result;
 import accord.primitives.*;
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
 
 import java.util.concurrent.TimeUnit;
 

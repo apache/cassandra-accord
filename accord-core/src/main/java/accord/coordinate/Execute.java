@@ -41,7 +41,7 @@ import static accord.messages.Commit.Kind.Maximal;
 class Execute extends ReadCoordinator<ReadReply>
 {
     final Txn txn;
-    final Seekables<?, ?> readScope;
+    final Unseekables<?, ?> readScope;
     final FullRoute<?> route;
     final Timestamp executeAt;
     final Deps deps;
@@ -49,9 +49,9 @@ class Execute extends ReadCoordinator<ReadReply>
     final BiConsumer<? super Result, Throwable> callback;
     private Data data;
 
-    private Execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
+    private Execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Unseekables<?, ?> readScope, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
     {
-        super(node, node.topology().forEpoch(readScope.toUnseekables(), executeAt.epoch()), txnId);
+        super(node, node.topology().forEpoch(readScope, executeAt.epoch()), txnId);
         this.txn = txn;
         this.route = route;
         this.readScope = readScope;
@@ -73,7 +73,7 @@ class Execute extends ReadCoordinator<ReadReply>
         }
         else
         {
-            Execute execute = new Execute(node, txnId, txn, route, txn.keys(), executeAt, deps, callback);
+            Execute execute = new Execute(node, txnId, txn, route, txn.keys().toUnseekables(), executeAt, deps, callback);
             execute.start();
         }
     }
@@ -118,7 +118,7 @@ class Execute extends ReadCoordinator<ReadReply>
                 return Action.Reject;
             case Redundant:
                 callback.accept(null, new Preempted(txnId, route.homeKey()));
-                return Action.Abort;
+                return Action.Aborted;
             case NotCommitted:
                 // the replica may be missing the original commit, or the additional commit, so send everything
                 Topologies topology = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
@@ -128,7 +128,7 @@ class Execute extends ReadCoordinator<ReadReply>
                 return Action.TryAlternative;
             case Invalid:
                 callback.accept(null, new IllegalStateException("Submitted a read command to a replica that did not own the range"));
-                return Action.Abort;
+                return Action.Aborted;
         }
     }
 

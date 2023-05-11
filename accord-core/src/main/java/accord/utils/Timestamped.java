@@ -35,14 +35,34 @@ public class Timestamped<T>
 
     public static <T> Timestamped<T> merge(Timestamped<T> a, Timestamped<T> b)
     {
-        return a.timestamp.compareTo(b.timestamp) >= 0 ? a : b;
+        return a.timestamp.compareTo(b.timestamp) < 0 ? b : a;
     }
 
-    public static <T> Timestamped<T> merge(Timestamped<T> a, Timestamped<T> b, BiPredicate<T, T> testEquality)
+    public static <T> Timestamped<T> merge(Timestamped<T> a, Timestamped<T> b, BiPredicate<T, T> testPrefix, BiPredicate<T, T> testEquality)
     {
         int c = a.timestamp.compareTo(b.timestamp);
-        if (c == 0) Invariants.checkArgument(testEquality.test(a.data, b.data));
-        return c >= 0 ? a : b;
+        if (c == 0)
+        {
+            Invariants.checkArgument(testEquality.test(a.data, b.data));
+            return a;
+        }
+        else if (c < 0)
+        {
+            Invariants.checkArgument(testPrefix.test(a.data, b.data));
+            return b;
+        }
+        else
+        {
+            Invariants.checkArgument(testPrefix.test(b.data, a.data));
+            return a;
+        }
+    }
+
+    public static <T> Timestamped<T> mergeEqual(Timestamped<T> a, Timestamped<T> b, BiPredicate<T, T> testEquality)
+    {
+        int c = a.timestamp.compareTo(b.timestamp);
+        Invariants.checkState(c == 0 && testEquality.test(a.data, b.data));
+        return a;
     }
 
     @Override

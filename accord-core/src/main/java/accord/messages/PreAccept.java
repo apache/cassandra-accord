@@ -28,15 +28,14 @@ import accord.local.Node.Id;
 import accord.messages.TxnRequest.WithUnsynced;
 import accord.topology.Shard;
 import accord.topology.Topologies;
-import accord.primitives.Timestamp;
+
 import javax.annotation.Nullable;
 
 import accord.primitives.*;
 
-import accord.primitives.TxnId;
-
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestTimestamp.STARTED_BEFORE;
+import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 
 public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
 {
@@ -49,15 +48,16 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     }
 
     public final PartialTxn partialTxn;
-    public final @Nullable FullRoute<?> route; // ordinarily only set on home shard
+    public final FullRoute<?> route;
     public final long maxEpoch;
 
     public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route)
     {
         super(to, topologies, txnId, route);
-        this.partialTxn = txn.slice(scope.covering(), route.contains(route.homeKey()));
+        // TODO (expected): only includeQuery if route.contains(route.homeKey()); this affects state eviction and is low priority given size in C*
+        this.partialTxn = txn.slice(scope.covering(), true);
         this.maxEpoch = topologies.currentEpoch();
-        this.route = scope.contains(scope.homeKey()) ? route : null;
+        this.route = route;
     }
 
     PreAccept(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, long maxEpoch, PartialTxn partialTxn, @Nullable FullRoute<?> fullRoute)
@@ -90,6 +90,8 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     {
         // we only preaccept in the coordination epoch, but we might contact other epochs for dependencies
         Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, txnId);
+        if (txnId.rw() == ExclusiveSyncPoint)
+            safeStore.commandStore().markExclusiveSyncPoint(safeStore, txnId, ranges);
         return new PreAcceptOk(txnId, txnId, calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, ranges));
     }
 
@@ -103,7 +105,11 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         if (minUnsyncedEpoch < txnId.epoch() && !safeStore.ranges().coordinates(txnId).intersects(scope))
             return applyIfDoesNotCoordinate(safeStore);
 
-        switch (Commands.preaccept(safeStore, txnId, maxEpoch, partialTxn, route != null ? route : scope, progressKey))
+        // if the coordination or execution epoch intersect with a truncation then this transaction has been completed or rejected
+        if (safeStore.commandStore().isTruncatedAt(txnId, maxEpoch, scope))
+            return PreAcceptNack.INSTANCE;
+
+        switch (Commands.preaccept(safeStore, txnId, maxEpoch, partialTxn, route, progressKey))
         {
             default:
             case Success:
@@ -117,6 +123,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
                 return new PreAcceptOk(txnId, command.executeAt(),
                         calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().allBetween(minUnsyncedEpoch, txnId)));
 
+            case Truncated:
             case RejectedBallot:
                 return PreAcceptNack.INSTANCE;
         }

@@ -30,23 +30,18 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
 {
     public static class SerializationSupport
     {
-        public static PartialKeyRoute create(Ranges covering, RoutingKey homeKey, RoutingKey[] keys)
+        public static PartialKeyRoute create(Ranges covering, RoutingKey homeKey, boolean isParticipatingHomeKey, RoutingKey[] keys)
         {
-            return new PartialKeyRoute(covering, homeKey, keys);
+            return new PartialKeyRoute(covering, homeKey, isParticipatingHomeKey, keys);
         }
     }
 
     public final Ranges covering;
 
-    public PartialKeyRoute(Ranges covering, RoutingKey homeKey, RoutingKey[] keys)
+    public PartialKeyRoute(Ranges covering, RoutingKey homeKey, boolean isParticipatingHomeKey, RoutingKey[] keys)
     {
-        super(homeKey, keys);
+        super(homeKey, isParticipatingHomeKey, keys);
         this.covering = covering;
-    }
-
-    public static PartialKeyRoute empty(RoutingKey homeKey)
-    {
-        return new PartialKeyRoute(Ranges.EMPTY, homeKey, RoutingKeys.EMPTY.keys);
     }
 
     @Override
@@ -62,7 +57,7 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
     public PartialKeyRoute slice(Ranges newRanges)
     {
         RoutingKey[] keys = slice(newRanges, RoutingKey[]::new);
-        return new PartialKeyRoute(newRanges, homeKey, keys);
+        return new PartialKeyRoute(newRanges, homeKey, isParticipatingHomeKey, keys);
     }
 
     @Override
@@ -87,19 +82,31 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
     @Override
     public AbstractUnseekableKeys<?> with(RoutingKey withKey)
     {
+        if (withKey.equals(homeKey))
+            return withHomeKey();
+
         if (contains(withKey))
             return this;
 
         return new RoutingKeys(toRoutingKeysArray(withKey));
     }
 
+    @Override
+    public PartialKeyRoute withHomeKey()
+    {
+        if (contains(homeKey))
+            return this;
+        return new PartialKeyRoute(covering.with(Ranges.of(homeKey.asRange())), homeKey, isParticipatingHomeKey, toRoutingKeysArray(homeKey));
+    }
+
+    @Override
     public PartialKeyRoute slice(Ranges newRanges, Slice slice)
     {
         if (newRanges.containsAll(covering))
             return this;
 
         RoutingKey[] keys = slice(newRanges, RoutingKey[]::new);
-        return new PartialKeyRoute(newRanges, homeKey, keys);
+        return new PartialKeyRoute(newRanges, homeKey, isParticipatingHomeKey, keys);
     }
 
     @Override
@@ -116,12 +123,13 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
 
         PartialKeyRoute that = (PartialKeyRoute) with;
         Invariants.checkState(homeKey.equals(that.homeKey));
+        Invariants.checkState(isParticipatingHomeKey == that.isParticipatingHomeKey);
         RoutingKey[] keys = SortedArrays.linearUnion(this.keys, that.keys, RoutingKey[]::new);
         Ranges covering = this.covering.with(that.covering);
         if (covering == this.covering && keys == this.keys)
             return this;
         if (covering == that.covering && keys == that.keys)
             return that;
-        return new PartialKeyRoute(covering, homeKey, keys);
+        return new PartialKeyRoute(covering, homeKey, isParticipatingHomeKey, keys);
     }
 }

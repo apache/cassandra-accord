@@ -110,6 +110,11 @@ public interface Txn
             return this == LocalOnly;
         }
 
+        public boolean awaitsFutureDeps()
+        {
+            return this == ExclusiveSyncPoint;
+        }
+
         /**
          * Does the transaction propose dependencies as part of its Accept round, i.e. make durable a set of dependencies
          *

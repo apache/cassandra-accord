@@ -19,7 +19,6 @@
 package accord.primitives;
 
 import accord.api.RoutingKey;
-import accord.utils.ArrayBuffers.ObjectBuffers;
 
 import javax.annotation.Nonnull;
 import java.util.ArrayList;
@@ -33,12 +32,10 @@ import com.google.common.collect.ImmutableMap;
 
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_OVERLAPPING;
 import static accord.primitives.Routables.Slice.Overlapping;
-import static accord.utils.ArrayBuffers.cachedRanges;
-import static accord.utils.SortedArrays.Search.CEIL;
 
 public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, Seekables<Range, Ranges>, Unseekables<Range, Ranges>
 {
-    public static final Ranges EMPTY = ofSortedAndDeoverlappedUnchecked();
+    public static final Ranges EMPTY = new Ranges(new Range[0]);
 
     Ranges(@Nonnull Range[] ranges)
     {
@@ -47,16 +44,19 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
 
     public static Ranges of(Range... ranges)
     {
-        return AbstractRanges.of(Ranges::construct, ranges);
+        return AbstractRanges.of(Ranges::ofSortedAndDeoverlappedUnchecked, ranges);
     }
 
     public static Ranges ofSortedAndDeoverlapped(Range... ranges)
     {
-        return AbstractRanges.ofSortedAndDeoverlapped(Ranges::construct, ranges);
+        return AbstractRanges.ofSortedAndDeoverlapped(Ranges::ofSortedAndDeoverlappedUnchecked, ranges);
     }
 
     static Ranges ofSortedAndDeoverlappedUnchecked(Range... ranges)
     {
+        if (ranges.length == 0)
+            return EMPTY;
+
         return new Ranges(ranges);
     }
 
@@ -65,20 +65,12 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
         return new Ranges(new Range[]{range});
     }
 
-    private static Ranges construct(Range[] ranges)
-    {
-        if (ranges.length == 0)
-            return EMPTY;
-
-        return new Ranges(ranges);
-    }
-
     public Ranges select(int[] indexes)
     {
         Range[] selection = new Range[indexes.length];
         for (int i=0; i<indexes.length; i++)
             selection[i] = ranges[indexes[i]];
-        return ofSortedAndDeoverlapped(Ranges::construct, selection);
+        return ofSortedAndDeoverlapped(Ranges::ofSortedAndDeoverlappedUnchecked, selection);
     }
 
     public Stream<Range> stream()
@@ -103,6 +95,7 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
         return with((AbstractRanges<?>) that);
     }
 
+    @Override
     public Ranges with(Ranges that)
     {
         return union(MERGE_OVERLAPPING, that);
@@ -138,8 +131,11 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
     public FullRangeRoute toRoute(RoutingKey homeKey)
     {
         if (!contains(homeKey))
-            return with(Ranges.of(homeKey.asRange())).toRoute(homeKey);
-        return new FullRangeRoute(homeKey, ranges);
+        {
+            Range[] ranges = with(Ranges.of(homeKey.asRange())).ranges;
+            return new FullRangeRoute(homeKey, false, ranges);
+        }
+        return new FullRangeRoute(homeKey, true, ranges);
     }
 
     public Ranges union(UnionMode mode, Ranges that)
@@ -162,76 +158,6 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
     public Ranges mergeTouching()
     {
         return mergeTouching(this, Ranges::new);
-    }
-
-    /**
-     * Subtracts the given set of ranges from this
-     */
-    public Ranges difference(AbstractRanges<?> that)
-    {
-        if (that.isEmpty())
-            return this;
-
-        if (isEmpty() || that == this)
-            return EMPTY;
-
-        ObjectBuffers<Range> cachedRanges = cachedRanges();
-        Range[] result = null;
-
-        int count = 0;
-        int i = 0, j = 0;
-        Range iv = ranges[0];
-        while (true)
-        {
-            j = that.findNext(j, iv, CEIL);
-            if (j < 0)
-            {
-                j = -1 - j;
-                int nexti = j == that.size() ? size() : findNext(i + 1, that.ranges[j], CEIL);
-                if (nexti < 0) nexti = -1 - nexti;
-                if (count == 0)
-                    result = cachedRanges.get(1 + (this.size() - i) + (that.size() - j));
-                else if (count == result.length)
-                    result = cachedRanges.resize(result, count, count * 2);
-
-                result[count] = iv;
-                if (nexti > i + 1)
-                    System.arraycopy(ranges, i + 1, result, count + 1, nexti - (i + 1));
-                count += nexti - i;
-
-                if (nexti == ranges.length)
-                    break;
-                iv = ranges[i = nexti];
-                continue;
-            }
-
-            Range jv = that.ranges[j];
-            if (jv.start().compareTo(iv.start()) > 0)
-            {
-                if (count == 0)
-                    result = cachedRanges.get(1 + (this.size() - i) + (that.size() - j));
-                else if (count == result.length)
-                    result = cachedRanges.resize(result, count, count * 2);
-
-                result[count++] = iv.newRange(iv.start(), jv.start());
-            }
-
-            if (jv.end().compareTo(iv.end()) >= 0)
-            {
-                if (++i == ranges.length)
-                    break;
-                iv = ranges[i];
-            }
-            else
-            {
-                iv = iv.newRange(jv.end(), iv.end());
-            }
-        }
-
-        if (count == 0)
-            return EMPTY;
-
-        return construct(cachedRanges.completeAndDiscard(result, count));
     }
 
     public Map<Boolean, Ranges> partitioningBy(Predicate<? super Range> test)

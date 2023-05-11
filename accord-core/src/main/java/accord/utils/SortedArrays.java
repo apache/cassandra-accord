@@ -76,7 +76,7 @@ public class SortedArrays
     {
         public static <T extends Comparable<? super T>> ExtendedSortedArrayList<T> sortedCopyOf(Iterable<T> iterator, IntFunction<T[]> allocator)
         {
-            return new ExtendedSortedArrayList<T>(checkArgument(StreamSupport.stream(iterator.spliterator(), false).sorted().toArray(allocator), SortedArrays::isSortedUnique), allocator);
+            return new ExtendedSortedArrayList<>(checkArgument(StreamSupport.stream(iterator.spliterator(), false).sorted().toArray(allocator), SortedArrays::isSortedUnique), allocator);
         }
 
         final IntFunction<T[]> allocator;
@@ -88,7 +88,7 @@ public class SortedArrays
 
         public ExtendedSortedArrayList<T> difference(SortedArrayList<T> remove)
         {
-            return new ExtendedSortedArrayList<T>(linearDifference(array, remove.array, allocator), allocator);
+            return new ExtendedSortedArrayList<>(linearDifference(array, remove.array, allocator), allocator);
         }
     }
 
@@ -651,21 +651,21 @@ public class SortedArrays
      * with itself, but may match multiple entries in the other array, return a new array containing the elements of {@code slice}
      * that match elements of {@code select} as per the provided comparators.
      */
-    public static <A, R> A[] sliceWithMultipleMatches(A[] slice, R[] select, IntFunction<A[]> factory, AsymmetricComparator<A, R> cmp1, AsymmetricComparator<R, A> cmp2)
+    public static <A, R> A[] sliceWithMultipleMatches(A[] input, R[] select, IntFunction<A[]> factory, AsymmetricComparator<A, R> cmp1, AsymmetricComparator<R, A> cmp2)
     {
         A[] result;
         int resultCount;
         int ai = 0, ri = 0;
         while (true)
         {
-            long ari = findNextIntersection(slice, ai, slice.length, select, ri, select.length, cmp1, cmp2, Search.CEIL);
+            long ari = findNextIntersection(input, ai, input.length, select, ri, select.length, cmp1, cmp2, Search.CEIL);
             if (ari < 0)
             {
-                if (ai == slice.length)
-                    return slice; // all elements of slice were found in select, so can return the array unchanged
+                if (ai == input.length)
+                    return input; // all elements of slice were found in select, so can return the array unchanged
 
                 // The first (ai - 1) elements are present (without a gap), so copy just that subset
-                return Arrays.copyOf(slice, ai);
+                return Arrays.copyOf(input, ai);
             }
 
             int nextai = (int)(ari);
@@ -676,8 +676,8 @@ public class SortedArrays
                 // this means that ai currently points to an element in slice where it is not known if its present in select,
                 // so != implies a gap is detected!
                 resultCount = ai;
-                result = factory.apply(ai + (slice.length - nextai));
-                System.arraycopy(slice, 0, result, 0, resultCount);
+                result = factory.apply(ai + (input.length - nextai));
+                System.arraycopy(input, 0, result, 0, resultCount);
                 ai = nextai;
                 ri = (int)(ari >>> 32);
                 break;
@@ -686,19 +686,17 @@ public class SortedArrays
             ri = (int)(ari >>> 32);
             // In cases where duplicates are present in slice, find the last instance of slice[ai], and move past it.
             // slice[ai] is known to be present, so need to check the next element.
-            ai = exponentialSearch(slice, nextai, slice.length, select[ri], cmp2, Search.FLOOR) + 1;
+            ai = exponentialSearch(input, nextai, input.length, select[ri], cmp2, Search.FLOOR) + 1;
         }
 
         while (true)
         {
-            // Find the next element after the last element matching select[ri] and copy from slice into result
-            // nextai may be negative (such as -1), so the +1 may keep it negative OR set 0, since 0 < 0 is false
-            // it is safe to avoid checking for negative values
-            int nextai = exponentialSearch(slice, ai, slice.length, select[ri], cmp2, Search.FLOOR) + 1;
+            // find the matching end to the open slice
+            int nextai = exponentialSearch(input, ai, input.length, select[ri], cmp2, Search.FLOOR) + 1;
             while (ai < nextai)
-                result[resultCount++] = slice[ai++];
+                result[resultCount++] = input[ai++];
 
-            long ari = findNextIntersection(slice, ai, slice.length, select, ri, select.length, cmp1, cmp2, Search.CEIL);
+            long ari = findNextIntersection(input, ai, input.length, select, ri, select.length, cmp1, cmp2, Search.CEIL);
             if (ari < 0)
             {
                 if (resultCount < result.length)
@@ -710,6 +708,88 @@ public class SortedArrays
             ai = (int)(ari);
             ri = (int)(ari >>> 32);
         }
+    }
+
+    /**
+     * Given two sorted arrays {@code slice} and {@code select}, where each array's contents is unique and non-overlapping
+     * with itself, but may match multiple entries in the other array, return a new array containing the elements of {@code slice}
+     * that match elements of {@code select} as per the provided comparators.
+     */
+    public static <A, R> A[] subtractWithMultipleMatches(A[] input, R[] subtract, IntFunction<A[]> factory, AsymmetricComparator<A, R> cmp1, AsymmetricComparator<R, A> cmp2)
+    {
+        A[] result;
+        int resultCount;
+        int ai = 0, ri = 0;
+        // find first slice that removes an element, if any
+        long ari = findNextIntersection(input, ai, input.length, subtract, ri, subtract.length, cmp1, cmp2, Search.CEIL);
+        if (ari < 0)
+            return input; // no elements of input were found in subtract, so can return input unmodified
+
+        ai = resultCount = (int)(ari);
+        ri = (int)(ari >>> 32);
+        // find last element removed by this slice
+        int nextai = exponentialSearch(input, ai, input.length, subtract[ri], cmp2, Search.FLOOR) + 1;
+        if (nextai == input.length) // we remove the complete tail; just slice it
+            return Arrays.copyOf(input, resultCount);
+
+        // loop through any contiguous removals
+        while (true)
+        {
+            ai = nextai;
+            ari = findNextIntersection(input, ai, input.length, subtract, ri, subtract.length, cmp1, cmp2, Search.CEIL);
+            if (ari < 0)
+            {
+                nextai = input.length;
+                break;
+            }
+
+            nextai = (int)(ari);
+            ri = (int)(ari >>> 32);
+            if (ai != nextai)
+                break;
+
+            nextai = exponentialSearch(input, nextai, input.length, subtract[ri], cmp2, Search.FLOOR) + 1;
+            if (nextai == input.length) // we remove the complete tail; just slice it
+                return Arrays.copyOf(input, resultCount);
+        }
+
+        // we have found at least two separate slices to keep;
+        // the original 0..resultCount range, and the range [ai..nextai) representing the first non-contiguous removal after the initial removal
+        result = factory.apply(resultCount + (nextai - ai) + (input.length - nextai));
+        System.arraycopy(input, 0, result, 0, resultCount);
+        System.arraycopy(input, ai, result, resultCount, nextai - ai);
+        resultCount += nextai - ai;
+        if (nextai == input.length)
+            return result;
+
+        nextai = exponentialSearch(input, nextai, input.length, subtract[ri], cmp2, Search.FLOOR) + 1;
+        if (nextai == input.length) // we remove the complete tail; just slice it
+            return resizeIfNecessary(result, resultCount);
+
+        ai = nextai;
+        while (true)
+        {
+            ari = findNextIntersection(input, ai, input.length, subtract, ri, subtract.length, cmp1, cmp2, Search.CEIL);
+            if (ari < 0)
+                return resizeIfNecessary(result, resultCount);
+
+            nextai = (int)(ari);
+            ri = (int)(ari >>> 32);
+            if (ai != nextai)
+            {
+                System.arraycopy(input, ai, result, resultCount, nextai - ai);
+                resultCount += nextai - ai;
+            }
+
+            ai = exponentialSearch(input, ai, input.length, subtract[ri], cmp2, Search.FLOOR) + 1;
+        }
+    }
+
+    private static <T> T[] resizeIfNecessary(T[] input, int size)
+    {
+        if (size < input.length)
+            return Arrays.copyOf(input, size);
+        return input;
     }
 
     /**
@@ -1052,6 +1132,37 @@ public class SortedArrays
     public static int remap(int i, int[] remapper)
     {
         return remapper == null ? i : remapper[i];
+    }
+
+    @Inline
+    public static <T extends Comparable<? super T>, P1, P2, P3> void forEachIntersection(SortedArrayList<T> as, SortedArrayList<T> bs, BiIndexedTriConsumer<P1, P2, P3> forEach, P1 p1, P2 p2, P3 p3)
+    {
+        forEachIntersection(Comparable::compareTo, as.array, 0, as.size(), 0, bs.array, 0, bs.size(), 0, forEach, p1, p2, p3);
+    }
+
+    @Inline
+    public static <T extends Comparable<? super T>, P1, P2, P3> void forEachIntersection(SortedArrayList<T> as, int aoffset, SortedArrayList<T> bs, int boffset, BiIndexedTriConsumer<P1, P2, P3> forEach, P1 p1, P2 p2, P3 p3)
+    {
+        forEachIntersection(Comparable::compareTo, as.array, 0, as.size(), aoffset, bs.array, 0, bs.size(), boffset, forEach, p1, p2, p3);
+    }
+
+    @Inline
+    public static <T, P1, P2, P3> void forEachIntersection(AsymmetricComparator<? super T, ? super T> comparator, T[] as, int ai, int alim, int aoffset, T[] bs, int bi, int blim, int boffset, BiIndexedTriConsumer<P1, P2, P3> forEach, P1 p1, P2 p2, P3 p3)
+    {
+        while (true)
+        {
+            long abi = findNextIntersection(as, ai, alim, bs, bi, blim, comparator);
+            if (abi < 0)
+                break;
+
+            ai = (int)(abi);
+            bi = (int)(abi >>> 32);
+
+            forEach.accept(p1, p2, p3, aoffset + ai, boffset + bi);
+
+            ++ai;
+            ++bi;
+        }
     }
 
     /**
