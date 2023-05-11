@@ -20,6 +20,10 @@ package accord.utils.async;
 
 import java.util.function.Function;
 
+/**
+ * Stream like interface that is "pushed" results (to the {@link #onNext(Object)} method).  This interface is similar,
+ * yet different from {@link AsyncChain} as that type works with a single element, whereas this type works with 0-n.
+ */
 public interface Observable<T>
 {
     void onNext(T value);
