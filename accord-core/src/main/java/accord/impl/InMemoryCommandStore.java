@@ -34,6 +34,20 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import accord.impl.CommandTimeseries.CommandLoader;
+import accord.local.CommandStores.RangesForEpochHolder;
+import accord.local.CommandStores.RangesForEpoch;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.utils.Invariants;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -45,8 +59,6 @@ import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.local.Command;
 import accord.local.CommandStore;
-import accord.local.CommandStores.RangesForEpoch;
-import accord.local.CommandStores.RangesForEpochHolder;
 import accord.local.CommonAttributes;
 import accord.local.Listeners;
 import accord.local.NodeTimeService;
@@ -65,15 +77,6 @@ import accord.primitives.RoutableKey;
 import accord.primitives.Routables;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
-import accord.utils.Invariants;
-import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncChains;
-import javax.annotation.Nullable;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
@@ -482,7 +485,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
     }
 
-    class CFKLoader implements CommandsForKey.CommandLoader<TxnId>
+    class CFKLoader implements CommandLoader<TxnId>
     {
         private Command loadForCFK(TxnId data)
         {
@@ -725,7 +728,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         public <T> T mapReduce(Seekables<?, ?> keysOrRanges, Ranges slice, TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp, TestDep testDep, @Nullable TxnId depId, @Nullable Status minStatus, @Nullable Status maxStatus, CommandFunction<T, T> map, T accumulate, T terminalValue)
         {
             accumulate = commandStore.mapReduceForKey(this, keysOrRanges, slice, (forKey, prev) -> {
-                CommandsForKey.CommandTimeseries<?> timeseries;
+                CommandTimeseries<?> timeseries;
                 switch (testTimestamp)
                 {
                     default: throw new AssertionError();
@@ -737,17 +740,17 @@ public abstract class InMemoryCommandStore extends CommandStore
                     case MAY_EXECUTE_BEFORE:
                         timeseries = forKey.byExecuteAt();
                 }
-                CommandsForKey.CommandTimeseries.TestTimestamp remapTestTimestamp;
+                CommandTimeseries.TestTimestamp remapTestTimestamp;
                 switch (testTimestamp)
                 {
                     default: throw new AssertionError();
                     case STARTED_AFTER:
                     case EXECUTES_AFTER:
-                        remapTestTimestamp = CommandsForKey.CommandTimeseries.TestTimestamp.AFTER;
+                        remapTestTimestamp = CommandTimeseries.TestTimestamp.AFTER;
                         break;
                     case STARTED_BEFORE:
                     case MAY_EXECUTE_BEFORE:
-                        remapTestTimestamp = CommandsForKey.CommandTimeseries.TestTimestamp.BEFORE;
+                        remapTestTimestamp = CommandTimeseries.TestTimestamp.BEFORE;
                 }
                 return timeseries.mapReduce(testKind, remapTestTimestamp, timestamp, testDep, depId, minStatus, maxStatus, map, prev, terminalValue);
             }, accumulate, terminalValue);
@@ -866,7 +869,8 @@ public abstract class InMemoryCommandStore extends CommandStore
             return commandStore.register(this, keyOrRange, slice, command, attrs);
         }
 
-        public CommandsForKey.CommandLoader<?> cfkLoader()
+        @Override
+        public CommandLoader<?> cfkLoader()
         {
             return cfkLoader;
         }

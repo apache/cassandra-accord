@@ -19,22 +19,17 @@
 package accord.impl;
 
 import accord.api.Key;
+import accord.impl.CommandTimeseries.CommandLoader;
 import accord.local.*;
 import accord.primitives.*;
 import com.google.common.collect.ImmutableSortedMap;
 
-import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
-import java.util.function.Predicate;
-import java.util.stream.Stream;
 
-import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
-import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.Status.PreAccepted;
 import static accord.local.Status.PreCommitted;
-import static accord.utils.Utils.*;
 
 public class CommandsForKey
 {
@@ -52,179 +47,6 @@ public class CommandsForKey
                                                  ImmutableSortedMap<Timestamp, D> byExecuteAt)
         {
             return new CommandsForKey(key, max, lastExecutedTimestamp, lastExecutedMicros, lastWriteTimestamp, loader, byId, byExecuteAt);
-        }
-    }
-
-    public interface CommandLoader<D>
-    {
-        D saveForCFK(Command command);
-
-        TxnId txnId(D data);
-        Timestamp executeAt(D data);
-        SaveStatus saveStatus(D data);
-        List<TxnId> depsIds(D data);
-
-        default Status status(D data)
-        {
-            return saveStatus(data).status;
-        }
-
-        default Status.Known known(D data)
-        {
-            return saveStatus(data).known;
-        }
-    }
-
-    public static class CommandTimeseries<D>
-    {
-        public enum TestTimestamp {BEFORE, AFTER}
-
-        private final Key key;
-        protected final CommandLoader<D> loader;
-        public final ImmutableSortedMap<Timestamp, D> commands;
-
-        public CommandTimeseries(Update<D> builder)
-        {
-            this.key = builder.key;
-            this.loader = builder.loader;
-            this.commands = ensureSortedImmutable(builder.commands);
-        }
-
-        CommandTimeseries(Key key, CommandLoader<D> loader, ImmutableSortedMap<Timestamp, D> commands)
-        {
-            this.key = key;
-            this.loader = loader;
-            this.commands = commands;
-        }
-
-        public CommandTimeseries(Key key, CommandLoader<D> loader)
-        {
-            this(key, loader, ImmutableSortedMap.of());
-        }
-
-        @Override
-        public boolean equals(Object o)
-        {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            CommandTimeseries<?> that = (CommandTimeseries<?>) o;
-            return key.equals(that.key) && loader.equals(that.loader) && commands.equals(that.commands);
-        }
-
-        @Override
-        public int hashCode()
-        {
-            int hash = 1;
-            hash = 31 * hash + Objects.hashCode(key);
-            hash = 31 * hash + Objects.hashCode(loader);
-            hash = 31 * hash + Objects.hashCode(commands);
-            return hash;
-        }
-
-        public D get(Timestamp key)
-        {
-            return commands.get(key);
-        }
-
-        public boolean isEmpty()
-        {
-            return commands.isEmpty();
-        }
-
-        /**
-         * All commands before/after (exclusive of) the given timestamp
-         * <p>
-         * Note that {@code testDep} applies only to commands that know at least proposed deps; if specified any
-         * commands that do not know any deps will be ignored.
-         * <p>
-         * TODO (expected, efficiency): TestDep should be asynchronous; data should not be kept memory-resident as only used for recovery
-         */
-        public <T> T mapReduce(SafeCommandStore.TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp,
-                               SafeCommandStore.TestDep testDep, @Nullable TxnId depId,
-                               @Nullable Status minStatus, @Nullable Status maxStatus,
-                               SafeCommandStore.CommandFunction<T, T> map, T initialValue, T terminalValue)
-        {
-
-            for (D data : (testTimestamp == TestTimestamp.BEFORE ? commands.headMap(timestamp, false) : commands.tailMap(timestamp, false)).values())
-            {
-                TxnId txnId = loader.txnId(data);
-                if (!testKind.test(txnId.rw())) continue;
-                SaveStatus status = loader.saveStatus(data);
-                if (minStatus != null && minStatus.compareTo(status.status) > 0)
-                    continue;
-                if (maxStatus != null && maxStatus.compareTo(status.status) < 0)
-                    continue;
-                List<TxnId> deps = loader.depsIds(data);
-                // If we don't have any dependencies, we treat a dependency filter as a mismatch
-                if (testDep != ANY_DEPS && (!status.known.deps.hasProposedOrDecidedDeps() || (deps.contains(depId) != (testDep == WITH))))
-                    continue;
-                Timestamp executeAt = loader.executeAt(data);
-                initialValue = map.apply(key, txnId, executeAt, initialValue);
-                if (initialValue.equals(terminalValue))
-                    break;
-            }
-            return initialValue;
-        }
-
-        Stream<TxnId> between(Timestamp min, Timestamp max, Predicate<Status> statusPredicate)
-        {
-            return commands.subMap(min, true, max, true).values().stream()
-                    .filter(d -> statusPredicate.test(loader.status(d))).map(loader::txnId);
-        }
-
-        public Stream<D> all()
-        {
-            return commands.values().stream();
-        }
-
-        Update<D> beginUpdate()
-        {
-            return new Update<>(this);
-        }
-
-        public CommandLoader<D> loader()
-        {
-            return loader;
-        }
-
-        public static class Update<D>
-        {
-            private final Key key;
-            protected CommandLoader<D> loader;
-            protected NavigableMap<Timestamp, D> commands;
-
-            public Update(Key key, CommandLoader<D> loader)
-            {
-                this.key = key;
-                this.loader = loader;
-                this.commands = new TreeMap<>();
-            }
-
-            public Update(CommandTimeseries<D> timeseries)
-            {
-                this.key = timeseries.key;
-                this.loader = timeseries.loader;
-                this.commands = timeseries.commands;
-            }
-
-            public CommandsForKey.CommandTimeseries.Update<D> add(Timestamp timestamp, Command command)
-            {
-                commands = ensureSortedMutable(commands);
-                commands.put(timestamp, loader.saveForCFK(command));
-                return this;
-            }
-
-            public CommandsForKey.CommandTimeseries.Update<D> remove(Timestamp timestamp)
-            {
-                commands = ensureSortedMutable(commands);
-                commands.remove(timestamp);
-                return this;
-            }
-
-            CommandTimeseries<D> build()
-            {
-                return new CommandTimeseries<>(this);
-            }
         }
     }
 

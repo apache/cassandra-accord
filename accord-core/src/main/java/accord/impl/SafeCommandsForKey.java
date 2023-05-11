@@ -20,8 +20,7 @@ package accord.impl;
 
 import accord.api.Key;
 import accord.api.VisibleForImplementation;
-import accord.impl.CommandsForKey.CommandLoader;
-import accord.impl.CommandsForKey.CommandTimeseries;
+import accord.impl.CommandTimeseries.CommandLoader;
 import accord.local.Command;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
