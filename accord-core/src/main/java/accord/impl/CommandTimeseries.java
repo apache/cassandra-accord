@@ -202,6 +202,13 @@ public class CommandTimeseries<D>
             return this;
         }
 
+        public Update<D> add(Timestamp timestamp, D value)
+        {
+            commands = ensureSortedMutable(commands);
+            commands.put(timestamp, value);
+            return this;
+        }
+
         public Update<D> remove(Timestamp timestamp)
         {
             commands = ensureSortedMutable(commands);
@@ -209,7 +216,7 @@ public class CommandTimeseries<D>
             return this;
         }
 
-        CommandTimeseries<D> build()
+        public CommandTimeseries<D> build()
         {
             return new CommandTimeseries<>(this);
         }

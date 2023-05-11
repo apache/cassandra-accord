@@ -31,7 +31,7 @@ import java.util.function.Consumer;
 import static accord.local.Status.PreAccepted;
 import static accord.local.Status.PreCommitted;
 
-public class CommandsForKey
+public class CommandsForKey implements CommandTimeseriesHolder
 {
     public static class SerializerSupport
     {
@@ -205,11 +205,13 @@ public class CommandsForKey
         return lastWriteTimestamp;
     }
 
+    @Override
     public CommandTimeseries<?> byId()
     {
         return byId;
     }
 
+    @Override
     public CommandTimeseries<?> byExecuteAt()
     {
         return byExecuteAt;
