@@ -21,6 +21,7 @@ package accord.utils.async;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
@@ -30,8 +31,10 @@ import java.util.function.Function;
 public interface Observable<T>
 {
     void onNext(T value) throws Exception;
-    default void onError(Throwable t) {}
-    default void onCompleted() {}
+
+    void onError(Throwable t);
+
+    void onCompleted();
 
     default <R> Observable<R> map(Function<? super R, ? extends T> mapper)
     {
@@ -86,6 +89,48 @@ public interface Observable<T>
                 List<T> elements = this.elements;
                 this.elements = null;
                 callback.accept(elements, null);
+            }
+        };
+    }
+
+    static <A> AsyncChain<List<A>> asChain(Consumer<Observable<A>> work)
+    {
+        return asChain(work, Function.identity());
+    }
+
+    static <A, B> AsyncChain<List<B>> asChain(Consumer<Observable<A>> work, Function<? super A, ? extends B> mapper)
+    {
+        return new AsyncChains.Head<List<B>>()
+        {
+            @Override
+            protected void start(BiConsumer<? super List<B>, Throwable> callback)
+            {
+                work.accept(new Observable<A>()
+                {
+                    List<B> values = new ArrayList<>();
+
+                    @Override
+                    public void onNext(A value)
+                    {
+                        values.add(mapper.apply(value));
+                    }
+
+                    @Override
+                    public void onError(Throwable t)
+                    {
+                        values.clear();
+                        values = null;
+                        callback.accept(null, t);
+                    }
+
+                    @Override
+                    public void onCompleted()
+                    {
+                        List<B> values = this.values;
+                        this.values = null;
+                        callback.accept(values, null);
+                    }
+                });
             }
         };
     }
