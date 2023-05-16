@@ -47,7 +47,7 @@ public class AccordGens
 
     public static Gen<TxnId> txnIds()
     {
-        return txnIds(epochs()::nextLong, RandomSource::nextLong, RandomSource::nextInt);
+        return txnIds(epochs()::nextLong, rs -> rs.nextLong(0, Long.MAX_VALUE), RandomSource::nextInt);
     }
 
     public static Gen<TxnId> txnIds(Gen.LongGen epochs, Gen.LongGen hlcs, Gen.IntGen nodes)

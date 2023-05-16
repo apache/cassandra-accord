@@ -75,9 +75,9 @@ public class Timestamp implements Comparable<Timestamp>
 
     Timestamp(long epoch, long hlc, int flags, Id node)
     {
-        Invariants.checkArgument(hlc >= 0);
-        Invariants.checkArgument(epoch <= MAX_EPOCH);
-        Invariants.checkArgument(flags <= MAX_FLAGS);
+        Invariants.checkArgument(hlc >= 0, "hlc must be positive or zero; given %d", hlc);
+        Invariants.checkArgument(epoch <= MAX_EPOCH, "epoch %d > MAX_EPOCH %d", epoch, MAX_EPOCH);
+        Invariants.checkArgument(flags <= MAX_FLAGS, "flags %d > MAX_FLAGS %d", flags, MAX_FLAGS);
         this.msb = epochMsb(epoch) | hlcMsb(hlc);
         this.lsb = hlcLsb(hlc) | flags;
         this.node = node;
