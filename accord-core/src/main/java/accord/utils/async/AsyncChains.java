@@ -462,7 +462,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
 
     public static <V> AsyncChain<V> reduce(List<? extends AsyncChain<? extends V>> chains, BiFunction<V, V, V> reducer)
     {
-        Invariants.checkArgument(!chains.isEmpty());
+        Invariants.checkArgument(!chains.isEmpty(), "List of chains is empty");
         if (chains.size() == 1)
             return (AsyncChain<V>) chains.get(0);
         if (Reduce.canAppendTo(chains.get(0), reducer))
