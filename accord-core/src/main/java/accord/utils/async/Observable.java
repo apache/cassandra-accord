@@ -19,7 +19,9 @@
 package accord.utils.async;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -61,6 +63,37 @@ public interface Observable<T>
             public void onCompleted()
             {
                 self.onCompleted();
+            }
+        };
+    }
+
+    static <T> Observable<T> distinct(Observable<T> callback)
+    {
+        return new Observable<T>()
+        {
+            Set<T> keys = new HashSet<>();
+
+            @Override
+            public void onNext(T value) throws Exception
+            {
+                if (keys.add(value))
+                    callback.onNext(value);
+            }
+
+            @Override
+            public void onError(Throwable t)
+            {
+                keys.clear();
+                keys = null;
+                callback.onError(t);
+            }
+
+            @Override
+            public void onCompleted()
+            {
+                keys.clear();
+                keys = null;
+                callback.onCompleted();
             }
         };
     }
