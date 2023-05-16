@@ -35,15 +35,6 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import accord.impl.CommandTimeseries.CommandLoader;
-import accord.local.CommandStores.RangesForEpochHolder;
-import accord.local.CommandStores.RangesForEpoch;
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
-import accord.utils.Invariants;
-import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncChains;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,8 +48,11 @@ import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.ProgressLog;
+import accord.impl.CommandTimeseries.CommandLoader;
 import accord.local.Command;
 import accord.local.CommandStore;
+import accord.local.CommandStores.RangesForEpoch;
+import accord.local.CommandStores.RangesForEpochHolder;
 import accord.local.CommonAttributes;
 import accord.local.Listeners;
 import accord.local.NodeTimeService;
@@ -77,6 +71,11 @@ import accord.primitives.RoutableKey;
 import accord.primitives.Routables;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.utils.Invariants;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
