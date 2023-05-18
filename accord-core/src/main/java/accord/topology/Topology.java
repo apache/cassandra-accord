@@ -200,7 +200,7 @@ public class Topology
 
     public <P1> Topology forSelection(Unseekables<?, ?> select, IndexedPredicate<P1> predicate, P1 param)
     {
-        return forSubset(subsetFor(select, predicate, param));
+        return forSubset(subsetFor(select, predicate, param, OnUnknown.IGNORE));
     }
 
     public Topology forSelection(Unseekables<?, ?> select, Collection<Id> nodes)
@@ -210,7 +210,7 @@ public class Topology
 
     public <P1> Topology forSelection(Unseekables<?, ?> select, Collection<Id> nodes, IndexedPredicate<P1> predicate, P1 param)
     {
-        return forSubset(subsetFor(select, predicate, param), nodes);
+        return forSubset(subsetFor(select, predicate, param, OnUnknown.IGNORE), nodes);
     }
 
     private Topology forSubset(int[] newSubset)
@@ -236,7 +236,9 @@ public class Topology
         return new Topology(epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
     }
 
-    private <P1> int[] subsetFor(Unseekables<?, ?> select, IndexedPredicate<P1> predicate, P1 param)
+    private enum OnUnknown { REJECT, IGNORE }
+
+    private <P1> int[] subsetFor(Unseekables<?, ?> select, IndexedPredicate<P1> predicate, P1 param, OnUnknown onUnknown)
     {
         int count = 0;
         IntBuffers cachedInts = ArrayBuffers.cachedInts();
@@ -258,16 +260,36 @@ public class Topology
                     if (abi < 0)
                     {
                         if (ailim < as.size())
-                            throw new IllegalArgumentException("Range not found for " + as.get(ailim));
+                        {
+                            switch (onUnknown)
+                            {
+                                case REJECT: throw new IllegalArgumentException("Range not found for " + as.get(ailim));
+                                case IGNORE:
+                                    break;
+                                default:
+                                    throw new IllegalArgumentException("Unknown option: " + onUnknown);
+                            }
+                        }
                         break;
                     }
 
                     ai = (int)abi;
+                    boolean skip = false;
                     if (ailim < ai)
-                        throw new IllegalArgumentException("Range not found for " + as.get(ailim));
+                    {
+                        switch (onUnknown)
+                        {
+                            default:
+                                throw new IllegalArgumentException("Unknown option: " + onUnknown);
+                            case REJECT: throw new IllegalArgumentException("Range not found for " + as.get(ailim));
+                            case IGNORE:
+                                bi = (int)(abi >>> 32);
+                                skip = true;
+                        }
+                    }
 
                     bi = (int)(abi >>> 32);
-                    if (predicate.test(param, bi))
+                    if (!skip && predicate.test(param, bi))
                     {
                         if (count == newSubset.length)
                             newSubset = cachedInts.resize(newSubset, count, count * 2);
@@ -312,7 +334,7 @@ public class Topology
 
     public <P1> void visitNodeForKeysOnceOrMore(Unseekables<?, ?> select, IndexedPredicate<P1> predicate, P1 param, Consumer<Id> nodes)
     {
-        for (int shardIndex : subsetFor(select, predicate, param))
+        for (int shardIndex : subsetFor(select, predicate, param, OnUnknown.IGNORE))
         {
             Shard shard = shards[shardIndex];
             for (Id id : shard.nodes)
