@@ -18,7 +18,6 @@
 
 package accord.utils.async;
 
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -100,30 +99,35 @@ public interface Observable<T>
 
     static <T> Observable<T> forCallback(BiConsumer<? super List<T>, Throwable> callback)
     {
+        return forCallback(callback, Collectors.toList());
+    }
+
+    static <T, Result, Accumulator> Observable<T> forCallback(BiConsumer<? super Result, Throwable> callback,
+                                                              Collector<? super T, Accumulator, Result> collector)
+    {
         return new Observable<T>()
         {
-            private List<T> elements = new ArrayList<>();
+            Accumulator values = collector.supplier().get();
 
             @Override
             public void onNext(T value)
             {
-                elements.add(value);
+                collector.accumulator().accept(values, value);
             }
 
             @Override
             public void onError(Throwable t)
             {
-                this.elements.clear();
-                this.elements = null;
+                values = null;
                 callback.accept(null, t);
             }
 
             @Override
             public void onCompleted()
             {
-                List<T> elements = this.elements;
-                this.elements = null;
-                callback.accept(elements, null);
+                Result result = collector.finisher().apply(this.values);
+                this.values = null;
+                callback.accept(result, null);
             }
         };
     }
@@ -148,31 +152,7 @@ public interface Observable<T>
             @Override
             protected void start(BiConsumer<? super Result, Throwable> callback)
             {
-                work.accept(new Observable<A>()
-                {
-                    Accumulator values = collector.supplier().get();
-
-                    @Override
-                    public void onNext(A value)
-                    {
-                        collector.accumulator().accept(values, mapper.apply(value));
-                    }
-
-                    @Override
-                    public void onError(Throwable t)
-                    {
-                        values = null;
-                        callback.accept(null, t);
-                    }
-
-                    @Override
-                    public void onCompleted()
-                    {
-                        Result result = collector.finisher().apply(this.values);
-                        this.values = null;
-                        callback.accept(result, null);
-                    }
-                });
+                work.accept(forCallback(callback, collector).map(mapper));
             }
         };
     }
