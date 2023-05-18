@@ -230,16 +230,20 @@ public class TopologyManager
     {
         Epochs current = epochs;
 
-        checkArgument(topology.epoch == current.nextEpoch());
+        checkArgument(topology.epoch == current.nextEpoch(), "Expected topology update %d to be %d", topology.epoch, current.nextEpoch());
         EpochState[] nextEpochs = new EpochState[current.epochs.length + 1];
         List<Set<Id>> pendingSync = new ArrayList<>(current.pendingSyncComplete);
         Set<Id> alreadySyncd = Collections.emptySet();
         if (!pendingSync.isEmpty())
         {
-            EpochState currentEpoch = current.epochs[0];
-            if (current.epochs[0].syncComplete())
-                currentEpoch.markPrevSynced();
-            alreadySyncd = pendingSync.remove(0);
+            // if empty, then notified about an epoch from a peer before first epoch seen
+            if (current.epochs.length != 0)
+            {
+                EpochState currentEpoch = current.epochs[0];
+                if (currentEpoch.syncComplete())
+                    currentEpoch.markPrevSynced();
+                alreadySyncd = pendingSync.remove(0);
+            }
         }
         System.arraycopy(current.epochs, 0, nextEpochs, 1, current.epochs.length);
 
