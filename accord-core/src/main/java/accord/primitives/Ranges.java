@@ -22,6 +22,9 @@ import accord.api.RoutingKey;
 import accord.utils.ArrayBuffers.ObjectBuffers;
 
 import javax.annotation.Nonnull;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_OVERLAPPING;
@@ -225,6 +228,29 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
             return EMPTY;
 
         return construct(cachedRanges.completeAndDiscard(result, count));
+    }
+
+    public Partition partition(Predicate<Range> test)
+    {
+        List<Range> left = new ArrayList<>();
+        List<Range> right = new ArrayList<>();
+        for (Range range : this)
+            (test.test(range) ? left : right).add(range);
+        if (left.isEmpty()) return new Partition(Ranges.EMPTY, this);
+        if (right.isEmpty()) return new Partition(this, Ranges.EMPTY);
+        return new Partition(Ranges.ofSortedAndDeoverlapped(left.toArray(new Range[0])),
+                             Ranges.ofSortedAndDeoverlapped(right.toArray(new Range[0])));
+    }
+
+    public static class Partition
+    {
+        public final Ranges left, right;
+
+        public Partition(Ranges left, Ranges right)
+        {
+            this.left = left;
+            this.right = right;
+        }
     }
 
 }

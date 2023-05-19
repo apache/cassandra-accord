@@ -325,7 +325,7 @@ public abstract class CommandStores
         }
     }
 
-    protected boolean shouldBootstrap(Node node, Topology local, Topology newLocalTopology, Ranges add)
+    protected boolean shouldBootstrap(Node node, Topology local, Topology newLocalTopology, Range add)
     {
         return newLocalTopology.epoch() != 1;
     }
@@ -376,10 +376,12 @@ public abstract class CommandStores
                 RangesForEpochHolder rangesHolder = new RangesForEpochHolder();
                 ShardHolder shardHolder = new ShardHolder(supplier.create(nextId++, rangesHolder), rangesHolder);
                 rangesHolder.current = new RangesForEpoch(epoch, add, shardHolder.store);
-                // the first epoch we assume is either empty, or correctly initialised by whatever system is migrating
-                // TODO (correctness) : ranges may have a new keyspace AND a new range that needs to bootstrap... this logic will do the wrong thing in that case
-                if (shouldBootstrap(node, prev.local, newLocalTopology, add)) bootstrapUpdates.add(shardHolder.store.bootstrapper(node, add, newLocalTopology.epoch()));
-                else bootstrapUpdates.add(() -> shardHolder.store.initialise(epoch, add));
+
+                Ranges.Partition partition = add.partition(range -> shouldBootstrap(node, prev.local, newLocalTopology, range));
+                if (!partition.left.isEmpty())
+                    bootstrapUpdates.add(shardHolder.store.bootstrapper(node, partition.left, newLocalTopology.epoch()));
+                if (!partition.right.isEmpty())
+                    bootstrapUpdates.add(() -> shardHolder.store.initialise(epoch, partition.right));
                 result.add(shardHolder);
             }
         }
