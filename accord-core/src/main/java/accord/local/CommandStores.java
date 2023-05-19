@@ -325,6 +325,11 @@ public abstract class CommandStores
         }
     }
 
+    protected boolean shouldBootstrap(Node node, Topology local, Topology newLocalTopology, Ranges add)
+    {
+        return newLocalTopology.epoch() != 1;
+    }
+
     private synchronized TopologyUpdate updateTopology(Node node, Snapshot prev, Topology newTopology)
     {
         checkArgument(!newTopology.isSubset(), "Use full topology for CommandStores.updateTopology");
@@ -372,8 +377,9 @@ public abstract class CommandStores
                 ShardHolder shardHolder = new ShardHolder(supplier.create(nextId++, rangesHolder), rangesHolder);
                 rangesHolder.current = new RangesForEpoch(epoch, add, shardHolder.store);
                 // the first epoch we assume is either empty, or correctly initialised by whatever system is migrating
-                if (epoch == 1) bootstrapUpdates.add(() -> shardHolder.store.initialise(epoch, add));
-                else bootstrapUpdates.add(shardHolder.store.bootstrapper(node, add, newLocalTopology.epoch()));
+                // TODO (correctness) : ranges may have a new keyspace AND a new range that needs to bootstrap... this logic will do the wrong thing in that case
+                if (shouldBootstrap(node, prev.local, newLocalTopology, add)) bootstrapUpdates.add(shardHolder.store.bootstrapper(node, add, newLocalTopology.epoch()));
+                else bootstrapUpdates.add(() -> shardHolder.store.initialise(epoch, add));
                 result.add(shardHolder);
             }
         }
