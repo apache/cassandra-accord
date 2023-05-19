@@ -119,6 +119,7 @@ public class CommandTimeseries<D>
         for (D data : (testTimestamp == TestTimestamp.BEFORE ? commands.headMap(timestamp, false) : commands.tailMap(timestamp, false)).values())
         {
             TxnId txnId = loader.txnId(data);
+            // TODO (revert) : bad idea
             if (!ignoreTestKind && !testKind.test(txnId.rw())) continue;
             SaveStatus status = loader.saveStatus(data);
             if (minStatus != null && minStatus.compareTo(status.status) > 0)
