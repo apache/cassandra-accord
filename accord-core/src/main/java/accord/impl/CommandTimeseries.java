@@ -50,12 +50,14 @@ public class CommandTimeseries<D>
     private final Seekable keyOrRange;
     protected final CommandLoader<D> loader;
     public final ImmutableSortedMap<Timestamp, D> commands;
+    private final boolean ignoreTestKind;
 
     public CommandTimeseries(Update<D> builder)
     {
         this.keyOrRange = builder.keyOrRange;
         this.loader = builder.loader;
         this.commands = ensureSortedImmutable(builder.commands);
+        this.ignoreTestKind = builder.ignoreTestKind;
     }
 
     CommandTimeseries(Seekable keyOrRange, CommandLoader<D> loader, ImmutableSortedMap<Timestamp, D> commands)
@@ -63,6 +65,7 @@ public class CommandTimeseries<D>
         this.keyOrRange = keyOrRange;
         this.loader = loader;
         this.commands = commands;
+        this.ignoreTestKind = false;
     }
 
     public CommandTimeseries(Key keyOrRange, CommandLoader<D> loader)
@@ -116,7 +119,7 @@ public class CommandTimeseries<D>
         for (D data : (testTimestamp == TestTimestamp.BEFORE ? commands.headMap(timestamp, false) : commands.tailMap(timestamp, false)).values())
         {
             TxnId txnId = loader.txnId(data);
-            if (!testKind.test(txnId.rw())) continue;
+            if (!ignoreTestKind && !testKind.test(txnId.rw())) continue;
             SaveStatus status = loader.saveStatus(data);
             if (minStatus != null && minStatus.compareTo(status.status) > 0)
                 continue;
@@ -180,6 +183,7 @@ public class CommandTimeseries<D>
         private final Seekable keyOrRange;
         protected CommandLoader<D> loader;
         protected NavigableMap<Timestamp, D> commands;
+        private boolean ignoreTestKind = false;
 
         public Update(Seekable keyOrRange, CommandLoader<D> loader)
         {
@@ -219,6 +223,11 @@ public class CommandTimeseries<D>
         public CommandTimeseries<D> build()
         {
             return new CommandTimeseries<>(this);
+        }
+
+        public void ignoreTestKind(boolean ignoreTestKind)
+        {
+            this.ignoreTestKind = ignoreTestKind;
         }
     }
 }
