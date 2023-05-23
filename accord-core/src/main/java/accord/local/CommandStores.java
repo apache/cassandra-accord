@@ -37,6 +37,7 @@ import accord.utils.async.AsyncChains;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -377,11 +378,11 @@ public abstract class CommandStores
                 ShardHolder shardHolder = new ShardHolder(supplier.create(nextId++, rangesHolder), rangesHolder);
                 rangesHolder.current = new RangesForEpoch(epoch, add, shardHolder.store);
 
-                Ranges.Partition partition = add.partition(range -> shouldBootstrap(node, prev.local, newLocalTopology, range));
-                if (!partition.left.isEmpty())
-                    bootstrapUpdates.add(shardHolder.store.bootstrapper(node, partition.left, newLocalTopology.epoch()));
-                if (!partition.right.isEmpty())
-                    bootstrapUpdates.add(() -> shardHolder.store.initialise(epoch, partition.right));
+                Map<Boolean, Ranges> partitioned = add.partitioningBy(range -> shouldBootstrap(node, prev.local, newLocalTopology, range));
+                if (partitioned.containsKey(true))
+                    bootstrapUpdates.add(shardHolder.store.bootstrapper(node, partitioned.get(true), newLocalTopology.epoch()));
+                if (partitioned.containsKey(false))
+                    bootstrapUpdates.add(() -> shardHolder.store.initialise(epoch, partitioned.get(false)));
                 result.add(shardHolder);
             }
         }
