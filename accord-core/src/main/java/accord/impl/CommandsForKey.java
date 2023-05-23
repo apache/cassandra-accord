@@ -185,6 +185,7 @@ public class CommandsForKey implements CommandTimeseriesHolder
         return key;
     }
 
+    @Override
     public Timestamp max()
     {
         return max;

@@ -99,6 +99,11 @@ public class CommandTimeseries<D>
         return commands.isEmpty();
     }
 
+    public Timestamp maxTimestamp()
+    {
+        return commands.isEmpty() ? Timestamp.NONE : commands.keySet().last();
+    }
+
     /**
      * All commands before/after (exclusive of) the given timestamp
      * <p>

@@ -18,8 +18,12 @@
 
 package accord.impl;
 
+import accord.primitives.Timestamp;
+
 public interface CommandTimeseriesHolder
 {
     CommandTimeseries<?> byId();
     CommandTimeseries<?> byExecuteAt();
+
+    Timestamp max();
 }
