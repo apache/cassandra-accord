@@ -304,7 +304,7 @@ public abstract class CommandStore implements AgentExecutor
             }
             else
             {
-                execute(contextFor(null, deps.txnIds()), safeStore -> {
+                execute(contextFor(null, deps.txnIds(), deps.keyDeps.keys()), safeStore -> {
                     registerHistoricalTransactions(deps);
                 }).begin((success, fail2) -> {
                     if (fail2 != null) fetchMajorityDeps(coordination, node, epoch, ranges);
