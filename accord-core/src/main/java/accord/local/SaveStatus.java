@@ -74,6 +74,18 @@ public enum SaveStatus
         return this.status.compareTo(status) >= 0;
     }
 
+    public boolean isComplete()
+    {
+        switch (this)
+        {
+            case Applied:
+            case Invalidated:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     // TODO (expected, testing): exhaustive testing, particularly around PreCommitted
     public static SaveStatus get(Status status, Known known)
     {
