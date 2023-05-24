@@ -23,6 +23,7 @@ import java.util.function.Predicate;
 import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.ProgressLog;
+import accord.primitives.Deps;
 import accord.primitives.Keys;
 import accord.primitives.Ranges;
 import accord.primitives.Seekable;
@@ -155,6 +156,7 @@ public interface SafeCommandStore
     NodeTimeService time();
     CommandStores.RangesForEpoch ranges();
     Timestamp maxConflict(Seekables<?, ?> keys, Ranges slice);
+    void registerHistoricalTransactions(Deps deps);
 
     default long latestEpoch()
     {

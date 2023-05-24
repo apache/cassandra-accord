@@ -115,6 +115,11 @@ public abstract class CommandStore implements AgentExecutor
         return agent;
     }
 
+    public RangesForEpochHolder rangesForEpochHolder()
+    {
+        return rangesForEpochHolder;
+    }
+
     public abstract boolean inStore();
 
     public abstract AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer);
@@ -140,8 +145,6 @@ public abstract class CommandStore implements AgentExecutor
     {
         this.bootstrapBeganAt = newBootstrapBeganAt;
     }
-
-    protected abstract void registerHistoricalTransactions(Deps deps);
 
     /**
      * This method may be invoked on a non-CommandStore thread
@@ -307,7 +310,7 @@ public abstract class CommandStore implements AgentExecutor
                 // TODO (correcness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
                 // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
                 execute(contextFor(null, deps.txnIds(), deps.keyDeps.keys()), safeStore -> {
-                    registerHistoricalTransactions(deps);
+                    safeStore.registerHistoricalTransactions(deps);
                 }).begin((success, fail2) -> {
                     if (fail2 != null) fetchMajorityDeps(coordination, node, epoch, ranges);
                     else coordination.setSuccess(null);

@@ -143,7 +143,7 @@ class Bootstrap
                    Commands.commitRecipientLocalSyncPoint(safeStore1, localSyncId, syncPoint, valid);
                    // TODO (now): this should use a dedicated local id, distinct from the one we use to coordinate globally, as this may also be committed and applied locally
                    // TODO (now): should we even be putting any partialDeps here? Doesn't seem like it, as they're handled on source nodes.
-                   safeStore1.commandStore().registerHistoricalTransactions(syncPoint.waitFor);
+                   safeStore1.registerHistoricalTransactions(syncPoint.waitFor);
                    return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this);
                })))
                .flatMap(i -> i)
