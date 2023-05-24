@@ -304,6 +304,8 @@ public abstract class CommandStore implements AgentExecutor
             }
             else
             {
+                // TODO (correcness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
+                // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
                 execute(contextFor(null, deps.txnIds(), deps.keyDeps.keys()), safeStore -> {
                     registerHistoricalTransactions(deps);
                 }).begin((success, fail2) -> {
