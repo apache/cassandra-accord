@@ -118,6 +118,12 @@ public interface ConfigurationService
          * This should be invoked on each replica once EpochReady.coordination has returned on a replica.
          */
         void onEpochSyncComplete(Node.Id node, long epoch);
+
+        /**
+         * Called when the configuration service is meant to truncate it's topology data up to (but not including)
+         * the given epoch
+         */
+        void truncateTopologyUntil(long epoch);
     }
 
     void registerListener(Listener listener);

@@ -103,7 +103,7 @@ public class Topology
     @Override
     public String toString()
     {
-        return "Topology{" + "epoch=" + epoch + ", " + super.toString() + '}';
+        return "Topology{" + "epoch=" + epoch + ", " + Arrays.toString(shards) + '}';
     }
 
     @Override

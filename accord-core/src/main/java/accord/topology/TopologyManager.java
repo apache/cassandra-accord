@@ -68,6 +68,7 @@ public class TopologyManager
             this.global = checkArgument(global, !global.isSubset());
             this.local = global.forNode(node).trim();
             Invariants.checkArgument(!global().isSubset());
+            // TODO: can we just track sync for local ranges here?
             this.syncTracker = new QuorumTracker(new Single(sorter, global()));
             this.syncComplete = syncComplete;
             this.prevSynced = prevSynced;
@@ -129,6 +130,7 @@ public class TopologyManager
 
     private static class Epochs
     {
+        private static final Epochs EMPTY = new Epochs(new EpochState[0]);
         private final long currentEpoch;
         private final EpochState[] epochs;
         // nodes we've received sync complete notifications from, for epochs we do not yet have topologies for.
@@ -174,6 +176,16 @@ public class TopologyManager
             return current().epoch + 1;
         }
 
+        public long minEpoch()
+        {
+            return currentEpoch - epochs.length + 1;
+        }
+
+        public long epoch()
+        {
+            return currentEpoch;
+        }
+
         public Topology current()
         {
             return epochs.length > 0 ? epochs[0].global() : Topology.EMPTY;
@@ -197,6 +209,8 @@ public class TopologyManager
             else
             {
                 EpochState state = get(epoch);
+                if (state == null)
+                    return;
                 state.recordSyncComplete(node);
                 for (epoch++ ; state.syncComplete() && epoch <= currentEpoch; epoch++)
                 {
@@ -223,14 +237,15 @@ public class TopologyManager
     {
         this.sorter = sorter;
         this.node = node;
-        this.epochs = new Epochs(new EpochState[0]);
+        this.epochs = Epochs.EMPTY;
     }
 
     public synchronized void onTopologyUpdate(Topology topology)
     {
         Epochs current = epochs;
 
-        checkArgument(topology.epoch == current.nextEpoch(), "Expected topology update %d to be %d", topology.epoch, current.nextEpoch());
+        checkArgument(topology.epoch == current.nextEpoch() || epochs == Epochs.EMPTY,
+                      "Expected topology update %d to be %d", topology.epoch, current.nextEpoch());
         EpochState[] nextEpochs = new EpochState[current.epochs.length + 1];
         List<Set<Id>> pendingSync = new ArrayList<>(current.pendingSyncComplete);
         Set<Id> alreadySyncd = Collections.emptySet();
@@ -272,6 +287,22 @@ public class TopologyManager
     public void onEpochSyncComplete(Id node, long epoch)
     {
         epochs.syncComplete(node, epoch);
+    }
+
+    public synchronized void truncateTopologyUntil(long epoch)
+    {
+        Epochs current = epochs;
+        checkArgument(current.epoch() >= epoch);
+
+        if (current.minEpoch() >= epoch)
+            return;
+
+        int newLen = current.epochs.length - (int) (epoch - current.minEpoch());
+        Invariants.checkState(current.epochs[newLen - 1].syncComplete());
+
+        EpochState[] nextEpochs = new EpochState[newLen];
+        System.arraycopy(current.epochs, 0, nextEpochs, 0, newLen);
+        epochs = new Epochs(nextEpochs, current.pendingSyncComplete, current.futureEpochFutures);
     }
 
     public TopologySorter.Supplier sorter()

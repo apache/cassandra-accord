@@ -138,17 +138,17 @@ public class Utils
         MockStore store = new MockStore();
         Scheduler scheduler = new ThreadPoolScheduler();
         Node node = new Node(nodeId,
-                        messageSink,
-                        new MockConfigurationService(messageSink, EpochFunction.noop(), topology),
-                        clock,
-                        () -> store,
-                        new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()),
-                        new TestAgent(),
-                        new DefaultRandom(),
-                        scheduler,
-                        SizeOfIntersectionSorter.SUPPLIER,
-                        SimpleProgressLog::new,
-                        InMemoryCommandStores.Synchronized::new);
+                             messageSink,
+                             new MockConfigurationService(messageSink, EpochFunction.noop(), topology),
+                             clock,
+                             () -> store,
+                             new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()),
+                             new TestAgent(),
+                             new DefaultRandom(),
+                             scheduler,
+                             SizeOfIntersectionSorter.SUPPLIER,
+                             SimpleProgressLog::new,
+                             InMemoryCommandStores.Synchronized::new);
         awaitUninterruptibly(node.start());
         return node;
     }
