@@ -102,7 +102,7 @@ public class EpochSync implements Runnable
 
         public CommandSync(Node node, Route<?> route, SyncCommitted message, Topology topology)
         {
-            this.tracker = new QuorumTracker(new Single(node.topology().sorter(), topology.forSelection(route)));
+            this.tracker = new QuorumTracker(new Single(node.topology().sorter(), topology.forSelection(route, Topology.OnUnknown.REJECT)));
             node.send(tracker.nodes(), message, this);
         }
 

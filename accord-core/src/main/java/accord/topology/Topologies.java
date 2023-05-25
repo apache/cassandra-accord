@@ -51,6 +51,11 @@ public interface Topologies extends TopologySorter
 
     int size();
 
+    default boolean isEmpty()
+    {
+        return size() == 0;
+    }
+
     int totalShards();
 
     boolean contains(Id to);

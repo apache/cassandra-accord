@@ -66,7 +66,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
         AwaitCommit(Node node, TxnId txnId, Unseekables<?, ?> unseekables)
         {
-            Topology topology = node.topology().globalForEpoch(txnId.epoch()).forSelection(unseekables);
+            Topology topology = node.topology().globalForEpoch(txnId.epoch()).forSelection(unseekables, Topology.OnUnknown.REJECT);
             this.tracker = new QuorumTracker(new Topologies.Single(node.topology().sorter(), topology));
             node.send(topology.nodes(), to -> new WaitOnCommit(to, topology, txnId, unseekables), this);
         }
