@@ -33,25 +33,28 @@ import accord.utils.Invariants;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
-public abstract class AbstractConfigurationService implements ConfigurationService
+public abstract class AbstractConfigurationService<EpochState extends AbstractConfigurationService.AbstractEpochState,
+                                                   EpochHistory extends AbstractConfigurationService.AbstractEpochHistory<EpochState>>
+                      implements ConfigurationService
 {
     private static final Logger logger = LoggerFactory.getLogger(AbstractConfigurationService.class);
 
-    protected final Node.Id node;
+    protected final Node.Id localId;
 
-    protected final EpochHistory epochs = new EpochHistory();
+    protected final EpochHistory epochs = createEpochHistory();
 
     protected final List<Listener> listeners = new ArrayList<>();
 
-    static class EpochState
+    public abstract static class AbstractEpochState
     {
-        private final long epoch;
-        private final AsyncResult.Settable<Topology> received = AsyncResults.settable();
-        private final AsyncResult.Settable<Void> acknowledged = AsyncResults.settable();
+        protected final long epoch;
+        protected final AsyncResult.Settable<Topology> received = AsyncResults.settable();
+        protected final AsyncResult.Settable<Void> acknowledged = AsyncResults.settable();
+        protected AsyncResult<Void> reads = null;
 
-        private Topology topology = null;
+        protected Topology topology = null;
 
-        public EpochState(long epoch)
+        public AbstractEpochState(long epoch)
         {
             this.epoch = epoch;
         }
@@ -69,13 +72,15 @@ public abstract class AbstractConfigurationService implements ConfigurationServi
     }
 
     @VisibleForTesting
-    protected static class EpochHistory
+    public abstract static class AbstractEpochHistory<EpochState extends AbstractEpochState>
     {
         // TODO (low priority): move pendingEpochs / FetchTopology into here?
         private List<EpochState> epochs = new ArrayList<>();
 
         protected long lastReceived = 0;
-        private long lastAcknowledged = 0;
+        protected long lastAcknowledged = 0;
+
+        protected abstract EpochState createEpochState(long epoch);
 
         long minEpoch()
         {
@@ -105,7 +110,7 @@ public abstract class AbstractConfigurationService implements ConfigurationServi
             Invariants.checkArgument(epoch > 0);
             if (epochs.isEmpty())
             {
-                EpochState state = new EpochState(epoch);
+                EpochState state = createEpochState(epoch);
                 epochs.add(state);
                 return state;
             }
@@ -116,7 +121,7 @@ public abstract class AbstractConfigurationService implements ConfigurationServi
                 int prepend = Ints.checkedCast(minEpoch - epoch);
                 List<EpochState> next = new ArrayList<>(epochs.size() + prepend);
                 for (long addEpoch=epoch; addEpoch<minEpoch; addEpoch++)
-                    next.add(new EpochState(addEpoch));
+                    next.add(createEpochState(addEpoch));
                 next.addAll(epochs);
                 epochs = next;
                 minEpoch = minEpoch();
@@ -127,12 +132,12 @@ public abstract class AbstractConfigurationService implements ConfigurationServi
 
             // add any missing epochs
             for (long addEpoch = maxEpoch + 1; addEpoch <= epoch; addEpoch++)
-                epochs.add(new EpochState(addEpoch));
+                epochs.add(createEpochState(addEpoch));
 
             return epochs.get(idx);
         }
 
-        public EpochHistory receive(Topology topology)
+        public void receive(Topology topology)
         {
             long epoch = topology.epoch();
             Invariants.checkState(lastReceived == epoch - 1 || epoch == 0 || lastReceived == 0);
@@ -143,7 +148,6 @@ public abstract class AbstractConfigurationService implements ConfigurationServi
                 state.topology = topology;
                 state.received.setSuccess(topology);
             }
-            return this;
         }
 
         AsyncResult<Topology> receiveFuture(long epoch)
@@ -156,12 +160,14 @@ public abstract class AbstractConfigurationService implements ConfigurationServi
             return getOrCreate(epoch).topology;
         }
 
-        public EpochHistory acknowledge(long epoch)
+        public void acknowledge(EpochReady ready)
         {
+            long epoch = ready.epoch;
             Invariants.checkState(lastAcknowledged == epoch - 1 || epoch == 0 || lastAcknowledged == 0);
             lastAcknowledged = epoch;
-            getOrCreate(epoch).acknowledged.setSuccess(null);
-            return this;
+            EpochState state = getOrCreate(epoch);
+            state.reads = ready.reads;
+            state.acknowledged.setSuccess(null);
         }
 
         AsyncResult<Void> acknowledgeFuture(long epoch)
@@ -181,9 +187,16 @@ public abstract class AbstractConfigurationService implements ConfigurationServi
         }
     }
 
-    public AbstractConfigurationService(Node.Id node)
+    public AbstractConfigurationService(Node.Id localId)
     {
-        this.node = node;
+        this.localId = localId;
+    }
+
+    protected abstract EpochHistory createEpochHistory();
+
+    protected EpochState getOrCreateEpochState(long epoch)
+    {
+        return epochs.getOrCreate(epoch);
     }
 
     @Override
@@ -215,19 +228,19 @@ public abstract class AbstractConfigurationService implements ConfigurationServi
         fetchTopologyInternal(epoch);
     }
 
-    protected abstract void epochSyncComplete(Topology topology );
+    protected abstract void localSyncComplete(Topology topology);
 
     @Override
     public synchronized void acknowledgeEpoch(EpochReady ready)
     {
-        ready.metadata.addCallback(() -> epochs.acknowledge(ready.epoch));
-        ready.coordination.addCallback(() ->  epochSyncComplete(epochs.getOrCreate(ready.epoch).topology));
+        ready.metadata.addCallback(() -> epochs.acknowledge(ready));
+        ready.coordination.addCallback(() ->  localSyncComplete(epochs.getOrCreate(ready.epoch).topology));
     }
 
     protected void topologyUpdatePreListenerNotify(Topology topology) {}
     protected void topologyUpdatePostListenerNotify(Topology topology) {}
 
-    public synchronized AsyncResult<Void> reportTopology(Topology topology)
+    public synchronized AsyncResult<Void> reportTopology(Topology topology, boolean startSync)
     {
         long lastReceived = epochs.lastReceived;
         if (topology.epoch() <= lastReceived)
@@ -236,33 +249,38 @@ public abstract class AbstractConfigurationService implements ConfigurationServi
         if (lastReceived > 0 && topology.epoch() > lastReceived + 1)
         {
             fetchTopologyForEpoch(lastReceived + 1);
-            epochs.receiveFuture(lastReceived + 1).addCallback(() -> reportTopology(topology));
+            epochs.receiveFuture(lastReceived + 1).addCallback(() -> reportTopology(topology, startSync));
             return AsyncResults.success(null);
         }
 
         long lastAcked = epochs.lastAcknowledged;
         if (lastAcked > 0 && topology.epoch() > lastAcked + 1)
         {
-            epochs.acknowledgeFuture(lastAcked + 1).addCallback(() -> reportTopology(topology));
+            epochs.acknowledgeFuture(lastAcked + 1).addCallback(() -> reportTopology(topology, startSync));
             return AsyncResults.success(null);
         }
-        logger.trace("Epoch {} received by {}", topology.epoch(), node);
+        logger.trace("Epoch {} received by {}", topology.epoch(), localId);
 
         epochs.receive(topology);
         topologyUpdatePreListenerNotify(topology);
         for (Listener listener : listeners)
-            listener.onTopologyUpdate(topology);
+            listener.onTopologyUpdate(topology, startSync);
         topologyUpdatePostListenerNotify(topology);
         return AsyncResults.success(null);
     }
 
-    protected void epochSyncCompletePreListenerNotify(Node.Id node, long epoch) {}
-
-    public synchronized void epochSyncComplete(Node.Id node, long epoch)
+    public synchronized AsyncResult<Void> reportTopology(Topology topology)
     {
-        epochSyncCompletePreListenerNotify(node, epoch);
+        return reportTopology(topology, true);
+    }
+
+    protected void remoteSyncCompletePreListenerNotify(Node.Id node, long epoch) {}
+
+    public synchronized void remoteSyncComplete(Node.Id node, long epoch)
+    {
+        remoteSyncCompletePreListenerNotify(node, epoch);
         for (Listener listener : listeners)
-            listener.onEpochSyncComplete(node, epoch);
+            listener.onRemoteSyncComplete(node, epoch);
     }
 
     protected void truncateTopologiesPreListenerNotify(long epoch) {}
@@ -275,5 +293,45 @@ public abstract class AbstractConfigurationService implements ConfigurationServi
             listener.truncateTopologyUntil(epoch);
         truncateTopologiesPostListenerNotify(epoch);
         epochs.truncateUntil(epoch);
+    }
+
+    public synchronized AsyncResult<Void> epochReady(long epoch)
+    {
+        EpochState state = epochs.getOrCreate(epoch);
+        if (state.reads != null)
+            return state.reads;
+
+        return state.acknowledged.flatMap(r -> state.reads).beginAsResult();
+    }
+
+    public abstract static class Minimal extends AbstractConfigurationService<Minimal.EpochState, Minimal.EpochHistory>
+    {
+        static class EpochState extends AbstractEpochState
+        {
+            public EpochState(long epoch)
+            {
+                super(epoch);
+            }
+        }
+
+        static class EpochHistory extends AbstractEpochHistory<EpochState>
+        {
+            @Override
+            protected EpochState createEpochState(long epoch)
+            {
+                return new EpochState(epoch);
+            }
+        }
+
+        public Minimal(Node.Id node)
+        {
+            super(node);
+        }
+
+        @Override
+        protected EpochHistory createEpochHistory()
+        {
+            return new EpochHistory();
+        }
     }
 }

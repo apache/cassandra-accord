@@ -331,7 +331,7 @@ public abstract class CommandStores
         return newLocalTopology.epoch() != 1;
     }
 
-    private synchronized TopologyUpdate updateTopology(Node node, Snapshot prev, Topology newTopology)
+    private synchronized TopologyUpdate updateTopology(Node node, Snapshot prev, Topology newTopology, boolean startSync)
     {
         checkArgument(!newTopology.isSubset(), "Use full topology for CommandStores.updateTopology");
 
@@ -364,7 +364,7 @@ public abstract class CommandStores
                 bootstrapUpdates.add(shard.store.interruptBootstraps(epoch, newRanges.currentRanges()));
             }
             // TODO (desired): only sync affected shards
-            if (epoch > 1)
+            if (epoch > 1 && startSync)
                 bootstrapUpdates.add(shard.store.sync(node, shard.ranges().currentRanges(), epoch));
             result.add(shard);
         }
@@ -515,9 +515,9 @@ public abstract class CommandStores
         return chain;
     }
 
-    public synchronized Supplier<EpochReady> updateTopology(Node node, Topology newTopology)
+    public synchronized Supplier<EpochReady> updateTopology(Node node, Topology newTopology, boolean startSync)
     {
-        TopologyUpdate update = updateTopology(node, current, newTopology);
+        TopologyUpdate update = updateTopology(node, current, newTopology, startSync);
         current = update.snapshot;
         return update.bootstrap;
     }

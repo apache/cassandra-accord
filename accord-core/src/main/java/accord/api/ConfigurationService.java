@@ -50,7 +50,7 @@ import accord.utils.async.AsyncResults;
  *      nodes that this node has synced data for the previous epoch.
  *
  *  - ConfigurationService will notify the node when other nodes complete syncing an epoch by calling
- *      {@link accord.api.ConfigurationService.Listener#onEpochSyncComplete(accord.local.Node.Id, long)}
+ *      {@link accord.api.ConfigurationService.Listener#onRemoteSyncComplete(accord.local.Node.Id, long)}
  *
  */
 public interface ConfigurationService
@@ -111,13 +111,13 @@ public interface ConfigurationService
          *
          * TODO (required): document what this Future represents, or maybe refactor it away - only used for testing
          */
-        AsyncResult<Void> onTopologyUpdate(Topology topology);
+        AsyncResult<Void> onTopologyUpdate(Topology topology, boolean startSync);
 
         /**
          * Called when accord data associated with a superseded epoch has been sync'd from previous replicas.
          * This should be invoked on each replica once EpochReady.coordination has returned on a replica.
          */
-        void onEpochSyncComplete(Node.Id node, long epoch);
+        void onRemoteSyncComplete(Node.Id node, long epoch);
 
         /**
          * Called when the configuration service is meant to truncate it's topology data up to (but not including)

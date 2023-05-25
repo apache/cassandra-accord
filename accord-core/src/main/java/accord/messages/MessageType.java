@@ -48,4 +48,6 @@ public enum MessageType
     INFORM_HOME_DURABLE_REQ,
     CHECK_STATUS_REQ,
     CHECK_STATUS_RSP,
+    FETCH_DATA_REQ,
+    FETCH_DATA_RSP
 }

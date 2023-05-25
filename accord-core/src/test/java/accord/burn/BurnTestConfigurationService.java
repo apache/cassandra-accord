@@ -34,7 +34,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-public class BurnTestConfigurationService extends AbstractConfigurationService implements TestableConfigurationService
+public class BurnTestConfigurationService extends AbstractConfigurationService.Minimal implements TestableConfigurationService
 {
     private final AgentExecutor executor;
     private final Function<Node.Id, Node> lookup;
@@ -121,7 +121,7 @@ public class BurnTestConfigurationService extends AbstractConfigurationService i
             if (candidates.isEmpty())
             {
                 candidates.addAll(currentTopology().nodes());
-                candidates.remove(node);
+                candidates.remove(localId);
             }
             int idx = randomSupplier.get().nextInt(candidates.size());
             Node.Id node = candidates.remove(idx);
@@ -157,9 +157,9 @@ public class BurnTestConfigurationService extends AbstractConfigurationService i
     }
 
     @Override
-    protected void epochSyncComplete(Topology topology)
+    protected void localSyncComplete(Topology topology)
     {
-        topologyUpdates.syncComplete(lookup.apply(node), topology.nodes(), topology.epoch());
+        topologyUpdates.syncComplete(lookup.apply(localId), topology.nodes(), topology.epoch());
     }
 
     @Override
@@ -174,6 +174,6 @@ public class BurnTestConfigurationService extends AbstractConfigurationService i
 
     private Node originator()
     {
-        return lookup.apply(node);
+        return lookup.apply(localId);
     }
 }

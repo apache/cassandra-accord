@@ -96,7 +96,7 @@ public class MockConfigurationService implements TestableConfigurationService
 
         List<AsyncResult<Void>> futures = new ArrayList<>();
         for (Listener listener : listeners)
-            futures.add(listener.onTopologyUpdate(topology));
+            futures.add(listener.onTopologyUpdate(topology, true));
 
         AsyncResult<Void> result = futures.isEmpty()
            ? AsyncResults.success(null)
@@ -109,6 +109,6 @@ public class MockConfigurationService implements TestableConfigurationService
     public synchronized void reportSyncComplete(Node.Id node, long epoch)
     {
         for (Listener listener : listeners)
-            listener.onEpochSyncComplete(node, epoch);
+            listener.onRemoteSyncComplete(node, epoch);
     }
 }

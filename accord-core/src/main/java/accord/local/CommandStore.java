@@ -286,7 +286,7 @@ public abstract class CommandStore implements AgentExecutor
      * So, the outer future's success is sufficient for the topology to be acknowledged, and the inner future for the
      * bootstrap to be complete.
      */
-    Supplier<EpochReady> sync(Node node, Ranges ranges, long epoch)
+    protected Supplier<EpochReady> sync(Node node, Ranges ranges, long epoch)
     {
         return () -> {
             AsyncResults.SettableResult<Void> whenDone = new AsyncResults.SettableResult<>();
