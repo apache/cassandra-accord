@@ -131,7 +131,11 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
                 break;
 
             case ApprovePartial:
-                handle(recordPartialReadSuccess(from, unavailable(reply)));
+                Ranges unavailable = unavailable(reply);
+                RequestStatus result = recordPartialReadSuccess(from, unavailable);
+                if (result == RequestStatus.Failed && failure == null)
+                    failure = new RangeUnavailable(unavailable, txnId);
+                handle(result);
                 break;
         }
     }

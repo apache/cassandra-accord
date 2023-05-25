@@ -26,7 +26,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import accord.api.VisibleForImplementation;
-import accord.impl.CommandsForKey.CommandLoader;
+import accord.impl.CommandTimeseries.CommandLoader;
 import accord.local.Command;
 import accord.local.CommonAttributes;
 import accord.local.PreLoadContext;

@@ -185,7 +185,14 @@ public class Runner
         {
             logger.info("Seed {}; rerun with -D{}={}", seed, key, seed);
             RandomSource randomSource = new DefaultRandom(seed);
-            Runner.run(nodeCount, new StandardQueue.Factory(randomSource), randomSource::fork, factory, commands);
+            try
+            {
+                Runner.run(nodeCount, new StandardQueue.Factory(randomSource), randomSource::fork, factory, commands);
+            }
+            catch (Throwable t)
+            {
+                throw new AssertionError("Failure for seed " + seed, t);
+            }
         }
     }
 }

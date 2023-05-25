@@ -43,6 +43,7 @@ import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.ProgressLog;
+import accord.impl.CommandTimeseries.CommandLoader;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores.RangesForEpoch;
@@ -107,6 +108,16 @@ public abstract class InMemoryCommandStore extends CommandStore
     public Agent agent()
     {
         return agent;
+    }
+
+    TreeMap<TxnId, Ranges> historicalRangeCommands()
+    {
+        return historicalRangeCommands;
+    }
+
+    TreeMap<TxnId, RangeCommand> rangeCommands()
+    {
+        return rangeCommands;
     }
 
     public GlobalCommand ifPresent(TxnId txnId)
@@ -333,38 +344,6 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
     }
 
-    @Override
-    protected void registerHistoricalTransactions(Deps deps)
-    {
-        Ranges allRanges = rangesForEpochHolder.get().all();
-        deps.keyDeps.keys().forEach(allRanges, key -> {
-            SafeCommandsForKey cfk = commandsForKey(key).createSafeReference();
-            deps.keyDeps.forEach(key, txnId -> {
-                // TODO (desired, efficiency): this can be made more efficient by batching by epoch
-                if (rangesForEpochHolder.get().coordinates(txnId).contains(key))
-                    return; // already coordinates, no need to replicate
-                if (!rangesForEpochHolder.get().allBefore(txnId.epoch()).contains(key))
-                    return;
-
-                cfk.registerNotWitnessed(txnId);
-            });
-
-        });
-        deps.rangeDeps.forEachUniqueTxnId(allRanges, txnId -> {
-
-            if (rangeCommands.containsKey(txnId))
-                return;
-
-            Ranges ranges = deps.rangeDeps.ranges(txnId);
-            if (rangesForEpochHolder.get().coordinates(txnId).intersects(ranges))
-                return; // already coordinates, no need to replicate
-            if (!rangesForEpochHolder.get().allBefore(txnId.epoch()).intersects(ranges))
-                return;
-
-            historicalRangeCommands.merge(txnId, ranges.slice(allRanges), Ranges::with);
-        });
-    }
-
     protected InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys)
     {
         return new InMemorySafeStore(this, cfkLoader, ranges, context, commands, commandsForKeys);
@@ -482,7 +461,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
     }
 
-    class CFKLoader implements CommandsForKey.CommandLoader<TxnId>
+    class CFKLoader implements CommandLoader<TxnId>
     {
         private Command loadForCFK(TxnId data)
         {
@@ -702,6 +681,41 @@ public abstract class InMemoryCommandStore extends CommandStore
             return timestamp;
         }
 
+        @Override
+        public void registerHistoricalTransactions(Deps deps)
+        {
+            RangesForEpochHolder rangesForEpochHolder = commandStore.rangesForEpochHolder();
+            Ranges allRanges = rangesForEpochHolder.get().all();
+            deps.keyDeps.keys().forEach(allRanges, key -> {
+                SafeCommandsForKey cfk = commandsForKey(key);
+                deps.keyDeps.forEach(key, txnId -> {
+                    // TODO (desired, efficiency): this can be made more efficient by batching by epoch
+                    if (rangesForEpochHolder.get().coordinates(txnId).contains(key))
+                        return; // already coordinates, no need to replicate
+                    if (!rangesForEpochHolder.get().allBefore(txnId.epoch()).contains(key))
+                        return;
+
+                    cfk.registerNotWitnessed(txnId);
+                });
+
+            });
+            TreeMap<TxnId, RangeCommand> rangeCommands = commandStore.rangeCommands();
+            TreeMap<TxnId, Ranges> historicalRangeCommands = commandStore.historicalRangeCommands();
+            deps.rangeDeps.forEachUniqueTxnId(allRanges, txnId -> {
+
+                if (rangeCommands.containsKey(txnId))
+                    return;
+
+                Ranges ranges = deps.rangeDeps.ranges(txnId);
+                if (rangesForEpochHolder.get().coordinates(txnId).intersects(ranges))
+                    return; // already coordinates, no need to replicate
+                if (!rangesForEpochHolder.get().allBefore(txnId.epoch()).intersects(ranges))
+                    return;
+
+                historicalRangeCommands.merge(txnId, ranges.slice(allRanges), Ranges::with);
+            });
+        }
+
         public Timestamp maxApplied(Seekables<?, ?> keysOrRanges, Ranges slice)
         {
             Seekables<?, ?> sliced = keysOrRanges.slice(slice, Minimal);
@@ -725,7 +739,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         public <T> T mapReduce(Seekables<?, ?> keysOrRanges, Ranges slice, TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp, TestDep testDep, @Nullable TxnId depId, @Nullable Status minStatus, @Nullable Status maxStatus, CommandFunction<T, T> map, T accumulate, T terminalValue)
         {
             accumulate = commandStore.mapReduceForKey(this, keysOrRanges, slice, (forKey, prev) -> {
-                CommandsForKey.CommandTimeseries<?> timeseries;
+                CommandTimeseries<?> timeseries;
                 switch (testTimestamp)
                 {
                     default: throw new AssertionError();
@@ -737,17 +751,17 @@ public abstract class InMemoryCommandStore extends CommandStore
                     case MAY_EXECUTE_BEFORE:
                         timeseries = forKey.byExecuteAt();
                 }
-                CommandsForKey.CommandTimeseries.TestTimestamp remapTestTimestamp;
+                CommandTimeseries.TestTimestamp remapTestTimestamp;
                 switch (testTimestamp)
                 {
                     default: throw new AssertionError();
                     case STARTED_AFTER:
                     case EXECUTES_AFTER:
-                        remapTestTimestamp = CommandsForKey.CommandTimeseries.TestTimestamp.AFTER;
+                        remapTestTimestamp = CommandTimeseries.TestTimestamp.AFTER;
                         break;
                     case STARTED_BEFORE:
                     case MAY_EXECUTE_BEFORE:
-                        remapTestTimestamp = CommandsForKey.CommandTimeseries.TestTimestamp.BEFORE;
+                        remapTestTimestamp = CommandTimeseries.TestTimestamp.BEFORE;
                 }
                 return timeseries.mapReduce(testKind, remapTestTimestamp, timestamp, testDep, depId, minStatus, maxStatus, map, prev, terminalValue);
             }, accumulate, terminalValue);
@@ -866,7 +880,8 @@ public abstract class InMemoryCommandStore extends CommandStore
             return commandStore.register(this, keyOrRange, slice, command, attrs);
         }
 
-        public CommandsForKey.CommandLoader<?> cfkLoader()
+        @Override
+        public CommandLoader<?> cfkLoader()
         {
             return cfkLoader;
         }

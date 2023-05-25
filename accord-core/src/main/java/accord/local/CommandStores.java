@@ -37,6 +37,7 @@ import accord.utils.async.AsyncChains;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -325,6 +326,11 @@ public abstract class CommandStores
         }
     }
 
+    protected boolean shouldBootstrap(Node node, Topology local, Topology newLocalTopology, Range add)
+    {
+        return newLocalTopology.epoch() != 1;
+    }
+
     private synchronized TopologyUpdate updateTopology(Node node, Snapshot prev, Topology newTopology)
     {
         checkArgument(!newTopology.isSubset(), "Use full topology for CommandStores.updateTopology");
@@ -371,9 +377,12 @@ public abstract class CommandStores
                 RangesForEpochHolder rangesHolder = new RangesForEpochHolder();
                 ShardHolder shardHolder = new ShardHolder(supplier.create(nextId++, rangesHolder), rangesHolder);
                 rangesHolder.current = new RangesForEpoch(epoch, add, shardHolder.store);
-                // the first epoch we assume is either empty, or correctly initialised by whatever system is migrating
-                if (epoch == 1) bootstrapUpdates.add(() -> shardHolder.store.initialise(epoch, add));
-                else bootstrapUpdates.add(shardHolder.store.bootstrapper(node, add, newLocalTopology.epoch()));
+
+                Map<Boolean, Ranges> partitioned = add.partitioningBy(range -> shouldBootstrap(node, prev.local, newLocalTopology, range));
+                if (partitioned.containsKey(true))
+                    bootstrapUpdates.add(shardHolder.store.bootstrapper(node, partitioned.get(true), newLocalTopology.epoch()));
+                if (partitioned.containsKey(false))
+                    bootstrapUpdates.add(() -> shardHolder.store.initialise(epoch, partitioned.get(false)));
                 result.add(shardHolder);
             }
         }
@@ -552,6 +561,18 @@ public abstract class CommandStores
     {
         Snapshot snapshot = current;
         return snapshot.byId.get(id);
+    }
+
+    public int[] ids()
+    {
+        Snapshot snapshot = current;
+        Int2ObjectHashMap<CommandStore>.KeySet set = snapshot.byId.keySet();
+        int[] ids = new int[set.size()];
+        int idx = 0;
+        for (int a : set)
+            ids[idx++] = a;
+        Arrays.sort(ids);
+        return ids;
     }
 
     public int count()

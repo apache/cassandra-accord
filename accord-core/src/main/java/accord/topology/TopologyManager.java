@@ -230,16 +230,20 @@ public class TopologyManager
     {
         Epochs current = epochs;
 
-        checkArgument(topology.epoch == current.nextEpoch());
+        checkArgument(topology.epoch == current.nextEpoch(), "Expected topology update %d to be %d", topology.epoch, current.nextEpoch());
         EpochState[] nextEpochs = new EpochState[current.epochs.length + 1];
         List<Set<Id>> pendingSync = new ArrayList<>(current.pendingSyncComplete);
         Set<Id> alreadySyncd = Collections.emptySet();
         if (!pendingSync.isEmpty())
         {
-            EpochState currentEpoch = current.epochs[0];
-            if (current.epochs[0].syncComplete())
-                currentEpoch.markPrevSynced();
-            alreadySyncd = pendingSync.remove(0);
+            // if empty, then notified about an epoch from a peer before first epoch seen
+            if (current.epochs.length != 0)
+            {
+                EpochState currentEpoch = current.epochs[0];
+                if (currentEpoch.syncComplete())
+                    currentEpoch.markPrevSynced();
+                alreadySyncd = pendingSync.remove(0);
+            }
         }
         System.arraycopy(current.epochs, 0, nextEpochs, 1, current.epochs.length);
 
@@ -308,15 +312,15 @@ public class TopologyManager
 
     public Topologies withUnsyncedEpochs(Unseekables<?, ?> select, long minEpoch, long maxEpoch)
     {
-        Invariants.checkArgument(minEpoch <= maxEpoch);
+        Invariants.checkArgument(minEpoch <= maxEpoch, "min epoch %d > max %d", minEpoch, maxEpoch);
         Epochs snapshot = epochs;
 
         if (maxEpoch == Long.MAX_VALUE) maxEpoch = snapshot.currentEpoch;
-        else Invariants.checkState(snapshot.currentEpoch >= maxEpoch);
+        else Invariants.checkState(snapshot.currentEpoch >= maxEpoch, "current epoch %d < max %d", snapshot.currentEpoch, maxEpoch);
 
         EpochState maxEpochState = nonNull(snapshot.get(maxEpoch));
         if (minEpoch == maxEpoch && maxEpochState.syncCompleteFor(select))
-            return new Single(sorter, maxEpochState.global.forSelection(select));
+            return new Single(sorter, maxEpochState.global.forSelection(select, Topology.OnUnknown.REJECT));
 
         int start = (int)(snapshot.currentEpoch - maxEpoch);
         int limit = (int)(Math.min(1 + snapshot.currentEpoch - minEpoch, snapshot.epochs.length));
@@ -334,20 +338,22 @@ public class TopologyManager
         {
             EpochState epochState = snapshot.epochs[i];
             if (epochState.epoch() < minEpoch)
-                epochState.global.visitNodeForKeysOnceOrMore(select, EpochState::shardIsUnsynced, epochState, nodes::add);
+                epochState.global.visitNodeForKeysOnceOrMore(select, Topology.OnUnknown.IGNORE, EpochState::shardIsUnsynced, epochState, nodes::add);
             else
-                epochState.global.visitNodeForKeysOnceOrMore(select, nodes::add);
+                epochState.global.visitNodeForKeysOnceOrMore(select, Topology.OnUnknown.IGNORE, nodes::add);
         }
+        Invariants.checkState(!nodes.isEmpty(), "Unable to find an epoch that contained %s", select);
 
         Topologies.Multi topologies = new Topologies.Multi(sorter, count);
         for (int i = start; i < limit ; ++i)
         {
             EpochState epochState = snapshot.epochs[i];
             if (epochState.epoch() < minEpoch)
-                topologies.add(epochState.global.forSelection(select, nodes, EpochState::shardIsUnsynced, epochState));
+                topologies.add(epochState.global.forSelection(select, Topology.OnUnknown.IGNORE, nodes, EpochState::shardIsUnsynced, epochState));
             else
-                topologies.add(epochState.global.forSelection(select, nodes, (ignore, idx) -> true, null));
+                topologies.add(epochState.global.forSelection(select, Topology.OnUnknown.IGNORE, nodes, (ignore, idx) -> true, null));
         }
+        Invariants.checkState(!topologies.isEmpty(), "Unable to find an epoch that contained %s", select);
 
         return topologies;
     }
@@ -357,16 +363,18 @@ public class TopologyManager
         Epochs snapshot = epochs;
 
         if (minEpoch == maxEpoch)
-            return new Single(sorter, snapshot.get(minEpoch).global.forSelection(keys));
+            return new Single(sorter, snapshot.get(minEpoch).global.forSelection(keys, Topology.OnUnknown.REJECT));
 
         Set<Id> nodes = new LinkedHashSet<>();
         int count = (int)(1 + maxEpoch - minEpoch);
         for (int i = count - 1 ; i >= 0 ; --i)
-            snapshot.get(minEpoch + i).global().visitNodeForKeysOnceOrMore(keys, nodes::add);
+            snapshot.get(minEpoch + i).global().visitNodeForKeysOnceOrMore(keys, Topology.OnUnknown.IGNORE, nodes::add);
+        Invariants.checkState(!nodes.isEmpty(), "Unable to find an epoch that contained %s", keys);
 
         Topologies.Multi topologies = new Topologies.Multi(sorter, count);
         for (int i = count - 1 ; i >= 0 ; --i)
-            topologies.add(snapshot.get(minEpoch + i).global.forSelection(keys, nodes));
+            topologies.add(snapshot.get(minEpoch + i).global.forSelection(keys, Topology.OnUnknown.IGNORE, nodes));
+        Invariants.checkState(!topologies.isEmpty(), "Unable to find an epoch that contained %s", keys);
 
         return topologies;
     }
@@ -374,7 +382,7 @@ public class TopologyManager
     public Topologies forEpoch(Unseekables<?, ?> select, long epoch)
     {
         EpochState state = epochs.get(epoch);
-        return new Single(sorter, state.global.forSelection(select));
+        return new Single(sorter, state.global.forSelection(select, Topology.OnUnknown.REJECT));
     }
 
     public Shard forEpochIfKnown(RoutingKey key, long epoch)

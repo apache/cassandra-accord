@@ -20,8 +20,8 @@ package accord.messages;
 
 import accord.api.RoutingKey;
 import accord.impl.*;
-import accord.impl.CommandsForKey.CommandLoader;
-import accord.impl.CommandsForKey.CommandTimeseries;
+import accord.impl.CommandTimeseries.CommandLoader;
+import accord.impl.CommandTimeseries;
 import accord.impl.IntKey.Raw;
 import accord.impl.mock.*;
 import accord.local.Node;

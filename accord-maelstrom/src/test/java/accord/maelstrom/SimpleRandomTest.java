@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 
 import static accord.maelstrom.Runner.test;
 
+// TODO (correctness) : if you run the tests with the same seed, you get different outcomes... this makes it hard to rerun a failure found from CI
 public class SimpleRandomTest
 {
     @Test

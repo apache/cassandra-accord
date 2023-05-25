@@ -22,7 +22,14 @@ import accord.api.RoutingKey;
 import accord.utils.ArrayBuffers.ObjectBuffers;
 
 import javax.annotation.Nonnull;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
+
+import com.google.common.collect.ImmutableMap;
 
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_OVERLAPPING;
 import static accord.primitives.Routables.Slice.Overlapping;
@@ -227,4 +234,17 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
         return construct(cachedRanges.completeAndDiscard(result, count));
     }
 
+    public Map<Boolean, Ranges> partitioningBy(Predicate<? super Range> test)
+    {
+        if (isEmpty())
+            return Collections.emptyMap();
+        List<Range> trues = new ArrayList<>();
+        List<Range> falses = new ArrayList<>();
+        for (Range range : this)
+            (test.test(range) ? trues : falses).add(range);
+        if (trues.isEmpty()) return ImmutableMap.of(Boolean.FALSE, this);
+        if (falses.isEmpty()) return ImmutableMap.of(Boolean.TRUE, this);
+        return ImmutableMap.of(Boolean.TRUE, Ranges.ofSortedAndDeoverlapped(trues.toArray(new Range[0])),
+                               Boolean.FALSE, Ranges.ofSortedAndDeoverlapped(falses.toArray(new Range[0])));
+    }
 }

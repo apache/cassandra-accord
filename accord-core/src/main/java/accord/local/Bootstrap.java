@@ -134,6 +134,8 @@ class Bootstrap
             Ranges commitRanges = valid;
             store.markBootstrapping(safeStore0, globalSyncId, valid);
             CoordinateSyncPoint.coordinate(node, globalSyncId, commitRanges)
+               // TODO (correcness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
+               // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
                .flatMap(syncPoint -> node.withEpoch(epoch, () -> store.submit(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys()), safeStore1 -> {
                    if (valid.isEmpty()) // we've lost ownership of the range
                        return AsyncResults.success(Ranges.EMPTY);
@@ -141,7 +143,7 @@ class Bootstrap
                    Commands.commitRecipientLocalSyncPoint(safeStore1, localSyncId, syncPoint, valid);
                    // TODO (now): this should use a dedicated local id, distinct from the one we use to coordinate globally, as this may also be committed and applied locally
                    // TODO (now): should we even be putting any partialDeps here? Doesn't seem like it, as they're handled on source nodes.
-                   safeStore1.commandStore().registerHistoricalTransactions(syncPoint.waitFor);
+                   safeStore1.registerHistoricalTransactions(syncPoint.waitFor);
                    return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this);
                })))
                .flatMap(i -> i)
