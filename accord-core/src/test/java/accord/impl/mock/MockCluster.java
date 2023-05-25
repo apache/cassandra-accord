@@ -119,6 +119,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                         SimpleProgressLog::new,
                         InMemoryCommandStores.SingleThread::new);
         awaitUninterruptibly(node.start());
+        node.onTopologyUpdate(topology);
         return node;
     }
 

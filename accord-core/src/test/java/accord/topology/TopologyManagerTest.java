@@ -200,4 +200,67 @@ public class TopologyManagerTest
         Assertions.assertEquals(topologies(topology2, topology(1, shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)))),
                                 actual);
     }
+
+    @Test
+    void incompleteTopologyHistory()
+    {
+        Topology topology5 = topology(5,
+                                      shard(range(100, 200), idList(1, 2, 3), idSet(1, 2)),
+                                      shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)));
+        Topology topology6 = topology(6,
+                                      shard(range(100, 200), idList(1, 2, 3), idSet(1, 2)),
+                                      shard(range(200, 300), idList(4, 5, 6), idSet(5, 6)));
+
+        TopologyManager service = new TopologyManager(SUPPLIER, ID);
+        service.onTopologyUpdate(topology5);
+        service.onTopologyUpdate(topology6);
+
+        Assertions.assertSame(topology6, service.getEpochStateUnsafe(6).global());
+        Assertions.assertSame(topology5, service.getEpochStateUnsafe(5).global());
+        for (int i=1; i<=6; i++) service.onEpochSyncComplete(id(i), 5);
+        Assertions.assertTrue(service.getEpochStateUnsafe(5).syncComplete());
+        Assertions.assertNull(service.getEpochStateUnsafe(4));
+
+        service.onEpochSyncComplete(id(1), 4);
+    }
+
+    private static void markTopologySynced(TopologyManager service, long epoch)
+    {
+        service.getEpochStateUnsafe(epoch).global().nodes().forEach(id -> service.onEpochSyncComplete(id, epoch));
+    }
+
+    private static void addAndMarkSynced(TopologyManager service, Topology topology)
+    {
+        service.onTopologyUpdate(topology);
+        markTopologySynced(service, topology.epoch());
+    }
+
+    @Test
+    void truncateTopologyHistory()
+    {
+        Range range = range(100, 200);
+        TopologyManager service = new TopologyManager(SUPPLIER, ID);
+        addAndMarkSynced(service, topology(1, shard(range, idList(1, 2, 3), idSet(1, 2))));
+        addAndMarkSynced(service, topology(2, shard(range, idList(1, 2, 3), idSet(2, 3))));
+        addAndMarkSynced(service, topology(3, shard(range, idList(1, 2, 3), idSet(1, 2))));
+        addAndMarkSynced(service, topology(4, shard(range, idList(1, 2, 3), idSet(1, 3))));
+
+        Assertions.assertTrue(service.hasEpoch(1));
+        Assertions.assertTrue(service.hasEpoch(2));
+        Assertions.assertTrue(service.hasEpoch(3));
+        Assertions.assertTrue(service.hasEpoch(4));
+
+        service.truncateTopologyUntil(3);
+        Assertions.assertFalse(service.hasEpoch(1));
+        Assertions.assertFalse(service.hasEpoch(2));
+        Assertions.assertTrue(service.hasEpoch(3));
+        Assertions.assertTrue(service.hasEpoch(4));
+
+    }
+
+    @Test
+    void truncateTopologyCantTruncateUnsyncedEpochs()
+    {
+
+    }
 }

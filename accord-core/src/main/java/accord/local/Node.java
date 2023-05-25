@@ -141,7 +141,6 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.configService = configService;
         this.topology = new TopologyManager(topologySorter, id);
         this.nowSupplier = nowSupplier;
-        Topology topology = configService.currentTopology();
         this.now = new AtomicReference<>(Timestamp.fromValues(topology.epoch(), nowSupplier.getAsLong(), id));
         this.agent = agent;
         this.random = random;
@@ -197,6 +196,12 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     public void onEpochSyncComplete(Id node, long epoch)
     {
         topology.onEpochSyncComplete(node, epoch);
+    }
+
+    @Override
+    public void truncateTopologyUntil(long epoch)
+    {
+        topology.truncateTopologyUntil(epoch);
     }
 
     public void withEpoch(long epoch, Runnable runnable)
