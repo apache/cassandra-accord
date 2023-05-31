@@ -21,8 +21,6 @@ package accord.primitives;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 import accord.api.Data;
 import accord.api.DataResolver;
@@ -38,6 +36,8 @@ import accord.local.SafeCommandStore;
 import accord.primitives.Routable.Domain;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.nonNull;
@@ -202,6 +202,18 @@ public interface Txn
         }
 
         @Override
+        public DataConsistencyLevel writeDataCL()
+        {
+            return update != null ? update.writeDataCl() : DataConsistencyLevel.UNSPECIFIED;
+        }
+
+        @Override
+        public DataConsistencyLevel readDataCL()
+        {
+            return read.readDataCL();
+        }
+
+        @Override
         public boolean equals(Object o)
         {
             if (this == o) return true;
@@ -241,6 +253,16 @@ public interface Txn
         return kind().isWrite();
     }
 
+    default DataConsistencyLevel writeDataCL()
+    {
+        return DataConsistencyLevel.UNSPECIFIED;
+    }
+
+    default DataConsistencyLevel readDataCL()
+    {
+        return DataConsistencyLevel.UNSPECIFIED;
+    }
+
     default Result result(TxnId txnId, Timestamp executeAt, @Nullable Data data)
     {
         return query().compute(txnId, executeAt, keys(), data, read(), update());
@@ -271,8 +293,8 @@ public interface Txn
         Ranges ranges = safeStore.ranges().at(command.executeAt().epoch());
         List<AsyncChain<UnresolvedData>> futures = Routables.foldlMinimal(read().keys(), ranges, (key, accumulate, index) -> {
             Read read = followupRead != null ? followupRead : read();
-            checkArgument(dataReadKeys == null || key.domain() == Domain.Key || !read().readDataCL().requiresDigestReads, "Digest reads are unsupported for ranges");
-            boolean digestRead = read().readDataCL().requiresDigestReads
+            checkArgument(dataReadKeys == null || key.domain() == Domain.Key || !readDataCL().requiresDigestReads, "Digest reads are unsupported for ranges");
+            boolean digestRead = readDataCL().requiresDigestReads
                                  && dataReadKeys != null
                                  && !dataReadKeys.contains(((Key)key).toUnseekable());
             AsyncChain<UnresolvedData> result = read.read(key, digestRead, kind(), safeStore, command.executeAt(), safeStore.dataStore());

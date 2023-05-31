@@ -34,22 +34,38 @@ package accord.primitives;
  */
 public enum DataConsistencyLevel
 {
+    // TODO ONE is silently upgraded to QUORUM
+    // The concept of a CL doesn't apply because it's not a data read
+    // Used when reading Accord metadata
+    INVALID(false, false, 0),
     // A majority must be contacted and digest requests may be sent
     // Blocking read repair should also be performed if replicas disagree to provide monotonic reads
     // If the transaction is a write and this is the write consistency level then synchronous apply should be performed
     // Synchronous apply will always be performed if read repair is necessary
-    QUORUM(true),
     // It is not required for Accord to honor a specific consistency level such as when
     // only Accord is reading/writing this data
-    UNSPECIFIED(false),
-    // The concept of a CL doesn't apply because it's not a data read
-    // Used when reading Accord metadata
-    INVALID(false);
+    UNSPECIFIED(false, false, 1),
+    QUORUM(true, true, 2),
+    ALL(true, true, 3);
+
 
     public final boolean requiresDigestReads;
+    public final boolean requiresSynchronousCommit;
 
-    DataConsistencyLevel(boolean requiresDigestReads)
+    public final int index;
+
+    DataConsistencyLevel(boolean requiresDigestReads, boolean requiresSynchronousCommit, int index)
     {
         this.requiresDigestReads = requiresDigestReads;
+        this.requiresSynchronousCommit = requiresSynchronousCommit;
+        this.index = index;
+    }
+
+    public static DataConsistencyLevel max(DataConsistencyLevel a, DataConsistencyLevel b)
+    {
+        if (a.index < b.index)
+            return b;
+        else
+            return a;
     }
 }

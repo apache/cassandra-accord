@@ -21,8 +21,6 @@ package accord.impl.mock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 import accord.api.Data;
 import accord.api.DataResolver;
@@ -50,6 +48,8 @@ import accord.primitives.Writes;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResults.SettableResult;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import static java.util.Collections.synchronizedList;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -309,13 +309,16 @@ public class MockStore implements DataStore
         final Write write;
         final Seekables keys;
 
+        DataConsistencyLevel writeDataCL;
+
         Data data;
         RepairWrites repairWrites;
 
-        public MockUpdate(Seekables keys, Write write)
+        public MockUpdate(Seekables keys, Write write, DataConsistencyLevel writeDataCL)
         {
             this.keys = keys;
             this.write = write;
+            this.writeDataCL = writeDataCL;
         }
 
         @Override
@@ -345,10 +348,21 @@ public class MockStore implements DataStore
         {
             return this;
         }
+
+        @Override
+        public DataConsistencyLevel writeDataCl()
+        {
+            return writeDataCL;
+        }
+    }
+
+    public static Update update(Seekables<?, ?> keys, DataConsistencyLevel writeDataCL)
+    {
+        return new MockUpdate(keys, (key, commandStore, executeAt, store) -> Writes.SUCCESS, writeDataCL);
     }
 
     public static Update update(Seekables<?, ?> keys)
     {
-        return new MockUpdate(keys, (key, commandStore, executeAt, store) -> Writes.SUCCESS);
+        return update(keys, DataConsistencyLevel.UNSPECIFIED);
     }
 }

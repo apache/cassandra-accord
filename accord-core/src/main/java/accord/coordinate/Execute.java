@@ -39,6 +39,7 @@ import accord.messages.ReadData;
 import accord.messages.WhenReadyToExecute.ExecuteNack;
 import accord.messages.WhenReadyToExecute.ExecuteOk;
 import accord.messages.WhenReadyToExecute.ExecuteReply;
+import accord.primitives.DataConsistencyLevel;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
 import accord.primitives.RoutingKeys;
@@ -72,7 +73,7 @@ class Execute extends ReadCoordinator<ExecuteReply>
 
     private Execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
     {
-        super(node, node.topology().forEpoch(txn.keys().toUnseekables(), executeAt.epoch()), txnId, txn.read().readDataCL());
+        super(node, node.topology().forEpoch(txn.keys().toUnseekables(), executeAt.epoch()), txnId, txn.readDataCL());
         this.txn = txn;
         this.route = route;
         this.readScope = txn.read().keys();
@@ -99,14 +100,12 @@ class Execute extends ReadCoordinator<ExecuteReply>
             Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch());
             Result result = txn.result(txnId, executeAt, null);
             Consumer<Throwable> onAppliedToQuorum = null;
-            // TODO when supporting commit/write CL need to also not invoke the callback here
-            // TODO Digest reads doesn't make much sense considering this is a writeDataCL
-            if (!txn.update().writeDataCl().requiresDigestReads)
+            DataConsistencyLevel writeDataCL = txn.writeDataCL();
+            if (!writeDataCL.requiresSynchronousCommit)
                 callback.accept(result, null);
             else
                 onAppliedToQuorum = (applyFailure) -> callback.accept(applyFailure == null ? result : null, applyFailure);
-            // TODO When support commit/write CL need to add the callback here
-            Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, null, null), result, onAppliedToQuorum);
+            Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, null, null), result, onAppliedToQuorum, writeDataCL);
         }
         else
         {
@@ -135,7 +134,7 @@ class Execute extends ReadCoordinator<ExecuteReply>
             UnresolvedData next = ((ExecuteOk) reply).unresolvedData;
             if (next != null)
                 unresolvedData = unresolvedData == null ? next : unresolvedData.merge(next);
-            return txn.read().readDataCL().requiresDigestReads ? ApproveIfQuorum : Approve;
+            return txn.readDataCL().requiresDigestReads ? ApproveIfQuorum : Approve;
         }
 
         ExecuteNack nack = (ExecuteNack) reply;
@@ -167,19 +166,26 @@ class Execute extends ReadCoordinator<ExecuteReply>
         {
             Data data = resolveResult.data;
             Result result = txn.result(txnId, executeAt, data);
+
+            // Accord allows you to specify read CL separately from write CL
+            // so if we want reads to be monotonic we may need to upgrade the CL when writing the repairs
+            DataConsistencyLevel txnWriteDataCL = txn.writeDataCL();
+            DataConsistencyLevel writeDataCL = resolveResult.repairWrites != null ?
+                                                   DataConsistencyLevel.max(txnWriteDataCL, txn.readDataCL()) :
+                                                   txnWriteDataCL;
+
             // If this transaction generates repair writes then we don't want to acknowledge it until the writes are committed
             // to make sure the transaction's reads are monotonic from the perspective of the caller
             // If the transaction specified a writeDataCL then we don't want to acknowledge until the CL is met
             Consumer<Throwable> onAppliedToQuorum = null;
-            // TODO when supporting commit/write CL need to also not invoke the callback here
-            // TODO Digest reads doesn't make much sense considering this is a writeDataCL
-            if (resolveResult.repairWrites == null && !txn.update().writeDataCl().requiresDigestReads)
-                callback.accept(result, null);
-            else
+            if (resolveResult.repairWrites != null || writeDataCL.requiresSynchronousCommit)
                 onAppliedToQuorum = (applyFailure) -> callback.accept(applyFailure == null ? result : null, applyFailure);
+            else
+                callback.accept(result, null);
+
             // avoid re-calculating topologies if it is unchanged
             Topologies sendTo = txnId.epoch() == executeAt.epoch() ? applyTo : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
-            Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, data, resolveResult.repairWrites), result, onAppliedToQuorum);
+            Persist.persist(node, sendTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(executeAt, data, resolveResult.repairWrites), result, onAppliedToQuorum, writeDataCL);
         }
         else
         {

@@ -26,8 +26,8 @@ import accord.topology.Topologies;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.NoChange;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Success;
+import static accord.primitives.DataConsistencyLevel.ALL;
 import static accord.primitives.DataConsistencyLevel.INVALID;
-import static accord.utils.Invariants.checkArgument;
 
 public class QuorumTracker extends AbstractTracker<QuorumTracker.QuorumShardTracker, Object>
 {
@@ -42,23 +42,33 @@ public class QuorumTracker extends AbstractTracker<QuorumTracker.QuorumShardTrac
         public QuorumShardTracker(Shard shard, DataConsistencyLevel dataCL)
         {
             super(shard, dataCL);
-            checkArgument(dataCL == INVALID);
         }
 
         public ShardOutcomes onSuccess(Object ignore)
         {
-            return ++successes == shard.slowPathQuorumSize ? Success : NoChange;
+            successes++;
+            if (dataCL == ALL)
+                return successes == shard.nodes.size() ? Success : NoChange;
+            else
+                return successes == shard.slowPathQuorumSize ? Success : NoChange;
         }
 
         // return true iff hasFailed()
         public ShardOutcomes onFailure(Object ignore)
         {
-            return ++failures > shard.maxFailures ? Fail : NoChange;
+            failures++;
+            if (dataCL == ALL)
+                return Fail;
+            else
+                return failures > shard.maxFailures ? Fail : NoChange;
         }
 
         public boolean hasReachedQuorum()
         {
-            return successes >= shard.slowPathQuorumSize;
+            // TODO nodeSet includes joining nodes, is this correct/desired for ALL?
+            return dataCL == ALL ?
+                       successes == shard.nodes.size() :
+                       successes >= shard.slowPathQuorumSize;
         }
 
         boolean hasInFlight()
@@ -73,13 +83,20 @@ public class QuorumTracker extends AbstractTracker<QuorumTracker.QuorumShardTrac
 
         boolean hasFailed()
         {
-            return failures > shard.maxFailures;
+            return dataCL == ALL ?
+                        failures > 0 :
+                        failures > shard.maxFailures;
         }
     }
 
     public QuorumTracker(Topologies topologies)
     {
-        super(topologies, INVALID, QuorumShardTracker[]::new, QuorumShardTracker::new);
+        this(topologies, INVALID);
+    }
+
+    public QuorumTracker(Topologies topologies, DataConsistencyLevel cl)
+    {
+        super(topologies, cl, QuorumShardTracker[]::new, QuorumShardTracker::new);
     }
 
     public RequestStatus recordSuccess(Node.Id node)

@@ -33,6 +33,7 @@ import accord.messages.Callback;
 import accord.messages.Commit;
 import accord.messages.Commit.Kind;
 import accord.messages.InformHomeDurable;
+import accord.primitives.DataConsistencyLevel;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
 import accord.primitives.Timestamp;
@@ -64,9 +65,9 @@ public class Persist implements Callback<ApplyReply>
     boolean isDone;
     Throwable fail;
 
-    public static void persist(Node node, Topologies sendTo, Topologies applyTo, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, @Nullable Consumer<Throwable> onAppliedToQuorum)
+    public static void persist(Node node, Topologies sendTo, Topologies applyTo, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, @Nullable Consumer<Throwable> onAppliedToQuorum, DataConsistencyLevel writeDataCL)
     {
-        Persist persist = new Persist(node, applyTo, txnId, route, txn, executeAt, deps, onAppliedToQuorum);
+        Persist persist = new Persist(node, applyTo, txnId, route, txn, executeAt, deps, onAppliedToQuorum, writeDataCL);
         node.send(sendTo.nodes(), to -> new Apply(to, sendTo, applyTo, executeAt.epoch(), txnId, route, txn, executeAt, deps, writes, result), persist);
     }
 
@@ -74,18 +75,18 @@ public class Persist implements Callback<ApplyReply>
     {
         Topologies sendTo = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
         Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch());
-        Persist persist = new Persist(node, sendTo, txnId, route, txn, executeAt, deps, null);
+        Persist persist = new Persist(node, sendTo, txnId, route, txn, executeAt, deps, null, DataConsistencyLevel.UNSPECIFIED);
         node.send(sendTo.nodes(), to -> new Apply(to, sendTo, applyTo, executeAt.epoch(), txnId, route, txn, executeAt, deps, writes, result), persist);
     }
 
-    private Persist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, @Nullable Consumer<Throwable> onAppliedToQuorum)
+    private Persist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, @Nullable Consumer<Throwable> onAppliedToQuorum, DataConsistencyLevel writeDataCL)
     {
         this.node = node;
         this.txnId = txnId;
         this.txn = txn;
         this.deps = deps;
         this.route = route;
-        this.tracker = new QuorumTracker(topologies);
+        this.tracker = new QuorumTracker(topologies, writeDataCL);
         this.executeAt = executeAt;
         this.persistedOn = new HashSet<>();
         this.onAppliedToQuorum = onAppliedToQuorum;

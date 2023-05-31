@@ -46,6 +46,7 @@ import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.NoChange;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.SendMore;
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Success;
 import static accord.primitives.DataConsistencyLevel.INVALID;
+import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.checkState;
 import static accord.utils.Invariants.nonNull;
 import static com.google.common.collect.Sets.newHashSetWithExpectedSize;
@@ -252,6 +253,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker, B
     {
         super(topologies, dataCL, ReadShardTracker[]::new, ReadShardTracker::new);
         checkState(topologies.size() == 1 || dataCL == INVALID, "Data reads should only have a single topology");
+        checkArgument(dataCL != DataConsistencyLevel.ALL, "ALL is not supported yet as a read DataConsistencyLevel");
         this.candidates = new ArrayList<>(topologies.nodes()); // TODO (low priority, efficiency): copyOfNodesAsList to avoid unnecessary copies
         this.dataCL = dataCL;
         this.inflight = newHashSetWithExpectedSize(maxShardsPerEpoch());

@@ -26,7 +26,9 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -89,6 +91,7 @@ import static accord.primitives.Txn.Kind.Read;
 import static accord.primitives.Txn.Kind.Write;
 import static accord.utils.Invariants.checkState;
 import static accord.utils.async.AsyncChains.getUninterruptibly;
+import static com.google.common.base.Predicates.alwaysFalse;
 import static com.google.common.base.Predicates.alwaysTrue;
 import static com.google.common.primitives.Ints.checkedCast;
 import static java.lang.Thread.sleep;
@@ -504,7 +507,9 @@ public class CoordinateTest
 
             MockWrite mockWrite = new MockWrite();
             MockRepairWrites repairWrites = includeRepairWrites ? new MockRepairWrites(readKeys, mockWrite) : null;
-            MockUpdate mockUpdate = new MockUpdate(writeKeys, mockWrite);
+            // Testing writeDataCL is done in a separate test, in this test we do need to establish
+            // that repair writes are persisted at the read consistency level, so provide DataConsistencyLevel.UNSPECIFIED
+            MockUpdate mockUpdate = new MockUpdate(writeKeys, mockWrite, DataConsistencyLevel.UNSPECIFIED);
             MockResolver mockResolver = new MockResolver(true, repairWrites, mockFollowupRead);
             Txn txn;
             if (read)
@@ -597,6 +602,57 @@ public class CoordinateTest
             FullKeyRoute route = keys.toRoute(keys.get(0).toUnseekable());
             Result result = getUninterruptibly(Coordinate.coordinate(node, txnId, txn, route));
             assertEquals(MockStore.RESULT, result);
+        }
+    }
+
+    @Test
+    void testQuorumAppliesAtCL() throws Throwable
+    {
+        for (DataConsistencyLevel writeDataCL : ImmutableList.of(DataConsistencyLevel.QUORUM, DataConsistencyLevel.ALL))
+            testQuorumAppliesAtCL(writeDataCL);
+    }
+
+    private void testQuorumAppliesAtCL(DataConsistencyLevel writeDataCL) throws Throwable
+    {
+        try (MockCluster cluster = MockCluster.builder().build())
+        {
+            for (boolean succeed : ImmutableList.of(true, false))
+            {
+                System.out.println("Testing " + writeDataCL + " with expected success: " + succeed);
+                cluster.networkFilter.clear();
+                Node node = cluster.get(1);
+                Predicate<Id> blockNodes;
+                if (succeed)
+                    if (writeDataCL == DataConsistencyLevel.QUORUM)
+                        blockNodes = id -> ImmutableSet.of(cluster.get(3).id()).contains(id);
+                    else
+                        blockNodes = alwaysFalse();
+                else
+                    if (writeDataCL == DataConsistencyLevel.QUORUM)
+                        blockNodes = id -> ImmutableSet.of(cluster.get(2).id(), cluster.get(3).id()).contains(id);
+                    else
+                        blockNodes = id -> ImmutableSet.of(cluster.get(3).id()).contains(id);
+                cluster.networkFilter.addFilter(blockNodes, alwaysTrue(), message -> message instanceof ApplyReply);
+                assertNotNull(node);
+
+                TxnId txnId = node.nextTxnId(Write, Domain.Key);
+                Keys keys = keys(10);
+                Txn txn = writeTxn(keys, writeDataCL);
+                FullKeyRoute route = keys.toRoute(keys.get(0).toUnseekable());
+                try
+                {
+                    Result result = getUninterruptibly(Coordinate.coordinate(node, txnId, txn, route));
+                    assertEquals(MockStore.RESULT, result);
+                    assertTrue(succeed);
+                }
+                catch (Throwable t)
+                {
+                    if (t instanceof ExecutionException && t.getCause() instanceof Timeout)
+                        assertFalse(succeed);
+                    else
+                        throw t;
+                }
+            }
         }
     }
 
