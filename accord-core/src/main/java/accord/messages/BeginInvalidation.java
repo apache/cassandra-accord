@@ -35,36 +35,33 @@ import static accord.utils.Functions.mapReduceNonNull;
 public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.InvalidateReply> implements Request, PreLoadContext
 {
     public final Ballot ballot;
-    public final Unseekables<?, ?> someUnseekables;
+    public final Unseekables<?, ?> someParticipants;
 
-    public BeginInvalidation(Id to, Topologies topologies, TxnId txnId, Unseekables<?, ?> someUnseekables, Ballot ballot)
+    public BeginInvalidation(Id to, Topologies topologies, TxnId txnId, Unseekables<?, ?> someParticipants, Ballot ballot)
     {
         super(txnId);
-        this.someUnseekables = someUnseekables.slice(topologies.computeRangesForNode(to));
+        this.someParticipants = someParticipants.slice(topologies.computeRangesForNode(to));
         this.ballot = ballot;
     }
 
-    public BeginInvalidation(TxnId txnId, Unseekables<?, ?> someUnseekables, Ballot ballot)
+    public BeginInvalidation(TxnId txnId, Unseekables<?, ?> someParticipants, Ballot ballot)
     {
         super(txnId);
-        this.someUnseekables = someUnseekables;
+        this.someParticipants = someParticipants;
         this.ballot = ballot;
     }
 
     @Override
     public void process()
     {
-        node.mapReduceConsumeLocal(this, someUnseekables, txnId.epoch(), txnId.epoch(), this);
+        node.mapReduceConsumeLocal(this, someParticipants, txnId.epoch(), txnId.epoch(), this);
     }
 
     @Override
     public InvalidateReply apply(SafeCommandStore safeStore)
     {
-        if (safeStore.commandStore().isTruncatedAt(txnId, txnId.epoch(), someUnseekables))
-            return new InvalidateReply(Ballot.MAX, Ballot.MAX, Status.Truncated, false, null, null);
-
-        boolean acceptedFastPath = false;
-        SafeCommand safeCommand = safeStore.command(txnId);
+        boolean acceptedFastPath;
+        SafeCommand safeCommand = safeStore.get(txnId, null, someParticipants);
         boolean preaccepted = Commands.preacceptInvalidate(safeCommand, txnId, ballot);
         Command command = safeCommand.current();
         acceptedFastPath = command.executeAt() != null && command.executeAt().equals(command.txnId());

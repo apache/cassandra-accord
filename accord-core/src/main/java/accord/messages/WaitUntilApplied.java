@@ -30,6 +30,7 @@ import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.Status;
+import accord.primitives.EpochSupplier;
 import accord.primitives.Ranges;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
@@ -43,7 +44,7 @@ import static accord.messages.ReadData.ReadNack.Redundant;
 import static accord.utils.MapReduceConsume.forEach;
 
 // TODO (required, efficiency): dedup - can currently have infinite pending reads that will be executed independently
-public class WaitUntilApplied extends ReadData implements Command.TransientListener
+public class WaitUntilApplied extends ReadData implements Command.TransientListener, EpochSupplier
 {
     private static final Logger logger = LoggerFactory.getLogger(WaitUntilApplied.class);
 
@@ -72,6 +73,12 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
 
     @Override
     protected long executeAtEpoch()
+    {
+        return executeAtEpoch;
+    }
+
+    @Override
+    public long epoch()
     {
         return executeAtEpoch;
     }
@@ -127,7 +134,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
     @Override
     public synchronized ReadNack apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.command(txnId);
+        SafeCommand safeCommand = safeStore.get(txnId, this, readScope);
         return apply(safeStore, safeCommand);
     }
 
@@ -135,14 +142,6 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
     {
         if (isInvalid)
             return null;
-
-        if (safeStore.commandStore().isTruncatedAt(txnId, executeAtEpoch, readScope))
-        {
-            waitingOn.set(safeStore.commandStore().id());
-            ++waitingOnCount;
-            readComplete(safeStore.commandStore(), null, null);
-            return null;
-        }
 
         Command command = safeCommand.current();
         Status status = command.status();
@@ -166,12 +165,12 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
 
                 if (status.compareTo(Committed) >= 0)
                 {
-                    safeStore.progressLog().waiting(txnId, Done, readScope);
+                    safeStore.progressLog().waiting(safeCommand, Done, readScope);
                     return null;
                 }
                 else
                 {
-                    safeStore.progressLog().waiting(txnId, Committed.minKnown, readScope);
+                    safeStore.progressLog().waiting(safeCommand, Committed.minKnown, readScope);
                     return NotCommitted;
                 }
 
@@ -226,7 +225,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
 
     private void removeListener(SafeCommandStore safeStore, TxnId txnId)
     {
-        safeStore.command(txnId).removeListener(this);
+        safeStore.get(txnId, this, readScope).removeListener(this);
     }
 
     @Override

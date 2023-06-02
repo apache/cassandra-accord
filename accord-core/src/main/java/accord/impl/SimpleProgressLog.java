@@ -25,8 +25,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 
-import javax.annotation.Nullable;
-
 import accord.utils.IntrusiveLinkedList;
 import accord.utils.IntrusiveLinkedListNode;
 import accord.coordinate.*;
@@ -140,7 +138,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     }
                 }
 
-                abstract void run(SafeCommandStore safeStore, Command command);
+                abstract void run(SafeCommandStore safeStore, SafeCommand safeCommand);
 
                 Progress progress()
                 {
@@ -204,9 +202,10 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 }
 
                 @Override
-                void run(SafeCommandStore safeStore, Command command)
+                void run(SafeCommandStore safeStore, SafeCommand safeCommand)
                 {
-                    Invariants.checkState(!commandStore.isTruncated(command));
+                    Command command = safeCommand.current();
+                    Invariants.checkState(!safeStore.isTruncated(command));
                     setProgress(Investigating);
                     switch (status)
                     {
@@ -230,9 +229,9 @@ public class SimpleProgressLog implements ProgressLog.Factory
                             Invariants.checkState(token.status != Status.Invalidated);
                             // TODO (expected): this should be encapsulated in Recover/FetchData
                             if (!command.durability().isDurable() && token.durability.isDurableOrInvalidated() && (token.durability.isDurable() || command.hasBeen(PreCommitted)))
-                                command = Commands.setDurability(safeStore, txnId, Majority);
+                                command = Commands.setDurability(safeStore, safeCommand, txnId, Majority);
 
-                            if (command.durability().isDurable())
+                            if (command.durability().isDurable() || token.durability.isDurableOrInvalidated())
                             {
                                 // not guaranteed to know the execution epoch, as might have received durability info obliquely
                                 Timestamp executeAt = command.known().executeAt.hasDecidedExecuteAt() ? command.executeAt() : null;
@@ -261,10 +260,6 @@ public class SimpleProgressLog implements ProgressLog.Factory
                                                 if (fail != null)
                                                     return;
 
-                                                ProgressToken progressToken = success.asProgressToken();
-                                                // TODO (expected): this should be encapsulated in Recover/FetchData
-                                                if (progressToken.status == Status.Invalidated)
-                                                    Commands.commitInvalidate(safeStore0, txnId);
                                                 updateMax(success.asProgressToken());
                                             }
                                         });
@@ -316,8 +311,9 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 }
 
                 @Override
-                void run(SafeCommandStore safeStore, Command command)
+                void run(SafeCommandStore safeStore, SafeCommand safeCommand)
                 {
+                    Command command = safeCommand.current();
                     if (command.has(blockedUntil))
                     {
                         setProgress(NoneExpected);
@@ -367,15 +363,17 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 private void invalidate(Node node, TxnId txnId, Unseekables<?, ?> someKeys)
                 {
                     setProgress(Investigating);
-                    if (Route.isRoute(someKeys))
-                        someKeys = Route.castToRoute(someKeys).withHomeKey();
-                    debugInvestigating = Invalidate.invalidate(node, txnId, someKeys, (success, fail) -> {
+                    // TODO (now): we should avoid invalidating with home key, as this simplifies erasing of invalidated transactions
+                    Unseekables<?, ?> invalidateWith = Route.isRoute(someKeys) ? Route.castToRoute(someKeys).withHomeKey() : someKeys;
+                    debugInvestigating = Invalidate.invalidate(node, txnId, invalidateWith, (success, fail) -> {
                         commandStore.execute(contextFor(txnId), safeStore -> {
                             if (progress() != Investigating)
                                 return;
 
                             setProgress(Expected);
-                            record(safeStore.command(txnId).current().known());
+                            SafeCommand safeCommand = safeStore.ifInitialised(txnId);
+                            Invariants.checkState(safeCommand != null, "No initialised command for %s but have active progress log", txnId);
+                            record(safeCommand.current().known());
                         }).begin(commandStore.agent());
                     });
                 }
@@ -401,8 +399,9 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 }
 
                 @Override
-                void run(SafeCommandStore safeStore, Command command)
+                void run(SafeCommandStore safeStore, SafeCommand safeCommand)
                 {
+                    Command command = safeCommand.current();
                     // make sure a quorum of the home shard is aware of the transaction, so we can rely on it to ensure progress
                     AsyncChain<Void> inform = inform(node, txnId, command.maxRoute());
                     inform.begin((success, fail) -> {
@@ -580,23 +579,6 @@ public class SimpleProgressLog implements ProgressLog.Factory
             ensureSafeOrAtLeast(command, shard, ReadyToExecute, Expected);
         }
 
-        @Override
-        public void invalidated(Command command, ProgressShard shard)
-        {
-            State state = recordApply(command.txnId());
-
-            Invariants.checkState(shard == Home || state == null || state.coordinateState == null);
-
-            // note: we permit Unsure here, so we check if we have any local home state
-            if (shard.isProgress())
-            {
-                state = ensure(command.txnId(), state);
-
-                if (shard.isHome()) state.ensureAtLeast(command, CoordinateStatus.Done, Done);
-                else ensure(command.txnId()).setSafe();
-            }
-        }
-
         public void clear(TxnId txnId)
         {
             State state = stateMap.remove(txnId);
@@ -622,10 +604,13 @@ public class SimpleProgressLog implements ProgressLog.Factory
         }
 
         @Override
-        public void waiting(TxnId blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn)
+        public void waiting(SafeCommand blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn)
         {
-            if (blockedBy.rw().isLocal())
+            if (blockedBy.txnId().rw().isLocal())
                 return;
+
+            // ensure we have a record to work with later; otherwise may think has been truncated
+            blockedBy.initialise();
 
             // TODO (consider): consider triggering a preemption of existing coordinator (if any) in some circumstances;
             //                  today, an LWT can pre-empt more efficiently (i.e. instantly) a failed operation whereas Accord will
@@ -634,7 +619,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
             // TODO (desirable, efficiency): forward to local progress shard for processing (if known)
             // TODO (desirable, efficiency): if we are co-located with the home shard, don't need to do anything unless we're in a
             //                               later topology that wasn't covered by its coordination
-            ensure(blockedBy).recordBlocking(blockedBy, blockedUntil, blockedOn);
+            ensure(blockedBy.txnId()).recordBlocking(blockedBy.txnId(), blockedUntil, blockedOn);
         }
 
         @Override
@@ -671,7 +656,11 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     {
                         commandStore.execute(contextFor(run.txnId()), safeStore -> {
                             if (run.shouldRun()) // could have been completed by a callback
-                                run.run(safeStore, safeStore.command(run.txnId()).current());
+                            {
+                                SafeCommand safeCommand = safeStore.ifInitialised(run.txnId());
+                                if (safeCommand != null && run.shouldRun()) // could be truncated on access
+                                    run.run(safeStore, safeCommand);
+                            }
                         }).begin(commandStore.agent());
                     }
                 }

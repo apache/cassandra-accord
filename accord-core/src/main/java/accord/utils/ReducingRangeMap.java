@@ -19,12 +19,12 @@ package accord.utils;
 
 import accord.api.RoutingKey;
 import accord.primitives.*;
-import com.google.common.annotations.VisibleForTesting;
 
 import java.util.function.BiFunction;
 import java.util.function.Predicate;
 
 import static accord.utils.SortedArrays.Search.FAST;
+import static accord.utils.SortedArrays.exponentialSearch;
 
 public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
 {
@@ -36,145 +36,141 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         }
     }
 
-    final RoutingKeys endKeys;
-
-    public ReducingRangeMap(V value)
+    public ReducingRangeMap()
     {
-        super(value);
-        this.endKeys = RoutingKeys.EMPTY;
+        super();
     }
 
-    ReducingRangeMap(boolean inclusiveEnds, RoutingKey[] ends, V[] values)
+    protected ReducingRangeMap(boolean inclusiveEnds, RoutingKey[] ends, V[] values)
     {
         super(inclusiveEnds, ends, values);
-        this.endKeys = RoutingKeys.ofSortedUnique(ends);
     }
 
-    public V foldl(Routables<?, ?> routables, BiFunction<V, V, V> fold, V initialValue)
+    public V foldl(Routables<?, ?> routables, BiFunction<V, V, V> fold, V accumulator)
     {
-        return foldl(routables, fold, initialValue, ignore -> false);
+        return foldl(routables, (a, b, f, ignore) -> f.apply(a, b), accumulator, fold, null, ignore -> false);
     }
 
-    public <V2> V2 foldl(Routables<?, ?> routables, BiFunction<V, V2, V2> fold, V2 initialValue, Predicate<V2> terminate)
+    public <V2> V2 foldl(Routables<?, ?> routables, BiFunction<V, V2, V2> fold, V2 accumulator, Predicate<V2> terminate)
+    {
+        return foldl(routables, (a, b, f, ignore) -> f.apply(a, b), accumulator, fold, null, terminate);
+    }
+
+    public <V2, P1, P2> V2 foldl(Routables<?, ?> routables, QuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    {
+        return foldl(routables, (v, v2, param1, param2, i, j) -> fold.apply(v, v2, param1, param2), accumulator, p1, p2, terminate);
+    }
+
+    public <V2, P1, P2> V2 foldl(Routables<?, ?> routables, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
         switch (routables.domain())
         {
             default: throw new AssertionError();
-            case Key: return foldl((AbstractKeys<?, ?>) routables, fold, initialValue, terminate);
-            case Range: return foldl((AbstractRanges<?>) routables, fold, initialValue, terminate);
+            case Key: return foldl((AbstractKeys<?, ?>) routables, fold, accumulator, p1, p2, terminate);
+            case Range: return foldl((AbstractRanges<?>) routables, fold, accumulator, p1, p2, terminate);
         }
     }
 
     // TODO (required): test
-    public <V2> V2 foldl(AbstractKeys<?, ?> keys, BiFunction<V, V2, V2> reduce, V2 accumulator, Predicate<V2> terminate)
+    public <V2, P1, P2> V2 foldl(AbstractKeys<?, ?> keys, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
-        int i = 0, j = 0;
+        if (values.length == 0)
+            return accumulator;
+
+        int i = 0, j = keys.findNext(0, starts[0], FAST);
+        if (j < 0) j = -1 - j;
+        else if (inclusiveEnds) ++j;
+
         while (j < keys.size())
         {
-            i = endKeys.findNext(i, keys.get(j), FAST);
-            if (i < 0) i = -1 - i;
-            else if (!inclusiveEnds) ++i;
+            i = exponentialSearch(starts, i, starts.length, keys.get(j));
+            if (i < 0) i = -2 - i;
+            else if (inclusiveEnds) --i;
 
-            accumulator = reduce.apply(values[i], accumulator);
-            if (terminate.test(accumulator))
+            if (i >= values.length)
                 return accumulator;
 
-            if (i == endKeys.size())
-                return j + 1 == keys.size() ? accumulator : reduce.apply(values[i], accumulator);
+            int nextj = keys.findNext(j, starts[i + 1], FAST);
+            if (nextj < 0) nextj = -1 -nextj;
+            else if (inclusiveEnds) ++nextj;
 
-            j = keys.findNext(j + 1, endKeys.get(i), FAST);
-            if (j < 0) j = -1 - j;
-        }
-        return accumulator;
-    }
-
-    // TODO (required): test
-    public <V2> V2 foldl(AbstractRanges<?> ranges, BiFunction<V, V2, V2> reduce, V2 accumulator, Predicate<V2> terminate)
-    {
-        int i = 0, j = 0;
-        while (j < ranges.size())
-        {
-            Range range = ranges.get(j);
-            i = endKeys.findNext(i, range.start(), FAST);
-            if (i < 0) i = -1 - i;
-            else if (inclusiveEnds) ++i;
-
-            int nexti = endKeys.findNext(i, range.end(), FAST);
-            if (nexti < 0) nexti = -nexti;
-            else if (inclusiveEnds) ++nexti;
-
-            while (i < nexti)
+            if (j != nextj && values[i] != null)
             {
-                accumulator = reduce.apply(values[i++], accumulator);
+                accumulator = fold.apply(values[i], accumulator, p1, p2, j, nextj);
                 if (terminate.test(accumulator))
                     return accumulator;
             }
-            if (i > endKeys.size())
-                return accumulator;
-
-            j = ranges.findNext(j + 1, endKeys.get(i - 1), FAST);
-            if (j < 0) j = -1 - j;
+            ++i;
+            j = nextj;
         }
         return accumulator;
     }
 
-    /**
-     * returns a copy of this ReducingRangeMap limited to the ranges supplied, with all other ranges reporting the "zero" value
-     */
-    @VisibleForTesting
-    static <V> ReducingRangeMap<V> trim(ReducingRangeMap<V> existing, Ranges ranges, BiFunction<V, V, V> reduce)
+    // TODO (required): test
+    public <V2, P1, P2> V2 foldl(AbstractRanges<?> ranges, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
-        boolean inclusiveEnds = inclusiveEnds(existing.inclusiveEnds, existing.size() > 0, ranges.size() > 0 && ranges.get(0).endInclusive(), ranges.size() > 0);
-        ReducingRangeMap.Builder<V> builder = new ReducingRangeMap.Builder<>(inclusiveEnds, existing.size());
+        if (values.length == 0)
+            return accumulator;
 
-        V zero = existing.values[0];
-        for (Range select : ranges)
+        // TODO (desired): first searches should be binarySearch
+        int j = ranges.findNext(0, starts[0], FAST);
+        if (j < 0) j = -1 - j;
+        else if (inclusiveEnds && ranges.get(j).end().equals(starts[0])) ++j;
+
+        int i = 0;
+        while (j < ranges.size())
         {
-            ReducingIntervalMap<RoutingKey, V>.RangeIterator intersects = existing.intersecting(select.start(), select.end());
-            while (intersects.hasNext())
+            Range range = ranges.get(j);
+            RoutingKey start = range.start();
+            int nexti = exponentialSearch(starts, i, starts.length, start);
+            if (nexti < 0) i = Math.max(i, -2 - nexti);
+            else if (nexti > i && !inclusiveStarts()) i = nexti - 1;
+            else i = nexti;
+
+            if (i >= values.length)
+                return accumulator;
+
+            int toj, nextj = ranges.findNext(j, starts[i + 1], FAST);
+            if (nextj < 0) toj = nextj = -1 -nextj;
+            else
             {
-                if (zero.equals(intersects.value()))
-                {
-                    intersects.next();
-                    continue;
-                }
-
-                RoutingKey start = intersects.hasStart() && intersects.start().compareTo(select.start()) >= 0 ? intersects.start() : select.start();
-                RoutingKey end = intersects.hasEnd() && intersects.end().compareTo(select.end()) <= 0 ? intersects.end() : select.end();
-
-                builder.append(start, zero, reduce);
-                builder.append(end, intersects.value(), reduce);
-                intersects.next();
+                toj = nextj + 1;
+                if (inclusiveEnds && ranges.get(nextj).end().equals(starts[i + 1]))
+                    ++nextj;
             }
-        }
 
-        builder.appendLast(zero);
-        return builder.build();
+            if (toj > j && values[i] != null)
+            {
+                accumulator = fold.apply(values[i], accumulator, p1, p2, j, toj);
+                if (terminate.test(accumulator))
+                    return accumulator;
+            }
+            ++i;
+            j = nextj;
+        }
+        return accumulator;
     }
 
-    public static <V> ReducingRangeMap<V> create(Ranges ranges, V value, V zero)
+    public static <V> ReducingRangeMap<V> create(Ranges ranges, V value)
     {
+        if (value == null)
+            throw new IllegalArgumentException();
+
         if (ranges.isEmpty())
-            return new ReducingRangeMap<>(zero);
+            return new ReducingRangeMap<>();
 
         ReducingRangeMap.Builder<V> builder = new ReducingRangeMap.Builder<>(ranges.get(0).endInclusive(), ranges.size() * 2);
         for (Range range : ranges)
         {
-            builder.append(range.start(), zero, (a, b) -> a); // if we are equal to prev end, take the prev value not zero
-            builder.append(range.end(), value, (a, b) -> { throw new IllegalStateException(); });
+            builder.append(range.start(), value, (a, b) -> { throw new IllegalStateException(); });
+            builder.append(range.end(), null, (a, b) -> a); // if we are equal to prev end, take the prev value not zero
         }
-        builder.appendLast(zero);
         return builder.build();
     }
 
     public static <V> ReducingRangeMap<V> add(ReducingRangeMap<V> existing, Ranges ranges, V value, BiFunction<V, V, V> reduce)
     {
-        return add(existing, ranges, value, reduce, existing.values[0]);
-    }
-
-    public static <V> ReducingRangeMap<V> add(ReducingRangeMap<V> existing, Ranges ranges, V value, BiFunction<V, V, V> reduce, V zero)
-    {
-        ReducingRangeMap<V> add = create(ranges, value, zero);
+        ReducingRangeMap<V> add = create(ranges, value);
         return merge(existing, add, reduce);
     }
 
@@ -190,15 +186,15 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
 
     static class Builder<V> extends ReducingIntervalMap.Builder<RoutingKey, V, ReducingRangeMap<V>>
     {
-        Builder(boolean inclusiveEnds, int capacity)
+        protected Builder(boolean inclusiveEnds, int capacity)
         {
             super(inclusiveEnds, capacity);
         }
 
         @Override
-        ReducingRangeMap<V> buildInternal()
+        protected ReducingRangeMap<V> buildInternal()
         {
-            return new ReducingRangeMap<>(inclusiveEnds, ends.toArray(new RoutingKey[0]), (V[])values.toArray(new Object[0]));
+            return new ReducingRangeMap<>(inclusiveEnds, starts.toArray(new RoutingKey[0]), (V[])values.toArray(new Object[0]));
         }
     }
 }

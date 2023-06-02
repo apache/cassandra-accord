@@ -191,7 +191,7 @@ public class Deps
         };
     }
 
-    public List<TxnId> txnIds(Seekable keyOrRange)
+    public List<TxnId> computeTxnIds(Seekable keyOrRange)
     {
         List<TxnId> keyIds, rangeIds;
         switch (keyOrRange.domain())
@@ -201,14 +201,14 @@ public class Deps
             {
                 Key key = keyOrRange.asKey();
                 keyIds = keyDeps.txnIds(key);
-                rangeIds = rangeDeps.txnIds(key);
+                rangeIds = rangeDeps.computeTxnIds(key);
                 break;
             }
             case Range:
             {
                 Range range = keyOrRange.asRange();
                 keyIds = keyDeps.txnIds(range);
-                rangeIds = rangeDeps.txnIds(range);
+                rangeIds = rangeDeps.computeTxnIds(range);
             }
         }
 
@@ -231,7 +231,7 @@ public class Deps
         return output;
     }
 
-    public Unseekables<?, ?> someUnseekables(TxnId txnId)
+    public Unseekables<?, ?> someParticipants(TxnId txnId)
     {
         switch (txnId.domain())
         {

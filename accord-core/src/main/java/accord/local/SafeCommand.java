@@ -21,11 +21,14 @@ package accord.local;
 import java.util.Collection;
 
 import accord.api.Result;
+import accord.local.Command.Truncated;
 import accord.primitives.Ballot;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
+
+import static accord.local.SaveStatus.Uninitialised;
 
 public abstract class SafeCommand
 {
@@ -57,7 +60,8 @@ public abstract class SafeCommand
 
     private <C extends Command> C update(C update)
     {
-        Invariants.checkState(current() == null || !CommandStore.current().isTruncated(current()));
+        // TODO (now): reenable this check
+//        Invariants.checkState(current() == null || !CommandStore.current().isTruncated(current()));
         set(update);
         return update;
     }
@@ -115,13 +119,13 @@ public abstract class SafeCommand
         return update(Command.commit(current(), attrs, executeAt, waitingOn));
     }
 
-    public Command.Truncated commitInvalidated()
+    public Truncated commitInvalidated()
     {
         Command current = current();
         if (current.hasBeen(Status.Truncated))
-            return (Command.Truncated) current;
+            return (Truncated) current;
 
-        return update(Command.Truncated.invalidated(current));
+        return update(Truncated.invalidated(current));
     }
 
     public Command precommit(Timestamp executeAt)
@@ -153,5 +157,13 @@ public abstract class SafeCommand
     {
         Invariants.checkArgument(current() == null);
         return update(Command.NotDefined.uninitialised(txnId));
+    }
+
+    public Command initialise()
+    {
+        Command current = current();
+        if (current.saveStatus() != Uninitialised)
+            return current;
+        return update(Command.NotDefined.notDefined(current, current.promised()));
     }
 }

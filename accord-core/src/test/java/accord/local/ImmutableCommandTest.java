@@ -85,9 +85,9 @@ public class ImmutableCommandTest
         @Override public void committed(Command command, ProgressShard shard) {}
         @Override public void readyToExecute(Command command, ProgressShard shard) {}
         @Override public void executed(Command command, ProgressShard shard) {}
-        @Override public void invalidated(Command command, ProgressShard shard) {}
         @Override public void durable(Command command) {}
-        @Override public void waiting(TxnId blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn) {}
+        @Override public void waiting(SafeCommand blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn) {}
+        @Override public void clear(TxnId txnId) {}
     }
 
     private static Node createNode(Id id, CommandStoreSupport storeSupport)
@@ -117,8 +117,9 @@ public class ImmutableCommandTest
             Assertions.assertNull(command.executeAt());
         }
         SafeCommandStore safeStore = commands.beginOperation(PreLoadContext.contextFor(txnId, keys));
-        Commands.preaccept(safeStore, txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY);
-        Command command = safeStore.command(txnId).current();
+        SafeCommand  safeCommand = safeStore.get(txnId, txnId, ROUTE);
+        Commands.preaccept(safeStore, safeCommand, txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY);
+        Command command = safeStore.get(txnId).current();
         Assertions.assertEquals(Status.PreAccepted, command.status());
         Assertions.assertEquals(txnId, command.executeAt());
     }
@@ -144,9 +145,9 @@ public class ImmutableCommandTest
         setTopologyEpoch(support.local, 2);
         ((TestableConfigurationService)node.configService()).reportTopology(support.local.get().withEpoch(2));
         Timestamp expectedTimestamp = Timestamp.fromValues(2, 110, ID1);
-        getUninterruptibly(commands.execute(context, (Consumer<? super SafeCommandStore>) store -> Commands.preaccept(store, txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY)));
+        getUninterruptibly(commands.execute(context, (Consumer<? super SafeCommandStore>) store -> Commands.preaccept(store, store.get(txnId, txnId, ROUTE), txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY)));
         commands.execute(PreLoadContext.contextFor(txnId, txn.keys()), safeStore -> {
-            Command command = safeStore.command(txnId).current();
+            Command command = safeStore.get(txnId).current();
             Assertions.assertEquals(Status.PreAccepted, command.status());
             Assertions.assertEquals(expectedTimestamp, command.executeAt());
         });

@@ -242,17 +242,6 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                 inputs, matching, fold, param, initialValue, terminalValue);
     }
 
-    /**
-     * Fold-left over the {@code inputs} that <b>do not</b> intersect with {@code matching} in ascending order.
-     * Terminate once we hit {@code terminalValue}.
-     */
-    @Inline
-    static <Input extends Routable> long foldlMissing(Routables<Input, ?> inputs, Routables<Input, ?> notMatching, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
-    {
-        return Helper.foldlMissing((ls, li, rs, ri) -> rs.findNextIntersection(ri, ls, li), (ls, li, rs, ri) -> li + 1,
-                inputs, notMatching, fold, param, initialValue, terminalValue);
-    }
-
     class Helper
     {
         interface SetIntersections<L extends Routables<?, ?>, R extends Routables<?, ?>>
@@ -370,34 +359,6 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
                         break done;
                     ++i;
                 }
-            }
-
-            return accumulator;
-        }
-
-        @Inline
-        static <Input extends Routable, Inputs extends Routables<Input, ?>, Matches extends Routables<?, ?>>
-        long foldlMissing(SetIntersections<Inputs, Matches> setIntersections, ValueIntersections<Inputs, Matches> valueIntersections,
-                   Inputs is, Matches ms, IndexedFoldToLong<? super Input> fold, long param, long accumulator, long terminalValue)
-        {
-            int i = 0, m = 0;
-            done: while (true)
-            {
-                long im = setIntersections.findNext(is, i, ms, m);
-                if (im < 0)
-                    break;
-
-                int nexti = (int)(im);
-                while (i < nexti)
-                {
-                    accumulator = fold.apply(is.get(i), param, accumulator, i);
-                    if (accumulator == terminalValue)
-                        break done;
-                    ++i;
-                }
-
-                m = (int)(im >>> 32);
-                i = 1 + valueIntersections.findLimit(is, nexti, ms, m);
             }
 
             return accumulator;

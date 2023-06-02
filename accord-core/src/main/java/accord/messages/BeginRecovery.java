@@ -80,11 +80,8 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
 
     public RecoverReply apply(SafeCommandStore safeStore)
     {
-        if (safeStore.commandStore().isTruncated(txnId, txnId, scope))
-            return new RecoverNack(null);
-
-        SafeCommand safeCommand = safeStore.command(txnId);
-        switch (Commands.recover(safeStore, txnId, partialTxn, route, progressKey, ballot))
+        SafeCommand safeCommand = safeStore.get(txnId, null, route);
+        switch (Commands.recover(safeStore, safeCommand, txnId, partialTxn, route, progressKey, ballot))
         {
             default:
                 throw new IllegalStateException("Unhandled Outcome");

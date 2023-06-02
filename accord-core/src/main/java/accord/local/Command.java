@@ -28,6 +28,7 @@ import accord.primitives.PartialTxn;
 import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.primitives.Writes;
 import accord.utils.ImmutableBitSet;
 import accord.utils.IndexedQuadConsumer;
@@ -114,7 +115,7 @@ public abstract class Command implements CommonAttributes
         @Override
         public void onChange(SafeCommandStore safeStore, SafeCommand safeCommand)
         {
-            Commands.listenerUpdate(safeStore, safeStore.command(listenerId), safeCommand);
+            Commands.listenerUpdate(safeStore, safeStore.get(listenerId), safeCommand);
         }
 
         @Override
@@ -933,6 +934,11 @@ public abstract class Command implements CommonAttributes
             return next != null ? next : nextWaitingOnCommit();
         }
 
+        public boolean isAppliedOrInvalidatedRangeIdx(int i)
+        {
+            return appliedOrInvalidated.get(i + deps.keyDeps.txnIdCount());
+        }
+
         public TxnId minWaitingOnTxnId()
         {
             return minWaitingOnTxnId(deps, waitingOnCommit, waitingOnApply);
@@ -947,14 +953,42 @@ public abstract class Command implements CommonAttributes
                                       minWaitingOnRanges == Integer.MAX_VALUE ? null : deps.txnId(minWaitingOnRanges));
         }
 
+        static TxnId minWaitingOn(Deps deps, SimpleBitSet waitingOn)
+        {
+            int keyDepsCount = deps.keyDeps.txnIdCount();
+            int minWaitingOnKeys = waitingOn.nextSetBitBefore(0, keyDepsCount, -1);
+            int minWaitingOnRanges = waitingOn.nextSetBit(keyDepsCount, -1);
+            return TxnId.nonNullOrMin(minWaitingOnKeys < 0 ? null : deps.keyDeps.txnId(minWaitingOnKeys),
+                                      minWaitingOnRanges < 0 ? null : deps.rangeDeps.txnId(minWaitingOnRanges - keyDepsCount));
+        }
+
+        static TxnId maxWaitingOn(Deps deps, SimpleBitSet waitingOn)
+        {
+            int keyDepsCount = deps.keyDeps.txnIdCount();
+            int maxWaitingOnRanges = waitingOn.prevSetBitNotBefore(waitingOn.size() - 1, keyDepsCount, -1);
+            int maxWaitingOnKeys = waitingOn.prevSetBit(keyDepsCount);
+            return TxnId.nonNullOrMax(maxWaitingOnKeys < 0 ? null : deps.keyDeps.txnId(maxWaitingOnKeys),
+                                      maxWaitingOnRanges < 0 ? null : deps.rangeDeps.txnId(maxWaitingOnRanges - keyDepsCount));
+        }
+
         public ImmutableSortedSet<TxnId> computeWaitingOnCommit()
+        {
+            return computeWaitingOnCommit(deps, waitingOnCommit);
+        }
+
+        public ImmutableSortedSet<TxnId> computeWaitingOnApply()
+        {
+            return computeWaitingOnApply(deps, waitingOnCommit, waitingOnApply);
+        }
+
+        private static ImmutableSortedSet<TxnId> computeWaitingOnCommit(Deps deps, SimpleBitSet waitingOnCommit)
         {
             ImmutableSortedSet.Builder<TxnId> builder = new ImmutableSortedSet.Builder<>(TxnId::compareTo);
             waitingOnCommit.forEach(builder, deps, (b, d, i) -> b.add(d.txnId(i)));
             return builder.build();
         }
 
-        public ImmutableSortedSet<TxnId> computeWaitingOnApply()
+        private static ImmutableSortedSet<TxnId> computeWaitingOnApply(Deps deps, SimpleBitSet waitingOnCommit, SimpleBitSet waitingOnApply)
         {
             ImmutableSortedSet.Builder<TxnId> builder = new ImmutableSortedSet.Builder<>(TxnId::compareTo);
             waitingOnApply.forEach(builder, deps, waitingOnCommit, (b, d, s, i) -> {
@@ -964,9 +998,14 @@ public abstract class Command implements CommonAttributes
             return builder.build();
         }
 
+        private static String toString(Deps deps, SimpleBitSet waitingOnCommit, SimpleBitSet waitingOnApply)
+        {
+            return "onApply=" + computeWaitingOnApply(deps, waitingOnCommit, waitingOnApply).descendingSet() + ", onCommit=" + computeWaitingOnCommit(deps, waitingOnCommit).descendingSet();
+        }
+
         public String toString()
         {
-            return "onApply=" + computeWaitingOnApply().descendingSet() + ", onCommit=" + computeWaitingOnCommit().descendingSet();
+            return toString(deps, waitingOnCommit, waitingOnApply);
         }
 
         public static class Update
@@ -985,6 +1024,23 @@ public abstract class Command implements CommonAttributes
             public Update(Committed committed)
             {
                 this(committed.waitingOn);
+            }
+
+            public Update(Unseekables<?, ?> participants, Deps deps)
+            {
+                this.deps = deps;
+                this.waitingOnCommit = new SimpleBitSet(deps.txnIdCount(), false);
+                this.waitingOnCommit.setRange(0, deps.keyDeps.txnIdCount());
+                if (!participants.containsAll(deps.keyDeps.keys()))
+                {
+                    // TODO (now): we don't need to wait on these as we have lost ownership of them locally
+                    System.out.println();
+                }
+                deps.rangeDeps.forEach(participants, this, (u, i) -> {
+                    u.waitingOnCommit.set(u.deps.keyDeps.txnIdCount() + i);
+                });
+                this.waitingOnApply = new SimpleBitSet(deps.txnIdCount(), false);
+                this.appliedOrInvalidated = new SimpleBitSet(deps.txnIdCount(), false);
             }
 
             public boolean hasChanges()
@@ -1057,11 +1113,11 @@ public abstract class Command implements CommonAttributes
                                                 to.setAppliedOrInvalidated(i2);
                                         }, propagate.appliedOrInvalidated, this, null);
 
-                    forEachIntersection(propagate.deps.rangeDeps.txnIds(), propagate.deps.keyDeps.txnIdCount(), deps.rangeDeps.txnIds(), deps.keyDeps.txnIdCount(),
+                    forEachIntersection(propagate.deps.rangeDeps.txnIds(), deps.rangeDeps.txnIds(),
                                         (from, to, ignore, i1, i2) -> {
-                                            if (from.get(i1))
-                                                to.setAppliedOrInvalidated(i2);
-                                        }, propagate.appliedOrInvalidated, this, null);
+                                            if (from.isAppliedOrInvalidatedRangeIdx(i1))
+                                                to.setAppliedOrInvalidatedRangeIdx(i2);
+                                        }, propagate, this, null);
                 }
 
                 return true;
@@ -1072,25 +1128,34 @@ public abstract class Command implements CommonAttributes
                 return WaitingOn.minWaitingOnTxnId(deps, waitingOnCommit, waitingOnApply);
             }
 
+            boolean setAppliedOrInvalidatedRangeIdx(int i)
+            {
+                return setAppliedOrInvalidated(i + deps.keyDeps.txnIdCount());
+            }
+
             boolean setAppliedOrInvalidated(int i)
             {
                 if (appliedOrInvalidated.get(i))
                     return false;
-
-                appliedOrInvalidated = ensureMutable(appliedOrInvalidated);
-                appliedOrInvalidated.set(i);
 
                 if (waitingOnCommit.get(i))
                 {
                     waitingOnCommit = ensureMutable(waitingOnCommit);
                     waitingOnCommit.unset(i);
                 }
-                else
+                else if (waitingOnApply.get(i))
                 {
-                    Invariants.checkState(waitingOnApply.get(i));
                     waitingOnApply = ensureMutable(waitingOnApply);
                     waitingOnApply.unset(i);
                 }
+                else
+                {
+                    return false;
+                }
+
+                appliedOrInvalidated = ensureMutable(appliedOrInvalidated);
+                appliedOrInvalidated.set(i);
+
                 return true;
             }
 
@@ -1107,6 +1172,12 @@ public abstract class Command implements CommonAttributes
             public WaitingOn build()
             {
                 return new WaitingOn(deps, ensureImmutable(waitingOnCommit), ensureImmutable(waitingOnApply), ensureImmutable(appliedOrInvalidated));
+            }
+
+            @Override
+            public String toString()
+            {
+                return WaitingOn.toString(deps, waitingOnCommit, waitingOnApply);
             }
         }
     }

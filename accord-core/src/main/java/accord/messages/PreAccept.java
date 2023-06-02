@@ -105,16 +105,13 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         if (minUnsyncedEpoch < txnId.epoch() && !safeStore.ranges().coordinates(txnId).intersects(scope))
             return applyIfDoesNotCoordinate(safeStore);
 
-        // if the coordination or execution epoch intersect with a truncation then this transaction has been completed or rejected
-        if (safeStore.commandStore().isTruncatedAt(txnId, maxEpoch, scope))
-            return PreAcceptNack.INSTANCE;
-
-        switch (Commands.preaccept(safeStore, txnId, maxEpoch, partialTxn, route, progressKey))
+        SafeCommand safeCommand = safeStore.get(txnId, null, route);
+        switch (Commands.preaccept(safeStore, safeCommand, txnId, maxEpoch, partialTxn, route, progressKey))
         {
             default:
             case Success:
             case Redundant: // we might hit 'Redundant' if we have to contact later epochs and partially re-contact a node we already contacted
-                Command command = safeStore.command(txnId).current();
+                Command command = safeCommand.current();
                 // for efficiency, we don't usually return dependencies newer than txnId as they aren't necessarily needed
                 // for recovery, and it's better to persist less data than more. However, for exclusive sync points we
                 // don't need to perform an Accept round, nor do we need to persist this state to aid recovery. We just

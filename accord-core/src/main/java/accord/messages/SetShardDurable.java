@@ -25,12 +25,12 @@ import accord.utils.MapReduceConsume;
 
 import static accord.messages.SimpleReply.Ok;
 
-public class SetLocallyDurable extends AbstractEpochRequest<SimpleReply>
+public class SetShardDurable extends AbstractEpochRequest<SimpleReply>
         implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, SimpleReply>
 {
     public final SyncPoint exclusiveSyncPoint;
 
-    public SetLocallyDurable(SyncPoint exclusiveSyncPoint)
+    public SetShardDurable(SyncPoint exclusiveSyncPoint)
     {
         super(null);
         this.exclusiveSyncPoint = exclusiveSyncPoint;

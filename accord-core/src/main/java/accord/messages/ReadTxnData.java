@@ -31,6 +31,7 @@ import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.Status;
+import accord.primitives.EpochSupplier;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -43,7 +44,7 @@ import static accord.messages.ReadData.ReadNack.Redundant;
 import static accord.utils.MapReduceConsume.forEach;
 
 // TODO (required, efficiency): dedup - can currently have infinite pending reads that will be executed independently
-public class ReadTxnData extends ReadData implements Command.TransientListener
+public class ReadTxnData extends ReadData implements Command.TransientListener, EpochSupplier
 {
     private static final Logger logger = LoggerFactory.getLogger(ReadTxnData.class);
 
@@ -104,6 +105,12 @@ public class ReadTxnData extends ReadData implements Command.TransientListener
     }
 
     @Override
+    public long epoch()
+    {
+        return executeAtEpoch;
+    }
+
+    @Override
     public PreLoadContext listenerPreLoadContext(TxnId caller)
     {
         return PreLoadContext.contextFor(txnId, caller, keys());
@@ -143,7 +150,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener
     @Override
     public synchronized ReadNack apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.command(txnId);
+        SafeCommand safeCommand = safeStore.get(txnId, this, readScope);
         return apply(safeStore, safeCommand);
     }
 
@@ -175,7 +182,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener
                 }
                 else
                 {
-                    safeStore.progressLog().waiting(txnId, Committed.minKnown, readScope);
+                    safeStore.progressLog().waiting(safeCommand, Committed.minKnown, readScope);
                     return NotCommitted;
                 }
 
@@ -254,7 +261,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener
 
     private void removeListener(SafeCommandStore safeStore, TxnId txnId)
     {
-        safeStore.command(txnId).removeListener(this);
+        safeStore.get(txnId, this, readScope).removeListener(this);
     }
 
     @Override

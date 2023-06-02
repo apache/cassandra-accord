@@ -149,10 +149,9 @@ public class Commit extends TxnRequest<ReadNack>
     @Override
     public synchronized ReadNack apply(SafeCommandStore safeStore)
     {
-        if (safeStore.commandStore().isTruncated(txnId, executeAt, scope))
-            return ReadNack.Redundant;
-
-        switch (Commands.commit(safeStore, txnId, route != null ? route : scope, progressKey, partialTxn, executeAt, partialDeps))
+        Route<?> route = this.route != null ? this.route : scope;
+        SafeCommand safeCommand = safeStore.get(txnId, executeAt, route);
+        switch (Commands.commit(safeStore, safeCommand, txnId, route != null ? route : scope, progressKey, partialTxn, executeAt, partialDeps))
         {
             default:
             case Success:
@@ -160,7 +159,6 @@ public class Commit extends TxnRequest<ReadNack>
                 return null;
 
             case Insufficient:
-                SafeCommand safeCommand = safeStore.command(txnId);
                 Invariants.checkState(!safeCommand.current().known().isDefinitionKnown());
                 if (defer == null)
                     defer = new Defer(DefinitionOnly, Committed.minKnown, Commit.this);
@@ -282,10 +280,7 @@ public class Commit extends TxnRequest<ReadNack>
         public void process(Node node, Id from, ReplyContext replyContext)
         {
             node.forEachLocal(this, scope, txnId.epoch(), invalidateUntilEpoch, safeStore -> {
-                if (safeStore.commandStore().isTruncatedAt(txnId, txnId.epoch(), scope))
-                    return;
-
-                Commands.commitInvalidate(safeStore, txnId);
+                Commands.commitInvalidate(safeStore, safeStore.get(txnId, txnId, scope));
             }).begin(node.agent());
         }
 

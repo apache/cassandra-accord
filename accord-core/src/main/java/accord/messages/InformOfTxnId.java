@@ -46,9 +46,9 @@ public class InformOfTxnId extends AbstractEpochRequest<Reply> implements Reques
     @Override
     public Reply apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.command(txnId);
+        SafeCommand safeCommand = safeStore.get(txnId, null, someRoute);
         Command current = safeCommand.current();
-        if (!current.hasBeen(Status.PreAccepted) && !safeStore.commandStore().isTruncated(txnId, txnId, someRoute))
+        if (!current.hasBeen(Status.PreAccepted))
         {
             Commands.informHome(safeStore, safeCommand, someRoute);
             safeStore.progressLog().unwitnessed(txnId, Home);

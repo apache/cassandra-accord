@@ -25,7 +25,7 @@ import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node;
 import accord.messages.Callback;
 import accord.messages.ReadData;
-import accord.messages.SetLocallyDurable;
+import accord.messages.SetShardDurable;
 import accord.messages.WaitUntilApplied;
 import accord.primitives.SyncPoint;
 import accord.topology.Topologies;
@@ -73,7 +73,7 @@ public class CoordinateShardDurable extends SettableResult<Void> implements Call
                 default: throw new AssertionError("Unhandled: " + reply);
 
                 case NotCommitted:
-                    CoordinateSyncPoint.sendApply(node, from, exclusiveSyncPoint.ranges, exclusiveSyncPoint);
+                    CoordinateSyncPoint.sendApply(node, from, exclusiveSyncPoint);
                     return;
 
                 case Redundant:
@@ -95,7 +95,7 @@ public class CoordinateShardDurable extends SettableResult<Void> implements Call
             if (tracker.recordSuccess(from) == RequestStatus.Success)
             {
                 node.configService().reportEpochRedundant(exclusiveSyncPoint.ranges, exclusiveSyncPoint.syncId.epoch());
-                node.send(tracker.nodes(), new SetLocallyDurable(exclusiveSyncPoint));
+                node.send(tracker.nodes(), new SetShardDurable(exclusiveSyncPoint));
                 trySuccess(null);
             }
         }

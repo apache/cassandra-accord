@@ -435,18 +435,22 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
 
     public List<TxnId> txnIds(Key key)
     {
-        int[] keysToTxnIds = keysToTxnIds();
         int keyIndex = keys.indexOf(key);
         if (keyIndex < 0)
             return Collections.emptyList();
 
-        int start = startOffset(keyIndex);
-        int end = endOffset(keyIndex);
-        int size = end - start;
-        return txnIds(keysToTxnIds, start, size);
+        return txnIdsForKeyIndex(keyIndex);
     }
 
-    public List<TxnId> txnIds(Range range)
+    public SortedRelationList<TxnId> txnIdsForKeyIndex(int keyIndex)
+    {
+        int[] keysToTxnIds = keysToTxnIds();
+        int start = startOffset(keyIndex);
+        int end = endOffset(keyIndex);
+        return txnIds(keysToTxnIds, start, end);
+    }
+
+    public SortedRelationList<TxnId> txnIds(Range range)
     {
         int startIndex = keys.indexOf(range.start());
         if (startIndex < 0) startIndex = -1 - startIndex;
@@ -457,7 +461,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         else if (range.endInclusive()) ++endIndex;
 
         if (startIndex == endIndex)
-            return Collections.emptyList();
+            return SortedRelationList.EMPTY;
 
         int[] keysToTxnIds = keysToTxnIds();
         int maxLength = Math.min(txnIds.length, startOffset(endIndex) - startOffset(startIndex));
@@ -498,24 +502,12 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return txnIds(ids, 0, count);
     }
 
-    private List<TxnId> txnIds(int[] ids, int start, int size)
+    private SortedRelationList<TxnId> txnIds(int[] ids, int start, int end)
     {
-        return new AbstractList<TxnId>()
-        {
-            @Override
-            public TxnId get(int index)
-            {
-                if (index > size)
-                    throw new IndexOutOfBoundsException();
-                return txnIds[ids[start + index]];
-            }
+        if (start == end)
+            return SortedRelationList.EMPTY;
 
-            @Override
-            public int size()
-            {
-                return size;
-            }
-        };
+        return new SortedRelationList<>(txnIds, ids, start, end);
     }
 
     private int startOffset(int keyIndex)

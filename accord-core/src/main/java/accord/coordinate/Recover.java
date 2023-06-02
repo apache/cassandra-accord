@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 
 import accord.coordinate.tracking.*;
+import accord.local.Status;
 import accord.primitives.*;
 import accord.messages.Commit;
 import accord.utils.Invariants;
@@ -103,7 +104,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         for (int i = 0 ; i < waitOn.txnIdCount() ; ++i)
         {
             TxnId txnId = waitOn.txnId(i);
-            new AwaitCommit(node, txnId, waitOn.someUnseekables(txnId)).addCallback((success, failure) -> {
+            new AwaitCommit(node, txnId, waitOn.someParticipants(txnId)).addCallback((success, failure) -> {
                 if (result.isDone())
                     return;
                 if (success != null && remaining.decrementAndGet() == 0)
@@ -228,10 +229,10 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                     Deps committedDeps = tryMergeCommittedDeps();
                     node.withEpoch(executeAt.epoch(), () -> {
                         // TODO (required, consider): when writes/result are partially replicated, need to confirm we have quorum of these
-                        if (committedDeps != null) Persist.persistAndCommitMaximal(node, txnId, route, txn, executeAt, committedDeps, acceptOrCommit.writes, acceptOrCommit.result);
+                        if (committedDeps != null) Persist.persistMaximal(node, txnId, route, txn, executeAt, committedDeps, acceptOrCommit.writes, acceptOrCommit.result);
                         else CollectDeps.withDeps(node, txnId, route, txn.keys(), executeAt, (deps, fail) -> {
                             if (fail != null) accept(null, fail);
-                            else Persist.persistAndCommitMaximal(node, txnId, route, txn, executeAt, deps, acceptOrCommit.writes, acceptOrCommit.result);
+                            else Persist.persistMaximal(node, txnId, route, txn, executeAt, deps, acceptOrCommit.writes, acceptOrCommit.result);
                         });
                     });
                     accept(acceptOrCommit.result, null);
@@ -336,7 +337,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         Timestamp invalidateUntil = recoverOks.stream().map(ok -> ok.executeAt).reduce(txnId, Timestamp::max);
         node.withEpoch(invalidateUntil.epoch(), () -> Commit.Invalidate.commitInvalidate(node, txnId, route, invalidateUntil));
         isDone = true;
-        callback.accept(ProgressToken.INVALIDATED, null);
+        new FetchData.InvalidateOnDone(node, txnId, route, Status.Known.Invalidated, (s, f) -> callback.accept(f == null ? ProgressToken.INVALIDATED : null, f)).start();
     }
 
     private void propose(Timestamp executeAt, Deps deps)

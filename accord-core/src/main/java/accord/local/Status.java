@@ -229,6 +229,11 @@ public enum Status
             return definition.isKnown();
         }
 
+        public boolean hasRoute()
+        {
+            return definition.isKnown() || deps.hasProposedOrDecidedDeps() || outcome.isKnown();
+        }
+
         public boolean canProposeInvalidation()
         {
             return deps.canProposeInvalidation() && executeAt.canProposeInvalidation() && outcome.canProposeInvalidation();

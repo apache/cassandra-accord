@@ -21,6 +21,7 @@ package accord.coordinate;
 import java.util.function.BiConsumer;
 
 import accord.local.Status.Known;
+import accord.messages.Commit;
 import accord.primitives.*;
 import accord.utils.Invariants;
 
@@ -28,7 +29,6 @@ import accord.local.Node;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
 
-import static accord.primitives.ProgressToken.TRUNCATED;
 import static accord.utils.Functions.reduceNonNull;
 
 /**
@@ -73,10 +73,11 @@ public class MaybeRecover extends CheckShards<Route<?>>
         {
             callback.accept(null, fail);
         }
-        else if (!truncated)
+        else
         {
             Invariants.checkState(merged != null);
             Known known = merged.saveStatus.known;
+            Route<?> someRoute = reduceNonNull(Route::union, (Route)this.route, merged.route);
 
             switch (known.outcome)
             {
@@ -84,8 +85,6 @@ public class MaybeRecover extends CheckShards<Route<?>>
                 case Unknown:
                     if (known.canProposeInvalidation() && !Route.isFullRoute(merged.route))
                     {
-                        // order important, as route could be a Route which does not implement RoutingKeys.union
-                        Route<?> someRoute = reduceNonNull(Route::union, (Route)this.route, merged.route);
                         // for correctness reasons, we have not necessarily preempted the initial pre-accept round and
                         // may have raced with it, so we must attempt to recover anything we see pre-accepted.
                         Invalidate.invalidate(node, txnId, someRoute.withHomeKey(), callback);
@@ -108,18 +107,12 @@ public class MaybeRecover extends CheckShards<Route<?>>
 
                 case Invalidate:
                     // TODO (easy, efficiency): we should simply invoke commitInvalidate
-                    Route<?> someRoute = reduceNonNull(Route::union, (Route)this.route, merged.route);
-                    Invalidate.invalidate(node, txnId, someRoute.withHomeKey(), callback);
-                    break;
+                    Commit.Invalidate.commitInvalidate(node, txnId, someRoute, sourceEpoch);
 
                 case Truncated:
                 case TruncatedApply:
-                    callback.accept(merged.toProgressToken(), null);
+                    new FetchData.InvalidateOnDone(node, txnId, someRoute, known, (s, f) -> callback.accept(f == null ? merged.toProgressToken() : null, f)).start();
             }
-        }
-        else
-        {
-            callback.accept(TRUNCATED, null);
         }
     }
 }

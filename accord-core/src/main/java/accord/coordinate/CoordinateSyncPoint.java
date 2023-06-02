@@ -22,7 +22,6 @@ import java.util.List;
 
 import accord.local.Node;
 import accord.messages.Apply;
-import accord.messages.Commit;
 import accord.messages.PreAccept.PreAcceptOk;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
@@ -34,7 +33,6 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.Txn.Kind;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.async.AsyncResult;
 import accord.utils.Invariants;
@@ -119,11 +117,7 @@ public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
                 @Override
                 void onAccepted()
                 {
-                    Topologies commit = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
-                    Topologies latest = commit.size() == 1 ? commit : node.topology().forEpoch(route, executeAt.epoch());
-                    if (latest != commit)
-                        node.send(commit.nodes(), id -> new Commit(Commit.Kind.Maximal, id, commit.forEpoch(txnId.epoch()), commit, txnId, txn, route, null, executeAt, deps, false));
-                    node.send(latest.nodes(), id -> new Apply(id, latest, latest, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null)));
+                    Apply.sendMaximal(node, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null));
                     node.configService().reportEpochClosed(ranges, txnId.epoch());
                     accept(new SyncPoint(txnId, deps, ranges, (FullRangeRoute) route), null);
                 }
@@ -131,16 +125,12 @@ public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
         }
     }
 
-    static void sendApply(Node node, Node.Id to, Unseekables<?, ?> scope, SyncPoint syncPoint)
+    static void sendApply(Node node, Node.Id to, SyncPoint syncPoint)
     {
         TxnId txnId = syncPoint.syncId;
         Timestamp executeAt = txnId;
         Txn txn = node.agent().emptyTxn(txnId.rw(), syncPoint.ranges);
         Deps deps = syncPoint.waitFor;
-        Topologies commit = node.topology().preciseEpochs(scope, txnId.epoch(), executeAt.epoch());
-        Topologies latest = commit.size() == 1 ? commit : node.topology().forEpoch(scope, executeAt.epoch());
-        if (latest != commit)
-            node.send(to, new Commit(Commit.Kind.Maximal, to, commit.forEpoch(txnId.epoch()), commit, txnId, txn, syncPoint.route(), null, executeAt, deps, false));
-        node.send(to, new Apply(to, latest, latest, txnId, syncPoint.route(), txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null)));
+        Apply.sendMaximal(node, to, txnId, syncPoint.route(), txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null));
     }
 }

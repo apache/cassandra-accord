@@ -23,13 +23,13 @@ import java.util.Set;
 import accord.local.Commands;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.local.SafeCommand;
 import accord.local.Status;
 import accord.local.Status.Durability;
 import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
-import static accord.api.ProgressLog.ProgressShard.Home;
 import static accord.local.PreLoadContext.contextFor;
 
 public class InformHomeDurable implements Request
@@ -56,13 +56,11 @@ public class InformHomeDurable implements Request
     {
         // TODO (expected, efficiency): do not load txnId first
         node.ifLocal(contextFor(txnId), route.homeKey(), txnId.epoch(), safeStore -> {
-            if (safeStore.commandStore().isTruncated(txnId, txnId, route))
+            SafeCommand safeCommand = safeStore.get(txnId, executeAt, route);
+            if (safeCommand.current().is(Status.Truncated))
                 return;
 
-            if (safeStore.command(txnId).current().is(Status.Truncated))
-                return;
-
-            Commands.setDurability(safeStore, txnId, durability, route, executeAt);
+            Commands.setDurability(safeStore, safeCommand, txnId, durability, route, executeAt);
         }).begin(node.agent());
     }
 

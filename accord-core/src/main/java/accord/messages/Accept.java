@@ -82,9 +82,6 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
                 return new AcceptReply(calculatePartialDeps(safeStore));
         }
 
-        if (safeStore.commandStore().isTruncated(txnId, executeAt, scope))
-            return AcceptReply.REDUNDANT;
-
         // only accept if we actually participate in the ranges - otherwise we're just looking
         switch (Commands.accept(safeStore, txnId, ballot, scope, keys, progressKey, executeAt, partialDeps))
         {
@@ -94,7 +91,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
             case Redundant:
                 return AcceptReply.REDUNDANT;
             case RejectedBallot:
-                return new AcceptReply(safeStore.command(txnId).current().promised());
+                return new AcceptReply(safeStore.get(txnId, null, scope).current().promised());
             case Success:
                 // TODO (desirable, efficiency): we don't need to calculate deps if executeAt == txnId
                 return new AcceptReply(calculatePartialDeps(safeStore));
@@ -223,6 +220,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     public static class Invalidate extends AbstractEpochRequest<AcceptReply>
     {
         public final Ballot ballot;
+        // TODO (now): this should be a participant
         public final RoutingKey someKey;
 
         public Invalidate(Ballot ballot, TxnId txnId, RoutingKey someKey)
@@ -241,10 +239,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         @Override
         public AcceptReply apply(SafeCommandStore safeStore)
         {
-            if (safeStore.commandStore().isTruncated(txnId, someKey))
-                return AcceptReply.TRUNCATED;
-
-            SafeCommand safeCommand = safeStore.command(txnId);
+            SafeCommand safeCommand = safeStore.get(txnId, null, someKey);
             switch (Commands.acceptInvalidate(safeStore, safeCommand, ballot))
             {
                 default:

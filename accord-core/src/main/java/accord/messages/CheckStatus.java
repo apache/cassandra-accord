@@ -37,7 +37,7 @@ import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.messages.TxnRequest.computeScope;
 
 public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusReply>
-        implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, CheckStatus.CheckStatusReply>
+        implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, CheckStatus.CheckStatusReply>, EpochSupplier
 {
     public enum WithQuorum { HasQuorum, NoQuorum }
 
@@ -101,12 +101,15 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     }
 
     @Override
+    public long epoch()
+    {
+        return sourceEpoch;
+    }
+
+    @Override
     public CheckStatusReply apply(SafeCommandStore safeStore)
     {
-        if (safeStore.commandStore().isTruncatedAt(txnId, sourceEpoch, query))
-            return truncated(safeStore);
-
-        SafeCommand safeCommand = safeStore.command(txnId);
+        SafeCommand safeCommand = safeStore.get(txnId, this, query);
         Command command = safeCommand.current();
         if (command.is(Truncated))
             return truncated(safeStore);
@@ -151,7 +154,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
         if (safeStore.commandStore().isGloballyDurable(txnId))
             return safeStore.commandStore().isRejectedIfNotPreAccepted(txnId, participants) ? PreAccepted : PreApplied;
 
-        if (safeStore.commandStore().isShardDurableAt(txnId, txnId.epoch(), participants))
+        if (safeStore.commandStore().statusMap().isSomeShardDurable(txnId, txnId, participants))
             return PreCommitted;
 
         return Status.NotDefined;
@@ -422,9 +425,9 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
                 case DepsKnown:
                     if (committedDeps != null && committedDeps.covers(unseekables))
                         break;
-                    deps = KnownDeps.DepsUnknown;
-                case NoDeps:
                 case DepsProposed:
+                case NoDeps:
+                    deps = KnownDeps.DepsUnknown;
                 case DepsUnknown:
             }
 

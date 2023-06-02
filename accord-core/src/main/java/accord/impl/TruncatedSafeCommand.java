@@ -19,90 +19,65 @@
 package accord.impl;
 
 import java.util.Collection;
-import java.util.function.Supplier;
+import java.util.Collections;
 
-import accord.impl.InMemoryCommandStore.GlobalCommand;
 import accord.local.Command;
 import accord.local.SafeCommand;
+import accord.local.SaveStatus;
 import accord.primitives.TxnId;
 
-public class InMemorySafeCommand extends SafeCommand implements SafeState<Command>
+import static accord.api.ProgressLog.ProgressShard.Unsure;
+import static accord.local.Listeners.Immutable.EMPTY;
+
+public class TruncatedSafeCommand extends SafeCommand
 {
-    private static final Supplier<GlobalCommand> INVALIDATED = () -> null;
+    final Command truncated;
 
-    private Supplier<GlobalCommand> lazy;
-    private GlobalCommand global;
-
-    public InMemorySafeCommand(TxnId txnId, GlobalCommand global)
+    public TruncatedSafeCommand(TxnId txnId)
     {
         super(txnId);
-        this.global = global;
-    }
-
-    public InMemorySafeCommand(TxnId txnId, Supplier<GlobalCommand> global)
-    {
-        super(txnId);
-        this.lazy = global;
+        this.truncated = new Command.Truncated(txnId, SaveStatus.Truncated, null, Unsure, null, EMPTY);
     }
 
     @Override
     public Command current()
     {
-        touch();
-        return global.value();
-    }
-
-    @Override
-    protected void set(Command update)
-    {
-        touch();
-        global.value(update);
-    }
-
-    @Override
-    public void addListener(Command.TransientListener listener)
-    {
-        global.addListener(listener);
-    }
-
-    @Override
-    public boolean removeListener(Command.TransientListener listener)
-    {
-        return global.removeListener(listener);
-    }
-
-    @Override
-    public Collection<Command.TransientListener> transientListeners()
-    {
-        return global.transientListeners();
+        return truncated;
     }
 
     @Override
     public void invalidate()
     {
-        lazy = INVALIDATED;
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public boolean invalidated()
     {
-        return lazy == INVALIDATED;
+        return false;
     }
 
-    private void touch()
+    @Override
+    public void addListener(Command.TransientListener listener)
     {
-        if (invalidated())
-            throw new IllegalStateException("Cannot access invalidated " + this);
-        if (lazy != null)
-        {
-            global = lazy.get();
-            lazy = null;
-        }
+        throw new UnsupportedOperationException();
     }
 
-    GlobalCommand global()
+    @Override
+    public boolean removeListener(Command.TransientListener listener)
     {
-        touch();
-        return global;
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Collection<Command.TransientListener> transientListeners()
+    {
+        return Collections.emptyList();
+    }
+
+    @Override
+    protected void set(Command command)
+    {
+        throw new UnsupportedOperationException();
     }
 }

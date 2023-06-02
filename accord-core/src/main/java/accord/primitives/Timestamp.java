@@ -25,7 +25,7 @@ import static accord.utils.Invariants.checkArgument;
 
 import javax.annotation.Nonnull;
 
-public class Timestamp implements Comparable<Timestamp>
+public class Timestamp implements Comparable<Timestamp>, EpochSupplier
 {
     public static final Timestamp MAX = new Timestamp(Long.MAX_VALUE, Long.MAX_VALUE, Id.MAX);
     public static final Timestamp NONE = new Timestamp(0, 0, 0, Id.NONE);

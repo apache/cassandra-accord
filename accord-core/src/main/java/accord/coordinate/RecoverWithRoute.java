@@ -169,7 +169,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                 {
                     Deps deps = merged.committedDeps.reconstitute(route());
                     node.withEpoch(merged.executeAt.epoch(), () -> {
-                        Persist.persistAndCommitMaximal(node, txnId, route(), txn, merged.executeAt, deps, merged.writes, merged.result);
+                        Persist.persistMaximal(node, txnId, route(), txn, merged.executeAt, deps, merged.writes, merged.result);
                     });
                     callback.accept(APPLIED, null);
                 }

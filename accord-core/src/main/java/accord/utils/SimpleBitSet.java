@@ -20,6 +20,10 @@ package accord.utils;
 
 import java.util.Arrays;
 
+import static java.lang.Long.highestOneBit;
+import static java.lang.Long.lowestOneBit;
+import static java.lang.Long.numberOfTrailingZeros;
+
 public class SimpleBitSet
 {
     public static class SerializationSupport
@@ -79,6 +83,48 @@ public class SimpleBitSet
         return true;
     }
 
+    public void setRange(int from, int to)
+    {
+        if (to <= from)
+        {
+            Invariants.checkArgument(to >= from, "to < from (%s < %s)", to, from);
+            return;
+        }
+
+        int fromIndex = from >>> 6;
+        int toIndex = (to + 63) >>> 6;
+        if (fromIndex + 1 == toIndex)
+        {
+            long addBits = (-1L >>> (64 - (to & 63))) & (-1L << (from & 63));
+            orBitsAtIndex(fromIndex,  addBits);
+        }
+        else if (count == 0)
+        {
+            bits[toIndex - 1] = -1L >>> (64 - (to & 63));
+            for (int i = fromIndex + 1, maxi = toIndex - 1; i < maxi ; ++i)
+                bits[i] = -1L;
+            bits[fromIndex] = -1L << (from & 63);
+            count = to - from;
+        }
+        else
+        {
+            orBitsAtIndex(fromIndex, -1L << (from & 63));
+            for (int i = fromIndex + 1, maxi = toIndex - 1; i < maxi ; ++i)
+            {
+                count += 64 - Long.bitCount(bits[i]);
+                bits[i] = -1L;
+            }
+            orBitsAtIndex(toIndex - 1, -1L >>> (64 - (to & 63)));
+        }
+    }
+
+    private void orBitsAtIndex(int index, long setBits)
+    {
+        long prevBits = bits[index];
+        bits[index] = setBits | prevBits;
+        count += Long.bitCount(setBits) - Long.bitCount(prevBits);
+    }
+
     public boolean unset(int i)
     {
         int index = indexOf(i);
@@ -122,9 +168,32 @@ public class SimpleBitSet
         while (true)
         {
             if (bits != 0)
-                return index * 64 + Long.numberOfTrailingZeros(Long.highestOneBit(bits));
+                return index * 64 + numberOfTrailingZeros(highestOneBit(bits));
 
             if (--index < 0)
+                return -1;
+
+            bits = this.bits[index];
+        }
+    }
+
+    public int prevSetBitNotBefore(int i, int inclBound, int ifNotFound)
+    {
+        if (count == 0)
+            return ifNotFound;
+
+        int index = indexOf(i);
+        int inclIndexBound = lowerLimitOf(inclBound);
+        long bits = this.bits[index] & bitsEqualOrLesser(i);
+        while (true)
+        {
+            if (bits != 0)
+            {
+                int result = index * 64 + numberOfTrailingZeros(highestOneBit(bits));
+                return result > inclBound ? result : ifNotFound;
+            }
+
+            if (--index < inclIndexBound)
                 return -1;
 
             bits = this.bits[index];
@@ -141,7 +210,7 @@ public class SimpleBitSet
         while (true)
         {
             if (bits != 0)
-                return index * 64 + Long.numberOfTrailingZeros(Long.lowestOneBit(bits));
+                return index * 64 + numberOfTrailingZeros(lowestOneBit(bits));
 
             if (++index >= this.bits.length)
                 return ifNotFound;
@@ -156,13 +225,13 @@ public class SimpleBitSet
             return ifNotFound;
 
         int index = indexOf(i);
-        int exclIndexBound = limitOf(exclBound);
+        int exclIndexBound = upperLimitOf(exclBound);
         long bits = this.bits[index] & bitsEqualOrGreater(i);
         while (true)
         {
             if (bits != 0)
             {
-                int result = index * 64 + Long.numberOfTrailingZeros(Long.lowestOneBit(bits));
+                int result = index * 64 + numberOfTrailingZeros(lowestOneBit(bits));
                 return result < exclBound ? result : ifNotFound;
             }
 
@@ -198,7 +267,7 @@ public class SimpleBitSet
             long register;
             while ((register = (bits[i] & mask)) != 0)
             {
-                int bitIndex = Long.numberOfTrailingZeros(register);
+                int bitIndex = numberOfTrailingZeros(register);
                 mask = (-1L << bitIndex) << 1;
                 forEach.accept(p1, p2, p3, p4, i * 64 + bitIndex);
             }
@@ -247,7 +316,12 @@ public class SimpleBitSet
         return index;
     }
 
-    private int limitOf(int i)
+    private int lowerLimitOf(int i)
+    {
+        return i >>> 6;
+    }
+
+    private int upperLimitOf(int i)
     {
         int index = (i + 63) >>> 6;
         return Math.min(index, bits.length);

@@ -47,6 +47,11 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
         return AbstractRanges.of(Ranges::ofSortedAndDeoverlappedUnchecked, ranges);
     }
 
+    public static Ranges ofSorted(Range... ranges)
+    {
+        return AbstractRanges.deoverlapSorted(Ranges::ofSortedAndDeoverlappedUnchecked, ranges, ranges.length, MERGE_OVERLAPPING);
+    }
+
     public static Ranges ofSortedAndDeoverlapped(Range... ranges)
     {
         return AbstractRanges.ofSortedAndDeoverlapped(Ranges::ofSortedAndDeoverlappedUnchecked, ranges);

@@ -283,10 +283,7 @@ public class Invalidate implements Callback<InvalidateReply>
         //  so we do not need to explicitly do so here before notifying the waiter
         // TODO (required, consider): pick a reasonable upper bound, so we don't invalidate into an epoch/commandStore that no longer cares about this command
         node.forEachLocalSince(contextFor(txnId), invalidateWith, txnId, safeStore -> {
-            if (safeStore.commandStore().isTruncatedAt(txnId, txnId.epoch(), invalidateWith))
-                return;
-
-            Commands.commitInvalidate(safeStore, txnId);
+            Commands.commitInvalidate(safeStore, safeStore.get(txnId, txnId, invalidateWith));
         }).begin((s, f) -> {
             callback.accept(INVALIDATED, null);
             if (f != null) // TODO (required): consider exception handling more carefully: should we catch these prior to passing to callbacks?

@@ -46,6 +46,8 @@ import static accord.local.Status.PreCommitted;
 import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
 import static accord.primitives.Routables.Slice.Minimal;
+import static accord.primitives.Route.castToRoute;
+import static accord.primitives.Route.isRoute;
 
 /**
  * Find data and persist locally
@@ -61,7 +63,7 @@ public class FetchData extends CheckShards<Route<?>>
 
     public static Object fetch(Known fetch, Node node, TxnId txnId, Unseekables<?, ?> someUnseekables, @Nullable Timestamp executeAt, BiConsumer<Known, Throwable> callback)
     {
-        if (someUnseekables.kind().isRoute()) return fetch(fetch, node, txnId, Route.castToRoute(someUnseekables), executeAt, callback);
+        if (someUnseekables.kind().isRoute()) return fetch(fetch, node, txnId, castToRoute(someUnseekables), executeAt, callback);
         else return fetchViaSomeRoute(fetch, node, txnId, someUnseekables, executeAt, callback);
     }
 
@@ -91,7 +93,7 @@ public class FetchData extends CheckShards<Route<?>>
             {
                 reportRouteNotFound(node, txnId, someUnseekables, executeAt, foundRoute.known, callback);
             }
-            else if (Route.isRoute(someUnseekables) && someUnseekables.containsAll(foundRoute.route))
+            else if (isRoute(someUnseekables) && someUnseekables.containsAll(foundRoute.route))
             {
                 // this is essentially a reentrancy check; we can only reach this point if we have already tried once to fetchSomeRoute
                 // (as a user-provided Route is used to fetchRoute, not fetchSomeRoute)
@@ -100,7 +102,7 @@ public class FetchData extends CheckShards<Route<?>>
             else
             {
                 Route<?> route = foundRoute.route;
-                if (Route.isRoute(someUnseekables))
+                if (isRoute(someUnseekables))
                     route = Route.merge(route, (Route)someUnseekables);
                 fetch(fetch, node, txnId, route, executeAt, callback);
             }
@@ -326,9 +328,7 @@ public class FetchData extends CheckShards<Route<?>>
         @Override
         public Void apply(SafeCommandStore safeStore)
         {
-            if (safeStore.commandStore().isTruncatedAt(txnId, toEpoch, route))
-                return null;
-
+            SafeCommand safeCommand = safeStore.get(txnId, full.saveStatus.known.executeAt.hasDecidedExecuteAt() ? full.executeAt : null, route);
             switch (achieved.propagate())
             {
                 default: throw new IllegalStateException();
@@ -339,10 +339,10 @@ public class FetchData extends CheckShards<Route<?>>
                     throw new IllegalStateException("Invalid states to propagate");
 
                 case Truncated:
+                    // TODO (now): really need to think this one through again some more
+                    Command command = safeCommand.current();
                     // if our peers have truncated this command, then either:
                     // 1) we have already applied it locally; 2) the command doesn't apply locally; 3) we are stale; or 4) the command is invalidated
-                    SafeCommand safeCommand = safeStore.command(txnId);
-                    Command command = safeCommand.current();
                     if (command.hasBeen(PreApplied))
                         break;
 
@@ -367,7 +367,7 @@ public class FetchData extends CheckShards<Route<?>>
                     // otherwise we are either stale, or the command didn't reach consensus
 
                 case Invalidated:
-                    Commands.commitInvalidate(safeStore, txnId);
+                    Commands.commitInvalidate(safeStore, safeCommand);
                     break;
 
                 case Applied:
@@ -376,30 +376,30 @@ public class FetchData extends CheckShards<Route<?>>
                     Invariants.checkState(full.executeAt != null);
                     if (toEpoch >= full.executeAt.epoch())
                     {
-                        confirm(Commands.commit(safeStore, txnId, route, progressKey, partialTxn, full.executeAt, partialDeps));
-                        confirm(Commands.apply(safeStore, txnId, route, progressKey, full.executeAt, partialDeps, full.writes, full.result));
+                        confirm(Commands.apply(safeStore, safeCommand, txnId, route, progressKey, full.executeAt, partialDeps, partialTxn, full.writes, full.result));
                         break;
                     }
 
                 case Committed:
                 case ReadyToExecute:
-                    confirm(Commands.commit(safeStore, txnId, route, progressKey, partialTxn, full.executeAt, partialDeps));
+                    confirm(Commands.commit(safeStore, safeCommand, txnId, route, progressKey, partialTxn, full.executeAt, partialDeps));
                     break;
 
                 case PreCommitted:
-                    Commands.precommit(safeStore, txnId, full.executeAt);
+                    Commands.precommit(safeStore, safeCommand, txnId, full.executeAt);
                     if (!achieved.definition.isKnown())
                         break;
 
                 case PreAccepted:
                     // only preaccept if we coordinate the transaction
                     if (safeStore.ranges().coordinates(txnId).intersects(route) && Route.isFullRoute(route))
-                        Commands.preaccept(safeStore, txnId, txnId.epoch(), partialTxn, Route.castToFullRoute(route), progressKey);
+                        Commands.preaccept(safeStore, safeCommand, txnId, txnId.epoch(), partialTxn, Route.castToFullRoute(route), progressKey);
                     break;
 
                 case NotDefined:
                     break;
             }
+
 
             RoutingKey homeKey = full.homeKey;
             if (!full.durability.isDurable() || homeKey == null)
@@ -409,7 +409,7 @@ public class FetchData extends CheckShards<Route<?>>
                 return null;
 
             Timestamp executeAt = full.saveStatus.known.executeAt.hasDecidedExecuteAt() ? full.executeAt : null;
-            Commands.setDurability(safeStore, txnId, full.durability, route, true, progressKey, executeAt);
+            Commands.setDurability(safeStore, safeCommand, txnId, full.durability, route, true, progressKey, executeAt);
             return null;
         }
 
@@ -430,6 +430,7 @@ public class FetchData extends CheckShards<Route<?>>
     {
         final Node node;
         final TxnId txnId;
+        // TODO (desired): consider how we might best represent routeOrParticipants as a static type, as used elsewhere
         final Unseekables<?, ?> routeOrParticipants;
         final Known achieved;
         final BiConsumer<Known, Throwable> callback;
@@ -446,23 +447,15 @@ public class FetchData extends CheckShards<Route<?>>
         void start()
         {
             PreLoadContext loadContext = contextFor(txnId);
-            node.mapReduceConsumeLocal(loadContext, routeOrParticipants, txnId.epoch(), txnId.epoch(), this);
+            Unseekables<?, ?> propagateTo = isRoute(routeOrParticipants) ? castToRoute(routeOrParticipants).withHomeKey() : routeOrParticipants;
+            node.mapReduceConsumeLocal(loadContext, propagateTo, txnId.epoch(), txnId.epoch(), this);
         }
 
         @Override
         public Void apply(SafeCommandStore safeStore)
         {
             // we're applying an invalidation, so the record will not be cleaned up until the whole range is truncated
-            SafeCommand safeCommand = safeStore.command(txnId);
-            // TODO (required): this should not contain a non-participating homeKey
-            if (safeStore.commandStore().isTruncatedAt(txnId, txnId.epoch(), routeOrParticipants))
-            {
-                if (safeCommand.current().saveStatus() == Uninitialised)
-                    return null;
-
-                Invariants.checkState(!safeStore.commandStore().isFullyTruncatedAt(txnId, txnId.epoch()));
-            }
-
+            SafeCommand safeCommand = safeStore.get(txnId, null, routeOrParticipants);
             Command command = safeCommand.current();
             if (achieved.outcome.isInvalidated() || !command.hasBeen(PreCommitted))
                 Commands.commitInvalidate(safeStore, safeCommand);

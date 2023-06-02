@@ -19,6 +19,7 @@
 package accord.primitives;
 
 import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.utils.*;
 import accord.utils.SortedArrays.SortedArrayList;
 import net.nicoulaj.compilecommand.annotations.DontInline;
@@ -81,6 +82,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     int[] txnIdsToRanges;
 
     private SearchableRangeList searchable;
+    private Ranges covering;
 
     public static <T1, T2> RangeDeps merge(List<T1> merge, Function<T1, T2> getter1, Function<T2, RangeDeps> getter2)
     {
@@ -121,21 +123,33 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     }
 
     @Inline
-    public <P1, P2, P3> int forEach(Key key, IndexedTriConsumer<P1, P2, P3> forEachScanOrCheckpoint, IndexedRangeTriConsumer<P1, P2, P3> forEachRange, P1 p1, P2 p2, P3 p3, int minIndex)
+    public <P1, P2, P3> int forEach(RoutableKey key, IndexedTriConsumer<P1, P2, P3> forEachScanOrCheckpoint, IndexedRangeTriConsumer<P1, P2, P3> forEachRange, P1 p1, P2 p2, P3 p3, int minIndex)
     {
         return ensureSearchable().forEach(key, forEachScanOrCheckpoint, forEachRange, p1, p2, p3, minIndex);
     }
 
-    private int forEach(Key key, Consumer<TxnId> forEach, int minIndex, @Nullable BitSet visited)
+    private int forEach(RoutableKey key, Consumer<TxnId> forEach, int minIndex, @Nullable BitSet visited)
     {
         return forEach(key, RangeDeps::visitTxnIdsForRangeIndex, RangeDeps::visitTxnIdsForRangeIndex,
                 this, forEach, visited, minIndex);
+    }
+
+    private <P> int forEach(RoutableKey key, IndexedConsumer<P> forEach, P param, int minIndex)
+    {
+        return forEach(key, RangeDeps::visitTxnIdxsForRangeIndex, RangeDeps::visitTxnIdxsForRangeIndex,
+                this, forEach, param, minIndex);
     }
 
     @Inline
     public <P1, P2, P3> int forEach(Range range, IndexedTriConsumer<P1, P2, P3> forEachScanOrCheckpoint, IndexedRangeTriConsumer<P1, P2, P3> forEachRange, P1 p1, P2 p2, P3 p3, int minIndex)
     {
         return ensureSearchable().forEach(range, forEachScanOrCheckpoint, forEachRange, p1, p2, p3, minIndex);
+    }
+
+    @Inline
+    public <P1, P2, P3> int forEach(RoutingKey start, RoutingKey end, IndexedTriConsumer<P1, P2, P3> forEachScanOrCheckpoint, IndexedRangeTriConsumer<P1, P2, P3> forEachRange, P1 p1, P2 p2, P3 p3, int minIndex)
+    {
+        return ensureSearchable().forEach(start, end, forEachScanOrCheckpoint, forEachRange, p1, p2, p3, minIndex);
     }
 
     private <P1, P2, P3> void forEach(Ranges ranges, IndexedTriConsumer<P1, P2, P3> forEachScanOrCheckpoint, IndexedRangeTriConsumer<P1, P2, P3> forEachRange, P1 p1, P2 p2, P3 p3)
@@ -151,9 +165,15 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
                 this, forEach, visited, minIndex);
     }
 
-    private <P> int forEach(Range range, IndexedConsumer<P> forEach, P param, int minIndex)
+    public <P> int forEach(Range range, IndexedConsumer<P> forEach, P param, int minIndex)
     {
         return forEach(range, RangeDeps::visitTxnIdxsForRangeIndex, RangeDeps::visitTxnIdxsForRangeIndex,
+                this, forEach, param, minIndex);
+    }
+
+    public <P> int forEach(RoutingKey start, RoutingKey end, IndexedConsumer<P> forEach, P param, int minIndex)
+    {
+        return forEach(start, end, RangeDeps::visitTxnIdxsForRangeIndex, RangeDeps::visitTxnIdxsForRangeIndex,
                 this, forEach, param, minIndex);
     }
 
@@ -200,7 +220,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     /**
      * Each matching TxnId will be provided precisely once
      */
-    public void forEachUniqueTxnId(Key key, Consumer<TxnId> forEach)
+    public void forEachUniqueTxnId(RoutableKey key, Consumer<TxnId> forEach)
     {
         forEach(key, forEach, 0, new BitSet());
     }
@@ -216,7 +236,15 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     /**
      * The same TxnId may be provided as a parameter multiple times
      */
-    public void forEach(Ranges ranges, Consumer<TxnId> forEach)
+    public <P> void forEach(Range range, IndexedConsumer<P> forEach, P param)
+    {
+        forEach(range, forEach, param, 0);
+    }
+
+    /**
+     * The same TxnId may be provided as a parameter multiple times
+     */
+    public void forEach(AbstractRanges<?> ranges, Consumer<TxnId> forEach)
     {
         int minIndex = 0;
         for (int i = 0; i < ranges.size() ; ++i)
@@ -226,11 +254,76 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     /**
      * The same TxnId may be provided as a parameter multiple times
      */
-    public <P> void forEach(Ranges ranges, P param, IndexedConsumer<P> forEach)
+    public <P> void forEach(Unseekables<?, ?> unseekables, P param, IndexedConsumer<P> forEach)
+    {
+        forEach(unseekables, null, 0, unseekables.size(), param, forEach);
+    }
+
+    /**
+     * The same TxnId may be provided as a parameter multiple times
+     * @param slice is only useful in case unseekables is a Ranges, in which case we only visit the intersection of the slice and the ranges we walk
+     *              for keys it is expected that the caller has already sliced in this manner
+     */
+    public <P> void forEach(Unseekables<?, ?> unseekables, @Nullable Range slice, int from, int to, P param, IndexedConsumer<P> forEach)
+    {
+        switch (unseekables.domain())
+        {
+            default: throw new AssertionError();
+            case Key:
+                forEach((AbstractKeys<?, ?>) unseekables, from, to, param, forEach);
+                break;
+            case Range:
+                forEach((AbstractRanges<?>) unseekables, slice, from, to, param, forEach);
+                break;
+        }
+    }
+
+    /**
+     * The same TxnId may be provided as a parameter multiple times
+     */
+    public <P> void forEach(AbstractKeys<?, ?> keys, P param, IndexedConsumer<P> forEach)
+    {
+        forEach(keys, 0, keys.size(), param, forEach);
+    }
+
+    /**
+     * The same TxnId may be provided as a parameter multiple times
+     */
+    public <P> void forEach(AbstractRanges<?> ranges, P param, IndexedConsumer<P> forEach)
+    {
+        forEach(ranges, null, 0, ranges.size(), param, forEach);
+    }
+
+    /**
+     * The same TxnId may be provided as a parameter multiple times
+     */
+    public <P> void forEach(AbstractKeys<?, ?> keys, int from, int to, P param, IndexedConsumer<P> forEach)
     {
         int minIndex = 0;
-        for (int i = 0; i < ranges.size() ; ++i)
-            minIndex = forEach(ranges.get(i), forEach, param, minIndex);
+        for (int i = from ; i < to ; ++i)
+            minIndex = forEach(keys.get(i), forEach, param, minIndex);
+    }
+
+    /**
+     * The same TxnId may be provided as a parameter multiple times
+     */
+    public <P> void forEach(AbstractRanges<?> ranges, @Nullable Range slice, int from, int to, P param, IndexedConsumer<P> forEach)
+    {
+        int minIndex = 0;
+        for (int i = from; i < to ; ++i)
+        {
+            Range range = ranges.get(i);
+            RoutingKey start = range.start();
+            RoutingKey end = range.end();
+            if (slice != null)
+            {
+                if (slice.start().compareTo(start) > 0) start = slice.start();
+                if (slice.end().compareTo(end) < 0) end = slice.end();
+                if (end.compareTo(start) <= 0)
+                    continue;
+            }
+            minIndex = forEach(start, end, forEach, param, minIndex);
+        }
     }
 
     /**
@@ -247,7 +340,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
      * @param ranges to match on
      * @param forEach function to call on each unique {@link TxnId}
      */
-    public void forEachUniqueTxnId(Ranges ranges, Consumer<TxnId> forEach)
+    public void forEachUniqueTxnId(AbstractRanges<?> ranges, Consumer<TxnId> forEach)
     {
         int minIndex = 0;
         for (int i = 0; i < ranges.size() ; ++i)
@@ -377,7 +470,16 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
         return new SortedArrayList<>(txnIds);
     }
 
-    public List<TxnId> txnIds(Key key)
+    public SortedRelationList<TxnId> txnIdsForRangeIndex(int rangeIndex)
+    {
+        Invariants.checkState(rangeIndex < ranges.length);
+        int start = startOffset(ranges, rangesToTxnIds, rangeIndex);
+        int end = endOffset(rangesToTxnIds, rangeIndex);
+        Invariants.checkState(end >= start);
+        return txnIds(rangesToTxnIds, start, end);
+    }
+
+    public List<TxnId> computeTxnIds(Key key)
     {
         List<TxnId> result = new ArrayList<>();
         forEachUniqueTxnId(key, result::add);
@@ -385,12 +487,20 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
         return result;
     }
 
-    public List<TxnId> txnIds(Range key)
+    public List<TxnId> computeTxnIds(Range key)
     {
         List<TxnId> result = new ArrayList<>();
         forEachUniqueTxnId(key, result::add);
         result.sort(TxnId::compareTo);
         return result;
+    }
+
+    private SortedRelationList<TxnId> txnIds(int[] ids, int start, int end)
+    {
+        if (start == end)
+            return SortedRelationList.EMPTY;
+
+        return new SortedRelationList<>(txnIds, ids, start, end);
     }
 
     public TxnId txnId(int i)
@@ -411,6 +521,13 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     public int rangeCount()
     {
         return ranges.length;
+    }
+
+    public Ranges covering()
+    {
+        if (covering == null)
+            covering = Ranges.ofSorted(ranges);
+        return covering;
     }
 
     @Override

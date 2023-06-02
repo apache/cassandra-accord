@@ -18,6 +18,8 @@
 
 package accord.messages;
 
+import javax.annotation.Nullable;
+
 import accord.local.*;
 import accord.primitives.*;
 import accord.local.Node.Id;
@@ -33,37 +35,74 @@ public class Apply extends TxnRequest<ApplyReply>
 {
     public static class SerializationSupport
     {
-        public static Apply create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, Writes writes, Result result)
+        public static Apply create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, PartialTxn txn, Writes writes, Result result)
         {
-            return new Apply(txnId, scope, waitForEpoch, keys, executeAt, deps, writes, result);
+            return new Apply(txnId, scope, waitForEpoch, keys, executeAt, deps, txn, writes, result);
         }
     }
 
     public final Timestamp executeAt;
-    public final PartialDeps deps;
     public final Seekables<?, ?> keys;
+    public final PartialDeps deps; // TODO (expected): this should be nullable, and only included if we did not send Commit (or if sending Maximal apply)
+    public final @Nullable PartialTxn txn;
     public final Writes writes;
     public final Result result;
 
-    public Apply(Id to, Topologies sendTo, Topologies applyTo, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    private Apply(Id to, Topologies participates, Topologies executes, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, boolean isMaximal, Writes writes, Result result)
     {
-        super(to, sendTo, route, txnId);
-        Ranges slice = applyTo == sendTo ? scope.covering() : applyTo.computeRangesForNode(to);
+        super(to, participates, route, txnId);
+        Ranges slice = isMaximal || executes == participates ? scope.covering() : executes.computeRangesForNode(to);
         // TODO (desired): it's wasteful to encode the full set of ranges owned by the recipient node;
         //     often it will be cheaper to include the FullRoute for Deps scope (or come up with some other safety-preserving encoding scheme)
         this.deps = deps.slice(slice);
         this.keys = txn.keys().slice(slice);
+        this.txn = isMaximal ? txn.slice(slice, true) : null;
         this.executeAt = executeAt;
         this.writes = writes;
         this.result = result;
     }
 
-    private Apply(TxnId txnId, PartialRoute<?> route, long waitForEpoch, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, Writes writes, Result result)
+    public static void sendMaximal(Node node, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    {
+        Topologies executes = executes(node, route, executeAt);
+        Topologies participates = participates(node, route, txnId, executeAt, executes);
+        node.send(participates.nodes(), to -> applyMaximal(to, participates, executes, txnId, route, txn, executeAt, deps, writes, result));
+    }
+
+    public static void sendMaximal(Node node, Id to, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    {
+        Topologies executes = executes(node, route, executeAt);
+        Topologies participates = participates(node, route, txnId, executeAt, executes);
+        node.send(to, applyMaximal(to, participates, executes, txnId, route, txn, executeAt, deps, writes, result));
+    }
+
+    public static Topologies executes(Node node, Route<?> route, Timestamp executeAt)
+    {
+        return node.topology().forEpoch(route, executeAt.epoch());
+    }
+
+    public static Topologies participates(Node node, Route<?> route, TxnId txnId, Timestamp executeAt, Topologies executes)
+    {
+        return txnId.epoch() == executeAt.epoch() ? executes : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
+    }
+
+    public static Apply applyMinimal(Id to, Topologies sendTo, Topologies applyTo, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    {
+        return new Apply(to, sendTo, applyTo, txnId, route, txn, executeAt, deps, false, writes, result);
+    }
+
+    public static Apply applyMaximal(Id to, Topologies participates, Topologies executes, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    {
+        return new Apply(to, participates, executes, txnId, route, txn, executeAt, deps, true, writes, result);
+    }
+
+    private Apply(TxnId txnId, PartialRoute<?> route, long waitForEpoch, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, @Nullable PartialTxn txn, Writes writes, Result result)
     {
         super(txnId, route, waitForEpoch);
         this.executeAt = executeAt;
         this.deps = deps;
         this.keys = keys;
+        this.txn = txn;
         this.writes = writes;
         this.result = result;
     }
@@ -78,10 +117,8 @@ public class Apply extends TxnRequest<ApplyReply>
     @Override
     public ApplyReply apply(SafeCommandStore safeStore)
     {
-        if (safeStore.commandStore().isTruncated(txnId, executeAt, scope))
-            return ApplyReply.Redundant;
-
-        switch (Commands.apply(safeStore, txnId, scope, progressKey, executeAt, deps, writes, result))
+        SafeCommand safeCommand = safeStore.get(txnId, executeAt, scope);
+        switch (Commands.apply(safeStore, safeCommand, txnId, scope, progressKey, executeAt, deps, txn, writes, result))
         {
             default:
             case Insufficient:
@@ -109,6 +146,13 @@ public class Apply extends TxnRequest<ApplyReply>
     public TxnId primaryTxnId()
     {
         return txnId;
+    }
+
+    @Override
+    public Seekables<?, ?> keys()
+    {
+        if (txn == null) return Keys.EMPTY;
+        return txn.keys();
     }
 
     @Override

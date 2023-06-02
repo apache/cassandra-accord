@@ -75,7 +75,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
     @Override
     public Void apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.command(txnId);
+        SafeCommand safeCommand = safeStore.get(txnId, null, scope);
         Command command = safeCommand.current();
         switch (command.status())
         {
@@ -90,7 +90,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
             case PreCommitted:
                 waitingOnUpdater.incrementAndGet(this);
                 safeCommand.addListener(this);
-                safeStore.progressLog().waiting(txnId, Committed.minKnown, scope);
+                safeStore.progressLog().waiting(safeCommand, Committed.minKnown, scope);
                 break;
 
             case Committed:

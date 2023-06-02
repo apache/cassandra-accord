@@ -146,7 +146,7 @@ class ReadDataTest
                 CheckedCommands.preaccept(safe, state.txnId, state.partialTxn, state.route, state.progressKey);
                 CheckedCommands.accept(safe, state.txnId, Ballot.ZERO, state.partialRoute, state.partialTxn.keys(), state.progressKey, state.executeAt, state.deps);
 
-                SafeCommand safeCommand = safe.command(state.txnId);
+                SafeCommand safeCommand = safe.ifInitialised(state.txnId);
                 safeCommand.commit(safeCommand.current(), state.executeAt, Command.WaitingOn.EMPTY);
             })));
 
@@ -180,7 +180,7 @@ class ReadDataTest
 
             store = stores.get(1);
             check(store.execute(PreLoadContext.contextFor(state.txnId, state.keys), safe -> {
-                SafeCommand command = safe.command(state.txnId);
+                SafeCommand command = safe.get(state.txnId, state.executeAt, state.route);
                 command.commitInvalidated();
             }));
 
@@ -196,7 +196,7 @@ class ReadDataTest
         test(state -> {
             List<CommandStore> stores = stores(state);
             stores.forEach(store -> check(store.execute(PreLoadContext.contextFor(state.txnId, state.keys), safe -> {
-                SafeCommand command = safe.command(state.txnId);
+                SafeCommand command = safe.get(state.txnId, state.executeAt, state.route);
                 command.commitInvalidated();
             })));
             ReplyContext replyContext = state.process();
@@ -290,7 +290,7 @@ class ReadDataTest
             Writes writes = new Writes(txnId, executeAt, keys, write);
 
             forEach(store -> check(store.execute(PreLoadContext.contextFor(txnId, keys), safe -> {
-                CheckedCommands.apply(safe, txnId, route, progressKey, executeAt, deps, writes, Mockito.mock(Result.class));
+                CheckedCommands.apply(safe, txnId, route, progressKey, executeAt, deps, partialTxn, writes, Mockito.mock(Result.class));
             })));
             return writeResult;
         }

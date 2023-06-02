@@ -33,6 +33,7 @@ import static accord.primitives.Ranges.ofSortedAndDeoverlappedUnchecked;
 import static accord.utils.ArrayBuffers.cachedRanges;
 import static accord.utils.SortedArrays.Search.CEIL;
 import static accord.utils.SortedArrays.Search.FAST;
+import static accord.utils.SortedArrays.isSorted;
 import static accord.utils.SortedArrays.swapHighLow32b;
 
 public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements Iterable<Range>, Routables<Range, RS>
@@ -634,10 +635,26 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         if (ranges.length == 0)
             return constructor.apply(NO_RANGES);
 
-        return sortAndDeoverlap(constructor, ranges, ranges.length);
+        return sortAndDeoverlap(constructor, ranges, ranges.length, UnionMode.MERGE_OVERLAPPING);
     }
 
-    static <RS extends AbstractRanges<?>> RS sortAndDeoverlap(Function<Range[], RS> constructor, Range[] ranges, int count)
+    static <RS extends AbstractRanges<?>> RS sortAndDeoverlap(Function<Range[], RS> constructor, Range[] ranges, int count, UnionMode mode)
+    {
+        if (count > 1 && !isSorted(ranges, Range::compareTo))
+        {
+            ranges = ranges.clone();
+            Arrays.sort(ranges, 0, count, Range::compare);
+        }
+
+        return deoverlapSorted(constructor, ranges, count, mode, false);
+    }
+
+    static <RS extends AbstractRanges<?>> RS deoverlapSorted(Function<Range[], RS> constructor, Range[] ranges, int count, UnionMode mode)
+    {
+        return deoverlapSorted(constructor, ranges, count, mode, true);
+    }
+
+    private static <RS extends AbstractRanges<?>> RS deoverlapSorted(Function<Range[], RS> constructor, Range[] ranges, int count, UnionMode mode, boolean copyOnWrite)
     {
         if (count == 0)
             return constructor.apply(NO_RANGES);
@@ -650,46 +667,59 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
             return constructor.apply(Arrays.copyOf(ranges, count));
         }
 
-        Arrays.sort(ranges, 0, count, Range::compare);
         Range prev = ranges[0];
+        Range[] out = null;
         int removed = 0;
+        int compareTo = mode == UnionMode.MERGE_OVERLAPPING ? 1 : 0;
         for (int i = 1 ; i < count ; ++i)
         {
             Range next = ranges[i];
-            if (prev.end().compareTo(next.start()) > 0)
+            if (prev.end().compareTo(next.start()) >= compareTo)
             {
-                if (prev.end().compareTo(next.end()) >= 0)
+                RoutingKey end = max(prev.end(), next.end());
+                boolean copy = removed == 0;
+                ++removed;
+                while (++i < count && end.compareTo((next = ranges[i]).start()) >= compareTo)
                 {
+                    end = max(end, next.end());
                     ++removed;
-                    continue;
                 }
 
-                if (prev.start().equals(next.start()))
+                if (copy)
                 {
-                    ++removed;
-                    ranges[i - removed] = prev = next;
-                    continue;
+                    if (i == count && end == prev.end())
+                        break;
+
+                    out = new Range[count - removed];
+                    System.arraycopy(ranges, 0, out, 0, i - removed);
                 }
 
-                prev = prev.newRange(prev.start(), next.start());
-                ranges[i - (1 + removed)] = prev;
-                prev = next;
+                if (end != prev.end())
+                {
+                    prev = prev.newRange(prev.start(), end);
+                    out[i - (1 + removed)] = prev;
+                }
+
+                if (i < count)
+                    out[i - removed] = prev = next;
                 continue;
             }
 
             if (removed > 0)
-                ranges[i - (1 + removed)] = prev;
+                out[i - removed] = next;
             prev = next;
         }
 
-        if (removed > 0)
-            ranges[count - (1 + removed)] = prev;
-
+        if (out == null) out = ranges;
         count -= removed;
-        if (count != ranges.length)
-            ranges = Arrays.copyOf(ranges, count);
+        if (count != out.length)
+            out = Arrays.copyOf(out, count);
+        return constructor.apply(out);
+    }
 
-        return constructor.apply(ranges);
+    private static RoutingKey max(RoutingKey a, RoutingKey b)
+    {
+        return a.compareTo(b) >= 0 ? a : b;
     }
 
     static <RS extends AbstractRanges<?>> RS ofSortedAndDeoverlapped(Function<Range[], RS> constructor, Range... ranges)

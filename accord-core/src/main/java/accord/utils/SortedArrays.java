@@ -41,7 +41,7 @@ import static accord.utils.SortedArrays.Search.FAST;
 //        - Exploit exponentialSearch in union/intersection/etc
 public class SortedArrays
 {
-    public static class SortedArrayList<T extends Comparable<? super T>> extends AbstractList<T>
+    public static class SortedArrayList<T extends Comparable<? super T>> extends AbstractList<T> implements SortedList<T>
     {
         final T[] array;
         public SortedArrayList(T[] array)
@@ -64,6 +64,11 @@ public class SortedArrays
         public int findNext(int i, Comparable<? super T> find)
         {
             return exponentialSearch(array, i, array.length, find);
+        }
+
+        public int find(Comparable<? super T> find)
+        {
+            return Arrays.binarySearch(array, 0, array.length, find);
         }
 
         public boolean containsAll(SortedArrayList<T> test)

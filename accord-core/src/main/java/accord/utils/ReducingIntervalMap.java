@@ -27,6 +27,7 @@ import java.util.function.BiFunction;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import javax.annotation.Nullable;
 
 /**
  * Mostly copied/adapted from Cassandra's PaxosRepairHistory class
@@ -44,31 +45,28 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
 
     // for simplicity at construction, we permit this to be overridden by the first insertion
     final boolean inclusiveEnds;
-    final K[] ends;
+    // starts is 1 longer than values, so that starts[0] == start of values[0]
+    final K[] starts;
     final V[] values;
 
-    public ReducingIntervalMap(V value)
+    public ReducingIntervalMap()
     {
-        this(false, value);
+        this(false);
     }
 
-    public ReducingIntervalMap(boolean inclusiveEnds, V value)
+    public ReducingIntervalMap(boolean inclusiveEnds)
     {
         this.inclusiveEnds = inclusiveEnds;
-        this.ends = (K[]) NO_OBJECTS;
-        this.values = (V[]) new Object[] { value };
+        this.starts = (K[]) NO_OBJECTS;
+        this.values = (V[]) NO_OBJECTS;
     }
 
     @VisibleForTesting
-    ReducingIntervalMap(boolean inclusiveEnds, K[] ends, V[] values)
+    ReducingIntervalMap(boolean inclusiveEnds, K[] starts, V[] values)
     {
-        if (ends.length != values.length - 1)
-            throw new IllegalArgumentException(String.format("Length %d != %d - 1; %s -> %s",
-                                                             ends.length, values.length,
-                                                             Arrays.toString(ends), Arrays.toString(values)));
-
+        Invariants.checkArgument(starts.length == values.length + 1);
         this.inclusiveEnds = inclusiveEnds;
-        this.ends = ends;
+        this.starts = starts;
         this.values = values;
     }
 
@@ -76,7 +74,10 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
     {
         V result = values[0];
         for (int i = 1; i < values.length; ++i)
-            result = reduce.apply(result, values[i]);
+        {
+            if (values[i] != null)
+                result = reduce.apply(result, values[i]);
+        }
         return result;
     }
 
@@ -87,9 +88,9 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
 
     public String toString(Predicate<V> include)
     {
-        return IntStream.range(0, ends.length)
+        return IntStream.range(0, values.length)
                         .filter(i -> include.test(values[i]))
-                        .mapToObj(i -> ends[i] + "=" + values[i])
+                        .mapToObj(i -> (inclusiveStarts() ? "[" : "(") + starts[i] + "," + starts[i + 1] + (inclusiveEnds ? "]" : ")") + "=" + values[i])
                         .collect(Collectors.joining(", ", "{", "}"));
     }
 
@@ -98,7 +99,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         ReducingIntervalMap that = (ReducingIntervalMap) o;
-        return Arrays.equals(ends, that.ends) && Arrays.equals(values, that.values);
+        return Arrays.equals(starts, that.starts) && Arrays.equals(values, that.values);
     }
 
     public int hashCode()
@@ -113,36 +114,31 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
 
     public V get(K key)
     {
-        int idx = Arrays.binarySearch(ends, key);
-        if (idx < 0) idx = -1 - idx;
-        else if (!inclusiveEnds) ++idx;
+        int idx = find(key);
+        if (idx < 0 || idx >= values.length)
+            return null;
         return values[idx];
     }
 
-    private void checkIndex(int idx)
+    public K startAt(int idx)
     {
         if (idx < 0 || idx > size() - 1)
-            throw new IndexOutOfBoundsException(String.format("%d < 0 or > %d - 1", idx, size()));
+            throw new IndexOutOfBoundsException();
+        return starts[idx];
     }
 
-    public K key(int idx)
-    {
-        checkIndex(idx);
-        return ends[idx];
-    }
-
-    public V value(int idx)
+    public V valueAt(int idx)
     {
         if (idx < 0 || idx >= values.length)
             throw new IndexOutOfBoundsException(String.format("%d < 0 or > %d - 1", idx, size()));
         return values[idx];
     }
 
-    public int indexOf(K key)
+    private int find(K key)
     {
-        int idx = Arrays.binarySearch(ends, key);
-        if (idx < 0) idx = -1 - idx;
-        else if (!inclusiveEnds) --idx;
+        int idx = Arrays.binarySearch(starts, key);
+        if (idx < 0) idx = -2 - idx;
+        else if (inclusiveEnds) --idx;
         return idx;
     }
 
@@ -151,14 +147,18 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         if (idx < 0 || idx > size())
             throw new IndexOutOfBoundsException();
 
-        int cmp = inclusiveEnds ? 0 : 1;
-        return  (   idx == 0      || ends[idx - 1].compareTo(key) <  cmp)
-                && (idx == size() || ends[idx    ].compareTo(key) >= cmp);
+        int cmp = inclusiveStarts() ? 1 : 0;
+        return starts[idx].compareTo(key) < cmp && starts[idx + 1].compareTo(key) >= cmp;
+    }
+
+    protected final boolean inclusiveStarts()
+    {
+        return !inclusiveEnds;
     }
 
     public int size()
     {
-        return ends.length;
+        return values.length;
     }
 
     RangeIterator rangeIterator()
@@ -166,20 +166,14 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         return new RangeIterator();
     }
 
-    public Searcher searcher()
-    {
-        return new Searcher();
-    }
-
     // append the item to the given list, modifying the underlying list
     // if the item makes previoud entries redundant
 
-    static <K extends Comparable<? super K>, V, M extends ReducingIntervalMap<K, V>> M merge(M historyLeft, M historyRight, BiFunction<V, V, V> reduce, BuilderFactory<K, V, M> factory)
+    protected static <K extends Comparable<? super K>, V, M extends ReducingIntervalMap<K, V>> M merge(M historyLeft, M historyRight, BiFunction<V, V, V> reduce, BuilderFactory<K, V, M> factory)
     {
-        if (historyLeft == null)
+        if (historyLeft == null || historyLeft.values.length == 0)
             return historyRight;
-
-        if (historyRight == null)
+        if (historyRight == null || historyRight.values.length == 0)
             return historyLeft;
 
         boolean inclusiveEnds = inclusiveEnds(historyLeft.inclusiveEnds, historyLeft.size() > 0, historyRight.inclusiveEnds, historyRight.size() > 0);
@@ -187,65 +181,87 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
 
         ReducingIntervalMap<K, V>.RangeIterator left = historyLeft.rangeIterator();
         ReducingIntervalMap<K, V>.RangeIterator right = historyRight.rangeIterator();
-        while (left.hasEnd() && right.hasEnd())
+
+        K start;
+        {   // first loop over any range only covered by one of the two
+            ReducingIntervalMap<K, V>.RangeIterator first = left.start().compareTo(right.start()) <= 0 ? left : right;
+            ReducingIntervalMap<K, V>.RangeIterator second = first == left ? right : left;
+
+            K end = null;
+            while (first.hasCurrent() && first.end().compareTo(second.start()) <= 0)
+            {
+                builder.append(first.start(), first.value(), reduce);
+                end = first.end();
+                first.next();
+            }
+
+            start = second.start();
+            if (first.hasCurrent()) builder.append(first.start(), first.value(), reduce);
+            else builder.append(end, null, reduce);
+            Invariants.checkState(start.compareTo(second.start()) <= 0);
+        }
+
+        // loop over any range covered by both
+        while (left.hasCurrent() && right.hasCurrent())
         {
             int cmp = left.end().compareTo(right.end());
+            V value = reduce(left.value(), right.value(), reduce);
 
-            V value = reduce.apply(left.value(), right.value());
             if (cmp == 0)
             {
-                builder.append(left.end(), value, reduce);
+                builder.append(start, value, reduce);
+                start = left.end();
                 left.next();
                 right.next();
             }
+            else if (cmp < 0)
+            {
+                builder.append(start, value, reduce);
+                start = left.end();
+                left.next();
+            }
             else
             {
-                ReducingIntervalMap<K, V>.RangeIterator firstIter = cmp < 0 ? left : right;
-                builder.append(firstIter.end(), value, reduce);
-                firstIter.next();
+                builder.append(start, value, reduce);
+                start = right.end();
+                right.next();
             }
         }
 
-        while (left.hasEnd())
+        // finally loop over any remaining range covered by only one
+        while (left.hasCurrent())
         {
-            builder.append(left.end(), reduce.apply(left.value(), right.value()), reduce);
+            builder.append(start, left.value(), reduce);
+            start = left.end();
             left.next();
         }
 
-        while (right.hasEnd())
+        while (right.hasCurrent())
         {
-            builder.append(right.end(), reduce.apply(left.value(), right.value()), reduce);
+            builder.append(start, right.value(), reduce);
+            start = right.end();
             right.next();
         }
 
-        builder.appendLast(reduce.apply(left.value(), right.value()));
+        builder.append(start, null, reduce);
         return builder.build();
+    }
+
+    private static <V> V reduce(V left, V right, BiFunction<V, V, V> reduce)
+    {
+        return left == null ? right : right == null ? left : reduce.apply(left, right);
     }
 
     RangeIterator intersecting(K start, K end)
     {
-        int from = Arrays.binarySearch(ends, start);
-        if (from < 0) from = -1 - from;
-        else if (inclusiveEnds) ++from;
+        int from = Arrays.binarySearch(starts, start);
+        if (from < 0) from = Math.max(0, -2 - from);
+        else if (!inclusiveStarts()) ++from;
 
-        int to = Arrays.binarySearch(ends, end);
+        int to = Arrays.binarySearch(starts, end);
         if (to < 0) to = -1 - to;
-        else if (!inclusiveEnds) ++to;
-
-        return new RangeIterator(from, 1 + to);
-    }
-
-    public class Searcher
-    {
-        int idx = -1;
-
-        public V find(K key)
-        {
-            // TODO (low priority, efficiency): assume ascending iteration and use expSearch
-            if (idx < 0 || !contains(idx, key))
-                idx = indexOf(key);
-            return value(idx);
-        }
+        else if (inclusiveStarts()) ++to;
+        return new RangeIterator(from, to);
     }
 
     class RangeIterator
@@ -264,7 +280,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
             this.end = to;
         }
 
-        boolean hasNext()
+        boolean hasCurrent()
         {
             return i < end;
         }
@@ -274,24 +290,14 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
             ++i;
         }
 
-        boolean hasStart()
-        {
-            return i > 0;
-        }
-
-        boolean hasEnd()
-        {
-            return i < ends.length;
-        }
-
         K start()
         {
-            return ends[i - 1];
+            return starts[i];
         }
 
         K end()
         {
-            return ends[i];
+            return starts[i + 1];
         }
 
         V value()
@@ -300,60 +306,79 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         }
     }
 
-    interface BuilderFactory<K extends Comparable<? super K>, V, M extends ReducingIntervalMap<K, V>>
+    protected interface BuilderFactory<K extends Comparable<? super K>, V, M extends ReducingIntervalMap<K, V>>
     {
         Builder<K, V, M> create(boolean inclusiveEnds, int capacity);
     }
 
-    static abstract class Builder<K extends Comparable<? super K>, V, M extends ReducingIntervalMap<K, V>>
+    protected static abstract class Builder<K extends Comparable<? super K>, V, M extends ReducingIntervalMap<K, V>>
     {
-        final boolean inclusiveEnds;
-        final List<K> ends;
-        final List<V> values;
+        protected final boolean inclusiveEnds;
+        protected final List<K> starts;
+        protected final List<V> values;
 
-        Builder(boolean inclusiveEnds, int capacity)
+        protected Builder(boolean inclusiveEnds, int capacity)
         {
             this.inclusiveEnds = inclusiveEnds;
-            this.ends = new ArrayList<>(capacity);
+            this.starts = new ArrayList<>(capacity);
             this.values = new ArrayList<>(capacity + 1);
         }
 
-        void append(K end, V value, BiFunction<V, V, V> reduce)
+        protected boolean equals(V a, V b)
         {
-            int tailIdx = ends.size() - 1;
+            return a.equals(b);
+        }
 
-            assert ends.size() == values.size();
-            assert tailIdx < 0 || end.compareTo(ends.get(tailIdx)) >= 0;
+        protected V mergeEqual(V a, V b)
+        {
+            return a;
+        }
 
-            boolean sameAsTailKey = tailIdx >= 0 && end.equals(ends.get(tailIdx));
-            boolean sameAsTailValue = tailIdx >= 0 && value.equals(values.get(tailIdx));
+        public void append(K start, @Nullable V value, BiFunction<V, V, V> reduce)
+        {
+            int tailIdx = starts.size() - 1;
+
+            assert starts.size() == values.size();
+            assert tailIdx < 0 || start.compareTo(starts.get(tailIdx)) >= 0;
+
+            boolean sameAsTailKey, sameAsTailValue;
+            V tailValue;
+            if (tailIdx < 0)
+            {
+                sameAsTailKey = sameAsTailValue = false;
+                tailValue = null;
+            }
+            else
+            {
+                sameAsTailKey = start.equals(starts.get(tailIdx));
+                tailValue = values.get(tailIdx);
+                sameAsTailValue = (value == null ? tailValue == null : tailValue != null && equals(value, tailValue));
+            }
             if (sameAsTailKey || sameAsTailValue)
             {
-                if (sameAsTailValue) ends.set(tailIdx, end);
-                else values.set(tailIdx, reduce.apply(values.get(tailIdx), value));
+                if (sameAsTailValue)
+                    values.set(tailIdx, value == null ? null : mergeEqual(value, tailValue));
+                else
+                    values.set(tailIdx, tailValue == null ? value : reduce.apply(tailValue, value));
             }
             else
             {
-                ends.add(end);
+                starts.add(start);
                 values.add(value);
             }
         }
 
-        void appendLast(V value)
-        {
-            assert values.size() == ends.size();
-            int tailIdx = ends.size() - 1;
-            if (!values.isEmpty() && value.equals(values.get(tailIdx)))
-                ends.remove(tailIdx);
-            else
-                values.add(value);
-        }
+        protected abstract M buildInternal();
 
-        abstract M buildInternal();
-
-        final M build()
+        public final M build()
         {
-            Invariants.checkState(ends.size() + 1 == values.size());
+            if (!values.isEmpty())
+            {
+                Invariants.checkState(values.get(values.size() - 1) == null);
+                values.remove(values.size() - 1);
+                Invariants.checkState(values.get(0) != null);
+                Invariants.checkState(starts.size() == values.size() + 1);
+            }
             return buildInternal();
         }
     }

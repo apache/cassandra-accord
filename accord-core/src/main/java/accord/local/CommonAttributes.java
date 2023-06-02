@@ -50,6 +50,11 @@ public interface CommonAttributes
         private PartialDeps partialDeps;
         private Listeners listeners;
 
+        public Mutable(TxnId txnId)
+        {
+            this.txnId = txnId;
+        }
+        
         public Mutable(CommonAttributes attributes)
         {
             this.txnId = attributes.txnId();

@@ -278,6 +278,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         int cs = start.compareTo(truncateTo.start);
         int ce = end.compareTo(truncateTo.end);
         if (cs >= 0 && ce <= 0) return this;
+        if (cs <= 0 && ce >= 0) return truncateTo;
         return newRange(cs >= 0 ? start : truncateTo.start, ce <= 0 ? end : truncateTo.end);
     }
 

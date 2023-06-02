@@ -45,7 +45,7 @@ class Execute extends ReadCoordinator<ReadReply>
     final FullRoute<?> route;
     final Timestamp executeAt;
     final Deps deps;
-    final Topologies applyTo;
+    final Topologies executes;
     final BiConsumer<? super Result, Throwable> callback;
     private Data data;
 
@@ -57,7 +57,7 @@ class Execute extends ReadCoordinator<ReadReply>
         this.readScope = readScope;
         this.executeAt = executeAt;
         this.deps = deps;
-        this.applyTo = node.topology().forEpoch(route, executeAt.epoch());
+        this.executes = node.topology().forEpoch(route, executeAt.epoch());
         this.callback = callback;
     }
 
@@ -65,10 +65,8 @@ class Execute extends ReadCoordinator<ReadReply>
     {
         if (txn.read().keys().isEmpty())
         {
-            Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch());
-            Topologies persistTo = txnId.epoch() == executeAt.epoch() ? applyTo : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
             Result result = txn.result(txnId, executeAt, null);
-            Persist.persist(node, persistTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, null), result);
+            Persist.persist(node, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, null), result);
             callback.accept(result, null);
         }
         else
@@ -81,7 +79,7 @@ class Execute extends ReadCoordinator<ReadReply>
     @Override
     protected void start(Set<Id> readSet)
     {
-        Commit.commitMinimalAndRead(node, applyTo, txnId, txn, route, readScope, executeAt, deps, readSet, this);
+        Commit.commitMinimalAndRead(node, executes, txnId, txn, route, readScope, executeAt, deps, readSet, this);
     }
 
     @Override
@@ -141,8 +139,7 @@ class Execute extends ReadCoordinator<ReadReply>
             Result result = txn.result(txnId, executeAt, data);
             callback.accept(result, null);
             // avoid re-calculating topologies if it is unchanged
-            Topologies persistTo = txnId.epoch() == executeAt.epoch() ? applyTo : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
-            Persist.persist(node, persistTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, data), result);
+            Persist.persist(node, executes, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, data), result);
         }
         else
         {

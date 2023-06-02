@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.ConfigurationService;
 import accord.local.Node;
+import accord.primitives.Ranges;
 import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
@@ -287,13 +288,25 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
         reportTopology(topology, true);
     }
 
-    protected void remoteSyncCompletePreListenerNotify(Node.Id node, long epoch) {}
+    protected void receiveSyncCompletePreListenerNotify(Node.Id node, long epoch) {}
 
-    public synchronized void remoteSyncComplete(Node.Id node, long epoch)
+    public synchronized void receiveSyncComplete(Node.Id node, long epoch)
     {
-        remoteSyncCompletePreListenerNotify(node, epoch);
+        receiveSyncCompletePreListenerNotify(node, epoch);
         for (Listener listener : listeners)
             listener.onRemoteSyncComplete(node, epoch);
+    }
+
+    public synchronized void receiveClosed(Ranges ranges, long epoch)
+    {
+        for (Listener listener : listeners)
+            listener.onEpochClosed(ranges, epoch);
+    }
+
+    public synchronized void receiveRedundant(Ranges ranges, long epoch)
+    {
+        for (Listener listener : listeners)
+            listener.onEpochRedundant(ranges, epoch);
     }
 
     protected void truncateTopologiesPreListenerNotify(long epoch) {}

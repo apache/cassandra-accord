@@ -19,17 +19,14 @@
 package accord.coordinate;
 
 import java.util.List;
-import java.util.Set;
 
 import accord.api.Result;
 import accord.local.Node;
 import accord.messages.Apply;
-import accord.messages.Commit;
 import accord.messages.PreAccept.PreAcceptOk;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
-import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -40,7 +37,6 @@ import accord.utils.Invariants;
 import accord.utils.async.AsyncResult;
 
 import static accord.coordinate.Propose.Invalidate.proposeAndCommitInvalidate;
-import static accord.messages.Commit.Kind.Maximal;
 import static accord.primitives.Txn.Kind.NoOp;
 
 /**
@@ -85,14 +81,9 @@ public class CoordinateNoOp extends CoordinatePreAccept<Timestamp>
                 @Override
                 void onAccepted()
                 {
-                    Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch());
-                    Topologies persistTo = txnId.epoch() == executeAt.epoch() ? applyTo : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
                     Writes writes = txn.execute(txnId, txnId, null);
                     Result result = txn.result(txnId, executeAt, null);
-                    // TODO (now): permit Apply to Commit in these cases
-                    Set<Node.Id> nodes = persistTo.nodes();
-                    node.send(nodes, id -> new Commit(Maximal, id, persistTo.forEpoch(txnId.epoch()), persistTo, txnId, txn, route, Ranges.EMPTY, executeAt, deps, false));
-                    node.send(nodes, id -> new Apply(id, persistTo, applyTo, txnId, route, txn, executeAt, deps, writes, result));
+                    Apply.sendMaximal(node, txnId, route, txn, executeAt, deps, writes, result);
                     accept(executeAt, null);
                 }
             }.start();

@@ -35,6 +35,8 @@ import accord.topology.Topologies;
 
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.local.Status.Durability.Majority;
+import static accord.messages.Apply.executes;
+import static accord.messages.Apply.participates;
 import static accord.messages.Commit.Kind.Maximal;
 
 public class Persist implements Callback<ApplyReply>
@@ -49,22 +51,25 @@ public class Persist implements Callback<ApplyReply>
     final Set<Id> persistedOn;
     boolean isDone;
 
-    // persistTo should be a superset of applyTo, and includes those replicas/ranges that no longer replicate at the execution epoch
-    // but did replicate for coordination and would like to be informed of the transaction's status (i.e. apply a no-op apply)
-    public static void persist(Node node, Topologies persistTo, Topologies appliesTo, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    public static void persist(Node node, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
-        Persist persist = new Persist(node, appliesTo, txnId, route, txn, executeAt, deps);
-        node.send(persistTo.nodes(), to -> new Apply(to, persistTo, appliesTo, txnId, route, txn, executeAt, deps, writes, result), persist);
+        Topologies executes = executes(node, route, executeAt);
+        persist(node, executes, txnId, route, txn, executeAt, deps, writes, result);
     }
 
-    public static void persistAndCommitMaximal(Node node, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    public static void persist(Node node, Topologies executes, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
-        Topologies coordinate = node.topology().forEpoch(route, txnId.epoch());
-        Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch());
-        Topologies persistTo = txnId.epoch() == executeAt.epoch() ? applyTo : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
-        Persist persist = new Persist(node, persistTo, txnId, route, txn, executeAt, deps);
-        node.send(persistTo.nodes(), to -> new Commit(Maximal, to, coordinate.current(), persistTo, txnId, txn, route, null, executeAt, deps, false));
-        node.send(applyTo.nodes(), to -> new Apply(to, persistTo, applyTo, txnId, route, txn, executeAt, deps, writes, result), persist);
+        Topologies participates = participates(node, route, txnId, executeAt, executes);
+        Persist persist = new Persist(node, executes, txnId, route, txn, executeAt, deps);
+        node.send(participates.nodes(), to -> Apply.applyMinimal(to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), persist);
+    }
+
+    public static void persistMaximal(Node node, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    {
+        Topologies executes = executes(node, route, executeAt);
+        Topologies participates = participates(node, route, txnId, executeAt, executes);
+        Persist persist = new Persist(node, participates, txnId, route, txn, executeAt, deps);
+        node.send(participates.nodes(), to -> Apply.applyMaximal(to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), persist);
     }
 
     private Persist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps)

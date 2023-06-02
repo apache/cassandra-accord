@@ -351,11 +351,11 @@ public abstract class CommandStores
         List<ShardHolder> result = new ArrayList<>(prev.shards.length + added.size());
         for (ShardHolder shard : prev.shards)
         {
-            if (subtracted.intersects(shard.ranges().currentRanges()))
+            Ranges slice = subtracted.slice(shard.ranges().currentRanges());
+            if (!slice.isEmpty())
             {
-                RangesForEpoch newRanges = shard.ranges().withRanges(newTopology.epoch(), shard.ranges().currentRanges().subtract(subtracted));
-                shard.ranges.current = newRanges;
-                bootstrapUpdates.add(shard.store.interruptBootstraps(epoch, newRanges.currentRanges()));
+                shard.ranges.current = shard.ranges().withRanges(newTopology.epoch(), shard.ranges().currentRanges().subtract(subtracted));
+                bootstrapUpdates.add(shard.store.unbootstrap(epoch, slice));
             }
             // TODO (desired): only sync affected shards
             Ranges ranges = shard.ranges().currentRanges();

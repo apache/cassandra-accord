@@ -204,8 +204,8 @@ public class TopologyManagerTest
         // first topology acked, so only the second shard should be included
         service.onEpochSyncComplete(id(1), 2);
         service.onEpochSyncComplete(id(2), 2);
-        Topologies actual = service.withUnsyncedEpochs(keys(150, 250).toUnseekables(), 3, 3);
-        Assertions.assertEquals(topologies(topology3, topology(2, shard(range(200, 300), idList(4, 5, 6), idSet(4, 5))), topology1.withEmptySubset()),
+        Topologies actual = service.withUnsyncedEpochs(keys(150, 250).toUnseekables(), 2, 2);
+        Assertions.assertEquals(topologies(topology2, topology(1, shard(range(200, 300), idList(4, 5, 6), idSet(4, 5))), topology1.withEmptySubset()),
                                 actual);
     }
 
@@ -225,7 +225,7 @@ public class TopologyManagerTest
 
         Assertions.assertSame(topology6, service.getEpochStateUnsafe(6).global());
         Assertions.assertSame(topology5, service.getEpochStateUnsafe(5).global());
-        for (int i=1; i<=6; i++) service.onEpochSyncComplete(id(i), 5);
+        for (int i=1; i<=6; i++) service.onEpochSyncComplete(id(i), 6);
         Assertions.assertTrue(service.getEpochStateUnsafe(5).syncComplete());
         Assertions.assertNull(service.getEpochStateUnsafe(4));
 

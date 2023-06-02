@@ -73,8 +73,8 @@ public class TopologyManager
             Invariants.checkArgument(!global().isSubset());
             this.curShardSyncComplete = new boolean[global.shards.length];
             this.syncTracker = new QuorumTracker(new Single(sorter, global()));
-            this.prevSyncComplete = prevSyncComplete;
             this.newRanges = global.ranges.subtract(prevRanges);
+            this.prevSyncComplete = newRanges.with(prevSyncComplete);
             this.curSyncComplete = this.syncComplete = newRanges;
         }
 

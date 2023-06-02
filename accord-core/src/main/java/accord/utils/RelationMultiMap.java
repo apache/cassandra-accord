@@ -397,6 +397,76 @@ public class RelationMultiMap
         }
     }
 
+    public static class SortedRelationList<T extends Comparable<? super T>> extends AbstractList<T> implements SortedList<T>
+    {
+        public static final SortedRelationList EMPTY = new SortedRelationList(new Comparable[0], new int[0], 0, 0);
+
+        final T[] values;
+        final int[] ids;
+        final int startIndex, endIndex;
+
+        public SortedRelationList(T[] values, int[] ids, int startIndex, int endIndex)
+        {
+            this.values = values;
+            this.ids = ids;
+            this.startIndex = startIndex;
+            this.endIndex = endIndex;
+        }
+
+        @Override
+        public T get(int index)
+        {
+            if (index >= endIndex)
+                throw new IndexOutOfBoundsException();
+            return values[ids[startIndex + index]];
+        }
+
+        public int getValueIndex(int index)
+        {
+            if (index >= endIndex)
+                throw new IndexOutOfBoundsException();
+            return ids[startIndex + index];
+        }
+
+        @Override
+        public int size()
+        {
+            return endIndex - startIndex;
+        }
+
+        @Override
+        public int findNext(int i, Comparable<? super T> find)
+        {
+            int idIdx = i + startIndex;
+            int valueIdx = ids[idIdx];
+            valueIdx = SortedArrays.exponentialSearch(values, valueIdx, values.length, find);
+            if (valueIdx < 0)
+                valueIdx = -1 -valueIdx;
+            return normalise(SortedArrays.exponentialSearch(ids, idIdx, endIndex, valueIdx));
+        }
+
+        public int findNext(int i, int valueIdx)
+        {
+            int idIdx = i + startIndex;
+            return normalise(SortedArrays.exponentialSearch(ids, idIdx, endIndex, valueIdx));
+        }
+
+        @Override
+        public int find(Comparable<? super T> find)
+        {
+            int valueIdx = Arrays.binarySearch(values, 0, values.length, find);
+            if (valueIdx < 0)
+                valueIdx = -1 -valueIdx;
+            // TODO (desired): use interpolation search
+            return normalise(SortedArrays.exponentialSearch(ids, startIndex, endIndex, valueIdx));
+        }
+
+        private int normalise(int searchResult)
+        {
+            return searchResult >= 0 ? searchResult - startIndex : searchResult + startIndex;
+        }
+    }
+
     /**
      * Returns the set of {@link TxnId}s that are referenced by {@code keysToTxnId}, and <strong>updates</strong>
      * {@code keysToTxnId} to point to the new offsets in the returned set.

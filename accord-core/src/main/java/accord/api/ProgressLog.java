@@ -18,13 +18,11 @@
 
 package accord.api;
 
-import javax.annotation.Nullable;
-
 import accord.coordinate.InformHomeOfTxn;
 import accord.local.Command;
 import accord.local.CommandStore;
+import accord.local.SafeCommand;
 import accord.local.Status.Known;
-import accord.primitives.Route;
 import accord.primitives.Unseekables;
 import accord.primitives.TxnId;
 
@@ -141,11 +139,6 @@ public interface ProgressLog
     void executed(Command command, ProgressShard shard);
 
     /**
-     * The transaction has been durably invalidated
-     */
-    void invalidated(Command command, ProgressShard shard);
-
-    /**
      * The transaction's outcome has been durably recorded (but not necessarily applied) at a quorum of all shards,
      * including at least those node's ids that are provided.
      *
@@ -177,5 +170,10 @@ public interface ProgressLog
      * @param blockedUntil  either Committed or Executed; the state we are waiting for
      * @param blockedOn the keys we should report any progress updates to
      */
-    void waiting(TxnId blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn);
+    void waiting(SafeCommand blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn);
+
+    /**
+     * We have finished processing this transaction; ensure its state is cleared
+     */
+    void clear(TxnId txnId);
 }

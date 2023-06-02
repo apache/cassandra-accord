@@ -24,7 +24,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -65,12 +64,10 @@ import accord.primitives.Ranges;
 import accord.primitives.Routable;
 import accord.primitives.RoutableKey;
 import accord.primitives.Routables;
-import accord.primitives.Route;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.utils.Functions;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
@@ -80,13 +77,9 @@ import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static accord.local.Command.Truncated.truncated;
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.Status.Committed;
-import static accord.local.Status.Invalidated;
-import static accord.local.Status.PreCommitted;
-import static accord.local.Status.Applied;
 import static accord.local.Status.Truncated;
 import static accord.primitives.Routables.Slice.Minimal;
 
@@ -100,7 +93,7 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     private final TreeMap<TxnId, RangeCommand> rangeCommands = new TreeMap<>();
     private final TreeMap<TxnId, Ranges> historicalRangeCommands = new TreeMap<>();
-    private Timestamp maxEvicted = Timestamp.NONE;
+    protected Timestamp maxEvicted = Timestamp.NONE;
 
     private InMemorySafeStore current;
 
@@ -212,7 +205,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                 for (Key key : keys)
                 {
                     if (!slice.contains(key)) continue;
-                    SafeCommandsForKey forKey = safeStore.ifLoaded(key);
+                    SafeCommandsForKey forKey = safeStore.ifLoadedAndInitialised(key);
                     if (forKey.current() == null)
                         continue;
                     accumulate = map.apply(forKey.current(), accumulate);
@@ -276,120 +269,23 @@ public abstract class InMemoryCommandStore extends CommandStore
     }
 
     @Override
-    protected void setTruncatedBefore(NavigableMap<TxnId, Ranges> newTruncatedAt)
+    public void markShardDurable(SafeCommandStore safeStore, TxnId syncId, Ranges ranges)
     {
-        super.setTruncatedBefore(newTruncatedAt);
-        List<GlobalCommand> maybeTruncate = new ArrayList<>(commands.values());
-        for (GlobalCommand global : maybeTruncate)
-        {
-            Command command = global.value();
-            TxnId txnId = command.txnId();
+        super.markShardDurable(safeStore, syncId, ranges);
 
-            // TODO (required): we aren't currently evicting commands that are invalidated whose definition is unknown
-            //  as we don't know if they're fully covered. Once the owned range is fully truncated, can erase everything.
-            // TODO (expected): we also might have orphaned future PreAccept and Accept state, i.e. in epochs we
-            //  ultimately did not decide to execute in; we need to ensure these are cleaned up
+        if (!rangeCommands.containsKey(syncId))
+            historicalRangeCommands.merge(syncId, ranges, Ranges::with);
 
-            Map.Entry<TxnId, Ranges> entry = newTruncatedAt.higherEntry(txnId);
-            if (entry == null)
-                continue;
-
-            Ranges truncated = entry.getValue();
-            if (isTruncated(command, truncated))
-                truncate(command, global, truncated);
-        }
-    }
-
-    @Override
-    protected void setRedundantBefore(NavigableMap<TxnId, Ranges> newRedundantBefore)
-    {
-        NavigableMap<TxnId, Ranges> oldRedundantBefore = getRedundantBefore();
-        super.setRedundantBefore(newRedundantBefore);
-        for (Map.Entry<TxnId, Ranges> entry : newRedundantBefore.entrySet())
-        {
-            Ranges existing = oldRedundantBefore.get(entry.getKey());
-            if (existing != null && existing.containsAll(entry.getValue()))
-                continue;
-
-            TxnId syncId = entry.getKey();
-            Ranges ranges = entry.getValue();
-            if (!rangeCommands.containsKey(entry.getKey()))
-                historicalRangeCommands.put(entry.getKey(), entry.getValue());
-
-            {
-                Iterator<Map.Entry<TxnId, Ranges>> iterator = historicalRangeCommands.entrySet().iterator();
-                while (iterator.hasNext())
-                {
-                    Map.Entry<TxnId, Ranges> next = iterator.next();
-                    if (next.getKey().compareTo(syncId) < 0 && next.getValue().intersects(ranges))
-                        iterator.remove();
-                }
-            }
-
-            ranges.forEach(r -> {
-                commandsForKey.subMap(r.start(), r.startInclusive(), r.end(), r.endInclusive()).values().forEach(forKey -> {
-                    if (!forKey.isEmpty())
-                        forKey.value(forKey.value().withoutRedundant(syncId));
-                });
+        // TODO (now): apply on retrieval
+        historicalRangeCommands.entrySet().removeIf(next -> next.getKey().compareTo(syncId) < 0 && next.getValue().intersects(ranges));
+        rangeCommands.entrySet().removeIf(next -> next.getKey().compareTo(syncId) < 0 && next.getValue().ranges.intersects(ranges));
+        ranges.forEach(r -> {
+            commandsForKey.subMap(r.start(), r.startInclusive(), r.end(), r.endInclusive()).values().forEach(forKey -> {
+                if (!forKey.isEmpty())
+                    forKey.value(forKey.value().withoutRedundant(syncId));
             });
-        }
-    }
+        });
 
-    @Override
-    protected Command.Truncated truncate(SafeCommand command, Ranges truncated)
-    {
-        return truncate(command.current(), ((InMemorySafeCommand)command).global(), truncated);
-    }
-
-    private Command.Truncated truncate(Command command, GlobalCommand global, Ranges truncated)
-    {
-        RangesForEpoch rangesForEpoch = rangesForEpochHolder.get();
-        Ranges coordinateRanges = rangesForEpoch.allAt(command.txnId().epoch());
-        Timestamp executeAt = command.executeAt();
-        Ranges additionalRanges = executeAt != null && !executeAt.equals(Timestamp.NONE) && executeAt.epoch() != command.txnId().epoch()
-                                  ? rangesForEpoch.allAt(executeAt.epoch()) : Ranges.EMPTY;
-
-        Invariants.checkState(!command.hasBeen(PreCommitted) || command.hasBeen(Applied) || !command.partialTxn().keys().intersects(coordinateRanges.with(additionalRanges)));
-
-        Command.Truncated result;
-        if (!command.hasBeen(Truncated))
-        {
-            // TODO (expected): is it certain partialTxn != null? might be a home shard that witnesses only accept and durable but nothing else
-            // we expect that
-            //   1) a command has been applied; or
-            //   2) has been coordinated but *will not* be applied (we just haven't witnessed the invalidation yet); or
-            //   3) a command is durably decided and this shard only hosts its home data, so no explicit truncation is necessary to remove it
-            // TODO (desired): consider if there are better invariants we can impose for undecided transactions, to verify they aren't later committed (should be detected already, but more is better)
-            Invariants.checkState(command.hasBeen(Applied) || !command.hasBeen(PreCommitted) || command.partialTxn().keys().isEmpty());
-            ((SimpleProgressLog.Instance)progressLog).clear(command.txnId());
-
-            global.value(result = truncated(command));
-        }
-        else
-        {
-            result = (Command.Truncated) command;
-        }
-
-        // TODO (now): add Route to Known, and add an InvalidatedWithRoute state
-        Route<?> route = result.route();
-        if (Route.isFullRoute(route))
-        {
-            route = route.slice(coordinateRanges.with(additionalRanges));
-            if (route.covers(coordinateRanges) && route.covers(additionalRanges) && truncated.containsAll(route))
-            {
-                maxEvicted = Timestamp.max(maxEvicted, Functions.reduceNonNull(Timestamp::max, command.txnId(), executeAt));
-                commands.remove(result.txnId());
-                return result;
-            }
-        }
-
-        if (truncated.containsAll(coordinateRanges) && truncated.containsAll(additionalRanges))
-        {
-            maxEvicted = Timestamp.max(maxEvicted, Functions.reduceNonNull(Timestamp::max, command.txnId(), executeAt));
-            commands.remove(result.txnId());
-        }
-
-        return result;
     }
 
     protected InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys)
@@ -739,6 +635,13 @@ public abstract class InMemoryCommandStore extends CommandStore
                     timestamp = Timestamp.nonNullOrMax(timestamp, command.command.value().executeAt());
             }
             return Timestamp.nonNullOrMax(timestamp, commandStore.maxEvicted);
+        }
+
+        @Override
+        public void erase(SafeCommand command)
+        {
+            commandStore.maxEvicted = Timestamp.max(commandStore.maxEvicted, Functions.reduceNonNull(Timestamp::max, command.txnId(), command.current().executeAt()));
+            commands.remove(command.txnId());
         }
 
         // TODO (preferable): this can have protected visibility if under CommandStore, and this is perhaps a better place to put it also
@@ -1114,24 +1017,17 @@ public abstract class InMemoryCommandStore extends CommandStore
             }
 
             @Override
-            public InMemorySafeCommand ifPresent(TxnId txnId)
+            public InMemorySafeCommand ifLoadedAndInitialised(TxnId txnId)
             {
                 assertThread();
-                return super.ifPresent(txnId);
+                return super.ifLoadedAndInitialised(txnId);
             }
 
             @Override
-            public InMemorySafeCommand ifLoaded(TxnId txnId)
+            public InMemorySafeCommand get(TxnId txnId)
             {
                 assertThread();
-                return super.ifLoaded(txnId);
-            }
-
-            @Override
-            public InMemorySafeCommand command(TxnId txnId)
-            {
-                assertThread();
-                return super.command(txnId);
+                return super.get(txnId);
             }
 
             @Override
