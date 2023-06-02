@@ -301,6 +301,6 @@ public interface Txn
             accumulate.add(result);
             return accumulate;
         }, new ArrayList<>());
-        return AsyncChains.reduce(futures, UnresolvedData::merge);
+        return AsyncChains.reduce(futures, UnresolvedData::mergeForReduce);
     }
 }

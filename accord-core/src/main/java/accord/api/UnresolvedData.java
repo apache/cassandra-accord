@@ -29,4 +29,14 @@ public interface UnresolvedData
      * This method may modify the current object and return itself.
      */
     UnresolvedData merge(UnresolvedData data);
+
+    static UnresolvedData mergeForReduce(UnresolvedData left, UnresolvedData right)
+    {
+        if (left == null)
+            return right;
+        if (right == null)
+            return null;
+
+        return left.merge(right);
+    }
 }
