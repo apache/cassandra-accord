@@ -288,7 +288,7 @@ public class Commit extends TxnRequest<ReadNack>
         @Override
         public MessageType type()
         {
-            return MessageType.COMMIT_INVALIDATE;
+            return MessageType.COMMIT_INVALIDATE_REQ;
         }
 
         @Override

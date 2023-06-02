@@ -73,7 +73,7 @@ public class InformOfTxnId extends AbstractEpochRequest<Reply> implements Reques
     @Override
     public MessageType type()
     {
-        return MessageType.INFORM_TXNID_REQ;
+        return MessageType.INFORM_OF_TXN_REQ;
     }
 
     @Override
