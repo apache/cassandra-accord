@@ -148,7 +148,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     @Override
     public MessageType type()
     {
-        return MessageType.PREACCEPT_REQ;
+        return MessageType.PRE_ACCEPT_REQ;
     }
 
     public static abstract class PreAcceptReply implements Reply
@@ -156,7 +156,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         @Override
         public MessageType type()
         {
-            return MessageType.PREACCEPT_RSP;
+            return MessageType.PRE_ACCEPT_RSP;
         }
 
         public abstract boolean isOk();
