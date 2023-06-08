@@ -15,37 +15,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
-import accord.api.RoutingKey;
-import accord.local.Command;
-import accord.local.Commands;
 import accord.local.Node;
-import accord.local.PreLoadContext;
-import accord.local.SafeCommand;
-import accord.local.SafeCommandStore;
 import accord.local.Status;
 import accord.local.Status.Known;
-import accord.local.Status.Phase;
 import accord.messages.CheckStatus;
 import accord.messages.CheckStatus.CheckStatusOkFull;
-import accord.messages.CheckStatus.WithQuorum;
+import accord.messages.Propagate;
 import accord.primitives.*;
 import accord.utils.Invariants;
-import accord.utils.MapReduceConsume;
 
 import javax.annotation.Nullable;
 
 import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAndCallback;
-import static accord.local.PreLoadContext.contextFor;
-import static accord.local.Status.NotDefined;
-import static accord.local.Status.Phase.Cleanup;
-import static accord.local.Status.PreApplied;
 import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
-import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Route.castToRoute;
 import static accord.primitives.Route.isRoute;
 
@@ -230,244 +216,7 @@ public class FetchData extends CheckShards<Route<?>>
             if (success == ReadCoordinator.Success.Success)
                 Invariants.checkState(isSufficient(merged), "Status %s is not sufficient", merged);
 
-            OnDone.propagate(node, txnId, sourceEpoch, success.withQuorum, route(), target, (CheckStatusOkFull) merged, callback);
+            Propagate.propagate(node, txnId, sourceEpoch, success.withQuorum, route(), target, (CheckStatusOkFull) merged, callback);
         }
     }
-
-    static class OnDone implements MapReduceConsume<SafeCommandStore, Void>, EpochSupplier
-    {
-        final Node node;
-        final TxnId txnId;
-        final Route<?> route;
-        final RoutingKey progressKey;
-        final CheckStatusOkFull full;
-        // this is a WHOLE NODE measure, so if commit epoch has more ranges we do not count as committed if we can only commit in coordination epoch
-        final Known achieved;
-        final PartialTxn partialTxn;
-        final PartialDeps partialDeps;
-        final long toEpoch;
-        final BiConsumer<Known, Throwable> callback;
-
-        OnDone(Node node, TxnId txnId, Route<?> route, RoutingKey progressKey, CheckStatusOkFull full, Known achieved, PartialTxn partialTxn, PartialDeps partialDeps, long toEpoch, BiConsumer<Known, Throwable> callback)
-        {
-            this.node = node;
-            this.txnId = txnId;
-            this.route = route;
-            this.progressKey = progressKey;
-            this.full = full;
-            this.achieved = achieved;
-            this.partialTxn = partialTxn;
-            this.partialDeps = partialDeps;
-            this.toEpoch = toEpoch;
-            this.callback = callback;
-        }
-
-        @SuppressWarnings({"rawtypes", "unchecked"})
-        public static void propagate(Node node, TxnId txnId, long sourceEpoch, WithQuorum withQuorum, Route route, @Nullable Known target, CheckStatusOkFull full, BiConsumer<Known, Throwable> callback)
-        {
-            if (full.saveStatus.status == NotDefined && full.invalidIfNotAtLeast == NotDefined)
-            {
-                callback.accept(Known.Nothing, null);
-                return;
-            }
-
-            Invariants.checkState(sourceEpoch == txnId.epoch() || (full.executeAt != null && sourceEpoch == full.executeAt.epoch()));
-            Route<?> maxRoute = Route.merge(route, full.route);
-
-            // TODO (required): permit individual shards that are behind to catch up by themselves
-            long toEpoch = sourceEpoch;
-            Ranges sliceRanges = node.topology().localRangesForEpochs(txnId.epoch(), toEpoch);
-            if (!maxRoute.covers(sliceRanges))
-            {
-                callback.accept(Known.Nothing, null);
-                return;
-            }
-
-            RoutingKey progressKey = node.trySelectProgressKey(txnId, maxRoute);
-
-            Ranges covering = maxRoute.sliceCovering(sliceRanges, Minimal);
-            Participants<?> participatingKeys = maxRoute.participants().slice(covering, Minimal);
-            Known achieved = full.sufficientFor(participatingKeys, withQuorum);
-            if (achieved.executeAt.hasDecidedExecuteAt() && full.executeAt.epoch() > toEpoch)
-            {
-                Ranges acceptRanges;
-                if (!node.topology().hasEpoch(full.executeAt.epoch()) ||
-                    (!maxRoute.covers(acceptRanges = node.topology().localRangesForEpochs(txnId.epoch(), full.executeAt.epoch()))))
-                {
-                    // we don't know what the execution epoch requires, so we cannot be sure we can replicate it locally
-                    // we *could* wait until we have the local epoch before running this
-                    Status.Outcome outcome = achieved.outcome.propagatesBetweenShards() ? achieved.outcome : Status.Outcome.Unknown;
-                    achieved = new Known(achieved.definition, achieved.executeAt, Status.KnownDeps.DepsUnknown, outcome);
-                }
-                else
-                {
-                    // TODO (expected): this should only be the two precise epochs, not the full range of epochs
-                    sliceRanges = acceptRanges;
-                    covering = maxRoute.sliceCovering(sliceRanges, Minimal);
-                    participatingKeys = maxRoute.participants().slice(covering, Minimal);
-                    Known knownForExecution = full.sufficientFor(participatingKeys, withQuorum);
-                    if ((target != null && target.isSatisfiedBy(knownForExecution)) || knownForExecution.isSatisfiedBy(achieved))
-                    {
-                        achieved = knownForExecution;
-                        toEpoch = full.executeAt.epoch();
-                    }
-                    else
-                    {
-                        Invariants.checkState(sourceEpoch == txnId.epoch(), "%d != %d", sourceEpoch, txnId.epoch());
-                        achieved = new Known(achieved.definition, achieved.executeAt, knownForExecution.deps, knownForExecution.outcome);
-                    }
-                }
-            }
-
-            PartialTxn partialTxn = null;
-            if (achieved.definition.isKnown())
-                partialTxn = full.partialTxn.slice(sliceRanges, true).reconstitutePartial(covering);
-
-            PartialDeps partialDeps = null;
-            if (achieved.deps.hasDecidedDeps())
-                partialDeps = full.committedDeps.slice(sliceRanges).reconstitutePartial(covering);
-
-            new OnDone(node, txnId, maxRoute, progressKey, full, achieved, partialTxn, partialDeps, toEpoch, callback).start();
-        }
-
-        void start()
-        {
-            Seekables<?, ?> keys = Keys.EMPTY;
-            if (achieved.definition.isKnown())
-                keys = partialTxn.keys();
-            else if (achieved.deps.hasProposedOrDecidedDeps())
-                keys = partialDeps.keyDeps.keys();
-
-            PreLoadContext loadContext = contextFor(txnId, keys);
-            node.mapReduceConsumeLocal(loadContext, route, txnId.epoch(), toEpoch, this);
-        }
-
-        @Override
-        public Void apply(SafeCommandStore safeStore)
-        {
-            SafeCommand safeCommand = safeStore.get(txnId, this, route);
-            Command command = safeCommand.current();
-            if (command.saveStatus().phase.compareTo(Phase.Persist) >= 0)
-                return null;
-
-            Status propagate = achieved.propagate();
-            if (command.hasBeen(propagate))
-            {
-                if (full.maxSaveStatus.phase == Cleanup && full.durability.isDurableOrInvalidated() && Infer.safeToCleanup(safeStore, command, route, full.executeAt))
-                    Commands.setTruncatedApply(safeStore, safeCommand);
-                return null;
-            }
-
-            switch (propagate)
-            {
-                default: throw new IllegalStateException("Unexpected status: " + propagate);
-                case Accepted:
-                case AcceptedInvalidate:
-                    // we never "propagate" accepted statuses as these are essentially votes,
-                    // and contribute nothing to our local state machine
-                    throw new IllegalStateException("Invalid states to propagate: " + achieved.propagate());
-
-                case Truncated:
-                    // if our peers have truncated this command, then either:
-                    // 1) we have already applied it locally; 2) the command doesn't apply locally; 3) we are stale; or 4) the command is invalidated
-                    if (command.hasBeen(PreApplied) || command.saveStatus().isUninitialised())
-                        break;
-
-                    if (Infer.safeToCleanup(safeStore, command, route, full.executeAt))
-                    {
-                        Commands.setErased(safeStore, safeCommand);
-                        break;
-                    }
-
-                    // TODO (required): check if we are stale
-                    // otherwise we are either stale, or the command didn't reach consensus
-
-                case Invalidated:
-                    Commands.commitInvalidate(safeStore, safeCommand, route);
-                    break;
-
-                case Applied:
-                case PreApplied:
-                    Invariants.checkState(full.executeAt != null);
-                    if (toEpoch >= full.executeAt.epoch())
-                    {
-                        confirm(Commands.apply(safeStore, safeCommand, txnId, route, progressKey, full.executeAt, partialDeps, partialTxn, full.writes, full.result));
-                        break;
-                    }
-
-                case Committed:
-                case ReadyToExecute:
-                    confirm(Commands.commit(safeStore, safeCommand, txnId, route, progressKey, partialTxn, full.executeAt, partialDeps));
-                    break;
-
-                case PreCommitted:
-                    Commands.precommit(safeStore, safeCommand, txnId, full.executeAt, route);
-                    if (!achieved.definition.isKnown())
-                        break;
-
-                case PreAccepted:
-                    // only preaccept if we coordinate the transaction
-                    if (safeStore.ranges().coordinates(txnId).intersects(route) && Route.isFullRoute(route))
-                        Commands.preaccept(safeStore, safeCommand, txnId, txnId.epoch(), partialTxn, Route.castToFullRoute(route), progressKey);
-                    break;
-
-                case NotDefined:
-                    break;
-            }
-
-            RoutingKey homeKey = full.homeKey;
-            if (!full.durability.isDurable() || homeKey == null)
-                return null;
-
-            if (!safeStore.ranges().coordinates(txnId).contains(homeKey))
-                return null;
-
-            Timestamp executeAt = full.saveStatus.known.executeAt.hasDecidedExecuteAt() ? full.executeAt : null;
-            Commands.setDurability(safeStore, safeCommand, full.durability, route, executeAt);
-            return null;
-        }
-
-        @Override
-        public Void reduce(Void o1, Void o2)
-        {
-            return null;
-        }
-
-        @Override
-        public void accept(Void result, Throwable failure)
-        {
-            callback.accept(failure  == null ? achieved : null, failure);
-        }
-
-        @Override
-        public long epoch()
-        {
-            return toEpoch;
-        }
-    }
-
-    private static void confirm(Commands.CommitOutcome outcome)
-    {
-        switch (outcome)
-        {
-            default: throw new IllegalStateException("Unknown outcome: " + outcome);
-            case Redundant:
-            case Success:
-                return;
-            case Insufficient: throw new IllegalStateException("Should have enough information");
-        }
-    }
-
-    private static void confirm(Commands.ApplyOutcome outcome)
-    {
-        switch (outcome)
-        {
-            default: throw new IllegalStateException("Unknown outcome: " + outcome);
-            case Redundant:
-            case Success:
-                return;
-            case Insufficient: throw new IllegalStateException("Should have enough information");
-        }
-    }
-
 }

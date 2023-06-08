@@ -42,19 +42,17 @@ import accord.primitives.Unseekables;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
 
-import static accord.messages.MessageType.APPLY_REQ;
-import static accord.messages.MessageType.APPLY_RSP;
-
 public class Apply extends TxnRequest<ApplyReply>
 {
     public static class SerializationSupport
     {
-        public static Apply create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, PartialTxn txn, Writes writes, Result result)
+        public static Apply create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Kind kind, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, PartialTxn txn, Writes writes, Result result)
         {
-            return new Apply(txnId, scope, waitForEpoch, keys, executeAt, deps, txn, writes, result);
+            return new Apply(kind, txnId, scope, waitForEpoch, keys, executeAt, deps, txn, writes, result);
         }
     }
 
+    public final Kind kind;
     public final Timestamp executeAt;
     public final Seekables<?, ?> keys;
     public final PartialDeps deps; // TODO (expected): this should be nullable, and only included if we did not send Commit (or if sending Maximal apply)
@@ -62,15 +60,18 @@ public class Apply extends TxnRequest<ApplyReply>
     public final Writes writes;
     public final Result result;
 
-    private Apply(Id to, Topologies participates, Topologies executes, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, boolean isMaximal, Writes writes, Result result)
+    public enum Kind { Minimal, Maximal }
+
+    private Apply(Kind kind, Id to, Topologies participates, Topologies executes, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         super(to, participates, route, txnId);
-        Ranges slice = isMaximal || executes == participates ? scope.covering() : executes.computeRangesForNode(to);
+        Ranges slice = kind == Kind.Maximal || executes == participates ? scope.covering() : executes.computeRangesForNode(to);
         // TODO (desired): it's wasteful to encode the full set of ranges owned by the recipient node;
         //     often it will be cheaper to include the FullRoute for Deps scope (or come up with some other safety-preserving encoding scheme)
+        this.kind = kind;
         this.deps = deps.slice(slice);
         this.keys = txn.keys().slice(slice);
-        this.txn = isMaximal ? txn.slice(slice, true) : null;
+        this.txn = kind == Kind.Maximal ? txn.slice(slice, true) : null;
         this.executeAt = executeAt;
         this.writes = writes;
         this.result = result;
@@ -102,17 +103,18 @@ public class Apply extends TxnRequest<ApplyReply>
 
     public static Apply applyMinimal(Id to, Topologies sendTo, Topologies applyTo, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
-        return new Apply(to, sendTo, applyTo, txnId, route, txn, executeAt, deps, false, writes, result);
+        return new Apply(Kind.Minimal, to, sendTo, applyTo, txnId, route, txn, executeAt, deps, writes, result);
     }
 
     public static Apply applyMaximal(Id to, Topologies participates, Topologies executes, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
-        return new Apply(to, participates, executes, txnId, route, txn, executeAt, deps, true, writes, result);
+        return new Apply(Kind.Maximal, to, participates, executes, txnId, route, txn, executeAt, deps, writes, result);
     }
 
-    private Apply(TxnId txnId, PartialRoute<?> route, long waitForEpoch, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, @Nullable PartialTxn txn, Writes writes, Result result)
+    private Apply(Kind kind, TxnId txnId, PartialRoute<?> route, long waitForEpoch, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, @Nullable PartialTxn txn, Writes writes, Result result)
     {
         super(txnId, route, waitForEpoch);
+        this.kind = kind;
         this.executeAt = executeAt;
         this.deps = deps;
         this.keys = keys;
@@ -172,7 +174,12 @@ public class Apply extends TxnRequest<ApplyReply>
     @Override
     public MessageType type()
     {
-        return APPLY_REQ;
+        switch (kind)
+        {
+            case Minimal: return MessageType.APPLY_MINIMAL_REQ;
+            case Maximal: return MessageType.APPLY_MAXIMAL_REQ;
+            default: throw new IllegalStateException();
+        }
     }
 
     public enum ApplyReply implements Reply
@@ -182,7 +189,7 @@ public class Apply extends TxnRequest<ApplyReply>
         @Override
         public MessageType type()
         {
-            return APPLY_RSP;
+            return MessageType.APPLY_RSP;
         }
 
         @Override
@@ -201,8 +208,8 @@ public class Apply extends TxnRequest<ApplyReply>
     @Override
     public String toString()
     {
-        return "Apply{" +
-               "txnId:" + txnId +
+        return "Apply{kind:" + kind +
+               ", txnId:" + txnId +
                ", deps:" + deps +
                ", executeAt:" + executeAt +
                ", writes:" + writes +

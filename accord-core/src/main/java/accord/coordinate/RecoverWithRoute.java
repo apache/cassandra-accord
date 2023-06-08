@@ -20,7 +20,6 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
-import accord.coordinate.FetchData.OnDone;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.Status;
@@ -29,6 +28,7 @@ import accord.messages.CheckStatus;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.messages.CheckStatus.IncludeInfo;
+import accord.messages.Propagate;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
@@ -177,7 +177,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                         }
                     }
 
-                    OnDone.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? full.toProgressToken() : null, f));
+                    Propagate.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? full.toProgressToken() : null, f));
                     break;
                 }
 
@@ -201,11 +201,11 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                 if (witnessedByInvalidation != null && witnessedByInvalidation.hasBeen(Status.PreCommitted))
                     throw new IllegalStateException("We previously invalidated, finding a status that should be recoverable");
 
-                OnDone.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? INVALIDATED : null, f));
+                Propagate.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? INVALIDATED : null, f));
                 break;
 
             case Erased:
-                OnDone.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? TRUNCATED : null, f));
+                Propagate.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? TRUNCATED : null, f));
                 break;
         }
     }

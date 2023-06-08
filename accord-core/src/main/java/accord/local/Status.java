@@ -55,8 +55,8 @@ public enum Status
      * So, for execution of other transactions we may treat a PreCommitted transaction as Committed,
      * using the timestamp to update our dependency set to rule it out as a dependency.
      * But we do not have enough information to execute the transaction, and when recovery calculates
-     * {@link BeginRecovery#acceptedStartedBeforeWithoutWitnessing}, {@link BeginRecovery#hasCommittedExecutesAfterWithoutWitnessing}
-     *
+     * {@link BeginRecovery#acceptedStartedBeforeWithoutWitnessing},
+     * {@link BeginRecovery#hasCommittedExecutesAfterWithoutWitnessing},
      * and {@link BeginRecovery#committedStartedBeforeAndWitnessed} we may not have the dependencies
      * to calculate the result. For these operations we treat ourselves as whatever Accepted status
      * we may have previously taken, using any proposed dependencies to compute the result.
@@ -311,6 +311,11 @@ public enum Status
          */
         NoDeps
         ;
+
+        public boolean hasProposedDeps()
+        {
+            return this == DepsProposed;
+        }
 
         public boolean hasDecidedDeps()
         {

@@ -36,6 +36,12 @@ public interface Route<K extends Unseekable> extends Unseekables<K>
 
     boolean covers(Ranges ranges);
 
+    default boolean covers(Route route)
+    {
+        // TODO (now): implement
+        return false;
+    }
+
     /**
      * Return an object containing any {@code K} present in either of the original collections,
      * and covering the union of the ranges.

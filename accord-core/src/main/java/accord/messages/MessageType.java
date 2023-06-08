@@ -17,53 +17,86 @@
  */
 package accord.messages;
 
+import static accord.messages.MessageType.Kind.REMOTE;
+import static accord.messages.MessageType.Kind.LOCAL;
+
 /**
- * Meant to assist implementations map accord messages to their own messaging systems.
+ * Meant to assist implementations with mapping accord messages to their own messaging systems.
  */
 public enum MessageType
 {
-    SIMPLE_RSP               (false),
-    PRE_ACCEPT_REQ           (true ),
-    PRE_ACCEPT_RSP           (false),
-    ACCEPT_REQ               (true ),
-    ACCEPT_RSP               (false),
-    ACCEPT_INVALIDATE_REQ    (true ),
-    GET_DEPS_REQ             (false),
-    GET_DEPS_RSP             (false),
-    COMMIT_REQ               (true ),
-    COMMIT_INVALIDATE_REQ    (true ),
-    APPLY_REQ                (true ),
-    APPLY_RSP                (false),
-    READ_REQ                 (false),
-    READ_RSP                 (false),
-    BEGIN_RECOVER_REQ        (true ),
-    BEGIN_RECOVER_RSP        (false),
-    BEGIN_INVALIDATE_REQ     (true ),
-    BEGIN_INVALIDATE_RSP     (false),
-    WAIT_ON_COMMIT_REQ       (false),
-    WAIT_ON_COMMIT_RSP       (false),
-    WAIT_ON_APPLY_REQ        (false),
-    INFORM_OF_TXN_REQ        (true ),
-    INFORM_DURABLE_REQ       (true ),
-    INFORM_HOME_DURABLE_REQ  (true ),
-    CHECK_STATUS_REQ         (false),
-    CHECK_STATUS_RSP         (false),
-    FETCH_DATA_REQ           (false),
-    FETCH_DATA_RSP           (false),
-    SET_SHARD_DURABLE_REQ    (true ),
-    SET_GLOBALLY_DURABLE_REQ (true ),
-    QUERY_DURABLE_BEFORE_REQ (false),
-    QUERY_DURABLE_BEFORE_RSP (false),
-    FAILURE_RSP              (false),
+    SIMPLE_RSP               (REMOTE, false),
+    FAILURE_RSP              (REMOTE, false),
+    PRE_ACCEPT_REQ           (REMOTE, true ),
+    PRE_ACCEPT_RSP           (REMOTE, false),
+    ACCEPT_REQ               (REMOTE, true ),
+    ACCEPT_RSP               (REMOTE, false),
+    ACCEPT_INVALIDATE_REQ    (REMOTE, true ),
+    GET_DEPS_REQ             (REMOTE, false),
+    GET_DEPS_RSP             (REMOTE, false),
+    COMMIT_MINIMAL_REQ       (REMOTE, true ),
+    COMMIT_MAXIMAL_REQ       (REMOTE, true ),
+    COMMIT_INVALIDATE_REQ    (REMOTE, true ),
+    APPLY_MINIMAL_REQ        (REMOTE, true ),
+    APPLY_MAXIMAL_REQ        (REMOTE, true ),
+    APPLY_RSP                (REMOTE, false),
+    READ_REQ                 (REMOTE, false),
+    READ_RSP                 (REMOTE, false),
+    BEGIN_RECOVER_REQ        (REMOTE, true ),
+    BEGIN_RECOVER_RSP        (REMOTE, false),
+    BEGIN_INVALIDATE_REQ     (REMOTE, true ),
+    BEGIN_INVALIDATE_RSP     (REMOTE, false),
+    WAIT_ON_COMMIT_REQ       (REMOTE, false),
+    WAIT_ON_COMMIT_RSP       (REMOTE, false),
+    WAIT_ON_APPLY_REQ        (REMOTE, false),
+    INFORM_OF_TXN_REQ        (REMOTE, true ),
+    INFORM_DURABLE_REQ       (REMOTE, true ),
+    INFORM_HOME_DURABLE_REQ  (REMOTE, true ),
+    CHECK_STATUS_REQ         (REMOTE, false),
+    CHECK_STATUS_RSP         (REMOTE, false),
+    FETCH_DATA_REQ           (REMOTE, false),
+    FETCH_DATA_RSP           (REMOTE, false),
+    SET_SHARD_DURABLE_REQ    (REMOTE, true ),
+    SET_GLOBALLY_DURABLE_REQ (REMOTE, true ),
+    QUERY_DURABLE_BEFORE_REQ (REMOTE, false),
+    QUERY_DURABLE_BEFORE_RSP (REMOTE, false),
+
+    PROPAGATE_PRE_ACCEPT_MSG (LOCAL,  true ),
+    PROPAGATE_COMMIT_MSG     (LOCAL,  true ),
+    PROPAGATE_APPLY_MSG      (LOCAL,  true ),
+    PROPAGATE_OTHER_MSG      (LOCAL,  true ),
     ;
+
+    public enum Kind { LOCAL, REMOTE }
+
+    /**
+     * LOCAL messages are not sent to remote nodes.
+     */
+    private final Kind kind;
 
     /**
      * If true, indicates that processing of the message has important side effects.
      */
-    public final boolean hasSideEffects;
+    private final boolean hasSideEffects;
 
-    MessageType(boolean hasSideEffects)
+    MessageType(Kind kind, boolean hasSideEffects)
     {
         this.hasSideEffects = hasSideEffects;
+        this.kind = kind;
+    }
+
+    public boolean isLocal()
+    {
+        return kind == LOCAL;
+    }
+
+    public boolean isRemote()
+    {
+        return kind == REMOTE;
+    }
+
+    public boolean hasSideEffects()
+    {
+        return hasSideEffects;
     }
 }

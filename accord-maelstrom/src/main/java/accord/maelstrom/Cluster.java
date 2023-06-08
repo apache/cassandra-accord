@@ -50,6 +50,7 @@ import accord.local.Node.Id;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
 import accord.messages.Callback;
+import accord.messages.LocalMessage;
 import accord.messages.Reply;
 import accord.messages.Reply.FailureReply;
 import accord.messages.ReplyContext;
@@ -313,7 +314,7 @@ public class Cluster implements Scheduler
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
                 LongSupplier nowSupplier = nowSupplierSupplier.get();
-                lookup.put(node, new Node(node, messageSink, new SimpleConfigService(topology),
+                lookup.put(node, new Node(node, messageSink, LocalMessage::process, new SimpleConfigService(topology),
                                           nowSupplier, NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, nowSupplier),
                                           MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                                           MaelstromAgent.INSTANCE,

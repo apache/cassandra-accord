@@ -212,6 +212,8 @@ public abstract class Command implements CommonAttributes
         }
     }
 
+    public abstract boolean covers(Command other);
+
     private abstract static class AbstractCommand extends Command
     {
         private final TxnId txnId;
@@ -247,12 +249,27 @@ public abstract class Command implements CommonAttributes
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
             Command command = (Command) o;
-            return txnId.equals(command.txnId())
-                    && status == command.saveStatus()
-                    && durability == command.durability()
-                    && Objects.equals(route, command.route())
-                    && Objects.equals(promised, command.promised())
-                    && listeners.equals(command.durableListeners());
+            return txnId().equals(command.txnId())
+                    && saveStatus() == command.saveStatus()
+                    && durability() == command.durability()
+                    && Objects.equals(route(), command.route())
+                    && Objects.equals(promised(), command.promised())
+                    && Objects.equals(durableListeners(), command.durableListeners());
+        }
+
+        @Override
+        public boolean covers(Command command)
+        {
+            if (this == command) return true;
+            if (command == null || getClass() != command.getClass()) return false;
+            if (!(txnId().equals(command.txnId())
+                    && saveStatus() == command.saveStatus()
+                    && durability() == command.durability()
+                    && Objects.equals(promised(), command.promised())
+                    && Objects.equals(durableListeners(), command.durableListeners())))
+                return false;
+            return (route() == null && command.route() == null)
+                || (route() != null && command.route() != null && route().covers(command.route()));
         }
 
         @Override
@@ -288,9 +305,7 @@ public abstract class Command implements CommonAttributes
         @Override
         public Listeners.Immutable durableListeners()
         {
-            if (listeners == null)
-                return EMPTY;
-            return listeners;
+            return listeners == null ? EMPTY : listeners;
         }
 
         @Override
@@ -600,6 +615,7 @@ public abstract class Command implements CommonAttributes
         @Nullable final Timestamp executeAt;
         @Nullable final Writes writes;
         @Nullable final Result result;
+
         public Truncated(CommonAttributes commonAttributes, SaveStatus saveStatus, @Nullable Timestamp executeAt, @Nullable Writes writes, @Nullable Result result)
         {
             super(commonAttributes, saveStatus, Ballot.MAX);
@@ -616,9 +632,37 @@ public abstract class Command implements CommonAttributes
             this.result = result;
         }
 
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            if (!super.equals(o)) return false;
+            Truncated that = (Truncated) o;
+            return Objects.equals(executeAt, that.executeAt)
+                && Objects.equals(writes, that.writes)
+                && Objects.equals(result, that.result);
+        }
+
+        public boolean covers(Command c)
+        {
+            if (this == c) return true;
+            if (c == null || getClass() != c.getClass()) return false;
+            if (!super.covers(c)) return false;
+            Truncated that = (Truncated) c;
+            return Objects.equals(executeAt, that.executeAt)
+                    && Objects.equals(writes, that.writes)
+                    && Objects.equals(result, that.result);
+        }
+
         public static Truncated erased(Command command)
         {
-            return new Truncated(command.txnId(), SaveStatus.Erased, command.durability(), command.route(), null, EMPTY, null, null);
+            return erased(command.txnId(), command.durability(), command.route());
+        }
+
+        public static Truncated erased(TxnId txnId, Status.Durability durability, Route<?> route)
+        {
+            return new Truncated(txnId, SaveStatus.Erased, durability, route, null, EMPTY, null, null);
         }
 
         public static Truncated truncatedApply(Command command)
@@ -633,7 +677,6 @@ public abstract class Command implements CommonAttributes
         }
 
         public static Truncated truncatedApply(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result)
-
         {
             Invariants.checkArgument(executeAt != null);
             Invariants.checkArgument(saveStatus == SaveStatus.TruncatedApply || saveStatus == SaveStatus.TruncatedApplyWithDeps || saveStatus == SaveStatus.TruncatedApplyWithOutcome);
@@ -729,10 +772,24 @@ public abstract class Command implements CommonAttributes
                     && Objects.equals(partialDeps, that.partialDeps);
         }
 
+        @Override
+        public boolean covers(Command c)
+        {
+            if (this == c) return true;
+            if (c == null || getClass() != c.getClass()) return false;
+            if (!super.covers(c)) return false;
+            PreAccepted that = (PreAccepted) c;
+            if (!executeAt.equals(that.executeAt) || !partialTxn.covers(that.partialTxn))
+                return false;
+            return (partialDeps == null && that.partialDeps == null)
+                || (partialDeps != null && that.partialDeps != null && partialDeps.covers(that.partialDeps));
+        }
+
         public static PreAccepted preAccepted(CommonAttributes common, Timestamp executeAt, Ballot promised)
         {
             return new PreAccepted(common, SaveStatus.PreAccepted, executeAt, promised);
         }
+
         public static PreAccepted preAccepted(PreAccepted command, CommonAttributes common, Ballot promised)
         {
             checkPromised(command, promised);
@@ -792,16 +849,28 @@ public abstract class Command implements CommonAttributes
             return Objects.equals(accepted, that.accepted);
         }
 
+        @Override
+        public boolean covers(Command c)
+        {
+            if (this == c) return true;
+            if (c == null || getClass() != c.getClass()) return false;
+            if (!super.covers(c)) return false;
+            Accepted that = (Accepted) c;
+            return Objects.equals(accepted, that.accepted);
+        }
+
         static Accepted accepted(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted)
         {
             return new Accepted(common, status, executeAt, promised, accepted);
         }
+
         static Accepted accepted(Accepted command, CommonAttributes common, SaveStatus status, Ballot promised)
         {
             checkPromised(command, promised);
             checkSameClass(command, Accepted.class, "Cannot update");
             return new Accepted(common, status, command.executeAt(), promised, command.accepted());
         }
+
         static Accepted accepted(Accepted command, CommonAttributes common, Ballot promised)
         {
             return accepted(command, common, command.saveStatus(), promised);
@@ -839,6 +908,16 @@ public abstract class Command implements CommonAttributes
             if (o == null || getClass() != o.getClass()) return false;
             if (!super.equals(o)) return false;
             Committed committed = (Committed) o;
+            return Objects.equals(waitingOn, committed.waitingOn);
+        }
+
+        @Override
+        public boolean covers(Command c)
+        {
+            if (this == c) return true;
+            if (c == null || getClass() != c.getClass()) return false;
+            if (!super.covers(c)) return false;
+            Committed committed = (Committed) c;
             return Objects.equals(waitingOn, committed.waitingOn);
         }
 
@@ -923,6 +1002,17 @@ public abstract class Command implements CommonAttributes
             Executed executed = (Executed) o;
             return Objects.equals(writes, executed.writes)
                     && Objects.equals(result, executed.result);
+        }
+
+        @Override
+        public boolean covers(Command c)
+        {
+            if (this == c) return true;
+            if (c == null || getClass() != c.getClass()) return false;
+            if (!super.covers(c)) return false;
+            Executed executed = (Executed) c;
+            return Objects.equals(writes, executed.writes)
+                && Objects.equals(result, executed.result);
         }
 
         public static Executed executed(Executed command, CommonAttributes common, SaveStatus status, Ballot promised, WaitingOn waitingOn)

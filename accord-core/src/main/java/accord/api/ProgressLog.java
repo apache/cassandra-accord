@@ -142,8 +142,7 @@ public interface ProgressLog
     void executed(Command command, ProgressShard shard);
 
     /**
-     * The transaction's outcome has been durably recorded (but not necessarily applied) at a quorum of all shards,
-     * including at least those node's ids that are provided.
+     * The transaction's outcome has been durably recorded (but not necessarily applied) at a quorum of all shards.
      *
      * If this replica has not witnessed the outcome of the transaction, it should poll a majority of each shard
      * for its outcome.
