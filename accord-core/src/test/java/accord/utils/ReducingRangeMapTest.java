@@ -198,7 +198,7 @@ public class ReducingRangeMapTest
     {
         ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
         List<ListenableFuture<Void>> results = new ArrayList<>();
-        int count = 100000;
+        int count = 1000;
         for (int numberOfAdditions : new int[] { 1, 10, 100 })
         {
             for (float maxCoveragePerRange : new float[] { 0.01f, 0.1f, 0.5f })

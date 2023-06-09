@@ -228,7 +228,7 @@ public abstract class CommandStores
         private int floorIndex(long epoch)
         {
             int i = Arrays.binarySearch(epochs, epoch);
-            if (i < 0) i = -2 - i;
+            if (i < 0) i = Math.max(0, -2 - i);
             return i;
         }
 

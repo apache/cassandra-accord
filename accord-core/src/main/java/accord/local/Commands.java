@@ -385,9 +385,9 @@ public class Commands
 
         Ranges coordinateRanges = coordinateRanges(safeStore, localSyncId);
         // TODO (desired, consider): in the case of sync points, the coordinator is unlikely to be a home shard, do we mind this? should document at least
-        ProgressShard progressShard = coordinateRanges.contains(route.homeKey()) ? UnmanagedHome : No;
         Txn emptyTxn = safeStore.agent().emptyTxn(localSyncId.rw(), keys);
-        CommonAttributes newAttributes = command.mutable();
+        ProgressShard progressShard = coordinateRanges.contains(route.homeKey()) ? UnmanagedHome : No;
+        CommonAttributes newAttributes = command.mutable().progressShard(progressShard);
         PartialDeps none = Deps.NONE.slice(coordinateRanges);
         PartialTxn partialTxn = emptyTxn.slice(coordinateRanges, true);
         Invariants.checkState(validate(command.status(), newAttributes, Ranges.EMPTY, coordinateRanges, progressShard, route, Set, partialTxn, Set, none, Set));
