@@ -35,7 +35,7 @@ import static accord.primitives.Routable.Domain.Key;
 
 @SuppressWarnings("rawtypes")
 // TODO (desired, efficiency): check that foldl call-sites are inlined and optimised by HotSpot
-public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K, ?>> implements Iterable<K>, Routables<K, KS>
+public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>, Routables<K>
 {
     final K[] keys;
 
@@ -95,13 +95,13 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     }
 
     @Override
-    public final boolean containsAll(Routables<?, ?> keysOrRanges)
+    public final boolean containsAll(Routables<?> keysOrRanges)
     {
         return keysOrRanges.size() == Routables.foldl(keysOrRanges, this, (k, p, v, i) -> v + 1, 0, 0, 0);
     }
 
     @Override
-    public final boolean intersects(AbstractKeys<?, ?> keys)
+    public final boolean intersects(AbstractKeys<?> keys)
     {
         return findNextIntersection(0, keys, 0) >= 0;
     }
@@ -131,15 +131,15 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     }
 
     @Override
-    public final long findNextIntersection(int thisIdx, AbstractKeys<?, ?> that, int thatIdx)
+    public final long findNextIntersection(int thisIdx, AbstractKeys<?> that, int thatIdx)
     {
         return SortedArrays.findNextIntersection(this.keys, thisIdx, that.keys, thatIdx, RoutableKey::compareTo);
     }
 
     @Override
-    public final long findNextIntersection(int thisIndex, Routables<K, ?> with, int withIndex)
+    public final long findNextIntersection(int thisIndex, Routables<K> with, int withIndex)
     {
-        return findNextIntersection(thisIndex, (AbstractKeys<?, ?>) with, withIndex);
+        return findNextIntersection(thisIndex, (AbstractKeys<?>) with, withIndex);
     }
 
     public Stream<K> stream()
@@ -287,7 +287,7 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
         }
     }
 
-    public final RoutingKeys toUnseekables()
+    public final RoutingKeys toParticipants()
     {
         return toUnseekables(array -> array.length == 0 ? RoutingKeys.EMPTY : new RoutingKeys(array));
     }

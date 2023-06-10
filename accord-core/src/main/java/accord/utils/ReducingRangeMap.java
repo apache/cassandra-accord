@@ -46,33 +46,38 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         super(inclusiveEnds, ends, values);
     }
 
-    public V foldl(Routables<?, ?> routables, BiFunction<V, V, V> fold, V accumulator)
+    public V foldl(Routables<?> routables, BiFunction<V, V, V> fold, V accumulator)
     {
         return foldl(routables, (a, b, f, ignore) -> f.apply(a, b), accumulator, fold, null, ignore -> false);
     }
 
-    public <V2> V2 foldl(Routables<?, ?> routables, BiFunction<V, V2, V2> fold, V2 accumulator, Predicate<V2> terminate)
+    public <V2> V2 foldl(Routables<?> routables, BiFunction<V, V2, V2> fold, V2 accumulator, Predicate<V2> terminate)
     {
         return foldl(routables, (a, b, f, ignore) -> f.apply(a, b), accumulator, fold, null, terminate);
     }
 
-    public <V2, P1, P2> V2 foldl(Routables<?, ?> routables, QuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    public <V2, P1> V2 foldl(Routables<?> routables, TriFunction<V, V2, P1, V2> fold, V2 accumulator, P1 p1, Predicate<V2> terminate)
+    {
+        return foldl(routables, (a, b, f, p) -> f.apply(a, b, p), accumulator, fold, p1, terminate);
+    }
+
+    public <V2, P1, P2> V2 foldl(Routables<?> routables, QuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
         return foldl(routables, (v, v2, param1, param2, i, j) -> fold.apply(v, v2, param1, param2), accumulator, p1, p2, terminate);
     }
 
-    public <V2, P1, P2> V2 foldl(Routables<?, ?> routables, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    public <V2, P1, P2> V2 foldl(Routables<?> routables, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
         switch (routables.domain())
         {
             default: throw new AssertionError();
-            case Key: return foldl((AbstractKeys<?, ?>) routables, fold, accumulator, p1, p2, terminate);
+            case Key: return foldl((AbstractKeys<?>) routables, fold, accumulator, p1, p2, terminate);
             case Range: return foldl((AbstractRanges<?>) routables, fold, accumulator, p1, p2, terminate);
         }
     }
 
     // TODO (required): test
-    public <V2, P1, P2> V2 foldl(AbstractKeys<?, ?> keys, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    public <V2, P1, P2> V2 foldl(AbstractKeys<?> keys, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
         if (values.length == 0)
             return accumulator;

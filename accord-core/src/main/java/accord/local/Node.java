@@ -293,12 +293,12 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return nowSupplier.getAsLong();
     }
 
-    public AsyncChain<Void> forEachLocal(PreLoadContext context, Unseekables<?, ?> unseekables, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
+    public AsyncChain<Void> forEachLocal(PreLoadContext context, Unseekables<?> unseekables, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
     {
         return commandStores.forEach(context, unseekables, minEpoch, maxEpoch, forEach);
     }
 
-    public AsyncChain<Void> forEachLocalSince(PreLoadContext context, Unseekables<?, ?> unseekables, Timestamp since, Consumer<SafeCommandStore> forEach)
+    public AsyncChain<Void> forEachLocalSince(PreLoadContext context, Unseekables<?> unseekables, Timestamp since, Consumer<SafeCommandStore> forEach)
     {
         return commandStores.forEach(context, unseekables, since.epoch(), Long.MAX_VALUE, forEach);
     }
@@ -323,7 +323,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         commandStores.mapReduceConsume(context, key, minEpoch, maxEpoch, mapReduceConsume);
     }
 
-    public <T> void mapReduceConsumeLocal(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<SafeCommandStore, T> mapReduceConsume)
+    public <T> void mapReduceConsumeLocal(PreLoadContext context, Routables<?> keys, long minEpoch, long maxEpoch, MapReduceConsume<SafeCommandStore, T> mapReduceConsume)
     {
         commandStores.mapReduceConsume(context, keys, minEpoch, maxEpoch, mapReduceConsume);
     }

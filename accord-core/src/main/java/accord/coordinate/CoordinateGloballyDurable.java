@@ -18,17 +18,15 @@
 
 package accord.coordinate;
 
-import javax.annotation.Nullable;
-
 import accord.coordinate.tracking.QuorumTracker;
 import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node;
+import accord.local.DurableBefore;
 import accord.messages.Callback;
 import accord.messages.QueryDurableBefore;
 import accord.messages.SetGloballyDurable;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
-import accord.utils.Functions;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults.SettableResult;
 
@@ -40,7 +38,7 @@ public class CoordinateGloballyDurable extends SettableResult<Void> implements C
     final Node node;
     // TODO (now): this can be a ReadTracker, we only need one response from each shard
     final QuorumTracker tracker;
-    private @Nullable TxnId durableBefore;
+    private DurableBefore durableBefore = DurableBefore.EMPTY;
 
     private CoordinateGloballyDurable(Node node, long epoch)
     {
@@ -64,7 +62,7 @@ public class CoordinateGloballyDurable extends SettableResult<Void> implements C
     @Override
     public void onSuccess(Node.Id from, QueryDurableBefore.DurableBeforeReply reply)
     {
-        durableBefore = Functions.reduceNonNull(TxnId::min, durableBefore, reply.txnId);
+        durableBefore = DurableBefore.merge(durableBefore, reply.durableBeforeMap);
         if (tracker.recordSuccess(from) == RequestStatus.Success)
         {
             if (durableBefore != null && !durableBefore.equals(TxnId.NONE))

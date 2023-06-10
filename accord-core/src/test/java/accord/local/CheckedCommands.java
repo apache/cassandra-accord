@@ -37,7 +37,7 @@ public class CheckedCommands
 {
     public static void preaccept(SafeCommandStore safeStore, TxnId txnId, PartialTxn partialTxn, FullRoute<?> route, @Nullable RoutingKey progressKey)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, null, route);
+        SafeCommand safeCommand = safeStore.get(txnId, route);
         Commands.AcceptOutcome result = Commands.preaccept(safeStore, safeCommand, txnId, txnId.epoch(), partialTxn, route, progressKey);
         if (result != Commands.AcceptOutcome.Success) throw new IllegalStateException("Command mutation rejected: " + result);
     }
@@ -50,14 +50,14 @@ public class CheckedCommands
 
     public static void commit(SafeCommandStore safeStore, TxnId txnId, Route<?> route, @Nullable RoutingKey progressKey, @Nullable PartialTxn partialTxn, Timestamp executeAt, PartialDeps partialDeps)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, executeAt, route);
+        SafeCommand safeCommand = safeStore.get(txnId, route);
         Commands.CommitOutcome result = Commands.commit(safeStore, safeCommand, txnId, route, progressKey, partialTxn, executeAt, partialDeps);
         if (result != Commands.CommitOutcome.Success) throw new IllegalStateException("Command mutation rejected: " + result);
     }
 
     public static void apply(SafeCommandStore safeStore, TxnId txnId, Route<?> route, @Nullable RoutingKey progressKey, Timestamp executeAt, @Nullable PartialDeps partialDeps, @Nullable PartialTxn partialTxn, Writes writes, Result result)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, executeAt, route);
+        SafeCommand safeCommand = safeStore.get(txnId, route);
         Commands.ApplyOutcome outcome = Commands.apply(safeStore, safeCommand, txnId, route, progressKey, executeAt, partialDeps, partialTxn, writes, result);
         if (outcome != Commands.ApplyOutcome.Success) throw new IllegalStateException("Command mutation rejected: " + outcome);
     }

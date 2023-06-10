@@ -105,7 +105,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         if (minUnsyncedEpoch < txnId.epoch() && !safeStore.ranges().coordinates(txnId).intersects(scope))
             return applyIfDoesNotCoordinate(safeStore);
 
-        SafeCommand safeCommand = safeStore.get(txnId, null, route);
+        SafeCommand safeCommand = safeStore.get(txnId, route);
         switch (Commands.preaccept(safeStore, safeCommand, txnId, maxEpoch, partialTxn, route, progressKey))
         {
             default:

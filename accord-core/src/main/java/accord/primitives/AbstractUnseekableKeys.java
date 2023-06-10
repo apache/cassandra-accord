@@ -23,7 +23,8 @@ import accord.api.RoutingKey;
 import java.util.Arrays;
 
 // TODO: do we need this class?
-public abstract class AbstractUnseekableKeys<KS extends Unseekables<RoutingKey, ?>> extends AbstractKeys<RoutingKey, KS> implements Iterable<RoutingKey>, Unseekables<RoutingKey, KS>
+public abstract class AbstractUnseekableKeys extends AbstractKeys<RoutingKey>
+implements Iterable<RoutingKey>, Unseekables<RoutingKey>, Participants<RoutingKey>
 {
     AbstractUnseekableKeys(RoutingKey[] keys)
     {
@@ -37,7 +38,7 @@ public abstract class AbstractUnseekableKeys<KS extends Unseekables<RoutingKey, 
     }
 
     @Override
-    public Unseekables<RoutingKey, ?> subtract(Ranges ranges)
+    public Unseekables<RoutingKey> subtract(Ranges ranges)
     {
         RoutingKey[] output = subtract(ranges, RoutingKey[]::new);
         return output == keys ? this : new RoutingKeys(output);

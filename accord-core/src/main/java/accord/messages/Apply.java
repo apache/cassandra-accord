@@ -117,7 +117,7 @@ public class Apply extends TxnRequest<ApplyReply>
     @Override
     public ApplyReply apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, executeAt, scope);
+        SafeCommand safeCommand = safeStore.get(txnId, scope);
         switch (Commands.apply(safeStore, safeCommand, txnId, scope, progressKey, executeAt, deps, txn, writes, result))
         {
             default:

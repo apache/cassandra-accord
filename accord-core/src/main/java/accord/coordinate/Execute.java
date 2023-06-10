@@ -41,7 +41,7 @@ import static accord.messages.Commit.Kind.Maximal;
 class Execute extends ReadCoordinator<ReadReply>
 {
     final Txn txn;
-    final Unseekables<?, ?> readScope;
+    final Participants<?> readScope;
     final FullRoute<?> route;
     final Timestamp executeAt;
     final Deps deps;
@@ -49,7 +49,7 @@ class Execute extends ReadCoordinator<ReadReply>
     final BiConsumer<? super Result, Throwable> callback;
     private Data data;
 
-    private Execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Unseekables<?, ?> readScope, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
+    private Execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Participants<?> readScope, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
     {
         super(node, node.topology().forEpoch(readScope, executeAt.epoch()), txnId);
         this.txn = txn;
@@ -71,7 +71,7 @@ class Execute extends ReadCoordinator<ReadReply>
         }
         else
         {
-            Execute execute = new Execute(node, txnId, txn, route, txn.keys().toUnseekables(), executeAt, deps, callback);
+            Execute execute = new Execute(node, txnId, txn, route, txn.keys().toParticipants(), executeAt, deps, callback);
             execute.start();
         }
     }

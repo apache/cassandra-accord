@@ -131,13 +131,13 @@ public class KeyDepsTest
                 expectedTxnId.remove(txnId);
                 Assertions.assertEquals(expectedTxnId, without.txnIds());
 
-                Assertions.assertEquals(Keys.EMPTY, without.someKeys(txnId));
+                Assertions.assertEquals(Keys.EMPTY, without.participatingKeys(txnId));
                 // all other keys are fine?
                 for (TxnId other : deps.test.txnIds())
                 {
                     if (other == txnId)
                         continue;
-                    Assertions.assertEquals(deps.test.someKeys(other), without.someKeys(other), "someKeys(" + other + ")");
+                    Assertions.assertEquals(deps.test.participatingKeys(other), without.participatingKeys(other), "someKeys(" + other + ")");
                 }
 
                 // check each key
@@ -413,7 +413,7 @@ public class KeyDepsTest
             for (Map.Entry<TxnId, List<Key>> e : canonicalInverted.entrySet())
             {
                 Assertions.assertArrayEquals(toArray(e.getValue(), Key[]::new),
-                                             test.someKeys(e.getKey()).stream().toArray(Key[]::new));
+                                             test.participatingKeys(e.getKey()).stream().toArray(Key[]::new));
             }
 
             StringBuilder builder = new StringBuilder();

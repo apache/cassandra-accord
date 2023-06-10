@@ -287,7 +287,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         return compare(range);
     }
 
-    public boolean intersects(AbstractKeys<?, ?> keys)
+    public boolean intersects(AbstractKeys<?> keys)
     {
         return SortedArrays.binarySearch(keys.keys, 0, keys.size(), this, Range::compareTo, FAST) >= 0;
     }
@@ -309,7 +309,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
     /**
      * returns the index of the first key larger than what's covered by this range
      */
-    public int nextHigherKeyIndex(AbstractKeys<?, ?> keys, int from)
+    public int nextHigherKeyIndex(AbstractKeys<?> keys, int from)
     {
         int i = SortedArrays.exponentialSearch(keys.keys, from, keys.size(), this, Range::compareTo, Search.FLOOR);
         if (i < 0) i = -1 - i;

@@ -25,6 +25,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 
+import javax.annotation.Nullable;
+
 import accord.utils.IntrusiveLinkedList;
 import accord.utils.IntrusiveLinkedListNode;
 import accord.coordinate.*;
@@ -248,7 +250,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                             }
                             else
                             {
-                                Route<?> route = Invariants.nonNull(command.maxRoute());
+                                Route<?> route = Invariants.nonNull(command.route()).withHomeKey();
                                 node.withEpoch(txnId.epoch(), () -> {
                                     AsyncResult<? extends Outcome> recover = node.maybeRecover(txnId, route, token);
                                     recover.addCallback((success, fail) -> {
@@ -283,15 +285,19 @@ public class SimpleProgressLog implements ProgressLog.Factory
             {
                 Known blockedUntil = Nothing;
 
-                Unseekables<?, ?> blockedOn;
+                Route<?> route;
+                Participants<?> participants;
 
                 Object debugInvestigating;
 
-                void recordBlocking(Known blockedUntil, Unseekables<?, ?> blockedOn)
+                void recordBlocking(Known blockedUntil, @Nullable Route<?> route, @Nullable Participants<?> participants)
                 {
-                    Invariants.checkState(!blockedOn.isEmpty() || Route.isRoute(blockedOn));
-                    if (this.blockedOn == null) this.blockedOn = blockedOn;
-                    else this.blockedOn = Unseekables.merge(this.blockedOn, (Unseekables)blockedOn);
+                    Invariants.checkState(route != null || participants != null);
+                    Invariants.checkState(participants == null || !participants.isEmpty());
+                    Invariants.checkState(route == null || route.hasParticipants());
+
+                    this.route = Route.merge(this.route, (Route)route);
+                    this.participants = Participants.merge(this.participants, (Participants) participants);
                     if (!blockedUntil.isSatisfiedBy(this.blockedUntil))
                     {
                         this.blockedUntil = this.blockedUntil.merge(blockedUntil);
@@ -323,10 +329,10 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     setProgress(Investigating);
                     // first make sure we have enough information to obtain the command locally
                     Timestamp executeAt = command.known().executeAt.hasDecidedExecuteAt() ? command.executeAt() : null;
-                    Unseekables<?, ?> invalidateKeys = maxUnseekables(command);
+                    Participants<?> maxParticipants = maxParticipants(command);
                     // we want to fetch a route if we have it, so that we can go to our neighbouring shards for info
                     // (rather than the home shard, which may have GC'd its state if the result is durable)
-                    Unseekables<?, ?> fetchKeys = maxRoute(command);
+                    Unseekables<?> fetchKeys = maxContact(command);
 
                     BiConsumer<Known, Throwable> callback = (success, fail) -> {
                         // TODO (expected): this should be invoked on this commandStore
@@ -338,7 +344,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                             if (fail == null)
                             {
                                 if (success.canProposeInvalidation())
-                                    invalidate(node, txnId, invalidateKeys);
+                                    invalidate(node, txnId, maxParticipants);
                                 else
                                     record(success);
                             }
@@ -350,22 +356,24 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     });
                 }
 
-                private Unseekables<?, ?> maxRoute(Command command)
+                private Unseekables<?> maxContact(Command command)
                 {
-                    return Unseekables.merge((Route)command.maxRoute(), blockedOn);
+                    Route<?> route = Route.merge(command.route(), (Route)this.route);
+                    if (route != null) route = route.withHomeKey();
+                    return Unseekables.merge(route == null ? null : route.withHomeKey(), (Unseekables)participants);
                 }
 
-                private Unseekables<?, ?> maxUnseekables(Command command)
+                private Participants<?> maxParticipants(Command command)
                 {
-                    return Unseekables.merge((Unseekables)command.maxRoute(), blockedOn);
+                    Route<?> route = Route.merge(command.route(), (Route)this.route);
+                    return Participants.merge(route == null ? null : route.participants(), (Participants) participants);
                 }
 
-                private void invalidate(Node node, TxnId txnId, Unseekables<?, ?> someKeys)
+                private void invalidate(Node node, TxnId txnId, Participants<?> participants)
                 {
                     setProgress(Investigating);
                     // TODO (now): we should avoid invalidating with home key, as this simplifies erasing of invalidated transactions
-                    Unseekables<?, ?> invalidateWith = Route.isRoute(someKeys) ? Route.castToRoute(someKeys).withHomeKey() : someKeys;
-                    debugInvestigating = Invalidate.invalidate(node, txnId, invalidateWith, (success, fail) -> {
+                    debugInvestigating = Invalidate.invalidate(node, txnId, participants, (success, fail) -> {
                         commandStore.execute(contextFor(txnId), safeStore -> {
                             if (progress() != Investigating)
                                 return;
@@ -403,7 +411,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 {
                     Command command = safeCommand.current();
                     // make sure a quorum of the home shard is aware of the transaction, so we can rely on it to ensure progress
-                    AsyncChain<Void> inform = inform(node, txnId, command.maxRoute());
+                    AsyncChain<Void> inform = inform(node, txnId, command.route());
                     inform.begin((success, fail) -> {
                         commandStore.execute(empty(), ignore -> {
                             if (progress() == Done)
@@ -432,12 +440,12 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 this.txnId = txnId;
             }
 
-            void recordBlocking(TxnId txnId, Known waitingFor, Unseekables<?, ?> unseekables)
+            void recordBlocking(TxnId txnId, Known waitingFor, Route<?> route, Participants<?> participants)
             {
                 Invariants.checkArgument(txnId.equals(this.txnId));
                 if (blockingState == null)
                     blockingState = new BlockingState();
-                blockingState.recordBlocking(waitingFor, unseekables);
+                blockingState.recordBlocking(waitingFor, route, participants);
             }
 
             CoordinateState local()
@@ -597,14 +605,18 @@ public class SimpleProgressLog implements ProgressLog.Factory
         public void durable(Command command)
         {
             State state = ensure(command.txnId());
-            if (!command.status().hasBeen(PreApplied) && command.route() != null)
-                state.recordBlocking(command.txnId(), PreApplied.minKnown, command.route());
+            // if we participate in the transaction and its outcome hasn't been recorded locally then fetch it
+            // TODO (expected): we should delete the in-memory state once we reach Done, and guard against backward progress with Command state
+            //   however, we need to be careful:
+            //     - we might participate in the execution epoch so need to be sure we have received a route covering both
+            if (!command.status().hasBeen(PreApplied) && command.route() != null && command.route().hasParticipants())
+                state.recordBlocking(command.txnId(), PreApplied.minKnown, command.route(), null);
             if (command.progressShard() == Home)
                 state.local().durableGlobal();
         }
 
         @Override
-        public void waiting(SafeCommand blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn)
+        public void waiting(SafeCommand blockedBy, Known blockedUntil, Route<?> blockedOnRoute, Participants<?> blockedOnParticipants)
         {
             if (blockedBy.txnId().rw().isLocal())
                 return;
@@ -619,7 +631,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
             // TODO (desirable, efficiency): forward to local progress shard for processing (if known)
             // TODO (desirable, efficiency): if we are co-located with the home shard, don't need to do anything unless we're in a
             //                               later topology that wasn't covered by its coordination
-            ensure(blockedBy.txnId()).recordBlocking(blockedBy.txnId(), blockedUntil, blockedOn);
+            ensure(blockedBy.txnId()).recordBlocking(blockedBy.txnId(), blockedUntil, blockedOnRoute, blockedOnParticipants);
         }
 
         @Override

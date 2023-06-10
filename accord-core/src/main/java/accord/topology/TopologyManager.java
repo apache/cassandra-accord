@@ -154,7 +154,7 @@ public class TopologyManager
         /**
          * determine if sync has completed for all shards intersecting with the given keys
          */
-        boolean syncCompleteFor(Unseekables<?, ?> intersect)
+        boolean syncCompleteFor(Unseekables<?> intersect)
         {
             return syncComplete.containsAll(intersect);
         }
@@ -433,23 +433,23 @@ public class TopologyManager
         return new Single(sorter, epochs.get(epoch).global);
     }
 
-    public Topologies withUnsyncedEpochs(Unseekables<?, ?> select, Timestamp min, Timestamp max)
+    public Topologies withUnsyncedEpochs(Unseekables<?> select, Timestamp min, Timestamp max)
     {
         return withUnsyncedEpochs(select, min.epoch(), max.epoch());
     }
 
-    public Topologies withUnsyncedEpochs(Unseekables<?, ?> select, long minEpoch, long maxEpoch)
+    public Topologies withUnsyncedEpochs(Unseekables<?> select, long minEpoch, long maxEpoch)
     {
         Invariants.checkArgument(minEpoch <= maxEpoch, "min epoch %d > max %d", minEpoch, maxEpoch);
         return withSufficientEpochs(select, minEpoch, maxEpoch, epochState -> epochState.syncComplete);
     }
 
-    public Topologies withOpenEpochs(Unseekables<?, ?> select, Timestamp min, Timestamp max)
+    public Topologies withOpenEpochs(Unseekables<?> select, Timestamp min, Timestamp max)
     {
         return withSufficientEpochs(select, min.epoch(), max.epoch(), epochState -> epochState.closed);
     }
 
-    private Topologies withSufficientEpochs(Unseekables<?, ?> select, long minEpoch, long maxEpoch, Function<EpochState, Ranges> isSufficientFor)
+    private Topologies withSufficientEpochs(Unseekables<?> select, long minEpoch, long maxEpoch, Function<EpochState, Ranges> isSufficientFor)
     {
         Invariants.checkArgument(minEpoch <= maxEpoch);
         Epochs snapshot = epochs;
@@ -465,7 +465,7 @@ public class TopologyManager
         int maxi = (int)(Math.min(1 + snapshot.currentEpoch - minEpoch, snapshot.epochs.length));
         Topologies.Multi topologies = new Topologies.Multi(sorter, maxi - i);
 
-        Unseekables<?, ?> remaining = select;
+        Unseekables<?> remaining = select;
         while (i < maxi)
         {
             EpochState epochState = snapshot.epochs[i++];
@@ -493,7 +493,7 @@ public class TopologyManager
         return topologies;
     }
 
-    public Topologies preciseEpochs(Unseekables<?, ?> select, long minEpoch, long maxEpoch)
+    public Topologies preciseEpochs(Unseekables<?> select, long minEpoch, long maxEpoch)
     {
         Epochs snapshot = epochs;
 
@@ -515,7 +515,7 @@ public class TopologyManager
         return topologies;
     }
 
-    public Topologies forEpoch(Unseekables<?, ?> select, long epoch)
+    public Topologies forEpoch(Unseekables<?> select, long epoch)
     {
         EpochState state = epochs.get(epoch);
         return new Single(sorter, state.global.forSelection(select));

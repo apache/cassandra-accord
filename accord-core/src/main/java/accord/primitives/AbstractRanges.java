@@ -36,7 +36,7 @@ import static accord.utils.SortedArrays.Search.FAST;
 import static accord.utils.SortedArrays.isSorted;
 import static accord.utils.SortedArrays.swapHighLow32b;
 
-public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements Iterable<Range>, Routables<Range, RS>
+public abstract class AbstractRanges<RS extends Routables<Range>> implements Iterable<Range>, Routables<Range>
 {
     static final Range[] NO_RANGES = new Range[0];
 
@@ -66,12 +66,12 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     }
 
     @Override
-    public boolean containsAll(Routables<?, ?> that)
+    public boolean containsAll(Routables<?> that)
     {
         switch (that.domain())
         {
             default: throw new AssertionError();
-            case Key: return containsAll((AbstractKeys<?, ?>) that);
+            case Key: return containsAll((AbstractKeys<?>) that);
             case Range: return containsAll((AbstractRanges<?>) that);
         }
     }
@@ -79,7 +79,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     /**
      * @return true iff {@code that} is fully contained within {@code this}
      */
-    public boolean containsAll(AbstractKeys<?, ?> that)
+    public boolean containsAll(AbstractKeys<?> that)
     {
         if (this.isEmpty()) return that.isEmpty();
         if (that.isEmpty()) return true;
@@ -96,12 +96,12 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         return ((int) supersetLinearMerge(this.ranges, that.ranges)) == that.size();
     }
 
-    public boolean intersectsAll(Routables<?, ?> that)
+    public boolean intersectsAll(Routables<?> that)
     {
         switch (that.domain())
         {
             default: throw new AssertionError();
-            case Key: return containsAll((AbstractKeys<?, ?>) that);
+            case Key: return containsAll((AbstractKeys<?>) that);
             case Range: return intersectsAll((AbstractRanges<?>) that);
         }
     }
@@ -141,7 +141,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     }
 
     @Override
-    public final boolean intersects(AbstractKeys<?, ?> keys)
+    public final boolean intersects(AbstractKeys<?> keys)
     {
         return findNextIntersection(0, keys, 0) >= 0;
     }
@@ -159,7 +159,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
 
     // returns ri in low 32 bits, ki in top, or -1 if no match found
     @Override
-    public final long findNextIntersection(int ri, AbstractKeys<?, ?> keys, int ki)
+    public final long findNextIntersection(int ri, AbstractKeys<?> keys, int ki)
     {
         return swapHighLow32b(SortedArrays.findNextIntersectionWithMultipleMatches(keys.keys, ki, ranges, ri));
     }
@@ -172,7 +172,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     }
 
     @Override
-    public final long findNextIntersection(int thisIndex, Routables<Range, ?> with, int withIndex)
+    public final long findNextIntersection(int thisIndex, Routables<Range> with, int withIndex)
     {
         return findNextIntersection(thisIndex, (AbstractRanges<?>) with, withIndex);
     }
@@ -263,7 +263,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
      * Returns the inputs that intersect with any of the members of the keysOrRanges.
      * DOES NOT MODIFY THE RANGES.
      */
-    static <I extends AbstractRanges<?>, P> I intersecting(I input, Routables<?, ?> keysOrRanges, P param, SliceConstructor<AbstractRanges<?>, P, I> constructor)
+    static <I extends AbstractRanges<?>, P> I intersecting(I input, Routables<?> keysOrRanges, P param, SliceConstructor<AbstractRanges<?>, P, I> constructor)
     {
         switch (keysOrRanges.domain())
         {
@@ -271,7 +271,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
             case Range: return sliceOverlapping((AbstractRanges<?>)keysOrRanges, input, param, constructor);
             case Key:
             {
-                AbstractKeys<?, ?> that = (AbstractKeys<?, ?>) keysOrRanges;
+                AbstractKeys<?> that = (AbstractKeys<?>) keysOrRanges;
                 Range[] result = SortedArrays.asymmetricLinearIntersectionWithOverlaps(input.ranges, input.ranges.length, that.keys, that.keys.length, Range::compareTo, cachedRanges());
                 return result == input.ranges ? input : constructor.construct(input, param, result);
             }

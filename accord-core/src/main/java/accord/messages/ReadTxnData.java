@@ -32,10 +32,10 @@ import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.Status;
 import accord.primitives.EpochSupplier;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 
 import static accord.local.Status.Committed;
@@ -50,7 +50,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
 
     public static class SerializerSupport
     {
-        public static ReadTxnData create(TxnId txnId, Unseekables<?, ?> scope, long executeAtEpoch, long waitForEpoch)
+        public static ReadTxnData create(TxnId txnId, Participants<?> scope, long executeAtEpoch, long waitForEpoch)
         {
             return new ReadTxnData(txnId, scope, executeAtEpoch, waitForEpoch);
         }
@@ -86,13 +86,13 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
     final ObsoleteTracker obsoleteTracker = new ObsoleteTracker();
     private transient State state = State.PENDING; // TODO (low priority, semantics): respond with the Executed result we have stored?
 
-    public ReadTxnData(Node.Id to, Topologies topologies, TxnId txnId, Unseekables<?, ?> readScope, Timestamp executeAt)
+    public ReadTxnData(Node.Id to, Topologies topologies, TxnId txnId, Participants<?> readScope, Timestamp executeAt)
     {
         super(to, topologies, txnId, readScope);
         this.executeAtEpoch = executeAt.epoch();
     }
 
-    protected ReadTxnData(TxnId txnId, Unseekables<?, ?> readScope, long executeAtEpoch, long waitForEpoch)
+    protected ReadTxnData(TxnId txnId, Participants<?> readScope, long executeAtEpoch, long waitForEpoch)
     {
         super(txnId, readScope, waitForEpoch);
         this.executeAtEpoch = executeAtEpoch;
@@ -150,7 +150,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
     @Override
     public synchronized ReadNack apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, this, readScope);
+        SafeCommand safeCommand = safeStore.get(txnId, readScope);
         return apply(safeStore, safeCommand);
     }
 
@@ -182,7 +182,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
                 }
                 else
                 {
-                    safeStore.progressLog().waiting(safeCommand, Committed.minKnown, readScope);
+                    safeStore.progressLog().waiting(safeCommand, Committed.minKnown, null, readScope);
                     return NotCommitted;
                 }
 
@@ -261,7 +261,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
 
     private void removeListener(SafeCommandStore safeStore, TxnId txnId)
     {
-        safeStore.get(txnId, this, readScope).removeListener(this);
+        safeStore.get(txnId, readScope).removeListener(this);
     }
 
     @Override

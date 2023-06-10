@@ -244,7 +244,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return keysToTxnIds.length == keys.size();
     }
 
-    public Keys someKeys(TxnId txnId)
+    public Keys participatingKeys(TxnId txnId)
     {
         int txnIdIndex = Arrays.binarySearch(txnIds, txnId);
         if (txnIdIndex < 0)
@@ -263,7 +263,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return Keys.of(result);
     }
 
-    public Unseekables<RoutingKey, ?> someUnseekables(TxnId txnId)
+    public RoutingKeys participants(TxnId txnId)
     {
         int txnIdIndex = Arrays.binarySearch(txnIds, txnId);
         if (txnIdIndex < 0)

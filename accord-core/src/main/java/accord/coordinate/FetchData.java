@@ -56,12 +56,12 @@ import static accord.primitives.Route.isRoute;
  */
 public class FetchData extends CheckShards<Route<?>>
 {
-    public static Object fetch(Known fetch, Node node, TxnId txnId, Unseekables<?, ?> someUnseekables, BiConsumer<Known, Throwable> callback)
+    public static Object fetch(Known fetch, Node node, TxnId txnId, Unseekables<?> someUnseekables, BiConsumer<Known, Throwable> callback)
     {
         return fetch(fetch, node, txnId, someUnseekables, null, callback);
     }
 
-    public static Object fetch(Known fetch, Node node, TxnId txnId, Unseekables<?, ?> someUnseekables, @Nullable Timestamp executeAt, BiConsumer<Known, Throwable> callback)
+    public static Object fetch(Known fetch, Node node, TxnId txnId, Unseekables<?> someUnseekables, @Nullable Timestamp executeAt, BiConsumer<Known, Throwable> callback)
     {
         if (someUnseekables.kind().isRoute()) return fetch(fetch, node, txnId, castToRoute(someUnseekables), executeAt, callback);
         else return fetchViaSomeRoute(fetch, node, txnId, someUnseekables, executeAt, callback);
@@ -85,19 +85,19 @@ public class FetchData extends CheckShards<Route<?>>
         }
     }
 
-    private static Object fetchViaSomeRoute(Known fetch, Node node, TxnId txnId, Unseekables<?, ?> someUnseekables, @Nullable Timestamp executeAt, BiConsumer<Known, Throwable> callback)
+    private static Object fetchViaSomeRoute(Known fetch, Node node, TxnId txnId, Unseekables<?> someUnseekables, @Nullable Timestamp executeAt, BiConsumer<Known, Throwable> callback)
     {
         return FindSomeRoute.findSomeRoute(node, txnId, someUnseekables, (foundRoute, fail) -> {
             if (fail != null) callback.accept(null, fail);
             else if (foundRoute.route == null)
             {
-                reportRouteNotFound(node, txnId, someUnseekables, executeAt, foundRoute.known, callback);
+                reportRouteNotFound(node, txnId, someUnseekables, executeAt, foundRoute.known, foundRoute.withQuorum, callback);
             }
             else if (isRoute(someUnseekables) && someUnseekables.containsAll(foundRoute.route))
             {
                 // this is essentially a reentrancy check; we can only reach this point if we have already tried once to fetchSomeRoute
                 // (as a user-provided Route is used to fetchRoute, not fetchSomeRoute)
-                reportRouteNotFound(node, txnId, someUnseekables, executeAt, foundRoute.known, callback);
+                reportRouteNotFound(node, txnId, someUnseekables, executeAt, foundRoute.known, foundRoute.withQuorum, callback);
             }
             else
             {
@@ -109,7 +109,7 @@ public class FetchData extends CheckShards<Route<?>>
         });
     }
 
-    private static void reportRouteNotFound(Node node, TxnId txnId, Unseekables<?, ?> routeOrParticipants, @Nullable Timestamp executeAt, Known found, BiConsumer<Known, Throwable> callback)
+    private static void reportRouteNotFound(Node node, TxnId txnId, Unseekables<?> someUnseekables, @Nullable Timestamp executeAt, Known found, WithQuorum withQuorum, BiConsumer<Known, Throwable> callback)
     {
         Invariants.checkState(executeAt == null);
         switch (found.outcome)
@@ -117,7 +117,7 @@ public class FetchData extends CheckShards<Route<?>>
             default: throw new AssertionError();
             case Truncated: // TODO (expected): we might simply be stale; we should check
             case Invalidate:
-                new InvalidateOnDone(node, txnId, routeOrParticipants, found, callback).start();
+                InvalidateOnDone.propagate(node, txnId, someUnseekables, found, withQuorum, callback);
                 break;
             case TruncatedApply:
             case Applying:
@@ -203,7 +203,7 @@ public class FetchData extends CheckShards<Route<?>>
 
     protected boolean isSufficient(Route<?> scope, CheckStatus.CheckStatusOk ok)
     {
-        return target.isSatisfiedBy(((CheckStatusOkFull)ok).sufficientFor(scope, NoQuorum));
+        return target.isSatisfiedBy(((CheckStatusOkFull)ok).sufficientFor(scope.participants(), NoQuorum));
     }
 
     @Override
@@ -239,7 +239,7 @@ public class FetchData extends CheckShards<Route<?>>
             long toEpoch = sourceEpoch;
 
             Ranges covering = maxRoute.sliceCovering(sliceRanges, Minimal);
-            Unseekables<?, ?> participatingKeys = maxRoute.participants().slice(covering, Minimal);
+            Participants<?> participatingKeys = maxRoute.participants().slice(covering, Minimal);
             WithQuorum withQuorum = success == Success.Quorum ? HasQuorum : NoQuorum;
             Known achieved = full.sufficientFor(participatingKeys, withQuorum);
             if (achieved.executeAt.hasDecidedExecuteAt() && full.executeAt.epoch() > txnId.epoch())
@@ -328,7 +328,7 @@ public class FetchData extends CheckShards<Route<?>>
         @Override
         public Void apply(SafeCommandStore safeStore)
         {
-            SafeCommand safeCommand = safeStore.get(txnId, full.saveStatus.known.executeAt.hasDecidedExecuteAt() ? full.executeAt : null, route);
+            SafeCommand safeCommand = safeStore.get(txnId, route);
             switch (achieved.propagate())
             {
                 default: throw new IllegalStateException();
@@ -354,13 +354,19 @@ public class FetchData extends CheckShards<Route<?>>
                         break;
                     }
 
-                    Timestamp executeAt = full.executeAt != null ? full.executeAt : command.known().executeAt.hasDecidedExecuteAt() ? command.executeAt() : txnId;
-                    Ranges coordinateRanges = safeStore.ranges().coordinates(txnId);
-                    Ranges acceptRanges = executeAt.epoch() == txnId.epoch() ? coordinateRanges : safeStore.ranges().allBetween(txnId, executeAt);
-                    if (!command.route().participatesIn(coordinateRanges) && !command.route().participatesIn(acceptRanges))
+                    if (command.route() != null || route.covers(safeStore.ranges().allAt(txnId.epoch())))
                     {
-                        Commands.setTruncated(safeStore, safeCommand);
-                        break;
+                        Route<?> route = command.route();
+                        if (route == null) route = this.route;
+
+                        Timestamp executeAt = full.executeAt != null ? full.executeAt : command.known().executeAt.hasDecidedExecuteAt() ? command.executeAt() : txnId;
+                        Ranges coordinateRanges = safeStore.ranges().coordinates(txnId);
+                        Ranges acceptRanges = executeAt.epoch() == txnId.epoch() ? coordinateRanges : safeStore.ranges().allBetween(txnId, executeAt);
+                        if (!route.participatesIn(coordinateRanges) && !route.participatesIn(acceptRanges))
+                        {
+                            Commands.setTruncated(safeStore, safeCommand);
+                            break;
+                        }
                     }
 
                     // TODO (required): check if we are stale
@@ -430,24 +436,46 @@ public class FetchData extends CheckShards<Route<?>>
     {
         final Node node;
         final TxnId txnId;
-        // TODO (desired): consider how we might best represent routeOrParticipants as a static type, as used elsewhere
-        final Unseekables<?, ?> routeOrParticipants;
+        final Unseekables<?> someUnseekables;
         final Known achieved;
         final BiConsumer<Known, Throwable> callback;
 
-        InvalidateOnDone(Node node, TxnId txnId, Unseekables<?, ?> routeOrParticipants, Known achieved, BiConsumer<Known, Throwable> callback)
+        private InvalidateOnDone(Node node, TxnId txnId, Unseekables<?> someUnseekables, Known achieved, BiConsumer<Known, Throwable> callback)
         {
             this.node = node;
             this.txnId = txnId;
-            this.routeOrParticipants = routeOrParticipants;
+            this.someUnseekables = someUnseekables;
             this.achieved = achieved;
             this.callback = callback;
+        }
+
+        public static void propagate(Node node, TxnId txnId, Unseekables<?> someUnseekables, Known achieved, WithQuorum withQuorum, BiConsumer<Known, Throwable> callback)
+        {
+            switch (achieved.outcome)
+            {
+                default: throw new AssertionError("Invalid knowledge with which to trigger a potential invalidation " + achieved.outcome);
+                case Truncated:
+                    // TODO (NOW): clear the coordination progress log state if we've reached a majority
+                    if (Route.isRoute(someUnseekables) && !Route.castToRoute(someUnseekables).hasParticipants())
+                    {
+                        // TODO (now): it might be better to require that every home shard records a transaction outcome before truncating
+                        // not safe to invalidate; the home shard may have truncated because the outcome is durable at a majority.
+                        // however, even if we are only the home and do not participate in the current epoch, we cannot be sure we
+                        // do not participate in whatever the (unknown) execution epoch is
+                        return;
+                    }
+                    if (withQuorum != HasQuorum)
+                        return;
+
+                case Invalidate:
+                    new InvalidateOnDone(node, txnId, someUnseekables, achieved, callback).start();
+            }
         }
 
         void start()
         {
             PreLoadContext loadContext = contextFor(txnId);
-            Unseekables<?, ?> propagateTo = isRoute(routeOrParticipants) ? castToRoute(routeOrParticipants).withHomeKey() : routeOrParticipants;
+            Unseekables<?> propagateTo = isRoute(someUnseekables) ? castToRoute(someUnseekables).withHomeKey() : someUnseekables;
             node.mapReduceConsumeLocal(loadContext, propagateTo, txnId.epoch(), txnId.epoch(), this);
         }
 
@@ -455,7 +483,7 @@ public class FetchData extends CheckShards<Route<?>>
         public Void apply(SafeCommandStore safeStore)
         {
             // we're applying an invalidation, so the record will not be cleaned up until the whole range is truncated
-            SafeCommand safeCommand = safeStore.get(txnId, null, routeOrParticipants);
+            SafeCommand safeCommand = safeStore.get(txnId, someUnseekables);
             Command command = safeCommand.current();
             if (achieved.outcome.isInvalidated() || !command.hasBeen(PreCommitted))
                 Commands.commitInvalidate(safeStore, safeCommand);

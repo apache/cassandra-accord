@@ -36,6 +36,7 @@ import accord.primitives.FullRoute;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialRoute;
 import accord.primitives.PartialTxn;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Routables;
 import accord.primitives.Route;
@@ -63,6 +64,7 @@ import static accord.local.Commands.EnsureAction.Check;
 import static accord.local.Commands.EnsureAction.Ignore;
 import static accord.local.Commands.EnsureAction.Set;
 import static accord.local.Commands.EnsureAction.TrySet;
+import static accord.local.RedundantStatus.LIVE;
 import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.Accepted;
 import static accord.local.Status.AcceptedInvalidate;
@@ -70,6 +72,7 @@ import static accord.local.Status.Applied;
 import static accord.local.Status.Applying;
 import static accord.local.Status.Committed;
 import static accord.local.Status.Durability;
+import static accord.local.Status.Durability.Universal;
 import static accord.local.Status.Invalidated;
 import static accord.local.Status.Known;
 import static accord.local.Status.Known.ExecuteAtOnly;
@@ -204,7 +207,7 @@ public class Commands
 
     public static AcceptOutcome accept(SafeCommandStore safeStore, TxnId txnId, Ballot ballot, PartialRoute<?> route, Seekables<?, ?> keys, @Nullable RoutingKey progressKey, Timestamp executeAt, PartialDeps partialDeps)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, null, route);
+        SafeCommand safeCommand = safeStore.get(txnId, route);
         Command command = safeCommand.current();
         if (command.hasBeen(PreCommitted))
         {
@@ -664,12 +667,12 @@ public class Commands
 
     protected static WaitingOn initialiseWaitingOn(SafeCommandStore safeStore, TxnId waitingId, Timestamp executeWaitingAt, PartialDeps partialDeps, Route<?> route)
     {
-        Unseekables<?, ?> executionParticipants = route.participants().slice(safeStore.ranges().allAt(executeWaitingAt));
+        Unseekables<?> executionParticipants = route.participants().slice(safeStore.ranges().allAt(executeWaitingAt));
         WaitingOn.Update update = new WaitingOn.Update(executionParticipants, partialDeps);
-        return updateWaitingOn(safeStore, waitingId, executeWaitingAt, update, route).build();
+        return updateWaitingOn(safeStore, waitingId, executeWaitingAt, update, route.participants()).build();
     }
 
-    protected static WaitingOn.Update updateWaitingOn(SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt, WaitingOn.Update update, Unseekables<?, ?> participants)
+    protected static WaitingOn.Update updateWaitingOn(SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt, WaitingOn.Update update, Participants<?> participants)
     {
         CommandStore commandStore = safeStore.commandStore();
         TxnId minWaitingOnTxnId = update.minWaitingOnTxnId();
@@ -763,12 +766,12 @@ public class Commands
             {
                 TxnId nextWaitingOn = command.waitingOn().nextWaitingOn();
                 if (nextWaitingOn != null && nextWaitingOn.equals(pred.txnId()))
-                    safeStore.progressLog().waiting(predecessor, Known.Done, pred.route());
+                    safeStore.progressLog().waiting(predecessor, Known.Done, pred.route(), null);
             }
         }
     }
 
-    private enum Truncate { NO, TRUNCATE, ERASE }
+    public enum Truncate { NO, TRUNCATE, ERASE }
 
     public static Command setTruncated(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
@@ -797,44 +800,54 @@ public class Commands
         return result;
     }
 
-    private static Truncate shouldTruncate(SafeCommandStore safeStore, Command command)
+    public static Truncate shouldTruncate(SafeCommandStore safeStore, Command command)
     {
-        TxnId txnId = command.txnId();
-        Unseekables<?, ?> participants;
-        if (command.known().hasRoute()) participants = command.route().participants();
-        else
-        {
-            Ranges coordinates = safeStore.ranges().allAt(txnId.epoch());
-            Ranges additionalRanges = command.executeAt() != null && !command.executeAt().equals(Timestamp.NONE) && command.executeAt().epoch() > 0
-                                      ? safeStore.ranges().allBetween(txnId.epoch(), command.executeAt().epoch()) : Ranges.EMPTY;
-            participants = coordinates.with(additionalRanges);
-        }
+        if (safeStore.commandStore().globalDurability(command.txnId()) == Universal)
+            return Truncate.ERASE;
 
-        RangeStatus min = safeStore.commandStore().statusMap().min(txnId, txnId, participants);
+        if (!command.hasBeen(Applied) || !command.known().hasCompleteRoute())
+            return Truncate.NO;
+
+        TxnId txnId = command.txnId();
+        Timestamp executeAt = command.executeAt() != null && !command.executeAt().equals(Timestamp.NONE) ? command.executeAt() : txnId;
+        Route<?> all = command.route();
+        Participants<?> participants = all.participants();
+
+        RedundantStatus redundant = safeStore.commandStore().redundantBefore().min(txnId, executeAt, participants);
+        if (redundant == LIVE)
+            return Truncate.NO;
+
+        Durability min = safeStore.commandStore().durableBefore().min(txnId, all);
         switch (min)
         {
-            default: throw new AssertionError();
-            case TRUNCATED:
-                return Truncate.ERASE;
-            case NOT_OWNED:
-            case DURABLE:
-                if (command.durability().isDurable())
-                    return Truncate.TRUNCATE;
-            case LIVE:
+            default:
+            case Local:
+            case DurableOrInvalidated:
+                throw new AssertionError();
+            case NotDurable:
                 return Truncate.NO;
+            case Majority:
+                return Truncate.TRUNCATE;
+            case Universal:
+                return Truncate.ERASE;
         }
     }
 
-    private static boolean maybeTruncate(SafeCommandStore safeStore, SafeCommand safeCommand, Command command)
+    public static boolean maybeTruncate(SafeCommandStore safeStore, SafeCommand safeCommand, Command command)
     {
-        switch (shouldTruncate(safeStore, command))
+        Truncate truncate = shouldTruncate(safeStore, command);
+        switch (truncate)
         {
             default: throw new AssertionError();
             case NO:
                 return false;
-            case TRUNCATE:
+
             case ERASE:
-                setTruncated(safeStore, safeCommand);
+            case TRUNCATE:
+                if (!command.is(Truncated))
+                    setTruncated(safeStore, safeCommand, truncate, true);
+                else if (truncate == Truncate.ERASE)
+                    safeStore.erase(safeCommand);
                 return true;
         }
     }
@@ -957,17 +970,16 @@ public class Commands
                         continue;
                     }
 
-                    Unseekables<?, ?> someParticipants = null, someKeys = null;
+                    Participants<?> someParticipants = null;
                     if (cur.route() != null)
                     {
-                        someKeys = cur.route();
                         someParticipants = cur.route().participants();
                     }
                     else if (prev != null)
                     {
-                        someParticipants = someKeys = prev.partialDeps().someParticipants(cur.txnId());
+                        someParticipants = prev.partialDeps().participants(cur.txnId());
                     }
-                    Invariants.checkState(someKeys != null);
+                    Invariants.checkState(someParticipants != null);
                     if (safeStore.commandStore().isRedundant(cur.txnId(), cur.executeAt(), someParticipants))
                     {
                         if (prevSafe == null)
@@ -993,7 +1005,7 @@ public class Commands
                     else
                     {
                         logger.trace("{} blocked on {} until {}", txnIds[0], cur.txnId(), until);
-                        safeStore.progressLog().waiting(curSafe, until, someKeys);
+                        safeStore.progressLog().waiting(curSafe, until, null, someParticipants);
                         break;
                     }
                 }
@@ -1052,7 +1064,7 @@ public class Commands
         Command.Committed current = safeCommand.current().asCommitted();
         WaitingOn.Update update = new WaitingOn.Update(current.waitingOn);
         TxnId minWaitingOnTxnId = update.minWaitingOnTxnId();
-        if (minWaitingOnTxnId != null && commandStore.hasRedundantDependencies(update.minWaitingOnTxnId(), current.executeAt(), current.route()))
+        if (minWaitingOnTxnId != null && commandStore.hasRedundantDependencies(update.minWaitingOnTxnId(), current.executeAt(), current.route().participants()))
             safeStore.commandStore().removeRedundantDependencies(current.route().participants(), update);
 
         update.removeInvalidatedOrTruncated(redundant);
@@ -1190,34 +1202,22 @@ public class Commands
             return false;
 
         // first validate route
-        if (shard.isHome())
+        switch (ensureRoute)
         {
-            switch (ensureRoute)
-            {
-                default: throw new AssertionError();
-                case Check:
-                    if (!isFullRoute(attrs.route()) && !isFullRoute(route))
-                        return false;
-                case Ignore:
-                    break;
-                case Add:
-                case Set:
-                    if (!isFullRoute(route))
-                        throw new IllegalArgumentException("Incomplete route (" + route + ") sent to home shard");
-                    break;
-                case TrySet:
-                    if (!isFullRoute(route))
-                        return false;
-            }
-        }
-        else
-        {
-            // failing any of these tests is always an illegal state
-            if (!route.covers(existingRanges))
-                return false;
-
-            if (existingRanges != additionalRanges && !route.covers(additionalRanges))
-                throw new IllegalArgumentException("Incomplete route (" + route + ") provided; does not cover " + additionalRanges);
+            default: throw new AssertionError();
+            case Check:
+                if (!isFullRoute(attrs.route()) && !isFullRoute(route))
+                    return false;
+            case Ignore:
+                break;
+            case Add:
+            case Set:
+                if (!isFullRoute(route))
+                    throw new IllegalArgumentException("Incomplete route (" + route + ") sent to home shard");
+                break;
+            case TrySet:
+                if (!isFullRoute(route))
+                    return false;
         }
 
         // invalid to Add deps to Accepted or AcceptedInvalidate statuses, as Committed deps are not equivalent

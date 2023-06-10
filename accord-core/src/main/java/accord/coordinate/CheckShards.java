@@ -31,7 +31,7 @@ import accord.topology.Topologies;
  * A result of null indicates the transaction is globally persistent
  * A result of CheckStatusOk indicates the maximum status found for the transaction, which may be used to assess progress
  */
-public abstract class CheckShards<U extends Unseekables<?, ?>> extends ReadCoordinator<CheckStatusReply>
+public abstract class CheckShards<U extends Unseekables<?>> extends ReadCoordinator<CheckStatusReply>
 {
     final U route;
 
@@ -59,7 +59,7 @@ public abstract class CheckShards<U extends Unseekables<?, ?>> extends ReadCoord
         this.includeInfo = includeInfo;
     }
 
-    private static Topologies topologyFor(Node node, TxnId txnId, Unseekables<?, ?> contact, long epoch)
+    private static Topologies topologyFor(Node node, TxnId txnId, Unseekables<?> contact, long epoch)
     {
         // TODO (expected): only fetch data from source epoch
         return node.topology().preciseEpochs(contact, txnId.epoch(), epoch);
@@ -68,7 +68,7 @@ public abstract class CheckShards<U extends Unseekables<?, ?>> extends ReadCoord
     @Override
     protected void contact(Id id)
     {
-        Unseekables<?, ?> unseekables = route.slice(topologies().computeRangesForNode(id));
+        Unseekables<?> unseekables = route.slice(topologies().computeRangesForNode(id));
         node.send(id, new CheckStatus(txnId, unseekables, sourceEpoch, includeInfo), this);
     }
 

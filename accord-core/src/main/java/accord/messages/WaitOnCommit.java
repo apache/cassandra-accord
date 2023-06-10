@@ -36,14 +36,14 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
 
     public static class SerializerSupport
     {
-        public static WaitOnCommit create(TxnId txnId, Unseekables<?, ?> scope)
+        public static WaitOnCommit create(TxnId txnId, Participants<?> scope)
         {
             return new WaitOnCommit(txnId, scope);
         }
     }
 
     public final TxnId txnId;
-    public final Unseekables<?, ?> scope;
+    public final Participants<?> scope;
 
     private transient Node node;
     private transient Id replyTo;
@@ -51,13 +51,13 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
     private transient volatile int waitingOn;
     private static final AtomicIntegerFieldUpdater<WaitOnCommit> waitingOnUpdater = AtomicIntegerFieldUpdater.newUpdater(WaitOnCommit.class, "waitingOn");
 
-    public WaitOnCommit(Id to, Topology topologies, TxnId txnId, Unseekables<?, ?> unseekables)
+    public WaitOnCommit(Id to, Topology topologies, TxnId txnId, Participants<?> participants)
     {
         this.txnId = txnId;
-        this.scope = unseekables.slice(topologies.rangesForNode(to));
+        this.scope = participants.slice(topologies.rangesForNode(to));
     }
 
-    public WaitOnCommit(TxnId txnId, Unseekables<?, ?> scope)
+    public WaitOnCommit(TxnId txnId, Participants<?> scope)
     {
         this.txnId = txnId;
         this.scope = scope;
@@ -75,7 +75,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
     @Override
     public Void apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, null, scope);
+        SafeCommand safeCommand = safeStore.get(txnId, scope);
         Command command = safeCommand.current();
         switch (command.status())
         {
@@ -90,7 +90,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
             case PreCommitted:
                 waitingOnUpdater.incrementAndGet(this);
                 safeCommand.addListener(this);
-                safeStore.progressLog().waiting(safeCommand, Committed.minKnown, scope);
+                safeStore.progressLog().waiting(safeCommand, Committed.minKnown, null, scope);
                 break;
 
             case Committed:

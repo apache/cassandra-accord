@@ -33,7 +33,7 @@ import com.google.common.collect.ImmutableMap;
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_OVERLAPPING;
 import static accord.primitives.Routables.Slice.Overlapping;
 
-public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, Seekables<Range, Ranges>, Unseekables<Range, Ranges>
+public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, Seekables<Range, Ranges>, Unseekables<Range>, Participants<Range>
 {
     public static final Ranges EMPTY = new Ranges(new Range[0]);
 
@@ -89,15 +89,21 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
         return slice(ranges, Overlapping);
     }
 
-    public Ranges intersecting(Routables<?, ?> keysOrRanges)
+    public Ranges intersecting(Routables<?> keysOrRanges)
     {
         return intersecting(this, keysOrRanges, this, (i1, i2, rs) -> i2.ranges == rs ? i2 : new Ranges(rs));
     }
 
     @Override
-    public Ranges with(Unseekables<Range, ?> that)
+    public Ranges with(Unseekables<Range> with)
     {
-        return with((AbstractRanges<?>) that);
+        return with((AbstractRanges<?>) with);
+    }
+
+    @Override
+    public Participants<Range> with(Participants<Range> with)
+    {
+        return with((AbstractRanges<?>) with);
     }
 
     @Override
@@ -112,7 +118,7 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
     }
 
     @Override
-    public Unseekables<Range, ?> with(RoutingKey withKey)
+    public Unseekables<Range> with(RoutingKey withKey)
     {
         if (contains(withKey))
             return this;
@@ -127,7 +133,7 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
     }
 
     @Override
-    public Ranges toUnseekables()
+    public Ranges toParticipants()
     {
         return this;
     }

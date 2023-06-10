@@ -91,7 +91,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
             case Redundant:
                 return AcceptReply.REDUNDANT;
             case RejectedBallot:
-                return new AcceptReply(safeStore.get(txnId, null, scope).current().promised());
+                return new AcceptReply(safeStore.get(txnId, scope).current().promised());
             case Success:
                 // TODO (desirable, efficiency): we don't need to calculate deps if executeAt == txnId
                 return new AcceptReply(calculatePartialDeps(safeStore));
@@ -220,7 +220,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     public static class Invalidate extends AbstractEpochRequest<AcceptReply>
     {
         public final Ballot ballot;
-        // TODO (now): this should be a participant
+        // should not be a non-participating home key
         public final RoutingKey someKey;
 
         public Invalidate(Ballot ballot, TxnId txnId, RoutingKey someKey)
@@ -239,7 +239,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         @Override
         public AcceptReply apply(SafeCommandStore safeStore)
         {
-            SafeCommand safeCommand = safeStore.get(txnId, null, someKey);
+            SafeCommand safeCommand = safeStore.get(txnId, someKey);
             switch (Commands.acceptInvalidate(safeStore, safeCommand, ballot))
             {
                 default:

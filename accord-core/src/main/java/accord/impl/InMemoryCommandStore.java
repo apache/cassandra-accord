@@ -195,13 +195,13 @@ public abstract class InMemoryCommandStore extends CommandStore
         return attrs;
     }
 
-    private <O> O mapReduceForKey(InMemorySafeStore safeStore, Routables<?, ?> keysOrRanges, Ranges slice, BiFunction<CommandsForKey, O, O> map, O accumulate, O terminalValue)
+    private <O> O mapReduceForKey(InMemorySafeStore safeStore, Routables<?> keysOrRanges, Ranges slice, BiFunction<CommandsForKey, O, O> map, O accumulate, O terminalValue)
     {
         switch (keysOrRanges.domain()) {
             default:
                 throw new AssertionError();
             case Key:
-                AbstractKeys<Key, ?> keys = (AbstractKeys<Key, ?>) keysOrRanges;
+                AbstractKeys<Key> keys = (AbstractKeys<Key>) keysOrRanges;
                 for (Key key : keys)
                 {
                     if (!slice.contains(key)) continue;
@@ -237,7 +237,7 @@ public abstract class InMemoryCommandStore extends CommandStore
             default:
                 throw new AssertionError();
             case Key:
-                AbstractKeys<Key, ?> keys = (AbstractKeys<Key, ?>) keysOrRanges;
+                AbstractKeys<Key> keys = (AbstractKeys<Key>) keysOrRanges;
                 keys.forEach(slice, key -> forEach.accept(key));
                 break;
             case Range:

@@ -27,8 +27,9 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 
+import accord.coordinate.FetchData.InvalidateOnDone;
 import accord.coordinate.tracking.*;
-import accord.local.Status;
+import accord.local.Status.Known;
 import accord.primitives.*;
 import accord.messages.Commit;
 import accord.utils.Invariants;
@@ -53,6 +54,7 @@ import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.local.Status.Committed;
 import static accord.messages.BeginRecovery.RecoverOk.maxAcceptedOrLater;
+import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.utils.Invariants.debug;
 
 // TODO (low priority, cleanup): rename to Recover (verb); rename Recover message to not clash
@@ -65,11 +67,11 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         //                             are given earlier timestamps we can retry without restarting.
         final QuorumTracker tracker;
 
-        AwaitCommit(Node node, TxnId txnId, Unseekables<?, ?> unseekables)
+        AwaitCommit(Node node, TxnId txnId, Participants<?> participants)
         {
-            Topology topology = node.topology().globalForEpoch(txnId.epoch()).forSelection(unseekables);
+            Topology topology = node.topology().globalForEpoch(txnId.epoch()).forSelection(participants);
             this.tracker = new QuorumTracker(new Topologies.Single(node.topology().sorter(), topology));
-            node.send(topology.nodes(), to -> new WaitOnCommit(to, topology, txnId, unseekables), this);
+            node.send(topology.nodes(), to -> new WaitOnCommit(to, topology, txnId, participants), this);
         }
 
         @Override
@@ -104,7 +106,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         for (int i = 0 ; i < waitOn.txnIdCount() ; ++i)
         {
             TxnId txnId = waitOn.txnId(i);
-            new AwaitCommit(node, txnId, waitOn.someParticipants(txnId)).addCallback((success, failure) -> {
+            new AwaitCommit(node, txnId, waitOn.participants(txnId)).addCallback((success, failure) -> {
                 if (result.isDone())
                     return;
                 if (success != null && remaining.decrementAndGet() == 0)
@@ -326,7 +328,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     private void invalidate()
     {
-        proposeInvalidate(node, ballot, txnId, route.homeKey(), (success, fail) -> {
+        proposeInvalidate(node, ballot, txnId, route.someParticipatingKey(), (success, fail) -> {
             if (fail != null) accept(null, fail);
             else commitInvalidate();
         });
@@ -337,7 +339,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         Timestamp invalidateUntil = recoverOks.stream().map(ok -> ok.executeAt).reduce(txnId, Timestamp::max);
         node.withEpoch(invalidateUntil.epoch(), () -> Commit.Invalidate.commitInvalidate(node, txnId, route, invalidateUntil));
         isDone = true;
-        new FetchData.InvalidateOnDone(node, txnId, route, Status.Known.Invalidated, (s, f) -> callback.accept(f == null ? ProgressToken.INVALIDATED : null, f)).start();
+        InvalidateOnDone.propagate(node, txnId, route, Known.Invalidated, HasQuorum, (s, f) -> callback.accept(f == null ? ProgressToken.INVALIDATED : null, f));
     }
 
     private void propose(Timestamp executeAt, Deps deps)

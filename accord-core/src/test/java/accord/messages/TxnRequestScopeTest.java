@@ -49,13 +49,13 @@ public class TxnRequestScopeTest
         topologies.add(topology1);
 
         // 3 remains a member across both topologies, so can process requests without waiting for latest topology data
-        Assertions.assertEquals(scope(150), ((PartialKeyRoute)TxnRequest.computeScope(id(3), topologies, route)).toUnseekables());
+        Assertions.assertEquals(scope(150), ((PartialKeyRoute)TxnRequest.computeScope(id(3), topologies, route)).toParticipants());
         Assertions.assertEquals(1, TxnRequest.computeWaitForEpoch(id(3), topologies, route));
 
         // 1 leaves the shard, and 4 joins, so both need the latest information
-        Assertions.assertEquals(scope(150), ((PartialKeyRoute)TxnRequest.computeScope(id(1), topologies, route)).toUnseekables());
+        Assertions.assertEquals(scope(150), ((PartialKeyRoute)TxnRequest.computeScope(id(1), topologies, route)).toParticipants());
         Assertions.assertEquals(2, TxnRequest.computeWaitForEpoch(id(1), topologies, route));
-        Assertions.assertEquals(scope(150), ((PartialKeyRoute)TxnRequest.computeScope(id(4), topologies, route)).toUnseekables());
+        Assertions.assertEquals(scope(150), ((PartialKeyRoute)TxnRequest.computeScope(id(4), topologies, route)).toParticipants());
         Assertions.assertEquals(2, TxnRequest.computeWaitForEpoch(id(4), topologies, route));
     }
 
@@ -79,9 +79,9 @@ public class TxnRequestScopeTest
         topologies.add(topology2);
         topologies.add(topology1);
 
-        Assertions.assertEquals(scope(150, 250), ((PartialKeyRoute)TxnRequest.computeScope(id(1), topologies, route)).toUnseekables());
+        Assertions.assertEquals(scope(150, 250), ((PartialKeyRoute)TxnRequest.computeScope(id(1), topologies, route)).toParticipants());
         Assertions.assertEquals(2, TxnRequest.computeWaitForEpoch(id(1), topologies, route));
-        Assertions.assertEquals(scope(150, 250), ((PartialKeyRoute)TxnRequest.computeScope(id(4), topologies, route)).toUnseekables());
+        Assertions.assertEquals(scope(150, 250), ((PartialKeyRoute)TxnRequest.computeScope(id(4), topologies, route)).toParticipants());
         Assertions.assertEquals(2, TxnRequest.computeWaitForEpoch(id(4), topologies, route));
     }
 }

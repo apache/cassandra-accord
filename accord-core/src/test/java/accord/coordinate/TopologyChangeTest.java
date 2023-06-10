@@ -66,14 +66,14 @@ public class TopologyChangeTest
             Txn txn1 = writeTxn(keys);
             getUninterruptibly(node1.coordinate(txnId1, txn1));
             getUninterruptibly(node1.commandStores().forEach(contextFor(txnId1), keys, 1, 1, commands -> {
-                Command command = commands.ifInitialised(txnId1).current();
+                Command command = commands.get(txnId1, keys.toParticipants()).current();
                 Assertions.assertTrue(command.partialDeps().isEmpty());
             }));
 
             cluster.configServices(4).forEach(config -> {
                 try
                 {
-                    config.reportTopology(topology2);
+                    config.fetchTopologyForEpoch(2);
                     getUninterruptibly(config.ackFor(topology2.epoch()).coordination);
                 }
                 catch (ExecutionException e)
@@ -92,7 +92,7 @@ public class TopologyChangeTest
                 try
                 {
                     getUninterruptibly(node.commandStores().forEach(contextFor(txnId1, txnId2), keys, 2, 2, commands -> {
-                        Command command = commands.ifInitialised(txnId2).current();
+                        Command command = commands.get(txnId2, keys.toParticipants()).current();
                         Assertions.assertTrue(command.partialDeps().contains(txnId1));
                     }));
                 }

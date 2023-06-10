@@ -20,7 +20,9 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
+import accord.coordinate.FetchData.InvalidateOnDone;
 import accord.local.Status.Known;
+import accord.messages.CheckStatus.WithQuorum;
 import accord.messages.Commit;
 import accord.primitives.*;
 import accord.utils.Invariants;
@@ -87,7 +89,7 @@ public class MaybeRecover extends CheckShards<Route<?>>
                     {
                         // for correctness reasons, we have not necessarily preempted the initial pre-accept round and
                         // may have raced with it, so we must attempt to recover anything we see pre-accepted.
-                        Invalidate.invalidate(node, txnId, someRoute.withHomeKey(), callback);
+                        Invalidate.invalidate(node, txnId, someRoute, callback);
                         break;
                     }
 
@@ -111,7 +113,9 @@ public class MaybeRecover extends CheckShards<Route<?>>
 
                 case Truncated:
                 case TruncatedApply:
-                    new FetchData.InvalidateOnDone(node, txnId, someRoute, known, (s, f) -> callback.accept(f == null ? merged.toProgressToken() : null, f)).start();
+                    WithQuorum withQuorum = success.withQuorum;
+                    Known propagate = merged.ifKnownInvalidOrTruncated(withQuorum);
+                    InvalidateOnDone.propagate(node, txnId, someRoute, propagate, withQuorum, (s, f) -> callback.accept(f == null ? merged.toProgressToken() : null, f));
             }
         }
     }

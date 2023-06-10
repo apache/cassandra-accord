@@ -315,7 +315,9 @@ public abstract class Command implements CommonAttributes
      *
      * If hasBeen(Committed) this must contain the keys for both txnId.epoch and executeAt.epoch
      *
-     * TODO (expected): audit uses; do not assume null means it is a complete route for the shard
+     * TODO (expected): audit uses; do not assume null means it is a complete route for the shard;
+     *    preferably introduce two variations so callers can declare whether they need the full shard's route
+     *    or any route will do
      */
     @Override
     public abstract Route<?> route();
@@ -368,16 +370,6 @@ public abstract class Command implements CommonAttributes
     {
         if (!isSameClass(command, klass))
             throw new IllegalArgumentException(errorMsg + format(" expected %s got %s", klass.getSimpleName(), command.getClass().getSimpleName()));
-    }
-
-    // TODO (low priority, progress): callers should try to consult the local progress shard (if any) to obtain the full set of keys owned locally
-    public Route<?> maxRoute()
-    {
-        Route<?> route = route();
-        if (route == null)
-            return null;
-
-        return route.withHomeKey();
     }
 
     public PreLoadContext contextForSelf()
@@ -1026,7 +1018,7 @@ public abstract class Command implements CommonAttributes
                 this(committed.waitingOn);
             }
 
-            public Update(Unseekables<?, ?> participants, Deps deps)
+            public Update(Unseekables<?> participants, Deps deps)
             {
                 this.deps = deps;
                 this.waitingOnCommit = new SimpleBitSet(deps.txnIdCount(), false);

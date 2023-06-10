@@ -29,7 +29,7 @@ import javax.annotation.Nonnull;
 
 import static accord.utils.ArrayBuffers.cachedRoutingKeys;
 
-public abstract class KeyRoute extends AbstractUnseekableKeys<Route<RoutingKey>> implements Route<RoutingKey>
+public abstract class KeyRoute extends AbstractUnseekableKeys implements Route<RoutingKey>
 {
     public final RoutingKey homeKey;
     public final boolean isParticipatingHomeKey;
@@ -60,14 +60,21 @@ public abstract class KeyRoute extends AbstractUnseekableKeys<Route<RoutingKey>>
     }
 
     @Override
-    public Unseekables<RoutingKey, ?> with(Unseekables<RoutingKey, ?> with)
+    public Unseekables<RoutingKey> with(Unseekables<RoutingKey> with)
     {
-        AbstractKeys<RoutingKey, ?> that = (AbstractKeys<RoutingKey, ?>) with;
+        AbstractKeys<RoutingKey> that = (AbstractKeys<RoutingKey>) with;
         return wrap(SortedArrays.linearUnion(keys, that.keys, cachedRoutingKeys()), that);
     }
 
     @Override
-    public Unseekables<RoutingKey, ?> participants()
+    public Participants<RoutingKey> with(Participants<RoutingKey> with)
+    {
+        AbstractKeys<RoutingKey> that = (AbstractKeys<RoutingKey>) with;
+        return wrap(SortedArrays.linearUnion(keys, that.keys, cachedRoutingKeys()), that);
+    }
+
+    @Override
+    public Participants<RoutingKey> participants()
     {
         if (isParticipatingHomeKey)
             return this;
@@ -79,6 +86,7 @@ public abstract class KeyRoute extends AbstractUnseekableKeys<Route<RoutingKey>>
         RoutingKey[] result = new RoutingKey[keys.length - 1];
         System.arraycopy(keys, 0, result, 0, removePos);
         System.arraycopy(keys, removePos + 1, result, removePos, keys.length - (1 + removePos));
+        // TODO (expected): this should return a PartialKeyRoute, but we need to remove covering()
         return new RoutingKeys(result);
     }
 
@@ -95,18 +103,24 @@ public abstract class KeyRoute extends AbstractUnseekableKeys<Route<RoutingKey>>
     }
 
     @Override
+    public RoutingKey someParticipatingKey()
+    {
+        return isParticipatingHomeKey ? homeKey : keys[0];
+    }
+
+    @Override
     public abstract PartialKeyRoute slice(Ranges ranges);
 
     @Override
-    public Unseekables<RoutingKey, ?> slice(Ranges ranges, Slice slice)
+    public Participants<RoutingKey> slice(Ranges ranges, Slice slice)
     {
         return slice(ranges);
     }
 
-    private AbstractUnseekableKeys<?> wrap(RoutingKey[] wrap, AbstractKeys<RoutingKey, ?> that)
+    private AbstractUnseekableKeys wrap(RoutingKey[] wrap, AbstractKeys<RoutingKey> that)
     {
-        return wrap == keys ? this : wrap == that.keys && that instanceof AbstractUnseekableKeys<?>
-                ? (AbstractUnseekableKeys<?>) that
+        return wrap == keys ? this : wrap == that.keys && that instanceof AbstractUnseekableKeys
+                ? (AbstractUnseekableKeys) that
                 : new RoutingKeys(wrap);
     }
 }

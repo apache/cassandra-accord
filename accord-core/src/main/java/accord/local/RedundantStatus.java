@@ -16,30 +16,34 @@
  * limitations under the License.
  */
 
-package accord.messages;
+package accord.local;
 
-import accord.primitives.PartialTxn;
-import accord.primitives.Participants;
-import accord.primitives.TxnId;
-
-public abstract class WaitAndReadData extends WaitUntilApplied
+public enum RedundantStatus
 {
-    public final PartialTxn read;
+    NOT_OWNED,
 
-    protected WaitAndReadData(TxnId txnId, Participants<?> readScope, long executeAtEpoch, long waitForEpoch, PartialTxn read)
+    LIVE,
+
+    REDUNDANT,
+    ;
+
+    public static RedundantStatus min(RedundantStatus a, RedundantStatus b)
     {
-        super(txnId, readScope, executeAtEpoch, waitForEpoch);
-        this.read = read;
+        return a.compareTo(b) <= 0 ? a : b;
     }
 
-    @Override
-    protected void cancel()
+    public static RedundantStatus max(RedundantStatus a, RedundantStatus b)
     {
+        return a.compareTo(b) >= 0 ? a : b;
     }
 
-    @Override
-    protected long executeAtEpoch()
+    public static RedundantStatus nonNullOrMin(RedundantStatus a, RedundantStatus b)
     {
-        return executeAtEpoch;
+        return a == null ? b : b == null ? a : a.compareTo(b) <= 0 ? a : b;
+    }
+
+    public static RedundantStatus nonNullOrMax(RedundantStatus a, RedundantStatus b)
+    {
+        return a == null ? b : b == null ? a : a.compareTo(b) >= 0 ? a : b;
     }
 }

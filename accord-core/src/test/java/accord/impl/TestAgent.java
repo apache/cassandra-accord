@@ -46,7 +46,7 @@ public class TestAgent implements Agent
     @Override
     public void onFailedBootstrap(String phase, Ranges ranges, Runnable retry, Throwable failure)
     {
-//        throw new AssertionError();
+        retry.run();
     }
 
     @Override

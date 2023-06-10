@@ -80,7 +80,7 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
     }
 
     @Override
-    public AbstractUnseekableKeys<?> with(RoutingKey withKey)
+    public AbstractUnseekableKeys with(RoutingKey withKey)
     {
         if (withKey.equals(homeKey))
             return withHomeKey();

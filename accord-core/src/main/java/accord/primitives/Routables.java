@@ -30,7 +30,7 @@ import static accord.utils.SortedArrays.Search.FLOOR;
 /**
  * A collection of either Seekable or Unseekable
  */
-public interface Routables<K extends Routable, U extends Routables<K, ?>> extends Iterable<K>
+public interface Routables<K extends Routable> extends Iterable<K>
 {
     enum Slice
     {
@@ -48,21 +48,21 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
 
     boolean isEmpty();
     boolean intersects(AbstractRanges<?> ranges);
-    boolean intersects(AbstractKeys<?, ?> keys);
-    default boolean intersects(Routables<?, ?> routables)
+    boolean intersects(AbstractKeys<?> keys);
+    default boolean intersects(Routables<?> routables)
     {
         switch (routables.domain())
         {
             default: throw new AssertionError();
-            case Key: return intersects((AbstractKeys<?, ?>) routables);
+            case Key: return intersects((AbstractKeys<?>) routables);
             case Range: return intersects((AbstractRanges<?>) routables);
         }
     }
     boolean contains(RoutableKey key);
-    boolean containsAll(Routables<?, ?> keysOrRanges);
+    boolean containsAll(Routables<?> keysOrRanges);
 
-    U slice(Ranges ranges);
-    Routables<K, ?> slice(Ranges ranges, Slice slice);
+    Routables slice(Ranges ranges);
+    Routables<K> slice(Ranges ranges, Slice slice);
 
     /**
      * Search forwards from {code thisIndex} and {@code withIndex} to find the first entries in each collection
@@ -76,14 +76,14 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
      * that intersect with each other. Return their position packed in a long, with low bits representing
      * the resultant {@code thisIndex} and high bits {@code withIndex}.
      */
-    long findNextIntersection(int thisIndex, AbstractKeys<?, ?> with, int withIndex);
+    long findNextIntersection(int thisIndex, AbstractKeys<?> with, int withIndex);
 
     /**
      * Search forwards from {code thisIndex} and {@code withIndex} to find the first entries in each collection
      * that intersect with each other. Return their position packed in a long, with low bits representing
      * the resultant {@code thisIndex} and high bits {@code withIndex}.
      */
-    long findNextIntersection(int thisIndex, Routables<K, ?> with, int withIndex);
+    long findNextIntersection(int thisIndex, Routables<K> with, int withIndex);
 
     /**
      * Perform {@link SortedArrays#exponentialSearch} from {@code thisIndex} looking for {@code find} with behaviour of {@code search}
@@ -102,7 +102,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
      * Terminate once we hit {@code terminalValue}.
      */
     @Inline
-    static <Input extends Routable, T> T foldl(Routables<Input, ?> inputs, AbstractRanges<?> matching, IndexedFold<? super Input, T> fold, T initialValue)
+    static <Input extends Routable, T> T foldl(Routables<Input> inputs, AbstractRanges<?> matching, IndexedFold<? super Input, T> fold, T initialValue)
     {
         return Helper.foldl(Routables::findNextIntersection, Helper::findLimit, inputs, matching, fold, initialValue);
     }
@@ -124,7 +124,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
      * Terminate once we hit {@code terminalValue}.
      */
     @Inline
-    static <Input extends RoutableKey, T> T foldl(AbstractKeys<Input, ?> inputs, AbstractRanges<?> matching, IndexedFold<? super Input, T> fold, T initialValue)
+    static <Input extends RoutableKey, T> T foldl(AbstractKeys<Input> inputs, AbstractRanges<?> matching, IndexedFold<? super Input, T> fold, T initialValue)
     {
         return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, matching, fold, initialValue);
     }
@@ -134,12 +134,12 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
      * Terminate once we hit {@code terminalValue}.
      */
     @Inline
-    static <T> T foldl(AbstractRanges<?> inputs, Routables<?, ?> matching, IndexedFold<? super Range, T> fold, T initialValue)
+    static <T> T foldl(AbstractRanges<?> inputs, Routables<?> matching, IndexedFold<? super Range, T> fold, T initialValue)
     {
         switch (matching.domain())
         {
             default: throw new AssertionError();
-            case Key: return Helper.foldl(AbstractRanges::findNextIntersection, Helper::findLimit, inputs, (AbstractKeys<?,?>)matching, fold, initialValue);
+            case Key: return Helper.foldl(AbstractRanges::findNextIntersection, Helper::findLimit, inputs, (AbstractKeys<?>)matching, fold, initialValue);
             case Range: return Helper.foldl(AbstractRanges::findNextIntersection, Helper::findLimit, inputs, (AbstractRanges<?>)matching, fold, initialValue);
         }
     }
@@ -149,41 +149,41 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
      * Terminate once we hit {@code terminalValue}.
      */
     @Inline
-    static <Input extends RoutableKey, T> T foldl(AbstractKeys<Input, ?> inputs, Routables<?, ?> matching, IndexedFold<? super Input, T> fold, T initialValue)
+    static <Input extends RoutableKey, T> T foldl(AbstractKeys<Input> inputs, Routables<?> matching, IndexedFold<? super Input, T> fold, T initialValue)
     {
         switch (matching.domain())
         {
             default: throw new AssertionError();
-            case Key: return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, (AbstractKeys<?,?>)matching, fold, initialValue);
+            case Key: return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, (AbstractKeys<?>)matching, fold, initialValue);
             case Range: return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, (AbstractRanges<?>)matching, fold, initialValue);
         }
     }
 
     @Inline
-    static <P1, P2, Input extends RoutableKey, T> T foldl(AbstractKeys<Input, ?> inputs, Routables<?, ?> matching, IndexedTriFold<P1, P2, ? super Input, T> fold, P1 p1, P2 p2, T initialValue, Predicate<T> terminate)
+    static <P1, P2, Input extends RoutableKey, T> T foldl(AbstractKeys<Input> inputs, Routables<?> matching, IndexedTriFold<P1, P2, ? super Input, T> fold, P1 p1, P2 p2, T initialValue, Predicate<T> terminate)
     {
         switch (matching.domain())
         {
             default: throw new AssertionError();
-            case Key: return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, (AbstractKeys<?,?>)matching, fold, p1, p2, initialValue, terminate);
+            case Key: return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, (AbstractKeys<?>)matching, fold, p1, p2, initialValue, terminate);
             case Range: return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, (AbstractRanges<?>)matching, fold, p1, p2, initialValue, terminate);
         }
     }
 
     @Inline
-    static <P1, P2, Input extends RoutableKey, T> T foldl(AbstractKeys<Input, ?> inputs, AbstractRanges<?> matching, IndexedTriFold<P1, P2, ? super Input, T> fold, P1 p1, P2 p2, T initialValue, Predicate<T> terminate)
+    static <P1, P2, Input extends RoutableKey, T> T foldl(AbstractKeys<Input> inputs, AbstractRanges<?> matching, IndexedTriFold<P1, P2, ? super Input, T> fold, P1 p1, P2 p2, T initialValue, Predicate<T> terminate)
     {
         return Helper.foldl(Routables::findNextIntersection, Helper::findLimit, inputs, matching, fold, p1, p2, initialValue, terminate);
     }
 
     @Inline
-    static <P1, P2, Input extends Routable, T> T foldl(Routables<Input, ?> inputs, AbstractRanges<?> matching, IndexedTriFold<P1, P2, ? super Input, T> fold, P1 p1, P2 p2, T initialValue, Predicate<T> terminate)
+    static <P1, P2, Input extends Routable, T> T foldl(Routables<Input> inputs, AbstractRanges<?> matching, IndexedTriFold<P1, P2, ? super Input, T> fold, P1 p1, P2 p2, T initialValue, Predicate<T> terminate)
     {
         return Helper.foldl(Routables::findNextIntersection, Helper::findLimit, inputs, matching, fold, p1, p2, initialValue, terminate);
     }
 
     @Inline
-    static <Input extends RoutableKey> long foldl(AbstractKeys<Input, ?> inputs, AbstractRanges<?> matching, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
+    static <Input extends RoutableKey> long foldl(AbstractKeys<Input> inputs, AbstractRanges<?> matching, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
     {
         return Helper.foldl(AbstractKeys::findNextIntersection, Helper::findLimit, inputs, matching, fold, param, initialValue, terminalValue);
     }
@@ -193,7 +193,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
      * Terminate once we hit {@code terminalValue}.
      */
     @Inline
-    static <Input extends Routable> long foldl(Routables<Input, ?> inputs, AbstractRanges<?> matching, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
+    static <Input extends Routable> long foldl(Routables<Input> inputs, AbstractRanges<?> matching, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
     {
         return Helper.foldl(Routables::findNextIntersection, Helper::findLimit, inputs, matching, fold, param, initialValue, terminalValue);
     }
@@ -203,7 +203,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
      * Terminate once we hit {@code terminalValue}.
      */
     @Inline
-    static <Input extends Routable> long foldl(Routables<Input, ?> inputs, AbstractKeys<?, ?> matching, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
+    static <Input extends Routable> long foldl(Routables<Input> inputs, AbstractKeys<?> matching, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
     {
         return Helper.foldl(Routables::findNextIntersection, (ls, li, rs, ri) -> li + 1,
                 inputs, matching, fold, param, initialValue, terminalValue);
@@ -214,7 +214,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
      * Terminate once we hit {@code terminalValue}.
      */
     @Inline
-    static <Input extends RoutingKey, Matching extends Routable> long foldl(AbstractKeys<Input, ?> inputs, Routables<Matching, ?> matching, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
+    static <Input extends RoutingKey, Matching extends Routable> long foldl(AbstractKeys<Input> inputs, Routables<Matching> matching, IndexedFoldToLong<? super Input> fold, long param, long initialValue, long terminalValue)
     {
         return Helper.foldl((ls, li, rs, ri) -> SortedArrays.swapHighLow32b(rs.findNextIntersection(ri, ls, li)), (ls, li, rs, ri) -> li + 1,
                 inputs, matching, fold, param, initialValue, terminalValue);
@@ -225,7 +225,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
      * Terminate once we hit {@code terminalValue}.
      */
     @Inline
-    static <Input extends Routable> long rangeFoldl(Routables<Input, ?> inputs, AbstractRanges<?> matching, IndexedRangeFoldToLong fold, long param, long initialValue, long terminalValue)
+    static <Input extends Routable> long rangeFoldl(Routables<Input> inputs, AbstractRanges<?> matching, IndexedRangeFoldToLong fold, long param, long initialValue, long terminalValue)
     {
         return Helper.rangeFoldl(Routables::findNextIntersection, (ls, li, rs, ri) -> li + 1,
                 inputs, matching, fold, param, initialValue, terminalValue);
@@ -236,7 +236,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
      * Terminate once we hit {@code terminalValue}.
      */
     @Inline
-    static <Input extends Routable> long rangeFoldl(Routables<Input, ?> inputs, AbstractKeys<?, ?> matching, IndexedRangeFoldToLong fold, long param, long initialValue, long terminalValue)
+    static <Input extends Routable> long rangeFoldl(Routables<Input> inputs, AbstractKeys<?> matching, IndexedRangeFoldToLong fold, long param, long initialValue, long terminalValue)
     {
         return Helper.rangeFoldl(Routables::findNextIntersection, (ls, li, rs, ri) -> li + 1,
                 inputs, matching, fold, param, initialValue, terminalValue);
@@ -244,12 +244,12 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
 
     class Helper
     {
-        interface SetIntersections<L extends Routables<?, ?>, R extends Routables<?, ?>>
+        interface SetIntersections<L extends Routables<?>, R extends Routables<?>>
         {
             long findNext(L left, int li, R right, int ri);
         }
 
-        interface ValueIntersections<L extends Routables<?, ?>, R extends Routables<?, ?>>
+        interface ValueIntersections<L extends Routables<?>, R extends Routables<?>>
         {
             int findLimit(L left, int li, R right, int ri);
         }
@@ -283,7 +283,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
         }
 
         @Inline
-        static <Input extends Routable, Inputs extends Routables<Input, ?>, Matches extends Routables<?, ?>, T>
+        static <Input extends Routable, Inputs extends Routables<Input>, Matches extends Routables<?>, T>
         T foldl(SetIntersections<Inputs, Matches> setIntersections, ValueIntersections<Inputs, Matches> valueIntersections,
                 Inputs is, Matches ms, IndexedFold<? super Input, T> fold, T accumulator)
         {
@@ -309,7 +309,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
         }
 
         @Inline
-        static <P1, P2, Input extends Routable, Inputs extends Routables<Input, ?>, Matches extends Routables<?, ?>, T>
+        static <P1, P2, Input extends Routable, Inputs extends Routables<Input>, Matches extends Routables<?>, T>
         T foldl(SetIntersections<Inputs, Matches> setIntersections, ValueIntersections<Inputs, Matches> valueIntersections,
                 Inputs is, Matches ms, IndexedTriFold<P1, P2, ? super Input, T> fold, P1 p1, P2 p2, T accumulator, Predicate<T> terminate)
         {
@@ -337,7 +337,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
         }
 
         @Inline
-        static <Input extends Routable, Inputs extends Routables<Input, ?>, Matches extends Routables<?, ?>>
+        static <Input extends Routable, Inputs extends Routables<Input>, Matches extends Routables<?>>
         long foldl(SetIntersections<Inputs, Matches> setIntersections, ValueIntersections<Inputs, Matches> valueIntersections,
                    Inputs is, Matches ms, IndexedFoldToLong<? super Input> fold, long param, long accumulator, long terminalValue)
         {
@@ -364,7 +364,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
             return accumulator;
         }
 
-        static <Input extends Routable, Inputs extends Routables<Input, ?>, Matches extends Routables<?, ?>>
+        static <Input extends Routable, Inputs extends Routables<Input>, Matches extends Routables<?>>
         long rangeFoldl(SetIntersections<Inputs, Matches> setIntersections, ValueIntersections<Inputs, Matches> valueIntersections,
                         Inputs is, Matches ms, IndexedRangeFoldToLong fold, long param, long accumulator, long terminalValue)
         {
@@ -388,7 +388,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
             return accumulator;
         }
 
-        static <L extends Routable> int findLimit(Routables<L, ?> ls, int li, AbstractRanges<?> rs, int ri)
+        static <L extends Routable> int findLimit(Routables<L> ls, int li, AbstractRanges<?> rs, int ri)
         {
             Range range = rs.get(ri);
 
@@ -398,7 +398,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
             return nextl;
         }
 
-        static int findLimit(AbstractRanges<?> ls, int li, AbstractKeys<?, ?> rs, int ri)
+        static int findLimit(AbstractRanges<?> ls, int li, AbstractKeys<?> rs, int ri)
         {
             RoutableKey r = rs.get(ri);
 
@@ -408,7 +408,7 @@ public interface Routables<K extends Routable, U extends Routables<K, ?>> extend
             return nextl;
         }
 
-        static int findLimit(AbstractKeys<?, ?> ls, int li, AbstractKeys<?, ?> rs, int ri)
+        static int findLimit(AbstractKeys<?> ls, int li, AbstractKeys<?> rs, int ri)
         {
             RoutableKey r = rs.get(ri);
 

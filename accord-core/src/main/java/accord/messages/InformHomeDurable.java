@@ -56,7 +56,7 @@ public class InformHomeDurable implements Request
     {
         // TODO (expected, efficiency): do not load txnId first
         node.ifLocal(contextFor(txnId), route.homeKey(), txnId.epoch(), safeStore -> {
-            SafeCommand safeCommand = safeStore.get(txnId, executeAt, route);
+            SafeCommand safeCommand = safeStore.get(txnId, route);
             if (safeCommand.current().is(Status.Truncated))
                 return;
 

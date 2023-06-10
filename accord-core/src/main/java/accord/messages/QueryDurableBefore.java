@@ -18,13 +18,9 @@
 
 package accord.messages;
 
-import javax.annotation.Nullable;
-
 import accord.local.PreLoadContext;
+import accord.local.DurableBefore;
 import accord.local.SafeCommandStore;
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
-import accord.utils.Functions;
 import accord.utils.MapReduceConsume;
 
 public class QueryDurableBefore extends AbstractEpochRequest<QueryDurableBefore.DurableBeforeReply>
@@ -46,13 +42,13 @@ public class QueryDurableBefore extends AbstractEpochRequest<QueryDurableBefore.
     @Override
     public DurableBeforeReply apply(SafeCommandStore safeStore)
     {
-        return new DurableBeforeReply(safeStore.commandStore().durableBefore(safeStore, epoch));
+        return new DurableBeforeReply(safeStore.commandStore().durableBefore());
     }
 
     @Override
     public DurableBeforeReply reduce(DurableBeforeReply r1, DurableBeforeReply r2)
     {
-        return new DurableBeforeReply(Functions.reduceNonNull(Timestamp::min, r1.txnId, r2.txnId));
+        return new DurableBeforeReply(DurableBefore.merge(r1.durableBeforeMap, r2.durableBeforeMap));
     }
 
     @Override
@@ -81,11 +77,11 @@ public class QueryDurableBefore extends AbstractEpochRequest<QueryDurableBefore.
 
     public static class DurableBeforeReply implements Reply
     {
-        public final @Nullable TxnId txnId;
+        public final DurableBefore durableBeforeMap;
 
-        public DurableBeforeReply(@Nullable TxnId txnId)
+        public DurableBeforeReply(DurableBefore durableBeforeMap)
         {
-            this.txnId = txnId;
+            this.durableBeforeMap = durableBeforeMap;
         }
 
         @Override

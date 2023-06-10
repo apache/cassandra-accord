@@ -19,20 +19,20 @@
 package accord.messages;
 
 import accord.local.PreLoadContext;
+import accord.local.DurableBefore;
 import accord.local.SafeCommandStore;
-import accord.primitives.TxnId;
 
 import static accord.messages.SimpleReply.Ok;
 
 public class SetGloballyDurable extends AbstractEpochRequest<SimpleReply>
         implements Request, PreLoadContext
 {
-    public final TxnId before;
+    public final DurableBefore durableBefore;
 
-    public SetGloballyDurable(TxnId before)
+    public SetGloballyDurable(DurableBefore durableBefore)
     {
         super(null);
-        this.before = before;
+        this.durableBefore = durableBefore;
     }
 
     @Override
@@ -44,7 +44,7 @@ public class SetGloballyDurable extends AbstractEpochRequest<SimpleReply>
     @Override
     public SimpleReply apply(SafeCommandStore safeStore)
     {
-        safeStore.commandStore().setGloballyDurable(safeStore, before);
+        safeStore.commandStore().setDurableBefore(durableBefore);
         return Ok;
     }
 
@@ -62,18 +62,12 @@ public class SetGloballyDurable extends AbstractEpochRequest<SimpleReply>
     @Override
     public String toString()
     {
-        return "SetGloballyDurable{" + before + '}';
+        return "SetGloballyDurable{" + durableBefore + '}';
     }
 
     @Override
     public MessageType type()
     {
         return MessageType.SET_GLOBALLY_DURABLE_REQ;
-    }
-
-    @Override
-    public long waitForEpoch()
-    {
-        return before.epoch();
     }
 }

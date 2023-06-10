@@ -26,7 +26,7 @@ import javax.annotation.Nonnull;
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_OVERLAPPING;
 import static accord.primitives.Routables.Slice.Overlapping;
 
-public abstract class RangeRoute extends AbstractRanges<Route<Range>> implements Route<Range>
+public abstract class RangeRoute extends AbstractRanges<Route<Range>> implements Route<Range>, Unseekables<Range>, Participants<Range>
 {
     public final RoutingKey homeKey;
     public final boolean isParticipatingHomeKey;
@@ -40,17 +40,31 @@ public abstract class RangeRoute extends AbstractRanges<Route<Range>> implements
     }
 
     @Override
-    public Unseekables<Range, ?> with(Unseekables<Range, ?> with)
+    public Unseekables<Range> with(Unseekables<Range> with)
     {
         if (isEmpty())
             return with;
 
-        return union(MERGE_OVERLAPPING, this, (AbstractRanges<?>) with, null, null,
+        return merge((AbstractRanges<?>) with);
+    }
+
+    @Override
+    public Participants<Range> with(Participants<Range> with)
+    {
+        if (isEmpty())
+            return with;
+
+        return merge((AbstractRanges<?>) with);
+    }
+
+    private Ranges merge(AbstractRanges<?> with)
+    {
+        return union(MERGE_OVERLAPPING, this, with, null, null,
                 (left, right, rs) -> Ranges.ofSortedAndDeoverlapped(rs));
     }
 
     @Override
-    public Unseekables<Range, ?> with(RoutingKey withKey)
+    public Unseekables<Range> with(RoutingKey withKey)
     {
         if (withKey.equals(homeKey))
             return withHomeKey();
@@ -89,12 +103,13 @@ public abstract class RangeRoute extends AbstractRanges<Route<Range>> implements
     }
 
     @Override
-    public Unseekables<Range, ?> participants()
+    public Participants<Range> participants()
     {
         if (isParticipatingHomeKey || !contains(homeKey))
             return this;
 
         // TODO (desired): efficiency (lots of unnecessary allocations)
+        // TODO (expected): this should return a PartialRangeRoute, but we need to remove Route.covering()
         return ranges().subtract(Ranges.of(homeKey().asRange()));
     }
 
@@ -113,6 +128,12 @@ public abstract class RangeRoute extends AbstractRanges<Route<Range>> implements
     public boolean isParticipatingHomeKey()
     {
         return isParticipatingHomeKey;
+    }
+
+    @Override
+    public RoutingKey someParticipatingKey()
+    {
+        return isParticipatingHomeKey ? homeKey : ranges[0].someIntersectingRoutingKey(null);
     }
 
     @Override

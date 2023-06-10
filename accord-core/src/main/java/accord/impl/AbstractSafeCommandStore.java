@@ -88,10 +88,8 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
     public CommandType ifLoadedAndInitialised(TxnId txnId)
     {
         CommandType command = getIfLoaded(txnId, this::getCommandInternal, this::addCommandInternal, this::getIfLoaded);
-        if (command == null)
+        if (command == null || command.isEmpty())
             return null;
-        if (command.isEmpty())
-            command.uninitialised();
         return command;
     }
 

@@ -26,9 +26,7 @@ import accord.api.ProgressLog;
 import accord.api.RoutingKey;
 import accord.impl.TruncatedSafeCommand;
 import accord.primitives.Deps;
-import accord.primitives.EpochSupplier;
 import accord.primitives.Ranges;
-import accord.primitives.Routables;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
@@ -38,6 +36,7 @@ import accord.primitives.Unseekables;
 
 import javax.annotation.Nullable;
 
+import static accord.local.Commands.Truncate.NO;
 import static accord.local.SaveStatus.Uninitialised;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.primitives.Txn.Kind.Read;
@@ -132,15 +131,14 @@ public abstract class SafeCommandStore
         return maybeTruncate(safeCommand, command);
     }
 
-    public SafeCommand get(TxnId txnId, @Nullable EpochSupplier decidedExecuteAt, RoutingKey participant)
+    public SafeCommand get(TxnId txnId, RoutingKey unseekable)
     {
         SafeCommand safeCommand = get(txnId);
         Command command = safeCommand.current();
         if (command.saveStatus() == Uninitialised)
         {
-            // TODO (now): this needs to be some special global truncated instance, or else callers must handle null
-            if (commandStore().statusMap().isTruncated(txnId, decidedExecuteAt, participant))
-                return null;
+            if (commandStore().durableBefore().isUniversal(txnId, unseekable))
+                return new TruncatedSafeCommand(txnId);
         }
         return maybeTruncate(safeCommand, command);
     }
@@ -154,16 +152,24 @@ public abstract class SafeCommandStore
      *
      * If it is not initialised, use the provided parameters to determine if the record may have been expunged;
      * if not, create it.
+     *
+     * We do not distinguish between participants, home keys, and non-participating home keys for now, even though
+     * these fundamentally have different implications. Logically, we may erase a home shard's record as soon as
+     * the transaction has been made durable at a majority of replicas of every shard, and state for any participating
+     * keys may be erased as soon as their non-faulty peers have recorded the outcome.
+     *
+     * However if in some cases we don't know which commands are home keys or participants we need to wait to erase
+     * a transaction until both of these criteria are met for every key.
+     *
+     * TODO (desired): Introduce static types that permit us to propagate this information safely.
      */
-    public SafeCommand get(TxnId txnId, @Nullable EpochSupplier decidedExecuteAt, Routables<?, ?> routeOrParticipants)
+    public SafeCommand get(TxnId txnId, Unseekables<?> unseekables)
     {
-        // TODO (required): this should not contain a non-participating homeKey
         SafeCommand safeCommand = get(txnId);
         Command command = safeCommand.current();
         if (command.saveStatus() == Uninitialised)
         {
-            // TODO (now): this needs to be some special global truncated instance, or else callers must handle null
-            if (commandStore().statusMap().isTruncated(txnId, decidedExecuteAt, routeOrParticipants))
+            if (commandStore().durableBefore().isUniversal(txnId, unseekables))
                 return new TruncatedSafeCommand(txnId);
         }
         return maybeTruncate(safeCommand, command);
@@ -171,8 +177,7 @@ public abstract class SafeCommandStore
 
     protected SafeCommand maybeTruncate(SafeCommand safeCommand, Command command)
     {
-        if (isTruncated(command) && !command.hasBeen(Status.Truncated))
-            Commands.setTruncated(this, safeCommand);
+        Commands.maybeTruncate(this, safeCommand, command);
         return safeCommand;
     }
 
@@ -217,21 +222,7 @@ public abstract class SafeCommandStore
 
     public boolean isTruncated(Command command)
     {
-        TxnId txnId = command.txnId();
-        Timestamp executeAt = command.executeAt();
-        if (executeAt == null || executeAt.equals(Timestamp.NONE))
-            executeAt = txnId;
-
-        Unseekables<?, ?> participants;
-        if (command.known().hasRoute()) participants = command.route().participants();
-        else
-        {
-            Ranges coordinates = ranges().allAt(txnId.epoch());
-            Ranges additionalRanges = executeAt == txnId ? Ranges.EMPTY : ranges().allBetween(txnId.epoch(), command.executeAt().epoch());
-            participants = coordinates.with(additionalRanges);
-        }
-
-        return commandStore().statusMap().isTruncated(txnId, executeAt, participants);
+        return Commands.shouldTruncate(this, command) != NO;
     }
 
     public void notifyListeners(SafeCommand safeCommand)

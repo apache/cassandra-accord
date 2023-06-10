@@ -35,33 +35,33 @@ import static accord.utils.Functions.mapReduceNonNull;
 public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.InvalidateReply> implements Request, PreLoadContext
 {
     public final Ballot ballot;
-    public final Unseekables<?, ?> someParticipants;
+    public final Unseekables<?> someUnseekables;
 
-    public BeginInvalidation(Id to, Topologies topologies, TxnId txnId, Unseekables<?, ?> someParticipants, Ballot ballot)
+    public BeginInvalidation(Id to, Topologies topologies, TxnId txnId, Unseekables<?> someUnseekables, Ballot ballot)
     {
         super(txnId);
-        this.someParticipants = someParticipants.slice(topologies.computeRangesForNode(to));
+        this.someUnseekables = someUnseekables.slice(topologies.computeRangesForNode(to));
         this.ballot = ballot;
     }
 
-    public BeginInvalidation(TxnId txnId, Unseekables<?, ?> someParticipants, Ballot ballot)
+    public BeginInvalidation(TxnId txnId, Unseekables<?> someUnseekables, Ballot ballot)
     {
         super(txnId);
-        this.someParticipants = someParticipants;
+        this.someUnseekables = someUnseekables;
         this.ballot = ballot;
     }
 
     @Override
     public void process()
     {
-        node.mapReduceConsumeLocal(this, someParticipants, txnId.epoch(), txnId.epoch(), this);
+        node.mapReduceConsumeLocal(this, someUnseekables, txnId.epoch(), txnId.epoch(), this);
     }
 
     @Override
     public InvalidateReply apply(SafeCommandStore safeStore)
     {
         boolean acceptedFastPath;
-        SafeCommand safeCommand = safeStore.get(txnId, null, someParticipants);
+        SafeCommand safeCommand = safeStore.get(txnId, someUnseekables);
         boolean preaccepted = Commands.preacceptInvalidate(safeCommand, txnId, ballot);
         Command command = safeCommand.current();
         acceptedFastPath = command.executeAt() != null && command.executeAt().equals(command.txnId());

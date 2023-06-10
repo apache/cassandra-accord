@@ -254,7 +254,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     /**
      * The same TxnId may be provided as a parameter multiple times
      */
-    public <P> void forEach(Unseekables<?, ?> unseekables, P param, IndexedConsumer<P> forEach)
+    public <P> void forEach(Unseekables<?> unseekables, P param, IndexedConsumer<P> forEach)
     {
         forEach(unseekables, null, 0, unseekables.size(), param, forEach);
     }
@@ -264,13 +264,13 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
      * @param slice is only useful in case unseekables is a Ranges, in which case we only visit the intersection of the slice and the ranges we walk
      *              for keys it is expected that the caller has already sliced in this manner
      */
-    public <P> void forEach(Unseekables<?, ?> unseekables, @Nullable Range slice, int from, int to, P param, IndexedConsumer<P> forEach)
+    public <P> void forEach(Unseekables<?> unseekables, @Nullable Range slice, int from, int to, P param, IndexedConsumer<P> forEach)
     {
         switch (unseekables.domain())
         {
             default: throw new AssertionError();
             case Key:
-                forEach((AbstractKeys<?, ?>) unseekables, from, to, param, forEach);
+                forEach((AbstractKeys<?>) unseekables, from, to, param, forEach);
                 break;
             case Range:
                 forEach((AbstractRanges<?>) unseekables, slice, from, to, param, forEach);
@@ -281,7 +281,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     /**
      * The same TxnId may be provided as a parameter multiple times
      */
-    public <P> void forEach(AbstractKeys<?, ?> keys, P param, IndexedConsumer<P> forEach)
+    public <P> void forEach(AbstractKeys<?> keys, P param, IndexedConsumer<P> forEach)
     {
         forEach(keys, 0, keys.size(), param, forEach);
     }
@@ -297,7 +297,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     /**
      * The same TxnId may be provided as a parameter multiple times
      */
-    public <P> void forEach(AbstractKeys<?, ?> keys, int from, int to, P param, IndexedConsumer<P> forEach)
+    public <P> void forEach(AbstractKeys<?> keys, int from, int to, P param, IndexedConsumer<P> forEach)
     {
         int minIndex = 0;
         for (int i = from ; i < to ; ++i)
@@ -354,7 +354,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
         return RelationMultiMap.isEmpty(ranges, rangesToTxnIds);
     }
 
-    public Ranges someUnseekables(TxnId txnId)
+    public Ranges participants(TxnId txnId)
     {
         return ranges(txnId);
     }

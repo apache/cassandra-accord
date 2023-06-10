@@ -44,7 +44,7 @@ public class TopologyTest
         Assertions.assertTrue(shard.range.contains(expectedKey));
         Assertions.assertEquals(expectedRange, shard.range);
 
-        Topology subTopology = topology.forSelection(Keys.of(expectedKey).toUnseekables());
+        Topology subTopology = topology.forSelection(Keys.of(expectedKey).toParticipants());
         shard = Iterables.getOnlyElement(subTopology.shards());
         Assertions.assertTrue(shard.range.contains(expectedKey));
         Assertions.assertEquals(expectedRange, shard.range);

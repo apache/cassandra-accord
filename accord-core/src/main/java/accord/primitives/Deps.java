@@ -231,13 +231,13 @@ public class Deps
         return output;
     }
 
-    public Unseekables<?, ?> someParticipants(TxnId txnId)
+    public Participants<?> participants(TxnId txnId)
     {
         switch (txnId.domain())
         {
             default:    throw new AssertionError();
-            case Key:   return keyDeps.someUnseekables(txnId);
-            case Range: return rangeDeps.someUnseekables(txnId);
+            case Key:   return keyDeps.participants(txnId);
+            case Range: return rangeDeps.participants(txnId);
         }
     }
 

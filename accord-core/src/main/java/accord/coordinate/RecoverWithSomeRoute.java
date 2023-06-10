@@ -97,7 +97,7 @@ public class RecoverWithSomeRoute extends CheckShards<Route<?>> implements BiCon
                     {
                         if (witnessedByInvalidation != null && witnessedByInvalidation.compareTo(Status.PreAccepted) > 0)
                             throw new IllegalStateException("We previously invalidated, finding a status that should be recoverable");
-                        Invalidate.invalidate(node, txnId, route.withHomeKey(), true, callback);
+                        Invalidate.invalidate(node, txnId, route, true, callback);
                     }
             }
         }

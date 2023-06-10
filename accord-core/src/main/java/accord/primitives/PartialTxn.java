@@ -33,18 +33,26 @@ public interface PartialTxn extends Txn
     Txn reconstitute(FullRoute<?> route);
     PartialTxn reconstitutePartial(Ranges covering);
 
-    default boolean covers(Unseekables<?, ?> unseekables)
+    default boolean covers(Route<?> route)
+    {
+        if (query() == null && route.contains(route.homeKey()))
+            return false;
+
+        return covers(route.participants());
+    }
+
+    default boolean covers(Participants<?> participants)
     {
         if (query() == null)
         {
             // The home shard is expected to store the query contents
             // So if the query is null, and we are being asked if we
             // cover a range that includes a home shard, we should say no
-            Route<?> asRoute = Route.tryCastToRoute(unseekables);
+            Route<?> asRoute = Route.tryCastToRoute(participants);
             if (asRoute != null && asRoute.contains(asRoute.homeKey()))
                 return false;
         }
-        return covering().containsAll(unseekables);
+        return covering().containsAll(participants);
     }
 
     static PartialTxn merge(@Nullable PartialTxn a, @Nullable PartialTxn b)

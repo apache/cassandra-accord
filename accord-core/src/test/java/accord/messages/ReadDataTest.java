@@ -180,7 +180,7 @@ class ReadDataTest
 
             store = stores.get(1);
             check(store.execute(PreLoadContext.contextFor(state.txnId, state.keys), safe -> {
-                SafeCommand command = safe.get(state.txnId, state.executeAt, state.route);
+                SafeCommand command = safe.get(state.txnId, state.route);
                 command.commitInvalidated();
             }));
 
@@ -196,7 +196,7 @@ class ReadDataTest
         test(state -> {
             List<CommandStore> stores = stores(state);
             stores.forEach(store -> check(store.execute(PreLoadContext.contextFor(state.txnId, state.keys), safe -> {
-                SafeCommand command = safe.get(state.txnId, state.executeAt, state.route);
+                SafeCommand command = safe.get(state.txnId, state.route);
                 command.commitInvalidated();
             })));
             ReplyContext replyContext = state.process();
@@ -298,7 +298,7 @@ class ReadDataTest
         ReplyContext process()
         {
             ReplyContext replyContext = Mockito.mock(ReplyContext.class);
-            ReadData readData = new ReadTxnData(node.id(), TOPOLOGIES, txnId, keys.toUnseekables(), txnId);
+            ReadData readData = new ReadTxnData(node.id(), TOPOLOGIES, txnId, keys.toParticipants(), txnId);
             readData.process(node, node.id(), replyContext);
             return replyContext;
         }

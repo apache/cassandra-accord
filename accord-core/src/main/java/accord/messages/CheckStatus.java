@@ -32,9 +32,12 @@ import accord.utils.MapReduceConsume;
 
 import static accord.local.Status.*;
 import static accord.local.Status.Durability.DurableOrInvalidated;
+import static accord.local.Status.Durability.Majority;
 import static accord.local.Status.Known.Nothing;
 import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.messages.TxnRequest.computeScope;
+import static accord.primitives.Route.castToRoute;
+import static accord.primitives.Route.isRoute;
 
 public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusReply>
         implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, CheckStatus.CheckStatusReply>, EpochSupplier
@@ -66,11 +69,11 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     }
 
     // query is usually a Route
-    public final Unseekables<?, ?> query;
+    public final Unseekables<?> query;
     public final long sourceEpoch;
     public final IncludeInfo includeInfo;
 
-    public CheckStatus(TxnId txnId, Unseekables<?, ?> query, long sourceEpoch, IncludeInfo includeInfo)
+    public CheckStatus(TxnId txnId, Unseekables<?> query, long sourceEpoch, IncludeInfo includeInfo)
     {
         super(txnId);
         this.query = query;
@@ -84,10 +87,10 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
         return txnId;
     }
 
-    public CheckStatus(Id to, Topologies topologies, TxnId txnId, Unseekables<?, ?> query, long sourceEpoch, IncludeInfo includeInfo)
+    public CheckStatus(Id to, Topologies topologies, TxnId txnId, Unseekables<?> query, long sourceEpoch, IncludeInfo includeInfo)
     {
         super(txnId);
-        if (Route.isRoute(query)) this.query = computeScope(to, topologies, Route.castToRoute(query), 0, Route::slice, PartialRoute::union);
+        if (isRoute(query)) this.query = computeScope(to, topologies, castToRoute(query), 0, Route::slice, PartialRoute::union);
         else this.query = computeScope(to, topologies, (Unseekables) query, 0, Unseekables::slice, Unseekables::with);
         this.sourceEpoch = sourceEpoch;
         this.includeInfo = includeInfo;
@@ -109,7 +112,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     @Override
     public CheckStatusReply apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, this, query);
+        SafeCommand safeCommand = safeStore.get(txnId, query);
         Command command = safeCommand.current();
         if (command.is(Truncated))
             return truncated(safeStore);
@@ -147,14 +150,22 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
 
     private Status invalidIfNotAtLeast(SafeCommandStore safeStore)
     {
-        Unseekables<?, ?> participants = query;
-        if (Route.isRoute(participants))
-            participants = Route.castToRoute(participants).participants();
+        if (safeStore.commandStore().globalDurability(txnId).compareTo(Majority) >= 0)
+        {
+            Unseekables<?> preacceptsWith = isRoute(query) ? castToRoute(query).withHomeKey() : query;
+            return safeStore.commandStore().isRejectedIfNotPreAccepted(txnId, preacceptsWith) ? PreAccepted : PreApplied;
+        }
 
-        if (safeStore.commandStore().isGloballyDurable(txnId))
-            return safeStore.commandStore().isRejectedIfNotPreAccepted(txnId, participants) ? PreAccepted : PreApplied;
+        // TODO (expected, consider): should we force this to be a Route or a Participants?
+        if (isRoute(query))
+        {
+            Participants<?> participants = castToRoute(query).participants();
+            // TODO (desired): limit to local participants to avoid O(n2) work across cluster
+            if (safeStore.commandStore().durableBefore().isSomeShardDurable(txnId, participants, Majority))
+                return PreCommitted;
+        }
 
-        if (safeStore.commandStore().statusMap().isSomeShardDurable(txnId, txnId, participants))
+        if (safeStore.commandStore().durableBefore().isUniversal(txnId, safeStore.ranges().allAt(txnId.epoch())))
             return PreCommitted;
 
         return Status.NotDefined;
@@ -246,6 +257,16 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
         {
             if (withQuorum == HasQuorum && saveStatus.status.compareTo(invalidIfNotAtLeast) < 0)
                 return Known.Invalidated;
+
+            switch (saveStatus)
+            {
+                case Invalidated:
+                case Truncated:
+                    return saveStatus.known;
+            }
+
+            // TODO (required, consider): should we only upgrade to Truncated if for the precise range?
+            //    alternatively we can just ensure that Durability is at least Majority
             if (truncated)
                 return Known.Truncated;
             return Nothing;
@@ -394,23 +415,26 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
                                          max.homeKey, partialTxn, committedDeps, fullMax.writes, fullMax.result);
         }
 
-        public Known sufficientFor(Unseekables<?, ?> unseekables, WithQuorum withQuorum)
+        public Known sufficientFor(Participants<?> participants, WithQuorum withQuorum)
         {
             if (ifKnownInvalidOrTruncated(withQuorum) == Known.Invalidated)
                 return Known.Invalidated;
 
-            Known sufficientFor = sufficientFor(truncated, unseekables, saveStatus, partialTxn, committedDeps, writes, result);
+            if (saveStatus.hasBeen(Truncated))
+                return saveStatus.known;
+
+            Known sufficientFor = sufficientFor(truncated, participants, saveStatus, route, partialTxn, committedDeps, writes, result);
             return withQuorum != HasQuorum ? sufficientFor : maybeInvalid(sufficientFor, saveStatus, invalidIfNotAtLeast);
         }
 
-        private static Known sufficientFor(boolean truncated, Unseekables<?, ?> unseekables, SaveStatus saveStatus, PartialTxn partialTxn, PartialDeps committedDeps, Writes writes, Result result)
+        private static Known sufficientFor(boolean truncated, Participants<?> participants, SaveStatus saveStatus, Route<?> route, PartialTxn partialTxn, PartialDeps committedDeps, Writes writes, Result result)
         {
             Status.Definition definition = saveStatus.known.definition;
             switch (definition)
             {
                 default: throw new AssertionError();
                 case DefinitionKnown:
-                    if (partialTxn != null && partialTxn.covers(unseekables))
+                    if (partialTxn != null && partialTxn.covers(participants) && route.kind().isFullRoute())
                         break;
                     definition = Definition.DefinitionUnknown;
                 case DefinitionUnknown:
@@ -423,7 +447,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             {
                 default: throw new AssertionError();
                 case DepsKnown:
-                    if (committedDeps != null && committedDeps.covers(unseekables))
+                    if (committedDeps != null && committedDeps.covers(participants))
                         break;
                 case DepsProposed:
                 case NoDeps:

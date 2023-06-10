@@ -18,12 +18,15 @@
 
 package accord.api;
 
+import javax.annotation.Nullable;
+
 import accord.coordinate.InformHomeOfTxn;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.SafeCommand;
 import accord.local.Status.Known;
-import accord.primitives.Unseekables;
+import accord.primitives.Participants;
+import accord.primitives.Route;
 import accord.primitives.TxnId;
 
 /**
@@ -166,11 +169,14 @@ public interface ProgressLog
      * <p>
      * In all other scenarios, the implementation is free to choose its course of action.
      *
-     * @param blockedBy     is the transaction id that is blocking progress
-     * @param blockedUntil  either Committed or Executed; the state we are waiting for
-     * @param blockedOn the keys we should report any progress updates to
+     * Either blockedOnRoute or blockedOnParticipants should be non-null.
+     *
+     * @param blockedBy             is the transaction id that is blocking progress
+     * @param blockedUntil          either Committed or Executed; the state we are waiting for
+     * @param blockedOnRoute        the route (if any) we are blocked on execution for
+     * @param blockedOnParticipants the participating keys on which we are blocked for execution
      */
-    void waiting(SafeCommand blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn);
+    void waiting(SafeCommand blockedBy, Known blockedUntil, @Nullable Route<?> blockedOnRoute, @Nullable Participants<?> blockedOnParticipants);
 
     /**
      * We have finished processing this transaction; ensure its state is cleared

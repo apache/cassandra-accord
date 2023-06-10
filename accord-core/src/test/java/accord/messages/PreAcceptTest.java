@@ -146,7 +146,7 @@ public class PreAcceptTest
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
 
-            Unseekables<?, ?> invalidateWith = txn.keys().toUnseekables();
+            Participants<?> invalidateWith = txn.keys().toParticipants();
             BeginInvalidation invalidate = new BeginInvalidation(ID1, node.topology().forEpoch(invalidateWith, txnId.epoch()), txnId, invalidateWith, Ballot.fromValues(txnId.epoch(), txnId.hlc(), txnId.node));
             invalidate.process(node, ID2, REPLY_CONTEXT);
 

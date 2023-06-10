@@ -22,7 +22,7 @@ import java.util.BitSet;
 import javax.annotation.Nullable;
 
 import accord.api.Data;
-import accord.primitives.Unseekables;
+import accord.primitives.Participants;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 
@@ -38,7 +38,6 @@ import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
 import static accord.messages.MessageType.READ_RSP;
-import static accord.messages.TxnRequest.computeScope;
 import static accord.messages.TxnRequest.computeWaitForEpoch;
 import static accord.messages.TxnRequest.latestRelevantEpochIndex;
 
@@ -48,22 +47,22 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
     private static final Logger logger = LoggerFactory.getLogger(ReadData.class);
 
     // TODO (expected, cleanup): should this be a Route?
-    public final Unseekables<?, ?> readScope;
+    public final Participants<?> readScope;
     private final long waitForEpoch;
     private Data data;
     transient BitSet waitingOn;
     transient int waitingOnCount;
     transient Ranges unavailable;
 
-    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Unseekables<?, ?> readScope)
+    public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Participants<?> readScope)
     {
         super(txnId);
         int startIndex = latestRelevantEpochIndex(to, topologies, readScope);
-        this.readScope = computeScope(to, topologies, (Unseekables)readScope, startIndex, Unseekables::slice, Unseekables::with);
+        this.readScope = TxnRequest.computeScope(to, topologies, readScope, startIndex, Participants::slice, Participants::with);
         this.waitForEpoch = computeWaitForEpoch(to, topologies, startIndex);
     }
 
-    protected ReadData(TxnId txnId, Unseekables<?, ?> readScope, long waitForEpoch)
+    protected ReadData(TxnId txnId, Participants<?> readScope, long waitForEpoch)
     {
         super(txnId);
         this.readScope = readScope;

@@ -229,9 +229,12 @@ public enum Status
             return definition.isKnown();
         }
 
-        public boolean hasRoute()
+        /**
+         * The command may have an incomplete route when this is false
+         */
+        public boolean hasCompleteRoute()
         {
-            return definition.isKnown() || deps.hasProposedOrDecidedDeps() || outcome.isKnown();
+            return definition.isKnown() || outcome.isKnown();
         }
 
         public boolean canProposeInvalidation()
