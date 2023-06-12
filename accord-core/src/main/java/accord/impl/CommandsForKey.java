@@ -219,6 +219,11 @@ public class CommandsForKey implements CommandTimeseriesHolder
         return byExecuteAt;
     }
 
+    public boolean hasRedundant(TxnId redundantBefore)
+    {
+        return byId.minTimestamp().compareTo(redundantBefore) < 0;
+    }
+
     public CommandsForKey withoutRedundant(TxnId redundantBefore)
     {
         Timestamp removeExecuteAt = byId.maxExecuteAtBefore(redundantBefore);

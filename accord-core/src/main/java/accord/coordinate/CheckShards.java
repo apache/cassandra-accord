@@ -103,7 +103,7 @@ public abstract class CheckShards<U extends Unseekables<?>> extends ReadCoordina
         {
             switch ((CheckStatus.CheckStatusNack)reply)
             {
-                default: throw new AssertionError();
+                default: throw new AssertionError(String.format("Unexpected status: %s", reply));
                 case NotOwned:
                     finishOnFailure(new IllegalStateException("Submitted command to a replica that did not own the range"), true);
                     return Action.Aborted;

@@ -490,8 +490,8 @@ public class Commands
         {
             // This listener must be a stale vestige
             // TODO (desired): would be nice to ensure these are deregistered explicitly, but would be costly
-            Invariants.checkState(listener.saveStatus() == Uninitialised || listener.is(Truncated));
-            Invariants.checkState(updated.hasBeen(Applied) || updated.is(NotDefined));
+            Invariants.checkState(listener.saveStatus() == Uninitialised || listener.is(Truncated), "Listener status expected to be Uninitialised or Truncated, but was %s", listener.saveStatus());
+            Invariants.checkState(updated.hasBeen(Applied) || updated.is(NotDefined), "Updated status expected to be Applied or NotDefined, but was %s", updated);
             safeUpdated.removeListener(listener.asListener());
             return;
         }
@@ -913,12 +913,45 @@ public class Commands
         @Override
         public void accept(SafeCommandStore safeStore)
         {
-            SafeCommand prevSafe = get(safeStore, depth - 1);
+            SafeCommand prevSafe = ifInitialised(safeStore, depth - 1);
+            {
+                // we know we loaded it, so if it's null it's either truncated or we haven't witnessed it and need to initialise;
+                // in this case use our predecessor's intersecting keys to decide which
+                SafeCommand curSafe = ifInitialised(safeStore, depth);
+                if (curSafe == null)
+                {
+                    if (prevSafe != null)
+                    {
+                        if (safeStore.commandStore().redundantBefore().isRedundant(txnIds[depth], prevSafe.current().executeAt(), prevSafe.current().partialDeps().participants(txnIds[depth])))
+                        {
+                            removeDependency(safeStore, prevSafe, txnIds[depth]);
+                            curSafe = prevSafe;
+                            prevSafe = get(safeStore, --depth - 1);
+                        }
+                        else
+                        {
+                            curSafe = initialise(safeStore, depth);
+                        }
+                    }
+                    else
+                    {
+                        // if it's still null,
+                        do
+                        {
+                            if (--depth == -1)
+                                return;  // the command must have been erased
+                            curSafe = prevSafe;
+                            prevSafe = ifInitialised(safeStore, depth - 1);
+                        } while (curSafe == null);
+                    }
+                }
+            }
+
+            Invariants.checkState(depth == 0 || prevSafe != null);
             while (depth >= 0)
             {
                 Command prev = prevSafe != null ? prevSafe.current() : null;
-                SafeCommand curSafe = ifLoaded(safeStore, depth);
-                // TODO (now): we want to avoid inserting a new NotWitnessed record for redundant dependencies
+                SafeCommand curSafe = ifLoadedAndInitialised(safeStore, depth);
                 Command cur = curSafe != null ? curSafe.current() : null;
                 Known until = blockedUntil[depth];
                 if (cur == null)
@@ -1014,7 +1047,13 @@ public class Commands
                 get(safeStore, i).addListener(get(safeStore, i - 1).current().asListener());
         }
 
-        private SafeCommand ifLoaded(SafeCommandStore safeStore, int i)
+        private SafeCommand ifInitialised(SafeCommandStore safeStore, int i)
+        {
+            if (i < 0) return null;
+            return safeStore.ifInitialised(txnIds[i]);
+        }
+
+        private SafeCommand ifLoadedAndInitialised(SafeCommandStore safeStore, int i)
         {
             if (i < 0) return null;
             return safeStore.ifLoadedAndInitialised(txnIds[i]);
@@ -1023,6 +1062,13 @@ public class Commands
         private SafeCommand get(SafeCommandStore safeStore, int i)
         {
             if (i < 0) return null;
+            SafeCommand result = safeStore.ifInitialised(txnIds[i]);
+            Invariants.checkState(result != null);
+            return result;
+        }
+
+        private SafeCommand initialise(SafeCommandStore safeStore, int i)
+        {
             return safeStore.get(txnIds[i]);
         }
 

@@ -143,7 +143,7 @@ public class Deps
     {
         switch (txnId.domain())
         {
-            default: throw new AssertionError();
+            default: throw new AssertionError("Unknown domain: " + txnId.domain());
             case Key:
                 return Arrays.binarySearch(keyDeps.txnIds, txnId);
             case Range:

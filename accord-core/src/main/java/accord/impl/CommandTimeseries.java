@@ -102,6 +102,10 @@ public class CommandTimeseries<D>
     {
         return commands.isEmpty() ? Timestamp.NONE : commands.keySet().last();
     }
+    public Timestamp minTimestamp()
+    {
+        return commands.isEmpty() ? Timestamp.NONE : commands.keySet().first();
+    }
 
     /**
      * All commands before/after (exclusive of) the given timestamp

@@ -153,7 +153,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
         if (safeStore.commandStore().globalDurability(txnId).compareTo(Majority) >= 0)
         {
             Unseekables<?> preacceptsWith = isRoute(query) ? castToRoute(query).withHomeKey() : query;
-            return safeStore.commandStore().isRejectedIfNotPreAccepted(txnId, preacceptsWith) ? PreAccepted : PreApplied;
+            return safeStore.commandStore().isRejectedIfNotPreAccepted(txnId, preacceptsWith) ? PreAccepted : PreCommitted;
         }
 
         // TODO (expected, consider): should we force this to be a Route or a Participants?

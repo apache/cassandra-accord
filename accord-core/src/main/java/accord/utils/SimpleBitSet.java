@@ -312,7 +312,7 @@ public class SimpleBitSet
     {
         int index = i >>> 6;
         if (index >= bits.length)
-            throw new IndexOutOfBoundsException();
+            throw new IndexOutOfBoundsException(String.format("%d >= %d", index, bits.length));
         return index;
     }
 

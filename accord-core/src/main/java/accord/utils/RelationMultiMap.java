@@ -417,14 +417,14 @@ public class RelationMultiMap
         public T get(int index)
         {
             if (index >= endIndex)
-                throw new IndexOutOfBoundsException();
+                throw new IndexOutOfBoundsException(String.format("%d >= %d", index, endIndex));
             return values[ids[startIndex + index]];
         }
 
         public int getValueIndex(int index)
         {
             if (index >= endIndex)
-                throw new IndexOutOfBoundsException();
+                throw new IndexOutOfBoundsException(String.format("%d >= %d", index, endIndex));
             return ids[startIndex + index];
         }
 

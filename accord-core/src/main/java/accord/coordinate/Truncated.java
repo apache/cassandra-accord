@@ -24,7 +24,7 @@ import accord.api.RoutingKey;
 import accord.primitives.TxnId;
 
 /**
- * Thrown when a transaction exceeds its specified timeout for obtaining a result for a client
+ * Thrown when a transaction's state has been truncated prior to the completion of some operation upon it
  */
 public class Truncated extends CoordinationFailed
 {

@@ -30,6 +30,7 @@ import accord.impl.CommandTimeseries.CommandLoader;
 import accord.local.Command;
 import accord.local.CommonAttributes;
 import accord.local.PreLoadContext;
+import accord.local.RedundantBefore;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.primitives.Ranges;
@@ -112,7 +113,15 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
         if (cfk == null)
             return null;
         if (cfk.isEmpty())
+        {
             cfk.initialize(cfkLoader(key));
+        }
+        else
+        {
+            RedundantBefore.Entry entry = commandStore().redundantBefore().get(key.toUnseekable());
+            if (entry != null && cfk.current().hasRedundant(entry.redundantBefore))
+                cfk.set(cfk.current().withoutRedundant(entry.redundantBefore));
+        }
         return cfk;
     }
 
