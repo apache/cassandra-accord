@@ -18,4 +18,3 @@
 
 rootProject.name = 'accord'
 include 'accord-core'
-include 'accord-maelstrom'
