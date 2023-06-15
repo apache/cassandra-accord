@@ -35,9 +35,17 @@ import static java.util.Spliterators.spliteratorUnknownSize;
 @SuppressWarnings("unchecked")
 public class IntrusiveLinkedList<O extends IntrusiveLinkedListNode> extends IntrusiveLinkedListNode implements Iterable<O>
 {
+    private final boolean cacheIterator;
+
     public IntrusiveLinkedList()
     {
+        this(true);
+    }
+
+    public IntrusiveLinkedList(boolean cacheIterator)
+    {
         prev = next = this;
+        this.cacheIterator = cacheIterator;
     }
 
     public void addFirst(O add)
@@ -77,34 +85,49 @@ public class IntrusiveLinkedList<O extends IntrusiveLinkedListNode> extends Intr
         return next == this;
     }
 
-    @Override
-    public Iterator<O> iterator()
-    {
-        return new Iterator<O>()
-        {
-            IntrusiveLinkedListNode next = IntrusiveLinkedList.this.next;
-
-            @Override
-            public boolean hasNext()
-            {
-                return next != IntrusiveLinkedList.this;
-            }
-
-            @Override
-            public O next()
-            {
-                O result = (O)next;
-                if (result.next == null)
-                    throw new NullPointerException();
-                next = result.next;
-                return result;
-            }
-        };
-    }
-
     public Stream<O> stream()
     {
         return StreamSupport.stream(spliteratorUnknownSize(iterator(), Spliterator.IMMUTABLE), false);
     }
+
+    @Override
+    public Iterator<O> iterator()
+    {
+        if (!cacheIterator)
+            return new ReusableIterator();
+
+        if (iterator == null)
+            return iterator = new ReusableIterator();
+
+        return iterator.reset();
+    }
+
+    private class ReusableIterator implements Iterator<O>
+    {
+        IntrusiveLinkedListNode next = IntrusiveLinkedList.this.next;
+
+        @Override
+        public boolean hasNext()
+        {
+            return next != IntrusiveLinkedList.this;
+        }
+
+        @Override
+        public O next()
+        {
+            O result = (O)next;
+            if (result.next == null)
+                throw new NullPointerException();
+            next = result.next;
+            return result;
+        }
+
+        ReusableIterator reset()
+        {
+            next = IntrusiveLinkedList.this.next;
+            return this;
+        }
+    }
+    private ReusableIterator iterator = null;
 }
 
