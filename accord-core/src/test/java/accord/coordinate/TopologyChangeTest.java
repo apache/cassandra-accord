@@ -73,7 +73,8 @@ public class TopologyChangeTest
             cluster.configServices(4).forEach(config -> {
                 try
                 {
-                    getUninterruptibly(config.reportTopology(topology2));
+                    config.reportTopology(topology2);
+                    getUninterruptibly(config.ackFor(topology2.epoch()).coordination);
                 }
                 catch (ExecutionException e)
                 {

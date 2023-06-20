@@ -47,6 +47,8 @@ public enum MessageType
     INFORM_HOME_DURABLE_REQ (true ),
     CHECK_STATUS_REQ        (false),
     CHECK_STATUS_RSP        (false),
+    FETCH_DATA_REQ          (false),
+    FETCH_DATA_RSP          (false)
     ;
 
     /**

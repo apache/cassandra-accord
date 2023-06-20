@@ -331,7 +331,7 @@ public abstract class CommandStores
         return newLocalTopology.epoch() != 1;
     }
 
-    private synchronized TopologyUpdate updateTopology(Node node, Snapshot prev, Topology newTopology)
+    private synchronized TopologyUpdate updateTopology(Node node, Snapshot prev, Topology newTopology, boolean startSync)
     {
         checkArgument(!newTopology.isSubset(), "Use full topology for CommandStores.updateTopology");
 
@@ -364,8 +364,10 @@ public abstract class CommandStores
                 bootstrapUpdates.add(shard.store.interruptBootstraps(epoch, newRanges.currentRanges()));
             }
             // TODO (desired): only sync affected shards
-            if (epoch > 1)
-                bootstrapUpdates.add(shard.store.sync(node, shard.ranges().currentRanges(), epoch));
+            Ranges ranges = shard.ranges().currentRanges();
+            // ranges can be empty when ranges are lost or consolidated across epochs.
+            if (epoch > 1 && startSync && !ranges.isEmpty())
+                bootstrapUpdates.add(shard.store.sync(node, ranges, epoch));
             result.add(shard);
         }
 
@@ -378,7 +380,7 @@ public abstract class CommandStores
                 ShardHolder shardHolder = new ShardHolder(supplier.create(nextId++, rangesHolder), rangesHolder);
                 rangesHolder.current = new RangesForEpoch(epoch, add, shardHolder.store);
 
-                Map<Boolean, Ranges> partitioned = add.partitioningBy(range -> shouldBootstrap(node, prev.local, newLocalTopology, range));
+                Map<Boolean, Ranges> partitioned = add.partitioningBy(range -> shouldBootstrap(node, prev.global, newLocalTopology, range));
                 if (partitioned.containsKey(true))
                     bootstrapUpdates.add(shardHolder.store.bootstrapper(node, partitioned.get(true), newLocalTopology.epoch()));
                 if (partitioned.containsKey(false))
@@ -515,9 +517,9 @@ public abstract class CommandStores
         return chain;
     }
 
-    public synchronized Supplier<EpochReady> updateTopology(Node node, Topology newTopology)
+    public synchronized Supplier<EpochReady> updateTopology(Node node, Topology newTopology, boolean startSync)
     {
-        TopologyUpdate update = updateTopology(node, current, newTopology);
+        TopologyUpdate update = updateTopology(node, current, newTopology, startSync);
         current = update.snapshot;
         return update.bootstrap;
     }

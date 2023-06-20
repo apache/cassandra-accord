@@ -587,4 +587,16 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
             // ignore
         }
     }
+
+    public static void awaitUninterruptiblyAndRethrow(AsyncChain<?> chain)
+    {
+        try
+        {
+            getUninterruptibly(chain);
+        }
+        catch (ExecutionException e)
+        {
+            throw new RuntimeException(e.getCause());
+        }
+    }
 }

@@ -81,8 +81,6 @@ import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.Status.Committed;
 import static accord.local.Status.PreAccepted;
 import static accord.local.Status.PreCommitted;
-import static accord.local.Status.Applied;
-import static accord.local.Status.Invalidated;
 import static accord.primitives.Routables.Slice.Minimal;
 
 public abstract class InMemoryCommandStore extends CommandStore
@@ -714,19 +712,6 @@ public abstract class InMemoryCommandStore extends CommandStore
 
                 historicalRangeCommands.merge(txnId, ranges.slice(allRanges), Ranges::with);
             });
-        }
-
-        public Timestamp maxApplied(Seekables<?, ?> keysOrRanges, Ranges slice)
-        {
-            Seekables<?, ?> sliced = keysOrRanges.slice(slice, Minimal);
-            Timestamp timestamp = Timestamp.NONE;
-            for (SafeCommand safeCommand : commands.values())
-            {
-                Command command = safeCommand.current();
-                if (command.hasBeen(Applied) && !command.hasBeen(Invalidated) && command.partialTxn().keys().intersects(sliced))
-                    timestamp = Timestamp.max(timestamp, command.executeAt());
-            }
-            return timestamp;
         }
 
         @Override

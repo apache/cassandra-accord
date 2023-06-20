@@ -62,6 +62,11 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
     @VisibleForTesting
     ReducingIntervalMap(boolean inclusiveEnds, K[] ends, V[] values)
     {
+        if (ends.length != values.length - 1)
+            throw new IllegalArgumentException(String.format("Length %d != %d - 1; %s -> %s",
+                                                             ends.length, values.length,
+                                                             Arrays.toString(ends), Arrays.toString(values)));
+
         this.inclusiveEnds = inclusiveEnds;
         this.ends = ends;
         this.values = values;
@@ -101,6 +106,11 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         return Arrays.hashCode(values);
     }
 
+    public boolean inclusiveEnds()
+    {
+        return inclusiveEnds;
+    }
+
     public V get(K key)
     {
         int idx = Arrays.binarySearch(ends, key);
@@ -109,11 +119,22 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         return values[idx];
     }
 
+    private void checkIndex(int idx)
+    {
+        if (idx < 0 || idx > size() - 1)
+            throw new IndexOutOfBoundsException(String.format("%d < 0 or > %d - 1", idx, size()));
+    }
+
+    public K key(int idx)
+    {
+        checkIndex(idx);
+        return ends[idx];
+    }
+
     public V value(int idx)
     {
-        if (idx < 0 || idx > size())
-            throw new IndexOutOfBoundsException();
-
+        if (idx < 0 || idx >= values.length)
+            throw new IndexOutOfBoundsException(String.format("%d < 0 or > %d - 1", idx, size()));
         return values[idx];
     }
 

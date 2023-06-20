@@ -28,6 +28,7 @@ import accord.local.Node.Id;
 import accord.primitives.*;
 import accord.utils.*;
 import accord.utils.ArrayBuffers.IntBuffers;
+import com.google.common.annotations.VisibleForTesting;
 
 import static accord.utils.SortedArrays.Search.FLOOR;
 import static accord.utils.SortedArrays.exponentialSearch;
@@ -35,6 +36,7 @@ import static accord.utils.SortedArrays.exponentialSearch;
 public class Topology
 {
     public static final Topology EMPTY = new Topology(0, new Shard[0], Ranges.EMPTY, Collections.emptyMap(), Ranges.EMPTY, new int[0]);
+    private static final int[] EMPTY_SUBSET = new int[0];
     final long epoch;
     final Shard[] shards;
     final Ranges ranges;
@@ -191,6 +193,12 @@ public class Topology
         int i = ranges.indexOf(key);
         if (i < 0) return -1;
         return Arrays.binarySearch(supersetIndexes, i);
+    }
+
+    @VisibleForTesting
+    public Topology withEmptySubset()
+    {
+        return forSubset(EMPTY_SUBSET);
     }
 
     public Topology forSelection(Unseekables<?, ?> select, OnUnknown onUnknown)
