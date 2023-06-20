@@ -149,9 +149,10 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         configService.registerListener(this);
     }
 
+    // TODO (cleanup, testing): remove, only used by Maelstrom
     public AsyncResult<Void> start()
     {
-        return onTopologyUpdateInternal(configService.currentTopology()).metadata;
+        return onTopologyUpdateInternal(configService.currentTopology(), false).metadata;
     }
 
     public CommandStores commandStores()
@@ -175,25 +176,25 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return topology().epoch();
     }
 
-    private synchronized EpochReady onTopologyUpdateInternal(Topology topology)
+    private synchronized EpochReady onTopologyUpdateInternal(Topology topology, boolean startSync)
     {
-        Supplier<EpochReady> bootstrap = commandStores.updateTopology(this, topology);
+        Supplier<EpochReady> bootstrap = commandStores.updateTopology(this, topology, startSync);
         this.topology.onTopologyUpdate(topology);
         return bootstrap.get();
     }
 
     @Override
-    public synchronized AsyncResult<Void> onTopologyUpdate(Topology topology)
+    public synchronized AsyncResult<Void> onTopologyUpdate(Topology topology, boolean startSync)
     {
         if (topology.epoch() <= this.topology.epoch())
             return AsyncResults.success(null);
-        EpochReady ready = onTopologyUpdateInternal(topology);
+        EpochReady ready = onTopologyUpdateInternal(topology, startSync);
         configService.acknowledgeEpoch(ready);
         return ready.coordination;
     }
 
     @Override
-    public void onEpochSyncComplete(Id node, long epoch)
+    public void onRemoteSyncComplete(Id node, long epoch)
     {
         topology.onEpochSyncComplete(node, epoch);
     }

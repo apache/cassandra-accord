@@ -128,6 +128,21 @@ public abstract class CommandStore implements AgentExecutor
 
     public abstract void shutdown();
 
+    private static Timestamp maxApplied(SafeCommandStore safeStore, Seekables<?, ?> keysOrRanges, Ranges slice)
+    {
+        return safeStore.mapReduce(keysOrRanges, slice, SafeCommandStore.TestKind.Ws,
+                                   SafeCommandStore.TestTimestamp.STARTED_AFTER, Timestamp.NONE,
+                                   SafeCommandStore.TestDep.ANY_DEPS, null,
+                                   Status.Applied, Status.Applied,
+                                   (key, txnId, executeAt, max) -> Timestamp.max(max, executeAt),
+                                   Timestamp.NONE, Timestamp.MAX);
+    }
+
+    public AsyncChain<Timestamp> maxAppliedFor(Seekables<?, ?> keysOrRanges, Ranges slice)
+    {
+        return submit(PreLoadContext.contextFor(keysOrRanges), safeStore -> maxApplied(safeStore, keysOrRanges, slice));
+    }
+
     // implementations are expected to override this for persistence
     protected void setRejectBefore(ReducingRangeMap<Timestamp> newRejectBefore)
     {
@@ -152,6 +167,21 @@ public abstract class CommandStore implements AgentExecutor
     protected synchronized void setSafeToRead(NavigableMap<Timestamp, Ranges> newSafeToRead)
     {
         this.safeToRead = newSafeToRead;
+    }
+
+    public NavigableMap<TxnId, Ranges> bootstrapBeganAt()
+    {
+        return bootstrapBeganAt;
+    }
+
+    public NavigableMap<Timestamp, Ranges> safeToRead()
+    {
+        return safeToRead;
+    }
+
+    public long maxBootstrapEpoch()
+    {
+        return maxBootstrapEpoch;
     }
 
     public void markExclusiveSyncPoint(TxnId txnId, Ranges ranges, SafeCommandStore safeStore)
@@ -286,7 +316,7 @@ public abstract class CommandStore implements AgentExecutor
      * So, the outer future's success is sufficient for the topology to be acknowledged, and the inner future for the
      * bootstrap to be complete.
      */
-    Supplier<EpochReady> sync(Node node, Ranges ranges, long epoch)
+    protected Supplier<EpochReady> sync(Node node, Ranges ranges, long epoch)
     {
         return () -> {
             AsyncResults.SettableResult<Void> whenDone = new AsyncResults.SettableResult<>();

@@ -69,9 +69,19 @@ public class TopologyManager
             this.local = global.forNode(node).trim();
             Invariants.checkArgument(!global().isSubset());
             // TODO: can we just track sync for local ranges here?
-            this.syncTracker = new QuorumTracker(new Single(sorter, global()));
-            this.syncComplete = syncComplete;
-            this.prevSynced = prevSynced;
+            if (global().size() > 0)
+            {
+                this.syncTracker = new QuorumTracker(new Single(sorter, global()));
+                this.syncComplete = syncComplete;
+                this.prevSynced = prevSynced;
+            }
+            else
+            {
+                // if topology is empty, there is nothing to sync
+                this.syncTracker = null;
+                this.syncComplete = true;
+                this.prevSynced = true;
+            }
         }
 
         void markPrevSynced()
@@ -124,7 +134,7 @@ public class TopologyManager
 
         boolean shardIsUnsynced(int idx)
         {
-            return !prevSynced || !syncTracker.get(idx).hasReachedQuorum();
+            return !prevSynced || (!syncComplete && !syncTracker.get(idx).hasReachedQuorum());
         }
     }
 
@@ -178,6 +188,8 @@ public class TopologyManager
 
         public long minEpoch()
         {
+            if (currentEpoch == 0)
+                return 0;
             return currentEpoch - epochs.length + 1;
         }
 
@@ -292,17 +304,16 @@ public class TopologyManager
     public synchronized void truncateTopologyUntil(long epoch)
     {
         Epochs current = epochs;
-        checkArgument(current.epoch() >= epoch);
+        checkArgument(current.epoch() >= epoch, "Unable to truncate; epoch %d is > current epoch %d", epoch , current.epoch());
 
         if (current.minEpoch() >= epoch)
             return;
 
         int newLen = current.epochs.length - (int) (epoch - current.minEpoch());
-        Invariants.checkState(current.epochs[newLen - 1].syncComplete());
+        Invariants.checkState(current.epochs[newLen - 1].syncComplete(), "Epoch %d's sync is not complete", current.epochs[newLen - 1].epoch());
 
-        EpochState[] nextEpochs = new EpochState[newLen];
-        System.arraycopy(current.epochs, 0, nextEpochs, 0, newLen);
-        epochs = new Epochs(nextEpochs, current.pendingSyncComplete, current.futureEpochFutures);
+        epochs = new Epochs(Arrays.copyOfRange(current.epochs, 0, newLen),
+                            current.pendingSyncComplete, current.futureEpochFutures);
     }
 
     public TopologySorter.Supplier sorter()

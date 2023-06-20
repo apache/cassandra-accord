@@ -19,9 +19,8 @@
 package accord.api;
 
 import accord.topology.Topology;
-import accord.utils.async.AsyncResult;
 
 public interface TestableConfigurationService extends ConfigurationService
 {
-    AsyncResult<?> reportTopology(Topology topology);
+    void reportTopology(Topology topology);
 }

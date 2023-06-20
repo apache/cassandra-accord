@@ -30,12 +30,12 @@ import org.agrona.collections.Int2ObjectHashMap;
 
 public abstract class WaitAndReadData extends ReadData
 {
-    final Status waitForStatus;
-    final Deps waitOn;
-    protected final Timestamp waitUntil; // this may be set to Timestamp.MAX if we want to wait for all deps, regardless of when they execute
-    protected final Timestamp executeReadAt;
-    final PartialTxn read;
-    final Int2ObjectHashMap<LocalBarrier> barriers = new Int2ObjectHashMap<>();
+    public final Status waitForStatus;
+    public final Deps waitOn;
+    public final Timestamp waitUntil; // this may be set to Timestamp.MAX if we want to wait for all deps, regardless of when they execute
+    public final Timestamp executeReadAt;
+    public final PartialTxn read;
+    transient final Int2ObjectHashMap<LocalBarrier> barriers = new Int2ObjectHashMap<>();
 
     protected WaitAndReadData(Seekables<?, ?> readScope, long waitForEpoch, Status waitForStatus, Deps waitOn, Timestamp waitUntil, Timestamp executeReadAt, PartialTxn read)
     {

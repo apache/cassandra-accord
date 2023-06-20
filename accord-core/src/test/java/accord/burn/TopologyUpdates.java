@@ -69,7 +69,7 @@ public class TopologyUpdates
             pendingTopologies.remove(epoch);
 
         MessageTask.begin(originator, cluster, executor, "SyncComplete:" + epoch, (node, from, onDone) -> {
-            node.onEpochSyncComplete(originator.id(), epoch);
+            node.onRemoteSyncComplete(originator.id(), epoch);
             onDone.accept(true);
         });
     }

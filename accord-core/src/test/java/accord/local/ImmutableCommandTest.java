@@ -100,7 +100,7 @@ public class ImmutableCommandTest
                         new MockCluster.Clock(100), () -> storeSupport.data, new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), new TestAgent(), new DefaultRandom(), null,
                         SizeOfIntersectionSorter.SUPPLIER, ignore -> ignore2 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new);
         awaitUninterruptibly(node.start());
-        node.onTopologyUpdate(storeSupport.local.get());
+        node.onTopologyUpdate(storeSupport.local.get(), true);
         return node;
     }
 

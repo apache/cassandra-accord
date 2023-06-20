@@ -218,6 +218,7 @@ public abstract class FetchCoordinator
     // it must only ensure needed.isEmpty() (if possible)
     protected Ranges trySendMore(List<State> states, Ranges needed)
     {
+        // TODO (soon, required) : need to correctly handle the cluster having fewer nodes than replication factor
         for (State state : states)
         {
             Ranges contact = state.uncontacted.slice(needed, Minimal);

@@ -33,7 +33,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 import accord.api.ConfigurationService;
-import accord.impl.AbstractConfigurationService.EpochHistory;
+import accord.impl.AbstractConfigurationService.Minimal.EpochHistory;
 import accord.local.Node.Id;
 import accord.primitives.Range;
 import accord.topology.Shard;
@@ -58,7 +58,7 @@ public class AbstractConfigurationServiceTest
         }
 
         @Override
-        public AsyncResult<Void> onTopologyUpdate(Topology topology)
+        public AsyncResult<Void> onTopologyUpdate(Topology topology, boolean startSync)
         {
             if (topologies.put(topology.epoch(), topology) != null)
                 Assertions.fail("Received topology twice for epoch " + topology.epoch());
@@ -68,7 +68,7 @@ public class AbstractConfigurationServiceTest
         }
 
         @Override
-        public void onEpochSyncComplete(Id node, long epoch)
+        public void onRemoteSyncComplete(Id node, long epoch)
         {
             Set<Id> synced = syncCompletes.computeIfAbsent(epoch, e -> new HashSet<>());
             if (!synced.add(node))
@@ -113,7 +113,7 @@ public class AbstractConfigurationServiceTest
         }
     }
 
-    private static class TestableConfigurationService extends AbstractConfigurationService
+    private static class TestableConfigurationService extends AbstractConfigurationService.Minimal
     {
         final Set<Long> syncStarted = new HashSet<>();
         final Set<Long> epochsFetched = new HashSet<>();
@@ -130,7 +130,7 @@ public class AbstractConfigurationServiceTest
         }
 
         @Override
-        protected void epochSyncComplete(Topology topology)
+        protected void localSyncComplete(Topology topology)
         {
             if (!syncStarted.add(topology.epoch()))
                 Assertions.fail("Sync started multiple times for " + topology.epoch());

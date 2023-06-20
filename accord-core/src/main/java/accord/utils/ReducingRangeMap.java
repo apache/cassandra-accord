@@ -28,6 +28,14 @@ import static accord.utils.SortedArrays.Search.FAST;
 
 public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
 {
+    public static class SerializerSupport
+    {
+        public static <V> ReducingRangeMap<V> create(boolean inclusiveEnds, RoutingKey[] ends, V[] values)
+        {
+            return new ReducingRangeMap<>(inclusiveEnds, ends, values);
+        }
+    }
+
     final RoutingKeys endKeys;
 
     public ReducingRangeMap(V value)
