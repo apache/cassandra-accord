@@ -163,6 +163,16 @@ public abstract class Command implements CommonAttributes
         {
             return Executed.executed(common, status, executeAt, promised, accepted, waitingOn, writes, result);
         }
+
+        public static Truncated truncated(TxnId txnId, Route<?> route, Timestamp executeAt)
+        {
+            return Truncated.truncated(txnId, route, executeAt);
+        }
+
+        public static Truncated invalidated(TxnId txnId, Listeners.Immutable durableListeners)
+        {
+            return Truncated.invalidated(txnId, durableListeners);
+        }
     }
 
     private static SaveStatus validateCommandClass(SaveStatus status, Class<?> expected, Class<?> actual)
@@ -581,15 +591,20 @@ public abstract class Command implements CommonAttributes
             return new Truncated(command.txnId(), SaveStatus.Truncated, command.route(), command.executeAtIfKnown(), EMPTY);
         }
 
-        public static Truncated truncated(Command command, Route<?> route, Timestamp executeAt)
+        public static Truncated truncated(TxnId txnId, Route<?> route, Timestamp executeAt)
         {
-            return new Truncated(command.txnId(), SaveStatus.Truncated, route, executeAt, EMPTY);
+            return new Truncated(txnId, SaveStatus.Truncated, route, executeAt, EMPTY);
         }
 
         public static Truncated invalidated(Command command)
         {
             Invariants.checkState(!command.hasBeen(Status.PreCommitted));
-            return new Truncated(command.txnId(), SaveStatus.Invalidated, null, Timestamp.NONE, command.durableListeners());
+            return invalidated(command.txnId(), command.durableListeners());
+        }
+
+        public static Truncated invalidated(TxnId txnId, Listeners.Immutable durableListeners)
+        {
+            return new Truncated(txnId, SaveStatus.Invalidated, null, Timestamp.NONE, durableListeners);
         }
 
         @Override
