@@ -360,4 +360,15 @@ public class SimpleBitSet
         long bit = 1L << imod64;
         return bit + bit - 1;
     }
+
+    @Override
+    public boolean equals(Object other)
+    {
+        return other instanceof SimpleBitSet && this.equals((SimpleBitSet) other);
+    }
+
+    public boolean equals(SimpleBitSet other)
+    {
+        return Arrays.equals(this.bits, other.bits);
+    }
 }

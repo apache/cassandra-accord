@@ -1028,9 +1028,24 @@ public abstract class Command implements CommonAttributes
             return "onApply=" + computeWaitingOnApply(deps, waitingOnCommit, waitingOnApply).descendingSet() + ", onCommit=" + computeWaitingOnCommit(deps, waitingOnCommit).descendingSet();
         }
 
+        @Override
         public String toString()
         {
             return toString(deps, waitingOnCommit, waitingOnApply);
+        }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            return other instanceof WaitingOn && this.equals((WaitingOn) other);
+        }
+
+        public boolean equals(WaitingOn other)
+        {
+            return this.deps.equals(other.deps)
+                && this.waitingOnCommit.equals(other.waitingOnCommit)
+                && this.waitingOnApply.equals(other.waitingOnApply)
+                && this.appliedOrInvalidated.equals(other.appliedOrInvalidated);
         }
 
         public static class Update
