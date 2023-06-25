@@ -57,6 +57,8 @@ public class ReducingRangeMapTest
     static final ReducingRangeMap<Timestamp> EMPTY = new ReducingRangeMap<>();
     static final RoutingKey MINIMUM_EXCL = new IntKey.Routing(MIN_VALUE);
     static final RoutingKey MAXIMUM_EXCL = new IntKey.Routing(MAX_VALUE);
+    static boolean END_INCLUSIVE = false;
+
     private static RoutingKey rk(int t)
     {
         return new IntKey.Routing(t);
@@ -82,7 +84,7 @@ public class ReducingRangeMapTest
 
     private static Range r(RoutingKey l, RoutingKey r)
     {
-        return new Range.EndInclusive(l, r);
+        return END_INCLUSIVE ? new Range.EndInclusive(l, r) : new Range.StartInclusive(l, r);
     }
 
     private static RoutingKey incr(RoutingKey rk)
@@ -159,35 +161,6 @@ public class ReducingRangeMapTest
     }
 
     @Test
-    public void testAdd()
-    {
-        Builder builder = builder();
-        Assertions.assertEquals(h(pt(10, none()), pt(20, 5), pt(30, none()), pt(40, 5)),
-                            builder.add(ts(5), r(10, 20), r(30, 40)).history);
-
-        Assertions.assertEquals(none(), builder.history.get(rk(0)));
-        Assertions.assertEquals(none(), builder.history.get(rk(10)));
-        Assertions.assertEquals(ts(5), builder.history.get(rk(11)));
-        Assertions.assertEquals(ts(5), builder.history.get(rk(20)));
-        Assertions.assertEquals(none(), builder.history.get(rk(21)));
-
-        builder.clear();
-        Assertions.assertEquals(h(pt(10, none()), pt(20, 5), pt(30, none()), pt(40, 6)),
-                            builder.add(ts(5), r(10, 20)).add(ts(6), r(30, 40)).history);
-        builder.clear();
-        Assertions.assertEquals(h(pt(10, none()), pt(20, 5), pt(30, 6), pt(40, 5)),
-                            builder.add(ts(5), r(10, 40)).add(ts(6), r(20, 30)).history);
-
-        builder.clear();
-        Assertions.assertEquals(h(pt(10, none()), pt(20, 6), pt(30, 5)),
-                            builder.add(ts(6), r(10, 20)).add(ts(5), r(15, 30)).history);
-
-        builder.clear();
-        Assertions.assertEquals(h(pt(10, none()), pt(20, 5), pt(30, 6)),
-                            builder.add(ts(5), r(10, 25)).add(ts(6), r(20, 30)).history);
-    }
-
-    @Test
     public void testOne()
     {
         testRandomAdds(8532037884171168001L, 3, 1, 3, 0.100000f, 0.100000f);
@@ -198,7 +171,7 @@ public class ReducingRangeMapTest
     {
         ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
         List<ListenableFuture<Void>> results = new ArrayList<>();
-        int count = 1000;
+        int count = 100000;
         for (int numberOfAdditions : new int[] { 1, 10, 100 })
         {
             for (float maxCoveragePerRange : new float[] { 0.01f, 0.1f, 0.5f })
@@ -375,7 +348,7 @@ public class ReducingRangeMapTest
             canonical.put(range.start(), canonical.ceilingEntry(range.start()).getValue());
             canonical.put(range.end(), canonical.ceilingEntry(range.end()).getValue());
 
-            canonical.subMap(range.start(), false, range.end(), true)
+            canonical.subMap(range.start(), !END_INCLUSIVE, range.end(), END_INCLUSIVE)
                     .entrySet().forEach(e -> e.setValue(Timestamp.nonNullOrMax(e.getValue(), timestamp)));
         }
 
@@ -451,8 +424,8 @@ public class ReducingRangeMapTest
                     canonFoldl.clear();
                     for (Range range : ranges)
                     {
-                        RoutingKey start = canonical.higherKey(range.start());
-                        RoutingKey end = canonical.ceilingKey(range.end());
+                        RoutingKey start = END_INCLUSIVE ? canonical.higherKey(range.start()) : canonical.ceilingKey(range.start());
+                        RoutingKey end = END_INCLUSIVE ? canonical.ceilingKey(range.end()) : canonical.higherKey(range.end());
                         for (Timestamp next : canonical.subMap(start, true, end, true).values())
                         {
                             if (next == null)

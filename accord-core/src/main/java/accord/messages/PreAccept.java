@@ -136,10 +136,12 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         PreAcceptOk okMax = ok1.witnessedAt.compareTo(ok2.witnessedAt) >= 0 ? ok1 : ok2;
         PreAcceptOk okMin = okMax == ok1 ? ok2 : ok1;
 
+        Timestamp witnessedAt = Timestamp.mergeMax(okMax.witnessedAt, okMin.witnessedAt);
         PartialDeps deps = ok1.deps.with(ok2.deps);
-        if (deps == okMax.deps)
+
+        if (deps == okMax.deps && witnessedAt == okMax.witnessedAt)
             return okMax;
-        return new PreAcceptOk(txnId, okMax.witnessedAt.mergeFlags(okMin.witnessedAt), deps);
+        return new PreAcceptOk(txnId, witnessedAt, deps);
     }
 
     @Override

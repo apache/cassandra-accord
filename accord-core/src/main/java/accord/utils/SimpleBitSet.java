@@ -85,11 +85,9 @@ public class SimpleBitSet
 
     public void setRange(int from, int to)
     {
-        if (to <= from)
-        {
-            Invariants.checkArgument(to >= from, "to < from (%s < %s)", to, from);
+        Invariants.checkArgument(from <= to, "from > to (%s > %s)", from, to);
+        if (from == to)
             return;
-        }
 
         int fromIndex = from >>> 6;
         int toIndex = (to + 63) >>> 6;
@@ -136,32 +134,68 @@ public class SimpleBitSet
         return true;
     }
 
-    public boolean get(int i)
+    public final boolean get(int i)
     {
         int index = indexOf(i);
         long bit = bit(i);
         return 0 != (bits[index] & bit);
     }
 
-    public int size()
+    public final int size()
     {
         return bits.length * 64;
     }
 
-    public int setBitCount()
+    public final int setBitCount()
     {
         return count;
     }
 
-    public boolean isEmpty()
+    public final boolean isEmpty()
     {
         return count == 0;
     }
 
-    public int prevSetBit(int i)
+    public final int lastSetBit()
+    {
+        return prevSetBit(size() - 1, -1);
+    }
+
+    public final int lastSetBit(int ifNotFound)
+    {
+        return prevSetBit(size() - 1, ifNotFound);
+    }
+
+    public final int prevSetBit(int i)
+    {
+        return prevSetBit(i, -1);
+    }
+
+    public final int prevSetBit(int i, int ifNotFound)
+    {
+        return prevSetBitInternal(i, 0, ifNotFound);
+    }
+
+    public final int lastSetBitNotBefore(int inclBound)
+    {
+        return prevSetBitNotBefore(size() - 1, inclBound, -1);
+    }
+
+    public final int lastSetBitNotBefore(int inclBound, int ifNotFound)
+    {
+        return prevSetBitNotBefore(size() - 1, inclBound, ifNotFound);
+    }
+
+    public final int prevSetBitNotBefore(int i, int inclBound, int ifNotFound)
+    {
+        int result = prevSetBitInternal(i, lowerLimitOf(inclBound), ifNotFound);
+        return result >= inclBound ? result : ifNotFound;
+    }
+
+    public final int prevSetBitInternal(int i, int inclIndexBound, int ifNotFound)
     {
         if (count == 0)
-            return -1;
+            return ifNotFound;
 
         int index = indexOf(i);
         long bits = this.bits[index] & bitsEqualOrLesser(i);
@@ -170,37 +204,45 @@ public class SimpleBitSet
             if (bits != 0)
                 return index * 64 + numberOfTrailingZeros(highestOneBit(bits));
 
-            if (--index < 0)
-                return -1;
-
-            bits = this.bits[index];
-        }
-    }
-
-    public int prevSetBitNotBefore(int i, int inclBound, int ifNotFound)
-    {
-        if (count == 0)
-            return ifNotFound;
-
-        int index = indexOf(i);
-        int inclIndexBound = lowerLimitOf(inclBound);
-        long bits = this.bits[index] & bitsEqualOrLesser(i);
-        while (true)
-        {
-            if (bits != 0)
-            {
-                int result = index * 64 + numberOfTrailingZeros(highestOneBit(bits));
-                return result > inclBound ? result : ifNotFound;
-            }
-
             if (--index < inclIndexBound)
-                return -1;
+                return ifNotFound;
 
             bits = this.bits[index];
         }
     }
 
-    public int nextSetBit(int i, int ifNotFound)
+    public final int firstSetBit()
+    {
+        return nextSetBit(0, -1);
+    }
+
+    public final int firstSetBit(int ifNotFound)
+    {
+        return nextSetBit(0, ifNotFound);
+    }
+
+    public final int nextSetBit(int i)
+    {
+        return nextSetBit(i, -1);
+    }
+
+    public final int nextSetBit(int i, int ifNotFound)
+    {
+        return nextSetBitInternal(i, bits.length, ifNotFound);
+    }
+
+    public final int firstSetBitBefore(int exclBound, int ifNotFound)
+    {
+        return nextSetBitBefore(0, exclBound, ifNotFound);
+    }
+
+    public final int nextSetBitBefore(int i, int exclBound, int ifNotFound)
+    {
+        int result = nextSetBitInternal(i, upperLimitOf(exclBound), ifNotFound);
+        return result < exclBound ? result : ifNotFound;
+    }
+
+    public final int nextSetBitInternal(int i, int exclIndexBound, int ifNotFound)
     {
         if (count == 0)
             return ifNotFound;
@@ -212,29 +254,6 @@ public class SimpleBitSet
             if (bits != 0)
                 return index * 64 + numberOfTrailingZeros(lowestOneBit(bits));
 
-            if (++index >= this.bits.length)
-                return ifNotFound;
-
-            bits = this.bits[index];
-        }
-    }
-
-    public int nextSetBitBefore(int i, int exclBound, int ifNotFound)
-    {
-        if (count == 0)
-            return ifNotFound;
-
-        int index = indexOf(i);
-        int exclIndexBound = upperLimitOf(exclBound);
-        long bits = this.bits[index] & bitsEqualOrGreater(i);
-        while (true)
-        {
-            if (bits != 0)
-            {
-                int result = index * 64 + numberOfTrailingZeros(lowestOneBit(bits));
-                return result < exclBound ? result : ifNotFound;
-            }
-
             if (++index >= exclIndexBound)
                 return ifNotFound;
 
@@ -242,26 +261,25 @@ public class SimpleBitSet
         }
     }
 
-    public <P1> void forEach(P1 p1, IndexedConsumer<P1> forEach)
+    public final <P1> void forEach(P1 p1, IndexedConsumer<P1> forEach)
     {
         forEach(forEach, p1, IndexedConsumer::accept);
     }
 
-    public <P1, P2> void forEach(P1 p1, P2 p2, IndexedBiConsumer<P1, P2> forEach)
+    public final <P1, P2> void forEach(P1 p1, P2 p2, IndexedBiConsumer<P1, P2> forEach)
     {
         forEach(forEach, p1, p2, IndexedBiConsumer::accept);
     }
 
-    public <P1, P2, P3> void forEach(P1 p1, P2 p2, P3 p3, IndexedTriConsumer<P1, P2, P3> forEach)
+    public final <P1, P2, P3> void forEach(P1 p1, P2 p2, P3 p3, IndexedTriConsumer<P1, P2, P3> forEach)
     {
         forEach(forEach, p1, p2, p3, IndexedTriConsumer::accept);
     }
 
     // the bitset is permitted to mutate as we iterate
-    public <P1, P2, P3, P4> void forEach(P1 p1, P2 p2, P3 p3, P4 p4, IndexedQuadConsumer<P1, P2, P3, P4> forEach)
+    public final <P1, P2, P3, P4> void forEach(P1 p1, P2 p2, P3 p3, P4 p4, IndexedQuadConsumer<P1, P2, P3, P4> forEach)
     {
-        int i = 0;
-        while (i < bits.length && count > 0)
+        for (int i = 0 ; i < bits.length && count > 0 ; ++i)
         {
             long mask = -1L;
             long register;
@@ -271,30 +289,28 @@ public class SimpleBitSet
                 mask = (-1L << bitIndex) << 1;
                 forEach.accept(p1, p2, p3, p4, i * 64 + bitIndex);
             }
-            ++i;
         }
     }
 
-    public <P1> void reverseForEach(IndexedConsumer<P1> forEach, P1 p1)
+    public final <P1> void reverseForEach(IndexedConsumer<P1> forEach, P1 p1)
     {
         reverseForEach(forEach, p1, IndexedConsumer::accept);
     }
 
-    public <P1, P2> void reverseForEach(P1 p1, P2 p2, IndexedBiConsumer<P1, P2> forEach)
+    public final <P1, P2> void reverseForEach(P1 p1, P2 p2, IndexedBiConsumer<P1, P2> forEach)
     {
         reverseForEach(forEach, p1, p2, IndexedBiConsumer::accept);
     }
 
-    public <P1, P2, P3> void reverseForEach(P1 p1, P2 p2, P3 p3, IndexedTriConsumer<P1, P2, P3> forEach)
+    public final <P1, P2, P3> void reverseForEach(P1 p1, P2 p2, P3 p3, IndexedTriConsumer<P1, P2, P3> forEach)
     {
         reverseForEach(forEach, p1, p2, p3, IndexedTriConsumer::accept);
     }
 
     // the bitset is permitted to mutate as we iterate
-    public <P1, P2, P3, P4> void reverseForEach(P1 p1, P2 p2, P3 p3, P4 p4, IndexedQuadConsumer<P1, P2, P3, P4> forEach)
+    public final <P1, P2, P3, P4> void reverseForEach(P1 p1, P2 p2, P3 p3, P4 p4, IndexedQuadConsumer<P1, P2, P3, P4> forEach)
     {
-        int i = bits.length - 1;
-        while (i >= 0 && count > 0)
+        for (int i = bits.length - 1; i >= 0 && count > 0 ; --i)
         {
             long mask = -1L;
             long register;
@@ -304,7 +320,6 @@ public class SimpleBitSet
                 mask = (1L << bitIndex) - 1;
                 forEach.accept(p1, p2, p3, p4, i * 64 + bitIndex);
             }
-            --i;
         }
     }
 

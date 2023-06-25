@@ -910,13 +910,13 @@ public abstract class Command implements CommonAttributes
 
         public TxnId nextWaitingOnCommit()
         {
-            int i = waitingOnCommit.prevSetBit(waitingOnCommit.size() - 1);
+            int i = waitingOnCommit.lastSetBit();
             return i < 0 ? null : deps.txnId(i);
         }
 
         public TxnId nextWaitingOnApply()
         {
-            int i = waitingOnApply.prevSetBit(waitingOnApply.size() - 1);
+            int i = waitingOnApply.lastSetBit();
             return i < 0 ? null : deps.txnId(i);
         }
 
@@ -939,7 +939,7 @@ public abstract class Command implements CommonAttributes
         static TxnId minWaitingOnTxnId(Deps deps, SimpleBitSet waitingOnCommit, SimpleBitSet waitingOnApply)
         {
             int keyDepsCount = deps.keyDeps.txnIdCount();
-            int minWaitingOnKeys = Math.min(waitingOnCommit.nextSetBitBefore(0, keyDepsCount, Integer.MAX_VALUE), waitingOnApply.nextSetBitBefore(0, keyDepsCount, Integer.MAX_VALUE));
+            int minWaitingOnKeys = Math.min(waitingOnCommit.firstSetBitBefore(keyDepsCount, Integer.MAX_VALUE), waitingOnApply.nextSetBitBefore(0, keyDepsCount, Integer.MAX_VALUE));
             int minWaitingOnRanges = Math.min(waitingOnCommit.nextSetBit(keyDepsCount, Integer.MAX_VALUE), waitingOnApply.nextSetBit(keyDepsCount, Integer.MAX_VALUE));
             return TxnId.nonNullOrMin(minWaitingOnKeys == Integer.MAX_VALUE ? null : deps.txnId(minWaitingOnKeys),
                                       minWaitingOnRanges == Integer.MAX_VALUE ? null : deps.txnId(minWaitingOnRanges));
@@ -948,7 +948,7 @@ public abstract class Command implements CommonAttributes
         static TxnId minWaitingOn(Deps deps, SimpleBitSet waitingOn)
         {
             int keyDepsCount = deps.keyDeps.txnIdCount();
-            int minWaitingOnKeys = waitingOn.nextSetBitBefore(0, keyDepsCount, -1);
+            int minWaitingOnKeys = waitingOn.firstSetBitBefore(keyDepsCount, -1);
             int minWaitingOnRanges = waitingOn.nextSetBit(keyDepsCount, -1);
             return TxnId.nonNullOrMin(minWaitingOnKeys < 0 ? null : deps.keyDeps.txnId(minWaitingOnKeys),
                                       minWaitingOnRanges < 0 ? null : deps.rangeDeps.txnId(minWaitingOnRanges - keyDepsCount));
@@ -957,7 +957,7 @@ public abstract class Command implements CommonAttributes
         static TxnId maxWaitingOn(Deps deps, SimpleBitSet waitingOn)
         {
             int keyDepsCount = deps.keyDeps.txnIdCount();
-            int maxWaitingOnRanges = waitingOn.prevSetBitNotBefore(waitingOn.size() - 1, keyDepsCount, -1);
+            int maxWaitingOnRanges = waitingOn.lastSetBitNotBefore(keyDepsCount);
             int maxWaitingOnKeys = waitingOn.prevSetBit(keyDepsCount);
             return TxnId.nonNullOrMax(maxWaitingOnKeys < 0 ? null : deps.keyDeps.txnId(maxWaitingOnKeys),
                                       maxWaitingOnRanges < 0 ? null : deps.rangeDeps.txnId(maxWaitingOnRanges - keyDepsCount));
@@ -1023,11 +1023,6 @@ public abstract class Command implements CommonAttributes
                 this.deps = deps;
                 this.waitingOnCommit = new SimpleBitSet(deps.txnIdCount(), false);
                 this.waitingOnCommit.setRange(0, deps.keyDeps.txnIdCount());
-                if (!participants.containsAll(deps.keyDeps.keys()))
-                {
-                    // TODO (now): we don't need to wait on these as we have lost ownership of them locally
-                    System.out.println();
-                }
                 deps.rangeDeps.forEach(participants, this, (u, i) -> {
                     u.waitingOnCommit.set(u.deps.keyDeps.txnIdCount() + i);
                 });

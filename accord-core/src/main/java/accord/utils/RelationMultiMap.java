@@ -416,9 +416,7 @@ public class RelationMultiMap
         @Override
         public T get(int index)
         {
-            if (index >= endIndex)
-                throw new IndexOutOfBoundsException(String.format("%d >= %d", index, endIndex));
-            return values[ids[startIndex + index]];
+            return values[getValueIndex(index)];
         }
 
         public int getValueIndex(int index)

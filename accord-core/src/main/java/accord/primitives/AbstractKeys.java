@@ -107,7 +107,7 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
     }
 
     @Override
-    public final boolean intersects(AbstractRanges<?> ranges)
+    public final boolean intersects(AbstractRanges ranges)
     {
         return findNextIntersection(0, ranges, 0) >= 0;
     }
@@ -125,7 +125,7 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
     }
 
     @Override
-    public final long findNextIntersection(int thisIdx, AbstractRanges<?> that, int thatIdx)
+    public final long findNextIntersection(int thisIdx, AbstractRanges that, int thatIdx)
     {
         return SortedArrays.findNextIntersectionWithMultipleMatches(this.keys, thisIdx, that.ranges, thatIdx, (RoutableKey k, Range r) -> -r.compareTo(k), Range::compareTo);
     }

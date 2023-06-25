@@ -60,7 +60,7 @@ public class TopologyManager
         private final Topology global;
         private final Topology local;
         private final QuorumTracker syncTracker;
-        private final boolean[] curShardSyncComplete;
+        private final BitSet curShardSyncComplete;
         private final Ranges newRanges;
         private Ranges curSyncComplete, prevSyncComplete, syncComplete;
         Ranges closed = Ranges.EMPTY, complete = Ranges.EMPTY;
@@ -71,7 +71,7 @@ public class TopologyManager
             this.global = checkArgument(global, !global.isSubset());
             this.local = global.forNode(node).trim();
             Invariants.checkArgument(!global().isSubset());
-            this.curShardSyncComplete = new boolean[global.shards.length];
+            this.curShardSyncComplete = new BitSet(global.shards.length);
             this.syncTracker = new QuorumTracker(new Single(sorter, global()));
             this.newRanges = global.ranges.subtract(prevRanges);
             this.prevSyncComplete = newRanges.with(prevSyncComplete);
@@ -102,11 +102,11 @@ public class TopologyManager
                 // loop over each current shard, and test if its ranges are complete
                 for (int i = 0 ; i < global.shards.length ; ++i)
                 {
-                    if (syncTracker.get(i).hasReachedQuorum() && !curShardSyncComplete[i])
+                    if (syncTracker.get(i).hasReachedQuorum() && !curShardSyncComplete.get(i))
                     {
                         curSyncComplete = curSyncComplete.with(Ranges.of(global.shards[i].range));
                         syncComplete = curSyncComplete.slice(prevSyncComplete, Minimal);
-                        curShardSyncComplete[i] = true;
+                        curShardSyncComplete.set(i);
                         updated = true;
                     }
                 }
@@ -253,8 +253,8 @@ public class TopologyManager
         }
 
         /**
-         * Mark sync complete for the given node/epoch, and if this epoch
-         * is now synced, update the prevSynced flag on superseding epochs
+         * Mark the epoch as "closed" for the provided ranges; this means that no new transactions
+         * that intersect with this range may be proposed in the epoch (they will be rejected).
          */
         public void epochClosed(Ranges ranges, long epoch)
         {
@@ -274,8 +274,8 @@ public class TopologyManager
         }
 
         /**
-         * Mark sync complete for the given node/epoch, and if this epoch
-         * is now synced, update the prevSynced flag on superseding epochs
+         * Mark the epoch as "redundant" for the provided ranges; this means that all transactions that can be
+         * proposed for this epoch have now been executed globally.
          */
         public void epochRedundant(Ranges ranges, long epoch)
         {
@@ -298,6 +298,7 @@ public class TopologyManager
 
         private Notifications pending(long epoch)
         {
+            Invariants.checkArgument(epoch > currentEpoch);
             int idx = (int) (epoch - (1 + currentEpoch));
             for (int i = pending.size(); i <= idx; i++)
                 pending.add(new Notifications());

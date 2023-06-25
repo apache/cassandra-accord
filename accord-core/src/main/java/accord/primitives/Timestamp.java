@@ -257,7 +257,8 @@ public class Timestamp implements Comparable<Timestamp>, EpochSupplier
      */
     public static Timestamp mergeMax(Timestamp a, Timestamp b)
     {
-        return a.compareTo(b) >= 0 ? a.mergeFlags(b) : b.mergeFlags(a);
+        return a.compareTo(b) >= 0 ? a.mergeFlags(b).withHlcAtLeast(b.hlc())
+                                   : b.mergeFlags(a).withHlcAtLeast(a.hlc());
     }
 
     public static <T extends Timestamp> T rejectedOrMax(T a, T b)

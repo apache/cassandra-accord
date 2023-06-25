@@ -62,6 +62,12 @@ public class ImmutableBitSet extends SimpleBitSet
     }
 
     @Override
+    public void setRange(int from, int to)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public boolean unset(int i)
     {
         throw new UnsupportedOperationException();

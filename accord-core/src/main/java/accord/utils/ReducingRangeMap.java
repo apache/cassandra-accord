@@ -72,11 +72,10 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         {
             default: throw new AssertionError();
             case Key: return foldl((AbstractKeys<?>) routables, fold, accumulator, p1, p2, terminate);
-            case Range: return foldl((AbstractRanges<?>) routables, fold, accumulator, p1, p2, terminate);
+            case Range: return foldl((AbstractRanges) routables, fold, accumulator, p1, p2, terminate);
         }
     }
 
-    // TODO (required): test
     public <V2, P1, P2> V2 foldl(AbstractKeys<?> keys, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
         if (values.length == 0)
@@ -111,8 +110,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         return accumulator;
     }
 
-    // TODO (required): test
-    public <V2, P1, P2> V2 foldl(AbstractRanges<?> ranges, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    public <V2, P1, P2> V2 foldl(AbstractRanges ranges, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
         if (values.length == 0)
             return accumulator;

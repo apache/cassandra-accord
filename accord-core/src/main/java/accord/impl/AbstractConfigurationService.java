@@ -288,11 +288,11 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
         reportTopology(topology, true);
     }
 
-    protected void receiveSyncCompletePreListenerNotify(Node.Id node, long epoch) {}
+    protected void receiveRemoteSyncCompletePreListenerNotify(Node.Id node, long epoch) {}
 
-    public synchronized void receiveSyncComplete(Node.Id node, long epoch)
+    public synchronized void receiveRemoteSyncComplete(Node.Id node, long epoch)
     {
-        receiveSyncCompletePreListenerNotify(node, epoch);
+        receiveRemoteSyncCompletePreListenerNotify(node, epoch);
         for (Listener listener : listeners)
             listener.onRemoteSyncComplete(node, epoch);
     }

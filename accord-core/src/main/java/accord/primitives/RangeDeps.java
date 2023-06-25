@@ -244,7 +244,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     /**
      * The same TxnId may be provided as a parameter multiple times
      */
-    public void forEach(AbstractRanges<?> ranges, Consumer<TxnId> forEach)
+    public void forEach(AbstractRanges ranges, Consumer<TxnId> forEach)
     {
         int minIndex = 0;
         for (int i = 0; i < ranges.size() ; ++i)
@@ -273,7 +273,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
                 forEach((AbstractKeys<?>) unseekables, from, to, param, forEach);
                 break;
             case Range:
-                forEach((AbstractRanges<?>) unseekables, slice, from, to, param, forEach);
+                forEach((AbstractRanges) unseekables, slice, from, to, param, forEach);
                 break;
         }
     }
@@ -289,7 +289,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     /**
      * The same TxnId may be provided as a parameter multiple times
      */
-    public <P> void forEach(AbstractRanges<?> ranges, P param, IndexedConsumer<P> forEach)
+    public <P> void forEach(AbstractRanges ranges, P param, IndexedConsumer<P> forEach)
     {
         forEach(ranges, null, 0, ranges.size(), param, forEach);
     }
@@ -307,7 +307,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     /**
      * The same TxnId may be provided as a parameter multiple times
      */
-    public <P> void forEach(AbstractRanges<?> ranges, @Nullable Range slice, int from, int to, P param, IndexedConsumer<P> forEach)
+    public <P> void forEach(AbstractRanges ranges, @Nullable Range slice, int from, int to, P param, IndexedConsumer<P> forEach)
     {
         int minIndex = 0;
         for (int i = from; i < to ; ++i)
@@ -340,7 +340,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
      * @param ranges to match on
      * @param forEach function to call on each unique {@link TxnId}
      */
-    public void forEachUniqueTxnId(AbstractRanges<?> ranges, Consumer<TxnId> forEach)
+    public void forEachUniqueTxnId(AbstractRanges ranges, Consumer<TxnId> forEach)
     {
         int minIndex = 0;
         for (int i = 0; i < ranges.size() ; ++i)

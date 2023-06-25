@@ -33,7 +33,7 @@ import com.google.common.collect.ImmutableMap;
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_OVERLAPPING;
 import static accord.primitives.Routables.Slice.Overlapping;
 
-public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, Seekables<Range, Ranges>, Unseekables<Range>, Participants<Range>
+public class Ranges extends AbstractRanges implements Iterable<Range>, Seekables<Range, Ranges>, Unseekables<Range>, Participants<Range>
 {
     public static final Ranges EMPTY = new Ranges(new Range[0]);
 
@@ -97,13 +97,13 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
     @Override
     public Ranges with(Unseekables<Range> with)
     {
-        return with((AbstractRanges<?>) with);
+        return with((AbstractRanges) with);
     }
 
     @Override
     public Participants<Range> with(Participants<Range> with)
     {
-        return with((AbstractRanges<?>) with);
+        return with((AbstractRanges) with);
     }
 
     @Override
@@ -112,7 +112,7 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
         return union(MERGE_OVERLAPPING, that);
     }
 
-    public Ranges with(AbstractRanges<?> that)
+    public Ranges with(AbstractRanges that)
     {
         return union(MERGE_OVERLAPPING, that);
     }
@@ -158,7 +158,7 @@ public class Ranges extends AbstractRanges<Ranges> implements Iterable<Range>, S
         });
     }
 
-    public Ranges union(UnionMode mode, AbstractRanges<?> that)
+    public Ranges union(UnionMode mode, AbstractRanges that)
     {
         return union(mode, this, that, this, that, (left, right, ranges) -> {
             if (ranges == left.ranges) return left;

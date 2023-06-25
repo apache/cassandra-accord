@@ -323,6 +323,9 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             });
             return;
         }
+        // TODO (required): if there are epochs before txnId.epoch that haven't propagated their dependencies we potentially have a problem
+        //                  as we may propose deps that don't witness a transaction they should witness.
+        //                  in this case we should run GetDeps before proposing
         propose(txnId, deps);
     }
 

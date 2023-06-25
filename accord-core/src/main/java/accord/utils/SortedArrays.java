@@ -61,11 +61,13 @@ public class SortedArrays
             return array.length;
         }
 
+        @Override
         public int findNext(int i, Comparable<? super T> find)
         {
             return exponentialSearch(array, i, array.length, find);
         }
 
+        @Override
         public int find(Comparable<? super T> find)
         {
             return Arrays.binarySearch(array, 0, array.length, find);

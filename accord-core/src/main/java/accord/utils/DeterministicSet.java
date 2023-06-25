@@ -75,10 +75,19 @@ public class DeterministicSet<T> extends AbstractSet<T>
     {
         return new Iterator<T>()
         {
+            boolean hasComputedNext = true;
             Entry<T> next = head.next;
             @Override
             public boolean hasNext()
             {
+                if (!hasComputedNext)
+                {
+                    // apply any deletion before deciding if hasNext
+                    while (next.next == null)
+                        next = next.prev;
+                    next = next.next;
+                    hasComputedNext = true;
+                }
                 return next != head;
             }
 
@@ -88,7 +97,8 @@ public class DeterministicSet<T> extends AbstractSet<T>
                 if (!hasNext())
                     throw new NoSuchElementException();
                 T result = next.item;
-                next = next.next;
+                // defer filtering of deleted items until hasNext(), so processing of next() can have applied
+                hasComputedNext = false;
                 return result;
             }
         };
