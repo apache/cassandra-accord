@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -43,6 +44,7 @@ import org.junit.jupiter.api.Test;
 
 public class AbstractConfigurationServiceTest
 {
+    // C* uses this, so we can't use the jupiter assertions
     public static class TestListener implements ConfigurationService.Listener
     {
         private final ConfigurationService parent;
@@ -72,44 +74,50 @@ public class AbstractConfigurationServiceTest
         {
             Set<Id> synced = syncCompletes.computeIfAbsent(epoch, e -> new HashSet<>());
             if (!synced.add(node))
-                Assertions.fail(String.format("Recieved multiple syncs for epoch %s from %s", epoch, node));
+                throw new AssertionError(String.format("Recieved multiple syncs for epoch %s from %s", epoch, node));
         }
 
         @Override
         public void truncateTopologyUntil(long epoch)
         {
             if (!truncates.add(epoch))
-                Assertions.fail(String.format("Recieved multiple truncates for epoch", epoch));
+                throw new AssertionError(String.format("Recieved multiple truncates for epoch", epoch));
         }
 
         public void assertNoTruncates()
         {
-            Assertions.assertTrue(truncates.isEmpty());
+            assert truncates.isEmpty() : "truncates is not empty";
+        }
+
+        private static void assertEquals(Object expected, Object actual)
+        {
+            if (!Objects.equals(expected, actual))
+                throw new AssertionError(String.format("Expected %s, but was %s", expected, actual));
         }
 
         public void assertTruncates(Long... epochs)
         {
-            Assertions.assertEquals(ImmutableSet.copyOf(epochs), truncates);
+            assertEquals(ImmutableSet.copyOf(epochs), truncates);
         }
 
         public void assertSyncsFor(Long... epochs)
         {
-            Assertions.assertEquals(ImmutableSet.copyOf(epochs), syncCompletes.keySet());
+            assertEquals(ImmutableSet.copyOf(epochs), syncCompletes.keySet());
         }
 
         public void assertSyncsForEpoch(long epoch, Id... nodes)
         {
-            Assertions.assertEquals(ImmutableSet.copyOf(nodes), syncCompletes.get(epoch));
+            assertEquals(ImmutableSet.copyOf(nodes), syncCompletes.get(epoch));
         }
 
         public void assertTopologiesFor(Long... epochs)
         {
-            Assertions.assertEquals(ImmutableSet.copyOf(epochs), topologies.keySet());
+            assertEquals(ImmutableSet.copyOf(epochs), topologies.keySet());
         }
 
         public void assertTopologyForEpoch(long epoch, Topology topology)
         {
-            Assertions.assertEquals(topology, topologies.get(epoch));
+            assertEquals(topology, topologies.get(epoch));
         }
     }
 
