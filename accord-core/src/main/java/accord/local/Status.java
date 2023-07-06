@@ -467,7 +467,7 @@ public enum Status
      * Local:      the outcome has been durably recorded at least locally
      * Majority:   the outcome has been durably recorded to a majority of each participating shard
      * Universal:  the outcome has been durably recorded to every participating replica
-     * TruncatedOrInvalidated:  the outcome was either invalidated, or has been durably recorded to every replica
+     * DurableOrInvalidated:  the outcome was either invalidated, or has been durably recorded to every replica
      */
     public enum Durability
     {

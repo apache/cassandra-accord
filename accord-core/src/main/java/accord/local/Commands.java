@@ -812,11 +812,36 @@ public class Commands
         Route<?> all = command.route();
         Participants<?> participants = all.participants();
 
+        // TODO (now): confirm this isn't a necessary test (should be... redundant, as implied by not durable)
         RedundantStatus redundant = safeStore.commandStore().redundantBefore().min(txnId, executeAt, participants);
         if (redundant == LIVE)
             return Truncate.NO;
 
         Durability min = safeStore.commandStore().durableBefore().min(txnId, all);
+        switch (min)
+        {
+            default:
+            case Local:
+            case DurableOrInvalidated:
+                throw new AssertionError();
+            case NotDurable:
+                return Truncate.NO;
+            case Majority:
+                return Truncate.TRUNCATE;
+            case Universal:
+                return Truncate.ERASE;
+        }
+    }
+
+    public static Truncate shouldTruncate(TxnId txnId, Status status, Known known, Route<?> route, DurableBefore durableBefore)
+    {
+        if (durableBefore.global(txnId) == Universal)
+            return Truncate.ERASE;
+
+        if (!status.hasBeen(Applied) || !known.hasCompleteRoute())
+            return Truncate.NO;
+
+        Durability min = durableBefore.min(txnId, route);
         switch (min)
         {
             default:
