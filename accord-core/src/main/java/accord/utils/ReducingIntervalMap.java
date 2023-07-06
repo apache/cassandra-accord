@@ -99,7 +99,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         ReducingIntervalMap that = (ReducingIntervalMap) o;
-        return Arrays.equals(starts, that.starts) && Arrays.equals(values, that.values);
+        return inclusiveEnds == that.inclusiveEnds && Arrays.equals(starts, that.starts) && Arrays.equals(values, that.values);
     }
 
     public int hashCode()
@@ -140,15 +140,6 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         if (idx < 0) idx = -2 - idx;
         else if (inclusiveEnds) --idx;
         return idx;
-    }
-
-    private boolean contains(int idx, K key)
-    {
-        if (idx < 0 || idx > size())
-            throw new IndexOutOfBoundsException();
-
-        int cmp = inclusiveStarts() ? 1 : 0;
-        return starts[idx].compareTo(key) < cmp && starts[idx + 1].compareTo(key) >= cmp;
     }
 
     protected final boolean inclusiveStarts()

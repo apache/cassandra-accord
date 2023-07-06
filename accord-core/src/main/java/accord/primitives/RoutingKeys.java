@@ -80,18 +80,6 @@ public class RoutingKeys extends AbstractUnseekableKeys implements Unseekables<R
         return wrap(toRoutingKeysArray(with));
     }
 
-    public RoutingKeys without(RoutingKey without)
-    {
-        int index = indexOf(without);
-        if (index < 0)
-            return this;
-
-        RoutingKey[] keys = new RoutingKey[size() - 1];
-        System.arraycopy(keys, 0, keys, 0, index);
-        System.arraycopy(keys, index + 1, keys, index, size() - (1 + index));
-        return wrap(keys);
-    }
-
     @Override
     public UnseekablesKind kind()
     {
