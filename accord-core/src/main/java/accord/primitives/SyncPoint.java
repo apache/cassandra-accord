@@ -31,6 +31,14 @@ import accord.utils.Invariants;
  */
 public class SyncPoint
 {
+    public static class SerializationSupport
+    {
+        public static SyncPoint construct(TxnId syncId, Deps waitFor, Ranges ranges, RoutingKey homeKey)
+        {
+            return new SyncPoint(syncId, waitFor, ranges, homeKey);
+        }
+    }
+
     public final TxnId syncId;
     public final Deps waitFor;
     public final Ranges ranges;
@@ -43,6 +51,14 @@ public class SyncPoint
         this.waitFor = waitFor;
         this.ranges = ranges;
         this.homeKey = route.homeKey();
+    }
+
+    private SyncPoint(TxnId syncId, Deps waitFor, Ranges ranges, RoutingKey homeKey)
+    {
+        this.syncId = syncId;
+        this.waitFor = waitFor;
+        this.ranges = ranges;
+        this.homeKey = homeKey;
     }
 
     public FullRangeRoute route()
