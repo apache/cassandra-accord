@@ -18,7 +18,6 @@
 
 package accord.local;
 
-import accord.api.ProgressLog.ProgressShard;
 import accord.api.VisibleForImplementation;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;

@@ -26,7 +26,6 @@ import accord.local.SafeCommand;
 import accord.local.SaveStatus;
 import accord.primitives.TxnId;
 
-import static accord.api.ProgressLog.ProgressShard.Unsure;
 import static accord.local.Listeners.Immutable.EMPTY;
 
 public class TruncatedSafeCommand extends SafeCommand

@@ -112,6 +112,7 @@ public class Timestamp implements Comparable<Timestamp>, EpochSupplier
         this.node = copy.node;
     }
 
+    @Override
     public long epoch()
     {
         return epoch(msb);

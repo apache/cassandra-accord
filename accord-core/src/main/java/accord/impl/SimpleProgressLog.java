@@ -39,7 +39,6 @@ import accord.utils.async.AsyncResult;
 
 import accord.api.ProgressLog;
 
-import static accord.api.ProgressLog.ProgressShard.Home;
 import static accord.api.ProgressLog.ProgressShard.Unsure;
 import static accord.coordinate.InformHomeOfTxn.inform;
 import static accord.impl.SimpleProgressLog.CoordinateStatus.ReadyToExecute;
@@ -593,6 +592,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
             ensureSafeOrAtLeast(command, shard, ReadyToExecute, Expected);
         }
 
+        @Override
         public void clear(TxnId txnId)
         {
             State state = stateMap.remove(txnId);

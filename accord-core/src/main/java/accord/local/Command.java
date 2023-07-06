@@ -19,7 +19,6 @@
 package accord.local;
 
 import accord.api.Data;
-import accord.api.ProgressLog.ProgressShard;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.Keys;
@@ -34,7 +33,6 @@ import accord.utils.ImmutableBitSet;
 import accord.utils.IndexedQuadConsumer;
 import accord.utils.Invariants;
 
-import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import accord.api.Result;
@@ -47,7 +45,6 @@ import com.google.common.collect.ImmutableSortedSet;
 
 import java.util.*;
 
-import static accord.api.ProgressLog.ProgressShard.Unsure;
 import static accord.local.Listeners.Immutable.EMPTY;
 import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.Durability.DurableOrInvalidated;
