@@ -50,7 +50,7 @@ public enum MessageType
     CHECK_STATUS_RSP        (false),
     FETCH_DATA_REQ          (false),
     FETCH_DATA_RSP          (false),
-    SET_LOCALLY_DURABLE_REQ (true),
+    SET_SHARD_DURABLE_REQ   (true),
     SET_GLOBALLY_DURABLE_REQ(true),
     QUERY_DURABLE_BEFORE_REQ(false),
     QUERY_DURABLE_BEFORE_RSP(false),

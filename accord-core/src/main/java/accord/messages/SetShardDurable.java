@@ -69,7 +69,7 @@ public class SetShardDurable extends AbstractEpochRequest<SimpleReply>
     @Override
     public MessageType type()
     {
-        return MessageType.SET_LOCALLY_DURABLE_REQ;
+        return MessageType.SET_SHARD_DURABLE_REQ;
     }
 
     @Override
