@@ -809,7 +809,7 @@ public class Commands
             return Truncate.NO;
 
         TxnId txnId = command.txnId();
-        Timestamp executeAt = command.executeAt() != null && !command.executeAt().equals(Timestamp.NONE) ? command.executeAt() : txnId;
+        Timestamp executeAt = command.executeAtIfKnownElseTxnId();
         Route<?> all = command.route();
         Participants<?> participants = all.participants();
 
@@ -864,7 +864,7 @@ public class Commands
 
         Ranges coordinates = safeStore.ranges().coordinates(command.txnId());
         Ranges additionalRanges = Ranges.EMPTY;
-        if (command.executeAt() != null && !command.executeAt().equals(Timestamp.NONE))
+        if (command.executesInFutureEpoch())
             additionalRanges = safeStore.ranges().allBetween(command.txnId().epoch(), command.executeAt().epoch());
         CommonAttributes attrs = route == null ? command :
                                  hasProgressKey ? updateRouteAndProgressShard(command, route, progressKey, coordinates, additionalRanges)
@@ -897,7 +897,6 @@ public class Commands
         return setDurability(safeStore, safeCommand, durability, null, false, null, null);
     }
 
-    // TODO (expected): this should integrate with LocalBarrier so that we do not need to register interest with every transaction
     static class NotifyWaitingOn implements PreLoadContext, Consumer<SafeCommandStore>
     {
         Known[] blockedUntil = new Known[4];
@@ -913,9 +912,16 @@ public class Commands
         @Override
         public void accept(SafeCommandStore safeStore)
         {
+            // first do a simple loop to skip over txns that have been truncated
             SafeCommand prevSafe = ifInitialised(safeStore, depth - 1);
+            if (depth > 0 && (prevSafe == null || prevSafe.current().hasBeen(Truncated)))
             {
-                // we know we loaded it, so if it's null it's either truncated or we haven't witnessed it and need to initialise;
+                while (depth > 0 && (prevSafe == null || prevSafe.current().hasBeen(Truncated)))
+                    prevSafe = ifInitialised(safeStore, --depth - 1);
+            }
+            else
+            {
+                // we know we loaded cur, so if it's null it's either truncated or we haven't witnessed it and need to initialise;
                 // in this case use our predecessor's intersecting keys to decide which
                 SafeCommand curSafe = ifInitialised(safeStore, depth);
                 if (curSafe == null)
@@ -925,21 +931,20 @@ public class Commands
                         if (safeStore.commandStore().redundantBefore().isRedundant(txnIds[depth], prevSafe.current().executeAt(), prevSafe.current().partialDeps().participants(txnIds[depth])))
                         {
                             removeDependency(safeStore, prevSafe, txnIds[depth]);
-                            curSafe = prevSafe;
                             prevSafe = get(safeStore, --depth - 1);
                         }
                         else
                         {
-                            curSafe = initialise(safeStore, depth);
+                            Invariants.checkState(depth == 0, "prev (" + txnIds[depth - 1] + ") is null, but depth > 0; this should already be caught by another branch");
+                            throw new AssertionError(txnIds[0] + " had NotifyWaitingOn invoked directly upon it, so it must have existed; it is not redundant, but no longer exists");
                         }
                     }
                     else
                     {
-                        // if it's still null,
                         do
                         {
                             if (--depth == -1)
-                                return;  // the command must have been erased
+                                return; // the command must have been truncated
                             curSafe = prevSafe;
                             prevSafe = ifInitialised(safeStore, depth - 1);
                         } while (curSafe == null);

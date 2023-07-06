@@ -359,7 +359,7 @@ public class FetchData extends CheckShards<Route<?>>
                         Route<?> route = command.route();
                         if (route == null) route = this.route;
 
-                        Timestamp executeAt = full.executeAt != null ? full.executeAt : command.known().executeAt.hasDecidedExecuteAt() ? command.executeAt() : txnId;
+                        Timestamp executeAt = command.executeAtIfKnown(Timestamp.nonNullOrMax(full.executeAt, txnId));
                         Ranges coordinateRanges = safeStore.ranges().coordinates(txnId);
                         Ranges acceptRanges = executeAt.epoch() == txnId.epoch() ? coordinateRanges : safeStore.ranges().allBetween(txnId, executeAt);
                         if (!route.participatesIn(coordinateRanges) && !route.participatesIn(acceptRanges))

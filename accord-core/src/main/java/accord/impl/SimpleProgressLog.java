@@ -236,7 +236,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                             if (command.durability().isDurable() || token.durability.isDurableOrInvalidated())
                             {
                                 // not guaranteed to know the execution epoch, as might have received durability info obliquely
-                                Timestamp executeAt = command.known().executeAt.hasDecidedExecuteAt() ? command.executeAt() : null;
+                                Timestamp executeAt = command.executeAtIfKnown();
                                 long epoch = executeAt == null ? txnId.epoch() : executeAt.epoch();
                                 Route<?> route = command.route();
 
@@ -328,7 +328,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                     setProgress(Investigating);
                     // first make sure we have enough information to obtain the command locally
-                    Timestamp executeAt = command.known().executeAt.hasDecidedExecuteAt() ? command.executeAt() : null;
+                    Timestamp executeAt = command.executeAtIfKnown();
                     Participants<?> maxParticipants = maxParticipants(command);
                     // we want to fetch a route if we have it, so that we can go to our neighbouring shards for info
                     // (rather than the home shard, which may have GC'd its state if the result is durable)

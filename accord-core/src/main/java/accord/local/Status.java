@@ -296,6 +296,16 @@ public enum Status
             return compareTo(ExecuteAtKnown) >= 0;
         }
 
+        public boolean hasDecidedNonZeroExecuteAt()
+        {
+            return this == ExecuteAtKnown;
+        }
+
+        public final Timestamp executeAtIfKnownElseTxnId(TxnId txnId, Timestamp executeAt)
+        {
+            return this == ExecuteAtKnown ? executeAt : txnId;
+        }
+
         public boolean canProposeInvalidation()
         {
             return this == ExecuteAtUnknown;

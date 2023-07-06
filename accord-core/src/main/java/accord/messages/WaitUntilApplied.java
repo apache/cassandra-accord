@@ -138,7 +138,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
         return apply(safeStore, safeCommand);
     }
 
-    protected synchronized ReadNack apply(SafeCommandStore safeStore, SafeCommand safeCommand)
+    private ReadNack apply(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
         if (isInvalid)
             return null;

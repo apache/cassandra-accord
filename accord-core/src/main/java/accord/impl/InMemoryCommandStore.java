@@ -391,7 +391,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                '}';
     }
 
-    class RangeCommand
+    static class RangeCommand
     {
         final GlobalCommand command;
         Ranges ranges;
@@ -743,7 +743,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                         if (command.executeAt().compareTo(timestamp) < 0) return;
                         else break;
                     case MAY_EXECUTE_BEFORE:
-                        Timestamp compareTo = command.known().executeAt.hasDecidedExecuteAt() ? command.executeAt() : command.txnId();
+                        Timestamp compareTo = command.executeAtIfKnownElseTxnId();
                         if (compareTo.compareTo(timestamp) > 0) return;
                         else break;
                 }

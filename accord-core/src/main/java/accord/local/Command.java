@@ -53,6 +53,7 @@ import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.Durability.DurableOrInvalidated;
 import static accord.local.Status.Durability.Local;
 import static accord.local.Status.Durability.NotDurable;
+import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
 import static accord.utils.SortedArrays.forEachIntersection;
 import static accord.utils.Utils.*;
 import static java.lang.String.format;
@@ -379,10 +380,42 @@ public abstract class Command implements CommonAttributes
 
     public abstract Timestamp executeAt();
     public abstract Ballot accepted();
+
     @Override
     public abstract PartialTxn partialTxn();
+
     @Override
     public abstract @Nullable PartialDeps partialDeps();
+
+    public final Timestamp executeAtIfKnownElseTxnId()
+    {
+        if (known().executeAt == ExecuteAtKnown)
+            return executeAt();
+        return txnId();
+    }
+
+    public final Timestamp executeAtIfKnown()
+    {
+        return executeAtIfKnown(null);
+    }
+
+    public final Timestamp executeAtIfKnown(Timestamp orElse)
+    {
+        if (known().executeAt == ExecuteAtKnown)
+            return executeAt();
+        return orElse;
+    }
+
+    public final boolean executesInFutureEpoch()
+    {
+        return known().executeAt == ExecuteAtKnown && executeAt().epoch() > txnId().epoch();
+    }
+
+    public final Timestamp executeAtOrTxnId()
+    {
+        Timestamp executeAt = executeAt();
+        return executeAt == null || executeAt.equals(Timestamp.NONE) ? txnId() : executeAt;
+    }
 
     public final Status status()
     {
@@ -560,7 +593,7 @@ public abstract class Command implements CommonAttributes
 
         public static Truncated truncated(Command command)
         {
-            return new Truncated(command.txnId(), SaveStatus.Truncated, command.route(), command.progressShard(), command.known().executeAt.hasDecidedExecuteAt() ? command.executeAt() : null, EMPTY);
+            return new Truncated(command.txnId(), SaveStatus.Truncated, command.route(), command.progressShard(), command.executeAtIfKnown(), EMPTY);
         }
 
         public static Truncated truncated(Command command, Route<?> route, ProgressShard progressShard, Timestamp executeAt)
