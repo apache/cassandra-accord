@@ -52,15 +52,9 @@ public class QueryDurableBefore extends AbstractEpochRequest<QueryDurableBefore.
     }
 
     @Override
-    public void accept(DurableBeforeReply ok, Throwable failure)
-    {
-        node.reply(replyTo, replyContext, ok);
-    }
-
-    @Override
     public String toString()
     {
-        return "QueryNonDurable{}";
+        return "QueryDurableBefore{" + epoch + '}';
     }
 
     @Override
