@@ -234,7 +234,7 @@ class SortedArraysTest
     }
 
     @Test
-    public void testLinearDifference()
+    public void testLinearSubtract()
     {
         Gen<Integer[]> gen = sortedUniqueIntegerArray(0);
         qt().forAll(gen, gen).check((a, b) -> {
@@ -245,14 +245,25 @@ class SortedArraysTest
                 Set<Integer> difference = Sets.difference(left, right);
                 Integer[] expected = toArray(difference, Integer[]::new);
                 Arrays.sort(expected);
-                assertArrayEquals(expected, SortedArrays.linearDifference(a, b, Integer[]::new));
+                assertArrayEquals(expected, SortedArrays.linearSubtract(a, b, Integer[]::new));
             }
             {
                 Set<Integer> difference = Sets.difference(right, left);
                 Integer[] expected = toArray(difference, Integer[]::new);
                 Arrays.sort(expected);
-                assertArrayEquals(expected, SortedArrays.linearDifference(b, a, Integer[]::new));
+                assertArrayEquals(expected, SortedArrays.linearSubtract(b, a, Integer[]::new));
             }
+        });
+    }
+
+    @Test
+    public void testSubtractWithMultipleMatches()
+    {
+        Gen<Integer[]> uniq = sortedIntegerArray(100, 0);
+        Gen<Integer[]> dups = sortedUniqueIntegerArray(100, 0);
+        qt().forAll(uniq, dups).check((u, d) -> {
+            Integer[] expected = Arrays.stream(d).filter(i -> Arrays.binarySearch(u, i) < 0).toArray(Integer[]::new);
+            assertArrayEquals(expected, SortedArrays.subtractWithMultipleMatches(d, u, Integer[]::new, Integer::compare, Integer::compare));
         });
     }
 
@@ -335,6 +346,25 @@ class SortedArraysTest
     private static Gen<Integer[]> sortedUniqueIntegerArray(int minSize) {
         return Gens.arrays(Integer.class, Gens.ints().all())
                 .unique()
+                .ofSizeBetween(minSize, 100)
+                .map(a -> {
+                    Arrays.sort(a);
+                    return a;
+                });
+    }
+
+    private static Gen<Integer[]> sortedUniqueIntegerArray(int range, int minSize) {
+        return Gens.arrays(Integer.class, Gens.ints().between(0, range))
+                .unique()
+                .ofSizeBetween(minSize, 100)
+                .map(a -> {
+                    Arrays.sort(a);
+                    return a;
+                });
+    }
+
+    private static Gen<Integer[]> sortedIntegerArray(int range, int minSize) {
+        return Gens.arrays(Integer.class, Gens.ints().between(0, range))
                 .ofSizeBetween(minSize, 100)
                 .map(a -> {
                     Arrays.sort(a);

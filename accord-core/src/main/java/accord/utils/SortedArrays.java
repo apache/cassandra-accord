@@ -95,7 +95,7 @@ public class SortedArrays
 
         public ExtendedSortedArrayList<T> difference(SortedArrayList<T> remove)
         {
-            return new ExtendedSortedArrayList<>(linearDifference(array, remove.array, allocator), allocator);
+            return new ExtendedSortedArrayList<>(linearSubtract(array, remove.array, allocator), allocator);
         }
     }
 
@@ -589,7 +589,7 @@ public class SortedArrays
      * itself if possible
      */
     @SuppressWarnings("unused") // was used until recently, might be used again?
-    public static <T extends Comparable<? super T>> T[] linearDifference(T[] left, T[] right, IntFunction<T[]> allocate)
+    public static <T extends Comparable<? super T>> T[] linearSubtract(T[] left, T[] right, IntFunction<T[]> allocate)
     {
         int rightIdx = 0;
         int leftIdx = 0;
@@ -778,14 +778,20 @@ public class SortedArrays
         {
             ari = findNextIntersection(input, ai, input.length, subtract, ri, subtract.length, cmp1, cmp2, Search.CEIL);
             if (ari < 0)
+            {
+                int length = input.length - ai;
+                System.arraycopy(input, ai, result, resultCount, length);
+                resultCount += length;
                 return resizeIfNecessary(result, resultCount);
+            }
 
             nextai = (int)(ari);
             ri = (int)(ari >>> 32);
             if (ai != nextai)
             {
-                System.arraycopy(input, ai, result, resultCount, nextai - ai);
-                resultCount += nextai - ai;
+                int length = nextai - ai;
+                System.arraycopy(input, ai, result, resultCount, length);
+                resultCount += length;
             }
 
             ai = exponentialSearch(input, ai, input.length, subtract[ri], cmp2, Search.FLOOR) + 1;
