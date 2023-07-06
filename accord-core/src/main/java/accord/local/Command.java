@@ -211,17 +211,15 @@ public abstract class Command implements CommonAttributes
         private final SaveStatus status;
         private final Status.Durability durability;
         private final Route<?> route;
-        private final ProgressShard progressShard;
         private final Ballot promised;
         private final Listeners.Immutable listeners;
 
-        private AbstractCommand(TxnId txnId, SaveStatus status, Status.Durability durability, Route<?> route, ProgressShard progressShard, Ballot promised, Listeners.Immutable listeners)
+        private AbstractCommand(TxnId txnId, SaveStatus status, Status.Durability durability, Route<?> route, Ballot promised, Listeners.Immutable listeners)
         {
             this.txnId = txnId;
             this.status = validateCommandClass(status, getClass());
             this.durability = durability;
             this.route = route;
-            this.progressShard = progressShard;
             this.promised = promised;
             this.listeners = listeners;
         }
@@ -232,7 +230,6 @@ public abstract class Command implements CommonAttributes
             this.status = validateCommandClass(status, getClass());
             this.durability = common.durability();
             this.route = common.route();
-            this.progressShard = common.progressShard();
             this.promised = promised;
             this.listeners = common.durableListeners();
         }
@@ -247,7 +244,6 @@ public abstract class Command implements CommonAttributes
                     && status == command.saveStatus()
                     && durability == command.durability()
                     && Objects.equals(route, command.route())
-                    && Objects.equals(progressShard, command.progressShard())
                     && Objects.equals(promised, command.promised())
                     && listeners.equals(command.durableListeners());
         }
@@ -268,12 +264,6 @@ public abstract class Command implements CommonAttributes
         public final Route<?> route()
         {
             return route;
-        }
-
-        @Override
-        public final @Nonnull ProgressShard progressShard()
-        {
-            return progressShard;
         }
 
         @Override
@@ -335,8 +325,6 @@ public abstract class Command implements CommonAttributes
         return route == null ? null : route.homeKey();
     }
 
-    @Override
-    public abstract ProgressShard progressShard();
     @Override
     public abstract TxnId txnId();
     public abstract Ballot promised();
@@ -519,9 +507,9 @@ public abstract class Command implements CommonAttributes
 
     public static final class NotDefined extends AbstractCommand
     {
-        NotDefined(TxnId txnId, SaveStatus status, Status.Durability durability, Route<?> route, ProgressShard progressShard, Ballot promised, Listeners.Immutable listeners)
+        NotDefined(TxnId txnId, SaveStatus status, Status.Durability durability, Route<?> route, Ballot promised, Listeners.Immutable listeners)
         {
-            super(txnId, status, durability, route, progressShard, promised, listeners);
+            super(txnId, status, durability, route, promised, listeners);
         }
 
         NotDefined(CommonAttributes common, SaveStatus status, Ballot promised)
@@ -542,7 +530,7 @@ public abstract class Command implements CommonAttributes
 
         public static NotDefined uninitialised(TxnId txnId)
         {
-            return new NotDefined(txnId, Uninitialised, NotDurable, null, Unsure, Ballot.ZERO, null);
+            return new NotDefined(txnId, Uninitialised, NotDurable, null, Ballot.ZERO, null);
         }
 
         @Override
@@ -585,26 +573,26 @@ public abstract class Command implements CommonAttributes
     public static final class Truncated extends AbstractCommand
     {
         final Timestamp executeAt;
-        public Truncated(TxnId txnId, SaveStatus saveStatus, Route<?> route, ProgressShard progressShard, Timestamp executeAt, Listeners.Immutable listeners)
+        public Truncated(TxnId txnId, SaveStatus saveStatus, Route<?> route, Timestamp executeAt, Listeners.Immutable listeners)
         {
-            super(txnId, saveStatus, DurableOrInvalidated, route, progressShard, Ballot.MAX, listeners);
+            super(txnId, saveStatus, DurableOrInvalidated, route, Ballot.MAX, listeners);
             this.executeAt = executeAt;
         }
 
         public static Truncated truncated(Command command)
         {
-            return new Truncated(command.txnId(), SaveStatus.Truncated, command.route(), command.progressShard(), command.executeAtIfKnown(), EMPTY);
+            return new Truncated(command.txnId(), SaveStatus.Truncated, command.route(), command.executeAtIfKnown(), EMPTY);
         }
 
-        public static Truncated truncated(Command command, Route<?> route, ProgressShard progressShard, Timestamp executeAt)
+        public static Truncated truncated(Command command, Route<?> route, Timestamp executeAt)
         {
-            return new Truncated(command.txnId(), SaveStatus.Truncated, route, progressShard, executeAt, EMPTY);
+            return new Truncated(command.txnId(), SaveStatus.Truncated, route, executeAt, EMPTY);
         }
 
         public static Truncated invalidated(Command command)
         {
             Invariants.checkState(!command.hasBeen(Status.PreCommitted));
-            return new Truncated(command.txnId(), SaveStatus.Invalidated, null, command.progressShard(), Timestamp.NONE, command.durableListeners());
+            return new Truncated(command.txnId(), SaveStatus.Invalidated, null, Timestamp.NONE, command.durableListeners());
         }
 
         @Override
@@ -635,7 +623,7 @@ public abstract class Command implements CommonAttributes
         public Command updateAttributes(CommonAttributes attrs, Ballot promised)
         {
             // TODO (now): invoke listeners precisely once when we adopt this state, then we can simply return `this`
-            return new Truncated(txnId(), saveStatus(), attrs.route(), attrs.progressShard(), executeAt, attrs.durableListeners());
+            return new Truncated(txnId(), saveStatus(), attrs.route(), executeAt, attrs.durableListeners());
         }
     }
 

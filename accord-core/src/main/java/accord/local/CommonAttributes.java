@@ -30,7 +30,6 @@ public interface CommonAttributes
     TxnId txnId();
     Status.Durability durability();
     Route<?> route();
-    ProgressShard progressShard();
     PartialTxn partialTxn();
     PartialDeps partialDeps();
     Listeners.Immutable durableListeners();
@@ -45,7 +44,6 @@ public interface CommonAttributes
         private TxnId txnId;
         private Status.Durability durability;
         private Route<?> route;
-        private ProgressShard progressShard;
         private PartialTxn partialTxn;
         private PartialDeps partialDeps;
         private Listeners listeners;
@@ -60,7 +58,6 @@ public interface CommonAttributes
             this.txnId = attributes.txnId();
             this.durability = attributes.durability();
             this.route = attributes.route();
-            this.progressShard = attributes.progressShard();
             this.partialTxn = attributes.partialTxn();
             this.partialDeps = attributes.partialDeps();
             this.listeners = attributes.durableListeners();
@@ -105,18 +102,6 @@ public interface CommonAttributes
         public Mutable route(Route<?> route)
         {
             this.route = route;
-            return this;
-        }
-
-        @Override
-        public ProgressShard progressShard()
-        {
-            return progressShard;
-        }
-
-        public Mutable progressShard(ProgressShard progressShard)
-        {
-            this.progressShard = progressShard;
             return this;
         }
 

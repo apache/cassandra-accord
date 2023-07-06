@@ -83,7 +83,7 @@ public class ImmutableCommandTest
         @Override public void preaccepted(Command command, ProgressShard shard) {}
         @Override public void accepted(Command command, ProgressShard shard) {}
         @Override public void committed(Command command, ProgressShard shard) {}
-        @Override public void readyToExecute(Command command, ProgressShard shard) {}
+        @Override public void readyToExecute(Command command) {}
         @Override public void executed(Command command, ProgressShard shard) {}
         @Override public void durable(Command command) {}
         @Override public void waiting(SafeCommand blockedBy, Known blockedUntil, Route<?> blockedOnRoute, Participants<?> blockedOnParticipants) {}

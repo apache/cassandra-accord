@@ -36,7 +36,7 @@ public class TruncatedSafeCommand extends SafeCommand
     public TruncatedSafeCommand(TxnId txnId)
     {
         super(txnId);
-        this.truncated = new Command.Truncated(txnId, SaveStatus.Truncated, null, Unsure, null, EMPTY);
+        this.truncated = new Command.Truncated(txnId, SaveStatus.Truncated, null, null, EMPTY);
     }
 
     @Override

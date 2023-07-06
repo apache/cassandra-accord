@@ -128,7 +128,7 @@ public interface ProgressLog
      * A home shard should monitor this transaction for global progress.
      * A non-home shard can safely ignore this transaction, as it has been witnessed by a majority of the home shard.
      */
-    void readyToExecute(Command command, ProgressShard shard);
+    void readyToExecute(Command command);
 
     /**
      * The transaction's outcome has been durably recorded (but not necessarily applied) locally.

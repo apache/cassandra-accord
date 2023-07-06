@@ -156,8 +156,8 @@ public class Commands
 
         Ranges coordinateRanges = coordinateRanges(safeStore, txnId, acceptEpoch);
         Invariants.checkState(!coordinateRanges.isEmpty());
-        CommonAttributes attrs = updateRouteAndProgressShard(command, route, progressKey, coordinateRanges, Ranges.EMPTY);
-        ProgressShard shard = attrs.progressShard();
+        ProgressShard shard = progressShard(route, progressKey, coordinateRanges);
+        CommonAttributes attrs = updateRoute(command, route);
         Invariants.checkState(validate(command.status(), attrs, Ranges.EMPTY, coordinateRanges, shard, route, Set, partialTxn, Set, null, Ignore));
 
         // FIXME: this should go into a consumer method
@@ -237,8 +237,8 @@ public class Commands
         Ranges acceptRanges = acceptRanges(safeStore, txnId, executeAt, coordinateRanges);
         Invariants.checkState(!acceptRanges.isEmpty());
 
-        CommonAttributes attrs = updateRouteAndProgressShard(command, route, progressKey, coordinateRanges, acceptRanges);
-        ProgressShard shard = attrs.progressShard();
+        ProgressShard shard = progressShard(route, progressKey, coordinateRanges);
+        CommonAttributes attrs = updateRoute(command, route);
         Invariants.checkState(validate(command.status(), attrs, coordinateRanges, acceptRanges, shard, route, Ignore, null, Ignore, partialDeps, Set));
 
         // TODO (desired, clarity/efficiency): we don't need to set the route here, and perhaps we don't even need to
@@ -322,8 +322,8 @@ public class Commands
         // TODO (expected, consider): consider ranges between coordinateRanges and executeRanges? Perhaps don't need them
         Ranges executeRanges = executeRanges(safeStore, executeAt);
 
-        CommonAttributes attrs = updateRouteAndProgressShard(command, route, progressKey, coordinateRanges, acceptRanges);
-        ProgressShard shard = attrs.progressShard();
+        ProgressShard shard = progressShard(route, progressKey, coordinateRanges);
+        CommonAttributes attrs = updateRoute(command, route);
 
         if (!validate(command.status(), attrs, acceptRanges, executeRanges, shard, route, Check, partialTxn, Add, partialDeps, Set))
         {
@@ -341,7 +341,7 @@ public class Commands
         safeStore.progressLog().committed(command, shard);
 
         // TODO (expected, safety): introduce intermediate status to avoid reentry when notifying listeners (which might notify us)
-        maybeExecute(safeStore, safeCommand, shard, true, true);
+        maybeExecute(safeStore, safeCommand, true, true);
         return CommitOutcome.Success;
     }
 
@@ -390,11 +390,10 @@ public class Commands
         // TODO (desired, consider): in the case of sync points, the coordinator is unlikely to be a home shard, do we mind this? should document at least
         Txn emptyTxn = safeStore.agent().emptyTxn(localSyncId.rw(), keys);
         ProgressShard progressShard = coordinateRanges.contains(route.homeKey()) ? UnmanagedHome : No;
-        CommonAttributes newAttributes = command.mutable().progressShard(progressShard);
         PartialDeps none = Deps.NONE.slice(coordinateRanges);
         PartialTxn partialTxn = emptyTxn.slice(coordinateRanges, true);
-        Invariants.checkState(validate(command.status(), newAttributes, Ranges.EMPTY, coordinateRanges, progressShard, route, Set, partialTxn, Set, none, Set));
-        newAttributes = set(safeStore, command, newAttributes, Ranges.EMPTY, coordinateRanges, progressShard, route, partialTxn, Set, none, Set);
+        Invariants.checkState(validate(command.status(), command, Ranges.EMPTY, coordinateRanges, progressShard, route, Set, partialTxn, Set, none, Set));
+        CommonAttributes newAttributes = set(safeStore, command, command, Ranges.EMPTY, coordinateRanges, progressShard, route, partialTxn, Set, none, Set);
         safeCommand.commit(newAttributes, localSyncId, WaitingOn.EMPTY);
         safeStore.notifyListeners(safeCommand);
     }
@@ -409,7 +408,7 @@ public class Commands
         // NOTE: if this is ever made a non-empty txn this will introduce a potential bug where the txn is registered against CommandsForKeys
         Txn emptyTxn = safeStore.agent().emptyTxn(localSyncId.rw(), keys);
         safeCommand.preapplied(command, command.executeAt(), command.waitingOn(), emptyTxn.execute(localSyncId, localSyncId, null), emptyTxn.result(localSyncId, localSyncId, null));
-        maybeExecute(safeStore, safeCommand, Unsure, true, false);
+        maybeExecute(safeStore, safeCommand, true, false);
     }
 
     // TODO (expected, ?): commitInvalidate may need to update cfks _if_ possible
@@ -460,8 +459,8 @@ public class Commands
         Ranges acceptRanges = acceptRanges(safeStore, txnId, executeAt, coordinateRanges);
         Ranges executeRanges = executeRanges(safeStore, executeAt);
 
-        CommonAttributes attrs = updateRouteAndProgressShard(command, route, progressKey, coordinateRanges, acceptRanges);
-        ProgressShard shard = attrs.progressShard();
+        ProgressShard shard = progressShard(route, progressKey, coordinateRanges);
+        CommonAttributes attrs = updateRoute(command, route);
 
         if (!validate(command.status(), attrs, acceptRanges, executeRanges, shard, route, Check, partialTxn, Add, partialDeps, command.hasBeen(Committed) ? Check : TrySet))
         {
@@ -476,7 +475,7 @@ public class Commands
         safeStore.notifyListeners(safeCommand);
         logger.trace("{}: apply, status set to Executed with executeAt: {}, deps: {}", txnId, executeAt, partialDeps);
 
-        maybeExecute(safeStore, safeCommand, shard, true, true);
+        maybeExecute(safeStore, safeCommand, true, true);
         safeStore.progressLog().executed(safeCommand.current(), shard);
 
         return ApplyOutcome.Success;
@@ -604,7 +603,7 @@ public class Commands
     }
 
     // TODO (expected, API consistency): maybe split into maybeExecute and maybeApply?
-    private static boolean maybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, ProgressShard shard, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
+    private static boolean maybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
     {
         Command command = safeCommand.current();
         if (logger.isTraceEnabled())
@@ -635,7 +634,7 @@ public class Commands
                 // TODO (desirable, efficiency): maintain distinct ReadyToRead and ReadyToWrite states
                 command = safeCommand.readyToExecute();
                 logger.trace("{}: set to ReadyToExecute", command.txnId());
-                safeStore.progressLog().readyToExecute(command, shard);
+                safeStore.progressLog().readyToExecute(command);
                 safeStore.notifyListeners(safeCommand);
                 return true;
 
@@ -757,7 +756,7 @@ public class Commands
         if (updateWaitingOn(command.txnId(), command.executeAt(), waitingOn, predecessor))
         {
             command = safeCommand.updateWaitingOn(waitingOn);
-            maybeExecute(safeStore, safeCommand, command.progressShard(), false, notifyWaitingOn);
+            maybeExecute(safeStore, safeCommand, false, notifyWaitingOn);
         }
         else
         {
@@ -866,9 +865,7 @@ public class Commands
         Ranges additionalRanges = Ranges.EMPTY;
         if (command.executesInFutureEpoch())
             additionalRanges = safeStore.ranges().allBetween(command.txnId().epoch(), command.executeAt().epoch());
-        CommonAttributes attrs = route == null ? command :
-                                 hasProgressKey ? updateRouteAndProgressShard(command, route, progressKey, coordinates, additionalRanges)
-                                                : updateRouteOnly(command, route, coordinates, additionalRanges);
+        CommonAttributes attrs = route == null ? command : updateRoute(command, route);
         if (executeAt != null && command.status().hasBeen(Committed) && !command.asCommitted().executeAt().equals(executeAt))
             safeStore.agent().onInconsistentTimestamp(command, command.asCommitted().executeAt(), executeAt);
         attrs = attrs.mutable().durability(durability);
@@ -1002,7 +999,7 @@ public class Commands
                 {
                     if (cur.hasBeen(Committed) && !cur.is(ReadyToExecute) && !cur.is(Applying) && !cur.asCommitted().isWaitingOnDependency())
                     {
-                        if (!maybeExecute(safeStore, curSafe, cur.progressShard(), false, false))
+                        if (!maybeExecute(safeStore, curSafe, false, false))
                             throw new AssertionError("Is able to Apply, but has not done so");
                         // loop and re-test the command's status; we may still want to notify blocking, esp. if not homeShard
                         continue;
@@ -1128,7 +1125,8 @@ public class Commands
         Invariants.checkState(owns(safeStore, command.txnId().epoch(), someRoute.homeKey()));
         if (command.known().isDefinitionKnown())
             return command;
-        return dependencySafeCommand.updateAttributes(command.mutable().route(Route.merge((Route)someRoute, command.route())).progressShard(Home));
+
+        return dependencySafeCommand.updateAttributes(command.mutable().route(Route.merge((Route)someRoute, command.route())));
     }
 
     /**
@@ -1140,26 +1138,11 @@ public class Commands
      * Note that for ProgressLog purposes the "home shard" is the shard as of txnId.epoch.
      * For recovery purposes the "home shard" is as of txnId.epoch until Committed, and executeAt.epoch once Executed
      */
-    public static CommonAttributes updateRouteAndProgressShard(Command command, Route<?> route, @Nullable RoutingKey progressKey, Ranges coordinateRanges, Ranges additionalRanges)
+    public static CommonAttributes updateRoute(Command command, Route<?> route)
     {
-        // TODO (desired): validate progress key remains same
-        ProgressShard progressShard = progressShard(route, progressKey, coordinateRanges);
-        Invariants.checkState(progressShard == command.progressShard() || command.progressShard() == Unsure);
-
-        if (command.route() == null || !command.route().containsAll(route))
-            return command.mutable().route(Route.merge((Route)route, command.route())).progressShard(progressShard);
-
-        if (command.progressShard() != progressShard)
-            return command.mutable().progressShard(progressShard);
-
-        return command;
-    }
-
-    public static CommonAttributes updateRouteOnly(Command command, Route<?> route, Ranges coordinateRanges, Ranges additionalRanges)
-    {
-        // TODO (desired): validate progress key remains same
         if (command.route() == null || !command.route().containsAll(route))
             return command.mutable().route(Route.merge((Route)route, command.route()));
+
         return command;
     }
 
@@ -1181,7 +1164,7 @@ public class Commands
                                         @Nullable PartialTxn partialTxn, EnsureAction ensurePartialTxn,
                                         @Nullable PartialDeps partialDeps, EnsureAction ensurePartialDeps)
     {
-        Invariants.checkState(attrs.progressShard() != Unsure);
+        Invariants.checkState(shard != Unsure);
         Ranges allRanges = existingRanges.with(additionalRanges);
 
         attrs = attrs.mutable().route(Route.merge(attrs.route(), (Route)route));

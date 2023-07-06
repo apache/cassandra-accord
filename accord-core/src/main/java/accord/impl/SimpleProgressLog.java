@@ -574,9 +574,15 @@ public class SimpleProgressLog implements ProgressLog.Factory
         }
 
         @Override
-        public void readyToExecute(Command command, ProgressShard shard)
+        public void readyToExecute(Command command)
         {
-            ensureSafeOrAtLeast(command, shard, ReadyToExecute, Expected);
+            State state = stateMap.get(command.txnId());
+            if (state == null)
+                return; // not progress shard, and nothing blocking
+
+            Invariants.checkState(state.nonHomeState == null || state.nonHomeState.progress() == Done, "nonHomeState should have been set safe by call to committed");
+            if (state.coordinateState != null)
+                state.coordinateState.ensureAtLeast(command, ReadyToExecute, Expected);
         }
 
         @Override
@@ -611,8 +617,8 @@ public class SimpleProgressLog implements ProgressLog.Factory
             //     - we might participate in the execution epoch so need to be sure we have received a route covering both
             if (!command.status().hasBeen(PreApplied) && command.route() != null && command.route().hasParticipants())
                 state.recordBlocking(command.txnId(), PreApplied.minKnown, command.route(), null);
-            if (command.progressShard() == Home)
-                state.local().durableGlobal();
+            if (state.coordinateState != null)
+                state.coordinateState.durableGlobal();
         }
 
         @Override
