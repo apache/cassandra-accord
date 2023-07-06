@@ -134,7 +134,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     {
         switch (includeInfo)
         {
-            default: throw new IllegalStateException();
+            default: throw new IllegalStateException("Unexpected status: " + includeInfo);
             case No:
             case Route:
                 return new CheckStatusOk(true, invalidIfNotAtLeast(safeStore));
