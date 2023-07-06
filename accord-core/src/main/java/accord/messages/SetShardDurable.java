@@ -63,7 +63,7 @@ public class SetShardDurable extends AbstractEpochRequest<SimpleReply>
     @Override
     public String toString()
     {
-        return "SetLocallyDurable{" + exclusiveSyncPoint + '}';
+        return "SetShardDurable{" + exclusiveSyncPoint + '}';
     }
 
     @Override
