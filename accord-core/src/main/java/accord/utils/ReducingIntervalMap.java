@@ -18,8 +18,6 @@
 
 package accord.utils;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -28,6 +26,8 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import javax.annotation.Nullable;
+
+import com.google.common.annotations.VisibleForTesting;
 
 /**
  * Mostly copied/adapted from Cassandra's PaxosRepairHistory class
@@ -122,15 +122,15 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
 
     public K startAt(int idx)
     {
-        if (idx < 0 || idx > size() - 1)
-            throw new IndexOutOfBoundsException();
+        if (idx < 0 || idx > size() + 1)
+            throw new IndexOutOfBoundsException(String.format("%d < 0 or > %d", idx, size() + 1));
         return starts[idx];
     }
 
     public V valueAt(int idx)
     {
-        if (idx < 0 || idx >= values.length)
-            throw new IndexOutOfBoundsException(String.format("%d < 0 or > %d - 1", idx, size()));
+        if (idx < 0 || idx > size())
+            throw new IndexOutOfBoundsException(String.format("%d < 0 or > %d", idx, size()));
         return values[idx];
     }
 
