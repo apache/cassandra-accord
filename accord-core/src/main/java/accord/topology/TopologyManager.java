@@ -18,22 +18,30 @@
 
 package accord.topology;
 
+import java.util.ArrayList;
+import java.util.BitSet;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.Function;
+
+import com.google.common.annotations.VisibleForTesting;
+
 import accord.api.RoutingKey;
 import accord.api.TopologySorter;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.CommandStore;
 import accord.local.Node.Id;
-import accord.primitives.*;
+import accord.primitives.Ranges;
+import accord.primitives.Timestamp;
+import accord.primitives.Unseekables;
 import accord.topology.Topologies.Single;
-import com.google.common.annotations.VisibleForTesting;
 import accord.utils.Invariants;
-import accord.utils.async.*;
-
-import java.util.*;
-import java.util.function.Function;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 
 import static accord.coordinate.tracking.RequestStatus.Success;
-
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.nonNull;
@@ -72,8 +80,10 @@ public class TopologyManager
             this.local = global.forNode(node).trim();
             Invariants.checkArgument(!global().isSubset());
             this.curShardSyncComplete = new BitSet(global.shards.length);
-            this.syncTracker = new QuorumTracker(new Single(sorter, global()));
-            this.newRanges = global.ranges.subtract(prevRanges);
+            if (global().size() > 0)
+                this.syncTracker = new QuorumTracker(new Single(sorter, global()));
+            else
+                this.syncTracker = null;            this.newRanges = global.ranges.subtract(prevRanges);
             this.prevSyncComplete = newRanges.with(prevSyncComplete);
             this.curSyncComplete = this.syncComplete = newRanges;
         }
