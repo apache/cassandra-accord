@@ -487,18 +487,15 @@ public class TopologyManager
         if (i == snapshot.epochs.length)
             return topologies;
 
-        // include any additional epochs to reach sufficiency
-        EpochState prev = snapshot.epochs[maxi - 1];
         do
         {
-            Ranges sufficient = isSufficientFor.apply(prev);
+            EpochState next = snapshot.epochs[i++];
+            Ranges sufficient = isSufficientFor.apply(next);
             remaining = remaining.subtract(sufficient);
             if (remaining.isEmpty())
                 return topologies;
 
-            EpochState next = snapshot.epochs[i++];
             topologies.add(next.global.forSelection(remaining));
-            prev = next;
         } while (i < snapshot.epochs.length);
 
         return topologies;
