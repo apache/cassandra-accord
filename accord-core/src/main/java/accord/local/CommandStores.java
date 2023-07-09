@@ -548,7 +548,7 @@ public abstract class CommandStores
 
     public CommandStore select(RoutingKey key)
     {
-        return  select(ranges -> ranges.contains(key));
+        return select(ranges -> ranges.contains(key));
     }
 
     public CommandStore select(Route<?> route)

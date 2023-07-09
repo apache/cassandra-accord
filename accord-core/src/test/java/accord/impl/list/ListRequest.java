@@ -40,6 +40,7 @@ import accord.primitives.Txn;
 import accord.messages.Request;
 import accord.primitives.TxnId;
 
+import static accord.local.Status.Phase.Cleanup;
 import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
 
@@ -76,7 +77,7 @@ public class ListRequest implements Request
             if (failure != null) callback.accept(null, failure);
             else if (merged.saveStatus.is(Status.Invalidated)) callback.accept(Outcome.Invalidated, null);
             else if (merged.saveStatus.is(Status.Truncated)) callback.accept(Outcome.Truncated, null);
-            else if (!merged.saveStatus.hasBeen(PreCommitted) && merged.truncated) callback.accept(Outcome.Truncated, null);
+            else if (!merged.saveStatus.hasBeen(PreCommitted) && merged.maxSaveStatus.phase == Cleanup) callback.accept(Outcome.Truncated, null);
             else if (count == nodes().size()) callback.accept(Outcome.Lost, null);
             else callback.accept(Outcome.Other, null);
         }

@@ -227,7 +227,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                         case Uncommitted:
                         {
-                            Invariants.checkState(token.status != Status.Invalidated);
+                            Invariants.checkState(token.status != Status.Invalidated, "ProgressToken is invalidated, but we have not cleared the ProgressLog");
                             // TODO (expected): this should be encapsulated in Recover/FetchData
                             if (!command.durability().isDurable() && token.durability.isDurableOrInvalidated() && (token.durability.isDurable() || command.hasBeen(PreCommitted)))
                                 command = Commands.setDurability(safeStore, safeCommand, txnId, Majority);

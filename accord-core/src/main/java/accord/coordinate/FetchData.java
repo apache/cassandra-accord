@@ -21,6 +21,7 @@ package accord.coordinate;
 import java.util.function.BiConsumer;
 
 import accord.api.RoutingKey;
+import accord.coordinate.InferInvalid.InvalidateAndCallback;
 import accord.local.Command;
 import accord.local.Commands;
 import accord.local.Node;
@@ -38,11 +39,11 @@ import accord.utils.MapReduceConsume;
 
 import javax.annotation.Nullable;
 
+import static accord.coordinate.InferInvalid.InvalidateAndCallback.invalidateAndCallback;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.NotDefined;
 import static accord.local.Status.PreApplied;
-import static accord.local.Status.PreCommitted;
 import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
 import static accord.primitives.Routables.Slice.Minimal;
@@ -115,10 +116,11 @@ public class FetchData extends CheckShards<Route<?>>
         switch (found.outcome)
         {
             default: throw new AssertionError();
-            case Truncated: // TODO (expected): we might simply be stale; we should check
-            case Invalidate:
-                InvalidateOnDone.propagate(node, txnId, someUnseekables, found, withQuorum, callback);
+            case Invalidated:
+                invalidateAndCallback(node, txnId, someUnseekables, found, callback);
                 break;
+
+            case Erased:
             case TruncatedApply:
             case Applying:
             case Applied:
@@ -416,77 +418,6 @@ public class FetchData extends CheckShards<Route<?>>
 
             Timestamp executeAt = full.saveStatus.known.executeAt.hasDecidedExecuteAt() ? full.executeAt : null;
             Commands.setDurability(safeStore, safeCommand, txnId, full.durability, route, true, progressKey, executeAt);
-            return null;
-        }
-
-        @Override
-        public Void reduce(Void o1, Void o2)
-        {
-            return null;
-        }
-
-        @Override
-        public void accept(Void result, Throwable failure)
-        {
-            callback.accept(achieved, failure);
-        }
-    }
-
-    static class InvalidateOnDone implements MapReduceConsume<SafeCommandStore, Void>
-    {
-        final Node node;
-        final TxnId txnId;
-        final Unseekables<?> someUnseekables;
-        final Known achieved;
-        final BiConsumer<Known, Throwable> callback;
-
-        private InvalidateOnDone(Node node, TxnId txnId, Unseekables<?> someUnseekables, Known achieved, BiConsumer<Known, Throwable> callback)
-        {
-            this.node = node;
-            this.txnId = txnId;
-            this.someUnseekables = someUnseekables;
-            this.achieved = achieved;
-            this.callback = callback;
-        }
-
-        public static void propagate(Node node, TxnId txnId, Unseekables<?> someUnseekables, Known achieved, WithQuorum withQuorum, BiConsumer<Known, Throwable> callback)
-        {
-            switch (achieved.outcome)
-            {
-                default: throw new AssertionError("Invalid knowledge with which to trigger a potential invalidation " + achieved.outcome);
-                case Truncated:
-                    // TODO (NOW): clear the coordination progress log state if we've reached a majority
-                    if (Route.isRoute(someUnseekables) && !Route.castToRoute(someUnseekables).hasParticipants())
-                    {
-                        // TODO (now): it might be better to require that every home shard records a transaction outcome before truncating
-                        // not safe to invalidate; the home shard may have truncated because the outcome is durable at a majority.
-                        // however, even if we are only the home and do not participate in the current epoch, we cannot be sure we
-                        // do not participate in whatever the (unknown) execution epoch is
-                        return;
-                    }
-                    if (withQuorum != HasQuorum)
-                        return;
-
-                case Invalidate:
-                    new InvalidateOnDone(node, txnId, someUnseekables, achieved, callback).start();
-            }
-        }
-
-        void start()
-        {
-            PreLoadContext loadContext = contextFor(txnId);
-            Unseekables<?> propagateTo = isRoute(someUnseekables) ? castToRoute(someUnseekables).withHomeKey() : someUnseekables;
-            node.mapReduceConsumeLocal(loadContext, propagateTo, txnId.epoch(), txnId.epoch(), this);
-        }
-
-        @Override
-        public Void apply(SafeCommandStore safeStore)
-        {
-            // we're applying an invalidation, so the record will not be cleaned up until the whole range is truncated
-            SafeCommand safeCommand = safeStore.get(txnId, someUnseekables);
-            Command command = safeCommand.current();
-            if (achieved.outcome.isInvalidated() || !command.hasBeen(PreCommitted))
-                Commands.commitInvalidate(safeStore, safeCommand);
             return null;
         }
 

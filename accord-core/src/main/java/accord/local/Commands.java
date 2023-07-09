@@ -772,6 +772,7 @@ public class Commands
 
     public enum Truncate { NO, TRUNCATE, ERASE }
 
+    // TODO (now): document and justify all calls
     public static Command setTruncated(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
         return setTruncated(safeStore, safeCommand, Truncate.TRUNCATE, true);
@@ -804,6 +805,7 @@ public class Commands
         if (safeStore.commandStore().globalDurability(command.txnId()) == Universal)
             return Truncate.ERASE;
 
+        // TODO (desired): we may have the complete route for Invalidated, but we don't currently retain this in SaveStatus
         if (!command.hasBeen(Applied) || !command.known().hasCompleteRoute())
             return Truncate.NO;
 
@@ -812,11 +814,13 @@ public class Commands
         Route<?> all = command.route();
         Participants<?> participants = all.participants();
 
-        // TODO (now): confirm this isn't a necessary test (should be... redundant, as implied by not durable)
+        // We first check if the command is redundant locally, i.e. whether it has been applied to all local shards
         RedundantStatus redundant = safeStore.commandStore().redundantBefore().min(txnId, executeAt, participants);
         if (redundant == LIVE)
             return Truncate.NO;
 
+        // TODO (now): if the command's own durability is Majority, we can look *only* at our local participants to decide whether we truncate
+        // TODO (now): if we retain Outcome and Result in e.g. PartiallyTruncated then we can special-case recovery to permit truncation based only on redundancy
         Durability min = safeStore.commandStore().durableBefore().min(txnId, all);
         switch (min)
         {
@@ -957,8 +961,7 @@ public class Commands
                         }
                         else
                         {
-                            Invariants.checkState(depth == 0, "prev (" + txnIds[depth - 1] + ") is null, but depth > 0; this should already be caught by another branch");
-                            throw new AssertionError(txnIds[0] + " had NotifyWaitingOn invoked directly upon it, so it must have existed; it is not redundant, but no longer exists");
+                            initialise(safeStore, depth);
                         }
                     }
                     else

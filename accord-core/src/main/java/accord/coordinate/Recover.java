@@ -27,7 +27,6 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 
-import accord.coordinate.FetchData.InvalidateOnDone;
 import accord.coordinate.tracking.*;
 import accord.local.Status.Known;
 import accord.primitives.*;
@@ -48,6 +47,7 @@ import accord.messages.WaitOnCommit;
 import accord.messages.WaitOnCommit.WaitOnCommitOk;
 import accord.topology.Topology;
 
+import static accord.coordinate.InferInvalid.InvalidateAndCallback.invalidateAndCallback;
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
 import static accord.coordinate.ProposeAndExecute.proposeAndExecute;
 import static accord.coordinate.tracking.RequestStatus.Failed;
@@ -342,7 +342,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         Timestamp invalidateUntil = recoverOks.stream().map(ok -> ok.executeAt).reduce(txnId, Timestamp::max);
         node.withEpoch(invalidateUntil.epoch(), () -> Commit.Invalidate.commitInvalidate(node, txnId, route, invalidateUntil));
         isDone = true;
-        InvalidateOnDone.propagate(node, txnId, route, Known.Invalidated, HasQuorum, (s, f) -> callback.accept(f == null ? ProgressToken.INVALIDATED : null, f));
+        invalidateAndCallback(node, txnId, route, Known.Invalidated, (s, f) -> callback.accept(f == null ? ProgressToken.INVALIDATED : null, f));
     }
 
     private void propose(Timestamp executeAt, Deps deps)

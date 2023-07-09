@@ -37,7 +37,7 @@ public class Ranges extends AbstractRanges implements Iterable<Range>, Seekables
 {
     public static final Ranges EMPTY = new Ranges(new Range[0]);
 
-    Ranges(@Nonnull Range[] ranges)
+    private Ranges(@Nonnull Range[] ranges)
     {
         super(ranges);
     }
@@ -154,7 +154,7 @@ public class Ranges extends AbstractRanges implements Iterable<Range>, Seekables
         return union(mode, this, that, this, that, (left, right, ranges) -> {
             if (ranges == left.ranges) return left;
             if (ranges == right.ranges) return right;
-            return new Ranges(ranges);
+            return Ranges.ofSortedAndDeoverlapped(ranges);
         });
     }
 
@@ -162,13 +162,13 @@ public class Ranges extends AbstractRanges implements Iterable<Range>, Seekables
     {
         return union(mode, this, that, this, that, (left, right, ranges) -> {
             if (ranges == left.ranges) return left;
-            return new Ranges(ranges);
+            return Ranges.ofSortedAndDeoverlapped(ranges);
         });
     }
 
     public Ranges mergeTouching()
     {
-        return mergeTouching(this, Ranges::new);
+        return mergeTouching(this, Ranges::ofSortedAndDeoverlapped);
     }
 
     public Map<Boolean, Ranges> partitioningBy(Predicate<? super Range> test)

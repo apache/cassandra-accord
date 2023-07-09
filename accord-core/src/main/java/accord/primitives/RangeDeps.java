@@ -363,14 +363,14 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     {
         int txnIdIndex = Arrays.binarySearch(txnIds, txnId);
         if (txnIdIndex < 0)
-            throw new IllegalStateException("Cannot create a RouteFragment without any keys");
+            throw new IllegalArgumentException("Key not found");
 
         ensureTxnIdToRange();
 
         int start = txnIdIndex == 0 ? txnIds.length : txnIdsToRanges[txnIdIndex - 1];
         int end = txnIdsToRanges[txnIdIndex];
         if (start == end)
-            throw new IllegalStateException("Cannot create a RouteFragment without any keys");
+            return Ranges.EMPTY;
 
         Range[] result = new Range[end - start];
         result[0] = ranges[txnIdsToRanges[start]];
@@ -384,7 +384,11 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
 
         if (resultCount < result.length)
             result = Arrays.copyOf(result, resultCount);
-        return new Ranges(result);
+
+        // it's possible to have overlapping ranges in the RangeDeps after merging; to avoid this we would need to merge
+        // by txnId, or else have some post-filter, which probably isn't worth the effort.
+        // This occurs when a range transaction or sync point is sliced differently on different replicas
+        return Ranges.ofSorted(result);
     }
 
     void ensureTxnIdToRange()

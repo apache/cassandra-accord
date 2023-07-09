@@ -79,8 +79,8 @@ public enum Status
     PreApplied        (Persist, DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Outcome.Applying),
     Applying          (Persist, DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Outcome.Applying),
     Applied           (Persist, DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Outcome.Applied),
-    Truncated         (Cleanup, DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Outcome.Truncated),
-    Invalidated       (Persist, NoOp,              NoExecuteAt,      NoDeps,      Outcome.Invalidate),
+    Truncated         (Cleanup, DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Unknown),
+    Invalidated       (Persist, NoOp,              NoExecuteAt,      NoDeps,      Outcome.Invalidated),
     ;
 
     /**
@@ -108,8 +108,8 @@ public enum Status
         public static final Known DefinitionOnly    = new Known(DefinitionKnown,   ExecuteAtUnknown, DepsUnknown, Unknown);
         public static final Known ExecuteAtOnly     = new Known(DefinitionUnknown, ExecuteAtKnown,   DepsUnknown, Unknown);
         public static final Known Done              = new Known(DefinitionUnknown, ExecuteAtKnown,   DepsKnown,   Outcome.Applied);
-        public static final Known Invalidated       = new Known(DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Invalidate);
-        public static final Known Truncated         = new Known(DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Outcome.Truncated);
+        public static final Known Invalidated       = new Known(DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Outcome.Invalidated);
+        public static final Known Erased            = new Known(DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Outcome.Erased);
 
         public final Definition definition;
         public final KnownExecuteAt executeAt;
@@ -195,10 +195,10 @@ public enum Status
             switch (outcome)
             {
                 default: throw new AssertionError();
-                case Truncated:
+                case Erased:
                     return Status.Truncated;
 
-                case Invalidate:
+                case Invalidated:
                     return Status.Invalidated;
 
                 case Applying:
@@ -420,14 +420,13 @@ public enum Status
         /**
          * The transaction is known to have been invalidated
          */
-        Invalidate,
+        Invalidated,
 
         /**
          * The transaction has been *completely cleaned up* - this means it has been made
          * durable at every live replica of every shard we contacted
          */
-        Truncated
-
+        Erased
         ;
 
         public boolean isKnown()
@@ -442,17 +441,17 @@ public enum Status
 
         public boolean isInvalidated()
         {
-            return this == Invalidate;
+            return this == Invalidated;
         }
 
         public boolean propagatesBetweenShards()
         {
-            return this == Invalidate;
+            return this == Invalidated;
         }
 
         public boolean isTruncated()
         {
-            return this == Truncated || this == TruncatedApply;
+            return this == Erased || this == TruncatedApply;
         }
     }
 

@@ -180,7 +180,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                 }
                 break;
 
-            case Invalidate:
+            case Invalidated:
                 if (witnessedByInvalidation != null && witnessedByInvalidation.hasBeen(Status.PreCommitted))
                     throw new IllegalStateException("We previously invalidated, finding a status that should be recoverable");
 
@@ -189,7 +189,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                 callback.accept(INVALIDATED, null);
                 break;
 
-            case Truncated:
+            case Erased:
                 callback.accept(TRUNCATED, null);
                 break;
         }

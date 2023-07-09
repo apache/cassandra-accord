@@ -60,6 +60,7 @@ public class CoordinateShardDurable extends SettableResult<Void> implements Call
 
     private void start()
     {
+        // TODO (expected): we don't need to WaitUntilApplied - it's good enough to WaitUntilPreApplied
         node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), exclusiveSyncPoint.syncId, exclusiveSyncPoint.ranges, exclusiveSyncPoint.syncId.epoch()), this);
     }
 

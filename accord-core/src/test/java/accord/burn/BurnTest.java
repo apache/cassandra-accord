@@ -93,7 +93,7 @@ public class BurnTest
         for (int count = 0 ; count < operations ; ++count)
         {
             Id client = clients.get(random.nextInt(clients.size()));
-            Id node = nodes.get(random.nextInt(clients.size()));
+            Id node = nodes.get(random.nextInt(nodes.size()));
 
             boolean isRangeQuery = random.nextBoolean();
             if (isRangeQuery)
@@ -368,8 +368,17 @@ public class BurnTest
         try
         {
             List<Id> clients = generateIds(true, 1 + random.nextInt(4));
-            List<Id> nodes = generateIds(false, 5 + random.nextInt(5));
-            burn(random, new TopologyFactory(nodes.size() == 5 ? 3 : (2 + random.nextInt(3)), IntHashKey.ranges(4 + random.nextInt(12))),
+            int rf;
+            float chance = random.nextFloat();
+            if (chance < 0.2f)      { rf = random.nextInt(2, 9); }
+            else if (chance < 0.4f) { rf = 3; }
+            else if (chance < 0.7f) { rf = 5; }
+            else if (chance < 0.8f) { rf = 7; }
+            else                    { rf = 9; }
+
+            List<Id> nodes = generateIds(false, random.nextInt(rf, rf * 3));
+
+            burn(random, new TopologyFactory(rf, IntHashKey.ranges(random.nextInt(Math.max(nodes.size() + 1, rf), nodes.size() * 3))),
                     clients,
                     nodes,
                     5 + random.nextInt(15),

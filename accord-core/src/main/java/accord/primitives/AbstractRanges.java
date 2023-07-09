@@ -286,7 +286,7 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
     @Override
     public final Ranges slice(Ranges ranges, Slice slice)
     {
-        return slice(ranges, slice, this, null, (i1, i2, rs) -> i1.ranges == rs ? i1 : new Ranges(rs));
+        return slice(ranges, slice, this, null, (i1, i2, rs) -> i1.ranges == rs ? i1 : Ranges.ofSortedAndDeoverlapped(rs));
     }
 
     static <I extends AbstractRanges, P, O extends AbstractRanges> O slice(I covering, Slice slice, AbstractRanges input, P param, SliceConstructor<I, P, O> constructor)

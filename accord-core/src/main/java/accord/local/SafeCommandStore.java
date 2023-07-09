@@ -24,7 +24,7 @@ import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
-import accord.impl.TruncatedSafeCommand;
+import accord.impl.ErasedSafeCommand;
 import accord.primitives.Deps;
 import accord.primitives.Ranges;
 import accord.primitives.Seekable;
@@ -138,7 +138,7 @@ public abstract class SafeCommandStore
         if (command.saveStatus() == Uninitialised)
         {
             if (commandStore().durableBefore().isUniversal(txnId, unseekable))
-                return new TruncatedSafeCommand(txnId);
+                return new ErasedSafeCommand(txnId);
         }
         return maybeTruncate(safeCommand, command);
     }
@@ -170,7 +170,7 @@ public abstract class SafeCommandStore
         if (command.saveStatus() == Uninitialised)
         {
             if (commandStore().durableBefore().isUniversal(txnId, unseekables))
-                return new TruncatedSafeCommand(txnId);
+                return new ErasedSafeCommand(txnId);
         }
         return maybeTruncate(safeCommand, command);
     }

@@ -20,10 +20,8 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
-import accord.coordinate.FetchData.InvalidateOnDone;
 import accord.local.Status.Known;
 import accord.messages.CheckStatus.WithQuorum;
-import accord.messages.Commit;
 import accord.primitives.*;
 import accord.utils.Invariants;
 
@@ -31,6 +29,7 @@ import accord.local.Node;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
 
+import static accord.coordinate.InferInvalid.InvalidateAndCallback.invalidateAndCallback;
 import static accord.utils.Functions.reduceNonNull;
 
 /**
@@ -59,7 +58,7 @@ public class MaybeRecover extends CheckShards<Route<?>>
     @Override
     protected boolean isSufficient(CheckStatusOk ok)
     {
-        return hasMadeProgress(ok) || ok.truncated;
+        return hasMadeProgress(ok) || ok.durability.isDurableOrInvalidated();
     }
 
     public boolean hasMadeProgress(CheckStatusOk ok)
@@ -107,15 +106,17 @@ public class MaybeRecover extends CheckShards<Route<?>>
                     }
                     break;
 
-                case Invalidate:
-                    // TODO (easy, efficiency): we should simply invoke commitInvalidate
-                    Commit.Invalidate.commitInvalidate(node, txnId, someRoute, sourceEpoch);
-
-                case Truncated:
                 case TruncatedApply:
+                    callback.accept(merged.toProgressToken(), null);
+                    break;
+
+                case Invalidated:
+                    invalidateAndCallback(node, txnId, someRoute, Known.Invalidated, (s, f) -> callback.accept(f == null ? merged.toProgressToken() : null, f));
+
+                case Erased:
                     WithQuorum withQuorum = success.withQuorum;
-                    Known propagate = merged.ifKnownInvalidOrTruncated(withQuorum);
-                    InvalidateOnDone.propagate(node, txnId, someRoute, propagate, withQuorum, (s, f) -> callback.accept(f == null ? merged.toProgressToken() : null, f));
+                    if (!merged.inferInvalidated(someRoute, withQuorum)) callback.accept(merged.toProgressToken(), null);
+                    else invalidateAndCallback(node, txnId, someRoute, Known.Erased, (s, f) -> callback.accept(f == null ? merged.toProgressToken() : null, f));
             }
         }
     }

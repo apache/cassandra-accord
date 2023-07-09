@@ -206,6 +206,15 @@ public class Timestamp implements Comparable<Timestamp>, EpochSupplier
         if (this == that) return 0;
         int c = Long.compareUnsigned(this.msb, that.msb);
         if (c == 0) c = Long.compare(lowHlc(this.lsb), lowHlc(that.lsb));
+        if (c == 0) c = Long.compare(this.lsb & IDENTITY_FLAGS, that.lsb & IDENTITY_FLAGS);
+        if (c == 0) c = this.node.compareTo(that.node);
+        return c;
+    }
+
+    public int compareToWithoutEpoch(@Nonnull Timestamp that)
+    {
+        if (this == that) return 0;
+        int c = Long.compare(highHlc(this.msb), highHlc(that.msb));
         if (c == 0) c = Long.compare(lowHlc(this.lsb), lowHlc(that.lsb));
         if (c == 0) c = Long.compare(this.lsb & IDENTITY_FLAGS, that.lsb & IDENTITY_FLAGS);
         if (c == 0) c = this.node.compareTo(that.node);
@@ -258,8 +267,10 @@ public class Timestamp implements Comparable<Timestamp>, EpochSupplier
      */
     public static Timestamp mergeMax(Timestamp a, Timestamp b)
     {
-        return a.compareTo(b) >= 0 ? a.mergeFlags(b).withHlcAtLeast(b.hlc())
-                                   : b.mergeFlags(a).withHlcAtLeast(a.hlc());
+        // Note: it is not safe to take the highest HLC while retaining the current node;
+        //       however, it is safe to take the highest epoch, as the originating node will always advance the hlc()
+        return a.compareToWithoutEpoch(b) >= 0 ? a.mergeFlags(b).withEpochAtLeast(b.epoch())
+                                               : b.mergeFlags(a).withEpochAtLeast(a.epoch());
     }
 
     public static <T extends Timestamp> T rejectedOrMax(T a, T b)

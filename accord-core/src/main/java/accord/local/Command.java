@@ -588,12 +588,12 @@ public abstract class Command implements CommonAttributes
 
         public static Truncated truncated(Command command)
         {
-            return new Truncated(command.txnId(), SaveStatus.Truncated, command.route(), command.executeAtIfKnown(), EMPTY);
+            return new Truncated(command.txnId(), SaveStatus.TruncatedApply, command.route(), command.executeAtIfKnown(), EMPTY);
         }
 
         public static Truncated truncated(TxnId txnId, Route<?> route, Timestamp executeAt)
         {
-            return new Truncated(txnId, SaveStatus.Truncated, route, executeAt, EMPTY);
+            return new Truncated(txnId, SaveStatus.TruncatedApply, route, executeAt, EMPTY);
         }
 
         public static Truncated invalidated(Command command)

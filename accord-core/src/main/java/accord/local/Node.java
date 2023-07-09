@@ -513,7 +513,10 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     public RoutingKey selectRandomHomeKey(TxnId txnId)
     {
         Ranges ranges = topology().localForEpoch(txnId.epoch()).ranges();
-        Range range = ranges.get(ranges.size() == 1 ? 0 : random.nextInt(ranges.size()));
+        // TODO (expected): should we try to pick keys in the same Keyspace in C*? Might want to adapt this to an Agent behaviour
+        if (ranges.isEmpty()) // should not really happen, but pick some other replica to serve as home key
+            ranges = topology().globalForEpoch(txnId.epoch()).ranges();
+        Range range = ranges.get(random.nextInt(ranges.size()));
         return range.someIntersectingRoutingKey(null);
     }
 

@@ -280,7 +280,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         rangeCommands.entrySet().removeIf(next -> {
             if (!(next.getKey().compareTo(syncId) < 0 && next.getValue().ranges.intersects(ranges)))
                 return false;
-            maxRedundant = Timestamp.max(maxRedundant, next.getValue().command.value().executeAt());
+            maxRedundant = Timestamp.nonNullOrMax(maxRedundant, next.getValue().command.value().executeAt());
             return true;
         });
         ranges.forEach(r -> {

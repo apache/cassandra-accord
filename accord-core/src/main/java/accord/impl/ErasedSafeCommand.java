@@ -28,20 +28,20 @@ import accord.primitives.TxnId;
 
 import static accord.local.Listeners.Immutable.EMPTY;
 
-public class TruncatedSafeCommand extends SafeCommand
+public class ErasedSafeCommand extends SafeCommand
 {
-    final Command truncated;
+    final Command erased;
 
-    public TruncatedSafeCommand(TxnId txnId)
+    public ErasedSafeCommand(TxnId txnId)
     {
         super(txnId);
-        this.truncated = new Command.Truncated(txnId, SaveStatus.Truncated, null, null, EMPTY);
+        this.erased = new Command.Truncated(txnId, SaveStatus.Erased, null, null, EMPTY);
     }
 
     @Override
     public Command current()
     {
-        return truncated;
+        return erased;
     }
 
     @Override

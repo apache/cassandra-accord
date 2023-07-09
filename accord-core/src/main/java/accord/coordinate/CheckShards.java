@@ -94,9 +94,6 @@ public abstract class CheckShards<U extends Unseekables<?>> extends ReadCoordina
             CheckStatusOk ok = (CheckStatusOk) reply;
             if (merged == null) merged = ok;
             else merged = merged.merge(ok);
-            if (merged.truncated)
-                truncated = true;
-
             return checkSufficient(from, ok);
         }
         else
@@ -114,7 +111,7 @@ public abstract class CheckShards<U extends Unseekables<?>> extends ReadCoordina
     @Override
     protected void finishOnExhaustion()
     {
-        if (truncated) finishOnFailure(new Truncated(txnId, null), false);
+        if (merged != null && merged.isTruncated()) finishOnFailure(new Truncated(txnId, null), false);
         else super.finishOnExhaustion();
     }
 }
