@@ -140,7 +140,7 @@ public class Infer
         {
             // we're applying an invalidation, so the record will not be cleaned up until the whole range is truncated
             Command command = safeCommand.current();
-            if (!command.hasBeen(PreApplied) && safeToErase(safeStore, command, Route.castToRoute(someUnseekables), null))
+            if (!command.hasBeen(PreApplied) && safeToCleanup(safeStore, command, Route.castToRoute(someUnseekables), null))
                 Commands.setErased(safeStore, safeCommand);
             return null;
         }
@@ -186,8 +186,9 @@ public class Infer
         return invalidIfNotAtLeast.compareTo(PreAccepted) >= 0 && saveStatus == SaveStatus.AcceptedInvalidate;
     }
 
-    public static boolean safeToErase(SafeCommandStore safeStore, Command command, Route<?> fetchedWith, @Nullable Timestamp executeAt)
+    public static boolean safeToCleanup(SafeCommandStore safeStore, Command command, Route<?> fetchedWith, @Nullable Timestamp executeAt)
     {
+        Invariants.checkArgument(fetchedWith != null || command.route() != null);
         TxnId txnId = command.txnId();
         if (command.is(Status.NotDefined))
             return command.saveStatus() != Uninitialised;

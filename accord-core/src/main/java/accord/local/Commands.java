@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import accord.api.ProgressLog.ProgressShard;
 import accord.api.Result;
 import accord.api.RoutingKey;
+import accord.coordinate.Infer;
 import accord.local.Command.ProxyListener;
 import accord.local.Command.WaitingOn;
 import accord.local.SaveStatus.LocalExecution;
@@ -799,7 +800,8 @@ public class Commands
         //   2) has been coordinated but *will not* be applied (we just haven't witnessed the invalidation yet); or
         //   3) a command is durably decided and this shard only hosts its home data, so no explicit truncation is necessary to remove it
         // TODO (desired): consider if there are better invariants we can impose for undecided transactions, to verify they aren't later committed (should be detected already, but more is better)
-        Invariants.checkState(command.hasBeen(Applied) || !command.hasBeen(PreCommitted) || command.partialTxn().keys().isEmpty());
+        // note that our invariant here is imperfectly applied to keep the code cleaner: we don't verify that the caller was safe to invoke if we don't already have a route in the command and we're only PreCommitted
+        Invariants.checkState(command.hasBeen(Applied) || !command.hasBeen(PreCommitted) || (command.route() == null || Infer.safeToCleanup(safeStore, command, command.route(), command.executeAt())));
 
         Command.Truncated result;
         if (!command.hasBeen(PreCommitted))

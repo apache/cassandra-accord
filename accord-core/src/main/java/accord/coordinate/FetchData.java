@@ -27,7 +27,6 @@ import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
 import accord.local.Status;
 import accord.local.Status.Known;
 import accord.local.Status.Phase;
@@ -42,9 +41,7 @@ import javax.annotation.Nullable;
 
 import static accord.coordinate.Infer.InvalidateAndCallback.invalidateAndCallback;
 import static accord.local.PreLoadContext.contextFor;
-import static accord.local.SaveStatus.TruncatedApply;
 import static accord.local.SaveStatus.Uninitialised;
-import static accord.local.Status.Committed;
 import static accord.local.Status.NotDefined;
 import static accord.local.Status.Phase.Cleanup;
 import static accord.local.Status.PreApplied;
@@ -341,7 +338,7 @@ public class FetchData extends CheckShards<Route<?>>
             Status propagate = achieved.propagate();
             if (command.hasBeen(propagate))
             {
-                if (full.maxSaveStatus.phase == Cleanup && full.durability.isDurableOrInvalidated() && Infer.safeToErase(safeStore, command, route, full.executeAt))
+                if (full.maxSaveStatus.phase == Cleanup && full.durability.isDurableOrInvalidated() && Infer.safeToCleanup(safeStore, command, route, full.executeAt))
                     Commands.setTruncatedApply(safeStore, safeCommand);
                 return null;
             }
@@ -361,7 +358,7 @@ public class FetchData extends CheckShards<Route<?>>
                     if (command.hasBeen(PreApplied) || command.saveStatus() == Uninitialised)
                         break;
 
-                    if (Infer.safeToErase(safeStore, command, route, full.executeAt))
+                    if (Infer.safeToCleanup(safeStore, command, route, full.executeAt))
                     {
                         Commands.setErased(safeStore, safeCommand);
                         break;
