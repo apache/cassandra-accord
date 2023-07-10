@@ -119,8 +119,9 @@ public class SimpleBitSet
     private void orBitsAtIndex(int index, long setBits)
     {
         long prevBits = bits[index];
-        bits[index] = setBits | prevBits;
-        count += Long.bitCount(setBits) - Long.bitCount(prevBits);
+        long nextBits = setBits | prevBits;
+        bits[index] = nextBits;
+        count += Long.bitCount(nextBits) - Long.bitCount(prevBits);
     }
 
     public boolean unset(int i)
@@ -158,12 +159,12 @@ public class SimpleBitSet
 
     public final int lastSetBit()
     {
-        return prevSetBit(size() - 1, -1);
+        return prevSetBit(size(), -1);
     }
 
     public final int lastSetBit(int ifNotFound)
     {
-        return prevSetBit(size() - 1, ifNotFound);
+        return prevSetBit(size(), ifNotFound);
     }
 
     public final int prevSetBit(int i)
@@ -178,12 +179,17 @@ public class SimpleBitSet
 
     public final int lastSetBitNotBefore(int inclBound)
     {
-        return prevSetBitNotBefore(size() - 1, inclBound, -1);
+        return prevSetBitNotBefore(size(), inclBound, -1);
     }
 
     public final int lastSetBitNotBefore(int inclBound, int ifNotFound)
     {
-        return prevSetBitNotBefore(size() - 1, inclBound, ifNotFound);
+        return prevSetBitNotBefore(size(), inclBound, ifNotFound);
+    }
+
+    public final int prevSetBitNotBefore(int i, int inclBound)
+    {
+        return prevSetBitNotBefore(i, inclBound, -1);
     }
 
     public final int prevSetBitNotBefore(int i, int inclBound, int ifNotFound)
@@ -192,13 +198,28 @@ public class SimpleBitSet
         return result >= inclBound ? result : ifNotFound;
     }
 
-    public final int prevSetBitInternal(int i, int inclIndexBound, int ifNotFound)
+    private int prevSetBitInternal(int i, int inclIndexBound, int ifNotFound)
     {
-        if (count == 0)
+        Invariants.checkArgument(i >= 0);
+        Invariants.checkArgument(i <= size());
+        if (count == 0 || i == 0)
             return ifNotFound;
 
-        int index = indexOf(i);
-        long bits = this.bits[index] & bitsEqualOrLesser(i);
+        int index = i >>> 6;
+        long bits;
+        {
+            int imod64 = i & 63;
+            if (imod64 == 0)
+            {
+                bits = this.bits[--index];
+            }
+            else
+            {
+                long bit = 1L << imod64;
+                bits = this.bits[index] & (bit - 1);
+            }
+        }
+
         while (true)
         {
             if (bits != 0)
@@ -231,9 +252,19 @@ public class SimpleBitSet
         return nextSetBitInternal(i, bits.length, ifNotFound);
     }
 
+    public final int firstSetBitBefore(int exclBound)
+    {
+        return nextSetBitBefore(0, exclBound, -1);
+    }
+
     public final int firstSetBitBefore(int exclBound, int ifNotFound)
     {
         return nextSetBitBefore(0, exclBound, ifNotFound);
+    }
+
+    public final int nextSetBitBefore(int i, int exclBound)
+    {
+        return nextSetBitBefore(i, exclBound, -1);
     }
 
     public final int nextSetBitBefore(int i, int exclBound, int ifNotFound)
@@ -242,12 +273,18 @@ public class SimpleBitSet
         return result < exclBound ? result : ifNotFound;
     }
 
-    public final int nextSetBitInternal(int i, int exclIndexBound, int ifNotFound)
+    private int nextSetBitInternal(int i, int exclIndexBound, int ifNotFound)
     {
+        Invariants.checkArgument(i >= 0);
+        Invariants.checkArgument(i <= size());
+
         if (count == 0)
             return ifNotFound;
 
-        int index = indexOf(i);
+        int index = i >>> 6;
+        if (index == this.bits.length)
+            return ifNotFound;
+
         long bits = this.bits[index] & bitsEqualOrGreater(i);
         while (true)
         {
@@ -292,7 +329,7 @@ public class SimpleBitSet
         }
     }
 
-    public final <P1> void reverseForEach(IndexedConsumer<P1> forEach, P1 p1)
+    public final <P1> void reverseForEach(P1 p1, IndexedConsumer<P1> forEach)
     {
         reverseForEach(forEach, p1, IndexedConsumer::accept);
     }
@@ -352,13 +389,6 @@ public class SimpleBitSet
         int imod64 = i & 63;
         long bit = 1L << imod64;
         return -bit;
-    }
-
-    private static long bitsEqualOrLesser(int i)
-    {
-        int imod64 = i & 63;
-        long bit = 1L << imod64;
-        return bit + bit - 1;
     }
 
     @Override
