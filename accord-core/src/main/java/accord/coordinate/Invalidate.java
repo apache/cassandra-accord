@@ -171,7 +171,6 @@ public class Invalidate implements Callback<InvalidateReply>
                         break;
 
                 case Applied:
-                case Applying:
                 case PreApplied:
                 case ReadyToExecute:
                 case Committed:

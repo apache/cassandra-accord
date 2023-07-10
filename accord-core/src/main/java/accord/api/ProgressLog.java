@@ -24,7 +24,7 @@ import accord.coordinate.InformHomeOfTxn;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.SafeCommand;
-import accord.local.Status.Known;
+import accord.local.SaveStatus.LocalExecution;
 import accord.primitives.Participants;
 import accord.primitives.Route;
 import accord.primitives.TxnId;
@@ -176,7 +176,7 @@ public interface ProgressLog
      * @param blockedOnRoute        the route (if any) we are blocked on execution for
      * @param blockedOnParticipants the participating keys on which we are blocked for execution
      */
-    void waiting(SafeCommand blockedBy, Known blockedUntil, @Nullable Route<?> blockedOnRoute, @Nullable Participants<?> blockedOnParticipants);
+    void waiting(SafeCommand blockedBy, LocalExecution blockedUntil, @Nullable Route<?> blockedOnRoute, @Nullable Participants<?> blockedOnParticipants);
 
     /**
      * We have finished processing this transaction; ensure its state is cleared

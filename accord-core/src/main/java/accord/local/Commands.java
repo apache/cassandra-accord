@@ -30,6 +30,7 @@ import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.local.Command.ProxyListener;
 import accord.local.Command.WaitingOn;
+import accord.local.SaveStatus.LocalExecution;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
@@ -58,20 +59,27 @@ import static accord.api.ProgressLog.ProgressShard.Local;
 import static accord.api.ProgressLog.ProgressShard.No;
 import static accord.api.ProgressLog.ProgressShard.UnmanagedHome;
 import static accord.api.ProgressLog.ProgressShard.Unsure;
-import static accord.local.Command.Truncated.truncated;
+import static accord.local.Command.Truncated.erased;
+import static accord.local.Command.Truncated.partiallyTruncatedApply;
+import static accord.local.Command.Truncated.truncatedApply;
 import static accord.local.Commands.EnsureAction.Add;
 import static accord.local.Commands.EnsureAction.Check;
 import static accord.local.Commands.EnsureAction.Ignore;
 import static accord.local.Commands.EnsureAction.Set;
 import static accord.local.Commands.EnsureAction.TrySet;
+import static accord.local.Commands.Truncate.ERASE;
+import static accord.local.Commands.Truncate.TRUNCATE;
 import static accord.local.RedundantStatus.LIVE;
+import static accord.local.SaveStatus.Applying;
+import static accord.local.SaveStatus.TruncatedApply;
 import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.Accepted;
 import static accord.local.Status.AcceptedInvalidate;
 import static accord.local.Status.Applied;
-import static accord.local.Status.Applying;
 import static accord.local.Status.Committed;
 import static accord.local.Status.Durability;
+import static accord.local.Status.Durability.DurableOrInvalidated;
+import static accord.local.Status.Durability.Majority;
 import static accord.local.Status.Durability.Universal;
 import static accord.local.Status.Invalidated;
 import static accord.local.Status.Known;
@@ -511,7 +519,6 @@ public class Commands
             case Committed:
             case ReadyToExecute:
             case PreApplied:
-            case Applying:
             case Applied:
             case Invalidated:
             case Truncated:
@@ -765,23 +772,28 @@ public class Commands
             {
                 TxnId nextWaitingOn = command.waitingOn().nextWaitingOn();
                 if (nextWaitingOn != null && nextWaitingOn.equals(pred.txnId()))
-                    safeStore.progressLog().waiting(predecessor, Known.Done, pred.route(), null);
+                    safeStore.progressLog().waiting(predecessor, LocalExecution.Applied, pred.route(), null);
             }
         }
     }
 
-    public enum Truncate { NO, TRUNCATE, ERASE }
+    enum Truncate { NO, PARTIAL_TRUNCATE, TRUNCATE, ERASE }
 
     // TODO (now): document and justify all calls
-    public static Command setTruncated(SafeCommandStore safeStore, SafeCommand safeCommand)
+    public static void setTruncatedApply(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
-        return setTruncated(safeStore, safeCommand, Truncate.TRUNCATE, true);
+        setTruncated(safeStore, safeCommand, TRUNCATE, true);
+    }
+
+    public static void setErased(SafeCommandStore safeStore, SafeCommand safeCommand)
+    {
+        setTruncated(safeStore, safeCommand, ERASE, true);
     }
 
     public static Command setTruncated(SafeCommandStore safeStore, SafeCommand safeCommand, Truncate truncate, boolean notifyListeners)
     {
         Command command = safeCommand.current();
-        Invariants.checkState(!command.is(Truncated));
+        Invariants.checkState(!command.hasBeen(Truncated));
 
         //   1) a command has been applied; or
         //   2) has been coordinated but *will not* be applied (we just haven't witnessed the invalidation yet); or
@@ -789,18 +801,32 @@ public class Commands
         // TODO (desired): consider if there are better invariants we can impose for undecided transactions, to verify they aren't later committed (should be detected already, but more is better)
         Invariants.checkState(command.hasBeen(Applied) || !command.hasBeen(PreCommitted) || command.partialTxn().keys().isEmpty());
 
-        Command.Truncated result = truncated(command);
+        Command.Truncated result;
+        if (!command.hasBeen(PreCommitted))
+        {
+            result = erased(command);
+        }
+        else switch (truncate)
+        {
+            default: throw new AssertionError();
+            case PARTIAL_TRUNCATE:
+                // TODO (expected, consider): should we downgrade to no truncation in this case? Or are we stale?
+                if (command.hasBeen(PreApplied))
+                {
+                    result = partiallyTruncatedApply(command.asExecuted());
+                    break;
+                }
+            case TRUNCATE: result = truncatedApply(command); break;
+            case ERASE: result = erased(command); break;
+        }
         safeCommand.set(result);
         safeStore.progressLog().clear(safeCommand.txnId());
         if (notifyListeners)
-            safeStore.notifyListeners(safeCommand);
-
-        if (truncate == Truncate.ERASE)
-            safeStore.erase(safeCommand);
+            safeStore.notifyListeners(safeCommand, result, command.durableListeners(), safeCommand.transientListeners());
         return result;
     }
 
-    public static Truncate shouldTruncate(SafeCommandStore safeStore, Command command)
+    static Truncate shouldTruncate(SafeCommandStore safeStore, Command command)
     {
         if (safeStore.commandStore().globalDurability(command.txnId()) == Universal)
             return Truncate.ERASE;
@@ -814,7 +840,8 @@ public class Commands
         Route<?> all = command.route();
         Participants<?> participants = all.participants();
 
-        // We first check if the command is redundant locally, i.e. whether it has been applied to all local shards
+        // We first check if the command is redundant locally, i.e. whether it has been applied to all non-faulty replicas of the local shard
+        // If not, we don't want to truncate its state else we may make catching up for these other replicas much harder
         RedundantStatus redundant = safeStore.commandStore().redundantBefore().min(txnId, executeAt, participants);
         if (redundant == LIVE)
             return Truncate.NO;
@@ -829,9 +856,14 @@ public class Commands
             case DurableOrInvalidated:
                 throw new AssertionError();
             case NotDurable:
-                return Truncate.NO;
+                if (command.durability() == Majority)
+                    return Truncate.TRUNCATE;
+
+                return Truncate.PARTIAL_TRUNCATE;
+
             case Majority:
                 return Truncate.TRUNCATE;
+
             case Universal:
                 return Truncate.ERASE;
         }
@@ -870,11 +902,12 @@ public class Commands
             case NO:
                 return false;
 
-            case ERASE:
+            case PARTIAL_TRUNCATE:
             case TRUNCATE:
-                if (!command.is(Truncated))
+            case ERASE:
+                if (command.saveStatus().compareTo(TruncatedApply) < 0)
                     setTruncated(safeStore, safeCommand, truncate, true);
-                else if (truncate == Truncate.ERASE)
+                if (truncate == Truncate.ERASE)
                     safeStore.erase(safeCommand);
                 return true;
         }
@@ -890,10 +923,6 @@ public class Commands
         if (command.durability().compareTo(durability) >= 0)
             return command;
 
-        Ranges coordinates = safeStore.ranges().coordinates(command.txnId());
-        Ranges additionalRanges = Ranges.EMPTY;
-        if (command.executesInFutureEpoch())
-            additionalRanges = safeStore.ranges().allBetween(command.txnId().epoch(), command.executeAt().epoch());
         CommonAttributes attrs = route == null ? command : updateRoute(command, route);
         if (executeAt != null && command.status().hasBeen(Committed) && !command.asCommitted().executeAt().equals(executeAt))
             safeStore.agent().onInconsistentTimestamp(command, command.asCommitted().executeAt(), executeAt);
@@ -925,14 +954,14 @@ public class Commands
 
     static class NotifyWaitingOn implements PreLoadContext, Consumer<SafeCommandStore>
     {
-        Known[] blockedUntil = new Known[4];
+        LocalExecution[] blockedUntil = new LocalExecution[4];
         TxnId[] txnIds = new TxnId[4];
         int depth;
 
         public NotifyWaitingOn(SafeCommand root)
         {
             txnIds[0] = root.txnId();
-            blockedUntil[0] = Known.Done;
+            blockedUntil[0] = LocalExecution.Applied;
         }
 
         @Override
@@ -983,7 +1012,7 @@ public class Commands
                 Command prev = prevSafe != null ? prevSafe.current() : null;
                 SafeCommand curSafe = ifLoadedAndInitialised(safeStore, depth);
                 Command cur = curSafe != null ? curSafe.current() : null;
-                Known until = blockedUntil[depth];
+                LocalExecution until = blockedUntil[depth];
                 if (cur == null)
                 {
                     // need to load; schedule execution for later
@@ -993,7 +1022,7 @@ public class Commands
 
                 if (prev != null)
                 {
-                    if (cur.has(until) || cur.hasBeen(Truncated) || (cur.hasBeen(PreCommitted) && cur.executeAt().compareTo(prev.executeAt()) > 0 && !prev.txnId().rw().awaitsFutureDeps()))
+                    if (cur.isAtLeast(until) || (cur.hasBeen(PreCommitted) && cur.executeAt().compareTo(prev.executeAt()) > 0 && !prev.txnId().rw().awaitsFutureDeps()))
                     {
                         updateDependencyAndMaybeExecute(safeStore, prevSafe, curSafe, false);
                         --depth;
@@ -1001,9 +1030,9 @@ public class Commands
                         continue;
                     }
                 }
-                else if (cur.has(until))
+                else if (cur.isAtLeast(until))
                 {
-                    // we're done; have already applied
+                    // we're done; already applying
                     Invariants.checkState(depth == 0);
                     break;
                 }
@@ -1015,17 +1044,17 @@ public class Commands
                 {
                     // preferentially block on apply, as this probably saves us additional bookkeeping
                     // by giving other dependencies time to complete
-                    push(directlyBlockedOnApply, Known.Done);
+                    push(directlyBlockedOnApply, LocalExecution.Applied);
                     prevSafe = curSafe;
                 }
                 else if ((directlyBlockedOnCommit = waitingOn.nextWaitingOnCommit()) != null)
                 {
-                    push(directlyBlockedOnCommit, ExecuteAtOnly);
+                    push(directlyBlockedOnCommit, LocalExecution.ReadyToExclude);
                     prevSafe = curSafe;
                 }
                 else
                 {
-                    if (cur.hasBeen(Committed) && !cur.is(ReadyToExecute) && !cur.is(Applying) && !cur.asCommitted().isWaitingOnDependency())
+                    if (cur.hasBeen(Committed) && !cur.is(ReadyToExecute) && cur.saveStatus() != Applying && !cur.asCommitted().isWaitingOnDependency())
                     {
                         if (!maybeExecute(safeStore, curSafe, false, false))
                             throw new AssertionError("Is able to Apply, but has not done so");
@@ -1102,7 +1131,7 @@ public class Commands
             return safeStore.get(txnIds[i]);
         }
 
-        void push(TxnId by, Known until)
+        void push(TxnId by, LocalExecution until)
         {
             if (++depth == txnIds.length)
             {

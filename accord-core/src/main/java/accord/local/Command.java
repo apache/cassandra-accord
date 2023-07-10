@@ -46,6 +46,7 @@ import com.google.common.collect.ImmutableSortedSet;
 import java.util.*;
 
 import static accord.local.Listeners.Immutable.EMPTY;
+import static accord.local.SaveStatus.Invalidated;
 import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.Durability.DurableOrInvalidated;
 import static accord.local.Status.Durability.Local;
@@ -164,11 +165,6 @@ public abstract class Command implements CommonAttributes
             return Executed.executed(common, status, executeAt, promised, accepted, waitingOn, writes, result);
         }
 
-        public static Truncated truncated(TxnId txnId, Route<?> route, Timestamp executeAt)
-        {
-            return Truncated.truncated(txnId, route, executeAt);
-        }
-
         public static Truncated invalidated(TxnId txnId, Listeners.Immutable durableListeners)
         {
             return Truncated.invalidated(txnId, durableListeners);
@@ -201,7 +197,6 @@ public abstract class Command implements CommonAttributes
             case ReadyToExecute:
                 return validateCommandClass(status, Committed.class, klass);
             case PreApplied:
-            case Applying:
             case Applied:
                 return validateCommandClass(status, Executed.class, klass);
             case Invalidated:
@@ -432,6 +427,11 @@ public abstract class Command implements CommonAttributes
         return known.isSatisfiedBy(saveStatus().known);
     }
 
+    public boolean isAtLeast(SaveStatus.LocalExecution execution)
+    {
+        return saveStatus().execution.compareTo(execution) >= 0;
+    }
+
     public boolean has(Status.Definition definition)
     {
         return known().definition.compareTo(definition) >= 0;
@@ -580,31 +580,46 @@ public abstract class Command implements CommonAttributes
     public static final class Truncated extends AbstractCommand
     {
         final Timestamp executeAt;
-        public Truncated(TxnId txnId, SaveStatus saveStatus, Route<?> route, Timestamp executeAt, Listeners.Immutable listeners)
+        @Nullable final Writes writes;
+        @Nullable final Result result;
+        public Truncated(TxnId txnId, SaveStatus saveStatus, Status.Durability durability, Route<?> route, Timestamp executeAt, Listeners.Immutable listeners, @Nullable Writes writes, @Nullable Result result)
         {
-            super(txnId, saveStatus, DurableOrInvalidated, route, Ballot.MAX, listeners);
+            super(txnId, saveStatus, durability, route, Ballot.MAX, listeners);
             this.executeAt = executeAt;
+            this.writes = writes;
+            this.result = result;
         }
 
-        public static Truncated truncated(Command command)
+        public static Truncated erased(Command command)
         {
-            return new Truncated(command.txnId(), SaveStatus.TruncatedApply, command.route(), command.executeAtIfKnown(), EMPTY);
+            return new Truncated(command.txnId(), SaveStatus.Erased, command.durability(), command.route(), command.executeAtIfKnown(), EMPTY, null, null);
         }
 
-        public static Truncated truncated(TxnId txnId, Route<?> route, Timestamp executeAt)
+        public static Truncated truncatedApply(Command command)
         {
-            return new Truncated(txnId, SaveStatus.TruncatedApply, route, executeAt, EMPTY);
+            return new Truncated(command.txnId(), SaveStatus.TruncatedApply, command.durability(), command.route(), command.executeAtIfKnown(), EMPTY, null, null);
+        }
+
+        public static Truncated partiallyTruncatedApply(Executed command)
+        {
+            return new Truncated(command.txnId(), SaveStatus.TruncatedApply, command.durability(), command.route(), command.executeAt(), EMPTY, command.writes, command.result);
+        }
+
+        public static Truncated truncatedApply(TxnId txnId, Route<?> route, Timestamp executeAt, Status.Durability durability)
+        {
+            return new Truncated(txnId, SaveStatus.TruncatedApply, durability, route, executeAt, EMPTY, null, null);
         }
 
         public static Truncated invalidated(Command command)
         {
             Invariants.checkState(!command.hasBeen(Status.PreCommitted));
+            // TODO (now): we shouldn't need to propagate these
             return invalidated(command.txnId(), command.durableListeners());
         }
 
         public static Truncated invalidated(TxnId txnId, Listeners.Immutable durableListeners)
         {
-            return new Truncated(txnId, SaveStatus.Invalidated, null, Timestamp.NONE, durableListeners);
+            return new Truncated(txnId, SaveStatus.Invalidated, DurableOrInvalidated, null, Timestamp.NONE, durableListeners, null, null);
         }
 
         @Override
@@ -635,7 +650,7 @@ public abstract class Command implements CommonAttributes
         public Command updateAttributes(CommonAttributes attrs, Ballot promised)
         {
             // TODO (now): invoke listeners precisely once when we adopt this state, then we can simply return `this`
-            return new Truncated(txnId(), saveStatus(), attrs.route(), executeAt, attrs.durableListeners());
+            return new Truncated(txnId(), saveStatus(), attrs.durability(), attrs.route(), executeAt, attrs.durableListeners(), writes, result);
         }
     }
 
@@ -1297,11 +1312,11 @@ public abstract class Command implements CommonAttributes
 
     static Command.Executed applying(Command.Executed command)
     {
-        return Command.Executed.executed(command, command, SaveStatus.get(Status.Applying, command.known()));
+        return Command.Executed.executed(command, command, SaveStatus.Applying);
     }
 
     static Command.Executed applied(Command.Executed command)
     {
-        return Command.Executed.executed(command, command, SaveStatus.get(Status.Applied, command.known()));
+        return Command.Executed.executed(command, command, SaveStatus.Applied);
     }
 }

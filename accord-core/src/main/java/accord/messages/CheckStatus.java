@@ -22,7 +22,7 @@ import javax.annotation.Nullable;
 
 import accord.api.Result;
 import accord.api.RoutingKey;
-import accord.coordinate.InferInvalid;
+import accord.coordinate.Infer;
 import accord.local.*;
 import accord.local.Node.Id;
 
@@ -111,8 +111,6 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     {
         SafeCommand safeCommand = safeStore.get(txnId, query);
         Command command = safeCommand.current();
-        if (command.is(Truncated))
-            return erased(safeStore);
 
         switch (includeInfo)
         {
@@ -124,19 +122,6 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
                                          command.durability(), includeInfo == IncludeInfo.No ? null : command.route(), command.homeKey());
             case All:
                 return new CheckStatusOkFull(isCoordinating(node, command), invalidIfNotAtLeast(safeStore), command);
-        }
-    }
-
-    private CheckStatusOk erased(SafeCommandStore safeStore)
-    {
-        switch (includeInfo)
-        {
-            default: throw new IllegalStateException("Unexpected status: " + includeInfo);
-            case No:
-            case Route:
-                return new CheckStatusOk(invalidIfNotAtLeast(safeStore));
-            case All:
-                return new CheckStatusOkFull(invalidIfNotAtLeast(safeStore));
         }
     }
 
@@ -166,7 +151,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
 
     private Status invalidIfNotAtLeast(SafeCommandStore safeStore)
     {
-        return InferInvalid.invalidIfNotAtLeast(safeStore, txnId, query);
+        return Infer.invalidIfNotAtLeast(safeStore, txnId, query);
     }
 
     public interface CheckStatusReply extends Reply
@@ -235,15 +220,18 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             return maxSaveStatus.phase == Phase.Cleanup;
         }
 
-        public boolean inferInvalidated(Unseekables<?> fetchedWith, WithQuorum withQuorum)
+        public boolean inferInvalidated(WithQuorum withQuorum)
         {
-            return InferInvalid.inferInvalidated(fetchedWith, withQuorum, invalidIfNotAtLeast, saveStatus, maxSaveStatus);
+            return Infer.inferInvalidated(withQuorum, invalidIfNotAtLeast, saveStatus, maxSaveStatus);
         }
 
-        public Known knownOrInvalidatedIfInferred(Unseekables<?> fetchedWith, WithQuorum withQuorum)
+        public Known inferredOrKnown(Unseekables<?> fetchedWith, WithQuorum withQuorum)
         {
-            if (inferInvalidated(fetchedWith, withQuorum))
+            if (inferInvalidated(withQuorum))
                 return Known.Invalidated;
+
+
+
             // TODO (now): if erased, check if we're stale
             return saveStatus.known;
         }
@@ -393,7 +381,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
 
         public Known sufficientFor(Participants<?> participants, WithQuorum withQuorum)
         {
-            if (inferInvalidated(participants, withQuorum))
+            if (inferInvalidated(withQuorum))
                 return Known.Invalidated;
 
             if (saveStatus.hasBeen(Truncated))
@@ -434,8 +422,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             switch (outcome)
             {
                 default: throw new AssertionError();
-                case Applying:
-                case Applied:
+                case Apply:
                     if (writes == null || result == null) outcome = maxSaveStatus.phase == Phase.Cleanup ? Outcome.Erased : Outcome.Unknown;
                     else if (maxSaveStatus.phase == Phase.Cleanup) outcome = Outcome.TruncatedApply;
                     break;

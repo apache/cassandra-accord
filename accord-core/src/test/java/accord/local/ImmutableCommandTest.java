@@ -26,6 +26,7 @@ import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
 import accord.impl.mock.MockStore;
 import accord.local.Node.Id;
+import accord.local.SaveStatus.LocalExecution;
 import accord.local.Status.Known;
 import accord.primitives.*;
 import accord.topology.Topology;
@@ -86,7 +87,7 @@ public class ImmutableCommandTest
         @Override public void readyToExecute(Command command) {}
         @Override public void executed(Command command, ProgressShard shard) {}
         @Override public void durable(Command command) {}
-        @Override public void waiting(SafeCommand blockedBy, Known blockedUntil, Route<?> blockedOnRoute, Participants<?> blockedOnParticipants) {}
+        @Override public void waiting(SafeCommand blockedBy, LocalExecution blockedUntil, Route<?> blockedOnRoute, Participants<?> blockedOnParticipants) {}
         @Override public void clear(TxnId txnId) {}
     }
 

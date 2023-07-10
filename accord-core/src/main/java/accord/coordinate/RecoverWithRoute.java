@@ -160,8 +160,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                     break;
                 }
 
-            case Applying:
-            case Applied:
+            case Apply:
                 Invariants.checkState(known.definition.isKnown());
                 Invariants.checkState(known.executeAt == ExecuteAtKnown);
                 // TODO (required): we might not be able to reconstitute Txn if we have GC'd on some shards

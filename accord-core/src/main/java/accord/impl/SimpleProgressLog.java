@@ -27,6 +27,7 @@ import java.util.function.BiConsumer;
 
 import javax.annotation.Nullable;
 
+import accord.local.SaveStatus.LocalExecution;
 import accord.utils.IntrusiveLinkedList;
 import accord.utils.IntrusiveLinkedListNode;
 import accord.coordinate.*;
@@ -50,6 +51,8 @@ import static accord.impl.SimpleProgressLog.Progress.NoProgress;
 import static accord.impl.SimpleProgressLog.Progress.NoneExpected;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.local.PreLoadContext.empty;
+import static accord.local.SaveStatus.LocalExecution.NotReady;
+import static accord.local.SaveStatus.LocalExecution.WaitingToApply;
 import static accord.local.Status.Durability.Majority;
 import static accord.local.Status.Known.Nothing;
 import static accord.local.Status.PreApplied;
@@ -282,14 +285,14 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
             class BlockingState extends State.Monitoring
             {
-                Known blockedUntil = Nothing;
+                LocalExecution blockedUntil = NotReady;
 
                 Route<?> route;
                 Participants<?> participants;
 
                 Object debugInvestigating;
 
-                void recordBlocking(Known blockedUntil, @Nullable Route<?> route, @Nullable Participants<?> participants)
+                void recordBlocking(LocalExecution blockedUntil, @Nullable Route<?> route, @Nullable Participants<?> participants)
                 {
                     Invariants.checkState(route != null || participants != null);
                     Invariants.checkState(participants == null || !participants.isEmpty());
@@ -297,9 +300,9 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                     this.route = Route.merge(this.route, (Route)route);
                     this.participants = Participants.merge(this.participants, (Participants) participants);
-                    if (!blockedUntil.isSatisfiedBy(this.blockedUntil))
+                    if (blockedUntil.compareTo(this.blockedUntil) > 0)
                     {
-                        this.blockedUntil = this.blockedUntil.merge(blockedUntil);
+                        this.blockedUntil = blockedUntil;
                         setProgress(Expected);
                     }
                 }
@@ -319,7 +322,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 void run(SafeCommandStore safeStore, SafeCommand safeCommand)
                 {
                     Command command = safeCommand.current();
-                    if (command.has(blockedUntil))
+                    if (command.saveStatus().execution.compareTo(blockedUntil) >= 0)
                     {
                         setProgress(NoneExpected);
                         return;
@@ -351,7 +354,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     };
 
                     node.withEpoch(blockedUntil.fetchEpoch(txnId, executeAt), () -> {
-                        debugInvestigating = FetchData.fetch(blockedUntil, node, txnId, fetchKeys, executeAt, callback);
+                        debugInvestigating = FetchData.fetch(blockedUntil.requires, node, txnId, fetchKeys, executeAt, callback);
                     });
                 }
 
@@ -439,7 +442,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 this.txnId = txnId;
             }
 
-            void recordBlocking(TxnId txnId, Known waitingFor, Route<?> route, Participants<?> participants)
+            void recordBlocking(TxnId txnId, LocalExecution waitingFor, Route<?> route, Participants<?> participants)
             {
                 Invariants.checkArgument(txnId.equals(this.txnId));
                 if (blockingState == null)
@@ -616,13 +619,13 @@ public class SimpleProgressLog implements ProgressLog.Factory
             //   however, we need to be careful:
             //     - we might participate in the execution epoch so need to be sure we have received a route covering both
             if (!command.status().hasBeen(PreApplied) && command.route() != null && command.route().hasParticipants())
-                state.recordBlocking(command.txnId(), PreApplied.minKnown, command.route(), null);
+                state.recordBlocking(command.txnId(), WaitingToApply, command.route(), null);
             if (state.coordinateState != null)
                 state.coordinateState.durableGlobal();
         }
 
         @Override
-        public void waiting(SafeCommand blockedBy, Known blockedUntil, Route<?> blockedOnRoute, Participants<?> blockedOnParticipants)
+        public void waiting(SafeCommand blockedBy, LocalExecution blockedUntil, Route<?> blockedOnRoute, Participants<?> blockedOnParticipants)
         {
             if (blockedBy.txnId().rw().isLocal())
                 return;

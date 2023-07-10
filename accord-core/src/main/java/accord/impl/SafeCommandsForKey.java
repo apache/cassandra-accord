@@ -141,7 +141,6 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
                 byExecuteAt.add(command.txnId(), command);
                 break;
             case Applied:
-            case Applying:
             case PreApplied:
             case Committed:
             case ReadyToExecute:

@@ -75,10 +75,11 @@ public enum Status
     PreCommitted      (Accept,  DefinitionUnknown, ExecuteAtKnown,   DepsUnknown, Unknown),
 
     Committed         (Commit,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Unknown),
+    // TODO (expected): do we need ReadyToExecute here, or can we keep it to SaveStatus only?
     ReadyToExecute    (Commit,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Unknown),
-    PreApplied        (Persist, DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Outcome.Applying),
-    Applying          (Persist, DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Outcome.Applying),
-    Applied           (Persist, DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Outcome.Applied),
+    // TODO (expected): do we need both PreApplied and Applied here, or can we keep them to SaveStatus only?
+    PreApplied        (Persist, DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Outcome.Apply),
+    Applied           (Persist, DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Outcome.Apply),
     Truncated         (Cleanup, DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Unknown),
     Invalidated       (Persist, NoOp,              NoExecuteAt,      NoDeps,      Outcome.Invalidated),
     ;
@@ -107,9 +108,9 @@ public enum Status
         public static final Known Nothing           = new Known(DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Unknown);
         public static final Known DefinitionOnly    = new Known(DefinitionKnown,   ExecuteAtUnknown, DepsUnknown, Unknown);
         public static final Known ExecuteAtOnly     = new Known(DefinitionUnknown, ExecuteAtKnown,   DepsUnknown, Unknown);
-        public static final Known Done              = new Known(DefinitionUnknown, ExecuteAtKnown,   DepsKnown,   Outcome.Applied);
+        public static final Known Decision          = new Known(DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Unknown);
+        public static final Known Apply             = new Known(DefinitionUnknown, ExecuteAtKnown,   DepsKnown,   Outcome.Apply);
         public static final Known Invalidated       = new Known(DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Outcome.Invalidated);
-        public static final Known Erased            = new Known(DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Outcome.Erased);
 
         public final Definition definition;
         public final KnownExecuteAt executeAt;
@@ -168,14 +169,6 @@ public enum Status
             return txnId.epoch();
         }
 
-        public long propagateEpoch(TxnId txnId, @Nullable Timestamp executeAt)
-        {
-            if (this.executeAt.hasDecidedExecuteAt() && !executeAt.equals(Timestamp.NONE))
-                return executeAt.epoch();
-
-            return txnId.epoch();
-        }
-
         public Known with(Outcome newOutcome)
         {
             if (outcome == newOutcome)
@@ -201,8 +194,7 @@ public enum Status
                 case Invalidated:
                     return Status.Invalidated;
 
-                case Applying:
-                case Applied:
+                case Apply:
                 case TruncatedApply:
                     if (executeAt.hasDecidedExecuteAt() && definition.isKnown() && deps.hasDecidedDeps())
                         return PreApplied;
@@ -240,22 +232,6 @@ public enum Status
         public boolean canProposeInvalidation()
         {
             return deps.canProposeInvalidation() && executeAt.canProposeInvalidation() && outcome.canProposeInvalidation();
-        }
-
-        public boolean isDecisionKnown()
-        {
-            if (!deps.hasDecidedDeps())
-                return false;
-            Invariants.checkState(executeAt.hasDecidedExecuteAt());
-            return true;
-        }
-
-        public boolean isDecided()
-        {
-            if (outcome != Unknown)
-                return true;
-
-            return deps.isDecided() || executeAt.hasDecidedExecuteAt();
         }
 
         public String toString()
@@ -404,15 +380,10 @@ public enum Status
         /**
          * The outcome is known, but may not have been applied
          */
-        Applying,
+        Apply,
 
         /**
-         * The outcome is known, but may not have been applied
-         */
-        Applied,
-
-        /**
-         * The transaction has been partially cleaned-up, but was applied and the relevant portion of its outcome is known
+         * The transaction has been cleaned-up, but was applied and the relevant portion of its outcome may or may not be known
          * TODO (expected): is this state helpful? Feels like we can better encode it within Known
          */
         TruncatedApply,
@@ -431,7 +402,7 @@ public enum Status
 
         public boolean isKnown()
         {
-            return this == Applying || this == Applied || this == TruncatedApply;
+            return this == Apply || this == TruncatedApply;
         }
 
         public boolean canProposeInvalidation()

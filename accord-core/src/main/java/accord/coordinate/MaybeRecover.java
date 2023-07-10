@@ -29,7 +29,8 @@ import accord.local.Node;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
 
-import static accord.coordinate.InferInvalid.InvalidateAndCallback.invalidateAndCallback;
+import static accord.coordinate.Infer.EraseNonParticipatingAndCallback.eraseNonParticipatingAndCallback;
+import static accord.coordinate.Infer.InvalidateAndCallback.invalidateAndCallback;
 import static accord.utils.Functions.reduceNonNull;
 
 /**
@@ -92,8 +93,7 @@ public class MaybeRecover extends CheckShards<Route<?>>
                         break;
                     }
 
-                case Applying:
-                case Applied:
+                case Apply:
                     // we have included the home key, and one that witnessed the definition has responded, so it should also know the full route
                     if (hasMadeProgress(merged))
                     {
@@ -111,12 +111,12 @@ public class MaybeRecover extends CheckShards<Route<?>>
                     break;
 
                 case Invalidated:
-                    invalidateAndCallback(node, txnId, someRoute, Known.Invalidated, (s, f) -> callback.accept(f == null ? merged.toProgressToken() : null, f));
+                    invalidateAndCallback(node, txnId, someRoute, merged.toProgressToken(), callback);
 
                 case Erased:
                     WithQuorum withQuorum = success.withQuorum;
-                    if (!merged.inferInvalidated(someRoute, withQuorum)) callback.accept(merged.toProgressToken(), null);
-                    else invalidateAndCallback(node, txnId, someRoute, Known.Erased, (s, f) -> callback.accept(f == null ? merged.toProgressToken() : null, f));
+                    if (!merged.inferInvalidated(withQuorum)) eraseNonParticipatingAndCallback(node, txnId, someRoute, merged.toProgressToken(), callback);
+                    else invalidateAndCallback(node, txnId, someRoute, merged.toProgressToken(), callback);
             }
         }
     }

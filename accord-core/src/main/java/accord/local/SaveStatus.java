@@ -20,9 +20,16 @@ package accord.local;
 
 import accord.local.Status.*;
 import accord.primitives.Ballot;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 
+import static accord.local.SaveStatus.LocalExecution.NotReady;
 import static accord.local.Status.Definition.DefinitionKnown;
 import static accord.local.Status.Definition.DefinitionUnknown;
+import static accord.local.Status.Known.Apply;
+import static accord.local.Status.Known.Decision;
+import static accord.local.Status.Known.ExecuteAtOnly;
+import static accord.local.Status.Known.Nothing;
 import static accord.local.Status.KnownDeps.*;
 import static accord.local.Status.KnownExecuteAt.*;
 import static accord.local.Status.Outcome.Unknown;
@@ -49,37 +56,101 @@ public enum SaveStatus
     PreCommittedWithDefinition      (Status.PreCommitted,          DefinitionKnown,   ExecuteAtKnown,    DepsUnknown,  Unknown),
     PreCommittedWithDefinitionAndAcceptedDeps(Status.PreCommitted, DefinitionKnown,   ExecuteAtKnown,    DepsProposed, Unknown),
     Committed                       (Status.Committed),
-    ReadyToExecute                  (Status.ReadyToExecute),
+    ReadyToExecute                  (Status.ReadyToExecute,                                                                                    LocalExecution.ReadyToExecute),
     PreApplied                      (Status.PreApplied),
-    Applying                        (Status.Applying),
-    Applied                         (Status.Applied),
-    // TODO (desired): consider if we want a variant of TruncatedApply with e.g. ExecuteAtKnown
-    TruncatedApply                  (Status.Truncated,             DefinitionUnknown, ExecuteAtUnknown,  DepsUnknown,  Outcome.TruncatedApply),
-    Erased                          (Status.Truncated,             DefinitionUnknown, ExecuteAtUnknown,  DepsUnknown,  Outcome.Erased),
-    Invalidated                     (Status.Invalidated),
+    Applying                        (Status.PreApplied),
+    Applied                         (Status.Applied,                                                                                           LocalExecution.Applied),
+    TruncatedApply                  (Status.Truncated,             DefinitionUnknown, ExecuteAtKnown,    DepsUnknown,  Outcome.TruncatedApply, LocalExecution.CleaningUp),
+    Erased                          (Status.Truncated,             DefinitionUnknown, ExecuteAtUnknown,  DepsUnknown,  Outcome.Erased,         LocalExecution.CleaningUp),
+    Invalidated                     (Status.Invalidated,                                                                                       LocalExecution.CleaningUp),
     ;
-    
+
+    public enum LocalExecution
+    {
+        NotReady(Nothing),
+        ReadyToExclude(ExecuteAtOnly),
+        WaitingToExecute(Decision),
+        ReadyToExecute(Decision),
+        WaitingToApply(Apply),
+        Applying(Apply),
+        Applied(Apply),
+        CleaningUp(Nothing);
+
+        public final Known requires;
+        LocalExecution(Known requires)
+        {
+            this.requires = requires;
+        }
+
+        public boolean isSatisfiedBy(Known known)
+        {
+            return requires.isSatisfiedBy(known);
+        }
+
+        public long fetchEpoch(TxnId txnId, Timestamp timestamp)
+        {
+            if (timestamp == null || timestamp.equals(Timestamp.NONE))
+                return txnId.epoch();
+
+            switch (this)
+            {
+                default: throw new AssertionError();
+                case NotReady:
+                case ReadyToExclude:
+                case ReadyToExecute:
+                case WaitingToExecute:
+                    return txnId.epoch();
+
+                case WaitingToApply:
+                case Applying:
+                case Applied:
+                case CleaningUp:
+                    return timestamp.epoch();
+            }
+        }
+    }
+
     public final Status status;
     public final Phase phase;
-    public final Known known; // TODO (easy, API/efficiency): duplicate contents here to reduce indirection for majority of cases
+    public final Known known;
+    public final LocalExecution execution;
 
     SaveStatus(Status status)
     {
         this(status, status.phase);
     }
 
+    SaveStatus(Status status, LocalExecution execution)
+    {
+        this(status, status.phase, execution);
+    }
+
     SaveStatus(Status status, Phase phase)
     {
-        this.status = status;
-        this.phase = phase;
-        this.known = status.minKnown;
+        this(status, phase, NotReady);
+    }
+
+    SaveStatus(Status status, Phase phase, LocalExecution execution)
+    {
+        this(status, phase, status.minKnown, execution);
     }
 
     SaveStatus(Status status, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome)
     {
+        this(status, definition, executeAt, deps, outcome, NotReady);
+    }
+
+    SaveStatus(Status status, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome, LocalExecution execution)
+    {
+        this(status, status.phase, new Known(definition, executeAt, deps, outcome), execution);
+    }
+
+    SaveStatus(Status status, Phase phase, Known known, LocalExecution execution)
+    {
         this.status = status;
-        this.phase = status.phase;
-        this.known = new Known(definition, executeAt, deps, outcome);
+        this.phase = phase;
+        this.known = known;
+        this.execution = execution;
     }
 
     public boolean is(Status status)
@@ -131,7 +202,6 @@ public enum SaveStatus
             case Committed: return Committed;
             case ReadyToExecute: return ReadyToExecute;
             case PreApplied: return PreApplied;
-            case Applying: return Applying;
             case Applied: return Applied;
             case Invalidated: return Invalidated;
         }

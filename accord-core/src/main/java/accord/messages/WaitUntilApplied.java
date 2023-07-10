@@ -29,6 +29,8 @@ import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
+import accord.local.SaveStatus;
+import accord.local.SaveStatus.LocalExecution;
 import accord.local.Status;
 import accord.primitives.EpochSupplier;
 import accord.primitives.Participants;
@@ -36,8 +38,8 @@ import accord.primitives.Ranges;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
+import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
 import static accord.local.Status.Committed;
-import static accord.local.Status.Known.Done;
 import static accord.messages.ReadData.ReadNack.Invalid;
 import static accord.messages.ReadData.ReadNack.NotCommitted;
 import static accord.messages.ReadData.ReadNack.Redundant;
@@ -106,7 +108,6 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
             case Committed:
             case ReadyToExecute:
             case PreApplied:
-            case Applying:
                 return;
 
             case Invalidated:
@@ -157,7 +158,6 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
             case AcceptedInvalidate:
             case PreCommitted:
             case ReadyToExecute:
-            case Applying:
             case PreApplied:
                 waitingOn.set(safeStore.commandStore().id());
                 ++waitingOnCount;
@@ -165,12 +165,12 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
 
                 if (status.compareTo(Committed) >= 0)
                 {
-                    safeStore.progressLog().waiting(safeCommand, Done, null, readScope);
+                    safeStore.progressLog().waiting(safeCommand, LocalExecution.Applied, null, readScope);
                     return null;
                 }
                 else
                 {
-                    safeStore.progressLog().waiting(safeCommand, Committed.minKnown, null, readScope);
+                    safeStore.progressLog().waiting(safeCommand, WaitingToExecute, null, readScope);
                     return NotCommitted;
                 }
 

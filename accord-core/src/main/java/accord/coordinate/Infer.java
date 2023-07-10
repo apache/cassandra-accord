@@ -20,6 +20,8 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
+import javax.annotation.Nullable;
+
 import accord.local.Command;
 import accord.local.Commands;
 import accord.local.Node;
@@ -30,42 +32,41 @@ import accord.local.SaveStatus;
 import accord.local.Status;
 import accord.messages.CheckStatus;
 import accord.primitives.Participants;
+import accord.primitives.Ranges;
 import accord.primitives.Route;
+import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
 
 import static accord.local.PreLoadContext.contextFor;
+import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.Durability.Majority;
 import static accord.local.Status.PreAccepted;
+import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
 import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.primitives.Route.castToRoute;
 import static accord.primitives.Route.isRoute;
 
-public class InferInvalid
+public class Infer
 {
-    static class InvalidateAndCallback implements MapReduceConsume<SafeCommandStore, Void>
+    private static abstract class CleanupAndCallback<T> implements MapReduceConsume<SafeCommandStore, Void>
     {
         final Node node;
         final TxnId txnId;
         final Unseekables<?> someUnseekables;
-        final Status.Known achieved;
-        final BiConsumer<Status.Known, Throwable> callback;
+        final T param;
+        final BiConsumer<T, Throwable> callback;
 
-        private InvalidateAndCallback(Node node, TxnId txnId, Unseekables<?> someUnseekables, Status.Known achieved, BiConsumer<Status.Known, Throwable> callback)
+        private CleanupAndCallback(Node node, TxnId txnId, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
         {
             this.node = node;
             this.txnId = txnId;
             this.someUnseekables = someUnseekables;
-            this.achieved = achieved;
+            this.param = param;
             this.callback = callback;
-        }
-
-        public static void invalidateAndCallback(Node node, TxnId txnId, Unseekables<?> someUnseekables, Status.Known achieved, BiConsumer<Status.Known, Throwable> callback)
-        {
-            new InvalidateAndCallback(node, txnId, someUnseekables, achieved, callback).start();
         }
 
         void start()
@@ -79,13 +80,10 @@ public class InferInvalid
         public Void apply(SafeCommandStore safeStore)
         {
             // we're applying an invalidation, so the record will not be cleaned up until the whole range is truncated
-            SafeCommand safeCommand = safeStore.get(txnId, someUnseekables);
-            Command command = safeCommand.current();
-            // TODO (required): consider the !command.hasBeen(PreCommitted) condition
-            Invariants.checkState(!command.hasBeen(PreCommitted) || command.hasBeen(Status.Truncated));
-            Commands.commitInvalidate(safeStore, safeCommand);
-            return null;
+            return apply(safeStore, safeStore.get(txnId, someUnseekables));
         }
+
+        abstract Void apply(SafeCommandStore safeStore, SafeCommand safeCommand);
 
         @Override
         public Void reduce(Void o1, Void o2)
@@ -96,7 +94,55 @@ public class InferInvalid
         @Override
         public void accept(Void result, Throwable failure)
         {
-            callback.accept(achieved, failure);
+            callback.accept(param, failure);
+        }
+    }
+
+    static class InvalidateAndCallback<T> extends CleanupAndCallback<T>
+    {
+        private InvalidateAndCallback(Node node, TxnId txnId, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
+        {
+            super(node, txnId, someUnseekables, param, callback);
+        }
+
+        public static <T> void invalidateAndCallback(Node node, TxnId txnId, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
+        {
+            new InvalidateAndCallback<T>(node, txnId, someUnseekables, param, callback).start();
+        }
+
+        @Override
+        Void apply(SafeCommandStore safeStore, SafeCommand safeCommand)
+        {
+            // we're applying an invalidation, so the record will not be cleaned up until the whole range is truncated
+            Command command = safeCommand.current();
+            // TODO (required): consider the !command.hasBeen(PreCommitted) condition
+            Invariants.checkState(!command.hasBeen(PreCommitted) || command.hasBeen(Status.Truncated));
+            Commands.commitInvalidate(safeStore, safeCommand);
+            return null;
+        }
+    }
+
+    static class EraseNonParticipatingAndCallback<T> extends CleanupAndCallback<T>
+    {
+        private EraseNonParticipatingAndCallback(Node node, TxnId txnId, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
+        {
+            super(node, txnId, someUnseekables, param, callback);
+        }
+
+        public static <T> void eraseNonParticipatingAndCallback(Node node, TxnId txnId, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
+        {
+            if (!Route.isRoute(someUnseekables)) callback.accept(param, null);
+            else new EraseNonParticipatingAndCallback<>(node, txnId, someUnseekables, param, callback).start();
+        }
+
+        @Override
+        Void apply(SafeCommandStore safeStore, SafeCommand safeCommand)
+        {
+            // we're applying an invalidation, so the record will not be cleaned up until the whole range is truncated
+            Command command = safeCommand.current();
+            if (!command.hasBeen(PreApplied) && safeToErase(safeStore, command, Route.castToRoute(someUnseekables), null))
+                Commands.setErased(safeStore, safeCommand);
+            return null;
         }
     }
 
@@ -123,7 +169,7 @@ public class InferInvalid
         return Status.NotDefined;
     }
 
-    public static boolean inferInvalidated(Unseekables<?> fetchedWith, CheckStatus.WithQuorum withQuorum, Status invalidIfNotAtLeast, SaveStatus saveStatus, SaveStatus maxSaveStatus)
+    public static boolean inferInvalidated(CheckStatus.WithQuorum withQuorum, Status invalidIfNotAtLeast, SaveStatus saveStatus, SaveStatus maxSaveStatus)
     {
         if (saveStatus == SaveStatus.Invalidated)
             return true;
@@ -137,22 +183,25 @@ public class InferInvalid
         if (saveStatus.status.compareTo(invalidIfNotAtLeast) < 0)
             return true;
 
-        if (invalidIfNotAtLeast.compareTo(PreAccepted) >= 0 && saveStatus == SaveStatus.AcceptedInvalidate)
-            return true;
+        return invalidIfNotAtLeast.compareTo(PreAccepted) >= 0 && saveStatus == SaveStatus.AcceptedInvalidate;
+    }
 
-        if (maxSaveStatus.phase != Status.Phase.Cleanup)
-            return false;
+    public static boolean safeToErase(SafeCommandStore safeStore, Command command, Route<?> fetchedWith, @Nullable Timestamp executeAt)
+    {
+        TxnId txnId = command.txnId();
+        if (command.is(Status.NotDefined))
+            return command.saveStatus() != Uninitialised;
 
-        // TODO (now): clear the coordination progress log state if we've reached a majority
-        if (Route.isRoute(fetchedWith) && !Route.castToRoute(fetchedWith).hasParticipants())
+        if (command.route() != null || fetchedWith.covers(safeStore.ranges().allAt(txnId.epoch())))
         {
-            // TODO (now): it might be better to require that every home shard records a transaction outcome before truncating
-            // not safe to invalidate; the home shard may have truncated because the outcome is durable at a majority.
-            // however, even if we are only the home and do not participate in the current epoch, we cannot be sure we
-            // do not participate in whatever the (unknown) execution epoch is
-            return false;
-        }
+            Route<?> route = command.route();
+            if (route == null) route = fetchedWith;
 
-        return true;
+            executeAt = command.executeAtIfKnown(Timestamp.nonNullOrMax(executeAt, txnId));
+            Ranges coordinateRanges = safeStore.ranges().coordinates(txnId);
+            Ranges acceptRanges = executeAt.epoch() == txnId.epoch() ? coordinateRanges : safeStore.ranges().allBetween(txnId, executeAt);
+            return !route.participatesIn(coordinateRanges) && !route.participatesIn(acceptRanges);
+        }
+        return false;
     }
 }

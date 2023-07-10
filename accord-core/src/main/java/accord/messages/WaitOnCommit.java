@@ -27,7 +27,8 @@ import accord.utils.MapReduceConsume;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static accord.local.Status.Committed;
+import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
+
 import accord.topology.Topology;
 
 public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore, Void>, PreLoadContext, Command.TransientListener
@@ -90,12 +91,11 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
             case PreCommitted:
                 waitingOnUpdater.incrementAndGet(this);
                 safeCommand.addListener(this);
-                safeStore.progressLog().waiting(safeCommand, Committed.minKnown, null, scope);
+                safeStore.progressLog().waiting(safeCommand, WaitingToExecute, null, scope);
                 break;
 
             case Committed:
             case PreApplied:
-            case Applying:
             case Applied:
             case Invalidated:
             case Truncated:
@@ -123,7 +123,6 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
             case Committed:
             case ReadyToExecute:
             case PreApplied:
-            case Applying:
             case Applied:
             case Truncated:
             case Invalidated:

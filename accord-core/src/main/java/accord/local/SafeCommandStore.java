@@ -18,6 +18,7 @@
 
 package accord.local;
 
+import java.util.Collection;
 import java.util.function.Predicate;
 
 import accord.api.Agent;
@@ -228,10 +229,15 @@ public abstract class SafeCommandStore
     public void notifyListeners(SafeCommand safeCommand)
     {
         Command command = safeCommand.current();
-        for (Command.DurableAndIdempotentListener listener : command.durableListeners())
+        notifyListeners(safeCommand, command, command.durableListeners(), safeCommand.transientListeners());
+    }
+
+    public void notifyListeners(SafeCommand safeCommand, Command command, Listeners<Command.DurableAndIdempotentListener> durableListeners, Collection<Command.TransientListener> transientListeners)
+    {
+        for (Command.DurableAndIdempotentListener listener : durableListeners)
             notifyListener(this, safeCommand, command, listener);
 
-        for (Command.TransientListener listener : safeCommand.transientListeners())
+        for (Command.TransientListener listener : transientListeners)
             notifyListener(this, safeCommand, command, listener);
     }
 

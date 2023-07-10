@@ -30,6 +30,7 @@ import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
+import accord.local.SaveStatus;
 import accord.local.Status;
 import accord.primitives.EpochSupplier;
 import accord.primitives.Participants;
@@ -64,7 +65,6 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
             switch (safeCommand.current().status())
             {
                 case PreApplied:
-                case Applying:
                 case Applied:
                 case Invalidated:
                 case Truncated:
@@ -134,7 +134,6 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
                 return;
 
             case PreApplied:
-            case Applying:
             case Applied:
             case Invalidated:
             case Truncated:
@@ -182,13 +181,12 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
                 }
                 else
                 {
-                    safeStore.progressLog().waiting(safeCommand, Committed.minKnown, null, readScope);
+                    safeStore.progressLog().waiting(safeCommand, SaveStatus.LocalExecution.ReadyToExclude, null, readScope);
                     return NotCommitted;
                 }
 
 
             case PreApplied:
-            case Applying:
             case Applied:
             case Invalidated:
             case Truncated:

@@ -21,15 +21,16 @@ package accord.coordinate;
 import java.util.function.BiConsumer;
 
 import accord.api.RoutingKey;
-import accord.coordinate.InferInvalid.InvalidateAndCallback;
 import accord.local.Command;
 import accord.local.Commands;
 import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
+import accord.local.SaveStatus;
 import accord.local.Status;
 import accord.local.Status.Known;
+import accord.local.Status.Phase;
 import accord.messages.CheckStatus;
 import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.messages.CheckStatus.WithQuorum;
@@ -39,10 +40,13 @@ import accord.utils.MapReduceConsume;
 
 import javax.annotation.Nullable;
 
-import static accord.coordinate.InferInvalid.InvalidateAndCallback.invalidateAndCallback;
+import static accord.coordinate.Infer.InvalidateAndCallback.invalidateAndCallback;
 import static accord.local.PreLoadContext.contextFor;
+import static accord.local.SaveStatus.TruncatedApply;
 import static accord.local.SaveStatus.Uninitialised;
+import static accord.local.Status.Committed;
 import static accord.local.Status.NotDefined;
+import static accord.local.Status.Phase.Cleanup;
 import static accord.local.Status.PreApplied;
 import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
@@ -122,8 +126,7 @@ public class FetchData extends CheckShards<Route<?>>
 
             case Erased:
             case TruncatedApply:
-            case Applying:
-            case Applied:
+            case Apply:
             case Unknown:
                 callback.accept(found, null);
         }
@@ -331,7 +334,19 @@ public class FetchData extends CheckShards<Route<?>>
         public Void apply(SafeCommandStore safeStore)
         {
             SafeCommand safeCommand = safeStore.get(txnId, route);
-            switch (achieved.propagate())
+            Command command = safeCommand.current();
+            if (command.saveStatus().phase.compareTo(Phase.Persist) >= 0)
+                return null;
+
+            Status propagate = achieved.propagate();
+            if (command.hasBeen(propagate))
+            {
+                if (full.maxSaveStatus.phase == Cleanup && full.durability.isDurableOrInvalidated() && Infer.safeToErase(safeStore, command, route, full.executeAt))
+                    Commands.setTruncatedApply(safeStore, safeCommand);
+                return null;
+            }
+
+            switch (propagate)
             {
                 default: throw new IllegalStateException();
                 case Accepted:
@@ -341,34 +356,15 @@ public class FetchData extends CheckShards<Route<?>>
                     throw new IllegalStateException("Invalid states to propagate");
 
                 case Truncated:
-                    // TODO (now): really need to think this one through again some more
-                    Command command = safeCommand.current();
                     // if our peers have truncated this command, then either:
                     // 1) we have already applied it locally; 2) the command doesn't apply locally; 3) we are stale; or 4) the command is invalidated
-                    if (command.hasBeen(PreApplied))
+                    if (command.hasBeen(PreApplied) || command.saveStatus() == Uninitialised)
                         break;
 
-                    if (command.is(Status.NotDefined))
+                    if (Infer.safeToErase(safeStore, command, route, full.executeAt))
                     {
-                        // we don't know if this has been invalidated or if we are a non-participating home shard
-                        if (!(command.saveStatus() == Uninitialised))
-                            Commands.setTruncated(safeStore, safeCommand);
+                        Commands.setErased(safeStore, safeCommand);
                         break;
-                    }
-
-                    if (command.route() != null || route.covers(safeStore.ranges().allAt(txnId.epoch())))
-                    {
-                        Route<?> route = command.route();
-                        if (route == null) route = this.route;
-
-                        Timestamp executeAt = command.executeAtIfKnown(Timestamp.nonNullOrMax(full.executeAt, txnId));
-                        Ranges coordinateRanges = safeStore.ranges().coordinates(txnId);
-                        Ranges acceptRanges = executeAt.epoch() == txnId.epoch() ? coordinateRanges : safeStore.ranges().allBetween(txnId, executeAt);
-                        if (!route.participatesIn(coordinateRanges) && !route.participatesIn(acceptRanges))
-                        {
-                            Commands.setTruncated(safeStore, safeCommand);
-                            break;
-                        }
                     }
 
                     // TODO (required): check if we are stale
@@ -379,7 +375,6 @@ public class FetchData extends CheckShards<Route<?>>
                     break;
 
                 case Applied:
-                case Applying:
                 case PreApplied:
                     Invariants.checkState(full.executeAt != null);
                     if (toEpoch >= full.executeAt.epoch())

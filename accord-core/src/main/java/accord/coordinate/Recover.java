@@ -47,14 +47,13 @@ import accord.messages.WaitOnCommit;
 import accord.messages.WaitOnCommit.WaitOnCommitOk;
 import accord.topology.Topology;
 
-import static accord.coordinate.InferInvalid.InvalidateAndCallback.invalidateAndCallback;
+import static accord.coordinate.Infer.InvalidateAndCallback.invalidateAndCallback;
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
 import static accord.coordinate.ProposeAndExecute.proposeAndExecute;
 import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.local.Status.Committed;
 import static accord.messages.BeginRecovery.RecoverOk.maxAcceptedOrLater;
-import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.utils.Invariants.debug;
 
 // TODO (low priority, cleanup): rename to Recover (verb); rename Recover message to not clash
@@ -225,7 +224,6 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 }
 
                 case Applied:
-                case Applying:
                 case PreApplied:
                 {
                     Deps committedDeps = tryMergeCommittedDeps();
@@ -342,7 +340,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         Timestamp invalidateUntil = recoverOks.stream().map(ok -> ok.executeAt).reduce(txnId, Timestamp::max);
         node.withEpoch(invalidateUntil.epoch(), () -> Commit.Invalidate.commitInvalidate(node, txnId, route, invalidateUntil));
         isDone = true;
-        invalidateAndCallback(node, txnId, route, Known.Invalidated, (s, f) -> callback.accept(f == null ? ProgressToken.INVALIDATED : null, f));
+        invalidateAndCallback(node, txnId, route, ProgressToken.INVALIDATED, callback);
     }
 
     private void propose(Timestamp executeAt, Deps deps)
