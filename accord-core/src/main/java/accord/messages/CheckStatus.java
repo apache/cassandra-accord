@@ -178,20 +178,6 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
                  isCoordinating, command.durability(), command.route(), command.homeKey());
         }
 
-        private CheckStatusOk(Status invalidIfNotAtLeast)
-        {
-            this.invalidIfNotAtLeast = invalidIfNotAtLeast;
-            this.saveStatus = SaveStatus.Erased;
-            this.maxSaveStatus = SaveStatus.Erased;
-            this.promised = Ballot.MAX;
-            this.accepted = Ballot.MAX;
-            this.executeAt = null;
-            this.isCoordinating = false;
-            this.durability = DurableOrInvalidated;
-            this.route = null;
-            this.homeKey = null;
-        }
-
         private CheckStatusOk(Status invalidIfNotAtLeast, SaveStatus saveStatus, SaveStatus maxSaveStatus,
                               Ballot promised, Ballot accepted, @Nullable Timestamp executeAt,
                               boolean isCoordinating, Durability durability,
@@ -279,14 +265,16 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             SaveStatus mergeStatus = SaveStatus.merge(prefer.saveStatus, prefer.accepted, defer.saveStatus, defer.accepted, true);
             SaveStatus mergeMaxStatus = SaveStatus.merge(prefer.saveStatus, prefer.accepted, defer.saveStatus, defer.accepted, false);
             CheckStatusOk maxPromised = prefer.promised.compareTo(defer.promised) >= 0 ? prefer : defer;
+            CheckStatusOk maxAccepted = prefer.accepted.compareTo(defer.accepted) >= 0 ? prefer : defer;
             CheckStatusOk maxDurability = prefer.durability.compareTo(defer.durability) >= 0 ? prefer : defer;
             CheckStatusOk maxHomeKey = prefer.homeKey != null || defer.homeKey == null ? prefer : defer;
+            CheckStatusOk maxExecuteAt = prefer.saveStatus.known.executeAt.compareTo(defer.saveStatus.known.executeAt) >= 0 ? prefer : defer;
             Route<?> mergedRoute = Route.merge(prefer.route, (Route)defer.route);
             Status mergedInvalidIfNotAtLeast = Status.simpleMax(prefer.invalidIfNotAtLeast, defer.invalidIfNotAtLeast);
 
             // if the maximum (or preferred equal) is the same on all dimensions, return it
-            if (mergeStatus == maxStatus.saveStatus && maxStatus == maxPromised && maxStatus == maxDurability
-                && maxStatus.route == mergedRoute && maxStatus == maxHomeKey)
+            if (mergeStatus == maxStatus.saveStatus && maxStatus == maxPromised && maxStatus == maxAccepted && maxStatus == maxDurability
+                && maxStatus.route == mergedRoute && maxStatus == maxHomeKey && maxStatus == maxExecuteAt)
             {
                 return maxStatus;
             }
@@ -294,7 +282,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             // otherwise assemble the maximum of each, and propagate isCoordinating from the origin we selected the promise from
             boolean isCoordinating = maxPromised == prefer ? prefer.isCoordinating : defer.isCoordinating;
             return new CheckStatusOk(mergedInvalidIfNotAtLeast, mergeStatus, mergeMaxStatus,
-                                     maxPromised.promised, maxStatus.accepted, maxStatus.executeAt,
+                                     maxPromised.promised, maxAccepted.accepted, maxExecuteAt.executeAt,
                                      isCoordinating, maxDurability.durability, mergedRoute, maxHomeKey.homeKey);
         }
 
@@ -319,15 +307,6 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             this.committedDeps = command.status().compareTo(Committed) >= 0 ? command.partialDeps() : null;
             this.writes = command.isExecuted() ? command.asExecuted().writes() : null;
             this.result = command.isExecuted() ? command.asExecuted().result() : null;
-        }
-
-        public CheckStatusOkFull(Status invalidIfNotAtLeast)
-        {
-            super(invalidIfNotAtLeast);
-            this.partialTxn = null;
-            this.committedDeps = null;
-            this.writes = null;
-            this.result = null;
         }
 
         protected CheckStatusOkFull(Status invalidIfNotCommitted, SaveStatus status, SaveStatus maxStatus, Ballot promised, Ballot accepted, Timestamp executeAt,
@@ -375,7 +354,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             else if (fullMin.committedDeps == null) committedDeps = fullMax.committedDeps;
             else committedDeps = fullMax.committedDeps.with(fullMin.committedDeps);
 
-            return new CheckStatusOkFull(max.invalidIfNotAtLeast, max.saveStatus, max.maxSaveStatus, max.promised, max.accepted, fullMax.executeAt, max.isCoordinating, max.durability, max.route,
+            return new CheckStatusOkFull(max.invalidIfNotAtLeast, max.saveStatus, max.maxSaveStatus, max.promised, max.accepted, max.executeAt, max.isCoordinating, max.durability, max.route,
                                          max.homeKey, partialTxn, committedDeps, fullMax.writes, fullMax.result);
         }
 

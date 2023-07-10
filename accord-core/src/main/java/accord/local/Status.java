@@ -508,8 +508,8 @@ public enum Status
     {
         if (preferNonTruncated && statusA != statusB)
         {
-            if (statusA == Truncated) return b;
-            if (statusB == Truncated) return a;
+            if (statusA == Truncated && b != NotDefined) return b;
+            if (statusB == Truncated && a != NotDefined) return a;
         }
         int c = statusA.phase.compareTo(statusB.phase);
         if (c > 0) return a;

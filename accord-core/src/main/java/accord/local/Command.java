@@ -592,11 +592,12 @@ public abstract class Command implements CommonAttributes
 
         public static Truncated erased(Command command)
         {
-            return new Truncated(command.txnId(), SaveStatus.Erased, command.durability(), command.route(), command.executeAtIfKnown(), EMPTY, null, null);
+            return new Truncated(command.txnId(), SaveStatus.Erased, command.durability(), command.route(), null, EMPTY, null, null);
         }
 
         public static Truncated truncatedApply(Command command)
         {
+            Invariants.checkArgument(command.known().executeAt.hasDecidedExecuteAt());
             return new Truncated(command.txnId(), SaveStatus.TruncatedApply, command.durability(), command.route(), command.executeAtIfKnown(), EMPTY, null, null);
         }
 
@@ -607,6 +608,7 @@ public abstract class Command implements CommonAttributes
 
         public static Truncated truncatedApply(TxnId txnId, Route<?> route, Timestamp executeAt, Status.Durability durability)
         {
+            Invariants.checkArgument(executeAt != null);
             return new Truncated(txnId, SaveStatus.TruncatedApply, durability, route, executeAt, EMPTY, null, null);
         }
 
