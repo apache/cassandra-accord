@@ -29,12 +29,12 @@ import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
 import accord.local.SaveStatus.LocalExecution;
 import accord.local.Status;
 import accord.primitives.EpochSupplier;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
+import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
@@ -52,37 +52,37 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
 
     public static class SerializerSupport
     {
-        public static WaitUntilApplied create(TxnId txnId, Participants<?> scope, long executeAtEpoch, long waitForEpoch)
+        public static WaitUntilApplied create(TxnId txnId, Participants<?> scope, Timestamp executeAt, long waitForEpoch)
         {
-            return new WaitUntilApplied(txnId, scope, executeAtEpoch, waitForEpoch);
+            return new WaitUntilApplied(txnId, scope, executeAt, waitForEpoch);
         }
     }
 
-    public final long executeAtEpoch;
+    public final Timestamp executeAt;
     private boolean isInvalid;
 
-    public WaitUntilApplied(Node.Id to, Topologies topologies, TxnId txnId, Participants<?> readScope, long executeAtEpoch)
+    public WaitUntilApplied(Node.Id to, Topologies topologies, TxnId txnId, Participants<?> readScope, Timestamp executeAt)
     {
         super(to, topologies, txnId, readScope);
-        this.executeAtEpoch = executeAtEpoch;
+        this.executeAt = executeAt;
     }
 
-    protected WaitUntilApplied(TxnId txnId, Participants<?> readScope, long executeAtEpoch, long waitForEpoch)
+    protected WaitUntilApplied(TxnId txnId, Participants<?> readScope, Timestamp executeAt, long waitForEpoch)
     {
         super(txnId, readScope, waitForEpoch);
-        this.executeAtEpoch = executeAtEpoch;
+        this.executeAt = executeAt;
     }
 
     @Override
     protected long executeAtEpoch()
     {
-        return executeAtEpoch;
+        return executeAt.epoch();
     }
 
     @Override
     public long epoch()
     {
-        return executeAtEpoch;
+        return executeAt.epoch();
     }
 
     @Override
@@ -210,7 +210,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
         if (isInvalid)
             return;
 
-        Ranges unavailable = safeStore.ranges().unsafeToReadAt(safeCommand.current().executeAt());
+        Ranges unavailable = safeStore.ranges().unsafeToReadAt(executeAt);
         readComplete(safeStore.commandStore(), null, unavailable);
     }
 

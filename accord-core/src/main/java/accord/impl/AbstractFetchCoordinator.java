@@ -223,7 +223,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
 
         public FetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
         {
-            super(syncId, ranges, sourceEpoch, sourceEpoch, partialTxn);
+            super(syncId, ranges, syncId, sourceEpoch, partialTxn);
             this.partialDeps = partialDeps;
         }
 

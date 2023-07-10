@@ -66,6 +66,7 @@ public class SyncPoint
         return ranges.toRoute(homeKey);
     }
 
+    // TODO (required): document this and its usages; make sure call-sites make sense
     public long sourceEpoch()
     {
         TxnId maxDep = waitFor.maxTxnId();

@@ -20,26 +20,21 @@ package accord.messages;
 
 import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
+import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
 public abstract class WaitAndReadData extends WaitUntilApplied
 {
     public final PartialTxn read;
 
-    protected WaitAndReadData(TxnId txnId, Participants<?> readScope, long executeAtEpoch, long waitForEpoch, PartialTxn read)
+    protected WaitAndReadData(TxnId txnId, Participants<?> readScope, Timestamp executeAt, long waitForEpoch, PartialTxn read)
     {
-        super(txnId, readScope, executeAtEpoch, waitForEpoch);
+        super(txnId, readScope, executeAt, waitForEpoch);
         this.read = read;
     }
 
     @Override
     protected void cancel()
     {
-    }
-
-    @Override
-    protected long executeAtEpoch()
-    {
-        return executeAtEpoch;
     }
 }
