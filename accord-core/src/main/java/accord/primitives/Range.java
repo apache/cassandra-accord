@@ -70,12 +70,6 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         {
             return new EndInclusive(start, end);
         }
-
-        @Override
-        public String toString()
-        {
-            return "Range(" + start() + ", " + end() + ']';
-        }
     }
 
     public static class StartInclusive extends Range
@@ -111,12 +105,6 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         public Range newRange(RoutingKey start, RoutingKey end)
         {
             return new StartInclusive(start, end);
-        }
-
-        @Override
-        public String toString()
-        {
-            return "Range[" + start() + ", " + end() + ')';
         }
     }
 
@@ -375,4 +363,25 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
     {
         return this;
     }
+
+
+    @Override
+    public String toString()
+    {
+        Object prefix = start().prefix();
+        if (prefix == null || !prefix.equals(end().prefix()))
+        {
+            return (startInclusive() ? "Range[" : "Range(") + start() + ", " + end() + (endInclusive() ? ']' : ')');
+        }
+        else
+        {
+            return "Range:" + prefix + ":" + toSuffixString();
+        }
+    }
+
+    public String toSuffixString()
+    {
+        return (startInclusive() ? "[" : "(") + start().suffix() + ", " + end().suffix() + (endInclusive() ? ']' : ')');
+    }
+
 }

@@ -556,6 +556,31 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
     @Override
     public String toString()
     {
+        if (isEmpty()) return "[]";
+        if (ranges[0].start().prefix() == null)
+            return Arrays.toString(ranges);
+
+        StringBuilder sb = new StringBuilder();
+        sb.append('[');
+        int i = 0;
+        while (i < ranges.length)
+        {
+            if (i > 0) sb.append(",");
+            Object prefix = ranges[i].start().prefix();
+            int j = i + 1;
+            while (j < ranges.length && prefix.equals(ranges[j].end().prefix()))
+                ++j;
+            sb.append(prefix);
+            sb.append(':');
+            sb.append('[');
+            while (i < j)
+            {
+                sb.append(ranges[i++].toSuffixString());
+                if (i < j) sb.append(",");
+            }
+            sb.append(']');
+        }
+        sb.append(']');
         return Arrays.toString(ranges);
     }
 
