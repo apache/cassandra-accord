@@ -28,10 +28,12 @@ import accord.local.Node.Id;
 
 import accord.primitives.*;
 import accord.topology.Topologies;
+import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
 
 import static accord.local.Status.*;
-import static accord.local.Status.Durability.DurableOrInvalidated;
+import static accord.local.Status.KnownDeps.DepsKnown;
+import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
 import static accord.messages.TxnRequest.computeScope;
 import static accord.primitives.Route.castToRoute;
 import static accord.primitives.Route.isRoute;
@@ -211,14 +213,11 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             return Infer.inferInvalidated(withQuorum, invalidIfNotAtLeast, saveStatus, maxSaveStatus);
         }
 
-        public Known inferredOrKnown(Unseekables<?> fetchedWith, WithQuorum withQuorum)
+        public Known inferredOrKnown(WithQuorum withQuorum)
         {
             if (inferInvalidated(withQuorum))
                 return Known.Invalidated;
 
-
-
-            // TODO (now): if erased, check if we're stale
             return saveStatus.known;
         }
 
@@ -245,23 +244,26 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
 
         boolean preferSelf(CheckStatusOk that)
         {
-            if (this.saveStatus.is(Status.Truncated) && this.saveStatus != that.saveStatus)
-                return false;
+            if ((this.saveStatus.is(Truncated) && !this.saveStatus.is(NotDefined)) || (that.saveStatus.is(Truncated) && !that.saveStatus.is(NotDefined)))
+                return this.saveStatus.compareTo(that.saveStatus) <= 0;
 
-            return that.saveStatus.compareTo(this.saveStatus) <= 0 || that.saveStatus.is(Status.Truncated);
+            return this.saveStatus.compareTo(that.saveStatus) >= 0;
         }
 
         public CheckStatusOk merge(CheckStatusOk that)
         {
             if (!preferSelf(that))
+            {
+                Invariants.checkState(that.preferSelf(this));
                 return that.merge(this);
+            }
 
             // preferentially select the one that is coordinating, if any
             CheckStatusOk prefer = this.isCoordinating ? this : that;
             CheckStatusOk defer = prefer == this ? that : this;
 
             // then select the max along each criteria, preferring the coordinator
-            CheckStatusOk maxStatus = Status.max(prefer, prefer.saveStatus.status, prefer.accepted, defer, defer.saveStatus.status, defer.accepted, true);
+            CheckStatusOk maxStatus = SaveStatus.max(prefer, prefer.saveStatus, prefer.accepted, defer, defer.saveStatus, defer.accepted, true);
             SaveStatus mergeStatus = SaveStatus.merge(prefer.saveStatus, prefer.accepted, defer.saveStatus, defer.accepted, true);
             SaveStatus mergeMaxStatus = SaveStatus.merge(prefer.saveStatus, prefer.accepted, defer.saveStatus, defer.accepted, false);
             CheckStatusOk maxPromised = prefer.promised.compareTo(defer.promised) >= 0 ? prefer : defer;
@@ -305,8 +307,8 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             super(isCoordinating, invalidIfNotAtLeast, command);
             this.partialTxn = command.partialTxn();
             this.committedDeps = command.status().compareTo(Committed) >= 0 ? command.partialDeps() : null;
-            this.writes = command.isExecuted() ? command.asExecuted().writes() : null;
-            this.result = command.isExecuted() ? command.asExecuted().result() : null;
+            this.writes = command.writes();
+            this.result = command.result();
         }
 
         protected CheckStatusOkFull(Status invalidIfNotCommitted, SaveStatus status, SaveStatus maxStatus, Ballot promised, Ballot accepted, Timestamp executeAt,
@@ -353,18 +355,17 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             if (fullMax.committedDeps == null) committedDeps = fullMin.committedDeps;
             else if (fullMin.committedDeps == null) committedDeps = fullMax.committedDeps;
             else committedDeps = fullMax.committedDeps.with(fullMin.committedDeps);
+            Writes writes = (fullMax.writes != null ? fullMax : fullMin).writes;
+            Result result = (fullMax.result != null ? fullMax : fullMin).result;
 
             return new CheckStatusOkFull(max.invalidIfNotAtLeast, max.saveStatus, max.maxSaveStatus, max.promised, max.accepted, max.executeAt, max.isCoordinating, max.durability, max.route,
-                                         max.homeKey, partialTxn, committedDeps, fullMax.writes, fullMax.result);
+                                         max.homeKey, partialTxn, committedDeps, writes, result);
         }
 
         public Known sufficientFor(Participants<?> participants, WithQuorum withQuorum)
         {
             if (inferInvalidated(withQuorum))
                 return Known.Invalidated;
-
-            if (saveStatus.hasBeen(Truncated))
-                return saveStatus.known;
 
             return sufficientFor(participants, saveStatus, maxSaveStatus, route, partialTxn, committedDeps, writes, result);
         }
@@ -401,15 +402,16 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             switch (outcome)
             {
                 default: throw new AssertionError();
+                case WasApply:
+                    if (writes != null && result != null && definition.isKnown() && executeAt == ExecuteAtKnown && deps == DepsKnown)
+                        outcome = Outcome.Apply;
                 case Apply:
-                    if (writes == null || result == null) outcome = maxSaveStatus.phase == Phase.Cleanup ? Outcome.Erased : Outcome.Unknown;
-                    else if (maxSaveStatus.phase == Phase.Cleanup) outcome = Outcome.TruncatedApply;
-                    break;
+                    if (writes == null || result == null || !definition.isKnown() || executeAt != ExecuteAtKnown || deps != DepsKnown)
+                        outcome = Outcome.WasApply;
 
                 case Invalidated:
                 case Unknown:
                 case Erased:
-                case TruncatedApply:
             }
 
             return new Known(definition, executeAt, deps, outcome);

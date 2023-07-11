@@ -106,7 +106,7 @@ public class MaybeRecover extends CheckShards<Route<?>>
                     }
                     break;
 
-                case TruncatedApply:
+                case WasApply:
                     callback.accept(merged.toProgressToken(), null);
                     break;
 

@@ -22,7 +22,6 @@ import accord.messages.BeginRecovery;
 import accord.primitives.Ballot;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-import accord.utils.Invariants;
 
 import java.util.List;
 import java.util.Objects;
@@ -143,7 +142,7 @@ public enum Status
             return this.definition.compareTo(that.definition) <= 0
                     && this.executeAt.compareTo(that.executeAt) <= 0
                     && this.deps.compareTo(that.deps) <= 0
-                    && this.outcome.compareTo(that.outcome) <= 0;
+                    && this.outcome.isSatisfiedBy(that.outcome);
         }
 
         /**
@@ -152,7 +151,7 @@ public enum Status
          */
         public LogicalEpoch epoch()
         {
-            if (outcome.isKnown())
+            if (outcome.isOrWasApply())
                 return LogicalEpoch.Execution;
 
             return LogicalEpoch.Coordination;
@@ -163,7 +162,7 @@ public enum Status
             if (executeAt == null)
                 return txnId.epoch();
 
-            if (outcome.isKnown() && !executeAt.equals(Timestamp.NONE))
+            if (outcome.isOrWasApply() && !executeAt.equals(Timestamp.NONE))
                 return executeAt.epoch();
 
             return txnId.epoch();
@@ -195,7 +194,7 @@ public enum Status
                     return Status.Invalidated;
 
                 case Apply:
-                case TruncatedApply:
+                case WasApply:
                     if (executeAt.hasDecidedExecuteAt() && definition.isKnown() && deps.hasDecidedDeps())
                         return PreApplied;
 
@@ -226,7 +225,7 @@ public enum Status
          */
         public boolean hasCompleteRoute()
         {
-            return definition.isKnown() || outcome.isKnown();
+            return definition.isKnown() || outcome.isOrWasApply();
         }
 
         public boolean canProposeInvalidation()
@@ -239,7 +238,7 @@ public enum Status
             return Stream.of(definition.isKnown() ? "Definition" : null,
                              executeAt.hasDecidedExecuteAt() ? "ExecuteAt" : null,
                              deps.hasDecidedDeps() ? "Deps" : null,
-                             outcome.isKnown() ? "Outcome" : null
+                             outcome.isOrWasApply() ? "Outcome" : null
             ).filter(Objects::nonNull).collect(Collectors.joining(",", "[", "]"));
         }
     }
@@ -378,15 +377,15 @@ public enum Status
         Unknown,
 
         /**
-         * The outcome is known, but may not have been applied
+         * The outcome is known
          */
         Apply,
 
         /**
-         * The transaction has been cleaned-up, but was applied and the relevant portion of its outcome may or may not be known
-         * TODO (expected): is this state helpful? Feels like we can better encode it within Known
+         * The transaction has been cleaned-up, but was applied and the relevant portion of its outcome has been cleaned up
+         * TODO (expected): is this state helpful? Feels like we can do without it
          */
-        TruncatedApply,
+        WasApply,
 
         /**
          * The transaction is known to have been invalidated
@@ -400,9 +399,26 @@ public enum Status
         Erased
         ;
 
-        public boolean isKnown()
+        public boolean isOrWasApply()
         {
-            return this == Apply || this == TruncatedApply;
+            return this == Apply || this == WasApply;
+        }
+
+        public boolean isSatisfiedBy(Outcome other)
+        {
+            switch (this)
+            {
+                default: throw new AssertionError();
+                case Unknown:
+                    return true;
+                case WasApply:
+                    if (other == Apply)
+                        return true;
+                case Apply:
+                case Invalidated:
+                case Erased:
+                    return other == this;
+            }
         }
 
         public boolean canProposeInvalidation()
@@ -422,7 +438,7 @@ public enum Status
 
         public boolean isTruncated()
         {
-            return this == Erased || this == TruncatedApply;
+            return this == Erased || this == WasApply;
         }
     }
 
@@ -504,24 +520,14 @@ public enum Status
         return max;
     }
 
-    public static <T> T max(T a, Status statusA, Ballot acceptedA, T b, Status statusB, Ballot acceptedB, boolean preferNonTruncated)
+    public static <T> T max(T a, Status statusA, Ballot acceptedA, T b, Status statusB, Ballot acceptedB)
     {
-        if (preferNonTruncated && statusA != statusB)
-        {
-            if (statusA == Truncated && b != NotDefined) return b;
-            if (statusB == Truncated && a != NotDefined) return a;
-        }
         int c = statusA.phase.compareTo(statusB.phase);
         if (c > 0) return a;
         if (c < 0) return b;
         if (statusA.phase != Phase.Accept || acceptedA.compareTo(acceptedB) >= 0)
             return a;
         return b;
-    }
-
-    public static Status max(Status a, Ballot acceptedA, Status b, Ballot acceptedB, boolean preferNonTruncated)
-    {
-        return max(a, a, acceptedA, b, b, acceptedB, preferNonTruncated);
     }
 
     public static Status simpleMax(Status a, Status b)

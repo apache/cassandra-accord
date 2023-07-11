@@ -35,6 +35,7 @@ import accord.topology.Topologies;
 
 import javax.annotation.Nullable;
 
+import static accord.local.Status.KnownDeps.DepsKnown;
 import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
 import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
@@ -153,17 +154,18 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                 }
                 break;
 
-            case TruncatedApply:
+            case WasApply:
                 if (!known.definition.isKnown() || !known.executeAt.hasDecidedExecuteAt() || !known.deps.hasDecidedDeps())
                 {
                     callback.accept(DURABLE, null);
                     break;
                 }
+                break;
 
             case Apply:
-                Invariants.checkState(known.definition.isKnown());
                 Invariants.checkState(known.executeAt == ExecuteAtKnown);
-                // TODO (required): we might not be able to reconstitute Txn if we have GC'd on some shards
+                // TODO (required): might reasonably not know deps and have to reconstruct them
+                Invariants.checkState(known.deps == DepsKnown);
                 Txn txn = merged.partialTxn.reconstitute(route);
                 if (known.deps.hasDecidedDeps())
                 {

@@ -26,6 +26,7 @@ import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Route;
 import accord.primitives.Timestamp;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.primitives.Writes;
@@ -46,7 +47,6 @@ import com.google.common.collect.ImmutableSortedSet;
 import java.util.*;
 
 import static accord.local.Listeners.Immutable.EMPTY;
-import static accord.local.SaveStatus.Invalidated;
 import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.Durability.DurableOrInvalidated;
 import static accord.local.Status.Durability.Local;
@@ -377,6 +377,9 @@ public abstract class Command implements CommonAttributes
     @Override
     public abstract @Nullable PartialDeps partialDeps();
 
+    public @Nullable Writes writes() { return null; }
+    public @Nullable Result result() { return null; }
+
     public final Timestamp executeAtIfKnownElseTxnId()
     {
         if (known().executeAt == ExecuteAtKnown)
@@ -488,13 +491,6 @@ public abstract class Command implements CommonAttributes
         return Invariants.cast(this, Committed.class);
     }
 
-    public final boolean isExecuted()
-    {
-        boolean result = hasBeen(Status.PreApplied) && !hasBeen(Status.Truncated);
-        Invariants.checkState(result == (this instanceof Executed));
-        return result;
-    }
-
     public final Executed asExecuted()
     {
         return Invariants.cast(this, Executed.class);
@@ -601,9 +597,9 @@ public abstract class Command implements CommonAttributes
             return new Truncated(command.txnId(), SaveStatus.TruncatedApply, command.durability(), command.route(), command.executeAtIfKnown(), EMPTY, null, null);
         }
 
-        public static Truncated partiallyTruncatedApply(Executed command)
+        public static Truncated truncatedApplyWithOutcome(Executed command)
         {
-            return new Truncated(command.txnId(), SaveStatus.TruncatedApply, command.durability(), command.route(), command.executeAt(), EMPTY, command.writes, command.result);
+            return new Truncated(command.txnId(), SaveStatus.TruncatedApplyWithOutcome, command.durability(), command.route(), command.executeAt(), EMPTY, command.writes, command.result);
         }
 
         public static Truncated truncatedApply(TxnId txnId, Route<?> route, Timestamp executeAt, Status.Durability durability)
@@ -628,6 +624,18 @@ public abstract class Command implements CommonAttributes
         public Timestamp executeAt()
         {
             return executeAt;
+        }
+
+        @Override
+        public @Nullable Writes writes()
+        {
+            return writes;
+        }
+
+        @Override
+        public @Nullable Result result()
+        {
+            return result;
         }
 
         @Override
@@ -860,6 +868,7 @@ public abstract class Command implements CommonAttributes
         public Executed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOn waitingOn, Writes writes, Result result)
         {
             super(common, status, executeAt, promised, accepted, waitingOn);
+            Invariants.checkState(txnId().rw() != Txn.Kind.Write || writes != null);
             this.writes = writes;
             this.result = result;
         }

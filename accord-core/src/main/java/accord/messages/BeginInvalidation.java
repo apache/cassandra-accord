@@ -81,7 +81,7 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
         boolean acceptedFastPath = o1.acceptedFastPath && o2.acceptedFastPath;
         Route<?> route =  Route.merge((Route)o1.route, o2.route);
         RoutingKey homeKey = o1.homeKey != null ? o1.homeKey : o2.homeKey != null ? o2.homeKey : null;
-        InvalidateReply maxStatus = Status.max(o1, o1.status, o1.accepted, o2, o2.status, o2.accepted, false);
+        InvalidateReply maxStatus = Status.max(o1, o1.status, o1.accepted, o2, o2.status, o2.accepted);
         return new InvalidateReply(supersededBy, maxStatus.accepted, maxStatus.status, acceptedFastPath, route, homeKey);
     }
 

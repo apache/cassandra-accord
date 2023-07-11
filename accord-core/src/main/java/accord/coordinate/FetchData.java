@@ -122,7 +122,7 @@ public class FetchData extends CheckShards<Route<?>>
                 break;
 
             case Erased:
-            case TruncatedApply:
+            case WasApply:
             case Apply:
             case Unknown:
                 callback.accept(found, null);

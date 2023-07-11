@@ -136,8 +136,8 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         Ballot accepted = command.accepted();
         Timestamp executeAt = command.executeAt();
         PartialDeps acceptedDeps = status.phase.compareTo(Phase.Accept) >= 0 ? deps : PartialDeps.NONE;
-        Writes writes = command.isExecuted() ? command.asExecuted().writes() : null;
-        Result result = command.isExecuted() ? command.asExecuted().result() : null;
+        Writes writes = command.writes();
+        Result result = command.result();
         return new RecoverOk(txnId, status, accepted, executeAt, deps, acceptedDeps, earlierCommittedWitness, earlierAcceptedNoWitness, rejectsFastPath, writes, result);
     }
 
@@ -153,7 +153,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         RecoverOk ok2 = (RecoverOk) r2;
 
         // set ok1 to the most recent of the two
-        if (ok1 != Status.max(ok1, ok1.status, ok1.accepted, ok2, ok2.status, ok2.accepted, false))
+        if (ok1 != Status.max(ok1, ok1.status, ok1.accepted, ok2, ok2.status, ok2.accepted))
         {
             RecoverOk tmp = ok1;
             ok1 = ok2;

@@ -61,7 +61,7 @@ import static accord.api.ProgressLog.ProgressShard.No;
 import static accord.api.ProgressLog.ProgressShard.UnmanagedHome;
 import static accord.api.ProgressLog.ProgressShard.Unsure;
 import static accord.local.Command.Truncated.erased;
-import static accord.local.Command.Truncated.partiallyTruncatedApply;
+import static accord.local.Command.Truncated.truncatedApplyWithOutcome;
 import static accord.local.Command.Truncated.truncatedApply;
 import static accord.local.Commands.EnsureAction.Add;
 import static accord.local.Commands.EnsureAction.Check;
@@ -72,19 +72,19 @@ import static accord.local.Commands.Truncate.ERASE;
 import static accord.local.Commands.Truncate.TRUNCATE;
 import static accord.local.RedundantStatus.LIVE;
 import static accord.local.SaveStatus.Applying;
+import static accord.local.SaveStatus.Erased;
 import static accord.local.SaveStatus.TruncatedApply;
+import static accord.local.SaveStatus.TruncatedApplyWithOutcome;
 import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.Accepted;
 import static accord.local.Status.AcceptedInvalidate;
 import static accord.local.Status.Applied;
 import static accord.local.Status.Committed;
 import static accord.local.Status.Durability;
-import static accord.local.Status.Durability.DurableOrInvalidated;
 import static accord.local.Status.Durability.Majority;
 import static accord.local.Status.Durability.Universal;
 import static accord.local.Status.Invalidated;
 import static accord.local.Status.Known;
-import static accord.local.Status.Known.ExecuteAtOnly;
 import static accord.local.Status.NotDefined;
 import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
@@ -778,7 +778,20 @@ public class Commands
         }
     }
 
-    enum Truncate { NO, PARTIAL_TRUNCATE, TRUNCATE, ERASE }
+    enum Truncate
+    {
+        NO(Uninitialised),
+        TRUNCATE_WITH_OUTCOME(TruncatedApplyWithOutcome),
+        TRUNCATE(TruncatedApply),
+        ERASE(Erased);
+
+        final SaveStatus yields;
+
+        Truncate(SaveStatus yields)
+        {
+            this.yields = yields;
+        }
+    }
 
     // TODO (now): document and justify all calls
     public static void setTruncatedApply(SafeCommandStore safeStore, SafeCommand safeCommand)
@@ -794,7 +807,6 @@ public class Commands
     public static Command setTruncated(SafeCommandStore safeStore, SafeCommand safeCommand, Truncate truncate, boolean notifyListeners)
     {
         Command command = safeCommand.current();
-        Invariants.checkState(!command.hasBeen(Truncated));
 
         //   1) a command has been applied; or
         //   2) has been coordinated but *will not* be applied (we just haven't witnessed the invalidation yet); or
@@ -811,15 +823,24 @@ public class Commands
         else switch (truncate)
         {
             default: throw new AssertionError();
-            case PARTIAL_TRUNCATE:
-                // TODO (expected, consider): should we downgrade to no truncation in this case? Or are we stale?
+            case TRUNCATE_WITH_OUTCOME:
+                Invariants.checkArgument(!command.hasBeen(Truncated));
                 if (command.hasBeen(PreApplied))
                 {
-                    result = partiallyTruncatedApply(command.asExecuted());
+                    result = truncatedApplyWithOutcome(command.asExecuted());
                     break;
                 }
-            case TRUNCATE: result = truncatedApply(command); break;
-            case ERASE: result = erased(command); break;
+                // TODO (expected, consider): should we downgrade to no truncation in this case? Or are we stale?
+
+            case TRUNCATE:
+                Invariants.checkState(command.saveStatus().compareTo(TruncatedApply) < 0);
+                result = truncatedApply(command);
+                break;
+
+            case ERASE:
+                Invariants.checkState(command.saveStatus().compareTo(Erased) < 0);
+                result = erased(command);
+                break;
         }
         safeCommand.set(result);
         safeStore.progressLog().clear(safeCommand.txnId());
@@ -861,7 +882,7 @@ public class Commands
                 if (command.durability() == Majority)
                     return Truncate.TRUNCATE;
 
-                return Truncate.PARTIAL_TRUNCATE;
+                return Truncate.TRUNCATE_WITH_OUTCOME;
 
             case Majority:
                 return Truncate.TRUNCATE;
@@ -898,21 +919,11 @@ public class Commands
     public static boolean maybeTruncate(SafeCommandStore safeStore, SafeCommand safeCommand, Command command)
     {
         Truncate truncate = shouldTruncate(safeStore, command);
-        switch (truncate)
-        {
-            default: throw new AssertionError();
-            case NO:
-                return false;
+        if (command.saveStatus().compareTo(truncate.yields) >= 0)
+            return false;
 
-            case PARTIAL_TRUNCATE:
-            case TRUNCATE:
-            case ERASE:
-                if (command.saveStatus().compareTo(TruncatedApply) < 0)
-                    setTruncated(safeStore, safeCommand, truncate, true);
-                if (truncate == Truncate.ERASE)
-                    safeStore.erase(safeCommand);
-                return true;
-        }
+        setTruncated(safeStore, safeCommand, truncate, true);
+        return true;
     }
 
     // TODO (now): either ignore this message if we don't have a route, or else require FullRoute requiring route, or else require FullRoute
@@ -1011,6 +1022,8 @@ public class Commands
             Invariants.checkState(depth == 0 || prevSafe != null);
             while (depth >= 0)
             {
+                if (depth > 100000) // TODO (expected): dump more debug info to aid investigation
+                    throw new StackOverflowError("Exploring a probably-recursive or otherwise faulty dependency graph from " + txnIds[0]);
                 Command prev = prevSafe != null ? prevSafe.current() : null;
                 SafeCommand curSafe = ifLoadedAndInitialised(safeStore, depth);
                 Command cur = curSafe != null ? curSafe.current() : null;
