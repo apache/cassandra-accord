@@ -500,6 +500,13 @@ public abstract class Command implements CommonAttributes
         return Invariants.cast(this, Executed.class);
     }
 
+    public final boolean isTruncated()
+    {
+        boolean result = status().hasBeen(Status.Truncated);
+        Invariants.checkState(result == (this instanceof Truncated));
+        return result;
+    }
+
     public abstract Command updateAttributes(CommonAttributes attrs, Ballot promised);
 
     public final Command updateAttributes(CommonAttributes attrs)
@@ -869,8 +876,16 @@ public abstract class Command implements CommonAttributes
 
     public static class Executed extends Committed
     {
+        public static final Executed EMPTY = new Executed();
         private final Writes writes;
         private final Result result;
+
+        private Executed()
+        {
+            super(Mutable.EMPTY_ATTRS, SaveStatus.Applied, null, null, null, WaitingOn.EMPTY);
+            this.writes = null;
+            this.result = null;
+        }
 
         public Executed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOn waitingOn, Writes writes, Result result)
         {

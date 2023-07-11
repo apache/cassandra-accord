@@ -40,6 +40,7 @@ public interface CommonAttributes
 
     class Mutable implements CommonAttributes
     {
+        public static final CommonAttributes.Mutable EMPTY_ATTRS = new CommonAttributes.Mutable((TxnId) null);
         private TxnId txnId;
         private Status.Durability durability;
         private Route<?> route;
