@@ -164,6 +164,11 @@ public abstract class Command implements CommonAttributes
             return Executed.executed(common, status, executeAt, promised, accepted, waitingOn, writes, result);
         }
 
+        public static Truncated truncated(CommonAttributes common, SaveStatus status, Timestamp executeAt, Writes writes, Result result)
+        {
+            return new Truncated(common, status, executeAt, writes, result);
+        }
+
         public static Truncated invalidated(TxnId txnId, Listeners.Immutable durableListeners)
         {
             return Truncated.invalidated(txnId, durableListeners);
@@ -586,10 +591,18 @@ public abstract class Command implements CommonAttributes
 
     public static final class Truncated extends AbstractCommand
     {
-        final Timestamp executeAt;
+        @Nullable final Timestamp executeAt;
         @Nullable final Writes writes;
         @Nullable final Result result;
-        public Truncated(TxnId txnId, SaveStatus saveStatus, Status.Durability durability, Route<?> route, Timestamp executeAt, Listeners.Immutable listeners, @Nullable Writes writes, @Nullable Result result)
+        public Truncated(CommonAttributes commonAttributes, SaveStatus saveStatus, @Nullable Timestamp executeAt, @Nullable Writes writes, @Nullable Result result)
+        {
+            super(commonAttributes, saveStatus, Ballot.MAX);
+            this.executeAt = executeAt;
+            this.writes = writes;
+            this.result = result;
+        }
+
+        public Truncated(TxnId txnId, SaveStatus saveStatus, Status.Durability durability, Route<?> route, @Nullable Timestamp executeAt, Listeners.Immutable listeners, @Nullable Writes writes, @Nullable Result result)
         {
             super(txnId, saveStatus, durability, route, Ballot.MAX, listeners);
             this.executeAt = executeAt;

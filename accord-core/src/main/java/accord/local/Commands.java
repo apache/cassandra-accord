@@ -850,48 +850,11 @@ public class Commands
 
     static Truncate shouldTruncate(SafeCommandStore safeStore, Command command)
     {
-        if (safeStore.commandStore().globalDurability(command.txnId()) == Universal)
-            return Truncate.ERASE;
-
-        // TODO (desired): we may have the complete route for Invalidated, but we don't currently retain this in SaveStatus
-        if (!command.hasBeen(Applied) || !command.known().hasCompleteRoute())
-            return Truncate.NO;
-
-        TxnId txnId = command.txnId();
-        Timestamp executeAt = command.executeAtIfKnownElseTxnId();
-        Route<?> all = command.route();
-        Participants<?> participants = all.participants();
-
-        // We first check if the command is redundant locally, i.e. whether it has been applied to all non-faulty replicas of the local shard
-        // If not, we don't want to truncate its state else we may make catching up for these other replicas much harder
-        RedundantStatus redundant = safeStore.commandStore().redundantBefore().min(txnId, executeAt, participants);
-        if (redundant == LIVE)
-            return Truncate.NO;
-
-        // TODO (now): if the command's own durability is Majority, we can look *only* at our local participants to decide whether we truncate
-        // TODO (now): if we retain Outcome and Result in e.g. PartiallyTruncated then we can special-case recovery to permit truncation based only on redundancy
-        Durability min = safeStore.commandStore().durableBefore().min(txnId, all);
-        switch (min)
-        {
-            default:
-            case Local:
-            case DurableOrInvalidated:
-                throw new AssertionError();
-            case NotDurable:
-                if (command.durability() == Majority)
-                    return Truncate.TRUNCATE;
-
-                return Truncate.TRUNCATE_WITH_OUTCOME;
-
-            case Majority:
-                return Truncate.TRUNCATE;
-
-            case Universal:
-                return Truncate.ERASE;
-        }
+        return shouldTruncate(command.txnId(), command.status(), command.known(), command.durability(), command.executeAtIfKnownElseTxnId(), command.route(), safeStore.commandStore().redundantBefore(),
+                              safeStore.commandStore().durableBefore());
     }
 
-    public static Truncate shouldTruncate(TxnId txnId, Status status, Known known, Route<?> route, DurableBefore durableBefore)
+    public static Truncate shouldTruncate(TxnId txnId, Status status, Known known, Durability durability, Timestamp executeAt, Route<?> route, RedundantBefore redundantBefore, DurableBefore durableBefore)
     {
         if (durableBefore.global(txnId) == Universal)
             return Truncate.ERASE;
@@ -899,6 +862,14 @@ public class Commands
         if (!status.hasBeen(Applied) || !known.hasCompleteRoute())
             return Truncate.NO;
 
+        // We first check if the command is redundant locally, i.e. whether it has been applied to all non-faulty replicas of the local shard
+        // If not, we don't want to truncate its state else we may make catching up for these other replicas much harder
+        RedundantStatus redundant = redundantBefore.min(txnId, executeAt, route.participants());
+        if (redundant == LIVE)
+            return Truncate.NO;
+
+        // TODO (now): if the command's own durability is Majority, we can look *only* at our local participants to decide whether we truncate
+        // TODO (now): if we retain Outcome and Result in e.g. PartiallyTruncated then we can special-case recovery to permit truncation based only on redundancy
         Durability min = durableBefore.min(txnId, route);
         switch (min)
         {
@@ -907,9 +878,14 @@ public class Commands
             case DurableOrInvalidated:
                 throw new AssertionError();
             case NotDurable:
-                return Truncate.NO;
+                if (durability == Majority)
+                    return Truncate.TRUNCATE;
+
+                return Truncate.TRUNCATE_WITH_OUTCOME;
+
             case Majority:
                 return Truncate.TRUNCATE;
+
             case Universal:
                 return Truncate.ERASE;
         }
