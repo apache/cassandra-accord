@@ -174,6 +174,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         if (topology.epoch() <= this.topology.epoch())
             return AsyncResults.success(null);
         EpochReady ready = onTopologyUpdateInternal(topology, startSync);
+        ready.coordination.addCallback(() -> this.topology.onEpochSyncComplete(id, topology.epoch()));
         configService.acknowledgeEpoch(ready);
         return ready.coordination;
     }

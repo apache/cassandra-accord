@@ -387,7 +387,7 @@ public class TopologyManager
         return current == null || result.isDone() ? result : result.withExecutor(current);
     }
 
-    public void onEpochSyncComplete(Id node, long epoch)
+    public synchronized void onEpochSyncComplete(Id node, long epoch)
     {
         epochs.syncComplete(node, epoch);
     }
@@ -408,12 +408,12 @@ public class TopologyManager
         epochs = new Epochs(nextEpochs, current.pending, current.futureEpochFutures);
     }
 
-    public void onEpochClosed(Ranges ranges, long epoch)
+    public synchronized void onEpochClosed(Ranges ranges, long epoch)
     {
         epochs.epochClosed(ranges, epoch);
     }
 
-    public void onEpochRedundant(Ranges ranges, long epoch)
+    public synchronized void onEpochRedundant(Ranges ranges, long epoch)
     {
         epochs.epochRedundant(ranges, epoch);
     }
