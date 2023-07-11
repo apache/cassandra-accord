@@ -21,30 +21,31 @@ package accord.coordinate;
 import java.util.function.BiConsumer;
 
 import accord.coordinate.FetchData.OnDone;
-import accord.local.Status;
-import accord.local.Status.Known;
-import accord.primitives.*;
-import accord.utils.Invariants;
-
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.local.Status;
+import accord.local.Status.Known;
 import accord.messages.CheckStatus;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.messages.CheckStatus.IncludeInfo;
+import accord.primitives.Ballot;
+import accord.primitives.Deps;
+import accord.primitives.FullRoute;
+import accord.primitives.PartialRoute;
+import accord.primitives.Ranges;
+import accord.primitives.Route;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
 import accord.topology.Topologies;
-
+import accord.utils.Invariants;
 import javax.annotation.Nullable;
 
-import static accord.local.Status.KnownDeps.DepsKnown;
 import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
 import static accord.local.Status.Outcome.Apply;
-import static accord.local.Status.Outcome.Unknown;
 import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
-import static accord.messages.Commit.Invalidate.commitInvalidate;
 import static accord.primitives.ProgressToken.APPLIED;
-import static accord.primitives.ProgressToken.DURABLE;
 import static accord.primitives.ProgressToken.INVALIDATED;
 import static accord.primitives.ProgressToken.TRUNCATED;
 import static accord.primitives.Route.castToFullRoute;

@@ -18,22 +18,44 @@
 
 package accord.messages;
 
-import javax.annotation.Nullable;
-
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.coordinate.Infer;
-import accord.local.*;
+import accord.local.Command;
+import accord.local.Node;
 import accord.local.Node.Id;
-
-import accord.primitives.*;
+import accord.local.PreLoadContext;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.local.SaveStatus;
+import accord.local.Status;
+import accord.primitives.Ballot;
+import accord.primitives.EpochSupplier;
+import accord.primitives.PartialDeps;
+import accord.primitives.PartialRoute;
+import accord.primitives.PartialTxn;
+import accord.primitives.Participants;
+import accord.primitives.ProgressToken;
+import accord.primitives.Route;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
+import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
+import javax.annotation.Nullable;
 
-import static accord.local.Status.*;
-import static accord.local.Status.KnownDeps.DepsKnown;
-import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
+import static accord.local.Status.Committed;
+import static accord.local.Status.Definition;
+import static accord.local.Status.Durability;
+import static accord.local.Status.Known;
+import static accord.local.Status.KnownDeps;
+import static accord.local.Status.KnownExecuteAt;
+import static accord.local.Status.NotDefined;
+import static accord.local.Status.Outcome;
+import static accord.local.Status.Phase;
+import static accord.local.Status.Truncated;
 import static accord.messages.TxnRequest.computeScope;
 import static accord.primitives.Route.castToRoute;
 import static accord.primitives.Route.isRoute;

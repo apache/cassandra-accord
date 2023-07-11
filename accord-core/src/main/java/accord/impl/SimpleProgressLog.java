@@ -25,20 +25,32 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 
-import javax.annotation.Nullable;
-
+import accord.api.ProgressLog;
+import accord.coordinate.FetchData;
+import accord.coordinate.Invalidate;
+import accord.coordinate.Outcome;
+import accord.local.Command;
+import accord.local.CommandStore;
+import accord.local.Commands;
+import accord.local.Node;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.local.SaveStatus;
 import accord.local.SaveStatus.LocalExecution;
+import accord.local.Status;
+import accord.local.Status.Known;
+import accord.primitives.Participants;
+import accord.primitives.ProgressToken;
+import accord.primitives.Route;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.utils.IntrusiveLinkedList;
 import accord.utils.IntrusiveLinkedListNode;
-import accord.coordinate.*;
-import accord.local.*;
-import accord.local.Status.Known;
-import accord.primitives.*;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResult;
-
-import accord.api.ProgressLog;
+import javax.annotation.Nullable;
 
 import static accord.api.ProgressLog.ProgressShard.Unsure;
 import static accord.coordinate.InformHomeOfTxn.inform;
@@ -54,7 +66,6 @@ import static accord.local.PreLoadContext.empty;
 import static accord.local.SaveStatus.LocalExecution.NotReady;
 import static accord.local.SaveStatus.LocalExecution.WaitingToApply;
 import static accord.local.Status.Durability.Majority;
-import static accord.local.Status.Known.Nothing;
 import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
 

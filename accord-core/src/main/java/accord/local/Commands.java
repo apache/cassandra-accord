@@ -21,6 +21,7 @@ package accord.local;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.function.Consumer;
+import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,16 +54,14 @@ import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
-import javax.annotation.Nullable;
-
 import static accord.api.ProgressLog.ProgressShard.Home;
 import static accord.api.ProgressLog.ProgressShard.Local;
 import static accord.api.ProgressLog.ProgressShard.No;
 import static accord.api.ProgressLog.ProgressShard.UnmanagedHome;
 import static accord.api.ProgressLog.ProgressShard.Unsure;
 import static accord.local.Command.Truncated.erased;
-import static accord.local.Command.Truncated.truncatedApplyWithOutcome;
 import static accord.local.Command.Truncated.truncatedApply;
+import static accord.local.Command.Truncated.truncatedApplyWithOutcome;
 import static accord.local.Commands.EnsureAction.Add;
 import static accord.local.Commands.EnsureAction.Check;
 import static accord.local.Commands.EnsureAction.Ignore;
@@ -778,7 +777,7 @@ public class Commands
         }
     }
 
-    enum Truncate
+    public enum Truncate
     {
         NO(Uninitialised),
         TRUNCATE_WITH_OUTCOME(TruncatedApplyWithOutcome),

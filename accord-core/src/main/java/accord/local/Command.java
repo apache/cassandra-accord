@@ -18,7 +18,15 @@
 
 package accord.local;
 
+import java.util.Objects;
+import javax.annotation.Nullable;
+
+import com.google.common.collect.ImmutableSortedSet;
+
 import accord.api.Data;
+import accord.api.Result;
+import accord.api.RoutingKey;
+import accord.api.VisibleForImplementation;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.Keys;
@@ -33,18 +41,8 @@ import accord.primitives.Writes;
 import accord.utils.ImmutableBitSet;
 import accord.utils.IndexedQuadConsumer;
 import accord.utils.Invariants;
-
-import javax.annotation.Nullable;
-
-import accord.api.Result;
-import accord.api.RoutingKey;
-import accord.api.VisibleForImplementation;
 import accord.utils.SimpleBitSet;
 import accord.utils.async.AsyncChain;
-
-import com.google.common.collect.ImmutableSortedSet;
-
-import java.util.*;
 
 import static accord.local.Listeners.Immutable.EMPTY;
 import static accord.local.SaveStatus.Uninitialised;
@@ -53,7 +51,8 @@ import static accord.local.Status.Durability.Local;
 import static accord.local.Status.Durability.NotDurable;
 import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
 import static accord.utils.SortedArrays.forEachIntersection;
-import static accord.utils.Utils.*;
+import static accord.utils.Utils.ensureImmutable;
+import static accord.utils.Utils.ensureMutable;
 import static java.lang.String.format;
 
 public abstract class Command implements CommonAttributes
@@ -168,6 +167,11 @@ public abstract class Command implements CommonAttributes
         public static Truncated invalidated(TxnId txnId, Listeners.Immutable durableListeners)
         {
             return Truncated.invalidated(txnId, durableListeners);
+        }
+
+        public static Truncated truncatedApply(CommonAttributes common,SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result)
+        {
+            return Truncated.truncatedApply(common, saveStatus, executeAt, writes, result);
         }
     }
 
@@ -602,10 +606,13 @@ public abstract class Command implements CommonAttributes
             return new Truncated(command.txnId(), SaveStatus.TruncatedApplyWithOutcome, command.durability(), command.route(), command.executeAt(), EMPTY, command.writes, command.result);
         }
 
-        public static Truncated truncatedApply(TxnId txnId, Route<?> route, Timestamp executeAt, Status.Durability durability)
+        public static Truncated truncatedApply(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result)
+
         {
             Invariants.checkArgument(executeAt != null);
-            return new Truncated(txnId, SaveStatus.TruncatedApply, durability, route, executeAt, EMPTY, null, null);
+            Invariants.checkArgument(saveStatus == SaveStatus.TruncatedApply || saveStatus == SaveStatus.TruncatedApplyWithDeps || saveStatus == SaveStatus.TruncatedApplyWithOutcome);
+            // TODO review Is this correctly handling all three versions of truncatedApplyStatus? Should writes be null some of the time?
+            return new Truncated(common.txnId(), saveStatus, common.durability(), common.route(), executeAt, EMPTY, writes, result);
         }
 
         public static Truncated invalidated(Command command)

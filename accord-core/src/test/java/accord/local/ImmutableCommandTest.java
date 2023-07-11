@@ -18,28 +18,41 @@
 
 package accord.local;
 
+import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+
+import com.google.common.collect.Lists;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
 import accord.api.TestableConfigurationService;
-import accord.impl.*;
+import accord.impl.InMemoryCommandStore;
+import accord.impl.InMemoryCommandStores;
+import accord.impl.IntKey;
+import accord.impl.SizeOfIntersectionSorter;
+import accord.impl.TestAgent;
+import accord.impl.TopologyFactory;
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
 import accord.impl.mock.MockStore;
 import accord.local.Node.Id;
 import accord.local.SaveStatus.LocalExecution;
-import accord.local.Status.Known;
-import accord.primitives.*;
+import accord.primitives.FullKeyRoute;
+import accord.primitives.Keys;
+import accord.primitives.Participants;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.Route;
+import accord.primitives.RoutingKeys;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
 import accord.topology.Topology;
-import com.google.common.collect.Lists;
 import accord.utils.DefaultRandom;
-
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 
 import static accord.Utils.id;
 import static accord.Utils.writeTxn;
