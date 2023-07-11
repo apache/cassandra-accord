@@ -20,6 +20,7 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
+import accord.coordinate.FetchData.OnDone;
 import accord.local.Status;
 import accord.local.Status.Known;
 import accord.primitives.*;
@@ -37,6 +38,8 @@ import javax.annotation.Nullable;
 
 import static accord.local.Status.KnownDeps.DepsKnown;
 import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
+import static accord.local.Status.Outcome.Apply;
+import static accord.local.Status.Outcome.Unknown;
 import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
 import static accord.messages.Commit.Invalidate.commitInvalidate;
@@ -135,15 +138,16 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
             return;
         }
 
-        CheckStatusOkFull merged = (CheckStatusOkFull) this.merged;
-        Known known = merged.sufficientFor(route.participants(), success == Success.Quorum ? HasQuorum : NoQuorum);
+        CheckStatusOkFull full = (CheckStatusOkFull) this.merged;
+        Known known = full.sufficientFor(route.participants(), success == Success.Quorum ? HasQuorum : NoQuorum);
+
         switch (known.outcome)
         {
             default: throw new AssertionError();
             case Unknown:
                 if (known.definition.isKnown())
                 {
-                    Txn txn = merged.partialTxn.reconstitute(route);
+                    Txn txn = full.partialTxn.reconstitute(route);
                     Recover.recover(node, txnId, txn, route, callback);
                 }
                 else
@@ -155,23 +159,20 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                 break;
 
             case WasApply:
-                if (!known.definition.isKnown() || !known.executeAt.hasDecidedExecuteAt() || !known.deps.hasDecidedDeps())
+            case Apply:
+                if (!known.isDefinitionKnown() || known.executeAt != ExecuteAtKnown || known.outcome != Apply)
                 {
-                    callback.accept(DURABLE, null);
+                    OnDone.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? full.toProgressToken() : null, f));
                     break;
                 }
-                break;
 
-            case Apply:
-                Invariants.checkState(known.executeAt == ExecuteAtKnown);
-                // TODO (required): might reasonably not know deps and have to reconstruct them
-                Invariants.checkState(known.deps == DepsKnown);
-                Txn txn = merged.partialTxn.reconstitute(route);
+                // TODO (required): might not be able to fully recover transaction - may only have enough for local shard
+                Txn txn = full.partialTxn.reconstitute(route);
                 if (known.deps.hasDecidedDeps())
                 {
-                    Deps deps = merged.committedDeps.reconstitute(route());
-                    node.withEpoch(merged.executeAt.epoch(), () -> {
-                        Persist.persistMaximal(node, txnId, route(), txn, merged.executeAt, deps, merged.writes, merged.result);
+                    Deps deps = full.committedDeps.reconstitute(route());
+                    node.withEpoch(full.executeAt.epoch(), () -> {
+                        Persist.persistMaximal(node, txnId, route(), txn, full.executeAt, deps, full.writes, full.result);
                     });
                     callback.accept(APPLIED, null);
                 }
@@ -185,13 +186,11 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                 if (witnessedByInvalidation != null && witnessedByInvalidation.hasBeen(Status.PreCommitted))
                     throw new IllegalStateException("We previously invalidated, finding a status that should be recoverable");
 
-                long untilEpoch = node.topology().epoch();
-                commitInvalidate(node, txnId, route, untilEpoch);
-                callback.accept(INVALIDATED, null);
+                OnDone.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? INVALIDATED : null, f));
                 break;
 
             case Erased:
-                callback.accept(TRUNCATED, null);
+                OnDone.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? TRUNCATED : null, f));
                 break;
         }
     }

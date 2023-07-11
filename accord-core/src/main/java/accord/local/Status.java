@@ -41,10 +41,10 @@ import static accord.local.Status.Phase.*;
 
 public enum Status
 {
-    NotDefined(None, Nothing),
+    NotDefined        (None,      Nothing),
     PreAccepted       (PreAccept, DefinitionOnly),
-    AcceptedInvalidate(Accept, DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Unknown), // may or may not have witnessed
-    Accepted          (Accept, DefinitionUnknown, ExecuteAtProposed, DepsProposed, Unknown), // may or may not have witnessed
+    AcceptedInvalidate(Accept,    DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Unknown), // may or may not have witnessed
+    Accepted          (Accept,    DefinitionUnknown, ExecuteAtProposed, DepsProposed, Unknown), // may or may not have witnessed
 
     /**
      * PreCommitted is a peculiar state, half-way between Accepted and Committed.

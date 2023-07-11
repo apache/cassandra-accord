@@ -45,7 +45,6 @@ import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.NotDefined;
 import static accord.local.Status.Phase.Cleanup;
 import static accord.local.Status.PreApplied;
-import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Route.castToRoute;
@@ -221,69 +220,7 @@ public class FetchData extends CheckShards<Route<?>>
             if (success == ReadCoordinator.Success.Success)
                 Invariants.checkState(isSufficient(merged));
 
-            if (merged.saveStatus.status == NotDefined)
-            {
-                callback.accept(Known.Nothing, null);
-                return;
-            }
-
-            CheckStatusOkFull full = (CheckStatusOkFull) merged;
-            Route<?> maxRoute = Route.merge((Route)route(), full.route);
-
-            Ranges sliceRanges = node.topology().localRangesForEpoch(txnId.epoch());
-            if (!maxRoute.covers(sliceRanges))
-            {
-                callback.accept(Known.Nothing, null);
-                return;
-            }
-
-            RoutingKey progressKey = node.trySelectProgressKey(txnId, maxRoute);
-            long toEpoch = sourceEpoch;
-
-            Ranges covering = maxRoute.sliceCovering(sliceRanges, Minimal);
-            Participants<?> participatingKeys = maxRoute.participants().slice(covering, Minimal);
-            WithQuorum withQuorum = success == Success.Quorum ? HasQuorum : NoQuorum;
-            Known achieved = full.sufficientFor(participatingKeys, withQuorum);
-            if (achieved.executeAt.hasDecidedExecuteAt() && full.executeAt.epoch() > txnId.epoch())
-            {
-                Ranges acceptRanges;
-                if (!node.topology().hasEpoch(full.executeAt.epoch()) ||
-                    (!maxRoute.covers(acceptRanges = node.topology().localRangesForEpochs(txnId.epoch(), full.executeAt.epoch()))))
-                {
-                    // we don't know what the execution epoch requires, so we cannot be sure we can replicate it locally
-                    // we *could* wait until we have the local epoch before running this
-                    Status.Outcome outcome = achieved.outcome.propagatesBetweenShards() ? achieved.outcome : Status.Outcome.Unknown;
-                    achieved = new Known(achieved.definition, achieved.executeAt, Status.KnownDeps.DepsUnknown, outcome);
-                }
-                else
-                {
-                    // TODO (expected): this should only be the two precise epochs, not the full range of epochs
-                    sliceRanges = acceptRanges;
-                    covering = maxRoute.sliceCovering(sliceRanges, Minimal);
-                    participatingKeys = maxRoute.participants().slice(covering, Minimal);
-                    Known knownForExecution = full.sufficientFor(participatingKeys, withQuorum);
-                    if (target.isSatisfiedBy(knownForExecution) || knownForExecution.isSatisfiedBy(achieved))
-                    {
-                        achieved = knownForExecution;
-                        toEpoch = full.executeAt.epoch();
-                    }
-                    else
-                    {
-                        Invariants.checkState(sourceEpoch == txnId.epoch());
-                        achieved = new Known(achieved.definition, achieved.executeAt, knownForExecution.deps, knownForExecution.outcome);
-                    }
-                }
-            }
-
-            PartialTxn partialTxn = null;
-            if (achieved.definition.isKnown())
-                partialTxn = full.partialTxn.slice(sliceRanges, true).reconstitutePartial(covering);
-
-            PartialDeps partialDeps = null;
-            if (achieved.deps.hasDecidedDeps())
-                partialDeps = full.committedDeps.slice(sliceRanges).reconstitutePartial(covering);
-
-            new OnDone(node, txnId, maxRoute, progressKey, full, achieved, partialTxn, partialDeps, toEpoch, callback).start();
+            OnDone.propagate(node, txnId, sourceEpoch, success.withQuorum, route(), target, (CheckStatusOkFull) merged, callback);
         }
     }
 
@@ -313,6 +250,71 @@ public class FetchData extends CheckShards<Route<?>>
             this.partialDeps = partialDeps;
             this.toEpoch = toEpoch;
             this.callback = callback;
+        }
+
+        public static void propagate(Node node, TxnId txnId, long sourceEpoch, WithQuorum withQuorum, Route route, @Nullable Known target, CheckStatusOkFull full, BiConsumer<Known, Throwable> callback)
+        {
+            if (full.saveStatus.status == NotDefined && full.invalidIfNotAtLeast == NotDefined)
+            {
+                callback.accept(Known.Nothing, null);
+                return;
+            }
+
+            Route<?> maxRoute = Route.merge(route, full.route);
+
+            Ranges sliceRanges = node.topology().localRangesForEpoch(txnId.epoch());
+            if (!maxRoute.covers(sliceRanges))
+            {
+                callback.accept(Known.Nothing, null);
+                return;
+            }
+
+            RoutingKey progressKey = node.trySelectProgressKey(txnId, maxRoute);
+            long toEpoch = sourceEpoch;
+
+            Ranges covering = maxRoute.sliceCovering(sliceRanges, Minimal);
+            Participants<?> participatingKeys = maxRoute.participants().slice(covering, Minimal);
+            Known achieved = full.sufficientFor(participatingKeys, withQuorum);
+            if (achieved.executeAt.hasDecidedExecuteAt() && full.executeAt.epoch() > txnId.epoch())
+            {
+                Ranges acceptRanges;
+                if (!node.topology().hasEpoch(full.executeAt.epoch()) ||
+                    (!maxRoute.covers(acceptRanges = node.topology().localRangesForEpochs(txnId.epoch(), full.executeAt.epoch()))))
+                {
+                    // we don't know what the execution epoch requires, so we cannot be sure we can replicate it locally
+                    // we *could* wait until we have the local epoch before running this
+                    Status.Outcome outcome = achieved.outcome.propagatesBetweenShards() ? achieved.outcome : Status.Outcome.Unknown;
+                    achieved = new Known(achieved.definition, achieved.executeAt, Status.KnownDeps.DepsUnknown, outcome);
+                }
+                else
+                {
+                    // TODO (expected): this should only be the two precise epochs, not the full range of epochs
+                    sliceRanges = acceptRanges;
+                    covering = maxRoute.sliceCovering(sliceRanges, Minimal);
+                    participatingKeys = maxRoute.participants().slice(covering, Minimal);
+                    Known knownForExecution = full.sufficientFor(participatingKeys, withQuorum);
+                    if ((target != null && target.isSatisfiedBy(knownForExecution)) || knownForExecution.isSatisfiedBy(achieved))
+                    {
+                        achieved = knownForExecution;
+                        toEpoch = full.executeAt.epoch();
+                    }
+                    else
+                    {
+                        Invariants.checkState(sourceEpoch == txnId.epoch());
+                        achieved = new Known(achieved.definition, achieved.executeAt, knownForExecution.deps, knownForExecution.outcome);
+                    }
+                }
+            }
+
+            PartialTxn partialTxn = null;
+            if (achieved.definition.isKnown())
+                partialTxn = full.partialTxn.slice(sliceRanges, true).reconstitutePartial(covering);
+
+            PartialDeps partialDeps = null;
+            if (achieved.deps.hasDecidedDeps())
+                partialDeps = full.committedDeps.slice(sliceRanges).reconstitutePartial(covering);
+
+            new OnDone(node, txnId, maxRoute, progressKey, full, achieved, partialTxn, partialDeps, toEpoch, callback).start();
         }
 
         void start()

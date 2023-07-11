@@ -367,10 +367,10 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             if (inferInvalidated(withQuorum))
                 return Known.Invalidated;
 
-            return sufficientFor(participants, saveStatus, maxSaveStatus, route, partialTxn, committedDeps, writes, result);
+            return sufficientFor(participants, saveStatus, route, partialTxn, committedDeps, writes, result);
         }
 
-        private static Known sufficientFor(Participants<?> participants, SaveStatus saveStatus, SaveStatus maxSaveStatus, Route<?> route, PartialTxn partialTxn, PartialDeps committedDeps, Writes writes, Result result)
+        private static Known sufficientFor(Participants<?> participants, SaveStatus saveStatus, Route<?> route, PartialTxn partialTxn, PartialDeps committedDeps, Writes writes, Result result)
         {
             Status.Definition definition = saveStatus.known.definition;
             switch (definition)
@@ -403,10 +403,11 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             {
                 default: throw new AssertionError();
                 case WasApply:
-                    if (writes != null && result != null && definition.isKnown() && executeAt == ExecuteAtKnown && deps == DepsKnown)
+                    if (writes != null && result != null)
                         outcome = Outcome.Apply;
+
                 case Apply:
-                    if (writes == null || result == null || !definition.isKnown() || executeAt != ExecuteAtKnown || deps != DepsKnown)
+                    if (writes == null || result == null)
                         outcome = Outcome.WasApply;
 
                 case Invalidated:
