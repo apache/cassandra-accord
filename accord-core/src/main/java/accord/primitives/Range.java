@@ -371,17 +371,17 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         Object prefix = start().prefix();
         if (prefix == null || !prefix.equals(end().prefix()))
         {
-            return (startInclusive() ? "Range[" : "Range(") + start() + ", " + end() + (endInclusive() ? ']' : ')');
+            return (startInclusive() ? "[" : "(") + start() + "," + end() + (endInclusive() ? ']' : ')');
         }
         else
         {
-            return "Range:" + prefix + ":" + toSuffixString();
+            return prefix + ":" + toSuffixString();
         }
     }
 
     public String toSuffixString()
     {
-        return (startInclusive() ? "[" : "(") + start().suffix() + ", " + end().suffix() + (endInclusive() ? ']' : ')');
+        return (startInclusive() ? "[" : "(") + start().suffix() + "," + end().suffix() + (endInclusive() ? ']' : ')');
     }
 
 }
