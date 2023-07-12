@@ -170,8 +170,8 @@ public class TopologyManagerTest
         Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
 
         RoutingKeys keys = keys(150).toParticipants();
-        Assertions.assertEquals(topologies(topology2.forSelection(keys), topology1.forSelection(keys)),
-                                service.withUnsyncedEpochs(keys, 2, 2));
+        Assertions.assertEquals(topologies(topology3.forSelection(keys), topology2.forSelection(keys), topology1.forSelection(keys)),
+                                service.withUnsyncedEpochs(keys, 3, 3));
 
         service.onEpochSyncComplete(id(2), 2);
         service.onEpochSyncComplete(id(3), 2);

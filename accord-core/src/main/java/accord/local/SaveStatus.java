@@ -262,7 +262,11 @@ public enum SaveStatus
             return av;
 
         if (a.phase != b.phase)
-            return a.phase.compareTo(b.phase) >= 0 ? av : bv;
+        {
+            return a.phase.compareTo(b.phase) > 0
+                   ? (preferKnowledge && a.phase == Phase.Cleanup ? bv : av)
+                   : (preferKnowledge && b.phase == Phase.Cleanup ? av : bv);
+        }
 
         if (a.phase == Phase.Accept)
             return acceptedA.compareTo(acceptedB) >= 0 ? av : bv;

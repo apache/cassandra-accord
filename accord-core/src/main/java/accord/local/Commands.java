@@ -868,8 +868,6 @@ public class Commands
         if (redundant == LIVE)
             return Truncate.NO;
 
-        // TODO (now): if the command's own durability is Majority, we can look *only* at our local participants to decide whether we truncate
-        // TODO (now): if we retain Outcome and Result in e.g. PartiallyTruncated then we can special-case recovery to permit truncation based only on redundancy
         Durability min = durableBefore.min(txnId, route);
         switch (min)
         {
