@@ -41,6 +41,7 @@ import com.google.common.annotations.VisibleForTesting;
  */
 public class ReducingIntervalMap<K extends Comparable<? super K>, V>
 {
+    @SuppressWarnings("rawtypes")
     private static final Comparable[] NO_OBJECTS = new Comparable[0];
 
     // for simplicity at construction, we permit this to be overridden by the first insertion
@@ -54,6 +55,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         this(false);
     }
 
+    @SuppressWarnings("unchecked")
     public ReducingIntervalMap(boolean inclusiveEnds)
     {
         this.inclusiveEnds = inclusiveEnds;
@@ -94,6 +96,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
                         .collect(Collectors.joining(", ", "{", "}"));
     }
 
+    @SuppressWarnings("rawtypes")
     public boolean equals(Object o)
     {
         if (this == o) return true;

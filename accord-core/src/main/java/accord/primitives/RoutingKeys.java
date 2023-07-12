@@ -54,12 +54,14 @@ public class RoutingKeys extends AbstractUnseekableKeys implements Unseekables<R
         return new RoutingKeys(keys);
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public RoutingKeys with(Unseekables<RoutingKey> with)
     {
         return with((AbstractKeys<RoutingKey>) with);
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public RoutingKeys with(Participants<RoutingKey> with)
     {

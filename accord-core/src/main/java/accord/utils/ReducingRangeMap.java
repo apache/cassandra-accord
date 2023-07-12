@@ -70,7 +70,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
     {
         switch (routables.domain())
         {
-            default: throw new AssertionError();
+            default: throw new AssertionError("Unknown domain: " + routables.domain());
             case Key: return foldl((AbstractKeys<?>) routables, fold, accumulator, p1, p2, terminate);
             case Range: return foldl((AbstractRanges) routables, fold, accumulator, p1, p2, terminate);
         }
@@ -157,7 +157,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
     public static <V> ReducingRangeMap<V> create(Ranges ranges, V value)
     {
         if (value == null)
-            throw new IllegalArgumentException();
+            throw new IllegalArgumentException("value is null");
 
         if (ranges.isEmpty())
             return new ReducingRangeMap<>();
@@ -194,6 +194,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
             super(inclusiveEnds, capacity);
         }
 
+        @SuppressWarnings("unchecked")
         @Override
         protected ReducingRangeMap<V> buildInternal()
         {

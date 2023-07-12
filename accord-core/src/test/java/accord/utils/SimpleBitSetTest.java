@@ -21,13 +21,13 @@ package accord.utils;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
-import java.util.Random;
 import java.util.function.BiConsumer;
 import java.util.function.IntConsumer;
 
 import com.google.common.collect.Lists;
 import org.junit.jupiter.api.Test;
 
+import static accord.utils.Property.qt;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class SimpleBitSetTest
@@ -47,7 +47,7 @@ public class SimpleBitSetTest
             this.size = size;
         }
 
-        void check(Random random)
+        void check(RandomSource random)
         {
             assertEquals(canon.cardinality(), test.setBitCount());
             assertEquals(canon.nextSetBit(0), test.firstSetBit());
@@ -78,7 +78,7 @@ public class SimpleBitSetTest
             assertEquals(canonCollect, testCollect);
         }
 
-        void forIndices(Random random, IntConsumer consumer)
+        void forIndices(RandomSource random, IntConsumer consumer)
         {
             for (int c = 0 ; c < 100 ; ++c)
             {
@@ -87,7 +87,7 @@ public class SimpleBitSetTest
             }
         }
 
-        void forRanges(Random random, BiConsumer<Integer, Integer> consumer)
+        void forRanges(RandomSource random, BiConsumer<Integer, Integer> consumer)
         {
             for (int c = 0 ; c < 100 ; ++c)
             {
@@ -98,7 +98,7 @@ public class SimpleBitSetTest
             }
         }
 
-        static Check generate(Random random, int maxSize, int modCount, int runLength, float runChance, float clearChance)
+        static Check generate(RandomSource random, int maxSize, int modCount, int runLength, float runChance, float clearChance)
         {
             int size = random.nextInt(maxSize);
             runLength = Math.min(size, runLength);
@@ -153,23 +153,10 @@ public class SimpleBitSetTest
     @Test
     public void testRandomBitSets()
     {
-        Random random = new Random();
-        long seed = random.nextLong();
-        System.err.println("Seed: " + seed);
-        random.setSeed(seed);
-        testRandomBitSets(random, 100000);
-    }
-
-    private void testRandomBitSets(Random random, int count)
-    {
-        while (count-- > 0)
-        {
-            long subSeed = random.nextLong();
-            testRandomBitSet(new Random(subSeed));
-        }
+        qt().withExamples(100000).forAll(Gens.random()).check(SimpleBitSetTest::testRandomBitSet);
     }
     
-    private static void testRandomBitSet(Random random)
+    private static void testRandomBitSet(RandomSource random)
     {
         Check.generate(random, 1000, 1 + random.nextInt(99), random.nextInt(100), random.nextFloat() * 0.1f, random.nextFloat() * 0.5f)
              .check(random);

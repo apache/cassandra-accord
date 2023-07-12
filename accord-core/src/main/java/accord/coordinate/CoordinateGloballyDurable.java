@@ -30,9 +30,6 @@ import accord.topology.Topologies;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults.SettableResult;
 
-/**
- *
- */
 public class CoordinateGloballyDurable extends SettableResult<Void> implements Callback<QueryDurableBefore.DurableBeforeReply>
 {
     final Node node;

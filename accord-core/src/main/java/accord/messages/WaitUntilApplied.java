@@ -99,7 +99,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
                 this, command.txnId(), command.status(), command);
         switch (command.status())
         {
-            default: throw new AssertionError();
+            default: throw new AssertionError("Unknown status: " + command.status());
             case NotDefined:
             case PreAccepted:
             case Accepted:
@@ -150,7 +150,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
         logger.trace("{}: setting up read with status {} on {}", txnId, status, safeStore);
         switch (status) {
             default:
-                throw new AssertionError();
+                throw new AssertionError("Unknown status: " + status);
             case Committed:
             case NotDefined:
             case PreAccepted:

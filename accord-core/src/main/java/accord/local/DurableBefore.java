@@ -53,7 +53,7 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
 
         public Entry(@Nonnull TxnId majority, @Nonnull TxnId universalBefore)
         {
-            Invariants.checkArgument(majority.compareTo(universalBefore) >= 0);
+            Invariants.checkArgument(majority.compareTo(universalBefore) >= 0, "majority %s < universal %s", majority, universalBefore);
             this.majorityBefore = majority;
             this.universalBefore = universalBefore;
         }

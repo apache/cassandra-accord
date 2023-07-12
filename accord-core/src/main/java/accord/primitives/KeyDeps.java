@@ -450,6 +450,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return txnIds(keysToTxnIds, start, end);
     }
 
+    @SuppressWarnings("unchecked")
     public SortedRelationList<TxnId> txnIds(Range range)
     {
         int startIndex = keys.indexOf(range.start());
@@ -502,6 +503,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return txnIds(ids, 0, count);
     }
 
+    @SuppressWarnings("unchecked")
     private SortedRelationList<TxnId> txnIds(int[] ids, int start, int end)
     {
         if (start == end)

@@ -240,6 +240,7 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
         return new FullKeyRoute(result[pos], contains(homeKey), result);
     }
 
+    @SuppressWarnings("SuspiciousSystemArraycopy")
     protected RoutingKey[] toRoutingKeysArray(RoutingKey withKey)
     {
         int insertPos = Arrays.binarySearch(keys, withKey);

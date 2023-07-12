@@ -268,7 +268,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     {
         switch (unseekables.domain())
         {
-            default: throw new AssertionError();
+            default: throw new AssertionError("Unknown domain: " + unseekables.domain());
             case Key:
                 forEach((AbstractKeys<?>) unseekables, from, to, param, forEach);
                 break;

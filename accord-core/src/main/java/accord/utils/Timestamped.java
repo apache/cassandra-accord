@@ -43,17 +43,17 @@ public class Timestamped<T>
         int c = a.timestamp.compareTo(b.timestamp);
         if (c == 0)
         {
-            Invariants.checkArgument(testEquality.test(a.data, b.data));
+            Invariants.checkArgument(testEquality.test(a.data, b.data), "%s != %s", a, b);
             return a;
         }
         else if (c < 0)
         {
-            Invariants.checkArgument(testPrefix.test(a.data, b.data));
+            Invariants.checkArgument(testPrefix.test(a.data, b.data), "%s >= %s", a, b);
             return b;
         }
         else
         {
-            Invariants.checkArgument(testPrefix.test(b.data, a.data));
+            Invariants.checkArgument(testPrefix.test(b.data, a.data), "%s <= %s", a, b);
             return a;
         }
     }
@@ -61,7 +61,7 @@ public class Timestamped<T>
     public static <T> Timestamped<T> mergeEqual(Timestamped<T> a, Timestamped<T> b, BiPredicate<T, T> testEquality)
     {
         int c = a.timestamp.compareTo(b.timestamp);
-        Invariants.checkState(c == 0 && testEquality.test(a.data, b.data));
+        Invariants.checkState(c == 0 && testEquality.test(a.data, b.data), "%s != %s", a, b);
         return a;
     }
 

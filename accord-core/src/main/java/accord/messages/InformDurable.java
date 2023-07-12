@@ -91,7 +91,7 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
         if (safeCommand.current().is(Status.Truncated))
             return Ok;
 
-        Commands.setDurability(safeStore, safeCommand, txnId, durability, scope, executeAt);
+        Commands.setDurability(safeStore, safeCommand, durability, scope, executeAt);
         return Ok;
     }
 

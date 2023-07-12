@@ -240,6 +240,7 @@ public class Invalidate implements Callback<InvalidateReply>
         });
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private void commitInvalidate()
     {
         @Nullable Route<?> route = InvalidateReply.mergeRoutes(replies);

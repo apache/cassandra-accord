@@ -59,6 +59,7 @@ public abstract class KeyRoute extends AbstractUnseekableKeys implements Route<R
         return findNextIntersection(i + 1, ranges, j) >= 0;
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public Unseekables<RoutingKey> with(Unseekables<RoutingKey> with)
     {
@@ -66,6 +67,7 @@ public abstract class KeyRoute extends AbstractUnseekableKeys implements Route<R
         return wrap(SortedArrays.linearUnion(keys, that.keys, cachedRoutingKeys()), that);
     }
 
+    @SuppressWarnings("unchecked")
     @Override
     public Participants<RoutingKey> with(Participants<RoutingKey> with)
     {

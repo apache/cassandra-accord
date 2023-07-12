@@ -60,7 +60,7 @@ public class InformHomeDurable implements Request
             if (safeCommand.current().is(Status.Truncated))
                 return;
 
-            Commands.setDurability(safeStore, safeCommand, txnId, durability, route, executeAt);
+            Commands.setDurability(safeStore, safeCommand, durability, route, executeAt);
         }).begin(node.agent());
     }
 

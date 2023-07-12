@@ -46,7 +46,7 @@ public class SyncPoint
 
     public SyncPoint(TxnId syncId, Deps waitFor, Ranges ranges, FullRangeRoute route)
     {
-        Invariants.checkArgument(ranges.toRoute(route.homeKey).equals(route));
+        Invariants.checkArgument(ranges.toRoute(route.homeKey).equals(route), "Expected homeKey %s from route %s to be in ranges %s", route.homeKey, route, ranges);
         this.syncId = syncId;
         this.waitFor = waitFor;
         this.ranges = ranges;

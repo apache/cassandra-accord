@@ -68,6 +68,7 @@ public class MaybeRecover extends CheckShards<Route<?>>
                               || ok.toProgressToken().compareTo(prevProgress) > 0);
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
     @Override
     protected void onDone(Success success, Throwable fail)
     {
@@ -101,7 +102,7 @@ public class MaybeRecover extends CheckShards<Route<?>>
                     }
                     else
                     {
-                        Invariants.checkState(Route.isFullRoute(merged.route));
+                        Invariants.checkState(Route.isFullRoute(merged.route), "Require a full route but given %s", merged.route);
                         node.recover(txnId, Route.castToFullRoute(merged.route)).addCallback(callback);
                     }
                     break;

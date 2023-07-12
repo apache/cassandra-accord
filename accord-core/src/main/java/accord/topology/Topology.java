@@ -299,7 +299,7 @@ public class Topology
         return cachedInts.completeAndDiscard(newSubset, count);
     }
 
-    public <P1> void visitNodeForKeysOnceOrMore(Unseekables<?> select, Consumer<Id> nodes)
+    public void visitNodeForKeysOnceOrMore(Unseekables<?> select, Consumer<Id> nodes)
     {
         for (int shardIndex : subsetFor(select))
         {

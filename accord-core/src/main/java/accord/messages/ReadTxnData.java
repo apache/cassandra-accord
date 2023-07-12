@@ -233,7 +233,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
     @Override
     protected synchronized void readComplete(CommandStore commandStore, @Nullable Data result, @Nullable Ranges unavailable)
     {
-        // TODO (expected): lots of undesirable costs associated with the obsoletion tracker
+        // TODO (expected): we should unregister our listener, but this is quite costly today
 //        commandStore.execute(contextFor(txnId), safeStore -> safeStore.command(txnId).removeListener(obsoleteTracker));
         super.readComplete(commandStore, result, unavailable);
     }

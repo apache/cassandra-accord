@@ -81,6 +81,7 @@ public enum SaveStatus
         CleaningUp(Nothing);
 
         public final Known requires;
+
         LocalExecution(Known requires)
         {
             this.requires = requires;
@@ -98,7 +99,7 @@ public enum SaveStatus
 
             switch (this)
             {
-                default: throw new AssertionError();
+                default: throw new AssertionError("Unexpected status: " + this);
                 case NotReady:
                 case ReadyToExclude:
                 case ReadyToExecute:
@@ -184,7 +185,7 @@ public enum SaveStatus
     {
         switch (status)
         {
-            default: throw new AssertionError();
+            default: throw new AssertionError("Unexpected status: " + status);
             case NotDefined: return NotDefined;
             case PreAccepted: return PreAccepted;
             case AcceptedInvalidate:
@@ -226,7 +227,7 @@ public enum SaveStatus
             case Truncated:
                 switch (status)
                 {
-                    default: throw new AssertionError();
+                    default: throw new AssertionError("Unexpected status: " + status);
                     case Erased:
                         if (!known.outcome.isOrWasApply() || known.executeAt != ExecuteAtKnown)
                             return Erased;
@@ -252,6 +253,9 @@ public enum SaveStatus
 
     public static SaveStatus merge(SaveStatus a, Ballot acceptedA, SaveStatus b, Ballot acceptedB, boolean preferKnowledge)
     {
+        // we first enrich cleanups with the knowledge of the other, to avoid counter-intuitive situations where
+        // we might be able to convert a TruncatedWithApply into Applied, but instead select something much earlier
+        // such as ReadyToExecute; we then apply the normal max process to the results
         if (a.phase == Phase.Cleanup) a = enrich(a, b.known);
         if (b.phase == Phase.Cleanup) b = enrich(b, a.known);
         SaveStatus result = max(a, a, acceptedA, b, b, acceptedB, preferKnowledge);

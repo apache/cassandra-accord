@@ -18,8 +18,6 @@
 
 package accord.coordinate.tracking;
 
-import java.util.Set;
-
 import accord.local.Node;
 import accord.topology.Shard;
 import accord.topology.Topologies;
@@ -34,10 +32,10 @@ public class AppliedTracker extends AbstractTracker<AppliedTracker.AppliedShardT
     {
         protected int waitingOn;
 
-        public AppliedShardTracker(Shard shard, Set<Node.Id> nonParticipants)
+        public AppliedShardTracker(Shard shard)
         {
             super(shard);
-            waitingOn = shard.rf() - (nonParticipants.isEmpty() ? 0 : (int)shard.nodes.stream().filter(nonParticipants::contains).count());
+            waitingOn = shard.rf();
         }
 
         public ShardOutcomes onSuccess(Object ignore)
@@ -64,20 +62,15 @@ public class AppliedTracker extends AbstractTracker<AppliedTracker.AppliedShardT
             return waitingOn > 0;
         }
 
-        boolean hasFailures()
-        {
-            return waitingOn < 0;
-        }
-
         boolean hasFailed()
         {
             return waitingOn < 0;
         }
     }
 
-    public AppliedTracker(Topologies topologies, Set<Node.Id> nonParticipants)
+    public AppliedTracker(Topologies topologies)
     {
-        super(topologies, AppliedShardTracker[]::new, shard -> new AppliedShardTracker(shard, nonParticipants));
+        super(topologies, AppliedShardTracker[]::new, shard -> new AppliedShardTracker(shard));
     }
 
     public RequestStatus recordSuccess(Node.Id node)
@@ -89,11 +82,6 @@ public class AppliedTracker extends AbstractTracker<AppliedTracker.AppliedShardT
     public RequestStatus recordFailure(Node.Id node)
     {
         return recordResponse(this, node, AppliedShardTracker::onFailure, null);
-    }
-
-    public boolean hasFailures()
-    {
-        return any(AppliedShardTracker::hasFailures);
     }
 
     public boolean hasFailed()

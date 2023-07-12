@@ -71,7 +71,7 @@ public class TopologyUtils
             noShard.removeAll(electorates.get(i % electorates.size()));
         }
         if (!noShard.isEmpty())
-            throw new AssertionError();
+            throw new AssertionError(String.format("The following electorates were found without a shard: %s", noShard));
 
         return new Topology(1, toArray(shards, Shard[]::new));
     }

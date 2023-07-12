@@ -192,7 +192,7 @@ public class Commands
         return AcceptOutcome.Success;
     }
 
-    public static boolean preacceptInvalidate(SafeCommand safeCommand, TxnId txnId, Ballot ballot)
+    public static boolean preacceptInvalidate(SafeCommand safeCommand, Ballot ballot)
     {
         Command command = safeCommand.current();
 
@@ -551,11 +551,6 @@ public class Commands
         return safeStore.ranges().allBetween(txnId.epoch(), untilEpoch);
     }
 
-    private static boolean coordinates(SafeCommandStore safeStore, TxnId txnId, RoutingKey key)
-    {
-        return coordinateRanges(safeStore, txnId).contains(key);
-    }
-
     private static Ranges acceptRanges(SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt, Ranges coordinateRanges)
     {
         return txnId.epoch() == executeAt.epoch() ? coordinateRanges : safeStore.ranges().allBetween(txnId, executeAt);
@@ -667,7 +662,7 @@ public class Commands
                     return true;
                 }
             default:
-                throw new IllegalStateException();
+                throw new IllegalStateException("Unexpected status: " + command.status());
         }
     }
 
@@ -812,7 +807,8 @@ public class Commands
         //   3) a command is durably decided and this shard only hosts its home data, so no explicit truncation is necessary to remove it
         // TODO (desired): consider if there are better invariants we can impose for undecided transactions, to verify they aren't later committed (should be detected already, but more is better)
         // note that our invariant here is imperfectly applied to keep the code cleaner: we don't verify that the caller was safe to invoke if we don't already have a route in the command and we're only PreCommitted
-        Invariants.checkState(command.hasBeen(Applied) || !command.hasBeen(PreCommitted) || (command.route() == null || Infer.safeToCleanup(safeStore, command, command.route(), command.executeAt())));
+        Invariants.checkState(command.hasBeen(Applied) || !command.hasBeen(PreCommitted) || (command.route() == null || Infer.safeToCleanup(safeStore, command, command.route(), command.executeAt())),
+                "Command %s could not be truncated", command);
 
         Command.Truncated result;
         if (!command.hasBeen(PreCommitted))
@@ -821,7 +817,7 @@ public class Commands
         }
         else switch (truncate)
         {
-            default: throw new AssertionError();
+            default: throw new AssertionError("Unexpected status: " + truncate);
             case TRUNCATE_WITH_OUTCOME:
                 Invariants.checkArgument(!command.hasBeen(Truncated));
                 if (command.hasBeen(PreApplied))
@@ -874,7 +870,7 @@ public class Commands
             default:
             case Local:
             case DurableOrInvalidated:
-                throw new AssertionError();
+                throw new AssertionError("Unexpected durability: " + min);
             case NotDurable:
                 if (durability == Majority)
                     return Truncate.TRUNCATE;
@@ -900,7 +896,7 @@ public class Commands
     }
 
     // TODO (now): either ignore this message if we don't have a route, or else require FullRoute requiring route, or else require FullRoute
-    private static Command setDurability(SafeCommandStore safeStore, SafeCommand safeCommand, Durability durability, @Nullable Route<?> route, boolean hasProgressKey, @Nullable RoutingKey progressKey, @Nullable Timestamp executeAt)
+    public static Command setDurability(SafeCommandStore safeStore, SafeCommand safeCommand, Durability durability, @Nullable Route<?> route, @Nullable Timestamp executeAt)
     {
         Command command = safeCommand.current();
         if (command.is(Truncated))
@@ -923,19 +919,9 @@ public class Commands
         return command;
     }
 
-    public static Command setDurability(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId txnId, Durability durability, Route<?> route, boolean hasProgressKey, @Nullable RoutingKey progressKey, @Nullable Timestamp executeAt)
+    public static Command setDurability(SafeCommandStore safeStore, SafeCommand safeCommand, Durability durability)
     {
-        return setDurability(safeStore, safeCommand, durability, route, hasProgressKey, progressKey, executeAt);
-    }
-
-    public static Command setDurability(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId txnId, Durability durability, Route<?> route, @Nullable Timestamp executeAt)
-    {
-        return setDurability(safeStore, safeCommand, durability, route, false, null, executeAt);
-    }
-
-    public static Command setDurability(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId txnId, Durability durability)
-    {
-        return setDurability(safeStore, safeCommand, durability, null, false, null, null);
+        return setDurability(safeStore, safeCommand, durability, null, null);
     }
 
     static class NotifyWaitingOn implements PreLoadContext, Consumer<SafeCommandStore>
@@ -971,7 +957,7 @@ public class Commands
                     {
                         if (safeStore.commandStore().redundantBefore().isRedundant(txnIds[depth], prevSafe.current().executeAt(), prevSafe.current().partialDeps().participants(txnIds[depth])))
                         {
-                            removeDependency(safeStore, prevSafe, txnIds[depth]);
+                            removeDependency(prevSafe, txnIds[depth]);
                             prevSafe = get(safeStore, --depth - 1);
                         }
                         else
@@ -1072,7 +1058,7 @@ public class Commands
                         // we've been invalidated, or we're done
                         if (cur.hasBeen(Applied))
                         {
-                            removeDependency(safeStore, prevSafe, cur.txnId());
+                            removeDependency(prevSafe, cur.txnId());
                         }
                         else
                         {
@@ -1143,7 +1129,7 @@ public class Commands
         }
     }
 
-    static Command removeDependency(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId redundant)
+    static Command removeDependency(SafeCommand safeCommand, TxnId redundant)
     {
         Command.Committed current = safeCommand.current().asCommitted();
         WaitingOn.Update update = new WaitingOn.Update(current.waitingOn);
@@ -1164,6 +1150,7 @@ public class Commands
         return safeCommand.updateWaitingOn(update);
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
     public static Command informHome(SafeCommandStore safeStore, SafeCommand dependencySafeCommand, Route<?> someRoute)
     {
         Command command = dependencySafeCommand.current();
@@ -1183,6 +1170,7 @@ public class Commands
      * Note that for ProgressLog purposes the "home shard" is the shard as of txnId.epoch.
      * For recovery purposes the "home shard" is as of txnId.epoch until Committed, and executeAt.epoch once Executed
      */
+    @SuppressWarnings({"unchecked", "rawtypes"})
     public static CommonAttributes updateRoute(Command command, Route<?> route)
     {
         if (command.route() == null || !command.route().containsAll(route))
@@ -1204,6 +1192,7 @@ public class Commands
 
     enum EnsureAction { Ignore, Check, Add, TrySet, Set }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private static CommonAttributes set(SafeCommandStore safeStore, Command command, CommonAttributes attrs,
                                         Ranges existingRanges, Ranges additionalRanges, ProgressShard shard, Route<?> route,
                                         @Nullable PartialTxn partialTxn, EnsureAction ensurePartialTxn,
@@ -1283,7 +1272,7 @@ public class Commands
         // first validate route
         switch (ensureRoute)
         {
-            default: throw new AssertionError();
+            default: throw new AssertionError("Unexpected action: " + ensureRoute);
             case Check:
                 if (!isFullRoute(attrs.route()) && !isFullRoute(route))
                     return false;
@@ -1320,7 +1309,7 @@ public class Commands
     {
         switch (action)
         {
-            default: throw new IllegalStateException();
+            default: throw new IllegalStateException("Unexpected action: " + action);
             case Ignore:
                 break;
 

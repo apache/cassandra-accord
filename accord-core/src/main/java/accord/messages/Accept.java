@@ -240,9 +240,10 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         public AcceptReply apply(SafeCommandStore safeStore)
         {
             SafeCommand safeCommand = safeStore.get(txnId, someKey);
-            switch (Commands.acceptInvalidate(safeStore, safeCommand, ballot))
+            AcceptOutcome outcome = Commands.acceptInvalidate(safeStore, safeCommand, ballot);
+            switch (outcome)
             {
-                default:
+                default: throw new IllegalArgumentException("Unknown status: " + outcome);
                 case Truncated:
                     return AcceptReply.TRUNCATED;
                 case Redundant:

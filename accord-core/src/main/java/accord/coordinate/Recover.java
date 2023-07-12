@@ -219,7 +219,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             Timestamp executeAt = acceptOrCommit.executeAt;
             switch (acceptOrCommit.status)
             {
-                default: throw new IllegalStateException();
+                default: throw new IllegalStateException("Unknown status: " + acceptOrCommit.status);
                 case Truncated:
                     callback.accept(ProgressToken.TRUNCATED, null);
                     return;

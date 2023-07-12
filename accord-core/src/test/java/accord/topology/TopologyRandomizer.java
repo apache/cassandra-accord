@@ -36,7 +36,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -296,7 +295,7 @@ public class TopologyRandomizer
 
     public synchronized void rangeDurable()
     {
-        Invariants.checkState(nodeLookup != null);
+        Invariants.nonNull(nodeLookup);
         Topology current = epochs.get(epochs.size() - 1);
         List<Node.Id> nodes = new ArrayList<>(current.nodes());
         Node.Id nodeId = nodes.get(random.nextInt(nodes.size()));
@@ -311,7 +310,7 @@ public class TopologyRandomizer
 
     private static void coordinateDurable(Node node, SyncPoint exclusiveSyncPoint)
     {
-        CoordinateShardDurable.coordinate(node, exclusiveSyncPoint, Collections.emptySet())
+        CoordinateShardDurable.coordinate(node, exclusiveSyncPoint)
                               .addCallback((success0, fail0) -> {
                                   if (fail0 != null) coordinateDurable(node, exclusiveSyncPoint);
                               });
@@ -319,7 +318,7 @@ public class TopologyRandomizer
 
     public synchronized void globallyDurable()
     {
-        Invariants.checkState(nodeLookup != null);
+        Invariants.nonNull(nodeLookup);
         Topology current = epochs.get(epochs.size() - 1);
         List<Node.Id> nodes = new ArrayList<>(current.nodes());
         Node.Id nodeId = nodes.get(random.nextInt(nodes.size()));
@@ -332,7 +331,7 @@ public class TopologyRandomizer
 
     private Ranges selectRanges(Ranges ranges)
     {
-        if (random.nextFloat() < 0.1f)
+        if (random.decide(0.1f))
             return ranges;
 
         int count = ranges.size() == 1 ? 1 : 1 + random.nextInt(Math.min(3, ranges.size() - 1));

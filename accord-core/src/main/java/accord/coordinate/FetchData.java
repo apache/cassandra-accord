@@ -74,7 +74,7 @@ public class FetchData extends CheckShards<Route<?>>
         if (!node.topology().hasEpoch(srcEpoch))
             return node.topology().awaitEpoch(srcEpoch).map(ignore -> fetch(fetch, node, txnId, route, executeAt, callback)).beginAsResult();
 
-        Invariants.checkArgument(node.topology().hasEpoch(srcEpoch));
+        Invariants.checkArgument(node.topology().hasEpoch(srcEpoch), "Unknown epoch %d, latest known is %d", srcEpoch, node.epoch());
         Ranges ranges = node.topology().localRangesForEpochs(txnId.epoch(), srcEpoch);
         if (!route.covers(ranges))
         {
@@ -86,19 +86,20 @@ public class FetchData extends CheckShards<Route<?>>
         }
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private static Object fetchViaSomeRoute(Known fetch, Node node, TxnId txnId, Unseekables<?> someUnseekables, @Nullable Timestamp executeAt, BiConsumer<Known, Throwable> callback)
     {
         return FindSomeRoute.findSomeRoute(node, txnId, someUnseekables, (foundRoute, fail) -> {
             if (fail != null) callback.accept(null, fail);
             else if (foundRoute.route == null)
             {
-                reportRouteNotFound(node, txnId, someUnseekables, executeAt, foundRoute.known, foundRoute.withQuorum, callback);
+                reportRouteNotFound(node, txnId, someUnseekables, executeAt, foundRoute.known, callback);
             }
             else if (isRoute(someUnseekables) && someUnseekables.containsAll(foundRoute.route))
             {
                 // this is essentially a reentrancy check; we can only reach this point if we have already tried once to fetchSomeRoute
                 // (as a user-provided Route is used to fetchRoute, not fetchSomeRoute)
-                reportRouteNotFound(node, txnId, someUnseekables, executeAt, foundRoute.known, foundRoute.withQuorum, callback);
+                reportRouteNotFound(node, txnId, someUnseekables, executeAt, foundRoute.known, callback);
             }
             else
             {
@@ -110,12 +111,12 @@ public class FetchData extends CheckShards<Route<?>>
         });
     }
 
-    private static void reportRouteNotFound(Node node, TxnId txnId, Unseekables<?> someUnseekables, @Nullable Timestamp executeAt, Known found, WithQuorum withQuorum, BiConsumer<Known, Throwable> callback)
+    private static void reportRouteNotFound(Node node, TxnId txnId, Unseekables<?> someUnseekables, @Nullable Timestamp executeAt, Known found, BiConsumer<Known, Throwable> callback)
     {
         Invariants.checkState(executeAt == null);
         switch (found.outcome)
         {
-            default: throw new AssertionError();
+            default: throw new AssertionError("Unknown outcome: " + found.outcome);
             case Invalidated:
                 invalidateAndCallback(node, txnId, someUnseekables, found, callback);
                 break;
@@ -131,7 +132,7 @@ public class FetchData extends CheckShards<Route<?>>
     private static Object fetchWithIncompleteRoute(Known fetch, Node node, TxnId txnId, Route<?> someRoute, @Nullable Timestamp executeAt, BiConsumer<Known, Throwable> callback)
     {
         long srcEpoch = fetch.fetchEpoch(txnId, executeAt);
-        Invariants.checkArgument(node.topology().hasEpoch(srcEpoch));
+        Invariants.checkArgument(node.topology().hasEpoch(srcEpoch), "Unknown epoch %d, latest known is %d", srcEpoch, node.epoch());
         return FindRoute.findRoute(node, txnId, someRoute.withHomeKey(), (foundRoute, fail) -> {
             if (fail != null) callback.accept(null, fail);
             else if (foundRoute == null) fetchViaSomeRoute(fetch, node, txnId, someRoute, executeAt, callback);
@@ -148,7 +149,7 @@ public class FetchData extends CheckShards<Route<?>>
     private static Object fetchInternal(Ranges ranges, Known target, Node node, TxnId txnId, PartialRoute<?> route, @Nullable Timestamp executeAt, BiConsumer<Known, Throwable> callback)
     {
         long srcEpoch = target.fetchEpoch(txnId, executeAt);
-        Invariants.checkArgument(node.topology().hasEpoch(srcEpoch));
+        Invariants.checkArgument(node.topology().hasEpoch(srcEpoch), "Unknown epoch %d, latest known is %d", srcEpoch, node.epoch());
         PartialRoute<?> fetch = route.sliceStrict(ranges);
         return fetchData(target, node, txnId, fetch, srcEpoch, (sufficientFor, fail) -> {
             if (fail != null) callback.accept(null, fail);
@@ -171,7 +172,7 @@ public class FetchData extends CheckShards<Route<?>>
     {
         // TODO (desired, efficiency): restore behaviour of only collecting info if e.g. Committed or Executed
         super(node, txnId, routeWithHomeKey, sourceEpoch, CheckStatus.IncludeInfo.All);
-        Invariants.checkArgument(routeWithHomeKey.contains(route.homeKey()));
+        Invariants.checkArgument(routeWithHomeKey.contains(route.homeKey()), "route %s does not contain %s", routeWithHomeKey, route.homeKey());
         this.target = target;
         this.callback = callback;
     }
@@ -218,7 +219,7 @@ public class FetchData extends CheckShards<Route<?>>
         else
         {
             if (success == ReadCoordinator.Success.Success)
-                Invariants.checkState(isSufficient(merged));
+                Invariants.checkState(isSufficient(merged), "Status %s is not sufficient", merged);
 
             OnDone.propagate(node, txnId, sourceEpoch, success.withQuorum, route(), target, (CheckStatusOkFull) merged, callback);
         }
@@ -252,6 +253,7 @@ public class FetchData extends CheckShards<Route<?>>
             this.callback = callback;
         }
 
+        @SuppressWarnings({"rawtypes", "unchecked"})
         public static void propagate(Node node, TxnId txnId, long sourceEpoch, WithQuorum withQuorum, Route route, @Nullable Known target, CheckStatusOkFull full, BiConsumer<Known, Throwable> callback)
         {
             if (full.saveStatus.status == NotDefined && full.invalidIfNotAtLeast == NotDefined)
@@ -300,7 +302,7 @@ public class FetchData extends CheckShards<Route<?>>
                     }
                     else
                     {
-                        Invariants.checkState(sourceEpoch == txnId.epoch());
+                        Invariants.checkState(sourceEpoch == txnId.epoch(), "%d != %d", sourceEpoch, txnId.epoch());
                         achieved = new Known(achieved.definition, achieved.executeAt, knownForExecution.deps, knownForExecution.outcome);
                     }
                 }
@@ -347,12 +349,12 @@ public class FetchData extends CheckShards<Route<?>>
 
             switch (propagate)
             {
-                default: throw new IllegalStateException();
+                default: throw new IllegalStateException("Unexpected status: " + propagate);
                 case Accepted:
                 case AcceptedInvalidate:
                     // we never "propagate" accepted statuses as these are essentially votes,
                     // and contribute nothing to our local state machine
-                    throw new IllegalStateException("Invalid states to propagate");
+                    throw new IllegalStateException("Invalid states to propagate: " + achieved.propagate());
 
                 case Truncated:
                     // if our peers have truncated this command, then either:
@@ -411,7 +413,7 @@ public class FetchData extends CheckShards<Route<?>>
                 return null;
 
             Timestamp executeAt = full.saveStatus.known.executeAt.hasDecidedExecuteAt() ? full.executeAt : null;
-            Commands.setDurability(safeStore, safeCommand, txnId, full.durability, route, true, progressKey, executeAt);
+            Commands.setDurability(safeStore, safeCommand, full.durability, route, executeAt);
             return null;
         }
 
@@ -424,7 +426,7 @@ public class FetchData extends CheckShards<Route<?>>
         @Override
         public void accept(Void result, Throwable failure)
         {
-            callback.accept(achieved, failure);
+            callback.accept(failure  == null ? achieved : null, failure);
         }
     }
 
@@ -432,7 +434,7 @@ public class FetchData extends CheckShards<Route<?>>
     {
         switch (outcome)
         {
-            default: throw new IllegalStateException();
+            default: throw new IllegalStateException("Unknown outcome: " + outcome);
             case Redundant:
             case Success:
                 return;
@@ -444,7 +446,7 @@ public class FetchData extends CheckShards<Route<?>>
     {
         switch (outcome)
         {
-            default: throw new IllegalStateException();
+            default: throw new IllegalStateException("Unknown outcome: " + outcome);
             case Redundant:
             case Success:
                 return;

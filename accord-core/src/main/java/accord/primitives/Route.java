@@ -24,14 +24,11 @@ import javax.annotation.Nullable;
 
 public interface Route<K extends Unseekable> extends Unseekables<K>
 {
-    enum Participation
-    {
-        PARTICIPANT,
-        HOME_KEY_ONLY
-    }
-
     RoutingKey homeKey();
-    // true iff homeKey() is not involved in the transaction, only in its coordination (i.e. !txn.keys().contains(homeKey())
+
+    /**
+     * @return true iff homeKey() is not involved in the transaction, only in its coordination (i.e. !txn.keys().contains(homeKey())
+     */
     boolean isParticipatingHomeKey();
     RoutingKey someParticipatingKey();
 

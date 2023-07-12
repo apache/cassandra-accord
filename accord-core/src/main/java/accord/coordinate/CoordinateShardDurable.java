@@ -18,8 +18,6 @@
 
 package accord.coordinate;
 
-import java.util.Set;
-
 import accord.coordinate.tracking.AppliedTracker;
 import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node;
@@ -38,22 +36,20 @@ import accord.utils.async.AsyncResults.SettableResult;
 public class CoordinateShardDurable extends SettableResult<Void> implements Callback<ReadData.ReadReply>
 {
     final Node node;
-    final Set<Node.Id> nonParticipants;
     final AppliedTracker tracker;
     final SyncPoint exclusiveSyncPoint;
 
-    private CoordinateShardDurable(Node node, SyncPoint exclusiveSyncPoint, Set<Node.Id> nonParticipants)
+    private CoordinateShardDurable(Node node, SyncPoint exclusiveSyncPoint)
     {
         Topologies topologies = node.topology().forEpoch(exclusiveSyncPoint.ranges, exclusiveSyncPoint.sourceEpoch());
         this.node = node;
-        this.tracker = new AppliedTracker(topologies, nonParticipants);
+        this.tracker = new AppliedTracker(topologies);
         this.exclusiveSyncPoint = exclusiveSyncPoint;
-        this.nonParticipants = nonParticipants;
     }
 
-    public static AsyncResult<Void> coordinate(Node node, SyncPoint exclusiveSyncPoint, Set<Node.Id> nonParticipants)
+    public static AsyncResult<Void> coordinate(Node node, SyncPoint exclusiveSyncPoint)
     {
-        CoordinateShardDurable coordinate = new CoordinateShardDurable(node, exclusiveSyncPoint, nonParticipants);
+        CoordinateShardDurable coordinate = new CoordinateShardDurable(node, exclusiveSyncPoint);
         coordinate.start();
         return coordinate;
     }

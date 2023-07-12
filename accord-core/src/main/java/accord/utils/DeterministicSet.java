@@ -42,7 +42,7 @@ public class DeterministicSet<T> extends AbstractSet<T>
         }
     }
 
-    // TODO (low priority): an identity hash map that doesn't mind concurrent modification / iteration
+    // TODO (low priority): create an identity hash map that doesn't mind concurrent modification / iteration; this class could then be replaced by java.util.Collections.newSetFromMap
     final Map<T, Entry<T>> lookup;
     final Entry<T> head = new Entry<T>(null);
 
@@ -75,8 +75,8 @@ public class DeterministicSet<T> extends AbstractSet<T>
     {
         return new Iterator<T>()
         {
-            boolean hasComputedNext = true;
-            Entry<T> next = head.next;
+            boolean hasComputedNext = false;
+            Entry<T> next = head;
             @Override
             public boolean hasNext()
             {
@@ -142,6 +142,7 @@ public class DeterministicSet<T> extends AbstractSet<T>
         entry.next.prev = entry;
         return true;
     }
+
     // we add to the front, and iterate in reverse order, so that we can add and remove while iterating without modifying the set we iterate over
     @Override
     public boolean add(T item)

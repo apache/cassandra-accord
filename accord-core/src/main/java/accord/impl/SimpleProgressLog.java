@@ -220,7 +220,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 void run(SafeCommandStore safeStore, SafeCommand safeCommand)
                 {
                     Command command = safeCommand.current();
-                    Invariants.checkState(!safeStore.isTruncated(command));
+                    Invariants.checkState(!safeStore.isTruncated(command), "Command %s is truncated", command);
                     setProgress(Investigating);
                     switch (status)
                     {
@@ -234,7 +234,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                             if (command.durability().isDurableOrInvalidated())
                             {
                                 // should not reach here with an invalidated state
-                                Invariants.checkState(command.durability().isDurable());
+                                Invariants.checkState(command.durability().isDurable(), "Command %s is not durable", command);
                                 durableGlobal();
                                 return;
                             }
@@ -244,7 +244,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                             Invariants.checkState(token.status != Status.Invalidated, "ProgressToken is invalidated, but we have not cleared the ProgressLog");
                             // TODO (expected): this should be encapsulated in Recover/FetchData
                             if (!command.durability().isDurable() && token.durability.isDurableOrInvalidated() && (token.durability.isDurable() || command.hasBeen(PreCommitted)))
-                                command = Commands.setDurability(safeStore, safeCommand, txnId, Majority);
+                                command = Commands.setDurability(safeStore, safeCommand, Majority);
 
                             if (command.durability().isDurable() || token.durability.isDurableOrInvalidated())
                             {
@@ -303,11 +303,12 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                 Object debugInvestigating;
 
+                @SuppressWarnings({"unchecked", "rawtypes"})
                 void recordBlocking(LocalExecution blockedUntil, @Nullable Route<?> route, @Nullable Participants<?> participants)
                 {
-                    Invariants.checkState(route != null || participants != null);
-                    Invariants.checkState(participants == null || !participants.isEmpty());
-                    Invariants.checkState(route == null || route.hasParticipants());
+                    Invariants.checkState(route != null || participants != null, "Route and participants are both undefined");
+                    Invariants.checkState(participants == null || !participants.isEmpty(), "participants is empty");
+                    Invariants.checkState(route == null || route.hasParticipants(), "Route %s does not have participants", route);
 
                     this.route = Route.merge(this.route, (Route)route);
                     this.participants = Participants.merge(this.participants, (Participants) participants);
@@ -333,7 +334,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 void run(SafeCommandStore safeStore, SafeCommand safeCommand)
                 {
                     Command command = safeCommand.current();
-                    if (command.saveStatus().execution.compareTo(blockedUntil) >= 0)
+                    if (command.isAtLeast(blockedUntil))
                     {
                         setProgress(NoneExpected);
                         return;
@@ -369,6 +370,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     });
                 }
 
+                @SuppressWarnings({"rawtypes", "unchecked"})
                 private Unseekables<?> maxContact(Command command)
                 {
                     Route<?> route = Route.merge(command.route(), (Route)this.route);
@@ -376,6 +378,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     return Unseekables.merge(route == null ? null : route.withHomeKey(), (Unseekables)participants);
                 }
 
+                @SuppressWarnings({"unchecked", "rawtypes"})
                 private Participants<?> maxParticipants(Command command)
                 {
                     Route<?> route = Route.merge(command.route(), (Route)this.route);
