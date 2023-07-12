@@ -252,6 +252,8 @@ public enum SaveStatus
 
     public static SaveStatus merge(SaveStatus a, Ballot acceptedA, SaveStatus b, Ballot acceptedB, boolean preferKnowledge)
     {
+        if (a.phase == Phase.Cleanup) a = enrich(a, b.known);
+        if (b.phase == Phase.Cleanup) b = enrich(b, a.known);
         SaveStatus result = max(a, a, acceptedA, b, b, acceptedB, preferKnowledge);
         return enrich(result, (result == a ? b : a).known);
     }
