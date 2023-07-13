@@ -72,20 +72,6 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
         return Timestamp.max(cfk.max(), timestamp);
     }
 
-    @VisibleForTesting
-    @VisibleForImplementation
-    public <D> CommandsForKey updateMax(Timestamp timestamp)
-    {
-        CommandsForKey current = current();
-        return update(new CommandsForKey(current.key(),
-                                         updateMax(current, timestamp),
-                                         current.lastExecutedTimestamp(),
-                                         current.lastExecutedMicros(),
-                                         current.lastWriteTimestamp(),
-                                         (CommandTimeseries<D>) current().byId(),
-                                         (CommandTimeseries<D>) current().byExecuteAt()));
-    }
-
     public <D> CommandsForKey register(Command command)
     {
         CommandsForKey current = current();

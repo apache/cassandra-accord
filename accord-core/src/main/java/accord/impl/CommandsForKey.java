@@ -99,10 +99,10 @@ public class CommandsForKey implements CommandTimeseriesHolder
         }
     }
 
-    // TODO (now): add validation that anything inserted into *committedBy* has everything prior in its dependencies
     private final Key key;
     private final Timestamp max;
     private final Timestamp lastExecutedTimestamp;
+    // TODO (desired): we have leaked C* implementation details here
     private final long lastExecutedMicros;
     private final Timestamp lastWriteTimestamp;
     private final CommandTimeseries<?> byId;
@@ -228,7 +228,10 @@ public class CommandsForKey implements CommandTimeseriesHolder
     {
         Timestamp removeExecuteAt = byId.maxExecuteAtBefore(redundantBefore);
 
-        return new CommandsForKey(key, max, lastExecutedTimestamp, lastExecutedMicros, lastWriteTimestamp,
+        return new CommandsForKey(key, max.compareTo(redundantBefore) < 0 ? Timestamp.NONE : max,
+                                  lastExecutedTimestamp.compareTo(redundantBefore) < 0 ? Timestamp.NONE : lastExecutedTimestamp,
+                                  lastExecutedMicros,
+                                  lastWriteTimestamp.compareTo(redundantBefore) < 0 ? Timestamp.NONE : lastWriteTimestamp,
                                   (CommandTimeseries)byId.beginUpdate().removeBefore(redundantBefore).build(),
                                   (CommandTimeseries)byExecuteAt.beginUpdate().removeBefore(removeExecuteAt).build()
                                  );
