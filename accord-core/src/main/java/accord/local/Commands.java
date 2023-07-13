@@ -757,13 +757,13 @@ public class Commands
         WaitingOn.Update waitingOn = new WaitingOn.Update(command);
         if (updateWaitingOn(command.txnId(), command.executeAt(), waitingOn, predecessor))
         {
-            command = safeCommand.updateWaitingOn(waitingOn);
+            safeCommand.updateWaitingOn(waitingOn);
             maybeExecute(safeStore, safeCommand, false, notifyWaitingOn);
         }
         else
         {
             Command pred = predecessor.current();
-            if (pred.is(ReadyToExecute))
+            if (pred.hasBeen(PreCommitted))
             {
                 TxnId nextWaitingOn = command.waitingOn().nextWaitingOn();
                 if (nextWaitingOn != null && nextWaitingOn.equals(pred.txnId()))
