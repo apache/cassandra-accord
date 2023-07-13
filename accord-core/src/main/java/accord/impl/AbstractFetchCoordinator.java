@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.Data;
 import accord.api.DataStore;
+import accord.coordinate.CoordinateSyncPoint;
 import accord.coordinate.FetchCoordinator;
 import accord.local.CommandStore;
 import accord.local.Node;
@@ -47,6 +48,7 @@ import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
+import static accord.messages.ReadData.ReadNack.NotCommitted;
 import static accord.primitives.Routables.Slice.Minimal;
 
 public abstract class AbstractFetchCoordinator extends FetchCoordinator
@@ -133,17 +135,23 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
             {
                 if (!reply.isOk())
                 {
-                    fail(to, new RuntimeException(reply.toString()));
-                    inflight.remove(key).cancel();
-                    switch ((ReadData.ReadNack) reply)
+                    if (reply == NotCommitted)
                     {
-                        default: throw new AssertionError("Unhandled enum: " + reply);
-                        case Invalid:
-                        case Redundant:
-                        case NotCommitted:
-                            throw new AssertionError(String.format("Unexpected reply: %s", reply));
-                        case Error:
-                            // TODO (required): ensure errors are propagated to coordinators and can be logged
+                        CoordinateSyncPoint.sendApply(node, from, syncPoint);
+                    }
+                    else
+                    {
+                        fail(to, new RuntimeException(reply.toString()));
+                        inflight.remove(key).cancel();
+                        switch ((ReadData.ReadNack) reply)
+                        {
+                            default: throw new AssertionError("Unhandled enum: " + reply);
+                            case Invalid:
+                            case Redundant:
+                                throw new AssertionError(String.format("Unexpected reply: %s", reply));
+                            case Error:
+                                // TODO (required): ensure errors are propagated to coordinators and can be logged
+                        }
                     }
                     return;
                 }

@@ -125,7 +125,7 @@ public class CoordinateSyncPoint extends CoordinatePreAccept<SyncPoint>
         }
     }
 
-    static void sendApply(Node node, Node.Id to, SyncPoint syncPoint)
+    public static void sendApply(Node node, Node.Id to, SyncPoint syncPoint)
     {
         TxnId txnId = syncPoint.syncId;
         Timestamp executeAt = txnId;
