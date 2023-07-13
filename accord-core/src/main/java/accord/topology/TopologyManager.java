@@ -69,7 +69,7 @@ public class TopologyManager
         private final Topology local;
         private final QuorumTracker syncTracker;
         private final BitSet curShardSyncComplete;
-        private final Ranges newRanges;
+        private final Ranges addedRanges, removedRanges;
         private Ranges curSyncComplete, prevSyncComplete, syncComplete;
         Ranges closed = Ranges.EMPTY, complete = Ranges.EMPTY;
 
@@ -83,18 +83,21 @@ public class TopologyManager
             if (global().size() > 0)
                 this.syncTracker = new QuorumTracker(new Single(sorter, global()));
             else
-                this.syncTracker = null;            this.newRanges = global.ranges.subtract(prevRanges);
-            this.prevSyncComplete = newRanges.with(prevSyncComplete);
-            this.curSyncComplete = this.syncComplete = newRanges;
+                this.syncTracker = null;
+            this.addedRanges = global.ranges.subtract(prevRanges);
+            this.removedRanges = prevRanges.subtract(global.ranges);
+            this.prevSyncComplete = addedRanges.with(prevSyncComplete.subtract(removedRanges));
+            this.curSyncComplete = this.syncComplete = addedRanges;
         }
 
         boolean markPrevSynced(Ranges newPrevSyncComplete)
         {
+            newPrevSyncComplete = newPrevSyncComplete.with(addedRanges).subtract(removedRanges);
             if (prevSyncComplete.containsAll(newPrevSyncComplete))
                 return false;
             Invariants.checkState(newPrevSyncComplete.containsAll(prevSyncComplete));
             prevSyncComplete = newPrevSyncComplete;
-            syncComplete = curSyncComplete.slice(newPrevSyncComplete, Minimal).with(newRanges);
+            syncComplete = curSyncComplete.slice(newPrevSyncComplete, Minimal).with(addedRanges);
             return true;
         }
 
@@ -481,7 +484,7 @@ public class TopologyManager
         {
             EpochState epochState = snapshot.epochs[i++];
             topologies.add(epochState.global.forSelection(select));
-            remaining = remaining.subtract(epochState.newRanges);
+            remaining = remaining.subtract(epochState.addedRanges);
         }
 
         if (i == snapshot.epochs.length)
@@ -517,7 +520,7 @@ public class TopologyManager
         {
             EpochState epochState = snapshot.get(minEpoch + i);
             topologies.add(epochState.global.forSelection(select));
-            select = select.subtract(epochState.newRanges);
+            select = select.subtract(epochState.addedRanges);
         }
 
         for (int i = count - 1 ; i >= 0 ; --i)

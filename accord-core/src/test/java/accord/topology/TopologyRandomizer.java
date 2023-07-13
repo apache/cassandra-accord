@@ -383,6 +383,9 @@ public class TopologyRandomizer
             }
         }
 
+        if (newShards == oldShards)
+            return null;
+
         Topology nextTopology = new Topology(current.epoch + 1, newShards);
 
         Map<Node.Id, Ranges> nextAdditions = getAdditions(current, nextTopology);
@@ -414,7 +417,7 @@ public class TopologyRandomizer
             Shard iv = in[i];
             Shard ov = out[o];
             Invariants.checkState(iv.range.compareIntersecting(ov.range) == 0);
-            if (ov.nodes.stream().filter(id -> topologyUpdates.isPending(ov.range, id)).noneMatch(iv::contains))
+            if (ov.nodes.stream().filter(iv::contains).allMatch(id -> topologyUpdates.isPending(ov.range, id)))
                 return false;
             int c = iv.range.end().compareTo(ov.range.end());
             if (c <= 0) ++i;
