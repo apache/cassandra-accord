@@ -55,6 +55,11 @@ public class TxnId extends Timestamp
         super(timestamp, flags(rw, domain));
     }
 
+    public TxnId(TxnId copy)
+    {
+        super(copy.msb, copy.lsb, copy.node);
+    }
+
     public TxnId(long epoch, long hlc, Kind rw, Domain domain, Id node)
     {
         this(epoch, hlc, flags(rw, domain), node);
@@ -93,6 +98,11 @@ public class TxnId extends Timestamp
     public TxnId as(Kind kind)
     {
         return new TxnId(epoch(), hlc(), kind, domain(), node);
+    }
+
+    public TxnId withStaleEpoch(long epoch)
+    {
+        return new TxnId(epoch, hlc(), flags(), node);
     }
 
     @Override
@@ -139,5 +149,10 @@ public class TxnId extends Timestamp
     public static TxnId maxForEpoch(long epoch)
     {
         return new TxnId(epochMsb(epoch) | 0x7fff, Long.MAX_VALUE, Id.MAX);
+    }
+
+    public static TxnId minForEpoch(long epoch)
+    {
+        return new TxnId(epochMsb(epoch), 0, Id.NONE);
     }
 }

@@ -30,7 +30,6 @@ import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
 import accord.local.Status;
 import accord.primitives.EpochSupplier;
 import accord.primitives.Participants;
@@ -39,6 +38,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
+import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
 import static accord.local.Status.Committed;
 import static accord.messages.ReadData.ReadNack.NotCommitted;
 import static accord.messages.ReadData.ReadNack.Redundant;
@@ -149,7 +149,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
     @Override
     public synchronized ReadNack apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, readScope);
+        SafeCommand safeCommand = safeStore.get(txnId, this, readScope);
         return apply(safeStore, safeCommand);
     }
 
@@ -175,16 +175,9 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
                 ++waitingOnCount;
                 safeCommand.addListener(this);
 
-                if (status == Committed)
-                {
-                    return null;
-                }
-                else
-                {
-                    safeStore.progressLog().waiting(safeCommand, SaveStatus.LocalExecution.ReadyToExclude, null, readScope);
-                    return NotCommitted;
-                }
-
+                safeStore.progressLog().waiting(safeCommand, WaitingToExecute, null, readScope);
+                if (status == Committed) return null;
+                else return NotCommitted;
 
             case PreApplied:
             case Applied:
@@ -259,7 +252,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
 
     private void removeListener(SafeCommandStore safeStore, TxnId txnId)
     {
-        safeStore.get(txnId, readScope).removeListener(this);
+        safeStore.get(txnId, this, readScope).removeListener(this);
     }
 
     @Override

@@ -60,7 +60,7 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
     @Override
     public InvalidateReply apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, someUnseekables);
+        SafeCommand safeCommand = safeStore.get(txnId, txnId, someUnseekables);
         boolean preaccepted = Commands.preacceptInvalidate(safeCommand, ballot);
         Command command = safeCommand.current();
         boolean acceptedFastPath = command.executeAt() != null && command.executeAt().equals(command.txnId());

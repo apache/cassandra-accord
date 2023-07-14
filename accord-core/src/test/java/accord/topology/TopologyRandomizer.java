@@ -300,7 +300,7 @@ public class TopologyRandomizer
         List<Node.Id> nodes = new ArrayList<>(current.nodes());
         Node.Id nodeId = nodes.get(random.nextInt(nodes.size()));
         Node node = nodeLookup.apply(nodeId);
-        Ranges ranges = selectRanges(current.forNode(nodeId).ranges);
+        Ranges ranges = selectRanges(node.topology().currentLocal().ranges);
         CoordinateSyncPoint.exclusive(node, ranges)
                            .addCallback((success, fail) -> {
                             if (success != null)

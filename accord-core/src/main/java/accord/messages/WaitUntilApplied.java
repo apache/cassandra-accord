@@ -135,7 +135,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
     @Override
     public synchronized ReadNack apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, readScope);
+        SafeCommand safeCommand = safeStore.get(txnId, this, readScope);
         return apply(safeStore, safeCommand);
     }
 
@@ -225,7 +225,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
 
     private void removeListener(SafeCommandStore safeStore, TxnId txnId)
     {
-        safeStore.get(txnId, readScope).removeListener(this);
+        safeStore.get(txnId, this, readScope).removeListener(this);
     }
 
     @Override

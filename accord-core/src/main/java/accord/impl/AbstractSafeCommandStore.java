@@ -86,7 +86,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
     }
 
     @Override
-    public CommandType ifLoadedAndInitialised(TxnId txnId)
+    protected CommandType getInternalIfLoadedAndInitialised(TxnId txnId)
     {
         CommandType command = getIfLoaded(txnId, this::getCommandInternal, this::addCommandInternal, this::getIfLoaded);
         if (command == null || command.isEmpty())
@@ -95,7 +95,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
     }
 
     @Override
-    public CommandType get(TxnId txnId)
+    public CommandType getInternal(TxnId txnId)
     {
         CommandType command = getCommandInternal(txnId);
         if (command == null)
@@ -185,7 +185,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
         for (PendingRegistration<T> pendingRegistration : pendingRegistrations)
         {
             TxnId txnId = pendingRegistration.txnId;
-            CommandType safeCommand = get(pendingRegistration.txnId);
+            CommandType safeCommand = getInternal(pendingRegistration.txnId);
             Command command = safeCommand.current();
             CommonAttributes attrs = updates.getOrDefault(txnId, command);
             attrs = completer.complete(pendingRegistration.value, pendingRegistration.slice, safeCommand, attrs);

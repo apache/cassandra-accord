@@ -119,8 +119,8 @@ class Bootstrap
 
         void start(SafeCommandStore safeStore0)
         {
-            globalSyncId = new TxnId(node.uniqueNowWithStaleEpoch(epoch), ExclusiveSyncPoint, Routable.Domain.Range);
-            localSyncId = globalSyncId.as(LocalOnly);
+            globalSyncId = node.nextTxnId(ExclusiveSyncPoint, Routable.Domain.Range);
+            localSyncId = globalSyncId.as(LocalOnly).withStaleEpoch(epoch);
 
             if (!node.topology().hasEpoch(globalSyncId.epoch()))
             {

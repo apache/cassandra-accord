@@ -41,6 +41,7 @@ public class CoordinateShardDurable extends SettableResult<Void> implements Call
 
     private CoordinateShardDurable(Node node, SyncPoint exclusiveSyncPoint)
     {
+        // TODO (required): this isn't correct, we need to potentially perform a second round if a dependency executes in a future epoch and we have lost ownership of that epoch
         Topologies topologies = node.topology().forEpoch(exclusiveSyncPoint.ranges, exclusiveSyncPoint.sourceEpoch());
         this.node = node;
         this.tracker = new AppliedTracker(topologies);
@@ -56,7 +57,6 @@ public class CoordinateShardDurable extends SettableResult<Void> implements Call
 
     private void start()
     {
-        // TODO (expected): we don't need to WaitUntilApplied - it's good enough to WaitUntilPreApplied
         node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), exclusiveSyncPoint.syncId, exclusiveSyncPoint.ranges, exclusiveSyncPoint.syncId), this);
     }
 
@@ -89,6 +89,7 @@ public class CoordinateShardDurable extends SettableResult<Void> implements Call
         }
         else
         {
+            // TODO (required): we also need to handle ranges not being safe to read
             if (tracker.recordSuccess(from) == RequestStatus.Success)
             {
                 node.configService().reportEpochRedundant(exclusiveSyncPoint.ranges, exclusiveSyncPoint.syncId.epoch());

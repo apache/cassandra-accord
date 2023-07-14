@@ -211,8 +211,11 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         }
         else
         {
+            CommandStore executingOn = CommandStore.maybeCurrent();
             configService.fetchTopologyForEpoch(epoch);
-            topology.awaitEpoch(epoch).addCallback(runnable).begin(agent());
+            AsyncChain<Void> chain = topology.awaitEpoch(epoch);
+            chain = (executingOn == null ? chain.addCallback(runnable) : chain.addCallback(runnable, executingOn));
+            chain.begin(agent());
         }
     }
 
@@ -250,17 +253,6 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
             if (now.compareAndSet(cur, next))
                 return next;
-        }
-    }
-
-    public Timestamp uniqueNowWithStaleEpoch(long epoch)
-    {
-        while (true)
-        {
-            Timestamp cur = now.get();
-            Timestamp next = cur.withNextHlc(nowSupplier.getAsLong());
-            if (now.compareAndSet(cur, next))
-                return next.withStaleEpoch(epoch);
         }
     }
 

@@ -150,7 +150,8 @@ public class Commit extends TxnRequest<ReadNack>
     public synchronized ReadNack apply(SafeCommandStore safeStore)
     {
         Route<?> route = this.route != null ? this.route : scope;
-        SafeCommand safeCommand = safeStore.get(txnId, route);
+        SafeCommand safeCommand = safeStore.get(txnId, executeAt, route);
+
         switch (Commands.commit(safeStore, safeCommand, txnId, route != null ? route : scope, progressKey, partialTxn, executeAt, partialDeps))
         {
             default:
@@ -253,6 +254,7 @@ public class Commit extends TxnRequest<ReadNack>
             int latestRelevantIndex = latestRelevantEpochIndex(to, topologies, scope);
             this.scope = computeScope(to, topologies, (Unseekables)scope, latestRelevantIndex, Unseekables::slice, Unseekables::with);
             this.waitForEpoch = computeWaitForEpoch(to, topologies, latestRelevantIndex);
+            // TODO (expected): make sure we're picking the right upper limit - it can mean future owners that have never witnessed the command are invalidated
             this.invalidateUntilEpoch = topologies.currentEpoch();
         }
 
@@ -282,7 +284,7 @@ public class Commit extends TxnRequest<ReadNack>
             node.forEachLocal(this, scope, txnId.epoch(), invalidateUntilEpoch, safeStore -> {
                 // it's fine for this to operate on a non-participating home key, since invalidation is a terminal state,
                 // so it doesn't matter if we resurrect a redundant entry
-                Commands.commitInvalidate(safeStore, safeStore.get(txnId, scope));
+                Commands.commitInvalidate(safeStore, safeStore.get(txnId, txnId, scope), scope);
             }).begin(node.agent());
         }
 

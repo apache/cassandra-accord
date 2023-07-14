@@ -47,7 +47,6 @@ import accord.impl.CommandTimeseries.CommandLoader;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores.RangesForEpoch;
-import accord.local.CommandStores.RangesForEpochHolder;
 import accord.local.CommonAttributes;
 import accord.local.Listeners;
 import accord.local.NodeTimeService;
@@ -76,6 +75,7 @@ import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static accord.local.Command.NotDefined.uninitialised;
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.Status.Committed;
@@ -96,9 +96,9 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     private InMemorySafeStore current;
 
-    public InMemoryCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
+    public InMemoryCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder)
     {
-        super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
+        super(id, time, agent, store, progressLogFactory, epochUpdateHolder);
     }
 
     @Override
@@ -322,7 +322,7 @@ public abstract class InMemoryCommandStore extends CommandStore
     {
         if (current != null)
             throw new IllegalStateException("Another operation is in progress or it's store was not cleared");
-        current = createSafeStore(context, rangesForEpochHolder.get());
+        current = createSafeStore(context, updateRangesForEpoch());
         return current;
     }
 
@@ -408,7 +408,17 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
     }
 
-    class CFKLoader implements CommandLoader<TxnId>
+    static class CFKEntry extends TxnId
+    {
+        final boolean uninitialised;
+        public CFKEntry(TxnId copy, boolean uninitialised)
+        {
+            super(copy);
+            this.uninitialised = uninitialised;
+        }
+    }
+
+    class CFKLoader implements CommandLoader<CFKEntry>
     {
         final RoutableKey key;
         CFKLoader(RoutableKey key)
@@ -416,43 +426,45 @@ public abstract class InMemoryCommandStore extends CommandStore
             this.key = key;
         }
 
-        private Command loadForCFK(TxnId txnId)
+        private Command loadForCFK(CFKEntry entry)
         {
-            GlobalCommand globalCommand = ifPresent(txnId);
+            GlobalCommand globalCommand = ifPresent(entry);
             if (globalCommand != null)
                 return globalCommand.value();
-            throw new IllegalStateException("Could not find command for CFK for " + txnId);
+            if (entry.uninitialised)
+                return uninitialised(entry);
+            throw new IllegalStateException("Could not find command for CFK for " + entry);
         }
 
         @Override
-        public TxnId txnId(TxnId txnId)
+        public TxnId txnId(CFKEntry txnId)
         {
             return loadForCFK(txnId).txnId();
         }
 
         @Override
-        public Timestamp executeAt(TxnId txnId)
+        public Timestamp executeAt(CFKEntry txnId)
         {
             return loadForCFK(txnId).executeAt();
         }
 
         @Override
-        public SaveStatus saveStatus(TxnId txnId)
+        public SaveStatus saveStatus(CFKEntry txnId)
         {
             return loadForCFK(txnId).saveStatus();
         }
 
         @Override
-        public List<TxnId> depsIds(TxnId data)
+        public List<TxnId> depsIds(CFKEntry data)
         {
             PartialDeps deps = loadForCFK(data).partialDeps();
             return deps != null ? deps.txnIds() : Collections.emptyList();
         }
 
         @Override
-        public TxnId saveForCFK(Command command)
+        public CFKEntry saveForCFK(Command command)
         {
-            return command.txnId();
+            return new CFKEntry(command.txnId(), command.saveStatus() == SaveStatus.Uninitialised);
         }
     }
 
@@ -648,15 +660,15 @@ public abstract class InMemoryCommandStore extends CommandStore
         @Override
         public void registerHistoricalTransactions(Deps deps)
         {
-            RangesForEpochHolder rangesForEpochHolder = commandStore.rangesForEpochHolder();
-            Ranges allRanges = rangesForEpochHolder.get().all();
+            RangesForEpoch rangesForEpoch = commandStore.rangesForEpoch;
+            Ranges allRanges = rangesForEpoch.all();
             deps.keyDeps.keys().forEach(allRanges, key -> {
                 SafeCommandsForKey cfk = commandsForKey(key);
                 deps.keyDeps.forEach(key, txnId -> {
                     // TODO (desired, efficiency): this can be made more efficient by batching by epoch
-                    if (rangesForEpochHolder.get().coordinates(txnId).contains(key))
+                    if (rangesForEpoch.coordinates(txnId).contains(key))
                         return; // already coordinates, no need to replicate
-                    if (!rangesForEpochHolder.get().allBefore(txnId.epoch()).contains(key))
+                    if (!rangesForEpoch.allBefore(txnId.epoch()).contains(key))
                         return;
 
                     cfk.registerNotWitnessed(txnId);
@@ -671,9 +683,9 @@ public abstract class InMemoryCommandStore extends CommandStore
                     return;
 
                 Ranges ranges = deps.rangeDeps.ranges(txnId);
-                if (rangesForEpochHolder.get().coordinates(txnId).intersects(ranges))
+                if (rangesForEpoch.coordinates(txnId).intersects(ranges))
                     return; // already coordinates, no need to replicate
-                if (!rangesForEpochHolder.get().allBefore(txnId.epoch()).intersects(ranges))
+                if (!rangesForEpoch.allBefore(txnId.epoch()).intersects(ranges))
                     return;
 
                 historicalRangeCommands.merge(txnId, ranges.slice(allRanges), Ranges::with);
@@ -860,9 +872,9 @@ public abstract class InMemoryCommandStore extends CommandStore
         Runnable active = null;
         final Queue<Runnable> queue = new ConcurrentLinkedQueue<>();
 
-        public Synchronized(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
+        public Synchronized(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder)
         {
-            super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
+            super(id, time, agent, store, progressLogFactory, epochUpdateHolder);
         }
 
         private synchronized void maybeRun()
@@ -952,9 +964,9 @@ public abstract class InMemoryCommandStore extends CommandStore
         private Thread thread; // when run in the executor this will be non-null, null implies not running in this store
         private final ExecutorService executor;
 
-        public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
+        public SingleThread(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder)
         {
-            super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
+            super(id, time, agent, store, progressLogFactory, epochUpdateHolder);
             this.executor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r);
                 thread.setName(CommandStore.class.getSimpleName() + '[' + time.id() + ']');
@@ -1017,17 +1029,17 @@ public abstract class InMemoryCommandStore extends CommandStore
             }
 
             @Override
-            public InMemorySafeCommand ifLoadedAndInitialised(TxnId txnId)
+            public InMemorySafeCommand getInternalIfLoadedAndInitialised(TxnId txnId)
             {
                 assertThread();
-                return super.ifLoadedAndInitialised(txnId);
+                return super.getInternalIfLoadedAndInitialised(txnId);
             }
 
             @Override
-            public InMemorySafeCommand get(TxnId txnId)
+            public InMemorySafeCommand getInternal(TxnId txnId)
             {
                 assertThread();
-                return super.get(txnId);
+                return super.getInternal(txnId);
             }
 
             @Override
@@ -1045,9 +1057,9 @@ public abstract class InMemoryCommandStore extends CommandStore
             }
         }
 
-        public Debug(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder)
+        public Debug(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder)
         {
-            super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
+            super(id, time, agent, store, progressLogFactory, epochUpdateHolder);
         }
 
         @Override

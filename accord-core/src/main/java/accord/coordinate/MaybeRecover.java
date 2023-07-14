@@ -30,7 +30,7 @@ import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
 
 import static accord.coordinate.Infer.EraseNonParticipatingAndCallback.eraseNonParticipatingAndCallback;
-import static accord.coordinate.Infer.InvalidateAndCallback.invalidateAndCallback;
+import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAndCallback;
 import static accord.utils.Functions.reduceNonNull;
 
 /**
@@ -112,12 +112,12 @@ public class MaybeRecover extends CheckShards<Route<?>>
                     break;
 
                 case Invalidated:
-                    invalidateAndCallback(node, txnId, someRoute, merged.toProgressToken(), callback);
+                    locallyInvalidateAndCallback(node, txnId, someRoute, merged.toProgressToken(), callback);
 
                 case Erased:
                     WithQuorum withQuorum = success.withQuorum;
                     if (!merged.inferInvalidated(withQuorum)) eraseNonParticipatingAndCallback(node, txnId, someRoute, merged.toProgressToken(), callback);
-                    else invalidateAndCallback(node, txnId, someRoute, merged.toProgressToken(), callback);
+                    else locallyInvalidateAndCallback(node, txnId, someRoute, merged.toProgressToken(), callback);
             }
         }
     }

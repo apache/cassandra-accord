@@ -42,6 +42,7 @@ import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
 import static accord.coordinate.tracking.RequestStatus.Success;
+import static accord.primitives.AbstractRanges.UnionMode.MERGE_ADJACENT;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.nonNull;
@@ -84,20 +85,20 @@ public class TopologyManager
                 this.syncTracker = new QuorumTracker(new Single(sorter, global()));
             else
                 this.syncTracker = null;
-            this.addedRanges = global.ranges.subtract(prevRanges);
-            this.removedRanges = prevRanges.subtract(global.ranges);
-            this.prevSyncComplete = addedRanges.with(prevSyncComplete.subtract(removedRanges));
+            this.addedRanges = global.ranges.subtract(prevRanges).mergeTouching();
+            this.removedRanges = prevRanges.mergeTouching().subtract(global.ranges);
+            this.prevSyncComplete = addedRanges.union(MERGE_ADJACENT, prevSyncComplete.subtract(removedRanges));
             this.curSyncComplete = this.syncComplete = addedRanges;
         }
 
         boolean markPrevSynced(Ranges newPrevSyncComplete)
         {
-            newPrevSyncComplete = newPrevSyncComplete.with(addedRanges).subtract(removedRanges);
+            newPrevSyncComplete = newPrevSyncComplete.union(MERGE_ADJACENT, addedRanges).subtract(removedRanges);
             if (prevSyncComplete.containsAll(newPrevSyncComplete))
                 return false;
             Invariants.checkState(newPrevSyncComplete.containsAll(prevSyncComplete));
             prevSyncComplete = newPrevSyncComplete;
-            syncComplete = curSyncComplete.slice(newPrevSyncComplete, Minimal).with(addedRanges);
+            syncComplete = curSyncComplete.slice(newPrevSyncComplete, Minimal).union(MERGE_ADJACENT, addedRanges);
             return true;
         }
 
@@ -108,7 +109,7 @@ public class TopologyManager
 
             if (syncTracker.recordSuccess(node) == Success)
             {
-                curSyncComplete = global.ranges;
+                curSyncComplete = global.ranges.mergeTouching();
                 syncComplete = prevSyncComplete;
                 return true;
             }
@@ -120,7 +121,7 @@ public class TopologyManager
                 {
                     if (syncTracker.get(i).hasReachedQuorum() && !curShardSyncComplete.get(i))
                     {
-                        curSyncComplete = curSyncComplete.with(Ranges.of(global.shards[i].range));
+                        curSyncComplete = curSyncComplete.union(MERGE_ADJACENT, Ranges.of(global.shards[i].range));
                         syncComplete = curSyncComplete.slice(prevSyncComplete, Minimal);
                         curShardSyncComplete.set(i);
                         updated = true;
@@ -134,7 +135,7 @@ public class TopologyManager
         {
             if (closed.containsAll(ranges))
                 return false;
-            closed = closed.with(ranges);
+            closed = closed.union(MERGE_ADJACENT, ranges);
             return true;
         }
 
@@ -142,8 +143,8 @@ public class TopologyManager
         {
             if (complete.containsAll(ranges))
                 return false;
-            closed = closed.with(ranges);
-            complete = complete.with(ranges);
+            closed = closed.union(MERGE_ADJACENT, ranges);
+            complete = complete.union(MERGE_ADJACENT, ranges);
             return true;
         }
 
@@ -247,6 +248,11 @@ public class TopologyManager
             return epochs.length > 0 ? epochs[0].global() : Topology.EMPTY;
         }
 
+        public Topology currentLocal()
+        {
+            return epochs.length > 0 ? epochs[0].local() : Topology.EMPTY;
+        }
+
         /**
          * Mark sync complete for the given node/epoch, and if this epoch
          * is now synced, update the prevSynced flag on superseding epochs
@@ -279,7 +285,7 @@ public class TopologyManager
             if (epoch > currentEpoch)
             {
                 Notifications notifications = pending(epoch);
-                notifications.closed = notifications.closed.with(ranges);
+                notifications.closed = notifications.closed.union(MERGE_ADJACENT, ranges);
                 i = 0;
             }
             else
@@ -300,7 +306,7 @@ public class TopologyManager
             if (epoch > currentEpoch)
             {
                 Notifications notifications = pending(epoch);
-                notifications.complete = notifications.complete.with(ranges);
+                notifications.complete = notifications.complete.union(MERGE_ADJACENT, ranges);
                 i = 0; // record these ranges as complete for all earlier epochs as well
             }
             else
@@ -434,6 +440,11 @@ public class TopologyManager
         return epochs.current();
     }
 
+    public Topology currentLocal()
+    {
+        return epochs.currentLocal();
+    }
+
     public long epoch()
     {
         return current().epoch;
@@ -499,6 +510,7 @@ public class TopologyManager
         {
             Ranges sufficient = isSufficientFor.apply(prev);
             remaining = remaining.subtract(sufficient);
+            remaining = remaining.subtract(prev.addedRanges);
             if (remaining.isEmpty())
                 return topologies;
 

@@ -49,7 +49,7 @@ public class SimpleBitSetTest
 
         void check(RandomSource random)
         {
-            assertEquals(canon.cardinality(), test.setBitCount());
+            assertEquals(canon.cardinality(), test.getSetBitCount());
             assertEquals(canon.nextSetBit(0), test.firstSetBit());
             assertEquals(normaliseNotFound(canon.nextSetBit(0)), test.firstSetBit(NOT_FOUND));
             assertEquals(canon.previousSetBit(size), test.lastSetBit());
@@ -143,7 +143,7 @@ public class SimpleBitSetTest
                             canon.clear(i);
                         }
                     }
-                    assertEquals(canon.cardinality(), test.setBitCount());
+                    assertEquals(canon.cardinality(), test.getSetBitCount());
                 }
             }
             return new Check(test, canon, size);

@@ -147,7 +147,7 @@ public class SimpleBitSet
         return bits.length * 64;
     }
 
-    public final int setBitCount()
+    public final int getSetBitCount()
     {
         return count;
     }

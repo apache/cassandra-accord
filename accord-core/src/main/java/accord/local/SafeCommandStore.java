@@ -27,6 +27,7 @@ import accord.api.ProgressLog;
 import accord.api.RoutingKey;
 import accord.impl.ErasedSafeCommand;
 import accord.primitives.Deps;
+import accord.primitives.EpochSupplier;
 import accord.primitives.Ranges;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
@@ -37,8 +38,8 @@ import accord.primitives.Unseekables;
 
 import javax.annotation.Nullable;
 
-import static accord.local.Commands.Truncate.NO;
-import static accord.local.SaveStatus.Uninitialised;
+import static accord.local.Commands.Cleanup.NO;
+import static accord.local.RedundantStatus.PRE_BOOTSTRAP;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.primitives.Txn.Kind.Read;
 import static accord.primitives.Txn.Kind.Write;
@@ -127,21 +128,21 @@ public abstract class SafeCommandStore
     {
         SafeCommand safeCommand = get(txnId);
         Command command = safeCommand.current();
-        if (command.saveStatus() == Uninitialised)
+        if (command.saveStatus().isUninitialised())
             return null;
-        return maybeTruncate(safeCommand, command);
+        return maybeTruncate(safeCommand, command, txnId, null);
     }
 
     public SafeCommand get(TxnId txnId, RoutingKey unseekable)
     {
         SafeCommand safeCommand = get(txnId);
         Command command = safeCommand.current();
-        if (command.saveStatus() == Uninitialised)
+        if (command.saveStatus().isUninitialised())
         {
             if (commandStore().durableBefore().isUniversal(txnId, unseekable))
                 return new ErasedSafeCommand(txnId);
         }
-        return maybeTruncate(safeCommand, command);
+        return maybeTruncate(safeCommand, command, txnId, null);
     }
 
     // decidedExecuteAt == null if not yet PreCommitted
@@ -164,21 +165,21 @@ public abstract class SafeCommandStore
      *
      * TODO (desired): Introduce static types that permit us to propagate this information safely.
      */
-    public SafeCommand get(TxnId txnId, Unseekables<?> unseekables)
+    public SafeCommand get(TxnId txnId, EpochSupplier toEpoch, Unseekables<?> unseekables)
     {
         SafeCommand safeCommand = get(txnId);
         Command command = safeCommand.current();
-        if (command.saveStatus() == Uninitialised)
+        if (command.saveStatus().isUninitialised())
         {
             if (commandStore().durableBefore().isUniversal(txnId, unseekables))
                 return new ErasedSafeCommand(txnId);
         }
-        return maybeTruncate(safeCommand, command);
+        return maybeTruncate(safeCommand, command, toEpoch, unseekables);
     }
 
-    protected SafeCommand maybeTruncate(SafeCommand safeCommand, Command command)
+    protected SafeCommand maybeTruncate(SafeCommand safeCommand, Command command, @Nullable EpochSupplier toEpoch, @Nullable Unseekables<?> maybeFullRoute)
     {
-        Commands.maybeTruncate(this, safeCommand, command);
+        Commands.cleanup(this, safeCommand, command, toEpoch, maybeFullRoute);
         return safeCommand;
     }
 
@@ -188,9 +189,22 @@ public abstract class SafeCommandStore
      *
      * This permits efficient operation when a transaction involved in processing another transaction happens to be in memory.
      */
-    public abstract SafeCommand ifLoadedAndInitialised(TxnId txnId);
+    public final SafeCommand ifLoadedAndInitialised(TxnId txnId)
+    {
+        SafeCommand safeCommand = getInternalIfLoadedAndInitialised(txnId);
+        if (safeCommand == null)
+            return null;
+        return maybeTruncate(safeCommand, safeCommand.current(), txnId, null);
+    }
 
-    protected abstract SafeCommand get(TxnId txnId);
+    protected SafeCommand get(TxnId txnId)
+    {
+        SafeCommand safeCommand = getInternal(txnId);
+        return maybeTruncate(safeCommand, safeCommand.current(), null, null);
+    }
+
+    protected abstract SafeCommand getInternal(TxnId txnId);
+    protected abstract SafeCommand getInternalIfLoadedAndInitialised(TxnId txnId);
 
     public abstract boolean canExecuteWith(PreLoadContext context);
 
@@ -223,7 +237,14 @@ public abstract class SafeCommandStore
 
     public boolean isTruncated(Command command)
     {
-        return Commands.shouldTruncate(this, command) != NO;
+        return Commands.shouldCleanup(this, command, null, null) != NO;
+    }
+
+    // if we have to re-bootstrap (due to failed bootstrap or catching up on a range) then we may
+    // have dangling redundant commands; these can safely be executed locally because we are a timestamp store
+    final boolean isPreBootstrap(Command command, Unseekables<?> forKeys)
+    {
+        return commandStore().redundantBefore().min(command.txnId(), command.executeAtOrTxnId(), forKeys) == PRE_BOOTSTRAP;
     }
 
     public void notifyListeners(SafeCommand safeCommand)

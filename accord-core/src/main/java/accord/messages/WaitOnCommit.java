@@ -76,7 +76,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
     @Override
     public Void apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, scope);
+        SafeCommand safeCommand = safeStore.get(txnId, txnId, scope);
         Command command = safeCommand.current();
         switch (command.status())
         {

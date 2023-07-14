@@ -223,7 +223,7 @@ public enum Status
         /**
          * The command may have an incomplete route when this is false
          */
-        public boolean hasCompleteRoute()
+        public boolean hasFullRoute()
         {
             return definition.isKnown() || outcome.isOrWasApply();
         }

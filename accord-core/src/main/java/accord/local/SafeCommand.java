@@ -28,8 +28,6 @@ import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
 
-import static accord.local.SaveStatus.Uninitialised;
-
 public abstract class SafeCommand
 {
     private final TxnId txnId;
@@ -128,9 +126,9 @@ public abstract class SafeCommand
         return update(Truncated.invalidated(current));
     }
 
-    public Command precommit(Timestamp executeAt)
+    public Command precommit(CommonAttributes attrs, Timestamp executeAt)
     {
-        return update(Command.precommit(current(), executeAt));
+        return update(Command.precommit(attrs, current(), executeAt));
     }
 
     public Command.Committed readyToExecute()
@@ -162,7 +160,7 @@ public abstract class SafeCommand
     public Command initialise()
     {
         Command current = current();
-        if (current.saveStatus() != Uninitialised)
+        if (!current.saveStatus().isUninitialised())
             return current;
         return update(Command.NotDefined.notDefined(current, current.promised()));
     }

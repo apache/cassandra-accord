@@ -81,10 +81,10 @@ public class Invalidate implements Callback<InvalidateReply>
         return invalidate(node, txnId, invalidateWith, false, callback);
     }
 
-    public static Invalidate invalidate(Node node, TxnId txnId, Unseekables<?> participants, boolean transitivelyInvokedByPriorInvalidation, BiConsumer<Outcome, Throwable> callback)
+    public static Invalidate invalidate(Node node, TxnId txnId, Unseekables<?> invalidateWith, boolean transitivelyInvokedByPriorInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
         Ballot ballot = new Ballot(node.uniqueNow());
-        Invalidate invalidate = new Invalidate(node, ballot, txnId, participants, transitivelyInvokedByPriorInvalidation, callback);
+        Invalidate invalidate = new Invalidate(node, ballot, txnId, invalidateWith, transitivelyInvokedByPriorInvalidation, callback);
         invalidate.start();
         return invalidate;
     }
@@ -187,7 +187,7 @@ public class Invalidate implements Callback<InvalidateReply>
                     // However, if the state is not guaranteed to be recoverable (i.e. PreAccept/NotWitnessed),
                     // we do not relay this information unless we can guarantee that any shard recovery may contact
                     // has been prevented from reaching a _later_ fast-path decision by our promises.
-                    // Which means checking we contacted every shard, since we only reach this point if we have promises
+                    // Which means checking we contacted every shard, since we only reach that point if we have promises
                     // from every shard we contacted.
 
                     // Note that there's lots of scope for variations in behaviour here, but lots of care is needed.
@@ -214,8 +214,8 @@ public class Invalidate implements Callback<InvalidateReply>
         // Probably simplest to do so, but perhaps better for user if we don't.
         Ranges ranges = Ranges.of(tracker.promisedShard().range);
         // we look up by TxnId at the target node, so it's fine to pick a RoutingKey even if it's a range transaction
-        RoutingKey participantsKey = invalidateWith.slice(ranges).get(0).someIntersectingRoutingKey(ranges);
-        proposeInvalidate(node, ballot, txnId, participantsKey, (success, fail) -> {
+        RoutingKey someKey = invalidateWith.slice(ranges).get(0).someIntersectingRoutingKey(ranges);
+        proposeInvalidate(node, ballot, txnId, someKey, (success, fail) -> {
             /*
               We're now inside our *exactly once* callback we registered with proposeInvalidate, and we need to
               make sure we honour our own exactly once semantics with {@code callback}.
@@ -259,8 +259,8 @@ public class Invalidate implements Callback<InvalidateReply>
         // TODO (desired): merge with FetchData.InvalidateOnDone
         // TODO (desired): when sending to network, register a callback for when local application of commitInvalidate message ahs been performed, so no need to special-case
         // TODO (required, consider): pick a reasonable upper bound, so we don't invalidate into an epoch/commandStore that no longer cares about this command
-        node.forEachLocalSince(contextFor(txnId), commitTo, txnId, safeStore -> {
-            Commands.commitInvalidate(safeStore, safeStore.get(txnId, commitTo));
+        node.forEachLocal(contextFor(txnId), commitTo, txnId.epoch(), txnId.epoch(), safeStore -> {
+            Commands.commitInvalidate(safeStore, safeStore.get(txnId, txnId, commitTo), commitTo);
         }).begin((s, f) -> {
             callback.accept(INVALIDATED, null);
             if (f != null) // TODO (required): consider exception handling more carefully: should we catch these prior to passing to callbacks?

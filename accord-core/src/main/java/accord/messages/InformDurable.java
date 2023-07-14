@@ -87,7 +87,7 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     @Override
     public Reply apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, scope);
+        SafeCommand safeCommand = safeStore.get(txnId, txnId, scope);
         if (safeCommand.current().is(Status.Truncated))
             return Ok;
 

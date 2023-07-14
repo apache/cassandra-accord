@@ -22,6 +22,7 @@ import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.coordinate.Infer;
 import accord.local.Command;
+import accord.local.Commands;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.PreLoadContext;
@@ -133,15 +134,19 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     @Override
     public CheckStatusReply apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, query);
+        SafeCommand safeCommand = safeStore.get(txnId, this, query);
         Command command = safeCommand.current();
+        // TODO (expected): do we want to force ourselves to serialise these?
+        if (!command.has(Known.DefinitionOnly) && Route.isRoute(query) && safeStore.ranges().allAt(txnId.epoch()).contains(Route.castToRoute(query).homeKey()))
+            Commands.informHome(safeStore, safeCommand, Route.castToRoute(query));
 
         switch (includeInfo)
         {
             default: throw new IllegalStateException();
             case No:
             case Route:
-                return new CheckStatusOk(invalidIfNotAtLeast(safeStore), command.saveStatus(), command.saveStatus(), command.promised(), command.accepted(), command.executeAt(),
+                return new CheckStatusOk(invalidIfNotAtLeast(safeStore), command.saveStatus(), command.saveStatus(),
+                                         command.promised(), command.accepted(), command.executeAt(),
                                          node.isCoordinating(txnId, command.promised()),
                                          command.durability(), includeInfo == IncludeInfo.No ? null : command.route(), command.homeKey());
             case All:

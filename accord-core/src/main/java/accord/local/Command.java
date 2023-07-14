@@ -31,6 +31,7 @@ import accord.primitives.Deps;
 import accord.primitives.Keys;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
+import accord.primitives.Ranges;
 import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -317,12 +318,20 @@ public abstract class Command implements CommonAttributes
      *
      * If hasBeen(Committed) this must contain the keys for both txnId.epoch and executeAt.epoch
      *
-     * TODO (expected): audit uses; do not assume null means it is a complete route for the shard;
+     * TODO (required): audit uses; do not assume null means it is a complete route for the shard;
      *    preferably introduce two variations so callers can declare whether they need the full shard's route
      *    or any route will do
      */
     @Override
     public abstract Route<?> route();
+
+    /**
+     * The command may have an incomplete route when this is false
+     */
+    public boolean hasFullRoute()
+    {
+        return route() != null && route().kind().isFullRoute();
+    }
 
     /**
      * homeKey is a global value that defines the home shard - the one tasked with ensuring the transaction is finished.
@@ -823,6 +832,7 @@ public abstract class Command implements CommonAttributes
         {
             super(common, status, executeAt, promised, accepted);
             this.waitingOn = waitingOn;
+            Invariants.checkState(common.route().kind().isFullRoute());
             Invariants.checkState(waitingOn.deps.equals(common.partialDeps()));
         }
 
@@ -978,14 +988,6 @@ public abstract class Command implements CommonAttributes
         // note that transactions default to waitingOnCommit, so presence in the set does not mean the transaction is uncommitted
         public final ImmutableBitSet waitingOnCommit, waitingOnApply, appliedOrInvalidated;
 
-        public WaitingOn(Deps deps)
-        {
-            this.deps = deps;
-            this.waitingOnCommit = new ImmutableBitSet(deps.txnIdCount(), true);
-            this.waitingOnApply = new ImmutableBitSet(deps.txnIdCount(), false);
-            this.appliedOrInvalidated = new ImmutableBitSet(deps.txnIdCount(), false);
-        }
-
         public WaitingOn(Deps deps, ImmutableBitSet waitingOnCommit, ImmutableBitSet waitingOnApply, ImmutableBitSet appliedOrInvalidated)
         {
             this.deps = deps;
@@ -1135,11 +1137,15 @@ public abstract class Command implements CommonAttributes
                 this(committed.waitingOn);
             }
 
-            public Update(Unseekables<?> participants, Deps deps)
+            public Update(Ranges ranges, Unseekables<?> participants, Deps deps)
             {
                 this.deps = deps;
                 this.waitingOnCommit = new SimpleBitSet(deps.txnIdCount(), false);
-                this.waitingOnCommit.setRange(0, deps.keyDeps.txnIdCount());
+                deps.keyDeps.forEach(ranges, 0, deps.keyDeps.txnIdCount(), this, null, (u, v, i) -> {
+                    u.waitingOnCommit.set(i);
+                });
+                // we select range deps on actual participants rather than covered ranges,
+                // since we may otherwise adopt false dependencies for range txns
                 deps.rangeDeps.forEach(participants, this, (u, i) -> {
                     u.waitingOnCommit.set(u.deps.keyDeps.txnIdCount() + i);
                 });
@@ -1163,6 +1169,12 @@ public abstract class Command implements CommonAttributes
                 waitingOnCommit = ensureMutable(waitingOnCommit);
                 waitingOnCommit.unset(index);
                 return true;
+            }
+
+            public boolean isWaitingOnApply(TxnId txnId)
+            {
+                int index = deps.indexOf(txnId);
+                return waitingOnApply.get(index);
             }
 
             public boolean addWaitingOnApply(TxnId txnId)
@@ -1349,9 +1361,9 @@ public abstract class Command implements CommonAttributes
         return Command.Committed.committed(attrs, SaveStatus.get(Status.Committed, command.known()), executeAt, command.promised(), command.accepted(), waitingOn);
     }
 
-    static Command precommit(Command command, Timestamp executeAt)
+    static Command precommit(CommonAttributes attrs, Command command, Timestamp executeAt)
     {
-        return new Command.Accepted(command, SaveStatus.get(Status.PreCommitted, command.known()), executeAt, command.promised(), command.accepted());
+        return new Command.Accepted(attrs, SaveStatus.get(Status.PreCommitted, command.known()), executeAt, command.promised(), command.accepted());
     }
 
     static Command.Committed readyToExecute(Command.Committed command)

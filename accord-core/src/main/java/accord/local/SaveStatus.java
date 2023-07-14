@@ -171,6 +171,11 @@ public enum SaveStatus
         return this.status.compareTo(status) >= 0;
     }
 
+    public boolean isUninitialised()
+    {
+        return compareTo(Uninitialised) <= 0;
+    }
+
     public boolean isComplete()
     {
         switch (this)

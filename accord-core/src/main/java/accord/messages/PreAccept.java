@@ -37,7 +37,7 @@ import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestTimestamp.STARTED_BEFORE;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 
-public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
+public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements EpochSupplier
 {
     public static class SerializerSupport
     {
@@ -105,7 +105,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         if (minUnsyncedEpoch < txnId.epoch() && !safeStore.ranges().coordinates(txnId).intersects(scope))
             return applyIfDoesNotCoordinate(safeStore);
 
-        SafeCommand safeCommand = safeStore.get(txnId, route);
+        SafeCommand safeCommand = safeStore.get(txnId, this, route);
         switch (Commands.preaccept(safeStore, safeCommand, txnId, maxEpoch, partialTxn, route, progressKey))
         {
             default:
@@ -335,5 +335,11 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
                ", txn:" + partialTxn +
                ", scope:" + scope +
                '}';
+    }
+
+    @Override
+    public long epoch()
+    {
+        return maxEpoch;
     }
 }

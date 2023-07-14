@@ -349,18 +349,17 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     Unseekables<?> fetchKeys = maxContact(command);
 
                     BiConsumer<Known, Throwable> callback = (success, fail) -> {
-                        // TODO (expected): this should be invoked on this commandStore
+                        // TODO (expected): this should be invoked on this commandStore; also do not need to load txn unless in DEBUG mode
                         commandStore.execute(contextFor(txnId), safeStore0 -> {
                             if (progress() != Investigating)
                                 return;
 
                             setProgress(Expected);
-                            if (fail == null)
+                            if (fail == null && blockedUntil.isSatisfiedBy(success))
                             {
-                                if (success.canProposeInvalidation())
-                                    invalidate(node, txnId, maxParticipants);
-                                else
-                                    record(success);
+                                Command test = safeStore0.ifInitialised(txnId).current();
+                                Invariants.checkState(test.has(success));
+                                record(success);
                             }
                         });
                     };
@@ -389,6 +388,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 {
                     setProgress(Investigating);
                     // TODO (now): we should avoid invalidating with home key, as this simplifies erasing of invalidated transactions
+                    // TODO (required): exponential back-off or time-slicing
                     debugInvestigating = Invalidate.invalidate(node, txnId, participants, (success, fail) -> {
                         commandStore.execute(contextFor(txnId), safeStore -> {
                             if (progress() != Investigating)

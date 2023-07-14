@@ -41,7 +41,6 @@ import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
 
 import static accord.local.PreLoadContext.contextFor;
-import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.Durability.Majority;
 import static accord.local.Status.PreAccepted;
 import static accord.local.Status.PreApplied;
@@ -80,7 +79,7 @@ public class Infer
         public Void apply(SafeCommandStore safeStore)
         {
             // we're applying an invalidation, so the record will not be cleaned up until the whole range is truncated
-            return apply(safeStore, safeStore.get(txnId, someUnseekables));
+            return apply(safeStore, safeStore.get(txnId, txnId, someUnseekables));
         }
 
         abstract Void apply(SafeCommandStore safeStore, SafeCommand safeCommand);
@@ -105,7 +104,7 @@ public class Infer
             super(node, txnId, someUnseekables, param, callback);
         }
 
-        public static <T> void invalidateAndCallback(Node node, TxnId txnId, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
+        public static <T> void locallyInvalidateAndCallback(Node node, TxnId txnId, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
         {
             new InvalidateAndCallback<T>(node, txnId, someUnseekables, param, callback).start();
         }
@@ -117,7 +116,7 @@ public class Infer
             Command command = safeCommand.current();
             // TODO (required): consider the !command.hasBeen(PreCommitted) condition
             Invariants.checkState(!command.hasBeen(PreCommitted) || command.hasBeen(Status.Truncated));
-            Commands.commitInvalidate(safeStore, safeCommand);
+            Commands.commitInvalidate(safeStore, safeCommand, someUnseekables);
             return null;
         }
     }
@@ -191,7 +190,7 @@ public class Infer
         Invariants.checkArgument(fetchedWith != null || command.route() != null);
         TxnId txnId = command.txnId();
         if (command.is(Status.NotDefined))
-            return command.saveStatus() != Uninitialised;
+            return !command.saveStatus().isUninitialised();
 
         if (command.route() != null || fetchedWith.covers(safeStore.ranges().allAt(txnId.epoch())))
         {

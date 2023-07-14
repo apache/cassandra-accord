@@ -20,9 +20,11 @@ package accord.local;
 
 public enum RedundantStatus
 {
+    LIVE,
+
     NOT_OWNED,
 
-    LIVE,
+    PRE_BOOTSTRAP,
 
     REDUNDANT,
     ;

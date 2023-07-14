@@ -238,7 +238,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         @Override
         protected void readComplete(CommandStore commandStore, Data result, Ranges unavailable)
         {
-            Ranges slice = commandStore.rangesForEpochHolder().get().allAt(txnId).subtract(unavailable);
+            Ranges slice = commandStore.unsafeRangesForEpoch().allAt(txnId).subtract(unavailable);
             commandStore.maxAppliedFor((Ranges)readScope, slice).begin((newMaxApplied, failure) -> {
                 if (failure != null)
                 {

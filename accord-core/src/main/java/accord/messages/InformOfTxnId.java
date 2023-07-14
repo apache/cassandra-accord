@@ -22,7 +22,7 @@ import accord.local.*;
 import accord.primitives.Route;
 import accord.primitives.TxnId;
 
-import static accord.api.ProgressLog.ProgressShard.Home;
+import static accord.local.Status.PreAccepted;
 import static accord.messages.SimpleReply.Nack;
 import static accord.messages.SimpleReply.Ok;
 
@@ -46,13 +46,10 @@ public class InformOfTxnId extends AbstractEpochRequest<Reply> implements Reques
     @Override
     public Reply apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, someRoute);
+        SafeCommand safeCommand = safeStore.get(txnId, txnId, someRoute);
         Command current = safeCommand.current();
-        if (!current.hasBeen(Status.PreAccepted))
-        {
+        if (!current.hasBeen(PreAccepted))
             Commands.informHome(safeStore, safeCommand, someRoute);
-            safeStore.progressLog().unwitnessed(txnId, Home);
-        }
         return Ok;
     }
 

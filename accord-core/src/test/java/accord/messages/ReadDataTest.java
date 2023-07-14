@@ -180,7 +180,7 @@ class ReadDataTest
 
             store = stores.get(1);
             check(store.execute(PreLoadContext.contextFor(state.txnId, state.keys), safe -> {
-                SafeCommand command = safe.get(state.txnId, state.route);
+                SafeCommand command = safe.get(state.txnId, state.txnId, state.route);
                 command.commitInvalidated();
             }));
 
@@ -196,7 +196,7 @@ class ReadDataTest
         test(state -> {
             List<CommandStore> stores = stores(state);
             stores.forEach(store -> check(store.execute(PreLoadContext.contextFor(state.txnId, state.keys), safe -> {
-                SafeCommand command = safe.get(state.txnId, state.route);
+                SafeCommand command = safe.get(state.txnId, state.txnId, state.route);
                 command.commitInvalidated();
             })));
             ReplyContext replyContext = state.process();

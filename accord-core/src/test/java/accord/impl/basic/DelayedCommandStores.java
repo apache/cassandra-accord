@@ -57,9 +57,9 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         private final SimulatedDelayedExecutorService executor;
         private final Queue<Task<?>> pending = new LinkedList<>();
 
-        public DelayedCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder, SimulatedDelayedExecutorService executor)
+        public DelayedCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder, SimulatedDelayedExecutorService executor)
         {
-            super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
+            super(id, time, agent, store, progressLogFactory, epochUpdateHolder);
             this.executor = executor;
         }
 

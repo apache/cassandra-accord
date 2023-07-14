@@ -39,9 +39,8 @@ import accord.utils.MapReduceConsume;
 
 import javax.annotation.Nullable;
 
-import static accord.coordinate.Infer.InvalidateAndCallback.invalidateAndCallback;
+import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAndCallback;
 import static accord.local.PreLoadContext.contextFor;
-import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.NotDefined;
 import static accord.local.Status.Phase.Cleanup;
 import static accord.local.Status.PreApplied;
@@ -118,13 +117,21 @@ public class FetchData extends CheckShards<Route<?>>
         {
             default: throw new AssertionError("Unknown outcome: " + found.outcome);
             case Invalidated:
-                invalidateAndCallback(node, txnId, someUnseekables, found, callback);
+                locallyInvalidateAndCallback(node, txnId, someUnseekables, found, callback);
                 break;
 
+            case Unknown:
+                if (found.canProposeInvalidation())
+                {
+                    Invalidate.invalidate(node, txnId, someUnseekables, (outcome, throwable) -> {
+                        Known known = throwable != null ? null : outcome.asProgressToken().status == Status.Invalidated ? Known.Invalidated : Known.Nothing;
+                        callback.accept(known, throwable);
+                    });
+                    break;
+                }
             case Erased:
             case WasApply:
             case Apply:
-            case Unknown:
                 callback.accept(found, null);
         }
     }
@@ -225,7 +232,7 @@ public class FetchData extends CheckShards<Route<?>>
         }
     }
 
-    static class OnDone implements MapReduceConsume<SafeCommandStore, Void>
+    static class OnDone implements MapReduceConsume<SafeCommandStore, Void>, EpochSupplier
     {
         final Node node;
         final TxnId txnId;
@@ -262,9 +269,12 @@ public class FetchData extends CheckShards<Route<?>>
                 return;
             }
 
+            Invariants.checkState(sourceEpoch == txnId.epoch() || (full.executeAt != null && sourceEpoch == full.executeAt.epoch()));
             Route<?> maxRoute = Route.merge(route, full.route);
 
-            Ranges sliceRanges = node.topology().localRangesForEpoch(txnId.epoch());
+            // TODO (required): permit individual shards that are behind to catch up by themselves
+            long toEpoch = sourceEpoch;
+            Ranges sliceRanges = node.topology().localRangesForEpochs(txnId.epoch(), toEpoch);
             if (!maxRoute.covers(sliceRanges))
             {
                 callback.accept(Known.Nothing, null);
@@ -272,12 +282,11 @@ public class FetchData extends CheckShards<Route<?>>
             }
 
             RoutingKey progressKey = node.trySelectProgressKey(txnId, maxRoute);
-            long toEpoch = sourceEpoch;
 
             Ranges covering = maxRoute.sliceCovering(sliceRanges, Minimal);
             Participants<?> participatingKeys = maxRoute.participants().slice(covering, Minimal);
             Known achieved = full.sufficientFor(participatingKeys, withQuorum);
-            if (achieved.executeAt.hasDecidedExecuteAt() && full.executeAt.epoch() > txnId.epoch())
+            if (achieved.executeAt.hasDecidedExecuteAt() && full.executeAt.epoch() > toEpoch)
             {
                 Ranges acceptRanges;
                 if (!node.topology().hasEpoch(full.executeAt.epoch()) ||
@@ -334,7 +343,7 @@ public class FetchData extends CheckShards<Route<?>>
         @Override
         public Void apply(SafeCommandStore safeStore)
         {
-            SafeCommand safeCommand = safeStore.get(txnId, route);
+            SafeCommand safeCommand = safeStore.get(txnId, this, route);
             Command command = safeCommand.current();
             if (command.saveStatus().phase.compareTo(Phase.Persist) >= 0)
                 return null;
@@ -359,7 +368,7 @@ public class FetchData extends CheckShards<Route<?>>
                 case Truncated:
                     // if our peers have truncated this command, then either:
                     // 1) we have already applied it locally; 2) the command doesn't apply locally; 3) we are stale; or 4) the command is invalidated
-                    if (command.hasBeen(PreApplied) || command.saveStatus() == Uninitialised)
+                    if (command.hasBeen(PreApplied) || command.saveStatus().isUninitialised())
                         break;
 
                     if (Infer.safeToCleanup(safeStore, command, route, full.executeAt))
@@ -372,7 +381,7 @@ public class FetchData extends CheckShards<Route<?>>
                     // otherwise we are either stale, or the command didn't reach consensus
 
                 case Invalidated:
-                    Commands.commitInvalidate(safeStore, safeCommand);
+                    Commands.commitInvalidate(safeStore, safeCommand, route);
                     break;
 
                 case Applied:
@@ -390,7 +399,7 @@ public class FetchData extends CheckShards<Route<?>>
                     break;
 
                 case PreCommitted:
-                    Commands.precommit(safeStore, safeCommand, txnId, full.executeAt);
+                    Commands.precommit(safeStore, safeCommand, txnId, full.executeAt, route);
                     if (!achieved.definition.isKnown())
                         break;
 
@@ -427,6 +436,12 @@ public class FetchData extends CheckShards<Route<?>>
         public void accept(Void result, Throwable failure)
         {
             callback.accept(failure  == null ? achieved : null, failure);
+        }
+
+        @Override
+        public long epoch()
+        {
+            return toEpoch;
         }
     }
 

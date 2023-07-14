@@ -35,7 +35,9 @@ import accord.utils.ReducingRangeMap;
 
 import static accord.local.RedundantStatus.LIVE;
 import static accord.local.RedundantStatus.NOT_OWNED;
+import static accord.local.RedundantStatus.PRE_BOOTSTRAP;
 import static accord.local.RedundantStatus.REDUNDANT;
+import static accord.local.RedundantStatus.nonNullOrMin;
 
 public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
 {
@@ -51,14 +53,15 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
     {
         public final Range range;
         public final long startEpoch, endEpoch;
-        public final @Nonnull TxnId redundantBefore;
+        public final @Nonnull TxnId redundantBefore, bootstrappedAt;
 
-        public Entry(Range range, long startEpoch, long endEpoch, @Nonnull TxnId redundantBefore)
+        public Entry(Range range, long startEpoch, long endEpoch, @Nonnull TxnId redundantBefore, @Nonnull TxnId bootstrappedAt)
         {
             this.range = range;
             this.startEpoch = startEpoch;
             this.endEpoch = endEpoch;
             this.redundantBefore = redundantBefore;
+            this.bootstrappedAt = bootstrappedAt;
         }
 
         public static Entry reduce(Entry a, Entry b)
@@ -79,25 +82,47 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
             if (range.equals(b.range) && startEpoch == b.startEpoch && endEpoch == b.endEpoch && cr <= 0)
                 return b;
 
-            return new Entry(range, startEpoch, endEpoch, redundantBefore);
+            return new Entry(range, startEpoch, endEpoch, redundantBefore, Timestamp.max(a.bootstrappedAt, b.bootstrappedAt));
         }
 
         static RedundantStatus mergeMin(Entry entry, RedundantStatus prev, TxnId txnId, EpochSupplier executeAt)
         {
-            if (entry == null || entry.outOfBounds(txnId, executeAt))
+            if (prev == LIVE || entry == null || entry.outOfBounds(txnId, executeAt))
                 return prev;
-            if (entry.redundantBefore.compareTo(txnId) > 0)
-                return prev == LIVE ? LIVE : REDUNDANT;
+            return nonNullOrMin(prev, entry.get(txnId));
+        }
+
+        static RedundantStatus mergeLocallyRedundant(Entry entry, RedundantStatus prev, TxnId txnId, EpochSupplier executeAt)
+        {
+            if (prev == REDUNDANT || entry == null || entry.outOfBounds(txnId, executeAt))
+                return prev;
+            return nonNullOrMin(prev, entry.get(txnId));
+        }
+
+        static RedundantStatus mergeRedundant(Entry entry, RedundantStatus prev, TxnId txnId, EpochSupplier executeAt)
+        {
+            if (prev == REDUNDANT || entry == null || entry.outOfBounds(txnId, executeAt))
+                return prev;
+            return nonNullOrMin(prev, entry.get(txnId));
+        }
+
+        RedundantStatus get(TxnId txnId)
+        {
+            if (redundantBefore.compareTo(txnId) > 0)
+                return REDUNDANT;
+            if (bootstrappedAt.compareTo(txnId) > 0)
+                return PRE_BOOTSTRAP;
             return LIVE;
         }
 
-        static RedundantStatus mergeMax(Entry entry, RedundantStatus prev, TxnId txnId, EpochSupplier executeAt)
+        public final boolean isLocalRedundancyViaBootstrap()
         {
-            if (entry == null || entry.outOfBounds(txnId, executeAt))
-                return prev;
-            if (entry.redundantBefore.compareTo(txnId) > 0)
-                return RedundantStatus.nonNullOrMax(prev, REDUNDANT);
-            return prev == null ? LIVE : prev;
+            return redundantBefore.compareTo(bootstrappedAt) < 0;
+        }
+
+        public final TxnId locallyRedundantBefore()
+        {
+            return TxnId.min(bootstrappedAt, redundantBefore);
         }
 
         // TODO (required, consider): this admits the range of epochs that cross the two timestamps, which matches our
@@ -110,7 +135,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
 
         Entry withRange(Range range)
         {
-            return new Entry(range, startEpoch, endEpoch, redundantBefore);
+            return new Entry(range, startEpoch, endEpoch, redundantBefore, bootstrappedAt);
         }
 
         public boolean equals(Object that)
@@ -136,7 +161,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
             return "("
                    + (startEpoch == Long.MIN_VALUE ? "-\u221E" : Long.toString(startEpoch)) + ","
                    + (endEpoch == Long.MAX_VALUE ? "\u221E" : Long.toString(endEpoch)) + ","
-                   + redundantBefore + ")";
+                   + (redundantBefore.compareTo(bootstrappedAt) >= 0 ? redundantBefore + ")" : bootstrappedAt + "*)");
         }
     }
 
@@ -151,12 +176,12 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         super(inclusiveEnds, starts, values);
     }
 
-    public static RedundantBefore create(Ranges ranges, long startEpoch, long endEpoch, @Nonnull TxnId redundantBefore)
+    public static RedundantBefore create(Ranges ranges, long startEpoch, long endEpoch, @Nonnull TxnId redundantBefore, @Nonnull TxnId bootstrappedAt)
     {
         if (ranges.isEmpty())
             return new RedundantBefore();
 
-        Entry entry = new Entry(null, startEpoch, endEpoch, redundantBefore);
+        Entry entry = new Entry(null, startEpoch, endEpoch, redundantBefore, bootstrappedAt);
         Builder builder = new Builder(ranges.get(0).endInclusive(), ranges.size() * 2);
         for (int i = 0 ; i < ranges.size() ; ++i)
         {
@@ -182,18 +207,23 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
     {
         if (executeAt == null) executeAt = txnId;
         Entry entry = get(participant);
-        return entry == null ? NOT_OWNED : notOwnedIfNull(Entry.mergeMax(entry,null, txnId, executeAt));
+        return entry == null ? NOT_OWNED : notOwnedIfNull(Entry.mergeMin(entry,null, txnId, executeAt));
     }
 
-    public RedundantStatus max(TxnId txnId, @Nullable EpochSupplier executeAt, Participants<?> participants)
+    public boolean isLocallyRedundant(TxnId txnId, Timestamp executeAt, Participants<?> participants)
     {
         if (executeAt == null) executeAt = txnId;
-        return notOwnedIfNull(foldl(participants, Entry::mergeMax, null, txnId, executeAt, test -> test == REDUNDANT));
+        // essentially, if ANY intersecting key is REDUNDANT then this command has either applied locally or is invalidated;
+        // otherwise, if ALL intersecting keys are PRE_BOOTSTRAP then any all of its effects will be reflected in the respective bootstraps that
+        return notOwnedIfNull(foldl(participants, Entry::mergeLocallyRedundant, null, txnId, executeAt, test -> test == REDUNDANT)).compareTo(PRE_BOOTSTRAP) >= 0;
     }
 
     public boolean isRedundant(TxnId txnId, Timestamp executeAt, Participants<?> participants)
     {
-        return max(txnId, executeAt, participants).compareTo(REDUNDANT) >= 0;
+        if (executeAt == null) executeAt = txnId;
+        // essentially, if ANY intersecting key is REDUNDANT then this command has either applied locally or is invalidated;
+        // otherwise, if ALL intersecting keys are PRE_BOOTSTRAP then any all of its effects will be reflected in the respective bootstraps that
+        return notOwnedIfNull(foldl(participants, Entry::mergeLocallyRedundant, null, txnId, executeAt, test -> test == REDUNDANT)).compareTo(PRE_BOOTSTRAP) >= 0;
     }
 
     private static RedundantStatus notOwnedIfNull(RedundantStatus status)
@@ -221,7 +251,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
             return new Entry(a.range.newRange(
                 a.range.start().compareTo(b.range.start()) <= 0 ? a.range.start() : b.range.start(),
                 a.range.end().compareTo(b.range.end()) >= 0 ? a.range.end() : b.range.end()
-            ), a.startEpoch, a.endEpoch, a.redundantBefore);
+            ), a.startEpoch, a.endEpoch, a.redundantBefore, a.bootstrappedAt);
         }
 
         @Override
