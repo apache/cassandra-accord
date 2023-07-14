@@ -27,7 +27,6 @@ import accord.coordinate.tracking.FastPathTracker;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.PreLoadContext;
 import accord.messages.Callback;
 import accord.messages.PreAccept;
 import accord.messages.PreAccept.PreAcceptOk;
@@ -42,7 +41,6 @@ import accord.utils.async.AsyncResults.SettableResult;
 
 import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
-import static accord.local.PreLoadContext.empty;
 import static accord.primitives.Timestamp.mergeMax;
 import static accord.utils.Functions.foldl;
 
@@ -236,22 +234,25 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
     {
         // TODO (desired, efficiency): check if we have already have a valid quorum for the future epoch
         //  (noting that nodes may have adopted new ranges, in which case they should be discounted, and quorums may have changed shape)
-        node.withEpoch(executeAt.epoch(), () -> node.commandStores().select(route.homeKey()).execute(empty(), safeStore -> {
-            topologies = node.topology().withUnsyncedEpochs(route, txnId.epoch(), executeAt.epoch());
-            boolean equivalent = topologies.oldestEpoch() <= prevTopologies.currentEpoch();
-            for (long epoch = topologies.currentEpoch() ; equivalent && epoch > prevTopologies.currentEpoch() ; --epoch)
-                equivalent = topologies.forEpoch(epoch).shards().equals(prevTopologies.current().shards());
+        node.withEpoch(executeAt.epoch(), () -> {
+            synchronized (CoordinatePreAccept.this)
+            {
+                topologies = node.topology().withUnsyncedEpochs(route, txnId.epoch(), executeAt.epoch());
+                boolean equivalent = topologies.oldestEpoch() <= prevTopologies.currentEpoch();
+                for (long epoch = topologies.currentEpoch() ; equivalent && epoch > prevTopologies.currentEpoch() ; --epoch)
+                    equivalent = topologies.forEpoch(epoch).shards().equals(prevTopologies.current().shards());
 
-            if (equivalent)
-            {
-                onPreAccepted(topologies, executeAt, successes);
+                if (equivalent)
+                {
+                    onPreAccepted(topologies, executeAt, successes);
+                }
+                else
+                {
+                    extraPreAccept = new ExtraPreAccept(prevTopologies.currentEpoch() + 1, executeAt.epoch());
+                    extraPreAccept.start();
+                }
             }
-            else
-            {
-                extraPreAccept = new ExtraPreAccept(prevTopologies.currentEpoch() + 1, executeAt.epoch());
-                extraPreAccept.start();
-            }
-        }));
+        });
     }
 
     abstract void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> successes);

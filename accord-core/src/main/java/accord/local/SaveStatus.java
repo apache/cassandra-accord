@@ -37,8 +37,10 @@ import static accord.local.Status.Outcome.Unknown;
 import static accord.local.Status.Truncated;
 
 /**
- * Identical to Status but preserves whether we have previously been PreAccepted and therefore know the definition
- * of the transaction. This would potentially complicate users of Status, and the distributed state machine is complicated
+ * A version of Status that preserves additional local state, including whether we have previously been PreAccepted
+ * and therefore know the definition of the transaction, and what knowledge remains post-truncation.
+ *
+ * This would potentially complicate users of Status, and the distributed state machine is complicated
  * enough. But it helps to formalise the relationships here as an auxiliary enum.
  * Intended to be used internally by Command implementations.
  */
@@ -62,6 +64,7 @@ public enum SaveStatus
     PreApplied                      (Status.PreApplied),
     Applying                        (Status.PreApplied),
     Applied                         (Status.Applied,                                                                                           LocalExecution.Applied),
+    // TruncatedApplyWithDeps is a state never adopted within a single replica; it is however a useful state we may enter by combining state from multiple replicas
     TruncatedApplyWithDeps          (Status.Truncated,             DefinitionUnknown, ExecuteAtKnown,    DepsKnown,    Outcome.Apply,          LocalExecution.CleaningUp),
     TruncatedApplyWithOutcome       (Status.Truncated,             DefinitionUnknown, ExecuteAtKnown,    DepsUnknown,  Outcome.Apply,          LocalExecution.CleaningUp),
     TruncatedApply                  (Status.Truncated,             DefinitionUnknown, ExecuteAtKnown,    DepsUnknown,  Outcome.WasApply,       LocalExecution.CleaningUp),

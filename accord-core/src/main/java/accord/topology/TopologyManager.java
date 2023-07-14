@@ -103,6 +103,9 @@ public class TopologyManager
 
         public boolean recordSyncComplete(Id node)
         {
+            if (syncTracker == null)
+                return false;
+
             if (syncTracker.recordSuccess(node) == Success)
             {
                 curSyncComplete = global.ranges;
