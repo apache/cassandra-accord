@@ -18,31 +18,11 @@
 
 package accord.local;
 
-import accord.api.ProgressLog;
-import accord.api.DataStore;
-import accord.coordinate.CollectDeps;
-import accord.local.Command.WaitingOn;
-
-import javax.annotation.Nullable;
-import accord.api.Agent;
-
-import accord.local.CommandStores.RangesForEpoch;
-import accord.utils.RelationMultiMap.SortedRelationList;
-import accord.utils.async.AsyncChain;
-
-import accord.api.ConfigurationService.EpochReady;
-import accord.primitives.*;
-import accord.utils.DeterministicIdentitySet;
-import accord.utils.Invariants;
-import accord.utils.ReducingRangeMap;
-import accord.utils.async.AsyncResult;
-
 import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.Collections;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Objects;
-
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.Callable;
@@ -50,10 +30,33 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
-
-import accord.utils.async.AsyncResults;
+import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSortedMap;
+
+import accord.api.Agent;
+import accord.api.ConfigurationService.EpochReady;
+import accord.api.DataStore;
+import accord.api.ProgressLog;
+import accord.coordinate.CollectDeps;
+import accord.local.Command.WaitingOn;
+import accord.local.CommandStores.RangesForEpoch;
+import accord.primitives.FullRoute;
+import accord.primitives.KeyDeps;
+import accord.primitives.Participants;
+import accord.primitives.RangeDeps;
+import accord.primitives.Ranges;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
+import accord.utils.DeterministicIdentitySet;
+import accord.utils.Invariants;
+import accord.utils.ReducingRangeMap;
+import accord.utils.RelationMultiMap.SortedRelationList;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 
 import static accord.api.ConfigurationService.EpochReady.DONE;
 import static accord.local.PreLoadContext.contextFor;
