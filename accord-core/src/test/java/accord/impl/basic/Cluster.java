@@ -36,29 +36,32 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Assertions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import accord.api.MessageSink;
+import accord.api.Scheduler;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
-import accord.impl.*;
+import accord.impl.IntHashKey;
+import accord.impl.SimpleProgressLog;
+import accord.impl.SizeOfIntersectionSorter;
+import accord.impl.TopologyFactory;
+import accord.impl.list.ListStore;
 import accord.local.AgentExecutor;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.api.Scheduler;
-import accord.impl.list.ListStore;
+import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
-import accord.messages.SafeCallback;
 import accord.messages.MessageType;
 import accord.messages.Reply;
 import accord.messages.Request;
-import accord.topology.TopologyRandomizer;
+import accord.messages.SafeCallback;
 import accord.topology.Topology;
+import accord.topology.TopologyRandomizer;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static java.util.stream.Collectors.toList;
@@ -215,7 +218,7 @@ public class Cluster implements Scheduler
         run.run();
     }
 
-    public static EnumMap<MessageType, Stats> run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, AgentExecutor executor, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, Consumer<Runnable> noMoreWorkSignal)
+    public static EnumMap<MessageType, Stats> run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, AgentExecutor executor, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplierSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, Consumer<Runnable> noMoreWorkSignal)
     {
         Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> lookup = new LinkedHashMap<>();
@@ -227,8 +230,9 @@ public class Cluster implements Scheduler
             for (Id node : nodes)
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
+                LongSupplier nowSupplier = nowSupplierSupplier.get();
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(node, executor, randomSupplier, topology, lookup::get, topologyUpdates);
-                lookup.put(node, new Node(node, messageSink, configService, nowSupplier.get(),
+                lookup.put(node, new Node(node, messageSink, configService, nowSupplier, NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, nowSupplier),
                                           () -> new ListStore(node), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
                                           executor.agent(),
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,

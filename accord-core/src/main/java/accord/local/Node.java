@@ -23,37 +23,69 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
-
-import accord.api.ConfigurationService.EpochReady;
-import accord.coordinate.*;
-import accord.messages.*;
-import accord.primitives.*;
-import accord.primitives.Routable.Domain;
-import accord.utils.MapReduceConsume;
-import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncResult;
-import accord.utils.async.AsyncResults;
-import accord.utils.RandomSource;
-import com.google.common.annotations.VisibleForTesting;
-
-import accord.api.*;
-
+import java.util.function.ToLongFunction;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import accord.api.Agent;
+import accord.api.ConfigurationService;
+import accord.api.ConfigurationService.EpochReady;
+import accord.api.DataStore;
+import accord.api.Key;
+import accord.api.MessageSink;
+import accord.api.ProgressLog;
+import accord.api.Result;
+import accord.api.RoutingKey;
+import accord.api.Scheduler;
+import accord.api.TopologySorter;
+import accord.coordinate.CoordinateTransaction;
+import accord.coordinate.MaybeRecover;
+import accord.coordinate.Outcome;
+import accord.coordinate.RecoverWithRoute;
+import accord.impl.CoordinateDurabilityScheduling;
+import accord.messages.Callback;
+import accord.messages.Reply;
+import accord.messages.ReplyContext;
+import accord.messages.Request;
+import accord.messages.TxnRequest;
+import accord.primitives.Ballot;
+import accord.primitives.FullRoute;
+import accord.primitives.ProgressToken;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.Routable.Domain;
+import accord.primitives.Routables;
+import accord.primitives.Route;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.topology.TopologyManager;
+import accord.utils.MapReduceConsume;
+import accord.utils.RandomSource;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 public class Node implements ConfigurationService.Listener, NodeTimeService
 {
+    private static final Logger logger = LoggerFactory.getLogger(Node.class);
+
     public static class Id implements Comparable<Id>
     {
         public static final Id NONE = new Id(0);
@@ -107,6 +139,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private final CommandStores commandStores;
 
     private final LongSupplier nowSupplier;
+    private final ToLongFunction<TimeUnit> nowTimeUnit;
     private final AtomicReference<Timestamp> now;
     private final Agent agent;
     private final RandomSource random;
@@ -117,7 +150,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     // TODO (expected, liveness): monitor the contents of this collection for stalled coordination, and excise them
     private final Map<TxnId, AsyncResult<? extends Outcome>> coordinating = new ConcurrentHashMap<>();
 
-    public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier,
+    public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier, ToLongFunction<TimeUnit> nowTimeUnit,
                 Supplier<DataStore> dataSupplier, ShardDistributor shardDistributor, Agent agent, RandomSource random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
                 Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory)
     {
@@ -126,18 +159,22 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.configService = configService;
         this.topology = new TopologyManager(topologySorter, id);
         this.nowSupplier = nowSupplier;
+        this.nowTimeUnit = nowTimeUnit;
         this.now = new AtomicReference<>(Timestamp.fromValues(topology.epoch(), nowSupplier.getAsLong(), id));
         this.agent = agent;
         this.random = random;
         this.scheduler = scheduler;
         this.commandStores = factory.create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this));
+        // TODO review these leak a reference to an object that hasn't finished construction, possibly to other threads
         configService.registerListener(this);
+        CoordinateDurabilityScheduling.scheduleDurabilityPropagation(this);
     }
 
     // TODO (cleanup, testing): remove, only used by Maelstrom
     public AsyncResult<Void> start()
     {
-        return onTopologyUpdateInternal(configService.currentTopology(), false).metadata;
+        AsyncResult<Void> result = onTopologyUpdateInternal(configService.currentTopology(), false).metadata;
+        return result;
     }
 
     public CommandStores commandStores()
@@ -268,6 +305,12 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
             now.accumulateAndGet(atLeast, Node::nowAtLeast);
         }
         return uniqueNow();
+    }
+
+    @Override
+    public long unix(TimeUnit timeUnit)
+    {
+        return nowTimeUnit.applyAsLong(timeUnit);
     }
 
     private static Timestamp nowAtLeast(Timestamp current, Timestamp proposed)

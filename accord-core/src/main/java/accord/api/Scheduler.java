@@ -25,6 +25,28 @@ import java.util.concurrent.TimeUnit;
  */
 public interface Scheduler
 {
+    Scheduled CANCELLED = () -> {};
+    Scheduler NEVER_RUN_SCHEDULED = new Scheduler()
+    {
+        @Override
+        public Scheduled recurring(Runnable run, long delay, TimeUnit units)
+        {
+            return CANCELLED;
+        }
+
+        @Override
+        public Scheduled once(Runnable run, long delay, TimeUnit units)
+        {
+            return CANCELLED;
+        }
+
+        @Override
+        public void now(Runnable run)
+        {
+            run.run();
+        }
+    };
+
     interface Scheduled
     {
         void cancel();

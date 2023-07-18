@@ -20,6 +20,7 @@ package accord.local;
 
 import java.util.List;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.Test;
 
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
+import accord.api.Scheduler;
 import accord.api.TestableConfigurationService;
 import accord.impl.InMemoryCommandStore;
 import accord.impl.InMemoryCommandStores;
@@ -106,8 +108,10 @@ public class ImmutableCommandTest
 
     private static Node createNode(Id id, CommandStoreSupport storeSupport)
     {
+        MockCluster.Clock clock = new MockCluster.Clock(100);
         Node node = new Node(id, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
-                        new MockCluster.Clock(100), () -> storeSupport.data, new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), new TestAgent(), new DefaultRandom(), null,
+                        clock, NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, clock),
+                        () -> storeSupport.data, new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), new TestAgent(), new DefaultRandom(), Scheduler.NEVER_RUN_SCHEDULED,
                         SizeOfIntersectionSorter.SUPPLIER, ignore -> ignore2 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new);
         awaitUninterruptibly(node.start());
         node.onTopologyUpdate(storeSupport.local.get(), true);

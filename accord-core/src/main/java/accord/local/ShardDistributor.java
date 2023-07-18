@@ -18,20 +18,28 @@
 
 package accord.local;
 
-import accord.primitives.Range;
-import accord.primitives.Ranges;
-import accord.utils.Invariants;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
+
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.utils.Invariants;
 
 public interface ShardDistributor
 {
     // TODO (expected, topology): this is overly simplistic: need to supply existing distribution, and support
     //                            gradual local redistribution to keep number of shards eventually the same
     List<Ranges> split(Ranges ranges);
+
+    /**
+     * Return a single subSpit from a range given the total number of splits the range should be divided into and
+     * the index of the split to be returned.
+     *
+     * If the range is not sufficiently divisible then the range will be returned unmodified.
+     */
+    Range splitRange(Range range, int splitIndex, int totalSplits);
 
     class EvenSplit<T> implements ShardDistributor
     {
@@ -56,6 +64,22 @@ public interface ShardDistributor
         {
             this.numberOfShards = numberOfShards;
             this.splitter = splitter;
+        }
+
+        @Override
+        public Range splitRange(Range range, int splitIndex, int totalSplits)
+        {
+            Invariants.checkArgument(splitIndex < totalSplits);
+            Splitter<T> splitter = this.splitter.apply(Ranges.single(range));
+            T size = splitter.sizeOf(range);
+            T splitSize = splitter.divide(size, totalSplits);
+            // Small ranges aren't divisible
+            if (splitter.compare(splitSize, splitter.zero()) <= 0)
+                return range;
+            T splitBegin = splitter.multiply(splitSize, splitIndex);
+            // For the last split use size as the end in case there is an issue with division and remainder
+            T splitEnd = splitIndex == (totalSplits - 1) ? size : splitter.add(splitBegin, splitSize);
+            return splitter.subRange(range, splitBegin, splitEnd);
         }
 
         @Override

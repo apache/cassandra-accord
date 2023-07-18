@@ -18,10 +18,8 @@
 
 package accord.local;
 
-import accord.api.*;
 import accord.api.ConfigurationService.EpochReady;
 import accord.local.CommandStore.EpochUpdateHolder;
-import accord.primitives.*;
 import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.MapReduce;
@@ -46,6 +44,18 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import accord.api.Agent;
+import accord.api.DataStore;
+import accord.api.Key;
+import accord.api.ProgressLog;
+import accord.api.RoutingKey;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.Routables;
+import accord.primitives.Route;
+import accord.primitives.RoutingKeys;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import javax.annotation.Nonnull;
 
 import static accord.api.ConfigurationService.EpochReady.done;
@@ -589,6 +599,11 @@ public abstract class CommandStores
     public int count()
     {
         return current.shards.length;
+    }
+
+    public ShardDistributor shardDistributor()
+    {
+        return shardDistributor;
     }
 
     @VisibleForTesting

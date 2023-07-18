@@ -18,6 +18,13 @@
 
 package accord;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+
+import com.google.common.collect.Sets;
+
 import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.impl.InMemoryCommandStores;
@@ -27,26 +34,21 @@ import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TestAgent;
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
-import accord.local.ShardDistributor;
-import accord.primitives.Range;
-import accord.local.Node;
 import accord.impl.mock.MockStore;
+import accord.local.Node;
+import accord.local.NodeTimeService;
+import accord.local.ShardDistributor;
+import accord.primitives.Keys;
+import accord.primitives.Range;
 import accord.primitives.Ranges;
+import accord.primitives.Txn;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.topology.Topology;
-import accord.primitives.Txn;
-import accord.primitives.Keys;
 import accord.utils.DefaultRandom;
 import accord.utils.EpochFunction;
 import accord.utils.Invariants;
 import accord.utils.ThreadPoolScheduler;
-
-import com.google.common.collect.Sets;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
 
 import static accord.utils.async.AsyncChains.awaitUninterruptibly;
 
@@ -141,6 +143,7 @@ public class Utils
                              messageSink,
                              new MockConfigurationService(messageSink, EpochFunction.noop(), topology),
                              clock,
+                             NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, clock),
                              () -> store,
                              new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()),
                              new TestAgent(),

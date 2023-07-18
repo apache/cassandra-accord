@@ -30,24 +30,25 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import accord.api.MessageSink;
+import accord.api.Scheduler;
 import accord.coordinate.Timeout;
-import accord.impl.SimpleProgressLog;
 import accord.impl.InMemoryCommandStores;
+import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.local.AgentExecutor;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.api.Scheduler;
+import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
+import accord.maelstrom.Packet.Type;
+import accord.messages.Callback;
+import accord.messages.Reply;
 import accord.messages.ReplyContext;
+import accord.messages.Request;
 import accord.topology.Topology;
 import accord.utils.DefaultRandom;
 import accord.utils.ThreadPoolScheduler;
-import accord.maelstrom.Packet.Type;
-import accord.api.MessageSink;
-import accord.messages.Callback;
-import accord.messages.Reply;
-import accord.messages.Request;
 
 import static accord.utils.async.AsyncChains.awaitUninterruptibly;
 
@@ -164,7 +165,8 @@ public class Main
             MaelstromInit init = (MaelstromInit) packet.body;
             topology = topologyFactory.toTopology(init.cluster);
             sink = new StdoutSink(System::currentTimeMillis, scheduler, start, init.self, out, err);
-            on = new Node(init.self, sink, new SimpleConfigService(topology), System::currentTimeMillis,
+            on = new Node(init.self, sink, new SimpleConfigService(topology),
+                          System::currentTimeMillis, NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, System::currentTimeMillis),
                           MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                           MaelstromAgent.INSTANCE, new DefaultRandom(), scheduler, SizeOfIntersectionSorter.SUPPLIER,
                           SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new);
