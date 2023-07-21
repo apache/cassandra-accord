@@ -19,6 +19,7 @@
 package accord.local;
 
 import java.util.Objects;
+import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSortedSet;
 
@@ -43,7 +44,6 @@ import accord.utils.IndexedQuadConsumer;
 import accord.utils.Invariants;
 import accord.utils.SimpleBitSet;
 import accord.utils.async.AsyncChain;
-import javax.annotation.Nullable;
 
 import static accord.local.Listeners.Immutable.EMPTY;
 import static accord.local.SaveStatus.Uninitialised;
@@ -819,12 +819,14 @@ public abstract class Command implements CommonAttributes
 
     public static class Committed extends Accepted
     {
+        public static final Committed EMPTY = new Committed(SaveStatus.Committed);
+
         public final WaitingOn waitingOn;
 
         // Empty constructor for size measurement
         private Committed(SaveStatus status)
         {
-            super(Mutable.EMPTY_ATTRS, status, null, null, null);
+            super(Mutable.EMPTY_ATTRS_NONE_PARTIAL_DEPS, status, null, null, null);
             this.waitingOn = WaitingOn.EMPTY;
         }
 
