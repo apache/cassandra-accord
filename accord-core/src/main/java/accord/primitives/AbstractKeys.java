@@ -28,7 +28,10 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import accord.api.RoutingKey;
-import accord.utils.*;
+import accord.utils.IndexedFold;
+import accord.utils.IndexedFoldToLong;
+import accord.utils.Invariants;
+import accord.utils.SortedArrays;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 import static accord.primitives.Routable.Domain.Key;
@@ -235,22 +238,29 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
         if (isEmpty())
             return new FullKeyRoute(homeKey, false, new RoutingKey[] { homeKey });
 
-        RoutingKey[] result = toRoutingKeysArray(homeKey);
-        int pos = Arrays.binarySearch(result, homeKey);
-        return new FullKeyRoute(result[pos], contains(homeKey), result);
+        return toRoutingKeysArray(homeKey, (routingKeys, homeKeyIndex, isParticipatingHomeKey) -> new FullKeyRoute(routingKeys[homeKeyIndex], isParticipatingHomeKey, routingKeys));
+    }
+
+    protected RoutingKey[] toRoutingKeysArray(RoutingKey withKey)
+    {
+        return toRoutingKeysArray(withKey, (routingKeys, homeKeyIndex, isParticipatingHomeKey) -> routingKeys);
+    }
+
+    interface ToRoutingKeysFactory<T>
+    {
+        T apply(RoutingKey[] keys, int insertPos, boolean includesKey);
     }
 
     @SuppressWarnings("SuspiciousSystemArraycopy")
-    protected RoutingKey[] toRoutingKeysArray(RoutingKey withKey)
+    protected <T> T toRoutingKeysArray(RoutingKey withKey, ToRoutingKeysFactory<T> toRoutingKeysFactory)
     {
-        int insertPos = Arrays.binarySearch(keys, withKey);
-
         if (keys.getClass() == RoutingKey[].class)
         {
+            int insertPos = Arrays.binarySearch(keys, withKey);
             if (insertPos >= 0)
             {
                 Invariants.checkState(keys[insertPos].equals(withKey));
-                return (RoutingKey[]) keys;
+                return toRoutingKeysFactory.apply((RoutingKey[])keys, insertPos, true);
             }
 
             insertPos = -1 - insertPos;
@@ -258,33 +268,28 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
             System.arraycopy(keys, 0, result, 0, insertPos);
             result[insertPos] = withKey;
             System.arraycopy(keys, insertPos, result, insertPos + 1, keys.length - insertPos);
-            return result;
+            return toRoutingKeysFactory.apply(result, insertPos, false);
         }
         else
         {
-            RoutingKey[] result;
-            int resultCount;
-            if (insertPos < 0)
+            // TODO review this is a pretty terrible work around for the fact that you can't binarySearch these
+            // two incompatible types
+            RoutingKey[] result = new RoutingKey[keys.length];
+            for (int i = 0; i < keys.length; i++)
+            {
+                result[i] = keys[i].toUnseekable();
+            }
+            int insertPos = Arrays.binarySearch(result, withKey);
+            if (insertPos >= 0)
+                return toRoutingKeysFactory.apply(result, insertPos, true);
+            else
                 insertPos = -1 - insertPos;
 
-            if (insertPos < keys.length && keys[insertPos].toUnseekable().equals(withKey))
-            {
-                result = new RoutingKey[keys.length];
-                resultCount = copyToRoutingKeys(keys, 0, result, 0, keys.length);
-            }
-            else
-            {
-                result = new RoutingKey[1 + keys.length];
-                resultCount = copyToRoutingKeys(keys, 0, result, 0, insertPos);
-                if (resultCount == 0 || !withKey.equals(result[resultCount - 1]))
-                    result[resultCount++] = withKey;
-                resultCount += copyToRoutingKeys(keys, insertPos, result, resultCount, keys.length - insertPos);
-            }
-
-            if (resultCount < result.length)
-                result = Arrays.copyOf(result, resultCount);
-
-            return result;
+            RoutingKey[] newResult = new RoutingKey[1 + keys.length];
+            System.arraycopy(result, 0, newResult, 0, insertPos);
+            newResult[insertPos] = withKey;
+            System.arraycopy(result, insertPos, newResult, insertPos + 1, result.length - insertPos);
+            return toRoutingKeysFactory.apply(newResult, insertPos, false);
         }
     }
 
