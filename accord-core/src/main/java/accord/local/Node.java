@@ -53,7 +53,6 @@ import accord.coordinate.CoordinateTransaction;
 import accord.coordinate.MaybeRecover;
 import accord.coordinate.Outcome;
 import accord.coordinate.RecoverWithRoute;
-import accord.impl.CoordinateDurabilityScheduling;
 import accord.messages.Callback;
 import accord.messages.Reply;
 import accord.messages.ReplyContext;
@@ -167,7 +166,6 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.commandStores = factory.create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this));
         // TODO review these leak a reference to an object that hasn't finished construction, possibly to other threads
         configService.registerListener(this);
-        CoordinateDurabilityScheduling.scheduleDurabilityPropagation(this);
     }
 
     // TODO (cleanup, testing): remove, only used by Maelstrom

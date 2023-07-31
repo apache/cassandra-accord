@@ -43,6 +43,7 @@ import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
+import accord.impl.CoordinateDurabilityScheduling;
 import accord.impl.IntHashKey;
 import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
@@ -227,16 +228,20 @@ public class Cluster implements Scheduler
             Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink);
             TopologyUpdates topologyUpdates = new TopologyUpdates(executor);
             TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, lookup::get);
-            for (Id node : nodes)
+            List<CoordinateDurabilityScheduling> durabilityScheduling = new ArrayList<>();
+            for (Id id : nodes)
             {
-                MessageSink messageSink = sinks.create(node, randomSupplier.get());
+                MessageSink messageSink = sinks.create(id, randomSupplier.get());
                 LongSupplier nowSupplier = nowSupplierSupplier.get();
-                BurnTestConfigurationService configService = new BurnTestConfigurationService(node, executor, randomSupplier, topology, lookup::get, topologyUpdates);
-                lookup.put(node, new Node(node, messageSink, configService, nowSupplier, NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, nowSupplier),
-                                          () -> new ListStore(node), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
-                                          executor.agent(),
-                                          randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
-                                          SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending)));
+                BurnTestConfigurationService configService = new BurnTestConfigurationService(id, executor, randomSupplier, topology, lookup::get, topologyUpdates);
+                Node node = new Node(id, messageSink, configService, nowSupplier, NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, nowSupplier),
+                                     () -> new ListStore(id), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
+                                     executor.agent(),
+                                     randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
+                                     SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending));
+                lookup.put(id, node);
+                CoordinateDurabilityScheduling durability = new CoordinateDurabilityScheduling(node);
+                durabilityScheduling.add(durability);
             }
 
             // startup
@@ -253,13 +258,11 @@ public class Cluster implements Scheduler
             }, 5L, SECONDS);
 
             Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1, SECONDS);
-            Scheduled rangeDurable = sinks.recurring(configRandomizer::rangeDurable, 1, SECONDS);
-            Scheduled globallyDurable = sinks.recurring(configRandomizer::globallyDurable, 1, SECONDS);
+            durabilityScheduling.forEach(CoordinateDurabilityScheduling::start);
 
             noMoreWorkSignal.accept(() -> {
                 reconfigure.cancel();
-                rangeDurable.cancel();
-                globallyDurable.cancel();
+                durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
             });
 
             Packet next;
@@ -270,8 +273,7 @@ public class Cluster implements Scheduler
 
             chaos.cancel();
             reconfigure.cancel();
-            rangeDurable.cancel();
-            globallyDurable.cancel();
+            durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
             sinks.partitionSet = Collections.emptySet();
 
             // give progress log et al a chance to finish

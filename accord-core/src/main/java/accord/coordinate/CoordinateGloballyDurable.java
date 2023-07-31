@@ -24,16 +24,19 @@ import accord.local.Node;
 import accord.local.DurableBefore;
 import accord.messages.Callback;
 import accord.messages.QueryDurableBefore;
+import accord.messages.QueryDurableBefore.DurableBeforeReply;
 import accord.messages.SetGloballyDurable;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults.SettableResult;
 
-public class CoordinateGloballyDurable extends SettableResult<Void> implements Callback<QueryDurableBefore.DurableBeforeReply>
+// TODO (expected): this does not need to query every shard; can disseminate globally any sub-range of the ring
+//  (indeed, we could slice both the query and dissemination only so that they always overlap)
+public class CoordinateGloballyDurable extends SettableResult<Void> implements Callback<DurableBeforeReply>
 {
     final Node node;
-    // TODO (now): this can be a ReadTracker, we only need one response from each shard
+    // TODO (expected): this can be a ReadTracker, we only need one response from each shard
     final QuorumTracker tracker;
     private DurableBefore durableBefore = DurableBefore.EMPTY;
 
@@ -57,7 +60,7 @@ public class CoordinateGloballyDurable extends SettableResult<Void> implements C
     }
 
     @Override
-    public void onSuccess(Node.Id from, QueryDurableBefore.DurableBeforeReply reply)
+    public void onSuccess(Node.Id from, DurableBeforeReply reply)
     {
         durableBefore = DurableBefore.merge(durableBefore, reply.durableBeforeMap);
         if (tracker.recordSuccess(from) == RequestStatus.Success)

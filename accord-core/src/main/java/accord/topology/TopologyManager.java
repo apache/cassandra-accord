@@ -20,7 +20,6 @@ package accord.topology;
 
 import java.util.ArrayList;
 import java.util.BitSet;
-import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
@@ -65,15 +64,15 @@ public class TopologyManager
 {
     private static final AsyncResult<Void> SUCCESS = AsyncResults.success(null);
 
-    public static class NodeAndTopologyInfo
+    public static class LocalAndGlobal
     {
-        public final Topology topology;
-        public final int ourIndex;
+        public final Topology global;
+        public final Topology local;
 
-        public NodeAndTopologyInfo(Topology topology, int ourIndex)
+        public LocalAndGlobal(Topology global, Topology local)
         {
-            this.topology = topology;
-            this.ourIndex = ourIndex;
+            this.global = global;
+            this.local = local;
         }
     }
 
@@ -365,8 +364,6 @@ public class TopologyManager
     private final Id node;
     private volatile Epochs epochs;
 
-    private volatile NodeAndTopologyInfo currentNodeAndTopologyInfo = null;
-
     public TopologyManager(TopologySorter.Supplier sorter, Id node)
     {
         this.sorter = sorter;
@@ -401,39 +398,8 @@ public class TopologyManager
         List<AsyncResult.Settable<Void>> futureEpochFutures = new ArrayList<>(current.futureEpochFutures);
         AsyncResult.Settable<Void> toComplete = !futureEpochFutures.isEmpty() ? futureEpochFutures.remove(0) : null;
         epochs = new Epochs(nextEpochs, pending, futureEpochFutures);
-        updateCurrentNodeAndTopologyInfo();
         if (toComplete != null)
             toComplete.trySuccess(null);
-    }
-
-    /**
-     * Knowing the node index in the current epoch is useful for having an arbitrary ordering across nodes
-     * so they can for example take turns invoking CoordinateGloballyDurable.
-     *
-     * Index is just the position in the sorted list of node ids.
-     */
-    private void updateCurrentNodeAndTopologyInfo()
-    {
-        Topology current = current();
-        List<Id> ids = new ArrayList<>(current.nodes());
-        // If initialization isn't done check again in 1 second
-        if (ids.isEmpty())
-        {
-            // TODO review in a situation where we have nodes in older epochs and no nodes in the current epoch
-            // it would cause this to assign null and maybe stop things that we actually still need to run?
-            currentNodeAndTopologyInfo = null;
-            return;
-        }
-        Collections.sort(ids);
-        int ourIndex = ids.indexOf(node);
-        // This seems to be a supported case of removing nodes (see TopologyChangeTest)
-        // which causes them to no longer be in the current epoch
-        if (ourIndex == -1)
-        {
-            currentNodeAndTopologyInfo = null;
-            return;
-        }
-        currentNodeAndTopologyInfo = new NodeAndTopologyInfo(current, ourIndex);
     }
 
     public AsyncChain<Void> awaitEpoch(long epoch)
@@ -491,14 +457,6 @@ public class TopologyManager
     public Topology currentLocal()
     {
         return epochs.currentLocal();
-    }
-
-    /**
-     * Returns -1 if there are no nodes in the current topology
-     */
-    public NodeAndTopologyInfo currentNodeAndTopologyInfo()
-    {
-        return currentNodeAndTopologyInfo;
     }
 
     public long epoch()

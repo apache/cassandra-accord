@@ -19,9 +19,11 @@
 package accord.impl;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BiConsumer;
 
 import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
@@ -30,16 +32,18 @@ import org.slf4j.LoggerFactory;
 import accord.coordinate.CoordinateGloballyDurable;
 import accord.coordinate.CoordinateShardDurable;
 import accord.coordinate.CoordinateSyncPoint;
-import accord.local.CommandStores;
 import accord.local.Node;
 import accord.local.ShardDistributor;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.SyncPoint;
+import accord.topology.Shard;
 import accord.topology.Topology;
-import accord.topology.TopologyManager.NodeAndTopologyInfo;
+import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResult;
+
+import static java.util.concurrent.TimeUnit.MICROSECONDS;
 
 /**
  * Helper methods and classes to invoke coordination to propagate information about durability.
@@ -63,243 +67,210 @@ import accord.utils.async.AsyncResult;
  * number of times and then processed one at a time with a fixed wait between them.
  *
  * // TODO review will the scheduler shut down on its own or do the individual tasks need to be canceled manually?
+ * // TODO (expected): cap number of coordinations we can have in flight at once
  * Didn't go with recurring because it doesn't play well with async execution of these tasks
  */
 public class CoordinateDurabilityScheduling
 {
     private static final Logger logger = LoggerFactory.getLogger(CoordinateDurabilityScheduling.class);
 
-    /*
-     * Divide each sub-range a node handles in a given round into COORDINATE_SHARD_DURABLE_RANGE_STEPS steps and then every
-     * COORDINATE_SHARD_DURABLE_RANGE_STEP_GAP_MILLIS invoke CoordinateShardDurable for a sub-range of a sub-range.
-     */
-    static final int COORDINATE_SHARD_DURABLE_RANGE_STEPS = 10;
+    private final Node node;
 
     /*
-     * In each round at each node wait this amount of time between CoordinateShardDurable invocations for each sub-range (of a sub-range) step
+     * In each round at each node wait this amount of time between initiating new CoordinateShardDurable
      */
-    static final int COORDINATE_SHARD_DURABLE_RANGE_STEP_GAP_MILLIS = 100;
+    private int frequencyMicros = Ints.saturatedCast(TimeUnit.MILLISECONDS.toMicros(100L));
 
     /*
      * Target for how often the entire ring should be processed in microseconds. Every node will start at an offset in the current round that is based
-     * on this value / by (total # nodes * its index in the current round). The current round is determined by dividing time since the epoch by this
+     * on this value / by (total # replicas * its index in the current round). The current round is determined by dividing time since the epoch by this
      * duration.
      */
-    static final long COORDINATE_SHARD_DURABLE_FULL_RING_TARGET_PROCESSING_MICROS = TimeUnit.SECONDS.toMicros(30);
+    private int shardCycleTimeMicros = Ints.saturatedCast(TimeUnit.SECONDS.toMicros(30));
 
     /*
      * Every node will independently attempt to invoke CoordinateGloballyDurable
-     * with a target gap between invocations of COORDINATE_GLOBALLY_DURABLE_TARGET_GAP_MICROS.
+     * with a target gap between invocations of globalCycleTimeMicros
      *
      * This is done by nodes taking turns for each scheduled attempt that is due by calculating what # attempt is
      * next for the current node ordinal in the cluster and time since the unix epoch and attempting to invoke then. If all goes
      * well they end up doing it periodically in a timely fashion with the target gap achieved.
      *
+     * TODO (desired): run this more often, but for less than the whole cluster, patterned in such a way as to ensure rapid cross-pollination
      */
-    static final long COORDINATE_GLOBALLY_DURABLE_TARGET_GAP_MICROS = TimeUnit.MILLISECONDS.toMicros(1000);
+    private long globalCycleTimeMicros = TimeUnit.SECONDS.toMicros(30);
+
+    private Topology currentGlobalTopology;
+    private final Map<Shard, Integer> localIndexes = new HashMap<>();
+    private int globalIndex;
+
+    private long nextGlobalSyncTimeMicros;
+    private long prevShardSyncTimeMicros;
+    volatile boolean stop;
+
+    public CoordinateDurabilityScheduling(Node node)
+    {
+        this.node = node;
+    }
 
     /**
      * Schedule regular invocations of CoordinateShardDurable and CoordinateGloballyDurable
      */
-    public static void scheduleDurabilityPropagation(Node node)
+    public void start()
     {
-        scheduleCoordinateShardDurable(node);
-        scheduleCoordinateGloballyDurable(node);
+        Invariants.checkState(!stop); // cannot currently restart safely
+        long nowMicros = node.unix(MICROSECONDS);
+        prevShardSyncTimeMicros = nowMicros;
+        setNextGlobalSyncTime(nowMicros);
+        requeue();
+    }
+
+    public void stop()
+    {
+        stop = true;
+    }
+
+    private void requeue()
+    {
+        if (!stop)
+            node.scheduler().once(this::run, frequencyMicros, MICROSECONDS);
     }
 
     /**
      * Schedule the first CoordinateShardDurable execution for the current round. Sub-steps will be scheduled after
      * each sub-step completes, and once all are completed scheduleCoordinateShardDurable is called again.
      */
-    private static void scheduleCoordinateShardDurable(Node node)
+    private void run()
     {
-        logger.trace("Scheduling once CoordinateShardDurable node {} at {}",  node.id(), node.unix(TimeUnit.MICROSECONDS));
-        NodeAndTopologyInfo nodeAndTopologyInfo = node.topology().currentNodeAndTopologyInfo();
-        // Empty epochs happen during node removal, startup, and tests so check again in 1 second
-        if (nodeAndTopologyInfo == null)
-        {
-            logger.trace("Empty topology, scheduling coordinate shard durable in 1 second at node {}", node.id());
-            node.scheduler().once(() -> scheduleCoordinateShardDurable(node), 1, TimeUnit.SECONDS);
+        if (stop)
             return;
-        }
 
-        Topology topology = nodeAndTopologyInfo.topology;
-        int nodeCount = topology.nodes().size();
-        CommandStores commandStores = node.commandStores();
-        ShardDistributor distributor = commandStores.shardDistributor();
-        Ranges ranges = topology.ranges();
-
-        // During startup or when there is nothing to do just skip
-        // since it generates a lot of noisy errors if you move forward
-        // with no shards
-        if (ranges.isEmpty() || commandStores.count() == 0)
+        try
         {
-            logger.trace("No ranges or no command stores, scheduling coordinate shard durable in 1 second at node {}", node.id());
-            node.scheduler().once(() -> scheduleCoordinateShardDurable(node), 1, TimeUnit.SECONDS);
-            return;
+            updateTopology();
+            if (currentGlobalTopology.size() == 0)
+                return;
+
+            long nowMicros = node.unix(MICROSECONDS);
+            if (nextGlobalSyncTimeMicros <= nowMicros)
+            {
+                startGlobalSync();
+                setNextGlobalSyncTime(nowMicros);
+            }
+
+            List<Ranges> coordinate = rangesToShardSync(nowMicros);
+            prevShardSyncTimeMicros = nowMicros;
+            if (coordinate.isEmpty())
+            {
+                logger.trace("Nothing pending in schedule for time slot at {}", nowMicros);
+                return;
+            }
+
+            logger.trace("Scheduling CoordinateShardDurable for {} at {}", coordinate, nowMicros);
+            for (Ranges ranges : coordinate)
+                startShardSync(ranges);
         }
-
-        int ourIndex = nodeAndTopologyInfo.ourIndex;
-        long nowMicros = node.unix(TimeUnit.MICROSECONDS);
-        // Which round of iterating across the ring is currently occurring given the target processing time for the full ring
-        long currentRound = nowMicros / COORDINATE_SHARD_DURABLE_FULL_RING_TARGET_PROCESSING_MICROS;
-        // Wall time when the current round started
-        long startOfCurrentRound = currentRound * COORDINATE_SHARD_DURABLE_FULL_RING_TARGET_PROCESSING_MICROS;
-
-        // Every round rotate backwards which subranges this node is responsible for so if there is a down node
-        // another node will eventually come along and propagate durability
-        // Backwards so that a node doesn't start last in one round and then start first in the next round
-        // and likely miss scheduling when it is supposed to run.
-        int rotationForCurrentRound = Ints.checkedCast(currentRound % nodeCount);
-        ourIndex = (ourIndex - rotationForCurrentRound) % (nodeCount + 1);
-        if (ourIndex < 0)
-            ourIndex += nodeCount + 1;
-        long ourTargetStartTime = startOfCurrentRound + ((COORDINATE_SHARD_DURABLE_FULL_RING_TARGET_PROCESSING_MICROS / nodeCount) * ourIndex);
-        // TODO review this can have the behavior of all nodes syncing up if we don't force them to wait for their turn in the next round
-        long ourDelayUntilStarting = Math.max(0, ourTargetStartTime - nowMicros);
-
-        // In each step coordinate shard durability for a subset of every range
-        List<Range> slices = new ArrayList<>(ranges.size());
-        for (int i = 0; i < ranges.size(); i++)
+        finally
         {
-            Range r = ranges.get(i);
-            Range slice = distributor.splitRange(r, ourIndex, nodeCount);
-            if (slice == r && ourIndex != 0)
-                // Have node index 0 always be responsible for processing indivisible ranges
-                // so multiple nodes don't conflict coordinating for the same indivisible range
-                continue;
-            slices.add(slice);
+            requeue();
         }
-        Range[] slicesArray = new Range[slices.size()];
-        slicesArray = slices.toArray(slicesArray);
-
-        node.scheduler().once(getCoordinateShardDurableRunnable(node, Ranges.ofSortedAndDeoverlapped(slicesArray), 0), ourDelayUntilStarting, TimeUnit. MICROSECONDS);
-    }
-
-    private static Runnable getCoordinateShardDurableRunnable(Node node, Ranges ranges, int currentStep)
-    {
-        return () -> {
-            try
-            {
-                coordinateExclusiveSyncPointForCoordinateShardDurable(node, ranges, currentStep);
-            }
-            catch (Exception e)
-            {
-                logger.error("Exception in initial range calculation and initiation of exclusive sync point for local shard durability", e);
-            }
-        };
     }
 
     /**
      * The first step for coordinating shard durable is to run an exclusive sync point
      * the result of which can then be used to run
      */
-    private static void coordinateExclusiveSyncPointForCoordinateShardDurable(Node node, Ranges ranges, int currentStep)
+    private void startShardSync(Ranges ranges)
     {
-        ShardDistributor distributor = node.commandStores().shardDistributor();
-        // In each step coordinate shard durability for a subrange of each range
-        Range[] slices = new Range[ranges.size()];
-        for (int i = 0; i < ranges.size(); i++)
-        {
-            Range r = ranges.get(i);
-            slices[i] = distributor.splitRange(r, currentStep, COORDINATE_SHARD_DURABLE_RANGE_STEPS);
-        }
-
-        CoordinateSyncPoint.exclusive(node, Ranges.ofSortedAndDeoverlapped(slices))
+        CoordinateSyncPoint.exclusive(node, ranges)
                 .addCallback((success, fail) -> {
                     if (fail != null)
-                    {
-                        logger.error("Exception coordinating exclusive sync point for local shard durability", fail);
-                        scheduleCoordinateShardDurable(node);
-                    }
-                    else
-                    {
-                        coordinateShardDurableAfterExclusiveSyncPoint(node, ranges, success, currentStep);
-                    }
+                        logger.error("Exception coordinating exclusive sync point for local shard durability of {}", ranges, fail);
+                    else coordinateShardDurableAfterExclusiveSyncPoint(node, success);
                 });
     }
 
-    private static void coordinateShardDurableAfterExclusiveSyncPoint(Node node, Ranges ranges, SyncPoint exclusiveSyncPoint, int currentStep)
+    private void coordinateShardDurableAfterExclusiveSyncPoint(Node node, SyncPoint exclusiveSyncPoint)
     {
         CoordinateShardDurable.coordinate(node, exclusiveSyncPoint)
                 .addCallback((success, fail) -> {
                     if (fail != null)
                     {
                         logger.error("Exception coordinating local shard durability, will retry immediately", fail);
-                        // On failure don't increment currentStep
-                        // TODO review is it better to increment the currentStep so if there is a stuck portion we will move past it and at least
-                        // make some progress?
-                        coordinateShardDurableAfterExclusiveSyncPoint(node, ranges, exclusiveSyncPoint, currentStep);
-                    }
-                    else
-                    {
-                        int nextStep = currentStep + 1;
-                        if (nextStep >= COORDINATE_SHARD_DURABLE_RANGE_STEPS)
-                            // Schedule the next time to start the steps from the beginning on whatever ranges we target in the next round
-                            scheduleCoordinateShardDurable(node);
-                        else
-                            // Continue on to scheduling the next subrange step with a fixed delay
-                            // TODO review Should there be a fixed gap here or just keep going immediately?
-                            node.scheduler().once(() -> coordinateExclusiveSyncPointForCoordinateShardDurable(node, ranges, currentStep + 1), COORDINATE_SHARD_DURABLE_RANGE_STEP_GAP_MILLIS, TimeUnit.MILLISECONDS);
+                        coordinateShardDurableAfterExclusiveSyncPoint(node, exclusiveSyncPoint);
                     }
                 });
     }
 
-    private static void scheduleCoordinateGloballyDurable(Node node)
+    private void startGlobalSync()
     {
-        node.scheduler().once(getCoordinateGloballyDurableRunnable(node), getNextCoordinateGloballyDurableWaitMicros(node), TimeUnit.MICROSECONDS);
+        try
+        {
+            long epoch = node.epoch();
+            AsyncChain<AsyncResult<Void>> resultChain = node.withEpoch(epoch, () -> node.commandStores().any().submit(() -> CoordinateGloballyDurable.coordinate(node, epoch)));
+            resultChain.begin((success, fail) -> {
+                if (fail != null) logger.error("Exception initiating coordination of global durability", fail);
+                else logger.trace("Successful coordination of global durability");
+            });
+        }
+        catch (Exception e)
+        {
+            logger.error("Exception invoking withEpoch to start coordination for global durability", e);
+        }
     }
 
-    private static Runnable getCoordinateGloballyDurableRunnable(Node node)
+    private List<Ranges> rangesToShardSync(long nowMicros)
     {
-        return () -> {
-            try
+        ShardDistributor distributor = node.commandStores().shardDistributor();
+        List<Ranges> result = new ArrayList<>();
+        for (Map.Entry<Shard, Integer> e : localIndexes.entrySet())
+        {
+            Shard shard = e.getKey();
+            int index = e.getValue();
+            long microsOffset = (index * shardCycleTimeMicros) / shard.rf();
+            int shardCycleTimeMicros = Math.max(this.shardCycleTimeMicros, Ints.saturatedCast(shard.rf() * 3L * frequencyMicros));
+            long prevSyncTimeMicros = Math.max(prevShardSyncTimeMicros, nowMicros - ((shardCycleTimeMicros / shard.rf()) / 2L));
+            int from = (int) ((prevSyncTimeMicros + microsOffset) % shardCycleTimeMicros);
+            int to = (int) ((nowMicros + microsOffset) % shardCycleTimeMicros);
+            List<Range> ranges = new ArrayList<>();
+            if (from > to)
             {
-                // During startup or when there is nothing to do just skip
-                // since it generates a lot of noisy errors if you move forward
-                // with no shards
-                Ranges nodeRanges = node.topology().current().rangesForNode(node.id());
-                if (nodeRanges.isEmpty() || node.commandStores().count() == 0)
-                {
-                    scheduleCoordinateGloballyDurable(node);
-                    return;
-                }
+                Range range = distributor.splitRange(shard.range, to, shardCycleTimeMicros, shardCycleTimeMicros);
+                if (range != null)
+                    ranges.add(range);
+                to = from;
+                from = 0;
+            }
 
-                long epoch = node.epoch();
-                // TODO review Wanted this to execute async and not block the scheduler
-                AsyncChain<AsyncResult<Void>> resultChain = node.withEpoch(epoch, () -> node.commandStores().any().submit(() -> CoordinateGloballyDurable.coordinate(node, epoch)));
-                resultChain.begin((success, fail) -> {
-                    if (fail != null)
-                    {
-                        logger.error("Exception initiating coordination in withEpoch for global durability", fail);
-                        scheduleCoordinateGloballyDurable(node);
-                    }
-                    else
-                    {
-                        success.addCallback(coordinateGloballyDurableCallback(node));
-                    }
-                });
-            }
-            catch (Exception e)
-            {
-                logger.error("Exception invoking withEpoch to start coordination for global durability", e);
-            }
-        };
+            Range range = distributor.splitRange(shard.range, from, to, shardCycleTimeMicros);
+            if (range != null)
+                ranges.add(range);
+
+            if (!ranges.isEmpty())
+                result.add(Ranges.of(ranges.toArray(new Range[0])));
+        }
+        return result;
     }
 
-    private static BiConsumer<Void, Throwable> coordinateGloballyDurableCallback(Node node)
+    private void updateTopology()
     {
-        return (success, fail) -> {
-            if (fail != null)
-                logger.error("Exception coordinating global durability", fail);
-            // Reschedule even on failure because we never stop need to propagate global durability
-            scheduleCoordinateGloballyDurable(node);
-        };
-    }
+        Topology latestGlobal = node.topology().current();
+        if (latestGlobal == currentGlobalTopology)
+            return;
 
-    private static long getNextCoordinateGloballyDurableWaitMicros(Node node)
-    {
-        return getNextTurn(node, COORDINATE_GLOBALLY_DURABLE_TARGET_GAP_MICROS);
+        Topology latestLocal = latestGlobal.forNode(node.id());
+        if (latestLocal.size() == 0)
+            return;
+
+        currentGlobalTopology = latestGlobal;
+
+        List<Node.Id> ids = new ArrayList<>(latestGlobal.nodes());
+        Collections.sort(ids);
+        globalIndex = ids.indexOf(node.id());
+
+        localIndexes.clear();
+        for (Shard shard : latestLocal.shards())
+            localIndexes.put(shard, shard.sortedNodes.indexOf(node.id()));
     }
 
     /**
@@ -313,21 +284,20 @@ public class CoordinateDurabilityScheduling
      * It's assumed it is fine if nodes overlap or reorder or skip for whatever activity we are picking turns for as long as it is approximately
      * the right pacing.
      */
-    private static long getNextTurn(Node node, long targetGapMicros)
+    private void setNextGlobalSyncTime(long nowMicros)
     {
-        NodeAndTopologyInfo nodeAndTopologyInfo = node.topology().currentNodeAndTopologyInfo();
-        // Empty epochs happen during node removal, startup, and tests so check again in 1 second
-        if (nodeAndTopologyInfo == null)
-            return TimeUnit.SECONDS.toMicros(1);
+        if (currentGlobalTopology == null)
+        {
+            nextGlobalSyncTimeMicros = nowMicros;
+            return;
+        }
 
-        int ourIndex = nodeAndTopologyInfo.ourIndex;
-        long nowMicros = node.unix(TimeUnit.MICROSECONDS);
         // How long it takes for all nodes to go once
-        long totalRoundDuration = nodeAndTopologyInfo.topology.nodes().size() * targetGapMicros;
+        long totalRoundDuration = currentGlobalTopology.nodes().size() * globalCycleTimeMicros;
         long startOfCurrentRound = (nowMicros / totalRoundDuration) * totalRoundDuration;
 
         // In a given round at what time in the round should this node take its turn
-        long ourOffsetInRound = ourIndex * targetGapMicros;
+        long ourOffsetInRound = globalIndex * globalCycleTimeMicros;
 
         long targetTimeInCurrentRound = startOfCurrentRound + ourOffsetInRound;
         long targetTime = targetTimeInCurrentRound;
@@ -335,6 +305,6 @@ public class CoordinateDurabilityScheduling
         if (targetTimeInCurrentRound < nowMicros)
             targetTime += totalRoundDuration;
 
-        return targetTime - nowMicros;
+        nextGlobalSyncTimeMicros = targetTime - nowMicros;
     }
 }

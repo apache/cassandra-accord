@@ -23,6 +23,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
 
+import javax.annotation.Nullable;
+
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.utils.Invariants;
@@ -37,9 +39,9 @@ public interface ShardDistributor
      * Return a single subSpit from a range given the total number of splits the range should be divided into and
      * the index of the split to be returned.
      *
-     * If the range is not sufficiently divisible then the range will be returned unmodified.
+     * If the range is not sufficiently divisible, some time slots will return null, and the others unitary portions of the range
      */
-    Range splitRange(Range range, int splitIndex, int totalSplits);
+    @Nullable Range splitRange(Range range, int from, int to, int totalSplits);
 
     class EvenSplit<T> implements ShardDistributor
     {
@@ -49,9 +51,11 @@ public interface ShardDistributor
             Range subRange(Range range, T start, T end);
 
             T zero();
+            T valueOf(int v);
             T add(T a, T b);
             T subtract(T a, T b);
             T divide(T a, int i);
+            T divide(T a, T b);
             T multiply(T a, int i);
             int min(T v, int i);
             int compare(T a, T b);
@@ -67,18 +71,34 @@ public interface ShardDistributor
         }
 
         @Override
-        public Range splitRange(Range range, int splitIndex, int totalSplits)
+        public Range splitRange(Range range, int from, int to, int numSplits)
         {
-            Invariants.checkArgument(splitIndex < totalSplits);
+            Invariants.checkArgument(from <= to);
+            Invariants.checkArgument(to <= numSplits);
             Splitter<T> splitter = this.splitter.apply(Ranges.single(range));
             T size = splitter.sizeOf(range);
-            T splitSize = splitter.divide(size, totalSplits);
-            // Small ranges aren't divisible
-            if (splitter.compare(splitSize, splitter.zero()) <= 0)
-                return range;
-            T splitBegin = splitter.multiply(splitSize, splitIndex);
-            // For the last split use size as the end in case there is an issue with division and remainder
-            T splitEnd = splitIndex == (totalSplits - 1) ? size : splitter.add(splitBegin, splitSize);
+            T splitSize = splitter.divide(size, numSplits);
+            T remainder = splitter.subtract(size, splitter.multiply(splitSize, numSplits));
+            T splitPlusOneRate = remainder.equals(splitter.zero()) ? null : splitter.divide(splitter.add(remainder, splitter.valueOf(numSplits-1)), remainder);
+            T splitBegin = splitter.multiply(splitSize, from);
+            if (splitPlusOneRate != null)
+                splitBegin = splitter.add(splitBegin, splitter.divide(splitter.valueOf(from), splitPlusOneRate));
+
+            T splitEnd;
+            if (to == numSplits)
+            {
+                splitEnd = size;
+            }
+            else
+            {
+                splitEnd = splitter.multiply(splitSize, to);
+                if (splitPlusOneRate != null)
+                    splitEnd = splitter.add(splitEnd, splitter.divide(splitter.valueOf(to), splitPlusOneRate));
+            }
+
+            if (splitBegin.equals(splitEnd))
+                return null;
+
             return splitter.subRange(range, splitBegin, splitEnd);
         }
 

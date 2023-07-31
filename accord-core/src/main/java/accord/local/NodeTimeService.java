@@ -38,8 +38,6 @@ public interface NodeTimeService
     /**
      * Return the current time since the Unix epoch in the specified time unit. May still be simulated time and not
      * real time.
-     *
-     * Throws IllegalArgumentException for TimeUnit.NANOSECONDS because a long isn't big enough.
      */
     long unix(TimeUnit unit);
 
