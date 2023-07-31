@@ -64,18 +64,6 @@ public class TopologyManager
 {
     private static final AsyncResult<Void> SUCCESS = AsyncResults.success(null);
 
-    public static class LocalAndGlobal
-    {
-        public final Topology global;
-        public final Topology local;
-
-        public LocalAndGlobal(Topology global, Topology local)
-        {
-            this.global = global;
-            this.local = local;
-        }
-    }
-
     static class EpochState
     {
         final Id self;
