@@ -19,7 +19,6 @@
 package accord.local;
 
 import java.util.Objects;
-import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSortedSet;
 
@@ -44,6 +43,7 @@ import accord.utils.IndexedQuadConsumer;
 import accord.utils.Invariants;
 import accord.utils.SimpleBitSet;
 import accord.utils.async.AsyncChain;
+import javax.annotation.Nullable;
 
 import static accord.local.Listeners.Immutable.EMPTY;
 import static accord.local.SaveStatus.Uninitialised;
@@ -834,8 +834,8 @@ public abstract class Command implements CommonAttributes
         {
             super(common, status, executeAt, promised, accepted);
             this.waitingOn = waitingOn;
-            Invariants.checkState(common.route().kind().isFullRoute());
-            Invariants.checkState(waitingOn.deps.equals(common.partialDeps()));
+            Invariants.checkState(common.route().kind().isFullRoute(), "Expected a full route but given %s", common.route().kind());
+            Invariants.checkState(waitingOn.deps.equals(common.partialDeps()), "Deps do not match; expected %s == %s", waitingOn.deps, common.partialDeps());
         }
 
         @Override

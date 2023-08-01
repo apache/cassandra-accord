@@ -18,21 +18,6 @@
 
 package accord.local;
 
-import accord.api.ConfigurationService.EpochReady;
-import accord.local.CommandStore.EpochUpdateHolder;
-import accord.topology.Topology;
-import accord.utils.Invariants;
-import accord.utils.MapReduce;
-import accord.utils.MapReduceConsume;
-
-import com.google.common.annotations.VisibleForTesting;
-
-import accord.utils.RandomSource;
-import org.agrona.collections.Hashing;
-import org.agrona.collections.Int2ObjectHashMap;
-import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncChains;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -44,11 +29,15 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import accord.api.Agent;
+import accord.api.ConfigurationService.EpochReady;
 import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
+import accord.local.CommandStore.EpochUpdateHolder;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Routables;
@@ -56,7 +45,16 @@ import accord.primitives.Route;
 import accord.primitives.RoutingKeys;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.topology.Topology;
+import accord.utils.Invariants;
+import accord.utils.MapReduce;
+import accord.utils.MapReduceConsume;
+import accord.utils.RandomSource;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 import javax.annotation.Nonnull;
+import org.agrona.collections.Hashing;
+import org.agrona.collections.Int2ObjectHashMap;
 
 import static accord.api.ConfigurationService.EpochReady.done;
 import static accord.local.PreLoadContext.empty;
@@ -154,6 +152,7 @@ public abstract class CommandStores
             Ranges[] newRanges = Arrays.copyOf(ranges, newLength);
             newEpochs[newLength - 1] = epoch;
             newRanges[newLength - 1] = latestRanges;
+            Invariants.checkState(newEpochs[newLength - 1] == 0 || newEpochs[newLength - 1] == epoch, "Attempted to override historic epoch %d with %d", newEpochs[newLength - 1], epoch);
             return new RangesForEpoch(newEpochs, newRanges, store);
         }
 
@@ -351,6 +350,7 @@ public abstract class CommandStores
             Ranges removeRanges = subtracted.slice(current, Minimal);
             if (!removeRanges.isEmpty())
             {
+                // TODO (required): This is updating the a non-volatile field in the previous Snapshot, why modify it at all, even with volatile the guaranteed visibility is weak even with mutual exclusion
                 shard.ranges = shard.ranges().withRanges(newTopology.epoch(), current.subtract(subtracted));
                 shard.store.epochUpdateHolder.remove(epoch, shard.ranges, removeRanges);
                 bootstrapUpdates.add(shard.store.unbootstrap(epoch, removeRanges));
