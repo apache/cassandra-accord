@@ -272,13 +272,9 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
         }
         else
         {
-            // TODO review this is a pretty terrible work around for the fact that you can't binarySearch these
-            // two incompatible types
             RoutingKey[] result = new RoutingKey[keys.length];
             for (int i = 0; i < keys.length; i++)
-            {
                 result[i] = keys[i].toUnseekable();
-            }
             int insertPos = Arrays.binarySearch(result, withKey);
             if (insertPos >= 0)
                 return toRoutingKeysFactory.apply(result, insertPos, true);
