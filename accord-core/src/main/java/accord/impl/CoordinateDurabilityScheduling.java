@@ -184,8 +184,7 @@ public class CoordinateDurabilityScheduling
     {
         CoordinateSyncPoint.exclusive(node, ranges)
                 .addCallback((success, fail) -> {
-                    if (fail != null)
-                        logger.error("Exception coordinating exclusive sync point for local shard durability of {}", ranges, fail);
+                    if (fail != null) logger.error("Exception coordinating exclusive sync point for local shard durability of {}", ranges, fail);
                     else coordinateShardDurableAfterExclusiveSyncPoint(node, success);
                 });
     }

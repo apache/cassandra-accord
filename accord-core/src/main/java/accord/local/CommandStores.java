@@ -125,6 +125,7 @@ public abstract class CommandStores
         }
     }
 
+    // TODO (now): split into deterministic and non-deterministic methods; ensure we only use deterministic methods during commands execution
     public static class RangesForEpoch
     {
         final long[] epochs;
