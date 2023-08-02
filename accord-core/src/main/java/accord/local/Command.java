@@ -165,11 +165,6 @@ public abstract class Command implements CommonAttributes
             return Executed.executed(common, status, executeAt, promised, accepted, waitingOn, writes, result);
         }
 
-        public static Truncated truncated(CommonAttributes common, SaveStatus status, Timestamp executeAt, Writes writes, Result result)
-        {
-            return new Truncated(common, status, executeAt, writes, result);
-        }
-
         public static Truncated invalidated(TxnId txnId, Listeners.Immutable durableListeners)
         {
             return Truncated.invalidated(txnId, durableListeners);
@@ -819,16 +814,7 @@ public abstract class Command implements CommonAttributes
 
     public static class Committed extends Accepted
     {
-        public static final Committed EMPTY = new Committed(SaveStatus.Committed);
-
         public final WaitingOn waitingOn;
-
-        // Empty constructor for size measurement
-        private Committed(SaveStatus status)
-        {
-            super(Mutable.EMPTY_ATTRS_NONE_PARTIAL_DEPS, status, null, null, null);
-            this.waitingOn = WaitingOn.EMPTY;
-        }
 
         private Committed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOn waitingOn)
         {
@@ -909,16 +895,8 @@ public abstract class Command implements CommonAttributes
 
     public static class Executed extends Committed
     {
-        public static final Executed EMPTY = new Executed();
         private final Writes writes;
         private final Result result;
-
-        private Executed()
-        {
-            super(SaveStatus.Applied);
-            this.writes = null;
-            this.result = null;
-        }
 
         public Executed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOn waitingOn, Writes writes, Result result)
         {
