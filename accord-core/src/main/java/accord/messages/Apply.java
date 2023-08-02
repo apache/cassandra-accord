@@ -76,12 +76,12 @@ public class Apply extends TxnRequest<ApplyReply>
         node.send(to, applyMaximal(to, participates, executes, txnId, route, txn, executeAt, deps, writes, result));
     }
 
-    public static Topologies executes(Node node, Route<?> route, Timestamp executeAt)
+    public static Topologies executes(Node node, Unseekables<?> route, Timestamp executeAt)
     {
         return node.topology().forEpoch(route, executeAt.epoch());
     }
 
-    public static Topologies participates(Node node, Route<?> route, TxnId txnId, Timestamp executeAt, Topologies executes)
+    public static Topologies participates(Node node, Unseekables<?> route, TxnId txnId, Timestamp executeAt, Topologies executes)
     {
         return txnId.epoch() == executeAt.epoch() ? executes : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
     }

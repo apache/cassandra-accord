@@ -206,11 +206,6 @@ public abstract class CommandStores
             return allInternal(Math.max(0, floorIndex(fromInclusive)), 1 + floorIndex(toInclusive));
         }
 
-        public @Nonnull Ranges allSince(long fromInclusive)
-        {
-            return allInternal(Math.max(0, floorIndex(fromInclusive)), ranges.length);
-        }
-
         public @Nonnull Ranges all()
         {
             return allInternal(0, ranges.length);

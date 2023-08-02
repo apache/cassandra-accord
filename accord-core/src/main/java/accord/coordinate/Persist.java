@@ -72,6 +72,14 @@ public class Persist implements Callback<ApplyReply>
         node.send(participates.nodes(), to -> Apply.applyMaximal(to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), persist);
     }
 
+    public static void persistPartialMaximal(Node node, TxnId txnId, Unseekables<?> sendTo, FullRoute<?> route, PartialTxn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    {
+        Topologies executes = executes(node, sendTo, executeAt);
+        Topologies participates = participates(node, sendTo, txnId, executeAt, executes);
+        Persist persist = new Persist(node, participates, txnId, route, txn, executeAt, deps);
+        node.send(participates.nodes(), to -> Apply.applyMaximal(to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), persist);
+    }
+
     private Persist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps)
     {
         this.node = node;
