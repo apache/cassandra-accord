@@ -63,6 +63,7 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
         {
             Deps deps = Deps.merge(successes, ok -> ok.witnessedAt.equals(txnId) ? ok.deps : null);
             Execute.execute(node, txnId, txn, route, txnId, deps, this);
+            node.agent().metricsEventsListener().onFastPathTaken(txnId, deps);
         }
         else
         {
@@ -83,6 +84,8 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
                 else
                     proposeAndExecute(node, topologies, Ballot.ZERO, txnId, txn, route, executeAt, deps, this);
             }
+
+            node.agent().metricsEventsListener().onSlowPathTaken(txnId, deps);
         }
     }
 }

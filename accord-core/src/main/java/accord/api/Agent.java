@@ -60,4 +60,9 @@ public interface Agent extends UncaughtExceptionListener
     boolean isExpired(TxnId initiated, long now);
 
     Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges);
+
+    default EventsListener metricsEventsListener()
+    {
+        return EventsListener.NOOP;
+    }
 }
