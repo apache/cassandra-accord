@@ -515,7 +515,10 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
         State ensure(TxnId txnId)
         {
-            return stateMap.computeIfAbsent(txnId, State::new);
+            return stateMap.computeIfAbsent(txnId, ignored -> {
+                node.agent().metricsEventsListener().onProgressLogSizeChange(txnId, 1);
+                return new State(txnId);
+            });
         }
 
         State ensure(TxnId txnId, State state)

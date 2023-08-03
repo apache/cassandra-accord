@@ -343,6 +343,7 @@ public class Commands
         WaitingOn waitingOn = initialiseWaitingOn(safeStore, txnId, executeAt, attrs.partialDeps(), attrs.route());
         command = safeCommand.commit(attrs, executeAt, waitingOn);
         safeStore.progressLog().committed(command, shard);
+        safeStore.agent().metricsEventsListener().onCommitted(command);
 
         // TODO (expected, safety): introduce intermediate status to avoid reentry when notifying listeners (which might notify us)
         maybeExecute(safeStore, safeCommand, true, true);
@@ -486,6 +487,7 @@ public class Commands
 
         maybeExecute(safeStore, safeCommand, true, true);
         safeStore.progressLog().executed(safeCommand.current(), shard);
+        safeStore.agent().metricsEventsListener().onExecuted(command);
 
         return ApplyOutcome.Success;
     }
@@ -582,8 +584,12 @@ public class Commands
         //  that was pre-bootstrap for some range (so redundant and we may have gone ahead of), but had to be executed locally
         //  for another range
         CommandStore unsafeStore = safeStore.commandStore();
+        long t0 = safeStore.time().now();
         return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()), command.partialTxn())
                .flatMap(unused -> unsafeStore.submit(context, ss -> {
+                   Command cmd = ss.get(txnId).current();
+                   if (!cmd.hasBeen(Applied))
+                       ss.agent().metricsEventsListener().onApplied(cmd, t0);
                    postApply(ss, txnId);
                    return null;
                }));

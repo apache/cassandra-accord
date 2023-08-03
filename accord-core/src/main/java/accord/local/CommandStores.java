@@ -403,6 +403,13 @@ public abstract class CommandStores
         return new TopologyUpdate(new Snapshot(result.toArray(new ShardHolder[0]), newLocalTopology, newTopology), bootstrap);
     }
 
+    public <R> R unsafeFoldLeft(R initial, BiFunction<R, CommandStore, R> f)
+    {
+        Snapshot snapshot = current;
+        for (ShardHolder shard : snapshot.shards)
+            initial = f.apply(initial, shard.store);
+        return initial;
+    }
 
     public AsyncChain<Void> forEach(Consumer<SafeCommandStore> forEach)
     {

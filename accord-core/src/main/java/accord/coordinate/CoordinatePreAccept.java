@@ -216,7 +216,15 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
         if (extraPreAccept != null)
             extraPreAccept.extraPreAcceptIsDone = true;
         if (failure instanceof CoordinationFailed)
+        {
             ((CoordinationFailed) failure).set(txnId, route.homeKey());
+            if (failure instanceof Timeout)
+                node.agent().metricsEventsListener().onTimeout(txnId);
+            else if (failure instanceof Preempted)
+                node.agent().metricsEventsListener().onPreempted(txnId);
+            else if (failure instanceof Invalidated)
+                node.agent().metricsEventsListener().onInvalidated(txnId);
+        }
         super.setFailure(failure);
     }
 
@@ -265,7 +273,15 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
     public void accept(T success, Throwable failure)
     {
         if (failure instanceof CoordinationFailed)
+        {
             ((CoordinationFailed) failure).set(txnId, route.homeKey());
+            if (failure instanceof Preempted)
+                node.agent().metricsEventsListener().onPreempted(txnId);
+            else if (failure instanceof Timeout)
+                node.agent().metricsEventsListener().onTimeout(txnId);
+            else if (failure instanceof Invalidated)
+                node.agent().metricsEventsListener().onInvalidated(txnId);
+        }
 
         if (success != null) trySuccess(success);
         else tryFailure(failure);
