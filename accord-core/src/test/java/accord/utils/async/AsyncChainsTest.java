@@ -305,7 +305,7 @@ public class AsyncChainsTest
 
     }
 
-    private static <T> AbstractThrowableAssert<?, Throwable> assertWillSeeFailure(AsyncChain<T> chain)
+    private static <T> AbstractThrowableAssert<?, ? extends Throwable> assertWillSeeFailure(AsyncChain<T> chain)
     {
         BiConsumer<? super T, Throwable> mock = Mockito.mock(BiConsumer.class);
         ArgumentCaptor<Throwable> captor = ArgumentCaptor.forClass(Throwable.class);
