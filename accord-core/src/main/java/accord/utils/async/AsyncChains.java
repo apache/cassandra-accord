@@ -20,18 +20,24 @@ package accord.utils.async;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
-import accord.api.VisibleForImplementation;
-import accord.utils.Invariants;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import accord.api.VisibleForImplementation;
+import accord.utils.Invariants;
 
 public abstract class AsyncChains<V> implements AsyncChain<V>
 {
@@ -611,6 +617,42 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         Result result = callbackResult.get();
         if (result.failure == null) return result.result;
         else throw new ExecutionException(result.failure);
+    }
+
+    public static <V> V getBlockingAndRethrow(AsyncChain<V> chain)
+    {
+        class Result
+        {
+            final V result;
+            final Throwable failure;
+
+            public Result(V result, Throwable failure)
+            {
+                this.result = result;
+                this.failure = failure;
+            }
+        }
+
+        AtomicReference<Result> callbackResult = new AtomicReference<>();
+        CountDownLatch latch = new CountDownLatch(1);
+
+        chain.begin((result, failure) -> {
+            callbackResult.set(new Result(result, failure));
+            latch.countDown();
+        });
+
+        try
+        {
+            latch.await();
+        }
+        catch (InterruptedException e)
+        {
+            throw new RuntimeException(e);
+        }
+
+        Result result = callbackResult.get();
+        if (result.failure == null) return result.result;
+        else throw new RuntimeException(result.failure);
     }
 
     public static <V> V getBlocking(AsyncChain<V> chain, long timeout, TimeUnit unit) throws InterruptedException, TimeoutException, ExecutionException
