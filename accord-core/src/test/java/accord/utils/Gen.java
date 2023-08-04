@@ -36,14 +36,24 @@ public interface Gen<A> {
 
     A next(RandomSource random);
 
-    default <B> Gen<B> map(Function<A, B> fn)
+    default <B> Gen<B> map(Function<? super A, ? extends B> fn)
     {
         return r -> fn.apply(this.next(r));
     }
 
-    default <B> Gen<B> map(BiFunction<RandomSource, A, B> fn)
+    default <B> Gen<B> map(BiFunction<RandomSource, ? super A, ? extends B> fn)
     {
         return r -> fn.apply(r, this.next(r));
+    }
+
+    default <B> Gen<B> flatMap(Function<? super A, Gen<? extends B>> mapper)
+    {
+        return rs -> mapper.apply(this.next(rs)).next(rs);
+    }
+
+    default <B> Gen<B> flatMap(BiFunction<RandomSource, ? super A, Gen<? extends B>> mapper)
+    {
+        return rs -> mapper.apply(rs, this.next(rs)).next(rs);
     }
 
     default Gen<A> filter(Predicate<A> fn)
