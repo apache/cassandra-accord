@@ -63,14 +63,14 @@ import static accord.api.ProgressLog.ProgressShard.Unsure;
 import static accord.local.Command.Truncated.erased;
 import static accord.local.Command.Truncated.truncatedApply;
 import static accord.local.Command.Truncated.truncatedApplyWithOutcome;
+import static accord.local.Commands.Cleanup.ERASE;
+import static accord.local.Commands.Cleanup.NO;
+import static accord.local.Commands.Cleanup.TRUNCATE;
 import static accord.local.Commands.EnsureAction.Add;
 import static accord.local.Commands.EnsureAction.Check;
 import static accord.local.Commands.EnsureAction.Ignore;
 import static accord.local.Commands.EnsureAction.Set;
 import static accord.local.Commands.EnsureAction.TrySet;
-import static accord.local.Commands.Cleanup.ERASE;
-import static accord.local.Commands.Cleanup.NO;
-import static accord.local.Commands.Cleanup.TRUNCATE;
 import static accord.local.RedundantStatus.NOT_OWNED;
 import static accord.local.RedundantStatus.PRE_BOOTSTRAP;
 import static accord.local.SaveStatus.Applying;
@@ -791,7 +791,7 @@ public class Commands
         TRUNCATE(TruncatedApply),
         ERASE(Erased);
 
-        final SaveStatus appliesIfNot;
+        public final SaveStatus appliesIfNot;
 
         Cleanup(SaveStatus appliesIfNot)
         {
