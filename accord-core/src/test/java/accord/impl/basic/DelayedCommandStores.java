@@ -54,6 +54,20 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 
     public static class DelayedCommandStore extends InMemoryCommandStore
     {
+        private class DelayedTask<T> extends Task<T>
+        {
+            private DelayedTask(Callable<T> fn)
+            {
+                super(fn);
+            }
+
+            @Override
+            public void run()
+            {
+                unsafeRunIn(super::run);
+            }
+        }
+
         private final SimulatedDelayedExecutorService executor;
         private final Queue<Task<?>> pending = new LinkedList<>();
 
@@ -89,7 +103,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         @Override
         public <T> AsyncChain<T> submit(Callable<T> fn)
         {
-            Task<T> task = new Task<>(() -> this.unsafeRunIn(fn));
+            Task<T> task = new DelayedTask<>(fn);
             boolean wasEmpty = pending.isEmpty();
             pending.add(task);
             if (wasEmpty)

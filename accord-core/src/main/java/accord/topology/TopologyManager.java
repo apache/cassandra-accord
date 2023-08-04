@@ -98,7 +98,7 @@ public class TopologyManager
             newPrevSyncComplete = newPrevSyncComplete.union(MERGE_ADJACENT, addedRanges).subtract(removedRanges);
             if (prevSyncComplete.containsAll(newPrevSyncComplete))
                 return false;
-            Invariants.checkState(newPrevSyncComplete.containsAll(prevSyncComplete));
+            Invariants.checkState(newPrevSyncComplete.containsAll(prevSyncComplete), "Expected %s to contain all ranges in %s; but did not", newPrevSyncComplete, prevSyncComplete);
             prevSyncComplete = newPrevSyncComplete;
             syncComplete = curSyncComplete.slice(newPrevSyncComplete, Minimal).union(MERGE_ADJACENT, addedRanges);
             return true;

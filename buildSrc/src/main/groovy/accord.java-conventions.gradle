@@ -44,6 +44,9 @@ test {
     // Use max(cpu/2, 1) workers to run tests
     // see https://docs.gradle.org/current/userguide/performance.html
     maxParallelForks = Runtime.runtime.availableProcessors().intdiv(2) ?: 1
+    minHeapSize = "1g"
+    maxHeapSize = "1g"
+    jvmArgs += ['-XX:+HeapDumpOnOutOfMemoryError', "-XX:HeapDumpPath=${buildDir}"]
 }
 
 dependencies {

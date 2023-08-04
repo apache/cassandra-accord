@@ -165,7 +165,7 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
     public static MessageTask begin(Node originator, Collection<Node.Id> recipients, AgentExecutor executor, String desc, NodeProcess process)
     {
         MessageTask task = of(originator, recipients, executor, desc, process);
-        task.run();
+        executor.execute(task);
         return task;
     }
 

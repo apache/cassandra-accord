@@ -84,11 +84,7 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
         public Durability get(TxnId txnId)
         {
             if (txnId.compareTo(majorityBefore) < 0)
-            {
-                if (txnId.compareTo(universalBefore) < 0)
-                    return Universal;
-                return Majority;
-            }
+                return txnId.compareTo(universalBefore) < 0 ? Universal : Majority;
             return NotDurable;
         }
 

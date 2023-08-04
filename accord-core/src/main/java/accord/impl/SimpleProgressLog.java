@@ -358,10 +358,10 @@ public class SimpleProgressLog implements ProgressLog.Factory
                             if (fail == null && blockedUntil.isSatisfiedBy(success))
                             {
                                 Command test = safeStore0.ifInitialised(txnId).current();
-                                Invariants.checkState(test.has(success));
+                                Invariants.checkState(test.has(success), "Command %s was expected to have known %s, but had %s", test, success, test.known());
                                 record(success);
                             }
-                        });
+                        }).begin(commandStore.agent());
                     };
 
                     node.withEpoch(blockedUntil.fetchEpoch(txnId, executeAt), () -> {

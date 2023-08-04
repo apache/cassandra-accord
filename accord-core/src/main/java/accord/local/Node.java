@@ -34,6 +34,7 @@ import java.util.function.ToLongFunction;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import accord.primitives.EpochSupplier;
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -171,8 +172,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     // TODO (cleanup, testing): remove, only used by Maelstrom
     public AsyncResult<Void> start()
     {
-        AsyncResult<Void> result = onTopologyUpdateInternal(configService.currentTopology(), false).metadata;
-        return result;
+        return onTopologyUpdateInternal(configService.currentTopology(), false).metadata;
     }
 
     public CommandStores commandStores()
@@ -238,6 +238,21 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         topology.onEpochRedundant(ranges, epoch);
     }
 
+    public AsyncChain<?> awaitEpoch(long epoch)
+    {
+        if (topology.hasEpoch(epoch))
+            return AsyncResults.SUCCESS_VOID;
+        configService.fetchTopologyForEpoch(epoch);
+        return topology.awaitEpoch(epoch);
+    }
+
+    public AsyncChain<?> awaitEpoch(@Nullable EpochSupplier epochSupplier)
+    {
+        if (epochSupplier == null)
+            return AsyncResults.SUCCESS_VOID;
+        return awaitEpoch(epochSupplier.epoch());
+    }
+
     public void withEpoch(long epoch, Runnable runnable)
     {
         if (topology.hasEpoch(epoch))
@@ -246,11 +261,8 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         }
         else
         {
-            CommandStore executingOn = CommandStore.maybeCurrent();
             configService.fetchTopologyForEpoch(epoch);
-            AsyncChain<Void> chain = topology.awaitEpoch(epoch);
-            chain = (executingOn == null ? chain.addCallback(runnable) : chain.addCallback(runnable, executingOn));
-            chain.begin(agent());
+            topology.awaitEpoch(epoch).addCallback(runnable).begin(agent);
         }
     }
 
@@ -266,6 +278,14 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
             configService.fetchTopologyForEpoch(epoch);
             return topology.awaitEpoch(epoch).flatMap(ignore -> supplier.get());
         }
+    }
+
+    @Inline
+    public <T> AsyncChain<T> withEpoch(@Nullable EpochSupplier epochSupplier, Supplier<? extends AsyncChain<T>> supplier)
+    {
+        if (epochSupplier == null)
+            return supplier.get();
+        return withEpoch(epochSupplier.epoch(), supplier);
     }
 
     public TopologyManager topology()
@@ -458,8 +478,13 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public void reply(Id replyingToNode, ReplyContext replyContext, Reply send)
     {
+        // TODO (usability, now): add Throwable as an argument so the error check is here, every single message gets this wrong causing a NPE here
         if (send == null)
-            throw new NullPointerException();
+        {
+            NullPointerException e = new NullPointerException();
+            agent.onUncaughtException(e);
+            throw e;
+        }
         messageSink.reply(replyingToNode, replyContext, send);
     }
 
@@ -550,6 +575,8 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         // TODO (expected): should we try to pick keys in the same Keyspace in C*? Might want to adapt this to an Agent behaviour
         if (ranges.isEmpty()) // should not really happen, but pick some other replica to serve as home key
             ranges = topology().globalForEpoch(txnId.epoch()).ranges();
+        if (ranges.isEmpty())
+            throw new IllegalStateException("Unable to select a HomeKey as the topology does not have any ranges for epoch " + txnId.epoch());
         Range range = ranges.get(random.nextInt(ranges.size()));
         return range.someIntersectingRoutingKey(null);
     }
