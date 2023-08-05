@@ -474,10 +474,10 @@ public abstract class CommandStores
 
     public <O> AsyncChain<O> mapReduce(PreLoadContext context, Routables<?> keys, long minEpoch, long maxEpoch, MapReduce<? super SafeCommandStore, O> mapReduce)
     {
+        AsyncChain<O> chain = null;
         BiFunction<O, O, O> reducer = mapReduce::reduce;
         Snapshot snapshot = current;
         ShardHolder[] shards = snapshot.shards;
-        List<AsyncChain<? extends O>> chains = null;
         for (ShardHolder shard : shards)
         {
             // TODO (urgent, efficiency): range map for intersecting ranges (e.g. that to be introduced for range dependencies)
@@ -485,31 +485,25 @@ public abstract class CommandStores
             if (!shardRanges.intersects(keys))
                 continue;
 
-            if (chains == null)
-                chains = new ArrayList<>();
-            chains.add(shard.store.submit(context, mapReduce));
+            AsyncChain<O> next = shard.store.submit(context, mapReduce);
+            chain = chain != null ? AsyncChains.reduce(chain, next, reducer) : next;
         }
-        return chains == null ?
-               AsyncChains.success(null) :
-               AsyncChains.reduce(chains, reducer);
+        return chain == null ? AsyncChains.success(null) : chain;
     }
 
     protected <O> AsyncChain<O> mapReduce(PreLoadContext context, IntStream commandStoreIds, MapReduce<? super SafeCommandStore, O> mapReduce)
     {
         // TODO (low priority, efficiency): avoid using an array, or use a scratch buffer
         int[] ids = commandStoreIds.toArray();
-        List<AsyncChain<? extends O>> chains = null;
+        AsyncChain<O> chain = null;
         BiFunction<O, O, O> reducer = mapReduce::reduce;
         for (int id : ids)
         {
             CommandStore commandStore = forId(id);
-            if (chains == null)
-                chains = new ArrayList<>();
-            chains.add(commandStore.submit(context, mapReduce));
+            AsyncChain<O> next = commandStore.submit(context, mapReduce);
+            chain = chain != null ? AsyncChains.reduce(chain, next, reducer) : next;
         }
-        return chains == null ?
-               AsyncChains.success(null) :
-               AsyncChains.reduce(chains, reducer);
+        return chain == null ? AsyncChains.success(null) : chain;
     }
 
     public <O> void mapReduceConsume(PreLoadContext context, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
@@ -521,18 +515,15 @@ public abstract class CommandStores
     protected <O> AsyncChain<O> mapReduce(PreLoadContext context, MapReduce<? super SafeCommandStore, O> mapReduce)
     {
         // TODO (low priority, efficiency): avoid using an array, or use a scratch buffer
-        List<AsyncChain<? extends O>> chains = null;
+        AsyncChain<O> chain = null;
         BiFunction<O, O, O> reducer = mapReduce::reduce;
         for (ShardHolder shardHolder : current.shards)
         {
             CommandStore commandStore = shardHolder.store;
-            if (chains == null)
-                chains = new ArrayList<>();
-            chains.add(commandStore.submit(context, mapReduce));
+            AsyncChain<O> next = commandStore.submit(context, mapReduce);
+            chain = chain != null ? AsyncChains.reduce(chain, next, reducer) : next;
         }
-        return chains == null ?
-               AsyncChains.success(null) :
-               AsyncChains.reduce(chains, reducer);
+        return chain == null ? AsyncChains.success(null) : chain;
     }
 
     public synchronized Supplier<EpochReady> updateTopology(Node node, Topology newTopology, boolean startSync)

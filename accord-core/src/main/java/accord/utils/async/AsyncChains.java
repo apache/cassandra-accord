@@ -18,6 +18,7 @@
 
 package accord.utils.async;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
@@ -27,6 +28,7 @@ import java.util.function.Function;
 
 import accord.api.VisibleForImplementation;
 import accord.utils.Invariants;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -266,6 +268,44 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         }
     }
 
+    @VisibleForTesting
+    static class AccumulatingReducerAsyncChain<V> extends AsyncChains.Head<V>
+    {
+        private final BiFunction<? super V, ? super V, ? extends V> reducer;
+        private final AsyncChainCombiner<V> chain;
+
+        private AccumulatingReducerAsyncChain(AsyncChain<V> accum, AsyncChain<V> add, BiFunction<? super V, ? super V, ? extends V> reducer)
+        {
+            List<AsyncChain<V>> list = new ArrayList<>(2);
+            list.add(accum);
+            list.add(add);
+            this.chain = new AsyncChainCombiner<>(list);
+            this.reducer = reducer;
+        }
+
+        private static <V> boolean match(AsyncChain<V> accum, BiFunction<? super V, ? super V, ? extends V> reducer)
+        {
+            return accum instanceof AccumulatingReducerAsyncChain && ((AccumulatingReducerAsyncChain<?>) accum).reducer == reducer;
+        }
+
+        private void add(AsyncChain<V> a)
+        {
+            chain.inputs().add(a);
+        }
+
+        @VisibleForTesting
+        int size()
+        {
+            return chain.inputs().size();
+        }
+
+        @Override
+        protected void start(BiConsumer<? super V, Throwable> callback)
+        {
+            chain.map(r -> reduceArray(r, reducer)).begin(callback);
+        }
+    }
+
     // either the thing we start, or the thing we do in follow-up
     BiConsumer<? super V, Throwable> next;
     AsyncChains(Head<?> head)
@@ -492,16 +532,42 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         return new AsyncChainCombiner<>(chains).map(Lists::newArrayList);
     }
 
-    public static <V> AsyncChain<V> reduce(List<? extends AsyncChain<? extends V>> chains, BiFunction<V, V, V> reducer)
+    public static <V> AsyncChain<V> reduce(List<? extends AsyncChain<? extends V>> chains, BiFunction<? super V, ? super V, ? extends V> reducer)
     {
         if (chains.size() == 1)
             return (AsyncChain<V>) chains.get(0);
-        return allOf(chains).map(results -> {
-            V result = results[0];
-            for (int i=1; i< results.length; i++)
-                result = reducer.apply(result, results[i]);
-            return result;
-        });
+        return allOf(chains).map(r -> reduceArray(r, reducer));
+    }
+
+    private static <V> V reduceArray(V[] results, BiFunction<? super V, ? super V, ? extends V> reducer)
+    {
+        V result = results[0];
+        for (int i=1; i< results.length; i++)
+            result = reducer.apply(result, results[i]);
+        return result;
+    }
+
+    /**
+     * Special variant of {@link #reduce(List, BiFunction)} that returns a mutable chain, where new chains can be appended as long as the returned chain has not started.  The target use case are for patterns such as the following
+     * <p/>
+     * <pre>{@code
+     * BiFunction<? super V, ? super V, ? extends V> reducer = ...;
+     * AsyncChain<V> chain = null;
+     * for (...)
+     * {
+     *   AsyncChain<V> next = ...;
+     *   chain = chain == null ? next : reduce(chain, next, reducer);
+     * }
+     * }</pre>
+     */
+    public static <V> AsyncChain<V> reduce(AsyncChain<V> accum, AsyncChain<V> add, BiFunction<? super V, ? super V, ? extends V> reducer)
+    {
+        if (AccumulatingReducerAsyncChain.match(accum, reducer))
+        {
+            ((AccumulatingReducerAsyncChain<V>) accum).add(add);
+            return accum;
+        }
+        return new AccumulatingReducerAsyncChain<>(accum, add, reducer);
     }
 
     public static <A, B> AsyncChain<B> reduce(List<? extends AsyncChain<? extends A>> chains, B identity, BiFunction<B, ? super A, B> reducer)

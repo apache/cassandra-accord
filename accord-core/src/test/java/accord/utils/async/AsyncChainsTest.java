@@ -34,6 +34,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -264,6 +265,50 @@ public class AsyncChainsTest
         Assertions.assertEquals(15, AsyncChains.getBlocking(chain));
     }
 
+    private static void assertCombinerSize(int size, AsyncChain<?> chain)
+    {
+        Assertions.assertTrue(chain instanceof AsyncChains.AccumulatingReducerAsyncChain, () -> String.format("%s is not an instance of AsyncChainCombiner", chain));
+        AsyncChains.AccumulatingReducerAsyncChain<?> combiner = (AsyncChains.AccumulatingReducerAsyncChain<?>) chain;
+        Assertions.assertEquals(size, combiner.size());
+    }
+
+    @Test
+    void appendingReduceTest()
+    {
+        AsyncChain<Integer> chain1 = AsyncChains.success(1);
+        AsyncChain<Integer> chain2 = AsyncChains.success(2);
+        AsyncChain<Integer> chain3 = AsyncChains.success(3);
+        BiFunction<Integer, Integer, Integer> add = (a, b) -> a + b;
+        AsyncChain<Integer> reduction1 = AsyncChains.reduce(chain1, chain2, add);
+        assertCombinerSize(2, reduction1);
+        AsyncChain<Integer> reduction2 = AsyncChains.reduce(reduction1, chain3, add);
+        assertCombinerSize(3, reduction2);
+        Assertions.assertSame(reduction1, reduction2);
+
+        ResultCallback<Integer> callback = new ResultCallback<>();
+        reduction2.begin(callback);
+        Assertions.assertEquals(6, callback.value());
+    }
+
+    @Test
+    void uncombinableReduce()
+    {
+        AsyncChain<Integer> chain1 = AsyncChains.success(1);
+        AsyncChain<Integer> chain2 = AsyncChains.success(2);
+        AsyncChain<Integer> chain3 = AsyncChains.success(3);
+        BiFunction<Integer, Integer, Integer> add = (a, b) -> a + b;
+        BiFunction<Integer, Integer, Integer> mult = (a, b) -> a * b;
+        AsyncChain<Integer> reduction1 = AsyncChains.reduce(chain1, chain2, add);
+        assertCombinerSize(2, reduction1);
+        AsyncChain<Integer> reduction2 = AsyncChains.reduce(reduction1, chain3, mult);
+        assertCombinerSize(2, reduction2);
+        Assertions.assertNotSame(reduction1, reduction2);
+
+        ResultCallback<Integer> callback = new ResultCallback<>();
+        reduction2.begin(callback);
+        Assertions.assertEquals(9, callback.value());
+    }
+
     @Test
     void exceptionHandling()
     {
@@ -283,6 +328,7 @@ public class AsyncChainsTest
             return settable;
         });
         topLevel.add(() -> AsyncChains.allOf(Arrays.asList(AsyncChains.success(0), AsyncChains.success(0), AsyncChains.success(42))));
+        topLevel.add(() -> AsyncChains.reduce(AsyncChains.success(1), AsyncChains.success(1), (a, b) -> a + b));
 
         for (Supplier<? extends AsyncChain<? extends Object>> start : topLevel)
         {

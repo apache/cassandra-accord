@@ -37,7 +37,7 @@ public class AsyncChainCombiner<I> extends AsyncChains.Head<I[]>
         this.state = inputs;
     }
 
-    private List<AsyncChain<? extends I>> inputs()
+    List<AsyncChain<? extends I>> inputs()
     {
         Object current = state;
         Invariants.checkState(current instanceof List, "Expected state to be List but was %s", (current == null ? null : current.getClass()));
