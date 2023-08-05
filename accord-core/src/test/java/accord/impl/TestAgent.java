@@ -29,6 +29,36 @@ import java.util.concurrent.TimeUnit;
 
 public class TestAgent implements Agent
 {
+    public static class RethrowAgent extends TestAgent
+    {
+        @Override
+        public void onRecover(Node node, Result success, Throwable fail)
+        {
+            if (fail != null)
+                throw new AssertionError("Unexpected exception", fail);
+        }
+
+
+        @Override
+        public void onFailedBootstrap(String phase, Ranges ranges, Runnable retry, Throwable failure)
+        {
+            if (failure != null)
+                throw new AssertionError("Unexpected exception", failure);
+        }
+
+        @Override
+        public void onUncaughtException(Throwable t)
+        {
+            throw new AssertionError("Unexpected exception", t);
+        }
+
+        @Override
+        public void onHandledException(Throwable t)
+        {
+            throw new AssertionError("Unexpected exception", t);
+        }
+    }
+
     @Override
     public void onRecover(Node node, Result success, Throwable fail)
     {

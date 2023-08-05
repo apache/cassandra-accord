@@ -63,6 +63,11 @@ public class Property
 
     public static class ForBuilder extends Common<ForBuilder>
     {
+        public void check(FailingConsumer<RandomSource> fn)
+        {
+            forAll(Gens.random()).check(fn);
+        }
+
         public <T> SingleBuilder<T> forAll(Gen<T> gen)
         {
             return new SingleBuilder<>(gen, this);

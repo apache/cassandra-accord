@@ -34,7 +34,7 @@ public abstract class TaskExecutorService extends AbstractExecutorService implem
 {
     public static class Task<T> extends AsyncResults.SettableResult<T> implements Pending, RunnableFuture<T>
     {
-        private final Callable<T> fn;
+        protected final Callable<T> fn;
 
         public Task(Callable<T> fn)
         {

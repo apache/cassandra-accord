@@ -45,6 +45,16 @@ public class AccordGens
         return Gens.longs().between(0, Timestamp.MAX_EPOCH);
     }
 
+    public static Gen<Node.Id> nodes()
+    {
+        return nodes(RandomSource::nextInt);
+    }
+
+    public static Gen<Node.Id> nodes(Gen.IntGen nodes)
+    {
+        return nodes.map(Node.Id::new);
+    }
+
     public static Gen<TxnId> txnIds()
     {
         return txnIds(epochs()::nextLong, rs -> rs.nextLong(0, Long.MAX_VALUE), RandomSource::nextInt);

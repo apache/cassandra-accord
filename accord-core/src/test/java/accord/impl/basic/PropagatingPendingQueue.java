@@ -45,6 +45,12 @@ public class PropagatingPendingQueue implements PendingQueue
     }
 
     @Override
+    public void remove(Pending item)
+    {
+        wrapped.remove(item);
+    }
+
+    @Override
     public Pending poll()
     {
         if (!failures.isEmpty())
@@ -76,5 +82,11 @@ public class PropagatingPendingQueue implements PendingQueue
     public int size()
     {
         return wrapped.size();
+    }
+
+    @Override
+    public long nowInMillis()
+    {
+        return wrapped.nowInMillis();
     }
 }

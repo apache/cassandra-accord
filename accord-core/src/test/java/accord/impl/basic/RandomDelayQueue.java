@@ -20,6 +20,7 @@ package accord.impl.basic;
 
 import accord.utils.RandomSource;
 
+import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
@@ -64,6 +65,22 @@ public class RandomDelayQueue implements PendingQueue
         }
 
         @Override
+        public boolean equals(Object o)
+        {
+            if (o instanceof Pending) return item.equals(o);
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            Item item1 = (Item) o;
+            return time == item1.time && seq == item1.seq && item.equals(item1.item);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(time, seq, item);
+        }
+
+        @Override
         public String toString()
         {
             return "@" + time + "/" + seq + ":" + item;
@@ -93,6 +110,12 @@ public class RandomDelayQueue implements PendingQueue
     }
 
     @Override
+    public void remove(Pending item)
+    {
+        queue.remove(item);
+    }
+
+    @Override
     public Pending poll()
     {
         Item item = queue.poll();
@@ -108,6 +131,7 @@ public class RandomDelayQueue implements PendingQueue
         return queue.size();
     }
 
+    @Override
     public long nowInMillis()
     {
         return now;
