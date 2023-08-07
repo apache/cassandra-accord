@@ -29,6 +29,7 @@ import java.util.TreeSet;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import javax.annotation.Nullable;
 
 import com.google.common.collect.Sets;
 import org.slf4j.Logger;
@@ -42,7 +43,6 @@ import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.utils.Invariants;
 import accord.utils.RandomSource;
-import javax.annotation.Nullable;
 
 
 // TODO (required, testing): add change replication factor
@@ -300,7 +300,7 @@ public class TopologyRandomizer
     {
         Topology current = epochs.get(epochs.size() - 1);
         Shard[] oldShards = current.unsafeGetShards().clone();
-        int remainingMutations = random.nextInt(Math.min(current.size(), 10));
+        int remainingMutations = random.nextInt(Math.min(current.size() + 1, 10));
         int rejectedMutations = 0;
         logger.debug("Updating topology with {} mutations", remainingMutations);
         Shard[] newShards = oldShards;
