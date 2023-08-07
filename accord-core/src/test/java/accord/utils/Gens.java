@@ -157,6 +157,50 @@ public class Gens {
         {
             return RandomSource::nextBoolean;
         }
+
+        public Gen<Boolean> runs(double ratio)
+        {
+            Invariants.checkArgument(ratio > 0 && ratio <= 1, "Expected %d to be larger than 0 and <= 1", ratio);
+            int steps = (int) (1 / ratio);
+            double lower = ratio * .8;
+            double upper = ratio * 1.2;
+            return new Gen<Boolean>() {
+                private int run = -1;
+                private long falseCount = 0, trueCount = 0;
+                @Override
+                public Boolean next(RandomSource rs)
+                {
+                    if (run != -1)
+                    {
+                        run--;
+                        trueCount++;
+                        return true;
+                    }
+                    double currentRatio = trueCount / (double) (falseCount + trueCount);
+                    if (currentRatio < lower)
+                    {
+                        // not enough true
+                        trueCount++;
+                        return true;
+                    }
+                    if (currentRatio > upper)
+                    {
+                        // not enough false
+                        falseCount++;
+                        return false;
+                    }
+                    if (rs.decide(ratio))
+                    {
+                        run = rs.nextInt(steps);
+                        run--;
+                        trueCount++;
+                        return true;
+                    }
+                    falseCount++;
+                    return false;
+                }
+            };
+        }
     }
 
     public static class IntDSL
