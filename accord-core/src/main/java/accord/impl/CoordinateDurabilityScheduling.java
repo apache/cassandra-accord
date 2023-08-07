@@ -36,13 +36,16 @@ import accord.local.Node;
 import accord.local.ShardDistributor;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
+import accord.primitives.Routable.Domain;
 import accord.primitives.SyncPoint;
+import accord.primitives.TxnId;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResult;
 
+import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 
 /**
@@ -79,7 +82,19 @@ public class CoordinateDurabilityScheduling
     /*
      * In each round at each node wait this amount of time between initiating new CoordinateShardDurable
      */
-    private int frequencyMicros = Ints.saturatedCast(TimeUnit.MILLISECONDS.toMicros(100L));
+    private int frequencyMicros = Ints.saturatedCast(TimeUnit.MILLISECONDS.toMicros(500L));
+
+    /*
+     * In each round at each node wait this amount of time between allocating a CoordinateShardDurable txnId
+     * and coordinating the shard durability
+     */
+    private int txnIdLagMicros = Ints.saturatedCast(TimeUnit.SECONDS.toMicros(1L));
+
+    /*
+     * In each round at each node wait this amount of time between allocating a CoordinateShardDurable txnId
+     * and coordinating the shard durability
+     */
+    private int durabilityLagMicros = Ints.saturatedCast(TimeUnit.MILLISECONDS.toMicros(500L));
 
     /*
      * Target for how often the entire ring should be processed in microseconds. Every node will start at an offset in the current round that is based
@@ -182,23 +197,30 @@ public class CoordinateDurabilityScheduling
      */
     private void startShardSync(Ranges ranges)
     {
-        CoordinateSyncPoint.exclusive(node, ranges)
-                .addCallback((success, fail) -> {
-                    if (fail != null) logger.error("Exception coordinating exclusive sync point for local shard durability of {}", ranges, fail);
-                    else coordinateShardDurableAfterExclusiveSyncPoint(node, success);
-                });
+        TxnId at = node.nextTxnId(ExclusiveSyncPoint, Domain.Range);
+        node.scheduler().once(() -> node.withEpoch(at.epoch(), () -> {
+                           CoordinateSyncPoint.coordinate(node, at, ranges)
+                               .addCallback((success, fail) -> {
+                                   if (fail != null) logger.trace("Exception coordinating exclusive sync point for local shard durability of {}", ranges, fail);
+                                   else coordinateShardDurableAfterExclusiveSyncPoint(node, success);
+                               });
+        }), txnIdLagMicros, MICROSECONDS);
     }
 
     private void coordinateShardDurableAfterExclusiveSyncPoint(Node node, SyncPoint exclusiveSyncPoint)
     {
-        CoordinateShardDurable.coordinate(node, exclusiveSyncPoint)
-                .addCallback((success, fail) -> {
-                    if (fail != null)
-                    {
-                        logger.error("Exception coordinating local shard durability, will retry immediately", fail);
-                        coordinateShardDurableAfterExclusiveSyncPoint(node, exclusiveSyncPoint);
-                    }
-                });
+        node.scheduler().once(() -> {
+            node.commandStores().any().execute(() -> {
+                CoordinateShardDurable.coordinate(node, exclusiveSyncPoint)
+                                      .addCallback((success, fail) -> {
+                                          if (fail != null)
+                                          {
+                                              logger.trace("Exception coordinating local shard durability, will retry immediately", fail);
+                                              coordinateShardDurableAfterExclusiveSyncPoint(node, exclusiveSyncPoint);
+                                          }
+                                      });
+            });
+        }, durabilityLagMicros, MICROSECONDS);
     }
 
     private void startGlobalSync()
@@ -208,7 +230,7 @@ public class CoordinateDurabilityScheduling
             long epoch = node.epoch();
             AsyncChain<AsyncResult<Void>> resultChain = node.withEpoch(epoch, () -> node.commandStores().any().submit(() -> CoordinateGloballyDurable.coordinate(node, epoch)));
             resultChain.begin((success, fail) -> {
-                if (fail != null) logger.error("Exception initiating coordination of global durability", fail);
+                if (fail != null) logger.trace("Exception initiating coordination of global durability", fail);
                 else logger.trace("Successful coordination of global durability");
             });
         }

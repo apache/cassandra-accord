@@ -110,6 +110,11 @@ public interface Txn
             return this == LocalOnly;
         }
 
+        public boolean isSyncPoint()
+        {
+            return this == ExclusiveSyncPoint || this == SyncPoint;
+        }
+
         public boolean awaitsFutureDeps()
         {
             return this == ExclusiveSyncPoint;

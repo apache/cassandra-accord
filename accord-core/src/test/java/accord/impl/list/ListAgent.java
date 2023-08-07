@@ -81,7 +81,7 @@ public class ListAgent implements Agent
     @Override
     public boolean isExpired(TxnId initiated, long now)
     {
-        return now - initiated.hlc() >= timeout;
+        return now - initiated.hlc() >= timeout && !initiated.rw().isSyncPoint();
     }
 
     @Override

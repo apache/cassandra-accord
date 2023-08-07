@@ -43,6 +43,7 @@ import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
+import accord.impl.CoordinateDurabilityScheduling;
 import accord.impl.IntHashKey;
 import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
@@ -227,7 +228,7 @@ public class Cluster implements Scheduler
             Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink);
             TopologyUpdates topologyUpdates = new TopologyUpdates(executor);
             TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, lookup::get);
-//            List<CoordinateDurabilityScheduling> durabilityScheduling = new ArrayList<>();
+            List<CoordinateDurabilityScheduling> durabilityScheduling = new ArrayList<>();
             for (Id id : nodes)
             {
                 MessageSink messageSink = sinks.create(id, randomSupplier.get());
@@ -239,8 +240,8 @@ public class Cluster implements Scheduler
                                      randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
                                      SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending));
                 lookup.put(id, node);
-//                CoordinateDurabilityScheduling durability = new CoordinateDurabilityScheduling(node);
-//                durabilityScheduling.add(durability);
+                CoordinateDurabilityScheduling durability = new CoordinateDurabilityScheduling(node);
+                durabilityScheduling.add(durability);
             }
 
             // startup
@@ -257,11 +258,11 @@ public class Cluster implements Scheduler
             }, 5L, SECONDS);
 
             Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1, SECONDS);
-//            durabilityScheduling.forEach(CoordinateDurabilityScheduling::start);
+            durabilityScheduling.forEach(CoordinateDurabilityScheduling::start);
 
             noMoreWorkSignal.accept(() -> {
                 reconfigure.cancel();
-//                durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
+                durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
             });
 
             Packet next;
@@ -272,7 +273,7 @@ public class Cluster implements Scheduler
 
             chaos.cancel();
             reconfigure.cancel();
-//            durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
+            durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
             sinks.partitionSet = Collections.emptySet();
 
             // give progress log et al a chance to finish
