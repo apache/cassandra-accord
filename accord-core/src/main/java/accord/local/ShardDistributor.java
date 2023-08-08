@@ -81,6 +81,7 @@ public interface ShardDistributor
             T remainder = splitter.subtract(size, splitter.multiply(splitSize, numSplits));
             T splitPlusOneRate = remainder.equals(splitter.zero()) ? null : splitter.divide(splitter.add(remainder, splitter.valueOf(numSplits-1)), remainder);
             T splitBegin = splitter.multiply(splitSize, from);
+            // TODO (now): splitPlusOneRate maybe "zero" so from / zero fails with "divide by zero"
             if (splitPlusOneRate != null)
                 splitBegin = splitter.add(splitBegin, splitter.divide(splitter.valueOf(from), splitPlusOneRate));
 
