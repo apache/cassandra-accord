@@ -39,18 +39,26 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService impleme
     {
         private final long sequenceNumber;
         private final long periodMillis;
-        private long timeMillis;
-        private ScheduledTask(long sequenceNumber, long value, TimeUnit unit, Callable<T> fn)
+        private long nextExecuteAtMillis;
+
+        private ScheduledTask(long sequenceNumber, long initialDelay, long value, TimeUnit unit, Callable<T> fn)
         {
             super(fn);
             this.sequenceNumber = sequenceNumber;
             periodMillis = unit.toMillis(value);
+            nextExecuteAtMillis = triggerTime(initialDelay, unit);
+        }
+
+        private long triggerTime(long delay, TimeUnit unit)
+        {
+            long delayMillis = unit.toMillis(delay < 0 ? 0 : delay);
+            return pending.nowInMillis() + delayMillis;
         }
 
         @Override
         public long getDelay(TimeUnit unit)
         {
-            return unit.convert(timeMillis - pending.nowInMillis(), TimeUnit.MILLISECONDS);
+            return unit.convert(nextExecuteAtMillis - pending.nowInMillis(), TimeUnit.MILLISECONDS);
         }
 
         @Override
@@ -60,7 +68,7 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService impleme
                 return 0;
             if (other instanceof ScheduledTask) {
                 ScheduledTask<?> x = (ScheduledTask<?>)other;
-                long diff = timeMillis - x.timeMillis;
+                long diff = nextExecuteAtMillis - x.nextExecuteAtMillis;
                 if (diff < 0)
                     return -1;
                 else if (diff > 0)
@@ -89,17 +97,17 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService impleme
                 {
                     fn.call();
                     long nowMillis = pending.nowInMillis();
-                    if (periodMillis < 0)
+                    if (periodMillis > 0)
                     {
-                        // scheduleWithFixedDelay
-                        timeMillis = nowMillis + (-periodMillis);
+                        // scheduleAtFixedRate
+                        nextExecuteAtMillis += periodMillis;
                     }
                     else
                     {
-                        // scheduleAtFixedRate
-                        timeMillis = timeMillis + periodMillis;
+                        // scheduleWithFixedDelay
+                        nextExecuteAtMillis = nowMillis + (-periodMillis);
                     }
-                    long delayMillis = timeMillis - nowMillis;
+                    long delayMillis = nextExecuteAtMillis - nowMillis;
                     if (delayMillis < 0)
                         delayMillis = 0;
                     schedule(this, delayMillis, TimeUnit.MILLISECONDS);
@@ -174,7 +182,7 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService impleme
     @Override
     public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit)
     {
-        ScheduledTask<?> task = new ScheduledTask<>(sequenceNumber++, 0, NANOSECONDS, Executors.callable(command));
+        ScheduledTask<?> task = new ScheduledTask<>(sequenceNumber++, delay, 0, NANOSECONDS, Executors.callable(command));
         schedule(task, delay, unit);
         return task;
     }
@@ -182,7 +190,7 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService impleme
     @Override
     public <V> ScheduledFuture<V> schedule(Callable<V> callable, long delay, TimeUnit unit)
     {
-        ScheduledTask<V> task = new ScheduledTask<>(sequenceNumber++, 0, NANOSECONDS, callable);
+        ScheduledTask<V> task = new ScheduledTask<>(sequenceNumber++, delay, 0, NANOSECONDS, callable);
         schedule(task, delay, unit);
         return task;
     }
@@ -190,7 +198,7 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService impleme
     @Override
     public ScheduledFuture<?> scheduleAtFixedRate(Runnable command, long initialDelay, long period, TimeUnit unit)
     {
-        ScheduledTask<?> task = new ScheduledTask<>(sequenceNumber++, period, unit, Executors.callable(command));
+        ScheduledTask<?> task = new ScheduledTask<>(sequenceNumber++, initialDelay, period, unit, Executors.callable(command));
         schedule(task, initialDelay, unit);
         return task;
     }
@@ -199,7 +207,7 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService impleme
     @Override
     public ScheduledFuture<?> scheduleWithFixedDelay(Runnable command, long initialDelay, long delay, TimeUnit unit)
     {
-        ScheduledTask<?> task = new ScheduledTask<>(sequenceNumber++, -delay, unit, Executors.callable(command));
+        ScheduledTask<?> task = new ScheduledTask<>(sequenceNumber++, initialDelay, -delay, unit, Executors.callable(command));
         schedule(task, initialDelay, unit);
         return task;
     }
