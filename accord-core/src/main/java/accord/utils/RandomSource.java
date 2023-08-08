@@ -182,11 +182,13 @@ public interface RandomSource
 
     default int pickInt(int first, int second, int... rest)
     {
-        int[] array = new int[rest.length + 2];
-        array[0] = first;
-        array[1] = second;
-        System.arraycopy(rest, 0, array, 2, rest.length);
-        return pickInt(array, 0, array.length);
+        int offset = nextInt(0, rest.length + 2);
+        switch (offset)
+        {
+            case 0:  return first;
+            case 1:  return second;
+            default: return rest[offset - 2];
+        }
     }
 
     default int pickInt(int[] array)
@@ -196,7 +198,7 @@ public interface RandomSource
 
     default int pickInt(int[] array, int offset, int length)
     {
-        Impl.checkNextArray(array, array.length, offset, length);
+        Invariants.checkIndexInBounds(array.length, offset, length);
         if (length == 1)
             return array[offset];
         return array[nextInt(offset, offset + length)];
@@ -218,7 +220,7 @@ public interface RandomSource
 
     default long pickLong(long[] array, int offset, int length)
     {
-        Impl.checkNextArray(array, array.length, offset, length);
+        Invariants.checkIndexInBounds(array.length, offset, length);
         if (length == 1)
             return array[offset];
         return array[nextInt(offset, offset + length)];
@@ -247,7 +249,7 @@ public interface RandomSource
 
     default <T> T pick(List<T> values, int offset, int length)
     {
-        Impl.checkNextArray(values, values.size(), offset, length);
+        Invariants.checkIndexInBounds(values.size(), offset, length);
         if (length == 1)
             return values.get(offset);
         return values.get(nextInt(offset, offset + length));
@@ -344,16 +346,5 @@ public interface RandomSource
                 return RandomSource.this.nextGaussian();
             }
         };
-    }
-
-    class Impl // once jdk8 is dropped can have private functions and replace this class
-    {
-        private static void checkNextArray(Object array, int realLength, int offset, int length)
-        {
-            if (length == 0 || realLength == 0)
-                throw new IllegalArgumentException("Can not fetch next from empty array");
-            if (offset + length > realLength)
-                throw new IndexOutOfBoundsException(String.format("offset = %d, length = %d; array length was %d", offset, length, realLength));
-        }
     }
 }
