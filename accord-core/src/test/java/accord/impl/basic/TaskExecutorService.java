@@ -50,11 +50,7 @@ public abstract class TaskExecutorService extends AbstractExecutorService implem
             }
             catch (Throwable t)
             {
-                // setSuccess may trigger callbacks, which may throw exceptions... if that happens then the result was already set
-                if (!tryFailure(t))
-                {
-                    throw new RuntimeException(t);
-                }
+                setFailure(t);
             }
         }
 
