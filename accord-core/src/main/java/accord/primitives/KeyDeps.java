@@ -237,6 +237,30 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return Arrays.binarySearch(txnIds, txnId) >= 0;
     }
 
+    public boolean intersects(TxnId txnId, Ranges ranges)
+    {
+        int txnIdx = Arrays.binarySearch(txnIds, txnId);
+        if (txnIdx < 0)
+            return false;
+
+        int[] txnIdsToKeys = txnIdsToKeys();
+
+        int start = txnIdx == 0 ? txnIds.length : txnIdsToKeys[txnIdx - 1];
+        int end = txnIdsToKeys[txnIdx];
+        if (start == end)
+            return false;
+
+        int li = start, ri = 0;
+        while (li < end && ri < ranges.size())
+        {
+            ri = ranges.findNext(ri, keys.get(txnIdsToKeys[li]), FAST);
+            if (ri >= 0) return true;
+            ri = -1 - ri;
+            ++li;
+        }
+        return false;
+    }
+
     // return true iff we map any keys to any txnId
     // if the mapping is empty we return false, whether or not we have any keys or txnId by themselves
     public boolean isEmpty()

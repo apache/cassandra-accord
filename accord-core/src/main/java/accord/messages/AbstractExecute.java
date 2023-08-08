@@ -38,6 +38,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
+import static accord.local.SaveStatus.LocalExecution.ReadyToExecute;
 import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
 import static accord.local.Status.Committed;
 import static accord.messages.ReadData.ReadNack.NotCommitted;
@@ -210,7 +211,11 @@ public abstract class AbstractExecute extends ReadData implements Command.Transi
 
                 safeStore.progressLog().waiting(safeCommand, WaitingToExecute, null, readScope);
                 if (status == Committed) return null;
-                else return NotCommitted;
+                else
+                {
+                    safeStore.progressLog().waiting(safeCommand, ReadyToExecute, null, readScope);
+                    return NotCommitted;
+                }
             case OBSOLETE:
                 state = State.OBSOLETE;
                 return Redundant;
@@ -268,6 +273,8 @@ public abstract class AbstractExecute extends ReadData implements Command.Transi
                 throw new IllegalStateException("ReadOk was sent, yet ack called again");
             case OBSOLETE:
                 logger.debug("After the read completed for txn {}, the result was marked obsolete", txnId);
+                if (fail != null)
+                    node.agent().onUncaughtException(fail);
                 break;
             case PENDING:
                 state = State.RETURNED;
@@ -283,16 +290,16 @@ public abstract class AbstractExecute extends ReadData implements Command.Transi
         return new ReadOk(unavailable, data);
     }
 
-    private void removeListener(SafeCommandStore safeStore, TxnId txnId)
-    {
-        SafeCommand safeCommand = safeStore.ifInitialised(txnId);
-        safeCommand.removeListener(this);
-    }
-
     @Override
     protected void cancel()
     {
         node.commandStores().mapReduceConsume(this, waitingOn.stream(), forEach(in -> removeListener(in, txnId), node.agent()));
+    }
+
+    private void removeListener(SafeCommandStore safeStore, TxnId txnId)
+    {
+        SafeCommand safeCommand = safeStore.ifInitialised(txnId);
+        safeCommand.removeListener(this);
     }
 
     @Override

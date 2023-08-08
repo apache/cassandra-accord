@@ -26,7 +26,7 @@ import accord.local.SaveStatus;
 import accord.primitives.TxnId;
 
 import static accord.local.Listeners.Immutable.EMPTY;
-import static accord.local.Status.Durability.DurableOrInvalidated;
+import static accord.local.Status.Durability.UniversalOrInvalidated;
 
 public class ErasedSafeCommand extends SafeCommand
 {
@@ -35,7 +35,7 @@ public class ErasedSafeCommand extends SafeCommand
     public ErasedSafeCommand(TxnId txnId)
     {
         super(txnId);
-        this.erased = new Command.Truncated(txnId, SaveStatus.Erased, DurableOrInvalidated, null, null, EMPTY, null, null);
+        this.erased = new Command.Truncated(txnId, SaveStatus.Erased, UniversalOrInvalidated, null, null, EMPTY, null, null);
     }
 
     @Override

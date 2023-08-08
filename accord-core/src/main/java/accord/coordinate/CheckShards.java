@@ -111,7 +111,7 @@ public abstract class CheckShards<U extends Unseekables<?>> extends ReadCoordina
     @Override
     protected void finishOnExhaustion()
     {
-        if (merged != null && merged.isTruncated()) finishOnFailure(new Truncated(txnId, null), false);
+        if (merged != null && merged.isTruncatedResponse()) finishOnFailure(new Truncated(txnId, null), false);
         else super.finishOnExhaustion();
     }
 }

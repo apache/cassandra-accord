@@ -133,7 +133,7 @@ public class SerializerSupport
         {
             Propagate propagate = messageProvider.propagateCommit();
             txn = propagate.partialTxn;
-            deps = propagate.partialDeps;
+            deps = propagate.committedDeps;
         }
         else
         {
@@ -175,7 +175,7 @@ public class SerializerSupport
         {
             Propagate propagate = messageProvider.propagateApply();
             txn = propagate.partialTxn;
-            deps = propagate.partialDeps;
+            deps = propagate.committedDeps;
             writes = propagate.writes;
             result = propagate.result;
         }
@@ -221,7 +221,7 @@ public class SerializerSupport
             {
                 Propagate propagateCommit = messageProvider.propagateCommit();
                 txn = propagateCommit.partialTxn;
-                deps = propagateCommit.partialDeps;
+                deps = propagateCommit.committedDeps;
             }
             else if (witnessed.contains(COMMIT_MINIMAL_REQ))
             {
@@ -340,7 +340,7 @@ public class SerializerSupport
                 else if (witnessed.contains(PROPAGATE_COMMIT_MSG))
                 {
                     Propagate propagate = messageProvider.propagateCommit();
-                    return new TxnAndDeps(propagate.partialTxn, propagate.partialDeps);
+                    return new TxnAndDeps(propagate.partialTxn, propagate.committedDeps);
                 }
                 else
                 {
@@ -359,7 +359,7 @@ public class SerializerSupport
                 else if (witnessed.contains(PROPAGATE_APPLY_MSG))
                 {
                     Propagate propagate = messageProvider.propagateApply();
-                    return new TxnAndDeps(propagate.partialTxn, propagate.partialDeps);
+                    return new TxnAndDeps(propagate.partialTxn, propagate.committedDeps);
                 }
                 else if (witnessed.contains(COMMIT_MAXIMAL_REQ))
                 {
@@ -369,7 +369,7 @@ public class SerializerSupport
                 else if (witnessed.contains(PROPAGATE_COMMIT_MSG))
                 {
                     Propagate propagate = messageProvider.propagateCommit();
-                    return new TxnAndDeps(propagate.partialTxn, propagate.partialDeps);
+                    return new TxnAndDeps(propagate.partialTxn, propagate.committedDeps);
                 }
                 else if (witnessed.contains(COMMIT_MINIMAL_REQ))
                 {

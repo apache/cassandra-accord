@@ -39,7 +39,7 @@ public class Invariants
         return DEBUG;
     }
 
-    private static void illegalState(String msg)
+    public static void illegalState(String msg)
     {
         throw new IllegalStateException(msg);
     }
@@ -49,7 +49,7 @@ public class Invariants
         illegalState(null);
     }
 
-    private static void illegalArgument(String msg)
+    public static RuntimeException illegalArgument(String msg)
     {
         throw new IllegalArgumentException(msg);
     }

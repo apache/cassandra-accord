@@ -20,6 +20,7 @@ package accord.messages;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Function;
 import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
@@ -30,7 +31,6 @@ import accord.local.Commands;
 import accord.local.Node.Id;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SafeCommandStore.TestKind;
 import accord.messages.TxnRequest.WithUnsynced;
 import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
@@ -105,10 +105,12 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
     protected PreAcceptReply applyIfDoesNotCoordinate(SafeCommandStore safeStore)
     {
         // we only preaccept in the coordination epoch, but we might contact other epochs for dependencies
+        // TODO (required): for recovery we need to update CommandsForKeys et al, even if we don't participate in coordination.
+        //      must consider cleanup though. (alternative is to make recovery more complicated)
         Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, txnId);
         if (txnId.rw() == ExclusiveSyncPoint)
             safeStore.commandStore().markExclusiveSyncPoint(safeStore, txnId, ranges);
-        return new PreAcceptOk(txnId, txnId, calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, ranges));
+        return new PreAcceptOk(txnId, txnId, calculatePartialDeps(safeStore, txnId, partialTxn.keys(), EpochSupplier.constant(minUnsyncedEpoch), txnId, ranges));
     }
 
     @Override
@@ -126,15 +128,18 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
         {
             default:
             case Success:
-            case Redundant: // we might hit 'Redundant' if we have to contact later epochs and partially re-contact a node we already contacted
+                // we might hit 'Redundant' if we have to contact later epochs and partially re-contact a node we already contacted
+                // TODO (expected): consider dedicated special case, or rename
+            case Redundant:
                 Command command = safeCommand.current();
                 // for efficiency, we don't usually return dependencies newer than txnId as they aren't necessarily needed
                 // for recovery, and it's better to persist less data than more. However, for exclusive sync points we
                 // don't need to perform an Accept round, nor do we need to persist this state to aid recovery. We just
                 // want the issuer of the sync point to know which transactions to wait for before it can safely treat
                 // all transactions with lower txnId as expired.
+                Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, txnId);
                 return new PreAcceptOk(txnId, command.executeAt(),
-                        calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().allBetween(minUnsyncedEpoch, txnId)));
+                                       calculatePartialDeps(safeStore, txnId, partialTxn.keys(), EpochSupplier.constant(minUnsyncedEpoch), txnId, ranges));
 
             case Truncated:
             case RejectedBallot:
@@ -247,29 +252,31 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
         }
     }
 
-    static PartialDeps calculatePartialDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Timestamp executeAt, Ranges ranges)
+    static PartialDeps calculatePartialDeps(SafeCommandStore safeStore, TxnId txnId, Seekables<?, ?> keys, EpochSupplier minEpoch, Timestamp executeAt, Ranges ranges)
     {
-        try (PartialDeps.Builder builder = PartialDeps.builder(ranges))
-        {
-            return calculateDeps(commandStore, txnId, keys, executeAt, ranges, builder);
-        }
+        // TODO (expected): do not build covering ranges; no longer especially valuable given use of FullRoute
+        return calculateDeps(safeStore, txnId, keys, minEpoch, executeAt, ranges, PartialDeps::builder);
     }
 
-    private static <T extends Deps> T calculateDeps(SafeCommandStore commandStore, TxnId txnId, Seekables<?, ?> keys, Timestamp executeAt, Ranges ranges, Deps.AbstractBuilder<T> builder)
+    private static <T extends Deps> T calculateDeps(SafeCommandStore safeStore, TxnId txnId, Seekables<?, ?> keys, EpochSupplier minEpoch, Timestamp executeAt, Ranges ranges, Function<Ranges, Deps.AbstractBuilder<T>> builderFactory)
     {
-        TestKind testKind = TestKind.conflicts(txnId.rw());
         // could use MAY_EXECUTE_BEFORE to prune those we know execute later.
         // NOTE: ExclusiveSyncPoint *relies* on STARTED_BEFORE to ensure it reports a dependency on *every* earlier TxnId that may execute after it.
         //       This is necessary for reporting to a bootstrapping replica which TxnId it must not prune from dependencies
         //       i.e. the source replica reports to the target replica those TxnId that STARTED_BEFORE and EXECUTES_AFTER.
-        commandStore.mapReduce(keys, ranges, testKind, STARTED_BEFORE, executeAt, ANY_DEPS, null, null, null,
-                (keyOrRange, testTxnId, testExecuteAt, saveStatus, in) -> {
-                    // TODO (easy, efficiency): either pass txnId as parameter or encode this behaviour in a specialised builder to avoid extra allocations
-                    if (!testTxnId.equals(txnId))
-                        in.add(keyOrRange, testTxnId);
-                    return in;
-                }, builder, null);
-        return builder.build();
+        try (Deps.AbstractBuilder<T> depBuilder = builderFactory.apply(ranges); Deps.AbstractBuilder<T> redundantBuilder = builderFactory.apply(ranges))
+        {
+            // TODO (expected): this can be neater
+            safeStore.mapReduce(keys, ranges, txnId.rw().witnesses(), STARTED_BEFORE, executeAt, ANY_DEPS, null, null, null,
+                                (txnId0, keyOrRange, testTxnId, testExecuteAt, testStatus, in) -> {
+                                    if (!testTxnId.equals(txnId0))
+                                        in.add(keyOrRange, testTxnId);
+                                    return in;
+                                }, txnId, depBuilder);
+            T deps = depBuilder.build();
+            T redundant = safeStore.commandStore().redundantBefore().collectDeps(keys, redundantBuilder, minEpoch, executeAt).build();
+            return (T)deps.with(redundant);
+        }
     }
 
     /**

@@ -18,21 +18,15 @@
 
 package accord.impl.basic;
 
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
-import java.util.function.LongSupplier;
-import java.util.function.Supplier;
 
 import accord.api.MessageSink;
+import accord.impl.basic.Cluster.Link;
 import accord.local.AgentExecutor;
-import accord.burn.random.FrequentLargeRange;
 import accord.messages.SafeCallback;
 import accord.messages.Message;
-import accord.utils.Gen;
-import accord.utils.Gens;
 import accord.utils.RandomSource;
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -43,14 +37,14 @@ import accord.messages.ReplyContext;
 import accord.messages.Request;
 
 import static accord.impl.basic.Packet.SENTINEL_MESSAGE_ID;
-import static java.util.concurrent.TimeUnit.SECONDS;
+import static java.util.concurrent.TimeUnit.MICROSECONDS;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 public class NodeSink implements MessageSink
 {
-    public enum Action {DELIVER, DROP, DROP_PARTITIONED, DELIVER_WITH_FAILURE, FAILURE}
+    private static final boolean DEBUG = false;
+    public enum Action { DELIVER, DROP, DELIVER_WITH_FAILURE, FAILURE }
 
-    private final Map<Id, Supplier<Action>> nodeActions = new HashMap<>();
-    private final Map<Id, LongSupplier> networkJitter = new HashMap<>();
     final Id self;
     final Function<Id, Node> lookup;
     final Cluster parent;
@@ -84,11 +78,11 @@ public class NodeSink implements MessageSink
             parent.pending.add((PendingRunnable) () -> {
                 if (sc == callbacks.get(messageId))
                     sc.slowResponse(to);
-            }, 100 + random.nextInt(200), TimeUnit.MILLISECONDS);
+            }, 100 + random.nextInt(200), MILLISECONDS);
             parent.pending.add((PendingRunnable) () -> {
                 if (sc == callbacks.remove(messageId))
                     sc.timeout(to);
-            }, 1000 + random.nextInt(1000), TimeUnit.MILLISECONDS);
+            }, 1000 + random.nextInt(1000), MILLISECONDS);
         }
     }
 
@@ -100,30 +94,22 @@ public class NodeSink implements MessageSink
 
     private boolean maybeEnqueue(Node.Id to, long id, Message message, SafeCallback callback)
     {
-        Runnable task = () -> {
-            Packet packet;
-            if (message instanceof Reply) packet = new Packet(self, to, id, (Reply) message);
-            else                          packet = new Packet(self, to, id, (Request) message);
-            parent.add(packet, networkJitterNanos(to), TimeUnit.NANOSECONDS);
-        };
+        Link link = parent.links.apply(self, to);
         if (to.equals(self) || lookup.apply(to) == null /* client */)
         {
-            parent.messageListener.onMessage(Action.DELIVER, self, to, id, message);
-            task.run();
+            deliver(to, id, message, link);
             return true;
         }
 
-        Action action = partitioned(to) ? Action.DROP_PARTITIONED
-                                        // call actions() per node so each one has different "runs" state
-                                        : nodeActions.computeIfAbsent(to, ignore -> actions()).get();
+        Action action = link.action.get();
         parent.messageListener.onMessage(action, self, to, id, message);
         switch (action)
         {
             case DELIVER:
-                task.run();
+                deliver(to, id, message, link);
                 return true;
             case DELIVER_WITH_FAILURE:
-                task.run();
+                deliver(to, id, message, link);
             case FAILURE:
 
                 if (action == Action.FAILURE)
@@ -143,10 +129,9 @@ public class NodeSink implements MessageSink
                                 lookup.apply(self).agent().onUncaughtException(t);
                             }
                         }
-                    }, 1000 + random.nextInt(1000), TimeUnit.MILLISECONDS);
+                    }, 1000 + random.nextInt(1000), MILLISECONDS);
                 }
                 return false;
-            case DROP_PARTITIONED:
             case DROP:
                 // TODO (consistency): parent.notifyDropped is a trace logger that is very similar in spirit to MessageListener; can we unify?
                 parent.notifyDropped(self, to, id, message);
@@ -156,39 +141,12 @@ public class NodeSink implements MessageSink
         }
     }
 
-    private long networkJitterNanos(Node.Id dst)
+    private void deliver(Node.Id to, long id, Message message, Link link)
     {
-        return networkJitter.computeIfAbsent(dst, ignore -> defaultJitter())
-                            .getAsLong();
-    }
-
-    private LongSupplier defaultJitter()
-    {
-        return FrequentLargeRange.builder(random)
-                                 .ratio(1, 5)
-                                 .small(500, TimeUnit.MICROSECONDS, 5, TimeUnit.MILLISECONDS)
-                                 .large(50, TimeUnit.MILLISECONDS, 5, SECONDS)
-                                 .build()
-                                 .asLongSupplier(random);
-    }
-
-    private boolean partitioned(Id to)
-    {
-        return parent.partitionSet.contains(self) != parent.partitionSet.contains(to);
-    }
-
-    private Supplier<Action> actions()
-    {
-        Gen<Boolean> drops = Gens.bools().biasedRepeatingRuns(0.01, random.nextInt(3, 15));
-        Gen<Boolean> failures = Gens.bools().biasedRepeatingRuns(0.01, random.nextInt(3, 15));
-        Gen<Action> actionGen = rs -> {
-            if (drops.next(rs))
-                return Action.DROP;
-            return failures.next(rs) ?
-                   rs.nextBoolean() ? Action.FAILURE : Action.DELIVER_WITH_FAILURE
-                   : Action.DELIVER;
-        };
-        return actionGen.asSupplier(random);
+        Packet packet;
+        if (message instanceof Reply) packet = new Packet(self, to, id, (Reply) message);
+        else packet = new Packet(self, to, id, (Request) message);
+        parent.add(packet, link.latencyMicros.getAsLong(), MICROSECONDS);
     }
 
     @Override

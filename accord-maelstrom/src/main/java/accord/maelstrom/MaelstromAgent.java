@@ -65,6 +65,11 @@ public class MaelstromAgent implements Agent
     }
 
     @Override
+    public void onStale(Timestamp staleSince, Ranges ranges)
+    {
+    }
+
+    @Override
     public void onUncaughtException(Throwable t)
     {
     }

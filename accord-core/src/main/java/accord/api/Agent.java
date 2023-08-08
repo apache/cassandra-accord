@@ -63,6 +63,7 @@ public interface Agent extends UncaughtExceptionListener
      * outside of Accord.
      */
     default void onLocalBarrier(@Nonnull Seekables<?, ?> keysOrRanges, @Nonnull Timestamp executeAt) {}
+    void onStale(Timestamp staleSince, Ranges ranges);
 
     @Override
     void onUncaughtException(Throwable t);

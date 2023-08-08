@@ -28,15 +28,16 @@ import accord.utils.MessageTask;
 import org.agrona.collections.Long2ObjectHashMap;
 
 import java.util.*;
+import java.util.function.Function;
 
 public class TopologyUpdates
 {
     private final Long2ObjectHashMap<Map<Node.Id, Ranges>> pendingTopologies = new Long2ObjectHashMap<>();
-    private final AgentExecutor executor;
 
-    public TopologyUpdates(AgentExecutor executor)
+    Function<Node.Id, AgentExecutor> executors;
+    public TopologyUpdates(Function<Node.Id, AgentExecutor> executors)
     {
-        this.executor = executor;
+        this.executors = executors;
     }
 
     public synchronized MessageTask notify(Node originator, Topology prev, Topology update)
@@ -50,7 +51,7 @@ public class TopologyUpdates
             nodeToNewRanges.put(node, newRanges);
         }
         pendingTopologies.put(update.epoch(), nodeToNewRanges);
-        return MessageTask.begin(originator, nodes, executor, "TopologyNotify:" + update.epoch(), (node, from, onDone) -> {
+        return MessageTask.begin(originator, nodes, executors.apply(originator.id()), "TopologyNotify:" + update.epoch(), (node, from, onDone) -> {
             long nodeEpoch = node.epoch();
             if (nodeEpoch + 1 < update.epoch())
                 onDone.accept(false);
@@ -71,7 +72,7 @@ public class TopologyUpdates
         if (pending.isEmpty())
             pendingTopologies.remove(epoch);
 
-        MessageTask.begin(originator, cluster, executor, "SyncComplete:" + epoch, (node, from, onDone) -> {
+        MessageTask.begin(originator, cluster, executors.apply(originator.id()), "SyncComplete:" + epoch, (node, from, onDone) -> {
             node.onRemoteSyncComplete(originator.id(), epoch);
             onDone.accept(true);
         });
@@ -79,8 +80,8 @@ public class TopologyUpdates
 
     public synchronized void epochClosed(Node originator, Collection<Node.Id> cluster, Ranges ranges, long epoch)
     {
-        executor.execute(() -> {
-            MessageTask.begin(originator, cluster, executor, "EpochClosed:" + epoch, (node, from, onDone) -> {
+        executors.apply(originator.id()).execute(() -> {
+            MessageTask.begin(originator, cluster, executors.apply(originator.id()), "EpochClosed:" + epoch, (node, from, onDone) -> {
                 node.onEpochClosed(ranges, epoch);
                 onDone.accept(true);
             });
@@ -89,8 +90,8 @@ public class TopologyUpdates
 
     public synchronized void epochRedundant(Node originator, Collection<Node.Id> cluster, Ranges ranges, long epoch)
     {
-        executor.execute(() -> {
-            MessageTask.begin(originator, cluster, executor, "EpochComplete:" + epoch, (node, from, onDone) -> {
+        executors.apply(originator.id()).execute(() -> {
+            MessageTask.begin(originator, cluster, executors.apply(originator.id()), "EpochComplete:" + epoch, (node, from, onDone) -> {
                 node.onEpochRedundant(ranges, epoch);
                 onDone.accept(true);
             });

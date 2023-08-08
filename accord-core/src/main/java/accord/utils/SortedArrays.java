@@ -403,15 +403,15 @@ public class SortedArrays
     /**
      * A linear intersection where we only want results from the left inputs, and the right inputs may either be a different type or otherwise only used for filtering
      */
-    public static <T1, T2> T1[] asymmetricLinearIntersectionWithOverlaps(T1[] left, int leftLength, T2[] right, int rightLength, AsymmetricComparator<? super T1, ? super T2> comparator, ObjectBuffers<T1> buffers)
+    public static <T1, T2> T1[] intersectWithMultipleMatches(T1[] left, int leftLength, T2[] right, int rightLength, AsymmetricComparator<? super T1, ? super T2> comparator, ObjectBuffers<T1> buffers)
     {
-        return (T1[])internalLinearIntersectionWithOverlaps(true, left, leftLength, right, rightLength, comparator, buffers, null);
+        return (T1[]) internalLinearIntersectionWithMultipleMatches(true, left, leftLength, right, rightLength, comparator, buffers, null);
     }
 
     /**
      * A linear intersection where we only want results from the left inputs, and the right inputs may either be a different type or otherwise only used for filtering
      */
-    private static <T1, T2> Object[] internalLinearIntersectionWithOverlaps(boolean preferLeft, T1[] left, int leftLength, T2[] right, int rightLength, AsymmetricComparator<? super T1, ? super T2> comparator, ObjectBuffers<T1> leftBuffers, @Nullable ObjectBuffers<T2> rightBuffers)
+    private static <T1, T2> Object[] internalLinearIntersectionWithMultipleMatches(boolean preferLeft, T1[] left, int leftLength, T2[] right, int rightLength, AsymmetricComparator<? super T1, ? super T2> comparator, ObjectBuffers<T1> leftBuffers, @Nullable ObjectBuffers<T2> rightBuffers)
     {
         int leftIdx = 0;
         int rightIdx = 0;
@@ -587,6 +587,8 @@ public class SortedArrays
     /**
      * Given two sorted arrays, return the elements present only in the first, preferentially returning the first array
      * itself if possible
+     *
+     * TODO (expected): use cachedBuffers
      */
     @SuppressWarnings("unused") // was used until recently, might be used again?
     public static <T extends Comparable<? super T>> T[] linearSubtract(T[] left, T[] right, IntFunction<T[]> allocate)
@@ -657,6 +659,8 @@ public class SortedArrays
      * Given two sorted arrays {@code slice} and {@code select}, where each array's contents is unique and non-overlapping
      * with itself, but may match multiple entries in the other array, return a new array containing the elements of {@code slice}
      * that match elements of {@code select} as per the provided comparators.
+     *
+     * TODO (expected): use buffers rather than factory
      */
     public static <A, R> A[] sliceWithMultipleMatches(A[] input, R[] select, IntFunction<A[]> factory, AsymmetricComparator<A, R> cmp1, AsymmetricComparator<R, A> cmp2)
     {
@@ -721,6 +725,8 @@ public class SortedArrays
      * Given two sorted arrays {@code slice} and {@code select}, where each array's contents is unique and non-overlapping
      * with itself, but may match multiple entries in the other array, return a new array containing the elements of {@code slice}
      * that match elements of {@code select} as per the provided comparators.
+     *
+     * TODO (expected): use buffers rather than factory
      */
     public static <A, R> A[] subtractWithMultipleMatches(A[] input, R[] subtract, IntFunction<A[]> factory, AsymmetricComparator<A, R> cmp1, AsymmetricComparator<R, A> cmp2)
     {

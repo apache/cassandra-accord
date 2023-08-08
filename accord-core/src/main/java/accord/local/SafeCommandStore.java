@@ -33,16 +33,15 @@ import accord.primitives.Ranges;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
-import accord.primitives.Txn.Kind;
+import accord.primitives.Txn.Kind.Kinds;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import javax.annotation.Nullable;
 
+import com.google.common.base.Predicates;
+
 import static accord.local.Commands.Cleanup.NO;
-import static accord.local.RedundantStatus.PRE_BOOTSTRAP;
-import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
-import static accord.primitives.Txn.Kind.Read;
-import static accord.primitives.Txn.Kind.Write;
+import static accord.local.RedundantBefore.PreBootstrapOrStale.FULLY;
 
 /**
  * A CommandStore with exclusive access; a reference to this should not be retained outside of the scope of the method
@@ -52,9 +51,9 @@ import static accord.primitives.Txn.Kind.Write;
  */
 public abstract class SafeCommandStore
 {
-    public interface CommandFunction<I, O>
+    public interface CommandFunction<P1, I, O>
     {
-        O apply(Seekable keyOrRange, TxnId txnId, Timestamp executeAt, Status status, I in);
+        O apply(P1 p1, Seekable keyOrRange, TxnId txnId, Timestamp executeAt, Status status, I in);
     }
 
     public enum TestTimestamp
@@ -65,57 +64,6 @@ public abstract class SafeCommandStore
         EXECUTES_AFTER
     }
     public enum TestDep { WITH, WITHOUT, ANY_DEPS }
-    public enum TestKind implements Predicate<Kind>
-    {
-        Ws, RorWs, WsOrSyncPoint, SyncPoints, Any;
-
-        @Override
-        public boolean test(Kind kind)
-        {
-            switch (this)
-            {
-                default: throw new AssertionError();
-                case Any: return true;
-                case WsOrSyncPoint: return kind == Write || kind == Kind.SyncPoint || kind == ExclusiveSyncPoint;
-                case SyncPoints: return kind == Kind.SyncPoint || kind == ExclusiveSyncPoint;
-                case Ws: return kind == Write;
-                case RorWs: return kind == Read || kind == Write;
-            }
-        }
-
-        public static TestKind conflicts(Kind kind)
-        {
-            switch (kind)
-            {
-                default: throw new AssertionError();
-                case Read:
-                case NoOp:
-                    return Ws;
-                case Write:
-                    return RorWs;
-                case SyncPoint:
-                case ExclusiveSyncPoint:
-                    return Any;
-            }
-        }
-
-        public static TestKind shouldHaveWitnessed(Kind kind)
-        {
-            switch (kind)
-            {
-                default: throw new AssertionError();
-                case Read:
-                    return WsOrSyncPoint;
-                case Write:
-                    return Any;
-                case SyncPoint:
-                case ExclusiveSyncPoint:
-                case NoOp:
-                    return SyncPoints;
-            }
-        }
-
-    }
 
     /**
      * If the transaction exists (with some associated data) in the CommandStore, return it. Otherwise return null.
@@ -212,16 +160,18 @@ public abstract class SafeCommandStore
      * Visits keys first and then ranges, both in ascending order.
      * Within each key or range visits TxnId in ascending order of queried timestamp.
      */
-    public abstract <T> T mapReduceWithTerminate(Seekables<?, ?> keysOrRanges, Ranges slice,
-                       TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp,
-                       TestDep testDep, @Nullable TxnId depId,
-                       @Nullable Status minStatus, @Nullable Status maxStatus,
-                       CommandFunction<T, T> map, T accumulate, Predicate<T> terminate);
-    public abstract <T> T mapReduce(Seekables<?, ?> keysOrRanges, Ranges slice,
-                    TestKind testKind, TestTimestamp testTimestamp, Timestamp timestamp,
-                    TestDep testDep, @Nullable TxnId depId, @Nullable Status minStatus, @Nullable Status maxStatus,
-                    CommandFunction<T, T> map, T accumulate, T terminalValue);
+    public <P1, T> T mapReduce(Seekables<?, ?> keys, Ranges slice,
+                                        Kinds testKind, TestTimestamp testTimestamp, Timestamp timestamp,
+                                        TestDep testDep, @Nullable TxnId depId, @Nullable Status minStatus, @Nullable Status maxStatus,
+                                        CommandFunction<P1, T, T> map, P1 p1, T initialValue)
+    {
+        return mapReduce(keys, slice, testKind, testTimestamp, timestamp, testDep, depId, minStatus, maxStatus, map, p1, initialValue, Predicates.alwaysFalse());
+    }
 
+    public abstract <P1, T> T mapReduce(Seekables<?, ?> keys, Ranges slice,
+                                        Kinds testKind, TestTimestamp testTimestamp, Timestamp timestamp,
+                                        TestDep testDep, @Nullable TxnId depId, @Nullable Status minStatus, @Nullable Status maxStatus,
+                                        CommandFunction<P1, T, T> map, P1 p1, T initialValue, Predicate<? super T> terminate);
     protected abstract void register(Seekables<?, ?> keysOrRanges, Ranges slice, Command command);
     protected abstract void register(Seekable keyOrRange, Ranges slice, Command command);
 
@@ -247,9 +197,9 @@ public abstract class SafeCommandStore
 
     // if we have to re-bootstrap (due to failed bootstrap or catching up on a range) then we may
     // have dangling redundant commands; these can safely be executed locally because we are a timestamp store
-    final boolean isFullyPreBootstrap(Command command, Participants<?> forKeys)
+    final boolean isFullyPreBootstrapOrStale(Command command, Participants<?> forKeys)
     {
-        return commandStore().redundantBefore().status(command.txnId(), command.executeAtOrTxnId(), forKeys) == PRE_BOOTSTRAP;
+        return commandStore().redundantBefore().preBootstrapOrStale(command.txnId(), command.executeAtOrTxnId(), forKeys) == FULLY;
     }
 
     public void notifyListeners(SafeCommand safeCommand)

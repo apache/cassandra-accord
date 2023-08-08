@@ -145,6 +145,12 @@ public class Ranges extends AbstractRanges implements Iterable<Range>, Seekables
     }
 
     @Override
+    public Ranges toRanges()
+    {
+        return this;
+    }
+
+    @Override
     public FullRangeRoute toRoute(RoutingKey homeKey)
     {
         if (!contains(homeKey))

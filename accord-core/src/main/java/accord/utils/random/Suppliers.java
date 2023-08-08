@@ -16,24 +16,40 @@
  * limitations under the License.
  */
 
-package accord.local;
+package accord.utils.random;
 
-import accord.primitives.TxnId;
+import java.util.function.BooleanSupplier;
+import java.util.function.IntSupplier;
+import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
-public interface CommandListener
+public class Suppliers
 {
-    void onChange(SafeCommandStore safeStore, SafeCommand safeCommand);
-
-    /**
-     * Scope needed to run onChange
-     */
-    PreLoadContext listenerPreLoadContext(TxnId caller);
-
-    /**
-     * Indicates the command to listener relationship doesn't need to persist across restarts
-     */
-    default boolean isTransient()
+    public interface Bools extends BooleanSupplier
     {
-        return false;
+        boolean get();
+        void cycle();
+        default boolean getAsBoolean() { return get(); }
     }
+
+    public interface Ints extends IntSupplier
+    {
+        int get();
+        void cycle();
+        default int getAsInt() { return get(); }
+    }
+
+    public interface Longs extends LongSupplier
+    {
+        long get();
+        void cycle();
+        default long getAsLong() { return get(); }
+    }
+
+    public interface Objects<T> extends Supplier<T>
+    {
+        T get();
+        void cycle();
+    }
+
 }

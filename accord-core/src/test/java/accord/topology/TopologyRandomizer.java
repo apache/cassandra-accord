@@ -41,6 +41,8 @@ import accord.impl.IntHashKey.Hash;
 import accord.local.Node;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
+import accord.primitives.Routables;
+import accord.primitives.Timestamp;
 import accord.utils.Invariants;
 import accord.utils.RandomSource;
 
@@ -364,5 +366,18 @@ public class TopologyRandomizer
         }
         Invariants.checkState (i == in.length && o == out.length);
         return true;
+    }
+
+    public void onStale(Node.Id id, Timestamp sinceAtLeast, Ranges ranges)
+    {
+        int epoch = (int) sinceAtLeast.epoch();
+        Invariants.checkState(epochs.get(epoch).nodeLookup.get(id).ranges.containsAll(ranges));
+        while (++epoch < epochs.size())
+        {
+            ranges = ranges.slice(epochs.get(epoch).nodeLookup.get(id).ranges, Routables.Slice.Minimal);
+            if (ranges.isEmpty())
+                return;
+        }
+        Invariants.illegalState("Stale ranges: " + ranges + ", but "+ id + " still replicates these ranges");
     }
 }

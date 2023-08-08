@@ -23,7 +23,9 @@ import accord.primitives.Ballot;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
+import static accord.local.SaveStatus.LocalExecution.CleaningUp;
 import static accord.local.SaveStatus.LocalExecution.NotReady;
+import static accord.local.Status.Definition.DefinitionErased;
 import static accord.local.Status.Definition.DefinitionKnown;
 import static accord.local.Status.Definition.DefinitionUnknown;
 import static accord.local.Status.Known.Apply;
@@ -32,7 +34,9 @@ import static accord.local.Status.Known.ExecuteAtOnly;
 import static accord.local.Status.Known.Nothing;
 import static accord.local.Status.KnownDeps.*;
 import static accord.local.Status.KnownExecuteAt.*;
-import static accord.local.Status.NotDefined;
+import static accord.local.Status.KnownRoute.Covering;
+import static accord.local.Status.KnownRoute.Full;
+import static accord.local.Status.KnownRoute.Maybe;
 import static accord.local.Status.Outcome.Unknown;
 import static accord.local.Status.Truncated;
 
@@ -49,29 +53,39 @@ public enum SaveStatus
     // TODO (expected): erase Uninitialised in Context once command finishes
     // TODO (expected): we can use Uninitialised in several places to simplify/better guarantee correct behaviour with truncation
     Uninitialised                   (Status.NotDefined),
+    // TODO (expected): reify PreAcceptedNotDefined and NotDefinedWithSomeRoute (latter to semantically represent outcome of InformHome)
     NotDefined                      (Status.NotDefined),
     PreAccepted                     (Status.PreAccepted),
+    // note: AcceptedInvalidate and AcceptedInvalidateWithDefinition clear any proposed Deps.
+    // This means voters recovering an earlier transaction will not consider the record when excluding the possibility of a fast-path commit.
+    // This is safe, because any Accept that may override the AcceptedInvalidate will construct new Deps that must now witness the recovering transaction.
     AcceptedInvalidate              (Status.AcceptedInvalidate),
-    AcceptedInvalidateWithDefinition(Status.AcceptedInvalidate,    DefinitionKnown,   ExecuteAtUnknown,  DepsUnknown,  Unknown),
+    AcceptedInvalidateWithDefinition(Status.AcceptedInvalidate,    Full,     DefinitionKnown,   ExecuteAtUnknown,  DepsUnknown,  Unknown),
     Accepted                        (Status.Accepted),
-    AcceptedWithDefinition          (Status.Accepted,              DefinitionKnown,   ExecuteAtProposed, DepsProposed, Unknown),
-    PreCommitted                    (Status.PreCommitted),
-    PreCommittedWithAcceptedDeps    (Status.PreCommitted,          DefinitionUnknown, ExecuteAtKnown,    DepsProposed, Unknown),
-    PreCommittedWithDefinition      (Status.PreCommitted,          DefinitionKnown,   ExecuteAtKnown,    DepsUnknown,  Unknown),
-    PreCommittedWithDefinitionAndAcceptedDeps(Status.PreCommitted, DefinitionKnown,   ExecuteAtKnown,    DepsProposed, Unknown),
-    Committed                       (Status.Committed),
-    ReadyToExecute                  (Status.ReadyToExecute,                                                                                    LocalExecution.ReadyToExecute),
-    PreApplied                      (Status.PreApplied),
-    Applying                        (Status.PreApplied),
-    Applied                         (Status.Applied,                                                                                           LocalExecution.Applied),
+    AcceptedWithDefinition          (Status.Accepted,              Full,     DefinitionKnown,   ExecuteAtProposed, DepsProposed, Unknown),
+    PreCommitted                    (Status.PreCommitted,                                                                                          LocalExecution.ReadyToExclude),
+    PreCommittedWithAcceptedDeps    (Status.PreCommitted,          Covering, DefinitionUnknown, ExecuteAtKnown,    DepsProposed, Unknown,          LocalExecution.ReadyToExclude),
+    PreCommittedWithDefinition      (Status.PreCommitted,          Full,     DefinitionKnown,   ExecuteAtKnown,    DepsUnknown,  Unknown,          LocalExecution.ReadyToExclude),
+    PreCommittedWithDefinitionAndAcceptedDeps(Status.PreCommitted, Full,     DefinitionKnown,   ExecuteAtKnown,    DepsProposed, Unknown,          LocalExecution.ReadyToExclude),
+    Committed                       (Status.Committed,                                                                                             LocalExecution.WaitingToExecute),
+    ReadyToExecute                  (Status.ReadyToExecute,                                                                                        LocalExecution.ReadyToExecute),
+    PreApplied                      (Status.PreApplied,                                                                                            LocalExecution.WaitingToApply),
+    Applying                        (Status.PreApplied,                                                                                            LocalExecution.Applying),
+    // similar to Truncated, but doesn't imply we have any global knowledge about application
+    Applied                         (Status.Applied,                                                                                               LocalExecution.Applied),
     // TruncatedApplyWithDeps is a state never adopted within a single replica; it is however a useful state we may enter by combining state from multiple replicas
-    TruncatedApplyWithDeps          (Status.Truncated,             DefinitionUnknown, ExecuteAtKnown,    DepsKnown,    Outcome.Apply,          LocalExecution.CleaningUp),
-    TruncatedApplyWithOutcome       (Status.Truncated,             DefinitionUnknown, ExecuteAtKnown,    DepsUnknown,  Outcome.Apply,          LocalExecution.CleaningUp),
-    TruncatedApply                  (Status.Truncated,             DefinitionUnknown, ExecuteAtKnown,    DepsUnknown,  Outcome.WasApply,       LocalExecution.CleaningUp),
-    Erased                          (Status.Truncated,             DefinitionUnknown, ExecuteAtUnknown,  DepsUnknown,  Outcome.Erased,         LocalExecution.CleaningUp),
-    Invalidated                     (Status.Invalidated,                                                                                       LocalExecution.CleaningUp),
+    // TODO (desired): if we migrate away from SaveStatus in CheckStatusOk towards Known we can remove this TruncatedApplyWithDeps
+    TruncatedApplyWithDeps          (Status.Truncated,             Full,    DefinitionErased, ExecuteAtKnown,    DepsKnown,    Outcome.Apply,    CleaningUp),
+    TruncatedApplyWithOutcome       (Status.Truncated,             Full,    DefinitionErased, ExecuteAtKnown,    DepsErased,   Outcome.Apply,    CleaningUp),
+    TruncatedApply                  (Status.Truncated,             Full,    DefinitionErased, ExecuteAtKnown,    DepsErased,   Outcome.WasApply, CleaningUp),
+    // Expunged means the command is either entirely pre-bootstrap or stale and we don't have enough information to move it through the normal redundant->truncation path (i.e. it might be truncated, it might be applied)
+    Erased                          (Status.Truncated,             Maybe,   DefinitionErased, ExecuteAtErased,   DepsErased,   Outcome.Erased,   CleaningUp),
+    Invalidated                     (Status.Invalidated,                                                                                         CleaningUp),
     ;
 
+    /**
+     * Note that this is a LOCAL concept ONLY, and should not be used to infer anything remotely.
+     */
     public enum LocalExecution
     {
         NotReady(Nothing),
@@ -143,14 +157,14 @@ public enum SaveStatus
         this(status, phase, status.minKnown, execution);
     }
 
-    SaveStatus(Status status, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome)
+    SaveStatus(Status status, KnownRoute route, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome)
     {
-        this(status, definition, executeAt, deps, outcome, NotReady);
+        this(status, route, definition, executeAt, deps, outcome, NotReady);
     }
 
-    SaveStatus(Status status, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome, LocalExecution execution)
+    SaveStatus(Status status, KnownRoute route, Definition definition, KnownExecuteAt executeAt, KnownDeps deps, Outcome outcome, LocalExecution execution)
     {
-        this(status, status.phase, new Known(definition, executeAt, deps, outcome), execution);
+        this(status, status.phase, new Known(route, definition, executeAt, deps, outcome), execution);
     }
 
     SaveStatus(Status status, Phase phase, Known known, LocalExecution execution)
@@ -188,30 +202,34 @@ public enum SaveStatus
         }
     }
 
+    // TODO (expected): merge Known only, and ensure 1:1 mapping so can reconstruct composite
     // TODO (expected, testing): exhaustive testing, particularly around PreCommitted
     public static SaveStatus get(Status status, Known known)
     {
+        if (known.isInvalidated())
+            return Invalidated;
+
         switch (status)
         {
             default: throw new AssertionError("Unexpected status: " + status);
-            case NotDefined: return NotDefined;
-            case PreAccepted: return PreAccepted;
+            case NotDefined: return known.executeAt.isDecidedAndKnownToExecute() ? PreCommitted : NotDefined;
+            case PreAccepted: return known.executeAt.isDecidedAndKnownToExecute() ? PreCommittedWithDefinition : PreAccepted;
             case AcceptedInvalidate:
                 // AcceptedInvalidate logically clears any proposed deps and executeAt
-                if (!known.executeAt.hasDecidedExecuteAt())
+                if (!known.executeAt.isDecidedAndKnownToExecute())
                     return known.isDefinitionKnown() ? AcceptedInvalidateWithDefinition : AcceptedInvalidate;
                 // If we know the executeAt decision then we do not clear it, and fall-through to PreCommitted
                 // however, we still clear the deps, as any deps we might have previously seen proposed are now expired
                 // TODO (expected, consider): consider clearing Command.partialDeps in this case also
                 known = known.with(DepsUnknown);
             case Accepted:
-                if (!known.executeAt.hasDecidedExecuteAt())
+                if (!known.executeAt.isDecidedAndKnownToExecute())
                     return known.isDefinitionKnown() ? AcceptedWithDefinition : Accepted;
                 // if the decision is known, we're really PreCommitted
             case PreCommitted:
                 if (known.isDefinitionKnown())
-                    return known.deps.hasProposedOrDecidedDeps() ? PreCommittedWithDefinitionAndAcceptedDeps : PreCommittedWithDefinition;
-                return known.deps.hasProposedOrDecidedDeps() ? PreCommittedWithAcceptedDeps : PreCommitted;
+                    return known.deps == DepsProposed ? PreCommittedWithDefinitionAndAcceptedDeps : PreCommittedWithDefinition;
+                return known.deps == DepsProposed ? PreCommittedWithAcceptedDeps : PreCommitted;
             case Committed: return Committed;
             case ReadyToExecute: return ReadyToExecute;
             case PreApplied: return PreApplied;
@@ -225,12 +243,14 @@ public enum SaveStatus
         switch (status.status)
         {
             // most statuses already know everything they can
+            case NotDefined:
+            case PreAccepted:
             case Accepted:
             case AcceptedInvalidate:
             case PreCommitted:
                 if (known.isSatisfiedBy(status.known))
                     return status;
-                return get(status.status, status.known.merge(known));
+                return get(status.status, status.known.atLeast(known));
 
             case Truncated:
                 switch (status)
@@ -259,6 +279,7 @@ public enum SaveStatus
         return status;
     }
 
+    // TODO (expected): tighten up distinction of "preferKnowledge" and its interaction with CheckStatus
     public static SaveStatus merge(SaveStatus a, Ballot acceptedA, SaveStatus b, Ballot acceptedB, boolean preferKnowledge)
     {
         // we first enrich cleanups with the knowledge of the other, to avoid counter-intuitive situations where

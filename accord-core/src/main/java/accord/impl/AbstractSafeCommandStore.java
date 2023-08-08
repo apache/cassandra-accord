@@ -38,6 +38,7 @@ import accord.primitives.RoutableKey;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
 import accord.primitives.TxnId;
+import accord.utils.Invariants;
 
 public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, CommandsForKeyType extends SafeCommandsForKey> extends SafeCommandStore
 {
@@ -119,8 +120,8 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
         else
         {
             RedundantBefore.Entry entry = commandStore().redundantBefore().get(key.toUnseekable());
-            if (entry != null && cfk.current().hasRedundant(entry.redundantBefore))
-                cfk.set(cfk.current().withoutRedundant(entry.redundantBefore));
+            if (entry != null && cfk.current().hasRedundant(entry.shardRedundantBefore()))
+                cfk.set(cfk.current().withoutRedundant(entry.shardRedundantBefore()));
         }
         return cfk;
     }
@@ -128,8 +129,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
     public CommandsForKeyType commandsForKey(RoutableKey key)
     {
         CommandsForKeyType cfk = getCommandsForKeyInternal(key);
-        if (cfk == null)
-            throw new IllegalStateException(String.format("%s was not specified in PreLoadContext", key));
+        Invariants.checkState(cfk != null, "%s was not specified in PreLoadContext", key);
         if (cfk.isEmpty())
             cfk.initialize(cfkLoader(key));
         return cfk;

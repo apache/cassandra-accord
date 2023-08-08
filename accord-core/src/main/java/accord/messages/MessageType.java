@@ -66,7 +66,7 @@ public class MessageType
     public static final MessageType SET_GLOBALLY_DURABLE_REQ         = mt(REMOTE, true );
     public static final MessageType QUERY_DURABLE_BEFORE_REQ         = mt(REMOTE, false);
     public static final MessageType QUERY_DURABLE_BEFORE_RSP         = mt(REMOTE, false);
-    public static final MessageType APPLY_AND_WAIT_UNTIL_APPLIED_REQ = mt(REMOTE, true );
+    public static final MessageType APPLY_THEN_WAIT_UNTIL_APPLIED_REQ= mt(REMOTE, true );
 
     public static final MessageType PROPAGATE_PRE_ACCEPT_MSG         = mt(LOCAL,  true );
     public static final MessageType PROPAGATE_COMMIT_MSG             = mt(LOCAL,  true );

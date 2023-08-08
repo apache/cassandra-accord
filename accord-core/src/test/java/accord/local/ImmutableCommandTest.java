@@ -103,6 +103,7 @@ public class ImmutableCommandTest
         @Override public void unwitnessed(TxnId txnId, ProgressShard shard) {}
         @Override public void preaccepted(Command command, ProgressShard shard) {}
         @Override public void accepted(Command command, ProgressShard shard) {}
+        @Override public void precommitted(Command command) {}
         @Override public void committed(Command command, ProgressShard shard) {}
         @Override public void readyToExecute(Command command) {}
         @Override public void executed(Command command, ProgressShard shard) {}

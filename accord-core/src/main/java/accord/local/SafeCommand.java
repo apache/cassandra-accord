@@ -57,8 +57,6 @@ public abstract class SafeCommand
 
     private <C extends Command> C update(C update)
     {
-        // TODO (now): reenable this check
-//        Invariants.checkState(current() == null || !CommandStore.current().isTruncated(current()));
         set(update);
         return update;
     }

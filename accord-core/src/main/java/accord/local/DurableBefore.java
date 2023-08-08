@@ -27,15 +27,15 @@ import accord.local.Status.Durability;
 import accord.primitives.Participants;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
-import accord.primitives.Routables;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.utils.Invariants;
 import accord.utils.ReducingIntervalMap;
 import accord.utils.ReducingRangeMap;
 
-import static accord.local.Status.Durability.Majority;
+import static accord.local.Status.Durability.MajorityOrInvalidated;
 import static accord.local.Status.Durability.NotDurable;
-import static accord.local.Status.Durability.Universal;
+import static accord.local.Status.Durability.UniversalOrInvalidated;
 
 public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
 {
@@ -84,7 +84,7 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
         public Durability get(TxnId txnId)
         {
             if (txnId.compareTo(majorityBefore) < 0)
-                return txnId.compareTo(universalBefore) < 0 ? Universal : Majority;
+                return txnId.compareTo(universalBefore) < 0 ? UniversalOrInvalidated : MajorityOrInvalidated;
             return NotDurable;
         }
 
@@ -175,14 +175,14 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
         return ReducingIntervalMap.merge(a, b, DurableBefore.Entry::max, Builder::new);
     }
 
-    public Durability min(TxnId txnId, Routables<?> routables)
+    public Durability min(TxnId txnId, Unseekables<?> unseekables)
     {
-        return notDurableIfNull(foldl(routables, Entry::mergeMin, null, txnId, test -> test == NotDurable));
+        return notDurableIfNull(foldl(unseekables, Entry::mergeMin, null, txnId, test -> test == NotDurable));
     }
 
-    public Durability max(TxnId txnId, Routables<?> routables)
+    public Durability max(TxnId txnId, Unseekables<?> unseekables)
     {
-        return notDurableIfNull(foldl(routables, Entry::mergeMax, null, txnId, test -> test == Universal));
+        return notDurableIfNull(foldl(unseekables, Entry::mergeMax, null, txnId, test -> test == UniversalOrInvalidated));
     }
 
     public Durability get(TxnId txnId, RoutingKey participant)
@@ -191,14 +191,14 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
         return entry == null ? NotDurable : entry.get(txnId);
     }
 
-    public boolean isUniversal(TxnId txnId, Routables<?> participants)
+    public boolean isUniversal(TxnId txnId, Unseekables<?> participants)
     {
-        return min(txnId, participants) == Universal;
+        return min(txnId, participants) == UniversalOrInvalidated;
     }
 
     public boolean isUniversal(TxnId txnId, RoutingKey participant)
     {
-        return get(txnId, participant) == Universal;
+        return get(txnId, participant) == UniversalOrInvalidated;
     }
 
     public boolean isSomeShardDurable(TxnId txnId, Participants<?> participants, Durability durability)
@@ -209,9 +209,9 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
     public Durability min(TxnId txnId)
     {
         if (min.universalBefore.compareTo(txnId) > 0)
-            return Universal;
+            return UniversalOrInvalidated;
         if (min.majorityBefore.compareTo(txnId) > 0)
-            return Majority;
+            return MajorityOrInvalidated;
         return NotDurable;
     }
 

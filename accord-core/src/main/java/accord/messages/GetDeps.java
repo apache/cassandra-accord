@@ -33,6 +33,7 @@ import accord.topology.Topologies;
 import accord.utils.Invariants;
 
 import static accord.messages.PreAccept.calculatePartialDeps;
+import static accord.primitives.EpochSupplier.constant;
 
 public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
 {
@@ -71,7 +72,7 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
     public PartialDeps apply(SafeCommandStore instance)
     {
         Ranges ranges = instance.ranges().allBetween(minUnsyncedEpoch, executeAt);
-        return calculatePartialDeps(instance, txnId, keys, executeAt, ranges);
+        return calculatePartialDeps(instance, txnId, keys, constant(minUnsyncedEpoch), executeAt, ranges);
     }
 
     @Override

@@ -46,7 +46,6 @@ import accord.utils.Invariants;
 
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.SafeCommandStore.TestDep.WITHOUT;
-import static accord.local.SafeCommandStore.TestKind.shouldHaveWitnessed;
 import static accord.local.SafeCommandStore.TestTimestamp.EXECUTES_AFTER;
 import static accord.local.SafeCommandStore.TestTimestamp.STARTED_AFTER;
 import static accord.local.SafeCommandStore.TestTimestamp.STARTED_BEFORE;
@@ -118,7 +117,8 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         PartialDeps deps = command.partialDeps();
         if (!command.known().deps.hasProposedOrDecidedDeps())
         {
-            deps = calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().coordinates(txnId));
+            // TODO (required): consider whether we are safe ignoring the concept of minUnsyncedEpoch here
+            deps = calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, txnId, safeStore.ranges().coordinates(txnId));
         }
 
         boolean rejectsFastPath;
@@ -335,32 +335,32 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         }
     }
 
-    private static Deps acceptedStartedBeforeWithoutWitnessing(SafeCommandStore commandStore, TxnId startedBefore, Ranges ranges, Seekables<?, ?> keys)
+    private static Deps acceptedStartedBeforeWithoutWitnessing(SafeCommandStore safeStore, TxnId startedBefore, Ranges ranges, Seekables<?, ?> keys)
     {
         try (Deps.Builder builder = Deps.builder())
         {
             // any transaction that started
-            commandStore.mapReduce(keys, ranges, shouldHaveWitnessed(startedBefore.rw()), STARTED_BEFORE, startedBefore, WITHOUT, startedBefore, Accepted, PreCommitted,
-                    (keyOrRange, txnId, executeAt, saveStatus, prev) -> {
-                        if (executeAt.compareTo(startedBefore) > 0)
-                            builder.add(keyOrRange, txnId);
-                        return builder;
-                    }, builder, null);
+            safeStore.mapReduce(keys, ranges, startedBefore.rw().witnesses(), STARTED_BEFORE, startedBefore, WITHOUT, startedBefore, Accepted, PreCommitted,
+                    (startedBefore0, keyOrRange, txnId, executeAt, status, prev) -> {
+                        if (executeAt.compareTo(startedBefore0) > 0)
+                            prev.add(keyOrRange, txnId);
+                        return prev;
+                    }, startedBefore, builder);
             return builder.build();
         }
     }
 
-    private static Deps committedStartedBeforeAndWitnessed(SafeCommandStore commandStore, TxnId startedBefore, Ranges ranges, Seekables<?, ?> keys)
+    private static Deps committedStartedBeforeAndWitnessed(SafeCommandStore safeStore, TxnId startedBefore, Ranges ranges, Seekables<?, ?> keys)
     {
         try (Deps.Builder builder = Deps.builder())
         {
-            commandStore.mapReduce(keys, ranges, shouldHaveWitnessed(startedBefore.rw()), STARTED_BEFORE, startedBefore, WITH, startedBefore, Committed, null,
-                    (keyOrRange, txnId, executeAt, saveStatus, prev) -> builder.add(keyOrRange, txnId), builder, (Deps.AbstractBuilder<Deps>)null);
+            safeStore.mapReduce(keys, ranges, startedBefore.rw().witnesses(), STARTED_BEFORE, startedBefore, WITH, startedBefore, Committed, null,
+                    (p1, keyOrRange, txnId, executeAt, status, prev) -> prev.add(keyOrRange, txnId), null, (Deps.AbstractBuilder<Deps>)builder);
             return builder.build();
         }
     }
 
-    private static boolean hasAcceptedStartedAfterWithoutWitnessing(SafeCommandStore commandStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
+    private static boolean hasAcceptedStartedAfterWithoutWitnessing(SafeCommandStore safeStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
     {
         /*
          * The idea here is to discover those transactions that were started after us and have been Accepted
@@ -368,12 +368,14 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
          * the fast path. This is central to safe recovery, as if every transaction that executes later has
          * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
          * has not witnessed us we can safely invalidate (us).
+         *
+         * TODO (required): consider carefully how _adding_ ranges to a CommandStore affects this
          */
-        return commandStore.mapReduce(keys, ranges, shouldHaveWitnessed(startedAfter.rw()), STARTED_AFTER, startedAfter, WITHOUT, startedAfter, Accepted, PreCommitted,
-                (keyOrRange, txnId, executeAt, saveStatus, prev) -> true, false, true);
+        return safeStore.mapReduce(keys, ranges, startedAfter.rw().witnesses(), STARTED_AFTER, startedAfter, WITHOUT, startedAfter, Accepted, PreCommitted,
+                (p1, keyOrRange, txnId, executeAt, status, prev) -> true, null, false, i -> i);
     }
 
-    private static boolean hasCommittedExecutesAfterWithoutWitnessing(SafeCommandStore commandStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
+    private static boolean hasCommittedExecutesAfterWithoutWitnessing(SafeCommandStore safeStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
     {
         /*
          * The idea here is to discover those transactions that have been decided to execute after us
@@ -382,7 +384,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
          * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
          * has not witnessed us we can safely invalidate it.
          */
-        return commandStore.mapReduce(keys, ranges, shouldHaveWitnessed(startedAfter.rw()), EXECUTES_AFTER, startedAfter, WITHOUT, startedAfter, Committed, null,
-                (keyOrRange, txnId, executeAt, saveStatus, prev) -> true,false, true);
+        return safeStore.mapReduce(keys, ranges, startedAfter.rw().witnesses(), EXECUTES_AFTER, startedAfter, WITHOUT, startedAfter, Committed, null,
+                (p1, keyOrRange, txnId, executeAt, status, prev) -> true, null, false, i -> i);
     }
 }

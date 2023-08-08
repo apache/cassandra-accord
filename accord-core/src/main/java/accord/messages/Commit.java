@@ -96,7 +96,7 @@ public class Commit extends TxnRequest<ReadNack>
         if (kind == Kind.Maximal)
         {
 //            boolean isHome = coordinateTopology.rangesForNode(to).contains(route.homeKey());
-            // TODO (expected): only includeQuery if isHome; this affects state eviction and is low priority given size in C*
+            // TODO (desired): only includeQuery if isHome; this affects state eviction and is low priority given size in C*
             partialTxn = txn.slice(scope.covering(), true);
             sendRoute = route;
         }

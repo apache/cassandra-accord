@@ -187,11 +187,6 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
             return Status.max(invalidateReplies, r -> r.status, r -> r.accepted, invalidateReply -> true);
         }
 
-        public static InvalidateReply maxNotTruncated(List<InvalidateReply> invalidateReplies)
-        {
-            return Status.max(invalidateReplies, r -> r.status, r -> r.accepted, invalidateReply -> true);
-        }
-
         public static RoutingKey findHomeKey(List<InvalidateReply> invalidateOks)
         {
             for (InvalidateReply ok : invalidateOks)

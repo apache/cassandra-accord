@@ -21,6 +21,7 @@ package accord.impl.basic;
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.concurrent.Callable;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -41,15 +42,15 @@ import accord.utils.async.AsyncChain;
 
 public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 {
-    private DelayedCommandStores(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, SimulatedDelayedExecutorService executorService)
+    private DelayedCommandStores(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, SimulatedDelayedExecutorService executorService, BooleanSupplier isLoadedCheck)
     {
-        super(time, agent, store, random, shardDistributor, progressLogFactory, DelayedCommandStore.factory(executorService));
+        super(time, agent, store, random, shardDistributor, progressLogFactory, DelayedCommandStore.factory(executorService, isLoadedCheck));
     }
 
-    public static CommandStores.Factory factory(PendingQueue pending)
+    public static CommandStores.Factory factory(PendingQueue pending, BooleanSupplier isLoadedCheck)
     {
         return (time, agent, store, random, shardDistributor, progressLogFactory) ->
-               new DelayedCommandStores(time, agent, store, random, shardDistributor, progressLogFactory, new SimulatedDelayedExecutorService(pending, agent));
+               new DelayedCommandStores(time, agent, store, random, shardDistributor, progressLogFactory, new SimulatedDelayedExecutorService(pending, agent), isLoadedCheck);
     }
 
     public static class DelayedCommandStore extends InMemoryCommandStore
@@ -70,16 +71,24 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 
         private final SimulatedDelayedExecutorService executor;
         private final Queue<Task<?>> pending = new LinkedList<>();
+        private final BooleanSupplier isLoadedCheck;
 
-        public DelayedCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder, SimulatedDelayedExecutorService executor)
+        public DelayedCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder, SimulatedDelayedExecutorService executor, BooleanSupplier isLoadedCheck)
         {
             super(id, time, agent, store, progressLogFactory, epochUpdateHolder);
             this.executor = executor;
+            this.isLoadedCheck = isLoadedCheck;
         }
 
-        private static CommandStore.Factory factory(SimulatedDelayedExecutorService executor)
+        @Override
+        protected boolean canExposeUnloaded()
         {
-            return (id, time, agent, store, progressLogFactory, rangesForEpoch) -> new DelayedCommandStore(id, time, agent, store, progressLogFactory, rangesForEpoch, executor);
+            return isLoadedCheck.getAsBoolean();
+        }
+
+        private static CommandStore.Factory factory(SimulatedDelayedExecutorService executor, BooleanSupplier isLoadedCheck)
+        {
+            return (id, time, agent, store, progressLogFactory, rangesForEpoch) -> new DelayedCommandStore(id, time, agent, store, progressLogFactory, rangesForEpoch, executor, isLoadedCheck);
         }
 
         @Override

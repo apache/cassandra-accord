@@ -30,6 +30,8 @@ import org.slf4j.LoggerFactory;
 import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.Write;
+import accord.impl.InMemoryCommandStore;
+import accord.impl.InMemorySafeCommandsForKey;
 import accord.local.CommandStore;
 import accord.local.SafeCommandStore;
 import accord.primitives.Seekable;
@@ -51,12 +53,15 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
     }
 
     @Override
-    public AsyncChain<Void> apply(Seekable key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store, PartialTxn txn)
+    public AsyncChain<Void> apply(Seekable key, SafeCommandStore safeStore, Timestamp executeAt, DataStore store, PartialTxn txn)
     {
         ListStore s = (ListStore) store;
         if (!containsKey(key))
             return Writes.SUCCESS;
-        return executor.apply(commandStore.commandStore()).submit(() -> {
+        InMemorySafeCommandsForKey cfk = ((InMemoryCommandStore.InMemorySafeStore) safeStore).commandsForKey((Key) key);
+        cfk.updateLastExecutionTimestamps(safeStore, executeAt, true);
+
+        return executor.apply(safeStore.commandStore()).submit(() -> {
             int[] data = get(key);
             s.data.merge((Key)key, new Timestamped<>(executeAt, data), ListStore::merge);
             logger.trace("WRITE on {} at {} key:{} -> {}", s.node, executeAt, key, data);

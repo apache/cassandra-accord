@@ -26,14 +26,6 @@ import accord.primitives.ProgressToken;
  */
 public interface Result extends Outcome
 {
-    Result APPLIED = new Result() { };
-    
-    Result INVALIDATED = new Result()
-    {
-        @Override
-        public ProgressToken asProgressToken() { return ProgressToken.INVALIDATED; }
-    };
-
     @Override
     default ProgressToken asProgressToken() { return ProgressToken.APPLIED; }
 }

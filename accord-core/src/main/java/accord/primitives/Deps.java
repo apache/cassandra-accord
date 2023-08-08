@@ -109,6 +109,11 @@ public class Deps
         return keyDeps.contains(txnId) || rangeDeps.contains(txnId);
     }
 
+    public boolean intersects(TxnId txnId, Ranges ranges)
+    {
+        return keyDeps.intersects(txnId, ranges) || rangeDeps.intersects(txnId, ranges);
+    }
+
     public Deps with(Deps that)
     {
         return new Deps(this.keyDeps.with(that.keyDeps), this.rangeDeps.with(that.rangeDeps));

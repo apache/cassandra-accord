@@ -115,6 +115,11 @@ public interface ProgressLog
     void accepted(Command command, ProgressShard shard);
 
     /**
+     * The transaction's executeAt is known. This may be enough to satisfy some waiting transactions.
+     */
+    void precommitted(Command command);
+
+    /**
      * Has committed
      *
      * A home shard should monitor this transaction for global progress.

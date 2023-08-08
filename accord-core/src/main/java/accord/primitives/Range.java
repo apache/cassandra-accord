@@ -54,6 +54,20 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         }
 
         @Override
+        public int compareStartTo(RoutableKey key)
+        {
+            int c = start().compareTo(key);
+            if (c == 0) c = 1;
+            return c;
+        }
+
+        @Override
+        public int compareEndTo(RoutableKey key)
+        {
+            return end().compareTo(key);
+        }
+
+        @Override
         public boolean startInclusive()
         {
             return false;
@@ -99,6 +113,20 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         public boolean endInclusive()
         {
             return false;
+        }
+
+        @Override
+        public int compareStartTo(RoutableKey key)
+        {
+            return start().compareTo(key);
+        }
+
+        @Override
+        public int compareEndTo(RoutableKey key)
+        {
+            int c = end().compareTo(key);
+            if (c == 0) c = -1;
+            return c;
         }
 
         @Override
@@ -154,6 +182,22 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
                         return -1;
                 }
                 return 0;
+            }
+
+            @Override
+            public int compareStartTo(RoutableKey key)
+            {
+                int c = start().compareTo(key);
+                if (c == 0 && !startInclusive) c = 1;
+                return c;
+            }
+
+            @Override
+            public int compareEndTo(RoutableKey key)
+            {
+                int c = end().compareTo(key);
+                if (c == 0 && !endInclusive) c = -1;
+                return c;
             }
         };
     }
@@ -222,6 +266,22 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
      */
     @Override
     public abstract int compareTo(RoutableKey key);
+
+    /**
+     * Returns a negative integer, zero, or a positive integer as the provided key is greater than, equal to,
+     * or less than the start of this range. This comparison is informed by the inclusivity of the start, i.e.
+     * if the raw keys are equal but the start is exclusive, the start is considered to sort after the provided key,
+     * so that it falls outside of the range.
+     */
+    public abstract int compareStartTo(RoutableKey key);
+
+    /**
+     * Returns a negative integer, zero, or a positive integer as the provided key is greater than, contained by,
+     * or less than the end of this range. This comparison is informed by the inclusivity of the end, i.e.
+     * if the raw keys are equal but the end is exclusive, the end is considered to sort before the provided key,
+     * so that it falls outside of the range.
+     */
+    public abstract int compareEndTo(RoutableKey key);
 
     public boolean contains(RoutableKey key)
     {

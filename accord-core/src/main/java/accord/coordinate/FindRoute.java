@@ -21,7 +21,6 @@ package accord.coordinate;
 import java.util.function.BiConsumer;
 
 import accord.local.Node;
-import accord.local.Status;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
 import accord.primitives.*;
@@ -47,7 +46,7 @@ public class FindRoute extends CheckShards<Route<?>>
         public Result(CheckStatusOk ok)
         {
             this.route = Route.castToFullRoute(ok.route);
-            this.executeAt = ok.saveStatus.status.compareTo(Status.PreCommitted) >= 0 ? ok.executeAt : null;
+            this.executeAt = ok.maxKnown().executeAt.isDecidedAndKnownToExecute() ? ok.executeAt : null;
         }
     }
 

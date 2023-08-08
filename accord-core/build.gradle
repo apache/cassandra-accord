@@ -134,3 +134,12 @@ tasks {
     }
 }
 
+task allTestJar(type: Jar) {
+    dependsOn testJar
+    archiveBaseName = project.name + '-test-all'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from { configurations.testCompileClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+    from { configurations.testRuntimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+    from { sourceSets.test.output }
+    with jar
+}

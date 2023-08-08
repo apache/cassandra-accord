@@ -96,6 +96,12 @@ public class TestAgent implements Agent
     }
 
     @Override
+    public void onStale(Timestamp staleSince, Ranges ranges)
+    {
+
+    }
+
+    @Override
     public void onUncaughtException(Throwable t)
     {
         logger.error("Uncaught exception", t);
@@ -119,7 +125,8 @@ public class TestAgent implements Agent
     }
 
     @Override
-    public void onLocalBarrier(@Nonnull Seekables<?, ?> keysOrRanges, @Nonnull Timestamp executeAt) {
+    public void onLocalBarrier(@Nonnull Seekables<?, ?> keysOrRanges, @Nonnull Timestamp executeAt)
+    {
         completedLocalBarriers.computeIfAbsent(executeAt, ignored -> new AtomicInteger()).incrementAndGet();
     }
 }
