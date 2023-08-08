@@ -193,6 +193,11 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
         {
             return hasData;
         }
+
+        public Ranges unavailable()
+        {
+            return unavailable;
+        }
     }
 
     // TODO (required): abstract the candidate selection process so the implementation may prioritise based on distance/health etc

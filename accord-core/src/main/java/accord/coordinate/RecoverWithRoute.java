@@ -33,19 +33,19 @@ import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
 import accord.primitives.PartialRoute;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Route;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 import javax.annotation.Nullable;
 
+import static accord.local.Status.Durability.Majority;
+import static accord.local.Status.KnownDeps.DepsKnown;
 import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
 import static accord.local.Status.Outcome.Apply;
-import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
-import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
 import static accord.primitives.ProgressToken.APPLIED;
 import static accord.primitives.ProgressToken.INVALIDATED;
 import static accord.primitives.ProgressToken.TRUNCATED;
@@ -120,7 +120,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
     protected boolean isSufficient(Route<?> route, CheckStatusOk ok)
     {
         CheckStatusOkFull full = (CheckStatusOkFull)ok;
-        Known sufficientTo = full.sufficientFor(route.participants(), NoQuorum);
+        Known sufficientTo = full.knownFor(route.participants());
         if (!sufficientTo.isDefinitionKnown())
             return false;
 
@@ -140,8 +140,8 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
             return;
         }
 
-        CheckStatusOkFull full = (CheckStatusOkFull) this.merged;
-        Known known = full.sufficientFor(route.participants(), success == Success.Quorum ? HasQuorum : NoQuorum);
+        CheckStatusOkFull full = ((CheckStatusOkFull) this.merged).finish(route, success.withQuorum);
+        Known known = full.knownFor(route.participants());
 
         switch (known.outcome)
         {
@@ -152,38 +152,61 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                     Txn txn = full.partialTxn.reconstitute(route);
                     Recover.recover(node, txnId, txn, route, callback);
                 }
-                else
+                else if (!known.definition.isOrWasKnown())
                 {
+                    // TODO (required): this logic should be put in Infer, alongside any similar inferences in Recover
                     if (witnessedByInvalidation != null && witnessedByInvalidation.compareTo(Status.PreAccepted) > 0)
                         throw new IllegalStateException("We previously invalidated, finding a status that should be recoverable");
                     Invalidate.invalidate(node, txnId, route, witnessedByInvalidation != null, callback);
+                }
+                else
+                {
+                    callback.accept(full.toProgressToken(), null);
                 }
                 break;
 
             case WasApply:
             case Apply:
-                if (!known.isDefinitionKnown() || known.executeAt != ExecuteAtKnown || known.outcome != Apply)
+                if (!known.isDefinitionKnown())
                 {
-                    if (!full.truncated.isEmpty() && known.executeAt == ExecuteAtKnown)
+                    // TODO (expected): if we determine new durability, propagate it
+                    CheckStatusOkFull propagate;
+                    if (full.isTruncatedResponse())
                     {
                         // we might have only part of the full transaction, and a shard may have truncated;
                         // in this case we want to skip straight to apply, but only for the shards that haven't truncated
-                        Unseekables<?> sendTo = route.subtract(full.truncated);
+                        Participants<?> sendTo = route.participants().subtract(full.truncatedResponse());
                         if (!sendTo.isEmpty())
                         {
-                            Invariants.checkState(full.committedDeps.covering.containsAll(sendTo));
-                            Invariants.checkState(full.partialTxn.covering().containsAll(sendTo));
-                            Persist.persistPartialMaximal(node, txnId, sendTo, route, full.partialTxn, full.executeAt, full.committedDeps, full.writes, full.result);
+                            known = full.knownFor(sendTo);
+                            // we might not know the Apply outcome because we might have raced with truncation on one shard, and the original apply on another,
+                            // so that we know to WasApply, but not
+                            if (known.executeAt == ExecuteAtKnown && known.deps == DepsKnown && known.outcome == Apply)
+                            {
+                                Invariants.checkState(full.committedDeps.covering.containsAll(sendTo));
+                                Invariants.checkState(full.partialTxn.covering().containsAll(sendTo));
+                                Persist.persistPartialMaximal(node, txnId, sendTo, route, full.partialTxn, full.executeAt, full.committedDeps, full.writes, full.result);
+                            }
+                            propagate = full;
+                        }
+                        else
+                        {
+                            // TODO (expected): tighten up / centralise this implication, perhaps in Infer
+                            propagate = full.merge(Majority);
                         }
                     }
+                    else
+                    {
+                        propagate = full;
+                    }
 
-                    Propagate.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? full.toProgressToken() : null, f));
+                    Propagate.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, propagate, (s, f) -> callback.accept(f == null ? propagate.toProgressToken() : null, f));
                     break;
                 }
 
                 // TODO (required): might not be able to fully recover transaction - may only have enough for local shard
                 Txn txn = full.partialTxn.reconstitute(route);
-                if (known.deps.hasDecidedDeps())
+                if (known.executeAt.isDecidedAndKnownToExecute() && known.deps.hasDecidedDeps() && known.outcome == Apply)
                 {
                     Deps deps = full.committedDeps.reconstitute(route());
                     node.withEpoch(full.executeAt.epoch(), () -> {

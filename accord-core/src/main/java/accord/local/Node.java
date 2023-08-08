@@ -85,6 +85,7 @@ import accord.topology.TopologyManager;
 import accord.utils.MapReduceConsume;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncExecutor;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import net.nicoulaj.compilecommand.annotations.Inline;
@@ -494,7 +495,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         messageSink.send(to, send, executor, callback);
     }
 
-    private void checkStore(AgentExecutor executor)
+    private void checkStore(AsyncExecutor executor)
     {
         CommandStore current = CommandStore.maybeCurrent();
         if (current != null && current != executor)

@@ -66,6 +66,13 @@ public class PartialDeps extends Deps
             && rangeDeps.txnIds().containsAll(that.rangeDeps.txnIds());
     }
 
+    public Deps with(Deps that)
+    {
+        if (that instanceof PartialDeps)
+            return with((PartialDeps) that);
+        return super.with(that);
+    }
+
     public PartialDeps with(PartialDeps that)
     {
         Invariants.checkArgument((this.rangeDeps == null) == (that.rangeDeps == null));

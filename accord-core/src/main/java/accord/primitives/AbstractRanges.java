@@ -157,6 +157,30 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
         return indexOf(that) >= 0;
     }
 
+    public boolean intersects(Routable key)
+    {
+        switch (key.domain())
+        {
+            default: throw new AssertionError();
+            case Range: return intersects((Range)key);
+            case Key: return contains((RoutableKey) key);
+        }
+    }
+
+    public Ranges subtract(Unseekables<?> keysOrRanges)
+    {
+        if (keysOrRanges.domain() == Routable.Domain.Key)
+            keysOrRanges = ((AbstractUnseekableKeys)keysOrRanges).toRanges();
+        return subtract((AbstractRanges) keysOrRanges);
+    }
+
+    public Ranges intersect(Unseekables<?> keysOrRanges)
+    {
+        if (keysOrRanges.domain() == Routable.Domain.Key)
+            keysOrRanges = ((AbstractUnseekableKeys)keysOrRanges).toRanges();
+        return sliceMinimal((AbstractRanges)keysOrRanges, this, (AbstractRanges)keysOrRanges, (i1, i2, rs) -> i2.ranges == rs && i2 instanceof Ranges ? (Ranges)i2 : Ranges.ofSortedAndDeoverlapped(rs));
+    }
+
     // returns ri in low 32 bits, ki in top, or -1 if no match found
     @Override
     public final long findNextIntersection(int ri, AbstractKeys<?> keys, int ki)
@@ -193,6 +217,14 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
      * Subtracts the given set of ranges from this
      */
     public Ranges subtract(Ranges that)
+    {
+        return subtract((AbstractRanges) that);
+    }
+
+    /**
+     * Subtracts the given set of ranges from this
+     */
+    private Ranges subtract(AbstractRanges that)
     {
         if (that.isEmpty())
             return this instanceof Ranges ? (Ranges)this : ofSortedAndDeoverlappedUnchecked(ranges);
@@ -272,7 +304,7 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
             case Key:
             {
                 AbstractKeys<?> that = (AbstractKeys<?>) keysOrRanges;
-                Range[] result = SortedArrays.asymmetricLinearIntersectionWithOverlaps(input.ranges, input.ranges.length, that.keys, that.keys.length, Range::compareTo, cachedRanges());
+                Range[] result = SortedArrays.intersectWithMultipleMatches(input.ranges, input.ranges.length, that.keys, that.keys.length, Range::compareTo, cachedRanges());
                 return result == input.ranges ? input : constructor.construct(input, param, result);
             }
         }
@@ -296,7 +328,7 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
 
     static <C extends AbstractRanges, P, O> O sliceOverlapping(C covering, AbstractRanges input, P param, SliceConstructor<? super C, P, O> constructor)
     {
-        Range[] result = SortedArrays.asymmetricLinearIntersectionWithOverlaps(input.ranges, input.ranges.length, covering.ranges, covering.ranges.length, Range::compareIntersecting, cachedRanges());
+        Range[] result = SortedArrays.intersectWithMultipleMatches(input.ranges, input.ranges.length, covering.ranges, covering.ranges.length, Range::compareIntersecting, cachedRanges());
         return constructor.construct(covering, param, result);
     }
 

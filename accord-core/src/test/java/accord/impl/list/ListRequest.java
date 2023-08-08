@@ -76,18 +76,18 @@ public class ListRequest implements Request
             ++count;
             // this method is called for each reply, so if we see a reply where the status is not known, it may be known on others;
             // once all status are merged, then onDone will apply aditional logic to make sure things are safe.
-            if (ok.saveStatus == SaveStatus.Uninitialised)
+            if (ok.maxKnowledgeSaveStatus == SaveStatus.Uninitialised)
                 return Action.ApproveIfQuorum;
-            return ok.saveStatus.hasBeen(PreApplied) ? Action.Approve : Action.Reject;
+            return ok.maxKnowledgeSaveStatus.hasBeen(PreApplied) ? Action.Approve : Action.Reject;
         }
 
         @Override
         protected void onDone(CheckShards.Success done, Throwable failure)
         {
             if (failure != null) callback.accept(null, failure);
-            else if (merged.saveStatus.is(Status.Invalidated)) callback.accept(Outcome.Invalidated, null);
-            else if (merged.saveStatus.is(Status.Truncated)) callback.accept(Outcome.Truncated, null);
-            else if (!merged.saveStatus.hasBeen(PreCommitted) && merged.maxSaveStatus.phase == Cleanup) callback.accept(Outcome.Truncated, null);
+            else if (merged.maxKnowledgeSaveStatus.is(Status.Invalidated)) callback.accept(Outcome.Invalidated, null);
+            else if (merged.maxKnowledgeSaveStatus.is(Status.Truncated)) callback.accept(Outcome.Truncated, null);
+            else if (!merged.maxKnowledgeSaveStatus.hasBeen(PreCommitted) && merged.maxSaveStatus.phase == Cleanup) callback.accept(Outcome.Truncated, null);
             else if (count == nodes().size()) callback.accept(Outcome.Lost, null);
             else callback.accept(Outcome.Other, null);
         }
@@ -160,11 +160,6 @@ public class ListRequest implements Request
         }
 
         private void checkOnResult(@Nullable RoutingKey homeKey, TxnId txnId, int attempt, Throwable t) {
-            if (attempt == 3)
-            {
-                node.agent().onUncaughtException(t);
-                return;
-            }
             if (homeKey == null)
                 homeKey = node.selectRandomHomeKey(txnId);
             RoutingKey finalHomeKey = homeKey;

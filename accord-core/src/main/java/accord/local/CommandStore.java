@@ -18,8 +18,29 @@
 
 package accord.local;
 
+import accord.api.ProgressLog;
+import accord.api.DataStore;
+import accord.coordinate.CollectDeps;
+import accord.local.Command.WaitingOn;
+
+import javax.annotation.Nullable;
+import accord.api.Agent;
+
+import accord.local.CommandStores.RangesForEpoch;
+import accord.primitives.Range;
+import accord.primitives.Txn.Kind.Kinds;
+import accord.utils.RelationMultiMap.SortedRelationList;
+import accord.utils.async.AsyncChain;
+
+import accord.api.ConfigurationService.EpochReady;
+import accord.utils.DeterministicIdentitySet;
+import accord.utils.Invariants;
+import accord.utils.ReducingRangeMap;
+import accord.utils.async.AsyncResult;
+
 import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Objects;
@@ -30,16 +51,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSortedMap;
 
-import accord.api.Agent;
-import accord.api.ConfigurationService.EpochReady;
-import accord.api.DataStore;
-import accord.api.ProgressLog;
-import accord.coordinate.CollectDeps;
-import accord.local.Command.WaitingOn;
 import accord.primitives.FullRoute;
 import accord.primitives.KeyDeps;
 import accord.primitives.Participants;
@@ -49,14 +63,7 @@ import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
-import accord.utils.DeterministicIdentitySet;
-import accord.utils.Invariants;
-import accord.utils.ReducingRangeMap;
-import accord.utils.RelationMultiMap.SortedRelationList;
-import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
-import accord.local.CommandStores.RangesForEpoch;
 
 import static accord.api.ConfigurationService.EpochReady.DONE;
 import static accord.local.PreLoadContext.contextFor;
@@ -98,13 +105,13 @@ public abstract class CommandStore implements AgentExecutor
         // TODO (desired): can better encapsulate by accepting only the newRangesForEpoch and deriving the add/remove ranges
         public void add(long epoch, RangesForEpoch newRangesForEpoch, Ranges addRanges)
         {
-            RedundantBefore addRedundantBefore = RedundantBefore.create(addRanges, epoch, Long.MAX_VALUE, TxnId.NONE, TxnId.minForEpoch(epoch));
+            RedundantBefore addRedundantBefore = RedundantBefore.create(addRanges, epoch, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, TxnId.minForEpoch(epoch));
             update(newRangesForEpoch, addRedundantBefore);
         }
 
         public void remove(long epoch, RangesForEpoch newRangesForEpoch, Ranges removeRanges)
         {
-            RedundantBefore addRedundantBefore = RedundantBefore.create(removeRanges, Long.MIN_VALUE, epoch, TxnId.NONE, TxnId.NONE);
+            RedundantBefore addRedundantBefore = RedundantBefore.create(removeRanges, Long.MIN_VALUE, epoch, TxnId.NONE, TxnId.NONE, TxnId.NONE);
             update(newRangesForEpoch, addRedundantBefore);
         }
 
@@ -145,6 +152,20 @@ public abstract class CommandStore implements AgentExecutor
     protected RangesForEpoch rangesForEpoch;
 
     // TODO (desired): merge with redundantBefore?
+    /**
+     * safeToRead is related to RedundantBefore, but a distinct concept.
+     * While bootstrappedAt defines the txnId bounds we expect to maintain data for locally,
+     * safeToRead defines executeAt bounds we can safely participate in transaction execution for.
+     * safeToRead is defined by the no-op transaction we execute after a bootstrap is initiated,
+     * and creates a global bound before which we know we have complete data from our bootstrap.
+     *
+     * There's a smearing period during bootstrap where some keys may be ahead of others, for instance,
+     * since we do not create a precise instant in the transaction log for bootstrap so as to avoid impeding execution.
+     *
+     * We also update safeToRead when we go stale, to remove ranges we may have bootstrapped but that are now known to
+     * be incomplete. In this case we permit transactions to execute in any order for the unsafe key ranges.
+     * But they may still be ordered for other key ranges they participate in.
+     */
     private NavigableMap<Timestamp, Ranges> safeToRead = ImmutableSortedMap.of(Timestamp.NONE, Ranges.EMPTY);
     private final Set<Bootstrap> bootstraps = Collections.synchronizedSet(new DeterministicIdentitySet<>());
     // TODO (required): we must synchronise this on joining, prior to marking ourselves ready to coordinate
@@ -201,12 +222,12 @@ public abstract class CommandStore implements AgentExecutor
 
     private static Timestamp maxApplied(SafeCommandStore safeStore, Seekables<?, ?> keysOrRanges, Ranges slice)
     {
-        return safeStore.mapReduce(keysOrRanges, slice, SafeCommandStore.TestKind.Ws,
+        return safeStore.mapReduce(keysOrRanges, slice, Kinds.Ws,
                                    SafeCommandStore.TestTimestamp.STARTED_AFTER, Timestamp.NONE,
                                    SafeCommandStore.TestDep.ANY_DEPS, null,
-                                   Status.Applied, Status.Applied,
-                                   (key, txnId, executeAt, status, max) -> Timestamp.max(max, executeAt),
-                                   Timestamp.NONE, Timestamp.MAX);
+                                   Status.PreApplied, Status.Truncated,
+                                   (p1, key, txnId, executeAt, status, max) -> Timestamp.max(max, executeAt),
+                                   null, Timestamp.NONE, Timestamp.MAX::equals);
     }
 
     public AsyncChain<Timestamp> maxAppliedFor(Seekables<?, ?> keysOrRanges, Ranges slice)
@@ -262,16 +283,6 @@ public abstract class CommandStore implements AgentExecutor
         this.safeToRead = newSafeToRead;
     }
 
-    public NavigableMap<TxnId, Ranges> bootstrapBeganAt()
-    {
-        return bootstrapBeganAt;
-    }
-
-    public NavigableMap<Timestamp, Ranges> safeToRead()
-    {
-        return safeToRead;
-    }
-
     public final void markExclusiveSyncPoint(SafeCommandStore safeStore, TxnId txnId, Ranges ranges)
     {
         // TODO (desired): narrow ranges to those that are owned
@@ -279,6 +290,14 @@ public abstract class CommandStore implements AgentExecutor
         ReducingRangeMap<Timestamp> newRejectBefore = rejectBefore != null ? rejectBefore : new ReducingRangeMap<>();
         newRejectBefore = ReducingRangeMap.add(newRejectBefore, ranges, txnId, Timestamp::max);
         setRejectBefore(newRejectBefore);
+    }
+
+    public final void markExclusiveSyncPointApplied(SafeCommandStore safeStore, TxnId txnId, Ranges ranges)
+    {
+        // TODO (desired): narrow ranges to those that are owned
+        Invariants.checkArgument(txnId.rw() == ExclusiveSyncPoint);
+        RedundantBefore newRedundantBefore = RedundantBefore.merge(redundantBefore, RedundantBefore.create(ranges, txnId, TxnId.NONE, TxnId.NONE));
+        setRedundantBefore(newRedundantBefore);
     }
 
     final Timestamp preaccept(TxnId txnId, Seekables<?, ?> keys, SafeCommandStore safeStore, boolean permitFastPath)
@@ -463,7 +482,7 @@ public abstract class CommandStore implements AgentExecutor
     final void markBootstrapping(SafeCommandStore safeStore, TxnId globalSyncId, Ranges ranges)
     {
         setBootstrapBeganAt(bootstrap(globalSyncId, ranges, bootstrapBeganAt));
-        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, globalSyncId);
+        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, TxnId.NONE, globalSyncId);
         setRedundantBefore(RedundantBefore.merge(redundantBefore, addRedundantBefore));
         DurableBefore addDurableBefore = DurableBefore.create(ranges, TxnId.NONE, TxnId.NONE);
         setDurableBefore(DurableBefore.merge(durableBefore, addDurableBefore));
@@ -472,12 +491,34 @@ public abstract class CommandStore implements AgentExecutor
     // TODO (expected): we can immediately truncate dependencies locally once an exclusiveSyncPoint applies, we don't need to wait for the whole shard
     public void markShardDurable(SafeCommandStore safeStore, TxnId globalSyncId, Ranges ranges)
     {
-        // TODO (now): IMPORTANT we should insert additional entries for each epoch our ownership differs
         ranges = ranges.slice(safeStore.ranges().allUntil(globalSyncId.epoch()), Minimal);
-        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, globalSyncId, TxnId.NONE);
+        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, TxnId.NONE, globalSyncId, TxnId.NONE);
         setRedundantBefore(RedundantBefore.merge(redundantBefore, addRedundantBefore));
         DurableBefore addDurableBefore = DurableBefore.create(ranges, globalSyncId, globalSyncId);
         setDurableBefore(DurableBefore.merge(durableBefore, addDurableBefore));
+    }
+
+    // TODO (expected): we can immediately truncate dependencies locally once an exclusiveSyncPoint applies, we don't need to wait for the whole shard
+    public void markShardStale(SafeCommandStore safeStore, Timestamp staleSince, Ranges ranges, boolean isSincePrecise)
+    {
+        Timestamp staleUntilAtLeast = staleSince;
+        if (isSincePrecise)
+        {
+            ranges = ranges.slice(safeStore.ranges().allAt(staleSince.epoch()), Minimal);
+        }
+        else
+        {
+            ranges = ranges.slice(safeStore.ranges().allSince(staleSince.epoch()), Minimal);
+            // make sure no in-progress bootstrap attempts will override the stale since for commands whose staleness bounds are unknown
+            staleUntilAtLeast = Timestamp.max(bootstrapBeganAt.lastKey(), staleUntilAtLeast);
+        }
+        agent.onStale(staleSince, ranges);
+
+        RedundantBefore addRedundantBefore = RedundantBefore.create(ranges, TxnId.NONE, TxnId.NONE, TxnId.NONE, staleUntilAtLeast);
+        setRedundantBefore(RedundantBefore.merge(redundantBefore, addRedundantBefore));
+        // find which ranges need to bootstrap, subtracting those already in progress that cover the id
+
+        markUnsafeToRead(ranges);
     }
 
     // MUST be invoked before CommandStore reference leaks to anyone
@@ -490,7 +531,7 @@ public abstract class CommandStore implements AgentExecutor
         return () -> new EpochReady(epoch, DONE, DONE, DONE, DONE);
     }
 
-    final Ranges safeToReadAt(Timestamp at)
+    public final Ranges safeToReadAt(Timestamp at)
     {
         return safeToRead.floorEntry(at).getValue();
     }
@@ -505,6 +546,9 @@ public abstract class CommandStore implements AgentExecutor
     {
         return redundantBefore;
     }
+
+    protected NavigableMap<TxnId, Ranges> bootstrapBeganAt() { return bootstrapBeganAt; }
+    protected NavigableMap<Timestamp, Ranges> safeToRead() { return safeToRead; }
 
     public final boolean isRejectedIfNotPreAccepted(TxnId txnId, Unseekables<?> participants)
     {
@@ -521,7 +565,8 @@ public abstract class CommandStore implements AgentExecutor
         // TODO (required): make sure we have no races on HLC around SyncPoint else this resolution may not work (we need to know the micros equivalent timestamp of the snapshot)
         KeyDeps keyDeps = builder.deps.keyDeps;
         redundantBefore().foldl(keyDeps.keys(), (e, b, d, p2, ki, kj) -> {
-            int txnIdx = d.txnIds().find(e.locallyRedundantBefore());
+            boolean isAppliedOrInvalidated = e.locallyAppliedOrInvalidatedBefore.compareTo(e.bootstrappedAt) >= 0;
+            int txnIdx = d.txnIds().find(isAppliedOrInvalidated ? e.locallyAppliedOrInvalidatedBefore : e.bootstrappedAt);
             if (txnIdx < 0) txnIdx = -1 - txnIdx;
             while (ki < kj)
             {
@@ -530,26 +575,86 @@ public abstract class CommandStore implements AgentExecutor
                 if (ti < 0)
                     ti = -1 - ti;
                 for (int i = 0 ; i < ti ; ++i)
-                    b.setAppliedOrInvalidated(txnIdsForKey.getValueIndex(i));
+                    b.removeWaitingOn(txnIdsForKey.getValueIndex(i), isAppliedOrInvalidated);
             }
             return b;
         }, builder, keyDeps, null, ignore -> false);
-        RangeDeps rangeDeps = builder.deps.rangeDeps;
-        // TODO (now): slice to only those ranges we own, maybe don't even construct rangeDeps.covering()
-        redundantBefore().foldl(participants, (e, b, d, rs, pi, pj) -> {
-            // TODO (now): foldlInt so we can track the lower rangeidx bound and not revisit unnecessarily
-            boolean useBootstrap = e.isLocalRedundancyViaBootstrap();
+
+        /**
+         * If we have to handle bootstrapping ranges for range transactions, these may only partially cover the
+         * transaction, in which case we should not remove the transaction as a dependency. But if it is fully
+         * covered by bootstrapping ranges then we *must* remove it as a dependency.
+         */
+        class RangeState
+        {
+            final WaitingOn.Update builder;
             int txnIdx;
+            Range range;
+            Map<Integer, Ranges> partiallyBootstrapping;
+
+            RangeState(WaitingOn.Update builder)
             {
-                int tmp = d.txnIds().find(useBootstrap ? e.bootstrappedAt : e.redundantBefore);
-                txnIdx = tmp < 0 ? -1 - tmp : tmp;
+                this.builder = builder;
             }
-            rangeDeps.forEach(participants, e.range, pi, pj, d, (d0, txnIdx0) -> {
-                if (txnIdx0 < txnIdx)
-                    b.setAppliedOrInvalidatedRangeIdx(txnIdx0);
+
+            /**
+             * Are the participating ranges for the txn fully covered by bootstrapping ranges for this command store
+             */
+            boolean isFullyBootstrapping(int rangeTxnIdx)
+            {
+                if (partiallyBootstrapping == null)
+                    partiallyBootstrapping = new HashMap<>();
+                Ranges prev = partiallyBootstrapping.get(rangeTxnIdx);
+                Ranges remaining = prev;
+                if (remaining == null) remaining = builder.deps.rangeDeps.ranges(rangeTxnIdx);
+                else Invariants.checkState(!remaining.isEmpty());
+                remaining = remaining.subtract(Ranges.of(range));
+                if (prev == null) Invariants.checkState(!remaining.isEmpty());
+                partiallyBootstrapping.put(txnIdx, remaining);
+                return remaining.isEmpty();
+            }
+        }
+        RangeDeps rangeDeps = builder.deps.rangeDeps;
+        // TODO (required, consider): slice to only those ranges we own, maybe don't even construct rangeDeps.covering()
+        redundantBefore().foldl(participants, (e, s, d, ps, pi, pj) -> {
+            // TODO (desired, efficiency): foldlInt so we can track the lower rangeidx bound and not revisit unnecessarily
+            WaitingOn.Update b = s.builder;
+            {
+                // find the txnIdx below which we are known to be fully redundant locally due to having been applied or invalidated
+                int tmp = d.txnIds().find(e.locallyAppliedOrInvalidatedBefore);
+                s.txnIdx = tmp < 0 ? -1 - tmp : tmp;
+            }
+            // remove intersecting transactions with known redundant txnId
+            d.forEach(ps, e.range, pi, pj, b, s, (b0, s0, txnIdx) -> {
+                if (txnIdx < s0.txnIdx)
+                    b0.removeWaitingOnRangeIdx(txnIdx);
             });
-            return b;
-        }, builder, rangeDeps, participants, ignore -> false);
+            if (e.bootstrappedAt.compareTo(e.locallyAppliedOrInvalidatedBefore) > 0)
+            {
+                // if we have any ranges where bootstrap is ahead of the latest known fully redundant txnId,
+                // we have to do a more complicated dance since this may imply only partial redundancy
+                // (we may still depend on the transaction for some other range)
+                {
+                    int tmp = d.txnIds().find(e.bootstrappedAt);
+                    s.txnIdx = tmp < 0 ? -1 - tmp : tmp;
+                }
+                s.range = e.range;
+                d.forEach(ps, e.range, pi, pj, b, s, (b0, s0, txnIdx) -> {
+                    if (txnIdx < s0.txnIdx && b0.isWaitingOnRangeIdx(txnIdx))
+                    {
+                        if (b0.deps.rangeDeps.foldEachRange(txnIdx, s0.range, true, (r1, r2, p) -> p && r1.contains(r2)))
+                        {
+                            b0.removeWaitingOnRangeIdx(txnIdx);
+                        }
+                        else if (s0.isFullyBootstrapping(txnIdx))
+                        {
+                            b0.removeWaitingOnRangeIdx(txnIdx);
+                        }
+                    }
+                });
+            }
+            return s;
+        }, new RangeState(builder), rangeDeps, participants, ignore -> false);
     }
 
     public final boolean hasLocallyRedundantDependencies(TxnId minimumDependencyId, Timestamp executeAt, Participants<?> participantsOfWaitingTxn)
@@ -557,7 +662,7 @@ public abstract class CommandStore implements AgentExecutor
         // TODO (required): consider race conditions when bootstrapping into an active command store, that may have seen a higher txnId than this?
         //   might benefit from maintaining a per-CommandStore largest TxnId register to ensure we allocate a higher TxnId for our ExclSync,
         //   or from using whatever summary records we have for the range, once we maintain them
-        return redundantBefore.status(minimumDependencyId, executeAt, participantsOfWaitingTxn).compareTo(RedundantStatus.PARTIALLY_PRE_BOOTSTRAP) >= 0;
+        return redundantBefore.status(minimumDependencyId, executeAt, participantsOfWaitingTxn).compareTo(RedundantStatus.PARTIALLY_PRE_BOOTSTRAP_OR_STALE) >= 0;
     }
 
     final synchronized void markUnsafeToRead(Ranges ranges)
@@ -566,9 +671,10 @@ public abstract class CommandStore implements AgentExecutor
             setSafeToRead(purgeHistory(safeToRead, ranges));
     }
 
-    final synchronized void markSafeToRead(Timestamp at, Ranges ranges)
+    final synchronized void markSafeToRead(Timestamp forBootstrapAt, Timestamp at, Ranges ranges)
     {
-        setSafeToRead(purgeAndInsert(safeToRead, at, ranges));
+        Ranges validatedSafeToRead = redundantBefore.validateSafeToRead(forBootstrapAt, ranges);
+        setSafeToRead(purgeAndInsert(safeToRead, at, validatedSafeToRead));
     }
 
     private static <T extends Timestamp> ImmutableSortedMap<T, Ranges> bootstrap(T at, Ranges ranges, NavigableMap<T, Ranges> bootstrappedAt)

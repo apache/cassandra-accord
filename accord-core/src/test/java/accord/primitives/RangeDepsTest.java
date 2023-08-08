@@ -101,6 +101,24 @@ public class RangeDepsTest
             return set;
         }
 
+        Set<TxnId> canonicalOverlaps(RoutableKey key)
+        {
+            Set<TxnId> set = new TreeSet<>();
+            for (Map.Entry<TxnId, Ranges> e : canonical.entrySet())
+            {
+                if (e.getValue().contains(key))
+                    set.add(e.getKey());
+            }
+            return set;
+        }
+
+        Set<TxnId> testOverlaps(RoutableKey key)
+        {
+            Set<TxnId> set = new TreeSet<>();
+            test.forEachUniqueTxnId(key, set::add);
+            return set;
+        }
+
         void validate(Random random)
         {
             Assertions.assertEquals(canonical.size(), test.txnIdCount());
@@ -108,11 +126,15 @@ public class RangeDepsTest
             for (int i = 0 ; i < test.rangeCount() ; ++i)
             {
                 Assertions.assertEquals(canonicalOverlaps(test.range(i)), testOverlaps(test.range(i)));
+                Assertions.assertEquals(canonicalOverlaps(test.range(i).start()), testOverlaps(test.range(i).start()));
+                Assertions.assertEquals(canonicalOverlaps(test.range(i).end()), testOverlaps(test.range(i).end()));
             }
             for (int i = 0 ; i < test.rangeCount() ; ++i)
             {
                 Range range = generate.generateRanges(random, 1)[0];
                 Assertions.assertEquals(canonicalOverlaps(range), testOverlaps(range));
+                Assertions.assertEquals(canonicalOverlaps(range.start()), testOverlaps(range.start()));
+                Assertions.assertEquals(canonicalOverlaps(range.end()), testOverlaps(range.end()));
             }
         }
     }
@@ -210,6 +232,7 @@ public class RangeDepsTest
     {
         Random random = new Random();
         long seed = random.nextLong();
+//        long seed = 2005526220972215410L;
         System.out.println("Seed: " + seed);
         random.setSeed(seed);
 

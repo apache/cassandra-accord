@@ -144,11 +144,7 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
                 break;
 
             case ApprovePartial:
-                Ranges unavailable = unavailable(reply);
-                RequestStatus result = recordPartialReadSuccess(from, unavailable);
-                if (result == RequestStatus.Failed && failure == null)
-                    failure = new RangeUnavailable(unavailable, txnId);
-                handle(result);
+                handle(recordPartialReadSuccess(from, unavailable(reply)));
                 break;
         }
     }
@@ -177,11 +173,9 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
     @Override
     public void onCallbackFailure(Id from, Throwable failure)
     {
+        node.agent().onUncaughtException(failure);
         if (isDone)
-        {
-            node.agent().onUncaughtException(failure);
             return;
-        }
 
         if (this.failure != null)
             failure.addSuppressed(this.failure);
@@ -218,7 +212,18 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
     {
         Invariants.checkState(!isDone);
         if (failure == null)
-            failure = new Exhausted(txnId, null);
+        {
+            Ranges unavailable = Ranges.EMPTY;
+            Ranges exhausted = Ranges.EMPTY;
+            for (ReadShardTracker tracker : trackers)
+            {
+                if (tracker.hasSucceeded())
+                    continue;
+                if (tracker.unavailable() != null) unavailable = unavailable.with(tracker.unavailable());
+                else exhausted = exhausted.with(Ranges.of(tracker.shard.range));
+            }
+            failure = new Exhausted(txnId, null, (unavailable.isEmpty() ? "" : "unavailable: " + unavailable + (exhausted.isEmpty() ? "" : "; ")) + (exhausted.isEmpty() ? "" : "no response: " + exhausted));
+        }
         finishOnFailure();
     }
 

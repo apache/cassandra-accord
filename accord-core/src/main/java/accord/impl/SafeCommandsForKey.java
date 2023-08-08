@@ -22,6 +22,7 @@ import accord.api.Key;
 import accord.api.VisibleForImplementation;
 import accord.impl.CommandTimeseries.CommandLoader;
 import accord.local.Command;
+import accord.local.SafeCommandStore;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
@@ -165,14 +166,18 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
     }
 
     @VisibleForImplementation
-    public <D> CommandsForKey updateLastExecutionTimestamps(Timestamp executeAt, boolean isForWriteTxn)
+    public <D> CommandsForKey updateLastExecutionTimestamps(SafeCommandStore safeStore, Timestamp executeAt, boolean isForWriteTxn)
     {
         CommandsForKey current = current();
 
         Timestamp lastWrite = current.lastWriteTimestamp();
 
         if (executeAt.compareTo(lastWrite) < 0)
+        {
+            if (!safeStore.commandStore().safeToReadAt(executeAt).contains(key.toUnseekable()))
+                return current;
             throw new IllegalArgumentException(String.format("%s is less than the most recent write timestamp %s", executeAt, lastWrite));
+        }
 
         Timestamp lastExecuted = current.lastExecutedTimestamp();
         int cmp = executeAt.compareTo(lastExecuted);
@@ -180,7 +185,11 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
         if (cmp == 0 || (!isForWriteTxn && cmp < 0))
             return current;
         if (cmp < 0)
+        {
+            if (!safeStore.commandStore().safeToReadAt(executeAt).contains(key.toUnseekable()))
+                return current;
             throw new IllegalArgumentException(String.format("%s is less than the most recent executed timestamp %s", executeAt, lastExecuted));
+        }
 
         long micros = executeAt.hlc();
         long lastMicros = current.lastExecutedHlc();

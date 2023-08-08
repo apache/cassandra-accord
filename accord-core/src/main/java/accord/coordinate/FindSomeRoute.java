@@ -75,6 +75,6 @@ public class FindSomeRoute extends CheckShards<Unseekables<?>>
     {
         if (failure != null) callback.accept(null, failure);
         else if (merged == null) callback.accept(new Result(null, Nothing, success.withQuorum), null);
-        else callback.accept(new Result(merged.route, merged.inferredOrKnown(success.withQuorum), success.withQuorum), null);
+        else callback.accept(new Result(merged.route, merged.finish(this.route, success.withQuorum).knownFor(this.route), success.withQuorum), null);
     }
 }

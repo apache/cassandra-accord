@@ -30,10 +30,13 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 
 /**
- * Mostly copied/adapted from Cassandra's PaxosRepairHistory class
- *
  * Represents a map of ranges where precisely one value is bound to each point in the continuum of ranges,
  * and a simple function is sufficient to merge values inserted to overlapping ranges.
+ *
+ * Copied/adapted from Cassandra's PaxosRepairHistory class, however has a major distinction: applies only to the
+ * covered ranges, i.e. the first start bound is the lower bound, and the last start bound is the upper bound,
+ * and everything else is considered unknown. This is in contrast to the C* version where every logical range has
+ * some associated information, with the first and last entries applying to everything either side of the start/end bound.
  *
  * A simple sorted array of bounds is sufficient to represent the state and perform efficient lookups.
  *
@@ -47,8 +50,8 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
     // for simplicity at construction, we permit this to be overridden by the first insertion
     final boolean inclusiveEnds;
     // starts is 1 longer than values, so that starts[0] == start of values[0]
-    final K[] starts;
-    final V[] values;
+    protected final K[] starts;
+    protected final V[] values;
 
     public ReducingIntervalMap()
     {
@@ -81,6 +84,35 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
                 result = reduce.apply(result, values[i]);
         }
         return result;
+    }
+
+    public <V2> V2 foldl(BiFunction<V, V2, V2> reduce, V2 accumulator, Predicate<V2> terminate)
+    {
+        for (V value : values)
+        {
+            if (value != null)
+            {
+                accumulator = reduce.apply(value, accumulator);
+                if (terminate.test(accumulator))
+                    break;
+            }
+        }
+        return accumulator;
+    }
+
+    public <V2> V2 foldlWithBounds(QuadFunction<V, V2, K, K, V2> fold, V2 accumulator, Predicate<V2> terminate)
+    {
+        for (int i = 0 ; i < values.length ; ++i)
+        {
+            V value = values[i];
+            if (value != null)
+            {
+                accumulator = fold.apply(value, accumulator, starts[i], starts[i+1]);
+                if (terminate.test(accumulator))
+                    break;
+            }
+        }
+        return accumulator;
     }
 
     public String toString()
@@ -329,6 +361,10 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
             return a;
         }
 
+        /**
+         * null is a valid value to represent no knowledge, and is the *expected* final value, representing
+         * the bound of our knowledge (any higher key will find no associated information)
+         */
         public void append(K start, @Nullable V value, BiFunction<V, V, V> reduce)
         {
             int tailIdx = starts.size() - 1;

@@ -182,20 +182,19 @@ public abstract class ReadData extends AbstractEpochRequest<ReadNack>
         ack(unavailable);
     }
 
-    protected AsyncChain<Data> execute(SafeCommandStore safeStore, Timestamp executeAt, PartialTxn txn)
+    protected AsyncChain<Data> execute(SafeCommandStore safeStore, Timestamp executeAt, PartialTxn txn, Ranges unavailable)
     {
-        return txn.read(safeStore, executeAt);
+        return txn.read(safeStore, executeAt, unavailable);
     }
 
     void read(SafeCommandStore safeStore, Timestamp executeAt, PartialTxn txn)
     {
         CommandStore unsafeStore = safeStore.commandStore();
         Ranges unavailable = safeStore.ranges().unsafeToReadAt(executeAt);
-
-        execute(safeStore, executeAt, txn).begin((next, throwable) -> {
+        // TODO (required): do we need to check unavailable again on completion, or throughout execution?
+        execute(safeStore, executeAt, txn, unavailable).begin((next, throwable) -> {
             if (throwable != null)
             {
-                // TODO (expected, exceptions): should send exception to client, and consistency handle/propagate locally
                 logger.trace("{}: read failed for {}: {}", txnId, unsafeStore, throwable);
                 node.reply(replyTo, replyContext, null, throwable);
                 cancel();

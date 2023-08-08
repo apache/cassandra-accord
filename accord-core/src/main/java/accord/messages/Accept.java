@@ -29,6 +29,7 @@ import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
+import accord.primitives.EpochSupplier;
 import accord.primitives.FullRoute;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialRoute;
@@ -109,7 +110,8 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
 
     private PartialDeps calculatePartialDeps(SafeCommandStore safeStore)
     {
-        return PreAccept.calculatePartialDeps(safeStore, txnId, keys, executeAt, safeStore.ranges().allBetween(minUnsyncedEpoch, executeAt));
+        Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, txnId);
+        return PreAccept.calculatePartialDeps(safeStore, txnId, keys, EpochSupplier.constant(minUnsyncedEpoch), executeAt, ranges);
     }
 
     @Override

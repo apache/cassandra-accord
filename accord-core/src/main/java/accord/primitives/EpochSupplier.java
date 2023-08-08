@@ -21,4 +21,9 @@ package accord.primitives;
 public interface EpochSupplier
 {
     long epoch();
+
+    static EpochSupplier constant(long epoch)
+    {
+        return () -> epoch;
+    }
 }

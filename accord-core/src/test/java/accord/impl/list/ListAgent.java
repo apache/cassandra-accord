@@ -18,6 +18,7 @@
 
 package accord.impl.list;
 
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import accord.api.Agent;
@@ -41,12 +42,14 @@ public class ListAgent implements Agent
     final long timeout;
     final Consumer<Throwable> onFailure;
     final Consumer<Runnable> retryBootstrap;
+    final BiConsumer<Timestamp, Ranges> onStale;
 
-    public ListAgent(long timeout, Consumer<Throwable> onFailure, Consumer<Runnable> retryBootstrap)
+    public ListAgent(long timeout, Consumer<Throwable> onFailure, Consumer<Runnable> retryBootstrap, BiConsumer<Timestamp, Ranges> onStale)
     {
         this.timeout = timeout;
         this.onFailure = onFailure;
         this.retryBootstrap = retryBootstrap;
+        this.onStale = onStale;
     }
 
     @Override
@@ -75,6 +78,12 @@ public class ListAgent implements Agent
     public void onFailedBootstrap(String phase, Ranges ranges, Runnable retry, Throwable failure)
     {
         retryBootstrap.accept(retry);
+    }
+
+    @Override
+    public void onStale(Timestamp staleSince, Ranges ranges)
+    {
+        onStale.accept(staleSince, ranges);
     }
 
     @Override

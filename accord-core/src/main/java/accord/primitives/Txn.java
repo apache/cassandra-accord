@@ -32,6 +32,14 @@ import accord.api.Update;
 import accord.local.SafeCommandStore;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
+import java.util.function.Predicate;
+
+import static accord.primitives.Txn.Kind.Kinds.Any;
+import static accord.primitives.Txn.Kind.Kinds.AnyGlobal;
+import static accord.primitives.Txn.Kind.Kinds.RorWs;
+import static accord.primitives.Txn.Kind.Kinds.SyncPoints;
+import static accord.primitives.Txn.Kind.Kinds.Ws;
+import static accord.primitives.Txn.Kind.Kinds.WsOrSyncPoint;
 
 public interface Txn
 {
@@ -93,6 +101,26 @@ public interface Txn
         LocalOnly
         ;
 
+        public enum Kinds implements Predicate<Kind>
+        {
+            Ws, RorWs, WsOrSyncPoint, SyncPoints, AnyGlobal, Any;
+
+            @Override
+            public boolean test(Kind kind)
+            {
+                switch (this)
+                {
+                    default: throw new AssertionError();
+                    case Any: return true;
+                    case AnyGlobal: return !kind.isLocal();
+                    case WsOrSyncPoint: return kind == Write || kind == Kind.SyncPoint || kind == ExclusiveSyncPoint;
+                    case SyncPoints: return kind == Kind.SyncPoint || kind == ExclusiveSyncPoint;
+                    case Ws: return kind == Write;
+                    case RorWs: return kind == Read || kind == Write;
+                }
+            }
+        }
+
         // in future: BlindWrite, Interactive?
 
         private static final Kind[] VALUES = Kind.values();
@@ -137,6 +165,43 @@ public interface Txn
         public static Kind ofOrdinal(int ordinal)
         {
             return VALUES[ordinal];
+        }
+
+        public Kinds witnesses()
+        {
+            switch (this)
+            {
+                default: throw new AssertionError();
+                case Read:
+                case NoOp:
+                    return Ws;
+                case Write:
+                    return RorWs;
+                case SyncPoint:
+                case ExclusiveSyncPoint:
+                    return AnyGlobal;
+            }
+        }
+
+        public Kinds witnessedBy()
+        {
+            switch (this)
+            {
+                default: throw new AssertionError();
+                case Read:
+                    return WsOrSyncPoint;
+                case Write:
+                    return AnyGlobal;
+                case SyncPoint:
+                case ExclusiveSyncPoint:
+                case NoOp:
+                    return SyncPoints;
+            }
+        }
+
+        public char shortName()
+        {
+            return toString().charAt(0);
         }
     }
 
@@ -267,10 +332,10 @@ public interface Txn
         return new Writes(txnId, executeAt, update.keys(), update.apply(executeAt, data));
     }
 
-    default AsyncChain<Data> read(SafeCommandStore safeStore, Timestamp executeAt)
+    default AsyncChain<Data> read(SafeCommandStore safeStore, Timestamp executeAt, Ranges unavailable)
     {
-        Ranges ranges = safeStore.ranges().safeToReadAt(executeAt);
-        List<AsyncChain<Data>> chains = Routables.foldlMinimal(read().keys(), ranges, (key, accumulate, index) -> {
+        Ranges ranges = safeStore.ranges().allAt(executeAt).subtract(unavailable);
+        List<AsyncChain<Data>> chains = Routables.foldlMinimal(keys(), ranges, (key, accumulate, index) -> {
             AsyncChain<Data> result = read().read(key, safeStore, executeAt, safeStore.dataStore());
             accumulate.add(result);
             return accumulate;

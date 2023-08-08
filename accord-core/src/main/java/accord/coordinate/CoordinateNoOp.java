@@ -76,14 +76,16 @@ public class CoordinateNoOp extends CoordinatePreAccept<Timestamp>
         }
         else
         {
-            new Propose<Timestamp>(node, topologies, Ballot.ZERO, txnId, txn, route, executeAt, Deps.NONE, this)
+            Deps preacceptDeps = Deps.merge(successes, ok -> ok.deps);
+            new Propose<Timestamp>(node, topologies, Ballot.ZERO, txnId, txn, route, executeAt, preacceptDeps, this)
             {
                 @Override
                 void onAccepted()
                 {
                     Writes writes = txn.execute(txnId, txnId, null);
                     Result result = txn.result(txnId, executeAt, null);
-                    Apply.sendMaximal(node, txnId, route, txn, executeAt, deps, writes, result);
+                    Deps acceptDeps = Deps.merge(this.acceptOks, ok -> ok.deps);
+                    Apply.sendMaximal(node, txnId, route, txn, executeAt, acceptDeps, writes, result);
                     accept(executeAt, null);
                 }
             }.start();

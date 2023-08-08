@@ -123,7 +123,7 @@ public abstract class TrackerReconciler<ST extends ShardTracker, T extends Abstr
 
         Deque<Topology> topologies = new ArrayDeque<>();
         topologies.add(topology);
-        TopologyUpdates topologyUpdates = new TopologyUpdates(executor);
+        TopologyUpdates topologyUpdates = new TopologyUpdates(null);
         TopologyRandomizer configRandomizer = new TopologyRandomizer(() -> random, topology, topologyUpdates, null);
         while (--count > 0)
         {

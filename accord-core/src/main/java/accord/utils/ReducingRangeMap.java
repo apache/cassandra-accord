@@ -28,6 +28,11 @@ import static accord.utils.SortedArrays.exponentialSearch;
 
 public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
 {
+    public interface ReduceFunction<V, V2, P1, P2>
+    {
+        V2 apply(V v, V2 v2, P1 p1, P2 p2, int startMatchingInput, int endMatchingInput, int matchingStartBound);
+    }
+
     public static class SerializerSupport
     {
         public static <V> ReducingRangeMap<V> create(boolean inclusiveEnds, RoutingKey[] ends, V[] values)
@@ -41,9 +46,9 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         super();
     }
 
-    protected ReducingRangeMap(boolean inclusiveEnds, RoutingKey[] ends, V[] values)
+    protected ReducingRangeMap(boolean inclusiveEnds, RoutingKey[] starts, V[] values)
     {
-        super(inclusiveEnds, ends, values);
+        super(inclusiveEnds, starts, values);
     }
 
     public V foldl(Routables<?> routables, BiFunction<V, V, V> fold, V accumulator)
@@ -56,6 +61,16 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         return foldl(routables, (a, b, f, ignore) -> f.apply(a, b), accumulator, fold, null, terminate);
     }
 
+    public <V2> V2 foldlWithBounds(Routables<?> routables, QuadFunction<V, V2, RoutingKey, RoutingKey, V2> fold, V2 accumulator, Predicate<V2> terminate)
+    {
+        return foldl(routables, (a, b, f, self, i, j, k) -> f.apply(a, b, self.starts[k], self.starts[k+1]), accumulator, fold, this, terminate);
+    }
+
+    public <R extends Routable, V2> V2 foldlWithInputAndBounds(Routables<R> routables, IndexedRangeQuadFunction<V, V2, RoutingKey, RoutingKey, V2> fold, V2 accumulator, Predicate<V2> terminate)
+    {
+        return foldl(routables, (a, b, f, self, i, j, k) -> f.apply(a, b, self.starts[k], self.starts[k+1], i, j), accumulator, fold, this, terminate);
+    }
+
     public <V2, P1> V2 foldl(Routables<?> routables, TriFunction<V, V2, P1, V2> fold, V2 accumulator, P1 p1, Predicate<V2> terminate)
     {
         return foldl(routables, (a, b, f, p) -> f.apply(a, b, p), accumulator, fold, p1, terminate);
@@ -63,10 +78,35 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
 
     public <V2, P1, P2> V2 foldl(Routables<?> routables, QuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
-        return foldl(routables, (v, v2, param1, param2, i, j) -> fold.apply(v, v2, param1, param2), accumulator, p1, p2, terminate);
+        return foldl(routables, (v, v2, param1, param2, i, j, k) -> fold.apply(v, v2, param1, param2), accumulator, p1, p2, terminate);
     }
 
     public <V2, P1, P2> V2 foldl(Routables<?> routables, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    {
+        return foldl(routables, (v, v2, param1, param2, i, j, k) -> fold.apply(v, v2, param1, param2, i, j), accumulator, p1, p2, terminate);
+    }
+
+    public V foldlWithDefault(Routables<?> routables, BiFunction<V, V, V> fold, V defaultValue, V accumulator)
+    {
+        return foldlWithDefault(routables, (a, b, f, ignore) -> f.apply(a, b), defaultValue, accumulator, fold, null, ignore -> false);
+    }
+
+    public <V2> V2 foldlWithDefault(Routables<?> routables, BiFunction<V, V2, V2> fold, V defaultValue, V2 accumulator, Predicate<V2> terminate)
+    {
+        return foldlWithDefault(routables, (a, b, f, ignore) -> f.apply(a, b), defaultValue, accumulator, fold, null, terminate);
+    }
+
+    public <V2, P1> V2 foldlWithDefault(Routables<?> routables, TriFunction<V, V2, P1, V2> fold, V defaultValue, V2 accumulator, P1 p1, Predicate<V2> terminate)
+    {
+        return foldlWithDefault(routables, (a, b, f, p) -> f.apply(a, b, p), defaultValue, accumulator, fold, p1, terminate);
+    }
+
+    public <V2, P1, P2> V2 foldlWithDefault(Routables<?> routables, QuadFunction<V, V2, P1, P2, V2> fold, V defaultValue, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    {
+        return foldlWithDefault(routables, (v, v2, param1, param2, i, j) -> fold.apply(v, v2, param1, param2), defaultValue, accumulator, p1, p2, terminate);
+    }
+
+    private <V2, P1, P2> V2 foldl(Routables<?> routables, ReduceFunction<V, V2, P1, P2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
         switch (routables.domain())
         {
@@ -76,7 +116,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         }
     }
 
-    public <V2, P1, P2> V2 foldl(AbstractKeys<?> keys, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    private <V2, P1, P2> V2 foldl(AbstractKeys<?> keys, ReduceFunction<V, V2, P1, P2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
         if (values.length == 0)
             return accumulator;
@@ -100,7 +140,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
 
             if (j != nextj && values[i] != null)
             {
-                accumulator = fold.apply(values[i], accumulator, p1, p2, j, nextj);
+                accumulator = fold.apply(values[i], accumulator, p1, p2, j, nextj, i);
                 if (terminate.test(accumulator))
                     return accumulator;
             }
@@ -110,7 +150,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         return accumulator;
     }
 
-    public <V2, P1, P2> V2 foldl(AbstractRanges ranges, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    private <V2, P1, P2> V2 foldl(AbstractRanges ranges, ReduceFunction<V, V2, P1, P2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
         if (values.length == 0)
             return accumulator;
@@ -144,13 +184,116 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
 
             if (toj > j && values[i] != null)
             {
-                accumulator = fold.apply(values[i], accumulator, p1, p2, j, toj);
+                accumulator = fold.apply(values[i], accumulator, p1, p2, j, toj, i);
                 if (terminate.test(accumulator))
                     return accumulator;
             }
             ++i;
             j = nextj;
         }
+        return accumulator;
+    }
+
+    public <V2, P1, P2> V2 foldlWithDefault(Routables<?> routables, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V defaultValue, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    {
+        switch (routables.domain())
+        {
+            default: throw new AssertionError("Unknown domain: " + routables.domain());
+            case Key: return foldlWithDefault((AbstractKeys<?>) routables, fold, defaultValue, accumulator, p1, p2, terminate);
+            case Range: return foldlWithDefault((AbstractRanges) routables, fold, defaultValue, accumulator, p1, p2, terminate);
+        }
+    }
+
+    private <V2, P1, P2> V2 foldlWithDefault(AbstractKeys<?> keys, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V defaultValue, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    {
+        if (values.length == 0 || keys.isEmpty())
+            return fold.apply(defaultValue, accumulator, p1, p2, 0, keys.size());
+
+        int i = 0, j = keys.findNext(0, starts[0], FAST);
+        if (j < 0) j = -1 - j;
+        else if (inclusiveEnds) ++j;
+
+        if (j > 0)
+            accumulator = fold.apply(defaultValue, accumulator, p1, p2, 0, j);
+
+        while (j < keys.size())
+        {
+            i = exponentialSearch(starts, i, starts.length, keys.get(j));
+            if (i < 0) i = -2 - i;
+            else if (inclusiveEnds) --i;
+
+            if (i >= values.length)
+                return fold.apply(defaultValue, accumulator, p1, p2, j, keys.size());
+
+            int nextj = keys.findNext(j, starts[i + 1], FAST);
+            if (nextj < 0) nextj = -1 -nextj;
+            else if (inclusiveEnds) ++nextj;
+
+            if (j != nextj)
+            {
+                V value = values[i];
+                if (value == null)
+                    value = defaultValue;
+
+                accumulator = fold.apply(value, accumulator, p1, p2, j, nextj);
+                if (terminate.test(accumulator))
+                    return accumulator;
+            }
+            ++i;
+            j = nextj;
+        }
+        return accumulator;
+    }
+
+    private <V2, P1, P2> V2 foldlWithDefault(AbstractRanges ranges, IndexedRangeQuadFunction<V, V2, P1, P2, V2> fold, V defaultValue, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    {
+        if (values.length == 0 || ranges.isEmpty())
+            return fold.apply(defaultValue, accumulator, p1, p2, 0, ranges.size());
+
+        // TODO (desired): first searches should be binarySearch
+        int j = ranges.findNext(0, starts[0], FAST);
+        if (j < 0) j = -1 - j;
+        else if (inclusiveEnds && ranges.get(j).end().equals(starts[0])) ++j;
+
+        if (j > 0 || starts[0].compareTo(ranges.get(0).start()) > 0)
+            accumulator = fold.apply(defaultValue, accumulator, p1, p2, 0, j);
+
+        int i = 0;
+        while (j < ranges.size())
+        {
+            Range range = ranges.get(j);
+            RoutingKey start = range.start();
+            int nexti = exponentialSearch(starts, i, starts.length, start);
+            if (nexti < 0) i = Math.max(i, -2 - nexti);
+            else if (nexti > i && !inclusiveStarts()) i = nexti - 1;
+            else i = nexti;
+
+            if (i >= values.length)
+                return fold.apply(defaultValue, accumulator, p1, p2, j, ranges.size());
+
+            int toj, nextj = ranges.findNext(j, starts[i + 1], FAST);
+            if (nextj < 0) toj = nextj = -1 -nextj;
+            else
+            {
+                toj = nextj + 1;
+                if (inclusiveEnds && ranges.get(nextj).end().equals(starts[i + 1]))
+                    ++nextj;
+            }
+
+            if (toj > j)
+            {
+                V value = values[i];
+                if (value == null)
+                    value = defaultValue;
+
+                accumulator = fold.apply(value, accumulator, p1, p2, j, toj);
+                if (terminate.test(accumulator))
+                    return accumulator;
+            }
+            ++i;
+            j = nextj;
+        }
+
         return accumulator;
     }
 

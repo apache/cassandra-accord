@@ -28,6 +28,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import accord.api.RoutingKey;
+import accord.utils.ArrayBuffers.ObjectBuffers;
 import accord.utils.IndexedFold;
 import accord.utils.IndexedFoldToLong;
 import accord.utils.Invariants;
@@ -183,9 +184,19 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
         return SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareTo(k), Range::compareTo);
     }
 
-    protected K[] subtract(Ranges ranges, IntFunction<K[]> factory)
+    protected K[] subtract(AbstractRanges ranges, IntFunction<K[]> factory)
     {
         return SortedArrays.subtractWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareTo(k), Range::compareTo);
+    }
+
+    protected K[] intersect(AbstractKeys<K> that, ObjectBuffers<K> buffers)
+    {
+        return SortedArrays.linearIntersection(this.keys, that.keys, buffers);
+    }
+
+    protected K[] intersect(AbstractRanges ranges, ObjectBuffers<K> buffers)
+    {
+        return SortedArrays.intersectWithMultipleMatches(keys, keys.length, ranges.ranges, ranges.ranges.length, (k, r) -> -r.compareTo(k), buffers);
     }
 
     public boolean any(Ranges ranges, Predicate<? super K> predicate)

@@ -26,11 +26,52 @@ package accord.primitives;
  */
 public interface Participants<K extends Unseekable> extends Unseekables<K>
 {
+    Participants<K> with(Participants<K> with);
+
+    @Override
+    Participants<K> intersect(Unseekables<?> with);
     @Override
     Participants<K> slice(Ranges ranges);
     @Override
     Participants<K> slice(Ranges ranges, Slice slice);
-    Participants<K> with(Participants<K> with);
+    @Override
+    Participants<K> subtract(Ranges ranges);
+    Participants<K> subtract(Unseekables<?> without);
+
+    Ranges toRanges();
+
+    static boolean isParticipants(Unseekables<?> unseekables)
+    {
+        switch (unseekables.kind())
+        {
+            default: throw new AssertionError("Unhandled Unseekables.Kind: " + unseekables.kind());
+            case FullKeyRoute:
+            case FullRangeRoute:
+            case PartialKeyRoute:
+            case PartialRangeRoute:
+                return Route.castToRoute(unseekables).isParticipatingHomeKey();
+            case RoutingRanges:
+            case RoutingKeys:
+                return true;
+        }
+    }
+
+    static Participants<?> participants(Unseekables<?> unseekables)
+    {
+        switch (unseekables.kind())
+        {
+            default: throw new AssertionError("Unhandled Unseekables.Kind: " + unseekables.kind());
+            case FullKeyRoute:
+            case FullRangeRoute:
+            case PartialKeyRoute:
+            case PartialRangeRoute:
+                return Route.castToRoute(unseekables).participants();
+            case RoutingRanges:
+                return (Ranges) unseekables;
+            case RoutingKeys:
+                return (RoutingKeys) unseekables;
+        }
+    }
 
     /**
      * If both left and right are a Route, invoke {@link Route#union} on them. Otherwise invoke {@link #with}.

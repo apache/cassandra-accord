@@ -34,6 +34,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
@@ -74,6 +75,7 @@ import accord.messages.MessageType;
 import accord.primitives.Keys;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
+import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.utils.DefaultRandom;
 import accord.utils.RandomSource;
@@ -116,8 +118,6 @@ public class BurnTest
                 ListQuery query = new ListQuery(client, count);
                 ListRequest request = new ListRequest(new Txn.InMemory(ranges, read, query, null), listener);
                 packets.add(new Packet(client, node, count, request));
-
-
             }
             else
             {
@@ -200,24 +200,25 @@ public class BurnTest
         RandomDelayQueue delayQueue = new Factory(random).get();
         PropagatingPendingQueue queue = new PropagatingPendingQueue(failures, delayQueue);
         RandomSource retryRandom = random.fork();
-        ListAgent agent = new ListAgent(1000L, failures::add, retry -> {
+        Function<BiConsumer<Timestamp, Ranges>, ListAgent> agentSupplier = onStale -> new ListAgent(1000L, failures::add, retry -> {
             long delay = retryRandom.nextInt(1, 15);
             queue.add((PendingRunnable)retry::run, delay, TimeUnit.SECONDS);
-        });
+        }, onStale);
 
         Supplier<LongSupplier> nowSupplier = () -> {
             RandomSource forked = random.fork();
+            // TODO (now): meta-randomise scale of clock drift
             return FrequentLargeRange.builder(forked)
                                                    .ratio(1, 5)
                                                    .small(50, 5000, TimeUnit.MICROSECONDS)
                                                    .large(1, 10, TimeUnit.MILLISECONDS)
                                                    .build()
-                    .mapAsLong(j -> Math.max(0, queue.nowInMillis() + j))
+                                                   .mapAsLong(j -> Math.max(0, queue.nowInMillis() + TimeUnit.NANOSECONDS.toMillis(j)))
                     .asLongSupplier(forked);
         };
 
         Verifier verifier = createVerifier(keyCount);
-        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, agent);
+        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, null);
 
         Function<CommandStore, AsyncExecutor> executor = ignore -> globalExecutor;
 
@@ -311,9 +312,10 @@ public class BurnTest
         Map<MessageType, Stats> messageStatsMap;
         try
         {
-            messageStatsMap = Cluster.run(toArray(nodes, Id[]::new), listener, () -> queue, queue::checkFailures,
-                                          responseSink, globalExecutor,
-                                          random::fork, nowSupplier,
+            messageStatsMap = Cluster.run(toArray(nodes, Id[]::new), listener, () -> queue,
+                                          (id, onStale) -> globalExecutor.withAgent(agentSupplier.apply(onStale)),
+                                          queue::checkFailures,
+                                          responseSink, random::fork, nowSupplier,
                                           topologyFactory, initialRequests::poll,
                                           onSubmitted::set
             );

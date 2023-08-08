@@ -401,4 +401,10 @@ public class SimpleBitSet
     {
         return Arrays.equals(this.bits, other.bits);
     }
+
+    public void clear()
+    {
+        count = 0;
+        Arrays.fill(bits, 0L);
+    }
 }

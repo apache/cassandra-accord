@@ -155,6 +155,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
                             default: throw new AssertionError("Unhandled enum: " + reply);
                             case Invalid:
                             case Redundant:
+                                // TODO (expected): stop fetch sync points from garbage collecting too quickly
                                 throw new AssertionError(String.format("Unexpected reply: %s", reply));
                         }
                     }

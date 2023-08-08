@@ -18,6 +18,7 @@
 
 package accord.coordinate;
 
+import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import javax.annotation.Nonnull;
 
@@ -34,7 +35,6 @@ import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.SafeCommandStore.TestDep;
-import accord.local.SafeCommandStore.TestKind;
 import accord.local.SafeCommandStore.TestTimestamp;
 import accord.local.Status;
 import accord.primitives.Routable.Domain;
@@ -45,6 +45,7 @@ import accord.utils.MapReduceConsume;
 import accord.utils.async.AsyncResults;
 
 import static accord.local.PreLoadContext.contextFor;
+import static accord.primitives.Txn.Kind.Kinds.Any;
 import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.checkState;
 import static accord.utils.async.AsyncChains.getUninterruptibly;
@@ -252,27 +253,28 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
         @Override
         public BarrierTxn apply(SafeCommandStore safeStore)
         {
-            BarrierTxn found = safeStore.mapReduceWithTerminate(
+            BarrierTxn found = safeStore.mapReduce(
                     seekables,
                     safeStore.ranges().allAfter(minEpoch),
                     // Barriers are trying to establish that committed transactions are applied before the barrier (or in this case just minEpoch)
                     // so all existing transaction types should ensure that at this point. An earlier txnid may have an executeAt that is after
                     // this barrier or the transaction we listen on and that is fine
-                    TestKind.Any,
+                    Any,
                     TestTimestamp.EXECUTES_AFTER,
                     TxnId.minForEpoch(minEpoch),
                     TestDep.ANY_DEPS,
                     null,
                     Status.Committed,
                     Status.Applied,
-                    (keyOrRange, txnId, executeAt, status, barrierTxn) -> {
+                    (p1, keyOrRange, txnId, executeAt, status, barrierTxn) -> {
                         if (keyOrRange.domain() == Domain.Key)
                             return new BarrierTxn(txnId, executeAt, status, keyOrRange.asKey());
                         return null;
                     },
                     null,
+                    null,
                     // Take the first one we find, and call it good enough to wait on
-                    barrierTxn -> barrierTxn != null);
+                    Objects::nonNull);
             // It's not applied so add a listener to find out when it is applied
             if (found != null && !found.status.equals(Status.Applied))
             {

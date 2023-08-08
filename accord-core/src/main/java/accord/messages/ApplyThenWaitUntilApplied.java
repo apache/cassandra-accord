@@ -115,6 +115,12 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     }
 
     @Override
+    public MessageType type()
+    {
+        return MessageType.APPLY_THEN_WAIT_UNTIL_APPLIED_REQ;
+    }
+
+    @Override
     public String toString()
     {
         return "WaitForDependenciesThenApply{" +

@@ -46,6 +46,11 @@ public interface Routable
         {
             return VALUES[ordinal];
         }
+
+        public char shortName()
+        {
+            return this == Key ? 'K' : 'R';
+        }
     }
 
     Domain domain();

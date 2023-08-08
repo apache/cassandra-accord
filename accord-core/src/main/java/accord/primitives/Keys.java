@@ -84,6 +84,11 @@ public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
         return wrap(slice(ranges, Key[]::new));
     }
 
+    public final Keys intersect(Keys that)
+    {
+        return wrap(SortedArrays.linearIntersection(this.keys, that.keys, ArrayBuffers.cachedKeys()), that);
+    }
+
     public Keys with(Key key)
     {
         int insertPos = Arrays.binarySearch(keys, key);
@@ -216,6 +221,11 @@ public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
     private Keys wrap(Key[] wrap, AbstractKeys<Key> that)
     {
         return wrap == keys ? this : wrap == that.keys && that instanceof Keys ? (Keys)that : new Keys(wrap);
+    }
+
+    private AbstractKeys<Key> weakWrap(Key[] wrap, AbstractKeys<Key> that)
+    {
+        return wrap == keys ? this : wrap == that.keys ? that : new Keys(wrap);
     }
 
     private Keys wrap(Key[] wrap)
