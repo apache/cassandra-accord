@@ -110,9 +110,9 @@ public class RandomDelayQueue implements PendingQueue
     }
 
     @Override
-    public void remove(Pending item)
+    public boolean remove(Pending item)
     {
-        queue.remove(item);
+        return queue.remove(item);
     }
 
     @Override

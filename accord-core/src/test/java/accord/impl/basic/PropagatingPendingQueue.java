@@ -45,9 +45,9 @@ public class PropagatingPendingQueue implements PendingQueue
     }
 
     @Override
-    public void remove(Pending item)
+    public boolean remove(Pending item)
     {
-        wrapped.remove(item);
+        return wrapped.remove(item);
     }
 
     @Override

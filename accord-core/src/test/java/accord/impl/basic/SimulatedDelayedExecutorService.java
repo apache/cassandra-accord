@@ -40,6 +40,7 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService impleme
         private final long sequenceNumber;
         private final long periodMillis;
         private long nextExecuteAtMillis;
+        private boolean canceled = false;
 
         private ScheduledTask(long sequenceNumber, long initialDelay, long value, TimeUnit unit, Callable<T> fn)
         {
@@ -85,6 +86,8 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService impleme
         @Override
         public void run()
         {
+            if (canceled)
+                return;
             boolean periodic = periodMillis != 0;
             if (!periodic)
             {
@@ -122,10 +125,10 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService impleme
         @Override
         public boolean cancel(boolean mayInterruptIfRunning)
         {
-            boolean c = super.cancel(mayInterruptIfRunning);
-            if (c)
-                pending.remove(this);
-            return c;
+            if (canceled)
+                return false;
+            canceled = true;
+            return pending.remove(this);
         }
     }
 
