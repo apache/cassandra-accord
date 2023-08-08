@@ -77,7 +77,7 @@ public class RandomDelayQueue implements PendingQueue
         @Override
         public int hashCode()
         {
-            return Objects.hash(time, seq, item);
+            throw new UnsupportedOperationException();
         }
 
         @Override
