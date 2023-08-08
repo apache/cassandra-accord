@@ -165,6 +165,7 @@ public class Gens {
             double lower = ratio * .8;
             double upper = ratio * 1.2;
             return new Gen<Boolean>() {
+                // run represents how many consecutaive true values should be returned; -1 implies no active "run" exists
                 private int run = -1;
                 private long falseCount = 0, trueCount = 0;
                 @Override
