@@ -18,9 +18,7 @@
 
 package accord.utils;
 
-import java.lang.reflect.Array;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
@@ -206,11 +204,13 @@ public interface RandomSource
 
     default long pickLong(long first, long second, long... rest)
     {
-        long[] array = new long[rest.length + 2];
-        array[0] = first;
-        array[1] = second;
-        System.arraycopy(rest, 0, array, 2, rest.length);
-        return pickLong(array, 0, array.length);
+        int offset = nextInt(0, rest.length + 2);
+        switch (offset)
+        {
+            case 0:  return first;
+            case 1:  return second;
+            default: return rest[offset - 2];
+        }
     }
 
     default long pickLong(long[] array)
@@ -235,11 +235,13 @@ public interface RandomSource
 
     default <T> T pick(T first, T second, T... rest)
     {
-        T[] array = (T[]) Array.newInstance(rest.getClass().getComponentType(), rest.length + 2);
-        array[0] = first;
-        array[1] = second;
-        System.arraycopy(rest, 0, array, 2, rest.length);
-        return pick(Arrays.asList(array), 0, array.length);
+        int offset = nextInt(0, rest.length + 2);
+        switch (offset)
+        {
+            case 0:  return first;
+            case 1:  return second;
+            default: return rest[offset - 2];
+        }
     }
 
     default <T> T pick(List<T> values)
