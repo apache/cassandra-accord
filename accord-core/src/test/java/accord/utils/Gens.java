@@ -22,10 +22,12 @@ import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
@@ -56,6 +58,17 @@ public class Gens {
     {
         Gen.IntGen offset = ints().between(0, ts.size() - 1);
         return rs -> ts.get(offset.nextInt(rs));
+    }
+
+    public static <T extends Comparable<T>> Gen<T> pick(Set<T> set)
+    {
+        List<T> list = new ArrayList<>(set.size());
+        list.addAll(set);
+        // Non-ordered sets may have different iteration order on different environments, which would make a seed produce different histories!
+        // To avoid such a problem, make sure to apply a deterministic function (sort).
+        if (!(set instanceof NavigableSet))
+            list.sort(Comparator.naturalOrder());
+        return pick(list);
     }
 
     public static <T> Gen<T> pick(Map<T, Integer> values)
