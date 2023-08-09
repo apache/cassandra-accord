@@ -109,7 +109,14 @@ public class Property
             if (Double.TYPE == subType)
                 return Arrays.toString((double[]) value);
         }
-        return value;
+        try
+        {
+            return value.toString();
+        }
+        catch (Throwable t)
+        {
+            return "Object.toString failed: " + t.getClass().getCanonicalName() + ": " + t.getMessage();
+        }
     }
 
     private static String propertyError(Common<?> input, Throwable cause, Object... values)
