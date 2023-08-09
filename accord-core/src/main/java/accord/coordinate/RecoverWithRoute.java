@@ -169,9 +169,12 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                         // we might have only part of the full transaction, and a shard may have truncated;
                         // in this case we want to skip straight to apply, but only for the shards that haven't truncated
                         Unseekables<?> sendTo = route.subtract(full.truncated);
-                        Invariants.checkState(full.committedDeps.covering.containsAll(sendTo));
-                        Invariants.checkState(full.partialTxn.covering().containsAll(sendTo));
-                        Persist.persistPartialMaximal(node, txnId, sendTo, route, full.partialTxn, full.executeAt, full.committedDeps, full.writes, full.result);
+                        if (!sendTo.isEmpty())
+                        {
+                            Invariants.checkState(full.committedDeps.covering.containsAll(sendTo));
+                            Invariants.checkState(full.partialTxn.covering().containsAll(sendTo));
+                            Persist.persistPartialMaximal(node, txnId, sendTo, route, full.partialTxn, full.executeAt, full.committedDeps, full.writes, full.result);
+                        }
                     }
 
                     OnDone.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? full.toProgressToken() : null, f));
