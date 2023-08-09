@@ -121,6 +121,7 @@ public class ListRequest implements Request
                     node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, null, null));
                     return;
                 }
+
                 node.reply(client, replyContext, new ListResult(client, ((Packet)replyContext).requestId, txnId, null, null, new int[0][], null));
                 ((Cluster)node.scheduler()).onDone(() -> {
                     node.commandStores()

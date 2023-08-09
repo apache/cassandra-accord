@@ -93,6 +93,24 @@ public abstract class KeyRoute extends AbstractUnseekableKeys implements Route<R
     }
 
     @Override
+    public Participants<RoutingKey> participants(Ranges ranges)
+    {
+        RoutingKey[] keys = slice(ranges, RoutingKey[]::new);
+        if (keys == this.keys && !isParticipatingHomeKey)
+            return this;
+
+        int removePos = Arrays.binarySearch(keys, homeKey);
+        if (removePos < 0)
+            return new RoutingKeys(keys);
+
+        RoutingKey[] result = new RoutingKey[keys.length - 1];
+        System.arraycopy(keys, 0, result, 0, removePos);
+        System.arraycopy(keys, removePos + 1, result, removePos, keys.length - (1 + removePos));
+        // TODO (expected): this should return a PartialKeyRoute, but we need to remove covering()
+        return new RoutingKeys(result);
+    }
+
+    @Override
     public RoutingKey homeKey()
     {
         return homeKey;
@@ -114,7 +132,7 @@ public abstract class KeyRoute extends AbstractUnseekableKeys implements Route<R
     public abstract PartialKeyRoute slice(Ranges ranges);
 
     @Override
-    public Participants<RoutingKey> slice(Ranges ranges, Slice slice)
+    public PartialKeyRoute slice(Ranges ranges, Slice slice)
     {
         return slice(ranges);
     }

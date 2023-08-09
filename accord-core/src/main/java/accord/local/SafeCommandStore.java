@@ -28,6 +28,7 @@ import accord.api.RoutingKey;
 import accord.impl.ErasedSafeCommand;
 import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
@@ -242,9 +243,9 @@ public abstract class SafeCommandStore
 
     // if we have to re-bootstrap (due to failed bootstrap or catching up on a range) then we may
     // have dangling redundant commands; these can safely be executed locally because we are a timestamp store
-    final boolean isPreBootstrap(Command command, Unseekables<?> forKeys)
+    final boolean isFullyPreBootstrap(Command command, Participants<?> forKeys)
     {
-        return commandStore().redundantBefore().min(command.txnId(), command.executeAtOrTxnId(), forKeys) == PRE_BOOTSTRAP;
+        return commandStore().redundantBefore().status(command.txnId(), command.executeAtOrTxnId(), forKeys) == PRE_BOOTSTRAP;
     }
 
     public void notifyListeners(SafeCommand safeCommand)

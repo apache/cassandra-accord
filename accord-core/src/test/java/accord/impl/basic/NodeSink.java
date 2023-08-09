@@ -74,7 +74,7 @@ public class NodeSink implements MessageSink
         parent.pending.add((PendingRunnable) () -> {
             if (sc == callbacks.remove(messageId))
                 sc.timeout(to);
-        }, 1000 + random.nextInt(10000), TimeUnit.MILLISECONDS);
+        }, 1000 + random.nextInt(1000), TimeUnit.MILLISECONDS);
     }
 
     @Override

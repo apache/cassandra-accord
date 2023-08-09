@@ -128,6 +128,31 @@ public class CoordinateDurabilityScheduling
         this.node = node;
     }
 
+    public void setFrequency(int frequency, TimeUnit units)
+    {
+        this.frequencyMicros = Ints.saturatedCast(units.toMicros(frequency));
+    }
+
+    public void setTxnIdLag(int txnIdLag, TimeUnit units)
+    {
+        this.txnIdLagMicros = Ints.saturatedCast(units.toMicros(txnIdLag));
+    }
+
+    public void setDurabilityLag(int durabilityLag, TimeUnit units)
+    {
+        this.durabilityLagMicros = Ints.saturatedCast(units.toMicros(durabilityLag));
+    }
+
+    public void setShardCycleTime(int shardCycleTime, TimeUnit units)
+    {
+        this.shardCycleTimeMicros = Ints.saturatedCast(units.toMicros(shardCycleTime));
+    }
+
+    public void setGlobalCycleTime(long globalCycleTime, TimeUnit units)
+    {
+        this.globalCycleTimeMicros = units.toMicros(globalCycleTime);
+    }
+
     /**
      * Schedule regular invocations of CoordinateShardDurable and CoordinateGloballyDurable
      */

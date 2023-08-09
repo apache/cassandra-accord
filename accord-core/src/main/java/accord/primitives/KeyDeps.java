@@ -263,6 +263,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return Keys.of(result);
     }
 
+    // TODO (desired): consider optionally not inverting before answering, as a single txnId may be answered more efficiently without inversion
     public RoutingKeys participants(TxnId txnId)
     {
         int txnIdIndex = Arrays.binarySearch(txnIds, txnId);

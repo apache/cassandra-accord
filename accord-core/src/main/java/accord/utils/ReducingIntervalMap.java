@@ -241,6 +241,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         return builder.build();
     }
 
+
     private static <V> V reduce(V left, V right, BiFunction<V, V, V> reduce)
     {
         return left == null ? right : right == null ? left : reduce.apply(left, right);

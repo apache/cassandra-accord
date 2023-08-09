@@ -1179,6 +1179,12 @@ public abstract class Command implements CommonAttributes
                 return waitingOnApply.get(index);
             }
 
+            public boolean isWaitingOn(TxnId txnId)
+            {
+                int index = deps.indexOf(txnId);
+                return waitingOnApply.get(index) || waitingOnCommit.get(index);
+            }
+
             public boolean addWaitingOnApply(TxnId txnId)
             {
                 int index = deps.indexOf(txnId);
@@ -1206,7 +1212,7 @@ public abstract class Command implements CommonAttributes
                 return removeWaitingOnCommit(txnId) || removeWaitingOnApply(txnId);
             }
 
-            public boolean removeInvalidatedOrTruncated(TxnId txnId)
+            public boolean removeInvalidatedAppliedOrTruncated(TxnId txnId)
             {
                 int index = this.deps.indexOf(txnId);
                 return setAppliedOrInvalidated(index);

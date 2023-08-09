@@ -47,6 +47,7 @@ public interface Route<K extends Unseekable> extends Unseekables<K>
 
     @Override
     PartialRoute<K> slice(Ranges ranges);
+    PartialRoute<K> slice(Ranges ranges, Slice slice);
     PartialRoute<K> sliceStrict(Ranges ranges);
     Ranges sliceCovering(Ranges ranges, Slice slice);
 
@@ -61,6 +62,11 @@ public interface Route<K extends Unseekable> extends Unseekables<K>
      * Return the unseekables excluding any coordination-only home key
      */
     Participants<K> participants();
+
+    /**
+     * Return the unseekables excluding any coordination-only home key, that intersect the provided ranges
+     */
+    Participants<K> participants(Ranges ranges);
 
     default boolean hasParticipants()
     {

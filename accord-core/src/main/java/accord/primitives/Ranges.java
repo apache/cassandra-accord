@@ -84,9 +84,15 @@ public class Ranges extends AbstractRanges implements Iterable<Range>, Seekables
     }
 
     @Override
-    public Ranges slice(Ranges ranges)
+    public final Ranges slice(Ranges ranges)
     {
         return slice(ranges, Overlapping);
+    }
+
+    @Override
+    public final Ranges slice(Ranges ranges, Slice slice)
+    {
+        return slice(ranges, slice, this, null, (i1, i2, rs) -> i1.ranges == rs ? i1 : Ranges.ofSortedAndDeoverlapped(rs));
     }
 
     public Ranges intersecting(Routables<?> keysOrRanges)

@@ -26,7 +26,6 @@ import accord.primitives.EpochSupplier;
 import accord.primitives.Participants;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
-import accord.primitives.Routables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
@@ -36,8 +35,7 @@ import accord.utils.ReducingRangeMap;
 import static accord.local.RedundantStatus.LIVE;
 import static accord.local.RedundantStatus.NOT_OWNED;
 import static accord.local.RedundantStatus.PRE_BOOTSTRAP;
-import static accord.local.RedundantStatus.REDUNDANT;
-import static accord.local.RedundantStatus.nonNullOrMin;
+import static accord.local.RedundantStatus.LOCALLY_REDUNDANT;
 
 public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
 {
@@ -74,42 +72,45 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
             long startEpoch = Long.max(a.startEpoch, b.startEpoch);
             long endEpoch = Long.min(a.endEpoch, b.endEpoch);
             int cr = a.redundantBefore.compareTo(b.redundantBefore);
+            int cb = a.bootstrappedAt.compareTo(b.bootstrappedAt);
 
-            TxnId redundantBefore = cr >= 0 ? a.redundantBefore : b.redundantBefore;
-
-            if (range.equals(a.range) && startEpoch == a.startEpoch && endEpoch == a.endEpoch && cr >= 0)
+            if (range.equals(a.range) && startEpoch == a.startEpoch && endEpoch == a.endEpoch && cr >= 0 && cb >= 0)
                 return a;
-            if (range.equals(b.range) && startEpoch == b.startEpoch && endEpoch == b.endEpoch && cr <= 0)
+            if (range.equals(b.range) && startEpoch == b.startEpoch && endEpoch == b.endEpoch && cr <= 0 && cb <= 0)
                 return b;
 
-            return new Entry(range, startEpoch, endEpoch, redundantBefore, Timestamp.max(a.bootstrappedAt, b.bootstrappedAt));
+            TxnId redundantBefore = cr >= 0 ? a.redundantBefore : b.redundantBefore;
+            TxnId bootstrappedAt = cb >= 0 ? a.bootstrappedAt : b.bootstrappedAt;
+
+            // if our redundantBefore predates bootstrappedAt, we should clear it to avoid erroneously treating
+            // transactions prior as locally redundant when they may simply have not applied yet, since we may
+            // permit the sync point that defines redundancy to apply locally without waiting for these earlier
+            // transactions, since we now consider them to be bootstrapping
+            // TODO (desired): revisit later as semantics here evolve
+            if (bootstrappedAt.compareTo(redundantBefore) >= 0)
+                redundantBefore = TxnId.NONE;
+
+            return new Entry(range, startEpoch, endEpoch, redundantBefore, bootstrappedAt);
         }
 
-        static RedundantStatus mergeMin(Entry entry, RedundantStatus prev, TxnId txnId, EpochSupplier executeAt)
+        static @Nonnull RedundantStatus getAndMerge(Entry entry, @Nonnull RedundantStatus prev, TxnId txnId, EpochSupplier executeAt)
         {
-            if (prev == LIVE || entry == null || entry.outOfBounds(txnId, executeAt))
+            if (entry == null || entry.outOfBounds(txnId, executeAt))
                 return prev;
-            return nonNullOrMin(prev, entry.get(txnId));
+            return prev.merge(entry.get(txnId));
         }
 
-        static RedundantStatus mergeLocallyRedundant(Entry entry, RedundantStatus prev, TxnId txnId, EpochSupplier executeAt)
+        static RedundantStatus get(Entry entry, TxnId txnId, EpochSupplier executeAt)
         {
-            if (prev == REDUNDANT || entry == null || entry.outOfBounds(txnId, executeAt))
-                return prev;
-            return nonNullOrMin(prev, entry.get(txnId));
-        }
-
-        static RedundantStatus mergeRedundant(Entry entry, RedundantStatus prev, TxnId txnId, EpochSupplier executeAt)
-        {
-            if (prev == REDUNDANT || entry == null || entry.outOfBounds(txnId, executeAt))
-                return prev;
-            return nonNullOrMin(prev, entry.get(txnId));
+            if (entry == null || entry.outOfBounds(txnId, executeAt))
+                return NOT_OWNED;
+            return entry.get(txnId);
         }
 
         RedundantStatus get(TxnId txnId)
         {
             if (redundantBefore.compareTo(txnId) > 0)
-                return REDUNDANT;
+                return LOCALLY_REDUNDANT;
             if (bootstrappedAt.compareTo(txnId) > 0)
                 return PRE_BOOTSTRAP;
             return LIVE;
@@ -197,38 +198,17 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         return ReducingIntervalMap.merge(a, b, RedundantBefore.Entry::reduce, Builder::new);
     }
 
-    public RedundantStatus min(TxnId txnId, @Nullable EpochSupplier executeAt, Routables<?> participants)
-    {
-        if (executeAt == null) executeAt = txnId;
-        return notOwnedIfNull(foldl(participants, Entry::mergeMin, null, txnId, executeAt, test -> test == LIVE));
-    }
-
     public RedundantStatus get(TxnId txnId, @Nullable EpochSupplier executeAt, RoutingKey participant)
     {
         if (executeAt == null) executeAt = txnId;
         Entry entry = get(participant);
-        return entry == null ? NOT_OWNED : notOwnedIfNull(Entry.mergeMin(entry,null, txnId, executeAt));
+        return Entry.get(entry, txnId, executeAt);
     }
 
-    public boolean isLocallyRedundant(TxnId txnId, Timestamp executeAt, Participants<?> participants)
+    public RedundantStatus status(TxnId txnId, EpochSupplier executeAt, Participants<?> participants)
     {
         if (executeAt == null) executeAt = txnId;
-        // essentially, if ANY intersecting key is REDUNDANT then this command has either applied locally or is invalidated;
-        // otherwise, if ALL intersecting keys are PRE_BOOTSTRAP then any all of its effects will be reflected in the respective bootstraps that
-        return notOwnedIfNull(foldl(participants, Entry::mergeLocallyRedundant, null, txnId, executeAt, test -> test == REDUNDANT)).compareTo(PRE_BOOTSTRAP) >= 0;
-    }
-
-    public boolean isRedundant(TxnId txnId, Timestamp executeAt, Participants<?> participants)
-    {
-        if (executeAt == null) executeAt = txnId;
-        // essentially, if ANY intersecting key is REDUNDANT then this command has either applied locally or is invalidated;
-        // otherwise, if ALL intersecting keys are PRE_BOOTSTRAP then any all of its effects will be reflected in the respective bootstraps that
-        return notOwnedIfNull(foldl(participants, Entry::mergeLocallyRedundant, null, txnId, executeAt, test -> test == REDUNDANT)).compareTo(PRE_BOOTSTRAP) >= 0;
-    }
-
-    private static RedundantStatus notOwnedIfNull(RedundantStatus status)
-    {
-        return status == null ? NOT_OWNED : status;
+        return foldl(participants, Entry::getAndMerge, NOT_OWNED, txnId, executeAt, ignore -> false);
     }
 
     static class Builder extends ReducingIntervalMap.Builder<RoutingKey, Entry, RedundantBefore>

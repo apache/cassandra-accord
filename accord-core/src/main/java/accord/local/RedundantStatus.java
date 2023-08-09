@@ -18,34 +18,70 @@
 
 package accord.local;
 
+import java.util.EnumMap;
+
+import accord.utils.Invariants;
+
 public enum RedundantStatus
 {
-    LIVE,
-
+    /** None of the relevant ranges are owned by the command store */
     NOT_OWNED,
 
+    /** Some of the relevant ranges are owned by the command store and valid for execution */
+    LIVE,
+
+    /** The relevant owned ranges are part live and part pre-bootstrap */
+    PARTIALLY_PRE_BOOTSTRAP,
+
+    /** The relevant owned ranges are ALL pre-bootstrap, meaning we are fetching the transaction's entire result
+     * from another node's snapshot already */
     PRE_BOOTSTRAP,
 
-    REDUNDANT,
+    /** The relevant owned ranges are fully redundant, meaning they are known applied or invalidated via a sync point
+     * that has applied locally */
+    LOCALLY_REDUNDANT,
     ;
 
-    public static RedundantStatus min(RedundantStatus a, RedundantStatus b)
+    private EnumMap<RedundantStatus, RedundantStatus> merge;
+
+    static
     {
-        return a.compareTo(b) <= 0 ? a : b;
+        NOT_OWNED.merge = new EnumMap<>(RedundantStatus.class);
+        NOT_OWNED.merge.put(NOT_OWNED, NOT_OWNED);
+        NOT_OWNED.merge.put(LIVE, LIVE);
+        NOT_OWNED.merge.put(PARTIALLY_PRE_BOOTSTRAP, PARTIALLY_PRE_BOOTSTRAP);
+        NOT_OWNED.merge.put(PRE_BOOTSTRAP, PRE_BOOTSTRAP);
+        NOT_OWNED.merge.put(LOCALLY_REDUNDANT, LOCALLY_REDUNDANT);
+        LIVE.merge = new EnumMap<>(RedundantStatus.class);
+        LIVE.merge.put(NOT_OWNED, LIVE);
+        LIVE.merge.put(LIVE, LIVE);
+        LIVE.merge.put(PARTIALLY_PRE_BOOTSTRAP, PARTIALLY_PRE_BOOTSTRAP);
+        LIVE.merge.put(PRE_BOOTSTRAP, PARTIALLY_PRE_BOOTSTRAP);
+        LIVE.merge.put(LOCALLY_REDUNDANT, LOCALLY_REDUNDANT);
+        PARTIALLY_PRE_BOOTSTRAP.merge = new EnumMap<>(RedundantStatus.class);
+        PARTIALLY_PRE_BOOTSTRAP.merge.put(NOT_OWNED, PARTIALLY_PRE_BOOTSTRAP);
+        PARTIALLY_PRE_BOOTSTRAP.merge.put(LIVE, PARTIALLY_PRE_BOOTSTRAP);
+        PARTIALLY_PRE_BOOTSTRAP.merge.put(PARTIALLY_PRE_BOOTSTRAP, PARTIALLY_PRE_BOOTSTRAP);
+        PARTIALLY_PRE_BOOTSTRAP.merge.put(PRE_BOOTSTRAP, PARTIALLY_PRE_BOOTSTRAP);
+        PARTIALLY_PRE_BOOTSTRAP.merge.put(LOCALLY_REDUNDANT, LOCALLY_REDUNDANT);
+        PRE_BOOTSTRAP.merge = new EnumMap<>(RedundantStatus.class);
+        PRE_BOOTSTRAP.merge.put(NOT_OWNED, PRE_BOOTSTRAP);
+        PRE_BOOTSTRAP.merge.put(LIVE, PARTIALLY_PRE_BOOTSTRAP);
+        PRE_BOOTSTRAP.merge.put(PARTIALLY_PRE_BOOTSTRAP, PARTIALLY_PRE_BOOTSTRAP);
+        PRE_BOOTSTRAP.merge.put(PRE_BOOTSTRAP, PRE_BOOTSTRAP);
+        PRE_BOOTSTRAP.merge.put(LOCALLY_REDUNDANT, LOCALLY_REDUNDANT);
+        LOCALLY_REDUNDANT.merge = new EnumMap<>(RedundantStatus.class);
+        LOCALLY_REDUNDANT.merge.put(NOT_OWNED, LOCALLY_REDUNDANT);
+        LOCALLY_REDUNDANT.merge.put(LIVE, LOCALLY_REDUNDANT);
+        LOCALLY_REDUNDANT.merge.put(PARTIALLY_PRE_BOOTSTRAP, LOCALLY_REDUNDANT);
+        LOCALLY_REDUNDANT.merge.put(PRE_BOOTSTRAP, LOCALLY_REDUNDANT);
+        LOCALLY_REDUNDANT.merge.put(LOCALLY_REDUNDANT, LOCALLY_REDUNDANT);
     }
 
-    public static RedundantStatus max(RedundantStatus a, RedundantStatus b)
+    public RedundantStatus merge(RedundantStatus that)
     {
-        return a.compareTo(b) >= 0 ? a : b;
-    }
-
-    public static RedundantStatus nonNullOrMin(RedundantStatus a, RedundantStatus b)
-    {
-        return a == null ? b : b == null ? a : a.compareTo(b) <= 0 ? a : b;
-    }
-
-    public static RedundantStatus nonNullOrMax(RedundantStatus a, RedundantStatus b)
-    {
-        return a == null ? b : b == null ? a : a.compareTo(b) >= 0 ? a : b;
+        RedundantStatus result = merge.get(that);
+        Invariants.checkState(result != null, "Invalid RedundantStatus combination: " + this + " and " + that);
+        return result;
     }
 }

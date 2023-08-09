@@ -278,18 +278,12 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
         }
     }
 
-    interface SliceConstructor<I extends AbstractRanges, P, RS extends AbstractRanges>
+    interface SliceConstructor<I extends AbstractRanges, P, RS>
     {
         RS construct(I covering, P param, Range[] ranges);
     }
 
-    @Override
-    public final Ranges slice(Ranges ranges, Slice slice)
-    {
-        return slice(ranges, slice, this, null, (i1, i2, rs) -> i1.ranges == rs ? i1 : Ranges.ofSortedAndDeoverlapped(rs));
-    }
-
-    static <I extends AbstractRanges, P, O extends AbstractRanges> O slice(I covering, Slice slice, AbstractRanges input, P param, SliceConstructor<I, P, O> constructor)
+    static <I extends AbstractRanges, P, O> O slice(I covering, Slice slice, AbstractRanges input, P param, SliceConstructor<I, P, O> constructor)
     {
         switch (slice)
         {
@@ -300,13 +294,13 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
         }
     }
 
-    static <C extends AbstractRanges, P, O extends AbstractRanges> O sliceOverlapping(C covering, AbstractRanges input, P param, SliceConstructor<? super C, P, O> constructor)
+    static <C extends AbstractRanges, P, O> O sliceOverlapping(C covering, AbstractRanges input, P param, SliceConstructor<? super C, P, O> constructor)
     {
         Range[] result = SortedArrays.asymmetricLinearIntersectionWithOverlaps(input.ranges, input.ranges.length, covering.ranges, covering.ranges.length, Range::compareIntersecting, cachedRanges());
         return constructor.construct(covering, param, result);
     }
 
-    static <C extends AbstractRanges, P, O extends AbstractRanges> O sliceMinimal(C covering, AbstractRanges input, P param, SliceConstructor<C, P, O> constructor)
+    static <C extends AbstractRanges, P, O> O sliceMinimal(C covering, AbstractRanges input, P param, SliceConstructor<C, P, O> constructor)
     {
         ObjectBuffers<Range> cachedRanges = cachedRanges();
 
@@ -353,7 +347,7 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
         }
     }
 
-    static <C extends AbstractRanges, P, O extends AbstractRanges> O sliceMaximal(C covering, AbstractRanges input, P param, SliceConstructor<C, P, O> constructor)
+    static <C extends AbstractRanges, P, O> O sliceMaximal(C covering, AbstractRanges input, P param, SliceConstructor<C, P, O> constructor)
     {
         ObjectBuffers<Range> cachedRanges = cachedRanges();
 

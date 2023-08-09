@@ -19,7 +19,9 @@
 package accord.coordinate;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
 
@@ -121,6 +123,7 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
     private final List<PreAcceptOk> successes;
     private boolean initialPreAcceptIsDone;
     private ExtraPreAccept extraPreAccept;
+    private Map<Id, Object> debug = Invariants.debug() ? new LinkedHashMap<>() : null;
 
     CoordinatePreAccept(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
     {
@@ -155,6 +158,7 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
     @Override
     public synchronized void onFailure(Id from, Throwable failure)
     {
+        if (debug != null) debug.putIfAbsent(from, failure);
         if (initialPreAcceptIsDone)
             return;
 
@@ -184,6 +188,7 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
     @Override
     public synchronized void onSuccess(Id from, PreAcceptReply reply)
     {
+        if (debug != null) debug.putIfAbsent(from, reply);
         if (initialPreAcceptIsDone)
             return;
 

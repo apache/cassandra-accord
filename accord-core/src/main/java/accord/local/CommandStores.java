@@ -330,9 +330,17 @@ public abstract class CommandStores
             return new TopologyUpdate(prev, () -> done(epoch));
 
         Topology newLocalTopology = newTopology.forNode(supplier.time.id()).trim();
+        Ranges addedGlobal = newTopology.ranges().subtract(prev.global.ranges());
+        if (!addedGlobal.isEmpty())
+        {
+            for (ShardHolder shard : prev.shards)
+            {
+                shard.store.epochUpdateHolder.updateGlobal(addedGlobal);
+            }
+        }
+
         Ranges added = newLocalTopology.ranges().subtract(prev.local.ranges());
         Ranges subtracted = prev.local.ranges().subtract(newLocalTopology.ranges());
-
         if (added.isEmpty() && subtracted.isEmpty())
         {
             Supplier<EpochReady> epochReady = () -> done(epoch);
@@ -372,6 +380,7 @@ public abstract class CommandStores
                 ShardHolder shard = new ShardHolder(supplier.create(nextId++, updateHolder));
                 shard.ranges = new RangesForEpoch(epoch, addRanges, shard.store);
                 shard.store.epochUpdateHolder.add(epoch, shard.ranges, addRanges);
+                shard.store.epochUpdateHolder.updateGlobal(newTopology.ranges());
 
                 Map<Boolean, Ranges> partitioned = addRanges.partitioningBy(range -> shouldBootstrap(node, prev.global, newLocalTopology, range));
                 if (partitioned.containsKey(false))

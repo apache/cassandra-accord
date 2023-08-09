@@ -103,6 +103,14 @@ public abstract class RangeRoute extends AbstractRanges implements Route<Range>,
     }
 
     @Override
+    public PartialRangeRoute slice(Ranges ranges, Slice slice)
+    {
+        return slice(ranges, slice, this, homeKey,
+                     isParticipatingHomeKey ? PartialRangeRoute::withParticipatingHomeKey
+                                            : PartialRangeRoute::withNonParticipatingHomeKey);
+    }
+
+    @Override
     public Participants<Range> participants()
     {
         if (isParticipatingHomeKey || !contains(homeKey))
@@ -111,6 +119,22 @@ public abstract class RangeRoute extends AbstractRanges implements Route<Range>,
         // TODO (desired): efficiency (lots of unnecessary allocations)
         // TODO (expected): this should return a PartialRangeRoute, but we need to remove Route.covering()
         return ranges().subtract(Ranges.of(homeKey().asRange()));
+    }
+
+    @Override
+    public Participants<Range> participants(Ranges slice)
+    {
+        Range[] ranges = slice(slice, Overlapping, this, null, (i1, i2, rs) -> rs);
+        if (ranges == this.ranges && isParticipatingHomeKey)
+            return this;
+
+        Ranges result = Ranges.ofSortedAndDeoverlapped(ranges);
+        if (isParticipatingHomeKey || !result.contains(homeKey))
+            return result;
+
+        // TODO (desired): efficiency (lots of unnecessary allocations)
+        // TODO (expected): this should return a PartialRangeRoute, but we need to remove Route.covering()
+        return result.subtract(Ranges.of(homeKey().asRange()));
     }
 
     public Ranges ranges()

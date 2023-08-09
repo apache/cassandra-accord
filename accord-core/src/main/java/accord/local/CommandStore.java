@@ -71,16 +71,27 @@ public abstract class CommandStore implements AgentExecutor
     {
         final RangesForEpoch newRangesForEpoch;
         final RedundantBefore addRedundantBefore;
+        final Ranges addGlobalRanges;
 
-        EpochUpdate(RangesForEpoch newRangesForEpoch, RedundantBefore addRedundantBefore)
+        EpochUpdate(RangesForEpoch newRangesForEpoch, RedundantBefore addRedundantBefore, Ranges addGlobalRanges)
         {
             this.newRangesForEpoch = newRangesForEpoch;
             this.addRedundantBefore = addRedundantBefore;
+            this.addGlobalRanges = addGlobalRanges;
         }
     }
 
     public static class EpochUpdateHolder extends AtomicReference<EpochUpdate>
     {
+        // TODO (required, eventually): support removing ranges
+        public void updateGlobal(Ranges addGlobalRanges)
+        {
+            EpochUpdate baseUpdate = new EpochUpdate(null, RedundantBefore.EMPTY, addGlobalRanges);
+            EpochUpdate cur = get();
+            if (cur == null || !compareAndSet(cur, new EpochUpdate(cur.newRangesForEpoch, cur.addRedundantBefore, cur.addGlobalRanges.with(addGlobalRanges))))
+                set(baseUpdate);
+        }
+
         // TODO (desired): can better encapsulate by accepting only the newRangesForEpoch and deriving the add/remove ranges
         public void add(long epoch, RangesForEpoch newRangesForEpoch, Ranges addRanges)
         {
@@ -96,9 +107,9 @@ public abstract class CommandStore implements AgentExecutor
 
         private void update(RangesForEpoch newRangesForEpoch, RedundantBefore addRedundantBefore)
         {
-            EpochUpdate baseUpdate = new EpochUpdate(newRangesForEpoch, addRedundantBefore);
+            EpochUpdate baseUpdate = new EpochUpdate(newRangesForEpoch, addRedundantBefore, Ranges.EMPTY);
             EpochUpdate cur = get();
-            if (cur == null || !compareAndSet(cur, new EpochUpdate(newRangesForEpoch, RedundantBefore.merge(cur.addRedundantBefore, addRedundantBefore))))
+            if (cur == null || !compareAndSet(cur, new EpochUpdate(newRangesForEpoch, RedundantBefore.merge(cur.addRedundantBefore, addRedundantBefore), cur.addGlobalRanges)))
                 set(baseUpdate);
         }
     }
@@ -164,8 +175,13 @@ public abstract class CommandStore implements AgentExecutor
             return rangesForEpoch;
 
         update = epochUpdateHolder.getAndSet(null);
-        setRedundantBefore(RedundantBefore.merge(redundantBefore, update.addRedundantBefore));
-        return rangesForEpoch = update.newRangesForEpoch;
+        if (!update.addGlobalRanges.isEmpty())
+            setDurableBefore(DurableBefore.merge(durableBefore, DurableBefore.create(update.addGlobalRanges, TxnId.NONE, TxnId.NONE)));
+        if (update.addRedundantBefore.size() > 0)
+            setRedundantBefore(RedundantBefore.merge(redundantBefore, update.addRedundantBefore));
+        if (update.newRangesForEpoch != null)
+            rangesForEpoch = update.newRangesForEpoch;
+        return rangesForEpoch;
     }
 
     public RangesForEpoch unsafeRangesForEpoch()
@@ -479,7 +495,7 @@ public abstract class CommandStore implements AgentExecutor
     // TODO (desired): Commands.durability() can use this to upgrade to Majority without further info
     public final Status.Durability globalDurability(TxnId txnId)
     {
-        return durableBefore.global(txnId);
+        return durableBefore.min(txnId);
     }
 
     public final RedundantBefore redundantBefore()
@@ -538,14 +554,7 @@ public abstract class CommandStore implements AgentExecutor
         // TODO (required): consider race conditions when bootstrapping into an active command store, that may have seen a higher txnId than this?
         //   might benefit from maintaining a per-CommandStore largest TxnId register to ensure we allocate a higher TxnId for our ExclSync,
         //   or from using whatever summary records we have for the range, once we maintain them
-        return redundantBefore.isLocallyRedundant(minimumDependencyId, executeAt, participantsOfWaitingTxn);
-    }
-
-    final boolean isRedundant(TxnId txnId, @Nullable Timestamp executeAt, Participants<?> participants)
-    {
-        if (executeAt == null)
-            executeAt = txnId;
-        return redundantBefore.isRedundant(txnId, executeAt, participants);
+        return redundantBefore.status(minimumDependencyId, executeAt, participantsOfWaitingTxn).compareTo(RedundantStatus.PARTIALLY_PRE_BOOTSTRAP) >= 0;
     }
 
     final synchronized void markUnsafeToRead(Ranges ranges)

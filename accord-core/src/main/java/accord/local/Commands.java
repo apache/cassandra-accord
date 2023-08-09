@@ -72,6 +72,7 @@ import static accord.local.Commands.Cleanup.ERASE;
 import static accord.local.Commands.Cleanup.NO;
 import static accord.local.Commands.Cleanup.TRUNCATE;
 import static accord.local.RedundantStatus.NOT_OWNED;
+import static accord.local.RedundantStatus.PRE_BOOTSTRAP;
 import static accord.local.SaveStatus.Applying;
 import static accord.local.SaveStatus.Erased;
 import static accord.local.SaveStatus.TruncatedApply;
@@ -577,6 +578,9 @@ public class Commands
         if (command.hasBeen(Applied))
             return AsyncChains.success(null);
 
+        // TODO (required): make sure we are correctly handling (esp. C* side with validation logic) executing a transaction
+        //  that was pre-bootstrap for some range (so redundant and we may have gone ahead of), but had to be executed locally
+        //  for another range
         CommandStore unsafeStore = safeStore.commandStore();
         return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()))
                .flatMap(unused -> unsafeStore.submit(context, ss -> {
@@ -713,13 +717,13 @@ public class Commands
         {
             logger.trace("{}: {} is truncated. Stop listening and removing from waiting on commit set.", waitingId, dependencyId);
             dependencySafeCommand.removeListener(new ProxyListener(waitingId));
-            return waitingOn.removeInvalidatedOrTruncated(dependencyId);
+            return waitingOn.removeInvalidatedAppliedOrTruncated(dependencyId);
         }
         else if (dependency.is(Invalidated))
         {
             logger.trace("{}: {} is invalidated. Stop listening and removing from waiting on commit set.", waitingId, dependencyId);
             dependencySafeCommand.removeListener(new ProxyListener(waitingId));
-            return waitingOn.removeInvalidatedOrTruncated(dependencyId);
+            return waitingOn.removeInvalidatedAppliedOrTruncated(dependencyId);
         }
         else if (dependency.executeAt().compareTo(executeWaitingAt) > 0 && !waitingId.rw().awaitsFutureDeps())
         {
@@ -745,7 +749,7 @@ public class Commands
         {
             return false;
         }
-        else if (safeStore.isPreBootstrap(dependency, dependency.hasFullRoute() ? dependency.route() : waitingOn.deps.participants(dependency.txnId())))
+        else if (safeStore.isFullyPreBootstrap(dependency, waitingOn.deps.participants(dependency.txnId())))
         {
             // TODO (expected): erase or otherwise prevent from executing
             return false;
@@ -816,7 +820,7 @@ public class Commands
         // TODO (desired): consider if there are better invariants we can impose for undecided transactions, to verify they aren't later committed (should be detected already, but more is better)
         // note that our invariant here is imperfectly applied to keep the code cleaner: we don't verify that the caller was safe to invoke if we don't already have a route in the command and we're only PreCommitted
         Invariants.checkState(command.hasBeen(Applied) || !command.hasBeen(PreCommitted)
-                              || (command.route() == null || Infer.safeToCleanup(safeStore, command, command.route(), command.executeAt()) || safeStore.isPreBootstrap(command, command.route()))
+                              || (command.route() == null || Infer.safeToCleanup(safeStore, command, command.route(), command.executeAt()) || safeStore.isFullyPreBootstrap(command, command.route().participants()))
         , "Command %s could not be truncated", command);
 
         Command result;
@@ -863,6 +867,9 @@ public class Commands
 
     static Cleanup shouldCleanup(SafeCommandStore safeStore, Command command, EpochSupplier toEpoch, Unseekables<?> maybeFullRoute)
     {
+        if (command.saveStatus() == Erased)
+            return NO; // once erased we no longer have executeAt, and may consider that a transaction is owned by us that should not be (as its txnId is an earlier epoch than we adopted a range)
+
         Route<?> route = command.route();
         if (!Route.isFullRoute(route))
         {
@@ -881,7 +888,7 @@ public class Commands
 
     public static Cleanup shouldCleanup(TxnId txnId, Status status, Durability durability, EpochSupplier toEpoch, Route<?> route, RedundantBefore redundantBefore, DurableBefore durableBefore)
     {
-        if (durableBefore.global(txnId) == Universal)
+        if (durableBefore.min(txnId) == Universal)
         {
             if (status.hasBeen(PreCommitted) && !status.hasBeen(Applied)) // TODO (expected): may be stale
                 throw new IllegalStateException("Loading universally-durable command that has been PreCommitted but not Applied");
@@ -893,19 +900,21 @@ public class Commands
 
         // We first check if the command is redundant locally, i.e. whether it has been applied to all non-faulty replicas of the local shard
         // If not, we don't want to truncate its state else we may make catching up for these other replicas much harder
-        RedundantStatus redundant = redundantBefore.min(txnId, toEpoch, route.participants());
+        RedundantStatus redundant = redundantBefore.status(txnId, toEpoch, route.participants());
         switch (redundant)
         {
             default: throw new AssertionError();
             case NOT_OWNED:
                 // TODO (expected): we can impose additional validations here IF we receive an epoch upper bound
+                // TODO (expected): we should be more robust to the presence/absence of executeAt
                 if (route.isParticipatingHomeKey() || redundantBefore.get(txnId, toEpoch, route.homeKey()) == NOT_OWNED)
                     throw new IllegalStateException("Command " + txnId + " that is being loaded is not owned by this shard on route " + route);
             case LIVE:
+            case PARTIALLY_PRE_BOOTSTRAP:
             case PRE_BOOTSTRAP:
                 return NO;
-            case REDUNDANT:
-                if (status.hasBeen(PreCommitted) && !status.hasBeen(Applied)) // TODO (expected): may be stale
+            case LOCALLY_REDUNDANT:
+                if (status.hasBeen(PreCommitted) && !status.hasBeen(Applied)) // TODO (required): may be stale
                     throw new IllegalStateException("Loading redundant command that has been PreCommitted but not Applied");
         }
 
@@ -992,14 +1001,19 @@ public class Commands
                 {
                     if (prevSafe != null)
                     {
-                        if (safeStore.commandStore().redundantBefore().isLocallyRedundant(txnIds[depth], prevSafe.current().executeAt(), prevSafe.current().partialDeps().participants(txnIds[depth])))
+                        RedundantStatus redundantStatus = safeStore.commandStore().redundantBefore().status(txnIds[depth], prevSafe.current().executeAt(), prevSafe.current().partialDeps().participants(txnIds[depth]));
+                        switch (redundantStatus)
                         {
-                            removeDependency(prevSafe, txnIds[depth]);
-                            prevSafe = get(safeStore, --depth - 1);
-                        }
-                        else
-                        {
-                            initialise(safeStore, depth);
+                            default: throw new AssertionError("Unexpected redundant status: " + redundantStatus);
+                            case NOT_OWNED: throw new AssertionError("Invalid state: waiting for execution of command that is not owned at the execution time");
+                            case LOCALLY_REDUNDANT:
+                            case PRE_BOOTSTRAP:
+                                removeRedundantDependencies(safeStore, prevSafe, txnIds[depth], redundantStatus == PRE_BOOTSTRAP);
+                                prevSafe = get(safeStore, --depth - 1);
+                                break;
+                            case LIVE:
+                            case PARTIALLY_PRE_BOOTSTRAP:
+                                initialise(safeStore, depth);
                         }
                     }
                     else
@@ -1016,7 +1030,7 @@ public class Commands
             }
 
             Invariants.checkState(depth == 0 || prevSafe != null);
-            while (depth >= 0)
+            loop: while (depth >= 0)
             {
                 if (depth > 100000) // TODO (expected): dump more debug info to aid investigation
                     throw new StackOverflowError("Exploring a probably-recursive or otherwise faulty dependency graph from " + txnIds[0]);
@@ -1074,43 +1088,35 @@ public class Commands
                     }
 
                     Timestamp executeAt = prev == null ? cur.executeAt() : prev.executeAt();
-                    Participants<?> someParticipants = null;
-                    if (cur.route() != null)
-                    {
-                        someParticipants = cur.route().participants();
-                    }
-                    else if (prev != null)
-                    {
-                        someParticipants = prev.partialDeps().participants(cur.txnId());
-                    }
-                    Invariants.checkState(someParticipants != null);
-                    if (safeStore.commandStore().isRedundant(cur.txnId(), executeAt, someParticipants))
-                    {
-                        if (prevSafe == null)
-                        {
-                            Invariants.checkState(cur.hasBeen(Applied) || !cur.hasBeen(PreCommitted) || safeStore.isPreBootstrap(cur, someParticipants));
-                            return;
-                        }
+                    Participants<?> participants = prev != null // TODO (desired): slightly costly to invert a large partialDeps collection
+                                                   ? prev.partialDeps().participants(cur.txnId()) // we do want to limit to the intersection of keys with the waiting transaction
+                                                   : cur.route().participants(); // no need to slice to execution ranges, as implicitly done for us by RedundantBefore
 
-                        curSafe.removeListener(prev.asListener());
-                        // we've been invalidated, or we're done
-                        if (cur.hasBeen(Applied))
-                        {
-                            removeDependency(prevSafe, cur.txnId());
-                        }
-                        else
-                        {
-                            Invariants.checkState(!cur.hasBeen(PreCommitted) || safeStore.isPreBootstrap(cur, someParticipants));
-                            removeAndUpdateDependencies(safeStore, prevSafe, cur.txnId());
-                        }
-                        --depth;
-                        prevSafe = get(safeStore, depth - 1);
-                    }
-                    else
+                    RedundantStatus redundantStatus = safeStore.commandStore().redundantBefore().status(cur.txnId(), executeAt, participants);
+                    switch (redundantStatus)
                     {
-                        logger.trace("{} blocked on {} until {}", txnIds[0], cur.txnId(), until);
-                        safeStore.progressLog().waiting(curSafe, until, null, someParticipants);
-                        break;
+                        default: throw new AssertionError("Unknown redundant status: " + redundantStatus);
+                        case NOT_OWNED: throw new AssertionError("Invalid state: waiting for execution of command that is not owned at the execution time");
+                        case LIVE:
+                        case PARTIALLY_PRE_BOOTSTRAP:
+                            logger.trace("{} blocked on {} until {}", txnIds[0], cur.txnId(), until);
+                            safeStore.progressLog().waiting(curSafe, until, null, participants);
+                            break loop;
+
+                        case PRE_BOOTSTRAP:
+                        case LOCALLY_REDUNDANT:
+                            Invariants.checkState(cur.hasBeen(Applied) || !cur.hasBeen(PreCommitted) || redundantStatus == PRE_BOOTSTRAP);
+                            if (prev == null)
+                                return;
+
+                            curSafe.removeListener(prev.asListener());
+
+                            // we've been applied, invalidated, or are no longer relevant
+                            if (cur.hasBeen(Applied)) removeInvalidatedAppliedOrTruncatedDependency(prevSafe, cur.txnId());
+                            else removeRedundantDependencies(safeStore, prevSafe, cur.txnId(), redundantStatus == PRE_BOOTSTRAP);
+
+                            --depth;
+                            prevSafe = get(safeStore, depth - 1);
                     }
                 }
             }
@@ -1167,15 +1173,15 @@ public class Commands
         }
     }
 
-    static Command removeDependency(SafeCommand safeCommand, TxnId redundant)
+    static Command removeInvalidatedAppliedOrTruncatedDependency(SafeCommand safeCommand, TxnId redundant)
     {
         Command.Committed current = safeCommand.current().asCommitted();
         WaitingOn.Update update = new WaitingOn.Update(current.waitingOn);
-        update.removeInvalidatedOrTruncated(redundant);
+        update.removeInvalidatedAppliedOrTruncated(redundant);
         return safeCommand.updateWaitingOn(update);
     }
 
-    static Command removeAndUpdateDependencies(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId redundant)
+    static Command removeRedundantDependencies(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId redundant, boolean isPreBootstrap)
     {
         CommandStore commandStore = safeStore.commandStore();
         Command.Committed current = safeCommand.current().asCommitted();
@@ -1184,7 +1190,8 @@ public class Commands
         if (minWaitingOnTxnId != null && commandStore.hasLocallyRedundantDependencies(update.minWaitingOnTxnId(), current.executeAt(), current.route().participants()))
             safeStore.commandStore().removeRedundantDependencies(current.route().participants(), update);
 
-        update.removeInvalidatedOrTruncated(redundant);
+        if (isPreBootstrap) update.removeWaitingOn(redundant); // above operation not guaranteed to remove all redundant dependencies; transaction may
+        else update.removeInvalidatedAppliedOrTruncated(redundant);
         return safeCommand.updateWaitingOn(update);
     }
 

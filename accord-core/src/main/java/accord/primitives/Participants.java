@@ -41,5 +41,4 @@ public interface Participants<K extends Unseekable> extends Unseekables<K>
         if (right == null) return left;
         return left.with(right);
     }
-
 }

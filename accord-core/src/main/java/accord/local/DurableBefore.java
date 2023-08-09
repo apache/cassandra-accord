@@ -120,10 +120,10 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
 
     public static final DurableBefore EMPTY = new DurableBefore();
 
-    final Entry global;
+    final Entry min;
     private DurableBefore()
     {
-        this.global = new Entry(TxnId.NONE, TxnId.NONE);
+        this.min = new Entry(TxnId.NONE, TxnId.NONE);
     }
 
     DurableBefore(boolean inclusiveEnds, RoutingKey[] starts, Entry[] values)
@@ -131,7 +131,7 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
         super(inclusiveEnds, starts, values);
         if (values.length == 0)
         {
-            global = new Entry(TxnId.NONE, TxnId.NONE);
+            min = new Entry(TxnId.NONE, TxnId.NONE);
         }
         else
         {
@@ -144,7 +144,7 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
                 if (min == null) min = value;
                 else min = Entry.min(min, value);
             }
-            global = min;
+            this.min = min;
         }
     }
 
@@ -155,12 +155,18 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
 
         Entry entry = new Entry(majority, universal);
         Builder builder = new Builder(ranges.get(0).endInclusive(), ranges.size() * 2);
+        Range prev = null;
         for (int i = 0 ; i < ranges.size() ; ++i)
         {
             Range cur = ranges.get(i);
+            if (prev != null && !prev.end().equals(cur.start()))
+                builder.append(prev.end(), null, (a, b) -> a); // if we are equal to prev end, take the prev value not zero
             builder.append(cur.start(), entry, (a, b) -> { throw new IllegalStateException(); });
-            builder.append(cur.end(), null, (a, b) -> a); // if we are equal to prev end, take the prev value not zero
+            prev = cur;
         }
+        if (prev != null)
+            builder.append(prev.end(), null, (a, b) -> a); // if we are equal to prev end, take the prev value not zero
+
         return builder.build();
     }
 
@@ -200,11 +206,11 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
         return max(txnId, participants).compareTo(durability) >= 0;
     }
 
-    public Durability global(TxnId txnId)
+    public Durability min(TxnId txnId)
     {
-        if (global.universalBefore.compareTo(txnId) > 0)
+        if (min.universalBefore.compareTo(txnId) > 0)
             return Universal;
-        if (global.majorityBefore.compareTo(txnId) > 0)
+        if (min.majorityBefore.compareTo(txnId) > 0)
             return Majority;
         return NotDurable;
     }

@@ -56,6 +56,12 @@ class AbstractRangesTest
         {
             throw new UnsupportedOperationException();
         }
+
+        @Override
+        public Routables<Range> slice(accord.primitives.Ranges ranges, Slice slice)
+        {
+            throw new UnsupportedOperationException();
+        }
     }
 
     private static class PrefixKey extends IntKey.Routing
