@@ -21,6 +21,7 @@ package accord.utils;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.NavigableSet;
 import java.util.Random;
 import java.util.Set;
 import java.util.stream.DoubleStream;
@@ -229,7 +230,10 @@ public interface RandomSource
     default <T extends Comparable<T>> T pick(Set<T> set)
     {
         List<T> values = new ArrayList<>(set);
-        values.sort(Comparator.naturalOrder());
+        // Non-ordered sets may have different iteration order on different environments, which would make a seed produce different histories!
+        // To avoid such a problem, make sure to apply a deterministic function (sort).
+        if (!(set instanceof NavigableSet))
+            values.sort(Comparator.naturalOrder());
         return pick(values);
     }
 

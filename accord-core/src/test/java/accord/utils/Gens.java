@@ -62,8 +62,7 @@ public class Gens {
 
     public static <T extends Comparable<T>> Gen<T> pick(Set<T> set)
     {
-        List<T> list = new ArrayList<>(set.size());
-        list.addAll(set);
+        List<T> list = new ArrayList<>(set);
         // Non-ordered sets may have different iteration order on different environments, which would make a seed produce different histories!
         // To avoid such a problem, make sure to apply a deterministic function (sort).
         if (!(set instanceof NavigableSet))
