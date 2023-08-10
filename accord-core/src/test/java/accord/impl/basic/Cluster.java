@@ -241,8 +241,9 @@ public class Cluster implements Scheduler
                                      SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending));
                 lookup.put(id, node);
                 CoordinateDurabilityScheduling durability = new CoordinateDurabilityScheduling(node);
-                durability.setFrequency(10, SECONDS);
-                durability.setGlobalCycleTime(60, SECONDS);
+                // TODO (desired): randomise
+                durability.setFrequency(60, SECONDS);
+                durability.setGlobalCycleTime(180, SECONDS);
                 durabilityScheduling.add(durability);
             }
 
