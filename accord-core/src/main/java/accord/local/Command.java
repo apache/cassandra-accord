@@ -470,6 +470,8 @@ public abstract class Command implements CommonAttributes
 
     public final boolean isDefined()
     {
+        if (status().hasBeen(Status.Truncated))
+            return false;
         boolean result = status().hasBeen(Status.PreAccepted);
         Invariants.checkState(result == (this instanceof PreAccepted), "Unexpected type: %s, %s", this, this.getClass().getCanonicalName());
         return result;
