@@ -24,10 +24,7 @@ public interface PendingQueue
 {
     void add(Pending item);
     void add(Pending item, long delay, TimeUnit units);
-    default boolean remove(Pending item)
-    {
-        return false;
-    }
+    boolean remove(Pending item);
     Pending poll();
     int size();
     long nowInMillis();
