@@ -485,7 +485,7 @@ public abstract class Command implements CommonAttributes
     public final boolean isAccepted()
     {
         boolean result = status().hasBeen(Status.AcceptedInvalidate);
-        Invariants.checkState(result == (this instanceof Accepted));
+        Invariants.checkState(result == (this instanceof Accepted), "Unexpected type: %s, %s", this, this.getClass().getCanonicalName());
         return result;
     }
 
@@ -497,7 +497,7 @@ public abstract class Command implements CommonAttributes
     public final boolean isCommitted()
     {
         boolean result = status().hasBeen(Status.Committed);
-        Invariants.checkState(result == (this instanceof Committed));
+        Invariants.checkState(result == (this instanceof Committed), "Unexpected type: %s, %s", this, this.getClass().getCanonicalName());
         return result;
     }
 
@@ -514,7 +514,7 @@ public abstract class Command implements CommonAttributes
     public final boolean isTruncated()
     {
         boolean result = status().hasBeen(Status.Truncated);
-        Invariants.checkState(result == (this instanceof Truncated));
+        Invariants.checkState(result == (this instanceof Truncated), "Unexpected type: %s, %s", this, this.getClass().getCanonicalName());
         return result;
     }
 
