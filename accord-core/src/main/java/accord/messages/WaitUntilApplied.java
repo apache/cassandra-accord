@@ -123,7 +123,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
         }
 
         if (safeCommand.removeListener(this))
-            maybeApplied(safeStore, safeCommand);
+            maybeApplied(safeStore);
     }
 
     @Override
@@ -182,7 +182,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
             case Truncated:
                 waitingOn.set(safeStore.commandStore().id());
                 ++waitingOnCount;
-                maybeApplied(safeStore, safeCommand);
+                maybeApplied(safeStore);
                 return null;
         }
     }
@@ -205,13 +205,21 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
         node.reply(replyTo, replyContext, Redundant);
     }
 
-    void maybeApplied(SafeCommandStore safeStore, SafeCommand safeCommand)
+    void maybeApplied(SafeCommandStore safeStore)
     {
         if (isInvalid)
             return;
 
-        Ranges unavailable = safeStore.ranges().unsafeToReadAt(executeAt);
-        readComplete(safeStore.commandStore(), null, unavailable);
+        if (!maybeReadAfterApply(safeStore))
+        {
+            Ranges unavailable = safeStore.ranges().unsafeToReadAt(executeAt);
+            readComplete(safeStore.commandStore(), null, unavailable);
+        }
+    }
+
+    protected boolean maybeReadAfterApply(SafeCommandStore safeStore)
+    {
+        return false;
     }
 
     @Override
