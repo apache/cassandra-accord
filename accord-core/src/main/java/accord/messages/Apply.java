@@ -20,13 +20,27 @@ package accord.messages;
 
 import javax.annotation.Nullable;
 
-import accord.local.*;
-import accord.primitives.*;
-import accord.local.Node.Id;
 import accord.api.Result;
-import accord.topology.Topologies;
-
+import accord.local.Commands;
+import accord.local.Node;
+import accord.local.Node.Id;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
 import accord.messages.Apply.ApplyReply;
+import accord.primitives.Deps;
+import accord.primitives.Keys;
+import accord.primitives.PartialDeps;
+import accord.primitives.PartialRoute;
+import accord.primitives.PartialTxn;
+import accord.primitives.Ranges;
+import accord.primitives.Route;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
+import accord.primitives.Writes;
+import accord.topology.Topologies;
 
 import static accord.messages.MessageType.APPLY_REQ;
 import static accord.messages.MessageType.APPLY_RSP;
@@ -139,6 +153,8 @@ public class Apply extends TxnRequest<ApplyReply>
     @Override
     public void accept(ApplyReply reply, Throwable failure)
     {
+        if (failure != null)
+            node.agent().onUncaughtException(failure);
         node.reply(replyTo, replyContext, reply);
     }
 
