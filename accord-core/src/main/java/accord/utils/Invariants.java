@@ -146,6 +146,13 @@ public class Invariants
         return param;
     }
 
+    public static <T> T nonNull(T param, String fmt, Object... args)
+    {
+        if (param == null)
+            throw new NullPointerException(format(fmt, args));
+        return param;
+    }
+
     public static int isNatural(int input)
     {
         if (input < 0)
