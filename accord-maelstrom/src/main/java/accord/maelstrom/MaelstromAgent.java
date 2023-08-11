@@ -18,13 +18,20 @@
 
 package accord.maelstrom;
 
-import accord.local.Command;
-import accord.local.Node;
+import java.util.concurrent.TimeUnit;
+
 import accord.api.Agent;
 import accord.api.Result;
-import accord.primitives.*;
+import accord.local.Command;
+import accord.local.Node;
+import accord.primitives.Keys;
+import accord.primitives.Ranges;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
 
-import java.util.concurrent.TimeUnit;
+import static accord.utils.Invariants.checkState;
 
 public class MaelstromAgent implements Agent
 {
@@ -33,10 +40,16 @@ public class MaelstromAgent implements Agent
     @Override
     public void onRecover(Node node, Result success, Throwable fail)
     {
+        if (fail != null)
+        {
+            checkState(success == null, "fail (%s) and success (%s) are both not null", fail, success);
+            // Can't respond without success and requestId
+            node.agent().onUncaughtException(fail);
+        }
         if (success != null)
         {
             MaelstromResult result = (MaelstromResult) success;
-            node.reply(result.client, MaelstromReplyContext.contextFor(result.requestId), new MaelstromReply(result.requestId, result));
+            node.reply(result.client, MaelstromReplyContext.contextFor(result.requestId), new MaelstromReply(result.requestId, result), null);
         }
     }
 

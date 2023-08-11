@@ -56,7 +56,7 @@ public abstract class AbstractEpochRequest<R extends Reply> implements PreLoadCo
     @Override
     public void accept(R reply, Throwable failure)
     {
-        node.reply(replyTo, replyContext, reply);
+        node.reply(replyTo, replyContext, reply, failure);
     }
 
     @Override

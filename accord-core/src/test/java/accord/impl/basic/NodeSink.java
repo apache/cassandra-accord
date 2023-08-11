@@ -23,16 +23,17 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
+import accord.api.MessageSink;
 import accord.local.AgentExecutor;
-import accord.messages.SafeCallback;
-import accord.utils.RandomSource;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.api.MessageSink;
 import accord.messages.Callback;
 import accord.messages.Reply;
+import accord.messages.Reply.FailureReply;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
+import accord.messages.SafeCallback;
+import accord.utils.RandomSource;
 
 import static accord.impl.basic.Packet.SENTINEL_MESSAGE_ID;
 
@@ -81,5 +82,11 @@ public class NodeSink implements MessageSink
     public void reply(Id replyToNode, ReplyContext replyContext, Reply reply)
     {
         parent.add(self, replyToNode, Packet.getMessageId(replyContext), reply);
+    }
+
+    @Override
+    public void replyWithFailure(Id replyingToNode, ReplyContext replyContext, Throwable failure)
+    {
+        reply(replyingToNode, replyContext, new FailureReply(failure));
     }
 }

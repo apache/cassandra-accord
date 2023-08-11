@@ -35,9 +35,9 @@ import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
 import accord.messages.MessageType;
 import accord.messages.ReplyContext;
+import accord.messages.Request;
 import accord.primitives.RoutingKeys;
 import accord.primitives.Txn;
-import accord.messages.Request;
 import accord.primitives.TxnId;
 
 import static accord.local.Status.Phase.Cleanup;
@@ -110,7 +110,7 @@ public class ListRequest implements Request
             // TODO (desired, testing): error handling
             if (success != null)
             {
-                node.reply(client, replyContext, (ListResult) success);
+                node.reply(client, replyContext, (ListResult) success, null);
             }
             else if (fail instanceof CoordinationFailed)
             {
@@ -118,30 +118,30 @@ public class ListRequest implements Request
                 TxnId txnId = ((CoordinationFailed) fail).txnId();
                 if (fail instanceof Invalidated)
                 {
-                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, null, null));
+                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, null, null), null);
                     return;
                 }
 
-                node.reply(client, replyContext, new ListResult(client, ((Packet)replyContext).requestId, txnId, null, null, new int[0][], null));
+                node.reply(client, replyContext, new ListResult(client, ((Packet)replyContext).requestId, txnId, null, null, new int[0][], null), null);
                 ((Cluster)node.scheduler()).onDone(() -> {
                     node.commandStores()
                         .select(homeKey)
                         .execute(() -> CheckOnResult.checkOnResult(node, txnId, homeKey, (s, f) -> {
                             if (f != null)
                             {
-                                node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, f instanceof Truncated ? new int[2][] : new int[3][], null));
+                                node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, f instanceof Truncated ? new int[2][] : new int[3][], null), null);
                                 return;
                             }
                             switch (s)
                             {
                                 case Truncated:
-                                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, new int[2][], null));
+                                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, new int[2][], null), null);
                                     break;
                                 case Invalidated:
-                                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, null, null));
+                                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, null, null), null);
                                     break;
                                 case Lost:
-                                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, new int[1][], null));
+                                    node.reply(client, replyContext, new ListResult(client, ((Packet) replyContext).requestId, txnId, null, null, new int[1][], null), null);
                                     break;
                                 case Other:
                                     // currently caught elsewhere in response tracking, but might help to throw an exception here

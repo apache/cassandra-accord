@@ -199,7 +199,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
         if (state == State.PENDING)
         {
             state = State.OBSOLETE;
-            node.reply(replyTo, replyContext, Redundant);
+            node.reply(replyTo, replyContext, Redundant, null);
         }
     }
 
@@ -231,8 +231,14 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
     }
 
     @Override
-    protected void reply(@Nullable Ranges unavailable, @Nullable Data data)
+    protected void reply(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Throwable fail)
     {
+        if (fail != null)
+        {
+            node.reply(replyTo, replyContext, null, fail);
+            return;
+        }
+
         switch (state)
         {
             case RETURNED:
@@ -242,7 +248,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
                 break;
             case PENDING:
                 state = State.RETURNED;
-                node.reply(replyTo, replyContext, new ReadOk(unavailable, data));
+                node.reply(replyTo, replyContext, new ReadOk(unavailable, data), null);
                 break;
             default:
                 throw new AssertionError("Unknown state: " + state);

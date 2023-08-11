@@ -18,7 +18,28 @@
 
 package accord.messages;
 
+import javax.annotation.Nonnull;
+
+import static accord.messages.MessageType.FAILURE_RSP;
+
 public interface Reply extends Message
 {
     default boolean isFinal() { return true; }
+
+    class FailureReply implements Reply
+    {
+        @Nonnull
+        public final Throwable failure;
+
+        public FailureReply(@Nonnull Throwable failure)
+        {
+            this.failure = failure;
+        }
+
+        @Override
+        public MessageType type()
+        {
+            return FAILURE_RSP;
+        }
+    }
 }

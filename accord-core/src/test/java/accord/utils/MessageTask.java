@@ -18,15 +18,24 @@
 
 package accord.utils;
 
-import accord.local.AgentExecutor;
-import accord.local.Node;
-import accord.messages.*;
-import accord.utils.async.AsyncResults;
-import com.google.common.collect.ImmutableList;
-
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+
+import com.google.common.collect.ImmutableList;
+
+import accord.local.AgentExecutor;
+import accord.local.Node;
+import accord.messages.Callback;
+import accord.messages.MessageType;
+import accord.messages.Reply;
+import accord.messages.ReplyContext;
+import accord.messages.Request;
+import accord.utils.async.AsyncResults;
 
 /**
  * Message task that will continue sending messages to a set of nodes until all
@@ -88,7 +97,8 @@ public class MessageTask extends AsyncResults.SettableResult<Void> implements Ru
         @Override
         public void process(Node on, Node.Id from, ReplyContext replyContext)
         {
-            process.process(on, from, success -> on.reply(from, replyContext, success ? SUCCESS : FAILURE));
+            // TODO (review): This is kind of odd, no error to propagate?
+            process.process(on, from, success -> on.reply(from, replyContext, success ? SUCCESS : FAILURE, null));
         }
 
         @Override

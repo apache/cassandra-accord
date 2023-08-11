@@ -22,8 +22,8 @@ import java.io.IOException;
 
 import accord.maelstrom.Packet.Type;
 import accord.messages.MessageType;
-import com.google.gson.stream.JsonWriter;
 import accord.messages.Reply;
+import com.google.gson.stream.JsonWriter;
 
 public class Error extends Body implements Reply
 {

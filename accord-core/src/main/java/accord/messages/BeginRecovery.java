@@ -18,25 +18,43 @@
 
 package accord.messages;
 
-import accord.api.Result;
-import accord.local.*;
-import accord.primitives.*;
-import accord.topology.Topologies;
-
 import java.util.List;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import accord.utils.Invariants;
-
+import accord.api.Result;
+import accord.local.Command;
+import accord.local.Commands;
 import accord.local.Node.Id;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.local.Status;
+import accord.primitives.Ballot;
+import accord.primitives.Deps;
+import accord.primitives.FullRoute;
+import accord.primitives.PartialDeps;
+import accord.primitives.PartialRoute;
+import accord.primitives.PartialTxn;
+import accord.primitives.Ranges;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
+import accord.primitives.Writes;
+import accord.topology.Topologies;
+import accord.utils.Invariants;
 
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.SafeCommandStore.TestDep.WITHOUT;
 import static accord.local.SafeCommandStore.TestKind.shouldHaveWitnessed;
-import static accord.local.SafeCommandStore.TestTimestamp.*;
-import static accord.local.Status.*;
+import static accord.local.SafeCommandStore.TestTimestamp.EXECUTES_AFTER;
+import static accord.local.SafeCommandStore.TestTimestamp.STARTED_AFTER;
+import static accord.local.SafeCommandStore.TestTimestamp.STARTED_BEFORE;
+import static accord.local.Status.Accepted;
+import static accord.local.Status.Committed;
+import static accord.local.Status.Phase;
+import static accord.local.Status.PreAccepted;
+import static accord.local.Status.PreCommitted;
 import static accord.messages.PreAccept.calculatePartialDeps;
 
 public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
@@ -179,7 +197,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
     @Override
     public void accept(RecoverReply reply, Throwable failure)
     {
-        node.reply(replyTo, replyContext, reply);
+        node.reply(replyTo, replyContext, reply, failure);
     }
 
     @Override

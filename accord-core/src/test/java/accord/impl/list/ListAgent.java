@@ -20,14 +20,20 @@ package accord.impl.list;
 
 import java.util.function.Consumer;
 
+import accord.api.Agent;
+import accord.api.Result;
 import accord.impl.mock.Network;
 import accord.local.Command;
 import accord.local.Node;
-import accord.api.Agent;
-import accord.api.Result;
-import accord.primitives.*;
+import accord.primitives.Keys;
+import accord.primitives.Ranges;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
 
 import static accord.local.Node.Id.NONE;
+import static accord.utils.Invariants.checkState;
 import static com.google.common.base.Functions.identity;
 
 public class ListAgent implements Agent
@@ -46,11 +52,17 @@ public class ListAgent implements Agent
     @Override
     public void onRecover(Node node, Result success, Throwable fail)
     {
+        if (fail != null)
+        {
+            checkState(success == null, "fail (%s) and success (%s) are both not null", fail, success);
+            // Can't respond without success and requestId
+            node.agent().onUncaughtException(fail);
+        }
         if (success != null)
         {
             ListResult result = (ListResult) success;
             if (result.requestId > Integer.MIN_VALUE)
-                node.reply(result.client, Network.replyCtxFor(result.requestId), result);
+                node.reply(result.client, Network.replyCtxFor(result.requestId), result, null);
         }
     }
 

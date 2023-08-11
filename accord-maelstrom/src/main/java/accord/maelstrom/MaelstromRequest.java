@@ -23,17 +23,18 @@ import java.util.NavigableSet;
 import java.util.TreeSet;
 
 import accord.api.Key;
+import accord.local.Node;
+import accord.local.Node.Id;
+import accord.maelstrom.Packet.Type;
 import accord.messages.MessageType;
+import accord.messages.Reply;
 import accord.messages.ReplyContext;
+import accord.messages.Request;
 import accord.primitives.Keys;
+import accord.primitives.Txn;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
-import accord.local.Node;
-import accord.local.Node.Id;
-import accord.primitives.Txn;
-import accord.maelstrom.Packet.Type;
-import accord.messages.Request;
 
 public class MaelstromRequest extends Body implements Request
 {
@@ -49,8 +50,8 @@ public class MaelstromRequest extends Body implements Request
     public void process(Node node, Id client, ReplyContext replyContext)
     {
         node.coordinate(txn).addCallback((success, fail) -> {
-            if (success != null) node.reply(client, replyContext, new MaelstromReply(MaelstromReplyContext.messageIdFor(replyContext), (MaelstromResult) success));
-//            else node.reply(client, messageId, new Error(messageId, 13, fail.getMessage()));
+            Reply reply = success != null ? new MaelstromReply(MaelstromReplyContext.messageIdFor(replyContext), (MaelstromResult) success) : null;
+            node.reply(client, replyContext, reply, fail);
         });
     }
 

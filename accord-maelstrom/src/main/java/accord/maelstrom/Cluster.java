@@ -51,6 +51,7 @@ import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
 import accord.messages.Callback;
 import accord.messages.Reply;
+import accord.messages.Reply.FailureReply;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
 import accord.messages.SafeCallback;
@@ -119,6 +120,12 @@ public class Cluster implements Scheduler
         {
             long replyToMessage = ((Packet) replyContext).body.msg_id;
             parent.add(self, replyToNode, replyToMessage, reply);
+        }
+
+        @Override
+        public void replyWithFailure(Id replyingToNode, ReplyContext replyContext, Throwable failure)
+        {
+            reply(replyingToNode, replyContext, new FailureReply(failure));
         }
     }
 

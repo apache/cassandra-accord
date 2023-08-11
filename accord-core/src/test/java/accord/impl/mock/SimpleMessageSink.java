@@ -18,11 +18,13 @@
 
 package accord.impl.mock;
 
+import accord.api.MessageSink;
 import accord.local.AgentExecutor;
 import accord.local.Node;
-import accord.api.MessageSink;
+import accord.local.Node.Id;
 import accord.messages.Callback;
 import accord.messages.Reply;
+import accord.messages.Reply.FailureReply;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
 
@@ -53,5 +55,11 @@ public class SimpleMessageSink implements MessageSink
     public void reply(Node.Id replyingToNode, ReplyContext replyContext, Reply reply)
     {
         network.reply(node, replyingToNode, Network.getMessageId(replyContext), reply);
+    }
+
+    @Override
+    public void replyWithFailure(Id replyingToNode, ReplyContext replyContext, Throwable failure)
+    {
+        network.reply(node, replyingToNode, Network.getMessageId(replyContext), new FailureReply(failure));
     }
 }

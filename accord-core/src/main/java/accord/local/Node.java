@@ -34,7 +34,6 @@ import java.util.function.ToLongFunction;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import accord.primitives.EpochSupplier;
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,6 +59,7 @@ import accord.messages.ReplyContext;
 import accord.messages.Request;
 import accord.messages.TxnRequest;
 import accord.primitives.Ballot;
+import accord.primitives.EpochSupplier;
 import accord.primitives.FullRoute;
 import accord.primitives.ProgressToken;
 import accord.primitives.Range;
@@ -81,6 +81,8 @@ import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import net.nicoulaj.compilecommand.annotations.Inline;
+
+import static accord.utils.Invariants.checkState;
 
 public class Node implements ConfigurationService.Listener, NodeTimeService
 {
@@ -475,10 +477,15 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         messageSink.send(to, send);
     }
 
-    public void reply(Id replyingToNode, ReplyContext replyContext, Reply send)
+    public void reply(Id replyingToNode, ReplyContext replyContext, Reply send, Throwable failure)
     {
-        // TODO (usability, now): add Throwable as an argument so the error check is here, every single message gets this wrong causing a NPE here
-        if (send == null)
+        if (failure != null)
+        {
+            checkState(send == null, "fail (%s) and send (%s) are both not null", failure, send);
+            messageSink.replyWithFailure(replyingToNode, replyContext, failure);
+            return;
+        }
+        else if (send == null)
         {
             NullPointerException e = new NullPointerException();
             agent.onUncaughtException(e);

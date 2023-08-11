@@ -21,21 +21,20 @@ package accord.messages;
 import java.util.BitSet;
 import javax.annotation.Nullable;
 
-import accord.api.Data;
-import accord.primitives.Participants;
-import accord.topology.Topologies;
-import accord.utils.Invariants;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import accord.api.Data;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.primitives.PartialTxn;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.topology.Topologies;
+import accord.utils.Invariants;
 
 import static accord.messages.MessageType.READ_RSP;
 import static accord.messages.TxnRequest.computeWaitForEpoch;
@@ -53,6 +52,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
     transient BitSet waitingOn;
     transient int waitingOnCount;
     transient Ranges unavailable;
+    transient Throwable fail;
 
     public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Participants<?> readScope)
     {
@@ -71,7 +71,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
 
     protected abstract void cancel();
     protected abstract long executeAtEpoch();
-    protected abstract void reply(@Nullable Ranges unavailable, @Nullable Data data);
+    protected abstract void reply(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Throwable fail);
 
     @Override
     public long waitForEpoch()
@@ -99,12 +99,12 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
     {
         if (reply != null)
         {
-            node.reply(replyTo, replyContext, reply);
+            node.reply(replyTo, replyContext, reply, null);
         }
         else if (failure != null)
         {
             // TODO (expected, testing): test
-            node.reply(replyTo, replyContext, ReadNack.Error);
+            node.reply(replyTo, replyContext, null, failure);
             data = null;
             // TODO (expected, exceptions): probably a better way to handle this, as might not be uncaught
             node.agent().onUncaughtException(failure);
@@ -129,7 +129,9 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
         // and prevents races where we respond before dispatching all the required reads (if the reads are
         // completing faster than the reads can be setup on all required shards)
         if (-1 == --waitingOnCount)
-            reply(this.unavailable, data);
+        {
+            reply(this.unavailable, fail == null ? data : null, fail);
+        }
     }
 
     protected synchronized void readComplete(CommandStore commandStore, @Nullable Data result, @Nullable Ranges unavailable)
@@ -149,14 +151,16 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
         Ranges unavailable = safeStore.ranges().unsafeToReadAt(executeAt);
 
         txn.read(safeStore, executeAt).begin((next, throwable) -> {
-            if (throwable != null)
+            // TODO (expected, exceptions): should send exception to client, and consistency handle/propagate locally
+            logger.trace("{}: read failed for {}: {}", txnId, unsafeStore, throwable);
+            synchronized (ReadData.this)
             {
-                // TODO (expected, exceptions): should send exception to client, and consistency handle/propagate locally
-                logger.trace("{}: read failed for {}: {}", txnId, unsafeStore, throwable);
-                node.reply(replyTo, replyContext, ReadNack.Error);
+                if (fail == null)
+                    fail = throwable;
+                else
+                    fail.addSuppressed(throwable);
             }
-            else
-                readComplete(unsafeStore, next, unavailable);
+            readComplete(unsafeStore, next, unavailable);
         });
     }
 
@@ -173,7 +177,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
 
     public enum ReadNack implements ReadReply
     {
-        Invalid, NotCommitted, Redundant, Error;
+        Invalid, NotCommitted, Redundant;
 
         @Override
         public String toString()

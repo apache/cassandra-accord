@@ -44,6 +44,7 @@ import accord.local.ShardDistributor;
 import accord.maelstrom.Packet.Type;
 import accord.messages.Callback;
 import accord.messages.Reply;
+import accord.messages.Reply.FailureReply;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
 import accord.topology.Topology;
@@ -128,6 +129,12 @@ public class Main
         public void reply(Id replyToNode, ReplyContext replyContext, Reply reply)
         {
             send(new Packet(self, replyToNode, MaelstromReplyContext.messageIdFor(replyContext), reply));
+        }
+
+        @Override
+        public void replyWithFailure(Id replyingToNode, ReplyContext replyContext, Throwable failure)
+        {
+            reply(replyingToNode, replyContext, new FailureReply(failure));
         }
     }
 

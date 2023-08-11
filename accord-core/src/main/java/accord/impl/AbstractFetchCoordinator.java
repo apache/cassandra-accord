@@ -154,8 +154,6 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
                             case Invalid:
                             case Redundant:
                                 throw new AssertionError(String.format("Unexpected reply: %s", reply));
-                            case Error:
-                                // TODO (required): ensure errors are propagated to coordinators and can be logged
                         }
                     }
                     return;
@@ -273,9 +271,11 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         }
 
         @Override
-        protected void reply(@Nullable Ranges unavailable, @Nullable Data data)
+        protected void reply(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Throwable fail)
         {
-            node.reply(replyTo, replyContext, new FetchResponse(unavailable, data, maxApplied));
+            // TODO (review): If the fetch response actually does some streaming, but we send back the error
+            // it is a lot of work and data that might move and be unaccounted for at the coordinator
+            node.reply(replyTo, replyContext, data != null ? new FetchResponse(unavailable, data, maxApplied) : null, fail);
         }
 
         @Override

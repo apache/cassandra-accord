@@ -24,14 +24,20 @@ import java.util.function.BiConsumer;
 import accord.api.Data;
 import accord.api.Result;
 import accord.local.Node;
-import accord.messages.ReadTxnData;
+import accord.local.Node.Id;
+import accord.messages.Commit;
 import accord.messages.ReadData.ReadNack;
 import accord.messages.ReadData.ReadOk;
 import accord.messages.ReadData.ReadReply;
-import accord.primitives.*;
+import accord.messages.ReadTxnData;
+import accord.primitives.Deps;
+import accord.primitives.FullRoute;
+import accord.primitives.Participants;
+import accord.primitives.Ranges;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
 import accord.topology.Topologies;
-import accord.local.Node.Id;
-import accord.messages.Commit;
 import accord.topology.Topology;
 
 import static accord.coordinate.ReadCoordinator.Action.Approve;
@@ -111,9 +117,6 @@ class Execute extends ReadCoordinator<ReadReply>
         switch (nack)
         {
             default: throw new IllegalStateException();
-            case Error:
-                // TODO (expected): report content of error
-                return Action.Reject;
             case Redundant:
                 callback.accept(null, new Preempted(txnId, route.homeKey()));
                 return Action.Aborted;
