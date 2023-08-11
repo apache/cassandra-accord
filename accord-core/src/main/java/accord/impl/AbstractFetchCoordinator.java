@@ -275,7 +275,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         {
             // TODO (review): If the fetch response actually does some streaming, but we send back the error
             // it is a lot of work and data that might move and be unaccounted for at the coordinator
-            node.reply(replyTo, replyContext, data != null ? new FetchResponse(unavailable, data, maxApplied) : null, fail);
+            node.reply(replyTo, replyContext, fail == null ? new FetchResponse(unavailable, data, maxApplied) : null, fail);
         }
 
         @Override
