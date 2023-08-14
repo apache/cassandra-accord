@@ -28,7 +28,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -41,7 +40,6 @@ import org.junit.jupiter.api.Assertions;
 import accord.api.MessageSink;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
-import accord.burn.random.FrequentLargeRange;
 import accord.impl.*;
 import accord.local.AgentExecutor;
 import accord.local.Node;
@@ -56,7 +54,6 @@ import accord.messages.Reply;
 import accord.messages.Request;
 import accord.topology.TopologyRandomizer;
 import accord.topology.Topology;
-import accord.utils.Gen.LongGen;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
@@ -81,48 +78,12 @@ public class Cluster implements Scheduler
 
     EnumMap<MessageType, Stats> statsMap = new EnumMap<>(MessageType.class);
 
-    private static class Connection
-    {
-        private final Id from, to;
-
-        private Connection(Id from, Id to)
-        {
-            this.from = from;
-            this.to = to;
-        }
-
-        @Override
-        public boolean equals(Object o)
-        {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            Connection that = (Connection) o;
-            return Objects.equals(from, that.from) && Objects.equals(to, that.to);
-        }
-
-        @Override
-        public int hashCode()
-        {
-            return Objects.hash(from, to);
-        }
-
-        @Override
-        public String toString()
-        {
-            return "Connection{" +
-                    "from=" + from +
-                    ", to=" + to +
-                    '}';
-        }
-    }
-
     final RandomSource randomSource;
     final Function<Id, Node> lookup;
     final PendingQueue pending;
     final List<Runnable> onDone = new ArrayList<>();
     final Consumer<Packet> responseSink;
     final Map<Id, NodeSink> sinks = new HashMap<>();
-    final Map<Connection, LongGen> networkJitter = new HashMap<>();
     int clock;
     int recurring;
     Set<Id> partitionSet;
@@ -143,41 +104,15 @@ public class Cluster implements Scheduler
         return sink;
     }
 
-    private void add(Packet packet)
+    void add(Packet packet, long delay, TimeUnit unit)
     {
         MessageType type = packet.message.type();
         if (type != null)
             statsMap.computeIfAbsent(type, ignore -> new Stats()).count++;
-        boolean isReply = packet.message instanceof Reply;
         if (trace.isTraceEnabled())
-            trace.trace("{} {} {}", clock++, isReply ? "RPLY" : "SEND", packet);
+            trace.trace("{} {} {}", clock++, packet.message instanceof Reply ? "RPLY" : "SEND", packet);
         if (lookup.apply(packet.dst) == null) responseSink.accept(packet);
-        else pending.add(packet, networkJitterNanos(packet), TimeUnit.NANOSECONDS);
-    }
-
-    private long networkJitterNanos(Packet packet)
-    {
-        return networkJitter.computeIfAbsent(new Connection(packet.src, packet.dst), ignore -> defaultJitter())
-                            .nextLong(randomSource);
-    }
-
-    private LongGen defaultJitter()
-    {
-        return FrequentLargeRange.builder(randomSource)
-                                 .raitio(1, 5)
-                                 .small(500, TimeUnit.MICROSECONDS, 5, TimeUnit.MILLISECONDS)
-                                 .large(50, TimeUnit.MILLISECONDS, 5, SECONDS)
-                                 .build();
-    }
-
-    void add(Id from, Id to, long messageId, Request send)
-    {
-        add(new Packet(from, to, messageId, send));
-    }
-
-    void add(Id from, Id to, long replyId, Reply send)
-    {
-        add(new Packet(from, to, replyId, send));
+        else pending.add(packet, delay, unit);
     }
 
     public void processAll()
@@ -306,7 +241,7 @@ public class Cluster implements Scheduler
 
             Packet next;
             while ((next = in.get()) != null)
-                sinks.add(next);
+                sinks.add(next, 0, TimeUnit.NANOSECONDS);
 
             while (sinks.processPending());
 

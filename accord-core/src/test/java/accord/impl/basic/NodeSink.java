@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
+import accord.burn.random.FrequentLargeRange;
 import accord.local.AgentExecutor;
 import accord.local.PreLoadContext;
 import accord.messages.SafeCallback;
@@ -48,6 +49,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static accord.impl.basic.Packet.SENTINEL_MESSAGE_ID;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 public class NodeSink implements MessageSink
 {
@@ -55,6 +57,7 @@ public class NodeSink implements MessageSink
     private enum Action {DELIVER, DROP, DROP_PARTITIONED, FAILURE}
 
     private final Map<Id, Gen<Action>> nodeActions = new HashMap<>();
+    private final Map<Id, Gen.LongGen> networkJitter = new HashMap<>();
     final Id self;
     final Function<Id, Node> lookup;
     final Cluster parent;
@@ -104,8 +107,11 @@ public class NodeSink implements MessageSink
     {
         Runnable task = () -> {
             debug(to, id, message, Action.DELIVER);
-            if (message instanceof Reply) parent.add(self, to, id, (Reply) message);
-            else                          parent.add(self, to, id, (Request) message);
+            Packet packet;
+            if (message instanceof Reply) packet = new Packet(self, to, id, (Reply) message);
+            else                          packet = new Packet(self, to, id, (Request) message);
+            long jitterNanos = networkJitterNanos(to);
+            parent.add(packet, jitterNanos, TimeUnit.NANOSECONDS);
         };
         if (to.equals(self) || lookup.apply(to) == null /* client */)
         {
@@ -147,6 +153,21 @@ public class NodeSink implements MessageSink
             default:
                 throw new AssertionError("Unexpected action: " + action);
         }
+    }
+
+    private long networkJitterNanos(Node.Id dst)
+    {
+        return networkJitter.computeIfAbsent(dst, ignore -> defaultJitter())
+                            .nextLong(random);
+    }
+
+    private Gen.LongGen defaultJitter()
+    {
+        return FrequentLargeRange.builder(random)
+                                 .raitio(1, 5)
+                                 .small(500, TimeUnit.MICROSECONDS, 5, TimeUnit.MILLISECONDS)
+                                 .large(50, TimeUnit.MILLISECONDS, 5, SECONDS)
+                                 .build();
     }
 
     private boolean partitioned(Id to)
