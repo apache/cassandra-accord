@@ -409,16 +409,15 @@ public class TopologyManager
     @VisibleForTesting
     public EpochReady epochReady(long epoch)
     {
+        Epochs epochs = this.epochs;
+
         if (epoch < epochs.minEpoch())
             return EpochReady.done(epoch);
 
         if (epoch > epochs.currentEpoch)
             throw new IllegalArgumentException(String.format("Epoch %d is larger than current epoch %d", epoch, epochs.currentEpoch));
 
-        synchronized (this)
-        {
-            return epochs.get(epoch).ready;
-        }
+        return epochs.get(epoch).ready;
     }
 
     public synchronized void onEpochSyncComplete(Id node, long epoch)
