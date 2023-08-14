@@ -18,13 +18,12 @@
 
 package accord.impl.basic;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
@@ -55,7 +54,7 @@ public class NodeSink implements MessageSink
     private static final boolean DEBUG = false;
     private enum Action {DELIVER, DROP, DROP_PARTITIONED, FAILURE}
 
-    private final ConcurrentMap<Id, Gen<Action>> nodeActions = new ConcurrentHashMap<>();
+    private final Map<Id, Gen<Action>> nodeActions = new HashMap<>();
     final Id self;
     final Function<Id, Node> lookup;
     final Cluster parent;
@@ -150,7 +149,8 @@ public class NodeSink implements MessageSink
         }
     }
 
-    private boolean partitioned(Id to) {
+    private boolean partitioned(Id to)
+    {
         return parent.partitionSet.contains(self) != parent.partitionSet.contains(to);
     }
 
