@@ -55,6 +55,7 @@ import accord.local.Node.Id;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
 import accord.messages.MessageType;
+import accord.messages.Message;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.messages.SafeCallback;
@@ -81,6 +82,7 @@ public class Cluster implements Scheduler
 
     EnumMap<MessageType, Stats> statsMap = new EnumMap<>(MessageType.class);
 
+    final RandomSource randomSource;
     final Function<Id, Node> lookup;
     final PendingQueue pending;
     final List<Runnable> onDone = new ArrayList<>();
@@ -90,8 +92,9 @@ public class Cluster implements Scheduler
     int recurring;
     Set<Id> partitionSet;
 
-    public Cluster(Supplier<PendingQueue> queueSupplier, Function<Id, Node> lookup, Consumer<Packet> responseSink)
+    public Cluster(RandomSource randomSource, Supplier<PendingQueue> queueSupplier, Function<Id, Node> lookup, Consumer<Packet> responseSink)
     {
+        this.randomSource = randomSource;
         this.pending = queueSupplier.get();
         this.lookup = lookup;
         this.responseSink = responseSink;
@@ -105,26 +108,16 @@ public class Cluster implements Scheduler
         return sink;
     }
 
-    private void add(Packet packet)
+    void add(Packet packet, long delay, TimeUnit unit)
     {
         MessageType type = packet.message.type();
         if (type != null)
             statsMap.computeIfAbsent(type, ignore -> new Stats()).count++;
-        boolean isReply = packet.message instanceof Reply;
         if (trace.isTraceEnabled())
-            trace.trace("{} {} {}", clock++, isReply ? "RPLY" : "SEND", packet);
+            trace.trace("{} {} {}", clock++, packet.message instanceof Reply ? "RPLY" : "SEND", packet);
         if (lookup.apply(packet.dst) == null) responseSink.accept(packet);
-        else pending.add(packet);
-    }
+        else                                  pending.add(packet, delay, unit);
 
-    void add(Id from, Id to, long messageId, Request send)
-    {
-        add(new Packet(from, to, messageId, send));
-    }
-
-    void add(Id from, Id to, long replyId, Reply send)
-    {
-        add(new Packet(from, to, replyId, send));
     }
 
     public void processAll()
@@ -139,6 +132,7 @@ public class Cluster implements Scheduler
 
     public boolean processPending()
     {
+        pending.checkFailures();
         if (pending.size() == recurring)
             return false;
 
@@ -147,6 +141,7 @@ public class Cluster implements Scheduler
             return false;
 
         processNext(next);
+        pending.checkFailures();
         return true;
     }
 
@@ -156,18 +151,6 @@ public class Cluster implements Scheduler
         {
             Packet deliver = (Packet) next;
             Node on = lookup.apply(deliver.dst);
-
-            // TODO (required, testing): random drop chance independent of partition; also port flaky connections etc. from simulator
-            // Drop the message if it goes across the partition
-            boolean drop = ((Packet) next).src.id >= 0 &&
-                           !(partitionSet.contains(deliver.src) && partitionSet.contains(deliver.dst)
-                             || !partitionSet.contains(deliver.src) && !partitionSet.contains(deliver.dst));
-            if (drop)
-            {
-                if (trace.isTraceEnabled())
-                    trace.trace("{} DROP[{}] {}", clock++, on.epoch(), deliver);
-                return;
-            }
 
             if (trace.isTraceEnabled())
                 trace.trace("{} RECV[{}] {}", clock++, on.epoch(), deliver);
@@ -188,6 +171,12 @@ public class Cluster implements Scheduler
         {
             ((Runnable) next).run();
         }
+    }
+
+    public void notifyDropped(Node.Id from, Node.Id to, long id, Message message)
+    {
+        if (trace.isTraceEnabled())
+            trace.trace("{} DROP[{}] (from:{}, to:{}, {}:{}, body:{})", clock++, lookup.apply(to).epoch(), from, to, message instanceof Reply ? "replyTo" : "id", id, message);
     }
 
     @Override
@@ -225,7 +214,7 @@ public class Cluster implements Scheduler
         Map<Id, Node> lookup = new LinkedHashMap<>();
         try
         {
-            Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink);
+            Cluster sinks = new Cluster(randomSupplier.get(), queueSupplier, lookup::get, responseSink);
             TopologyUpdates topologyUpdates = new TopologyUpdates(executor);
             TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, lookup::get);
             List<CoordinateDurabilityScheduling> durabilityScheduling = new ArrayList<>();
@@ -270,7 +259,7 @@ public class Cluster implements Scheduler
 
             Packet next;
             while ((next = in.get()) != null)
-                sinks.add(next);
+                sinks.add(next, 0, TimeUnit.NANOSECONDS);
 
             while (sinks.processPending());
 
@@ -289,8 +278,9 @@ public class Cluster implements Scheduler
 
             while (!sinks.onDone.isEmpty())
             {
-                sinks.onDone.forEach(Runnable::run);
+                List<Runnable> onDone = new ArrayList<>(sinks.onDone);
                 sinks.onDone.clear();
+                onDone.forEach(Runnable::run);
                 while (sinks.processPending());
             }
 

@@ -61,6 +61,9 @@ public class TopologyUpdates
 
     public synchronized void syncComplete(Node originator, Collection<Node.Id> cluster, long epoch)
     {
+        // topology is init topology
+        if (pendingTopologies.isEmpty())
+            return;
         Map<Node.Id, Ranges> pending = pendingTopologies.get(epoch);
         if (pending == null || null == pending.remove(originator.id()))
             throw new AssertionError();

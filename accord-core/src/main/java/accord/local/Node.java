@@ -172,7 +172,10 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     // TODO (cleanup, testing): remove, only used by Maelstrom
     public AsyncResult<Void> start()
     {
-        return onTopologyUpdateInternal(configService.currentTopology(), false).metadata;
+        EpochReady ready = onTopologyUpdateInternal(configService.currentTopology(), false);
+        ready.coordination.addCallback(() -> this.topology.onEpochSyncComplete(id, topology.epoch()));
+        configService.acknowledgeEpoch(ready, false);
+        return ready.metadata;
     }
 
     public CommandStores commandStores()

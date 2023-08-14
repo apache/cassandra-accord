@@ -27,8 +27,10 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 
 import com.google.common.collect.Sets;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
 import javax.annotation.Nullable;
@@ -51,6 +53,17 @@ public interface PreLoadContext
      *  Either way, the information we need in memory is super minimal for secondary transactions.
      */
     default Collection<TxnId> additionalTxnIds() { return Collections.emptyList(); }
+
+    default Collection<TxnId> txnIds()
+    {
+        TxnId primaryTxnId = primaryTxnId();
+        Collection<TxnId> additional = additionalTxnIds();
+        List<TxnId> list = new ArrayList<>(primaryTxnId == null ? additional.size() : additional.size() + 1);
+        if (primaryTxnId != null)
+            list.add(primaryTxnId);
+        additional.forEach(list::add);
+        return list.isEmpty() ? Collections.emptySet() : list;
+    }
 
     @Inline
     default void forEachId(Consumer<TxnId> consumer)

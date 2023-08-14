@@ -269,6 +269,13 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
         }
 
         long lastAcked = epochs.lastAcknowledged;
+        // TODO (now, review): lastAcked == 0, lastReceived = 2
+        // if we wait for epoch=1.acknowledge the test seems to wait forever... looks like burn test doesn't ack epoch=1
+        if (lastAcked == 0 && lastReceived > 0)
+        {
+            epochs.acknowledgeFuture(epochs.minEpoch()).addCallback(() -> reportTopology(topology, startSync));
+            return;
+        }
         if (lastAcked > 0 && topology.epoch() > lastAcked + 1)
         {
             epochs.acknowledgeFuture(lastAcked + 1).addCallback(() -> reportTopology(topology, startSync));

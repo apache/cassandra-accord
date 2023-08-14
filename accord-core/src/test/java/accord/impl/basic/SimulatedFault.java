@@ -16,11 +16,12 @@
  * limitations under the License.
  */
 
-package accord.burn.random;
+package accord.impl.basic;
 
-import accord.utils.RandomSource;
-
-public interface RandomLong
+public class SimulatedFault extends AssertionError
 {
-    long getLong(RandomSource randomSource);
+    public SimulatedFault(Object detailMessage)
+    {
+        super(detailMessage);
+    }
 }

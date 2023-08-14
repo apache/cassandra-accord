@@ -26,10 +26,6 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 import accord.api.Agent;
-import accord.burn.random.FrequentLargeRange;
-import accord.burn.random.RandomLong;
-import accord.burn.random.RandomWalkRange;
-import accord.utils.RandomSource;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
@@ -134,42 +130,23 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService impleme
 
     private final PendingQueue pending;
     private final Agent agent;
-    private final RandomSource random;
-    private final RandomLong jitterInNano;
     private long sequenceNumber;
 
-    public SimulatedDelayedExecutorService(PendingQueue pending, Agent agent, RandomSource random)
+    public SimulatedDelayedExecutorService(PendingQueue pending, Agent agent)
     {
         this.pending = pending;
         this.agent = agent;
-        this.random = random;
-        // this is different from Apache Cassandra Simulator as this is computed differently for each executor
-        // rather than being a global config
-        double ratio = random.nextInt(1, 11) / 100.0D;
-        this.jitterInNano = new FrequentLargeRange(new RandomWalkRange(random, microToNanos(0), microToNanos(50)),
-                                                   new RandomWalkRange(random, microToNanos(50), msToNanos(5)),
-                                                   ratio);
-    }
-
-    private static int msToNanos(int value)
-    {
-        return Math.toIntExact(TimeUnit.MILLISECONDS.toNanos(value));
-    }
-
-    private static int microToNanos(int value)
-    {
-        return Math.toIntExact(TimeUnit.MICROSECONDS.toNanos(value));
     }
 
     @Override
     public void execute(Task<?> task)
     {
-        pending.add(task, jitterInNano.getLong(random), TimeUnit.NANOSECONDS);
+        pending.add(task);
     }
 
     private void schedule(Task<?> task, long delay, TimeUnit unit)
     {
-        pending.add(task, unit.toNanos(delay) + jitterInNano.getLong(random), TimeUnit.NANOSECONDS);
+        pending.add(task, delay, unit);
     }
 
     @Override

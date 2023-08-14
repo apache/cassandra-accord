@@ -39,6 +39,12 @@ public class PropagatingPendingQueue implements PendingQueue
     }
 
     @Override
+    public void addNoDelay(Pending item)
+    {
+        wrapped.addNoDelay(item);
+    }
+
+    @Override
     public void add(Pending item, long delay, TimeUnit units)
     {
         wrapped.add(item, delay, units);
@@ -53,6 +59,14 @@ public class PropagatingPendingQueue implements PendingQueue
     @Override
     public Pending poll()
     {
+        checkFailures();
+        return wrapped.poll();
+    }
+
+    @Override
+    public void checkFailures()
+    {
+        wrapped.checkFailures();
         if (!failures.isEmpty())
         {
             AssertionError assertion = null;
@@ -74,8 +88,6 @@ public class PropagatingPendingQueue implements PendingQueue
             }
             throw assertion;
         }
-
-        return wrapped.poll();
     }
 
     @Override

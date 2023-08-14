@@ -23,9 +23,11 @@ import java.util.concurrent.TimeUnit;
 public interface PendingQueue
 {
     void add(Pending item);
+    void addNoDelay(Pending item);
     void add(Pending item, long delay, TimeUnit units);
     boolean remove(Pending item);
     Pending poll();
     int size();
+    void checkFailures();
     long nowInMillis();
 }

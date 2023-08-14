@@ -18,11 +18,13 @@
 
 package accord.impl.basic;
 
+import accord.burn.random.FrequentLargeRange;
+import accord.utils.RandomSource;
+
 import java.util.PriorityQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
-
-import accord.utils.RandomSource;
 
 public class RandomDelayQueue implements PendingQueue
 {
@@ -87,25 +89,38 @@ public class RandomDelayQueue implements PendingQueue
     }
 
     final PriorityQueue<Item> queue = new PriorityQueue<>();
-    final RandomSource random;
+    private final LongSupplier jitterMillis;
     long now;
     int seq;
 
     RandomDelayQueue(RandomSource random)
     {
-        this.random = random;
+        this.jitterMillis = FrequentLargeRange.builder(random)
+                                              .small(0, 50, TimeUnit.MICROSECONDS)
+                                              .large(50, TimeUnit.MICROSECONDS, 5, TimeUnit.MILLISECONDS)
+                                              .build()
+                                              .mapAsLong(TimeUnit.NANOSECONDS::toMillis)
+                                              .asLongSupplier(random);
     }
 
     @Override
     public void add(Pending item)
     {
-        add(item, random.nextInt(500), TimeUnit.MILLISECONDS);
+        add(item, 0, TimeUnit.NANOSECONDS);
+    }
+
+    @Override
+    public void addNoDelay(Pending item)
+    {
+        queue.add(new Item(now, seq++, item));
     }
 
     @Override
     public void add(Pending item, long delay, TimeUnit units)
     {
-        queue.add(new Item(now + units.toMillis(delay), seq++, item));
+        if (delay < 0)
+            throw new IllegalArgumentException("Delay must be positive or 0, but given " + delay);
+        queue.add(new Item(now + units.toMillis(delay) + jitterMillis.getAsLong(), seq++, item));
     }
 
     @Override
@@ -128,6 +143,12 @@ public class RandomDelayQueue implements PendingQueue
     public int size()
     {
         return queue.size();
+    }
+
+    @Override
+    public void checkFailures()
+    {
+
     }
 
     @Override
