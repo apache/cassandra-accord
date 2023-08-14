@@ -59,7 +59,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
     }
 
     public final Timestamp executeAt;
-    private boolean isInvalid;
+    boolean isInvalid;
 
     public WaitUntilApplied(Node.Id to, Topologies topologies, TxnId txnId, Participants<?> readScope, Timestamp executeAt)
     {
@@ -123,7 +123,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
         }
 
         if (safeCommand.removeListener(this))
-            maybeApplied(safeStore);
+            applied(safeStore, safeCommand);
     }
 
     @Override
@@ -182,7 +182,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
             case Truncated:
                 waitingOn.set(safeStore.commandStore().id());
                 ++waitingOnCount;
-                maybeApplied(safeStore);
+                applied(safeStore, safeCommand);
                 return null;
         }
     }
@@ -205,7 +205,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
         node.reply(replyTo, replyContext, Redundant);
     }
 
-    void maybeApplied(SafeCommandStore safeStore)
+    void applied(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
         if (isInvalid)
             return;

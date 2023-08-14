@@ -199,8 +199,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private synchronized EpochReady onTopologyUpdateInternal(Topology topology, boolean startSync)
     {
         Supplier<EpochReady> bootstrap = commandStores.updateTopology(this, topology, startSync);
-        this.topology.onTopologyUpdate(topology);
-        return bootstrap.get();
+        return this.topology.onTopologyUpdate(topology, bootstrap);
     }
 
     @Override

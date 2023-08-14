@@ -24,9 +24,12 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import accord.api.ConfigurationService;
+import accord.api.ConfigurationService.EpochReady;
 import accord.api.RoutingKey;
 import accord.api.TopologySorter;
 import accord.coordinate.tracking.QuorumTracker;
@@ -72,6 +75,7 @@ public class TopologyManager
         private final QuorumTracker syncTracker;
         private final BitSet curShardSyncComplete;
         private final Ranges addedRanges, removedRanges;
+        private EpochReady ready;
         private Ranges curSyncComplete, prevSyncComplete, syncComplete;
         Ranges closed = Ranges.EMPTY, complete = Ranges.EMPTY;
 
@@ -359,7 +363,7 @@ public class TopologyManager
         this.epochs = Epochs.EMPTY;
     }
 
-    public synchronized void onTopologyUpdate(Topology topology)
+    public synchronized EpochReady onTopologyUpdate(Topology topology, Supplier<EpochReady> bootstrap)
     {
         Epochs current = epochs;
 
@@ -388,6 +392,8 @@ public class TopologyManager
         epochs = new Epochs(nextEpochs, pending, futureEpochFutures);
         if (toComplete != null)
             toComplete.trySuccess(null);
+
+        return nextEpochs[0].ready = bootstrap.get();
     }
 
     public AsyncChain<Void> awaitEpoch(long epoch)
@@ -399,6 +405,17 @@ public class TopologyManager
         }
         CommandStore current = CommandStore.maybeCurrent();
         return current == null || result.isDone() ? result : result.withExecutor(current);
+    }
+
+    public EpochReady epochReady(long epoch)
+    {
+        if (epoch < epochs.minEpoch())
+            return EpochReady.done(epoch);
+
+        if (epoch > epochs.currentEpoch)
+            throw new IllegalArgumentException();
+
+        return epochs.get(epoch).ready;
     }
 
     public synchronized void onEpochSyncComplete(Id node, long epoch)
@@ -450,6 +467,11 @@ public class TopologyManager
     public long epoch()
     {
         return current().epoch;
+    }
+
+    public long minEpoch()
+    {
+        return epochs.minEpoch();
     }
 
     @VisibleForTesting

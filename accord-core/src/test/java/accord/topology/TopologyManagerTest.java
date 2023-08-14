@@ -49,8 +49,8 @@ public class TopologyManagerTest
         TopologyManager service = new TopologyManager(SUPPLIER, ID);
 
         Assertions.assertSame(Topology.EMPTY, service.current());
-        service.onTopologyUpdate(topology1);
-        service.onTopologyUpdate(topology2);
+        service.onTopologyUpdate(topology1, () -> null);
+        service.onTopologyUpdate(topology2, () -> null);
 
         Assertions.assertTrue(service.getEpochStateUnsafe(1).syncComplete());
         Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
@@ -72,8 +72,8 @@ public class TopologyManagerTest
                                       shard(range(200, 300), idList(4, 5, 6), idSet(4, 5)));
 
         TopologyManager service = new TopologyManager(SUPPLIER, ID);
-        service.onTopologyUpdate(topology1);
-        service.onTopologyUpdate(topology2);
+        service.onTopologyUpdate(topology1, () -> null);
+        service.onTopologyUpdate(topology2, () -> null);
 
         return service;
     }
@@ -103,9 +103,9 @@ public class TopologyManagerTest
         Topology topology3 = topology(3, shard(range, idList(1, 2, 3), idSet(1, 2)));
 
         TopologyManager service = new TopologyManager(SUPPLIER, ID);
-        service.onTopologyUpdate(topology1);
-        service.onTopologyUpdate(topology2);
-        service.onTopologyUpdate(topology3);
+        service.onTopologyUpdate(topology1, () -> null);
+        service.onTopologyUpdate(topology2, () -> null);
+        service.onTopologyUpdate(topology3, () -> null);
 
         Assertions.assertTrue(service.getEpochStateUnsafe(1).syncComplete());
         Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
@@ -140,14 +140,14 @@ public class TopologyManagerTest
 //        Topology topology3 = topology(3, shard(range, idList(1, 2, 3), idSet(3, 4)));
 
         TopologyManager service = new TopologyManager(SUPPLIER, ID);
-        service.onTopologyUpdate(topology1);
+        service.onTopologyUpdate(topology1, () -> null);
 
         // sync epoch 2
         service.onEpochSyncComplete(id(2), 2);
         service.onEpochSyncComplete(id(3), 2);
 
         // learn of epoch 2
-        service.onTopologyUpdate(topology2);
+        service.onTopologyUpdate(topology2, () -> null);
         Assertions.assertTrue(service.getEpochStateUnsafe(1).syncComplete());
         Assertions.assertTrue(service.getEpochStateUnsafe(2).syncComplete());
 //        Assertions.assertTrue(service.getEpochStateUnsafe(3).syncComplete());
@@ -164,9 +164,9 @@ public class TopologyManagerTest
         TopologyManager service = new TopologyManager(SUPPLIER, ID);
 
         Assertions.assertSame(Topology.EMPTY, service.current());
-        service.onTopologyUpdate(topology1);
-        service.onTopologyUpdate(topology2);
-        service.onTopologyUpdate(topology3);
+        service.onTopologyUpdate(topology1, () -> null);
+        service.onTopologyUpdate(topology2, () -> null);
+        service.onTopologyUpdate(topology3, () -> null);
         Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
 
         RoutingKeys keys = keys(150).toParticipants();
@@ -199,9 +199,9 @@ public class TopologyManagerTest
                                       shard(range(200, 300), idList(4, 5, 6), idSet(5, 6)));
 
         TopologyManager service = new TopologyManager(SUPPLIER, ID);
-        service.onTopologyUpdate(topology1);
-        service.onTopologyUpdate(topology2);
-        service.onTopologyUpdate(topology3);
+        service.onTopologyUpdate(topology1, () -> null);
+        service.onTopologyUpdate(topology2, () -> null);
+        service.onTopologyUpdate(topology3, () -> null);
 
         // no acks, so all epoch 1 shards should be included
         Assertions.assertEquals(topologies(topology2, topology1),
@@ -226,8 +226,8 @@ public class TopologyManagerTest
                                       shard(range(200, 300), idList(4, 5, 6), idSet(5, 6)));
 
         TopologyManager service = new TopologyManager(SUPPLIER, ID);
-        service.onTopologyUpdate(topology5);
-        service.onTopologyUpdate(topology6);
+        service.onTopologyUpdate(topology5, () -> null);
+        service.onTopologyUpdate(topology6, () -> null);
 
         Assertions.assertSame(topology6, service.getEpochStateUnsafe(6).global());
         Assertions.assertSame(topology5, service.getEpochStateUnsafe(5).global());
@@ -245,7 +245,7 @@ public class TopologyManagerTest
 
     private static void addAndMarkSynced(TopologyManager service, Topology topology)
     {
-        service.onTopologyUpdate(topology);
+        service.onTopologyUpdate(topology, () -> null);
         markTopologySynced(service, topology.epoch());
     }
 

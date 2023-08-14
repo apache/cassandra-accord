@@ -120,6 +120,11 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
 
     protected abstract void onReadOk(Node.Id from, CommandStore commandStore, Data data, Ranges ranges);
 
+    protected boolean collectMaxApplied()
+    {
+        return false;
+    }
+
     @Override
     public void contact(Node.Id to, Ranges ranges)
     {
@@ -128,7 +133,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         Ranges ownedRanges = ownedRangesForNode(to);
         Invariants.checkArgument(ownedRanges.containsAll(ranges), "Got a reply from %s for ranges %s, but owned ranges %s does not contain all the ranges", to, ranges, ownedRanges);
         PartialDeps partialDeps = syncPoint.waitFor.slice(ownedRanges, ranges);
-        node.send(to, new FetchRequest(syncPoint.sourceEpoch(), syncPoint.syncId, ranges, partialDeps, rangeReadTxn(ranges)), new Callback<ReadData.ReadReply>()
+        node.send(to, new FetchRequest(syncPoint.sourceEpoch(), syncPoint.syncId, ranges, partialDeps, rangeReadTxn(ranges), collectMaxApplied()), new Callback<ReadData.ReadReply>()
         {
             @Override
             public void onSuccess(Node.Id from, ReadData.ReadReply reply)
@@ -227,34 +232,44 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
     public static class FetchRequest extends WaitAndReadData
     {
         public final PartialDeps partialDeps;
+        public final boolean collectMaxApplied;
         private transient Timestamp maxApplied;
 
-        public FetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
+        public FetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn, boolean collectMaxApplied)
         {
             super(syncId, ranges, syncId, sourceEpoch, partialTxn);
             this.partialDeps = partialDeps;
+            this.collectMaxApplied = collectMaxApplied;
         }
 
         @Override
         protected void readComplete(CommandStore commandStore, Data result, Ranges unavailable)
         {
             Ranges slice = commandStore.unsafeRangesForEpoch().allAt(txnId).subtract(unavailable);
-            commandStore.maxAppliedFor((Ranges)readScope, slice).begin((newMaxApplied, failure) -> {
-                if (failure != null)
-                {
-                    commandStore.agent().onUncaughtException(failure);
-                }
-                else
-                {
-                    synchronized (this)
+            if (collectMaxApplied)
+            {
+                commandStore.maxAppliedFor((Ranges)readScope, slice).begin((newMaxApplied, failure) -> {
+                    if (failure != null)
                     {
-                        if (maxApplied == null) maxApplied = newMaxApplied;
-                        else maxApplied = Timestamp.max(maxApplied, newMaxApplied);
-                        Ranges reportUnavailable = unavailable.slice((Ranges)this.readScope, Minimal);
-                        super.readComplete(commandStore, result, reportUnavailable);
+                        commandStore.agent().onUncaughtException(failure);
                     }
-                }
-            });
+                    else
+                    {
+                        synchronized (this)
+                        {
+                            if (maxApplied == null) maxApplied = newMaxApplied;
+                            else maxApplied = Timestamp.max(maxApplied, newMaxApplied);
+                            Ranges reportUnavailable = unavailable.slice((Ranges)this.readScope, Minimal);
+                            super.readComplete(commandStore, result, reportUnavailable);
+                        }
+                    }
+                });
+            }
+            else
+            {
+                Ranges reportUnavailable = unavailable.slice((Ranges)this.readScope, Minimal);
+                super.readComplete(commandStore, result, reportUnavailable);
+            }
         }
 
         @Override
@@ -272,8 +287,8 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
 
     public static class FetchResponse extends ReadData.ReadOk
     {
-        public final Timestamp maxApplied;
-        public FetchResponse(@Nullable Ranges unavailable, @Nullable Data data, Timestamp maxApplied)
+        public final @Nullable Timestamp maxApplied;
+        public FetchResponse(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Timestamp maxApplied)
         {
             super(unavailable, data);
             this.maxApplied = maxApplied;

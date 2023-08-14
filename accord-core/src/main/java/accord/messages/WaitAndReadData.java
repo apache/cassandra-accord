@@ -18,9 +18,11 @@
 
 package accord.messages;
 
+import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
+import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
@@ -32,6 +34,14 @@ public abstract class WaitAndReadData extends WaitUntilApplied
     {
         super(txnId, readScope, executeAt, waitForEpoch);
         this.read = read;
+    }
+
+    void applied(SafeCommandStore safeStore, SafeCommand safeCommand)
+    {
+        if (isInvalid)
+            return;
+
+        read(safeStore, executeAt, read);
     }
 
     @Override

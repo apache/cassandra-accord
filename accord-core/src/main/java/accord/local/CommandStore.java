@@ -289,7 +289,11 @@ public abstract class CommandStore implements AgentExecutor
             isExpired = null == rejectBefore.foldl(keys, (rejectIfBefore, test) -> rejectIfBefore.compareTo(test) > 0 ? null : test, txnId, Objects::isNull);
 
         if (isExpired)
+        {
+            if (txnId.rw().isSyncPoint())
+                System.err.println(rejectBefore);
             return time.uniqueNow(txnId).asRejected();
+        }
 
         if (txnId.rw() == ExclusiveSyncPoint)
         {
