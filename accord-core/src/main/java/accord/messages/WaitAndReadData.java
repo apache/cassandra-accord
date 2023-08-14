@@ -35,6 +35,7 @@ public abstract class WaitAndReadData extends WaitUntilApplied
         this.read = read;
     }
 
+    @Override
     void applied(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
         if (isInvalid)
