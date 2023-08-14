@@ -28,7 +28,6 @@ import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import accord.api.ConfigurationService;
 import accord.api.ConfigurationService.EpochReady;
 import accord.api.RoutingKey;
 import accord.api.TopologySorter;

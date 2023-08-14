@@ -22,7 +22,6 @@ import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
-import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
