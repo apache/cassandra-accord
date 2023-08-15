@@ -201,6 +201,12 @@ public class AsyncResults
                 throw new IllegalStateException("Result succeeded");
             return result.failure;
         }
+
+        @Override
+        public String toString()
+        {
+            return getClass().getSimpleName() + "{status=" + (isDone() ? isSuccess() ? "success" : "failure" : "pending") + "}";
+        }
     }
 
     static class Chain<V> extends AbstractResult<V>
