@@ -27,25 +27,34 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 
-import accord.coordinate.tracking.*;
-import accord.primitives.*;
-import accord.messages.Commit;
-import accord.utils.Invariants;
-import accord.utils.async.AsyncResult;
-import accord.utils.async.AsyncResults;
-
 import accord.api.Result;
-import accord.topology.Topologies;
-import accord.messages.Callback;
+import accord.coordinate.tracking.QuorumTracker;
+import accord.coordinate.tracking.RecoveryTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.BeginRecovery;
 import accord.messages.BeginRecovery.RecoverOk;
 import accord.messages.BeginRecovery.RecoverReply;
+import accord.messages.Callback;
+import accord.messages.Commit;
 import accord.messages.WaitOnCommit;
 import accord.messages.WaitOnCommit.WaitOnCommitOk;
+import accord.primitives.Ballot;
+import accord.primitives.Deps;
+import accord.primitives.FullRoute;
+import accord.primitives.Participants;
+import accord.primitives.ProgressToken;
+import accord.primitives.Ranges;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
+import accord.topology.Topologies;
 import accord.topology.Topology;
+import accord.utils.Invariants;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 
+import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAndCallback;
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
 import static accord.coordinate.ProposeAndExecute.proposeAndExecute;
 import static accord.coordinate.tracking.RequestStatus.Failed;
@@ -64,11 +73,11 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         //                             are given earlier timestamps we can retry without restarting.
         final QuorumTracker tracker;
 
-        AwaitCommit(Node node, TxnId txnId, Unseekables<?, ?> unseekables)
+        AwaitCommit(Node node, TxnId txnId, Participants<?> participants)
         {
-            Topology topology = node.topology().globalForEpoch(txnId.epoch()).forSelection(unseekables, Topology.OnUnknown.REJECT);
+            Topology topology = node.topology().globalForEpoch(txnId.epoch()).forSelection(participants);
             this.tracker = new QuorumTracker(new Topologies.Single(node.topology().sorter(), topology));
-            node.send(topology.nodes(), to -> new WaitOnCommit(to, topology, txnId, unseekables), this);
+            node.send(topology.nodes(), to -> new WaitOnCommit(to, topology, txnId, participants), this);
         }
 
         @Override
@@ -103,7 +112,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         for (int i = 0 ; i < waitOn.txnIdCount() ; ++i)
         {
             TxnId txnId = waitOn.txnId(i);
-            new AwaitCommit(node, txnId, waitOn.someUnseekables(txnId)).addCallback((success, failure) -> {
+            new AwaitCommit(node, txnId, waitOn.participants(txnId)).addCallback((success, failure) -> {
                 if (result.isDone())
                     return;
                 if (success != null && remaining.decrementAndGet() == 0)
@@ -210,7 +219,11 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             Timestamp executeAt = acceptOrCommit.executeAt;
             switch (acceptOrCommit.status)
             {
-                default: throw new IllegalStateException();
+                default: throw new IllegalStateException("Unknown status: " + acceptOrCommit.status);
+                case Truncated:
+                    callback.accept(ProgressToken.TRUNCATED, null);
+                    return;
+
                 case Invalidated:
                 {
                     commitInvalidate();
@@ -223,10 +236,10 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                     Deps committedDeps = tryMergeCommittedDeps();
                     node.withEpoch(executeAt.epoch(), () -> {
                         // TODO (required, consider): when writes/result are partially replicated, need to confirm we have quorum of these
-                        if (committedDeps != null) Persist.persistAndCommitMaximal(node, txnId, route, txn, executeAt, committedDeps, acceptOrCommit.writes, acceptOrCommit.result);
+                        if (committedDeps != null) Persist.persistMaximal(node, txnId, route, txn, executeAt, committedDeps, acceptOrCommit.writes, acceptOrCommit.result);
                         else CollectDeps.withDeps(node, txnId, route, txn.keys(), executeAt, (deps, fail) -> {
                             if (fail != null) accept(null, fail);
-                            else Persist.persistAndCommitMaximal(node, txnId, route, txn, executeAt, deps, acceptOrCommit.writes, acceptOrCommit.result);
+                            else Persist.persistMaximal(node, txnId, route, txn, executeAt, deps, acceptOrCommit.writes, acceptOrCommit.result);
                         });
                     });
                     accept(acceptOrCommit.result, null);
@@ -284,7 +297,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                     return;
                 }
 
-                case NotWitnessed:
+                case NotDefined:
                 case PreAccepted:
                     throw new IllegalStateException("Should only be possible to have Accepted or later commands");
             }
@@ -315,12 +328,15 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             });
             return;
         }
+        // TODO (required): if there are epochs before txnId.epoch that haven't propagated their dependencies we potentially have a problem
+        //                  as we may propose deps that don't witness a transaction they should witness.
+        //                  in this case we should run GetDeps before proposing
         propose(txnId, deps);
     }
 
     private void invalidate()
     {
-        proposeInvalidate(node, ballot, txnId, route.homeKey(), (success, fail) -> {
+        proposeInvalidate(node, ballot, txnId, route.someParticipatingKey(), (success, fail) -> {
             if (fail != null) accept(null, fail);
             else commitInvalidate();
         });
@@ -331,7 +347,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         Timestamp invalidateUntil = recoverOks.stream().map(ok -> ok.executeAt).reduce(txnId, Timestamp::max);
         node.withEpoch(invalidateUntil.epoch(), () -> Commit.Invalidate.commitInvalidate(node, txnId, route, invalidateUntil));
         isDone = true;
-        callback.accept(ProgressToken.INVALIDATED, null);
+        locallyInvalidateAndCallback(node, txnId, route, ProgressToken.INVALIDATED, callback);
     }
 
     private void propose(Timestamp executeAt, Deps deps)

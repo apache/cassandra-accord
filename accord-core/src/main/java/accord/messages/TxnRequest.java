@@ -29,10 +29,6 @@ import accord.api.RoutingKey;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.PreLoadContext;
-import accord.primitives.Ranges;
-import accord.primitives.PartialRoute;
-import accord.primitives.Route;
-import accord.primitives.FullRoute;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 
@@ -154,7 +150,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
     protected abstract void process();
 
     // finds the first topology index that intersects with the node
-    protected static int latestRelevantEpochIndex(Node.Id node, Topologies topologies, Routables<?, ?> route)
+    protected static int latestRelevantEpochIndex(Node.Id node, Topologies topologies, Routables<?> route)
     {
         Ranges latest = topologies.current().rangesForNode(node);
 
@@ -197,7 +193,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
      * on the assumption that this might also mean some local shard rearrangement
      * (ignoring the case where the latest epochs do not intersect the keys at all)
      */
-    public static long computeWaitForEpoch(Node.Id node, Topologies topologies, Unseekables<?, ?> scope)
+    public static long computeWaitForEpoch(Node.Id node, Topologies topologies, Unseekables<?> scope)
     {
         return computeWaitForEpoch(node, topologies, latestRelevantEpochIndex(node, topologies, scope));
     }

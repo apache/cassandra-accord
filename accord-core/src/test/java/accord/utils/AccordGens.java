@@ -45,6 +45,16 @@ public class AccordGens
         return Gens.longs().between(0, Timestamp.MAX_EPOCH);
     }
 
+    public static Gen<Node.Id> nodes()
+    {
+        return nodes(RandomSource::nextInt);
+    }
+
+    public static Gen<Node.Id> nodes(Gen.IntGen nodes)
+    {
+        return nodes.map(Node.Id::new);
+    }
+
     public static Gen<TxnId> txnIds()
     {
         return txnIds(epochs()::nextLong, rs -> rs.nextLong(0, Long.MAX_VALUE), RandomSource::nextInt);
@@ -67,19 +77,19 @@ public class AccordGens
         return rs -> IntHashKey.key(rs.nextInt());
     }
 
-    public static Gen<KeyDeps> keyDeps(Gen<Key> keyGen)
+    public static Gen<KeyDeps> keyDeps(Gen<? extends Key> keyGen)
     {
         return keyDeps(keyGen, txnIds());
     }
 
-    public static Gen<KeyDeps> keyDeps(Gen<Key> keyGen, Gen<TxnId> idGen)
+    public static Gen<KeyDeps> keyDeps(Gen<? extends Key> keyGen, Gen<TxnId> idGen)
     {
         double emptyProb = .2D;
         return rs -> {
             if (rs.decide(emptyProb)) return KeyDeps.NONE;
             Set<Key> seenKeys = new HashSet<>();
             Set<TxnId> seenTxn = new HashSet<>();
-            Gen<Key> uniqKeyGen = keyGen.filter(seenKeys::add);
+            Gen<? extends Key> uniqKeyGen = keyGen.filter(seenKeys::add);
             Gen<TxnId> uniqIdGen = idGen.filter(seenTxn::add);
             try (KeyDeps.Builder builder = KeyDeps.builder())
             {
@@ -100,12 +110,12 @@ public class AccordGens
         Range create(RandomSource rs, RoutingKey a, RoutingKey b);
     }
 
-    public static Gen<Range> ranges(Gen<RoutingKey> keyGen, BiFunction<? super RoutingKey, ? super RoutingKey, ? extends Range> factory)
+    public static Gen<Range> ranges(Gen<? extends RoutingKey> keyGen, BiFunction<? super RoutingKey, ? super RoutingKey, ? extends Range> factory)
     {
         return ranges(keyGen, (ignore, a, b) -> factory.apply(a, b));
     }
 
-    public static Gen<Range> ranges(Gen<RoutingKey> keyGen)
+    public static Gen<Range> ranges(Gen<? extends RoutingKey> keyGen)
     {
         return ranges(keyGen, (rs, a, b) -> {
             boolean left = rs.nextBoolean();
@@ -113,7 +123,7 @@ public class AccordGens
         });
     }
 
-    public static Gen<Range> ranges(Gen<RoutingKey> keyGen, RangeFactory factory)
+    public static Gen<Range> ranges(Gen<? extends RoutingKey> keyGen, RangeFactory factory)
     {
         RoutingKey[] keys = new RoutingKey[2];
         return rs -> {
@@ -126,12 +136,12 @@ public class AccordGens
         };
     }
 
-    public static Gen<RangeDeps> rangeDeps(Gen<Range> rangeGen)
+    public static Gen<RangeDeps> rangeDeps(Gen<? extends Range> rangeGen)
     {
         return rangeDeps(rangeGen, txnIds());
     }
 
-    public static Gen<RangeDeps> rangeDeps(Gen<Range> rangeGen, Gen<TxnId> idGen)
+    public static Gen<RangeDeps> rangeDeps(Gen<? extends Range> rangeGen, Gen<TxnId> idGen)
     {
         double emptyProb = .2D;
         return rs -> {

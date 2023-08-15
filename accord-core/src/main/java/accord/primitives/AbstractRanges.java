@@ -28,11 +28,15 @@ import javax.annotation.Nonnull;
 import java.util.*;
 import java.util.function.Function;
 
+import static accord.primitives.Ranges.EMPTY;
+import static accord.primitives.Ranges.ofSortedAndDeoverlappedUnchecked;
 import static accord.utils.ArrayBuffers.cachedRanges;
+import static accord.utils.SortedArrays.Search.CEIL;
 import static accord.utils.SortedArrays.Search.FAST;
+import static accord.utils.SortedArrays.isSorted;
 import static accord.utils.SortedArrays.swapHighLow32b;
 
-public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements Iterable<Range>, Routables<Range, RS>
+public abstract class AbstractRanges implements Iterable<Range>, Routables<Range>
 {
     static final Range[] NO_RANGES = new Range[0];
 
@@ -62,20 +66,20 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     }
 
     @Override
-    public boolean containsAll(Routables<?, ?> that)
+    public boolean containsAll(Routables<?> that)
     {
         switch (that.domain())
         {
             default: throw new AssertionError();
-            case Key: return containsAll((AbstractKeys<?, ?>) that);
-            case Range: return containsAll((AbstractRanges<?>) that);
+            case Key: return containsAll((AbstractKeys<?>) that);
+            case Range: return containsAll((AbstractRanges) that);
         }
     }
 
     /**
      * @return true iff {@code that} is fully contained within {@code this}
      */
-    public boolean containsAll(AbstractKeys<?, ?> that)
+    public boolean containsAll(AbstractKeys<?> that)
     {
         if (this.isEmpty()) return that.isEmpty();
         if (that.isEmpty()) return true;
@@ -85,27 +89,27 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     /**
      * @return true iff {@code that} is a subset of {@code this}
      */
-    public boolean containsAll(AbstractRanges<?> that)
+    public boolean containsAll(AbstractRanges that)
     {
         if (this.isEmpty()) return that.isEmpty();
         if (that.isEmpty()) return true;
         return ((int) supersetLinearMerge(this.ranges, that.ranges)) == that.size();
     }
 
-    public boolean intersectsAll(Routables<?, ?> that)
+    public boolean intersectsAll(Routables<?> that)
     {
         switch (that.domain())
         {
             default: throw new AssertionError();
-            case Key: return containsAll((AbstractKeys<?, ?>) that);
-            case Range: return intersectsAll((AbstractRanges<?>) that);
+            case Key: return containsAll((AbstractKeys<?>) that);
+            case Range: return intersectsAll((AbstractRanges) that);
         }
     }
 
     /**
      * @return true iff {@code that} is a subset of {@code this}
      */
-    public boolean intersectsAll(AbstractRanges<?> that)
+    public boolean intersectsAll(AbstractRanges that)
     {
         if (this.isEmpty()) return that.isEmpty();
         if (that.isEmpty()) return true;
@@ -137,13 +141,13 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     }
 
     @Override
-    public final boolean intersects(AbstractKeys<?, ?> keys)
+    public final boolean intersects(AbstractKeys<?> keys)
     {
         return findNextIntersection(0, keys, 0) >= 0;
     }
 
     @Override
-    public final boolean intersects(AbstractRanges<?> that)
+    public final boolean intersects(AbstractRanges that)
     {
         return SortedArrays.findNextIntersection(this.ranges, 0, that.ranges, 0, Range::compareIntersecting) >= 0;
     }
@@ -155,22 +159,22 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
 
     // returns ri in low 32 bits, ki in top, or -1 if no match found
     @Override
-    public final long findNextIntersection(int ri, AbstractKeys<?, ?> keys, int ki)
+    public final long findNextIntersection(int ri, AbstractKeys<?> keys, int ki)
     {
         return swapHighLow32b(SortedArrays.findNextIntersectionWithMultipleMatches(keys.keys, ki, ranges, ri));
     }
 
     // returns ki in bottom 32 bits, ri in top, or -1 if no match found
     @Override
-    public final long findNextIntersection(int thisi, AbstractRanges<?> that, int thati)
+    public final long findNextIntersection(int thisi, AbstractRanges that, int thati)
     {
         return SortedArrays.findNextIntersectionWithMultipleMatches(ranges, thisi, that.ranges, thati, Range::compareIntersecting, Range::compareIntersecting);
     }
 
     @Override
-    public final long findNextIntersection(int thisIndex, Routables<Range, ?> with, int withIndex)
+    public final long findNextIntersection(int thisIndex, Routables<Range> with, int withIndex)
     {
-        return findNextIntersection(thisIndex, (AbstractRanges<?>) with, withIndex);
+        return findNextIntersection(thisIndex, (AbstractRanges) with, withIndex);
     }
 
     @Override
@@ -186,36 +190,100 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     }
 
     /**
+     * Subtracts the given set of ranges from this
+     */
+    public Ranges subtract(Ranges that)
+    {
+        if (that.isEmpty())
+            return this instanceof Ranges ? (Ranges)this : ofSortedAndDeoverlappedUnchecked(ranges);
+
+        if (isEmpty() || that == this)
+            return EMPTY;
+
+        ObjectBuffers<Range> cachedRanges = cachedRanges();
+        Range[] result = null;
+
+        int count = 0;
+        int i = 0, j = 0;
+        Range iv = ranges[0];
+        while (true)
+        {
+            j = that.findNext(j, iv, CEIL);
+            if (j < 0)
+            {
+                j = -1 - j;
+                int nexti = j == that.size() ? size() : findNext(i + 1, that.ranges[j], CEIL);
+                if (nexti < 0) nexti = -1 - nexti;
+                if (count == 0)
+                    result = cachedRanges.get(1 + (this.size() - i) + (that.size() - j));
+                else if (count == result.length)
+                    result = cachedRanges.resize(result, count, count * 2);
+
+                result[count] = iv;
+                if (nexti > i + 1)
+                    System.arraycopy(ranges, i + 1, result, count + 1, nexti - (i + 1));
+                count += nexti - i;
+
+                if (nexti == ranges.length)
+                    break;
+                iv = ranges[i = nexti];
+                continue;
+            }
+
+            Range jv = that.ranges[j];
+            if (jv.start().compareTo(iv.start()) > 0)
+            {
+                if (count == 0)
+                    result = cachedRanges.get(1 + (this.size() - i) + (that.size() - j));
+                else if (count == result.length)
+                    result = cachedRanges.resize(result, count, count * 2);
+
+                result[count++] = iv.newRange(iv.start(), jv.start());
+            }
+
+            if (jv.end().compareTo(iv.end()) >= 0)
+            {
+                if (++i == ranges.length)
+                    break;
+                iv = ranges[i];
+            }
+            else
+            {
+                iv = iv.newRange(jv.end(), iv.end());
+            }
+        }
+
+        if (count == 0)
+            return EMPTY;
+
+        return ofSortedAndDeoverlappedUnchecked(cachedRanges.completeAndDiscard(result, count));
+    }
+
+    /**
      * Returns the inputs that intersect with any of the members of the keysOrRanges.
      * DOES NOT MODIFY THE RANGES.
      */
-    static <I extends AbstractRanges<?>, P> I intersecting(I input, Routables<?, ?> keysOrRanges, P param, SliceConstructor<AbstractRanges<?>, P, I> constructor)
+    static <I extends AbstractRanges, P> I intersecting(I input, Routables<?> keysOrRanges, P param, SliceConstructor<AbstractRanges, P, I> constructor)
     {
         switch (keysOrRanges.domain())
         {
             default: throw new AssertionError();
-            case Range: return sliceOverlapping((AbstractRanges<?>)keysOrRanges, input, param, constructor);
+            case Range: return sliceOverlapping((AbstractRanges)keysOrRanges, input, param, constructor);
             case Key:
             {
-                AbstractKeys<?, ?> that = (AbstractKeys<?, ?>) keysOrRanges;
+                AbstractKeys<?> that = (AbstractKeys<?>) keysOrRanges;
                 Range[] result = SortedArrays.asymmetricLinearIntersectionWithOverlaps(input.ranges, input.ranges.length, that.keys, that.keys.length, Range::compareTo, cachedRanges());
                 return result == input.ranges ? input : constructor.construct(input, param, result);
             }
         }
     }
 
-    interface SliceConstructor<I extends AbstractRanges<?>, P, RS extends AbstractRanges<?>>
+    interface SliceConstructor<I extends AbstractRanges, P, RS>
     {
         RS construct(I covering, P param, Range[] ranges);
     }
 
-    @Override
-    public final Ranges slice(Ranges ranges, Slice slice)
-    {
-        return slice(ranges, slice, this, null, (i1, i2, rs) -> i1.ranges == rs ? i1 : new Ranges(rs));
-    }
-
-    static <I extends AbstractRanges<?>, P, O extends AbstractRanges<?>> O slice(I covering, Slice slice, AbstractRanges<?> input, P param, SliceConstructor<I, P, O> constructor)
+    static <I extends AbstractRanges, P, O> O slice(I covering, Slice slice, AbstractRanges input, P param, SliceConstructor<I, P, O> constructor)
     {
         switch (slice)
         {
@@ -226,13 +294,13 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         }
     }
 
-    static <C extends AbstractRanges<?>, P, O extends AbstractRanges<?>> O sliceOverlapping(C covering, AbstractRanges<?> input, P param, SliceConstructor<? super C, P, O> constructor)
+    static <C extends AbstractRanges, P, O> O sliceOverlapping(C covering, AbstractRanges input, P param, SliceConstructor<? super C, P, O> constructor)
     {
         Range[] result = SortedArrays.asymmetricLinearIntersectionWithOverlaps(input.ranges, input.ranges.length, covering.ranges, covering.ranges.length, Range::compareIntersecting, cachedRanges());
         return constructor.construct(covering, param, result);
     }
 
-    static <C extends AbstractRanges<?>, P, O extends AbstractRanges<?>> O sliceMinimal(C covering, AbstractRanges<?> input, P param, SliceConstructor<C, P, O> constructor)
+    static <C extends AbstractRanges, P, O> O sliceMinimal(C covering, AbstractRanges input, P param, SliceConstructor<C, P, O> constructor)
     {
         ObjectBuffers<Range> cachedRanges = cachedRanges();
 
@@ -279,7 +347,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         }
     }
 
-    static <C extends AbstractRanges<?>, P, O extends AbstractRanges<?>> O sliceMaximal(C covering, AbstractRanges<?> input, P param, SliceConstructor<C, P, O> constructor)
+    static <C extends AbstractRanges, P, O> O sliceMaximal(C covering, AbstractRanges input, P param, SliceConstructor<C, P, O> constructor)
     {
         ObjectBuffers<Range> cachedRanges = cachedRanges();
 
@@ -379,7 +447,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         return ((long)ai << 32) | bi;
     }
 
-    interface UnionConstructor<P1, P2, RS extends AbstractRanges<?>>
+    interface UnionConstructor<P1, P2, RS>
     {
         RS construct(P1 param1, P2 param2, Range[] ranges);
     }
@@ -389,7 +457,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     /**
      * @return the union of {@code left} and {@code right}, returning one of the two inputs if possible
      */
-    static <P1, P2, RS extends AbstractRanges<?>> RS union(UnionMode mode, AbstractRanges<?> left, AbstractRanges<?> right, P1 param1, P2 param2, UnionConstructor<P1, P2, RS> constructor)
+    static <P1, P2, RS> RS union(UnionMode mode, AbstractRanges left, AbstractRanges right, P1 param1, P2 param2, UnionConstructor<P1, P2, RS> constructor)
     {
         if (left == right || right.isEmpty()) return constructor.construct(param1, param2, left.ranges);
         if (left.isEmpty()) return constructor.construct(param1, param2, right.ranges);
@@ -482,7 +550,32 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     @Override
     public String toString()
     {
-        return Arrays.toString(ranges);
+        if (isEmpty()) return "[]";
+        if (ranges[0].start().prefix() == null)
+            return Arrays.toString(ranges);
+
+        StringBuilder sb = new StringBuilder();
+        sb.append('[');
+        int i = 0;
+        while (i < ranges.length)
+        {
+            if (i > 0) sb.append(", ");
+            Object prefix = ranges[i].start().prefix();
+            int j = i + 1;
+            while (j < ranges.length && prefix.equals(ranges[j].end().prefix()))
+                ++j;
+            sb.append(prefix);
+            sb.append(':');
+            sb.append('[');
+            while (i < j)
+            {
+                sb.append(ranges[i++].toSuffixString());
+                if (i < j) sb.append(", ");
+            }
+            sb.append(']');
+        }
+        sb.append(']');
+        return sb.toString();
     }
 
     @Override
@@ -496,7 +589,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
     {
         if (that == null || this.getClass() != that.getClass())
             return false;
-        return Arrays.equals(this.ranges, ((AbstractRanges<?>) that).ranges);
+        return Arrays.equals(this.ranges, ((AbstractRanges) that).ranges);
     }
 
     @Override
@@ -505,7 +598,7 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         return Iterators.forArray(ranges);
     }
 
-    static <RS extends AbstractRanges<?>> RS mergeTouching(RS input, Function<Range[], RS> constructor)
+    static <RS extends AbstractRanges> RS mergeTouching(RS input, Function<Range[], RS> constructor)
     {
         Range[] ranges = input.ranges;
         if (ranges.length == 0)
@@ -556,15 +649,33 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
         return withEnd == range.end() ? range : range.newRange(range.start(), withEnd);
     }
 
-    static <RS extends AbstractRanges<?>> RS of(Function<Range[], RS> constructor, Range... ranges)
+    static <RS extends AbstractRanges> RS of(Function<Range[], RS> constructor, Range... ranges)
     {
         if (ranges.length == 0)
             return constructor.apply(NO_RANGES);
 
-        return sortAndDeoverlap(constructor, ranges, ranges.length);
+        return sortAndDeoverlap(constructor, ranges, ranges.length, UnionMode.MERGE_OVERLAPPING);
     }
 
-    static <RS extends AbstractRanges<?>> RS sortAndDeoverlap(Function<Range[], RS> constructor, Range[] ranges, int count)
+    static <RS extends AbstractRanges> RS sortAndDeoverlap(Function<Range[], RS> constructor, Range[] ranges, int count, UnionMode mode)
+    {
+        boolean copyOnWrite = true;
+        if (count > 1 && !isSorted(ranges, Range::compareTo))
+        {
+            ranges = ranges.clone();
+            Arrays.sort(ranges, 0, count, Range::compare);
+            copyOnWrite = false;
+        }
+
+        return deoverlapSorted(constructor, ranges, count, mode, copyOnWrite);
+    }
+
+    static <RS extends AbstractRanges> RS deoverlapSorted(Function<Range[], RS> constructor, Range[] ranges, int count, UnionMode mode)
+    {
+        return deoverlapSorted(constructor, ranges, count, mode, true);
+    }
+
+    private static <RS extends AbstractRanges> RS deoverlapSorted(Function<Range[], RS> constructor, Range[] ranges, int count, UnionMode mode, boolean copyOnWrite)
     {
         if (count == 0)
             return constructor.apply(NO_RANGES);
@@ -577,46 +688,69 @@ public abstract class AbstractRanges<RS extends Routables<Range, ?>> implements 
             return constructor.apply(Arrays.copyOf(ranges, count));
         }
 
-        Arrays.sort(ranges, 0, count, Range::compare);
         Range prev = ranges[0];
+        Range[] out = null;
         int removed = 0;
+        int compareTo = mode == UnionMode.MERGE_OVERLAPPING ? 1 : 0;
         for (int i = 1 ; i < count ; ++i)
         {
             Range next = ranges[i];
-            if (prev.end().compareTo(next.start()) > 0)
+            if (prev.end().compareTo(next.start()) >= compareTo)
             {
-                if (prev.end().compareTo(next.end()) >= 0)
+                RoutingKey end = max(prev.end(), next.end());
+                boolean copy = removed == 0;
+                ++removed;
+                while (++i < count && end.compareTo((next = ranges[i]).start()) >= compareTo)
                 {
+                    end = max(end, next.end());
                     ++removed;
-                    continue;
                 }
 
-                if (prev.start().equals(next.start()))
+                if (copy)
                 {
-                    ++removed;
-                    ranges[i - removed] = prev = next;
-                    continue;
+                    if (i == count && end == prev.end())
+                        break;
+
+                    if (copyOnWrite)
+                    {
+                        out = new Range[count - removed];
+                        System.arraycopy(ranges, 0, out, 0, i - removed);
+                    }
+                    else
+                    {
+                        out = ranges;
+                    }
                 }
 
-                prev = prev.newRange(prev.start(), next.start());
-                ranges[i - (1 + removed)] = prev;
-                prev = next;
+                if (end != prev.end())
+                {
+                    prev = prev.newRange(prev.start(), end);
+                    out[i - (1 + removed)] = prev;
+                }
+
+                if (i < count)
+                    out[i - removed] = prev = next;
                 continue;
             }
 
             if (removed > 0)
-                ranges[i - (1 + removed)] = prev;
+                out[i - removed] = next;
             prev = next;
         }
 
+        if (out == null) out = ranges;
         count -= removed;
-        if (count != ranges.length)
-            ranges = Arrays.copyOf(ranges, count);
-
-        return constructor.apply(ranges);
+        if (count != out.length)
+            out = Arrays.copyOf(out, count);
+        return constructor.apply(out);
     }
 
-    static <RS extends AbstractRanges<?>> RS ofSortedAndDeoverlapped(Function<Range[], RS> constructor, Range... ranges)
+    private static RoutingKey max(RoutingKey a, RoutingKey b)
+    {
+        return a.compareTo(b) >= 0 ? a : b;
+    }
+
+    static <RS extends AbstractRanges> RS ofSortedAndDeoverlapped(Function<Range[], RS> constructor, Range... ranges)
     {
         for (int i = 1 ; i < ranges.length ; ++i)
         {

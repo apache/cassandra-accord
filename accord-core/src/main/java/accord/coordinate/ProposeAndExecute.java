@@ -51,6 +51,7 @@ class ProposeAndExecute extends Propose<Result>
         propose.start();
     }
 
+    @Override
     void onAccepted()
     {
         Deps deps = Deps.merge(acceptOks, ok -> ok.deps);

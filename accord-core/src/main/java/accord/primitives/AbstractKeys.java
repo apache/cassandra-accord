@@ -28,14 +28,17 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import accord.api.RoutingKey;
-import accord.utils.*;
+import accord.utils.IndexedFold;
+import accord.utils.IndexedFoldToLong;
+import accord.utils.Invariants;
+import accord.utils.SortedArrays;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 import static accord.primitives.Routable.Domain.Key;
 
 @SuppressWarnings("rawtypes")
 // TODO (desired, efficiency): check that foldl call-sites are inlined and optimised by HotSpot
-public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K, ?>> implements Iterable<K>, Routables<K, KS>
+public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>, Routables<K>
 {
     final K[] keys;
 
@@ -95,19 +98,19 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     }
 
     @Override
-    public final boolean containsAll(Routables<?, ?> keysOrRanges)
+    public final boolean containsAll(Routables<?> keysOrRanges)
     {
         return keysOrRanges.size() == Routables.foldl(keysOrRanges, this, (k, p, v, i) -> v + 1, 0, 0, 0);
     }
 
     @Override
-    public final boolean intersects(AbstractKeys<?, ?> keys)
+    public final boolean intersects(AbstractKeys<?> keys)
     {
         return findNextIntersection(0, keys, 0) >= 0;
     }
 
     @Override
-    public final boolean intersects(AbstractRanges<?> ranges)
+    public final boolean intersects(AbstractRanges ranges)
     {
         return findNextIntersection(0, ranges, 0) >= 0;
     }
@@ -125,21 +128,21 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     }
 
     @Override
-    public final long findNextIntersection(int thisIdx, AbstractRanges<?> that, int thatIdx)
+    public final long findNextIntersection(int thisIdx, AbstractRanges that, int thatIdx)
     {
         return SortedArrays.findNextIntersectionWithMultipleMatches(this.keys, thisIdx, that.ranges, thatIdx, (RoutableKey k, Range r) -> -r.compareTo(k), Range::compareTo);
     }
 
     @Override
-    public final long findNextIntersection(int thisIdx, AbstractKeys<?, ?> that, int thatIdx)
+    public final long findNextIntersection(int thisIdx, AbstractKeys<?> that, int thatIdx)
     {
         return SortedArrays.findNextIntersection(this.keys, thisIdx, that.keys, thatIdx, RoutableKey::compareTo);
     }
 
     @Override
-    public final long findNextIntersection(int thisIndex, Routables<K, ?> with, int withIndex)
+    public final long findNextIntersection(int thisIndex, Routables<K> with, int withIndex)
     {
-        return findNextIntersection(thisIndex, (AbstractKeys<?, ?>) with, withIndex);
+        return findNextIntersection(thisIndex, (AbstractKeys<?>) with, withIndex);
     }
 
     public Stream<K> stream()
@@ -174,11 +177,15 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     }
 
 
-
     // TODO (expected, efficiency): accept cached buffers
     protected K[] slice(Ranges ranges, IntFunction<K[]> factory)
     {
         return SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareTo(k), Range::compareTo);
+    }
+
+    protected K[] subtract(Ranges ranges, IntFunction<K[]> factory)
+    {
+        return SortedArrays.subtractWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareTo(k), Range::compareTo);
     }
 
     public boolean any(Ranges ranges, Predicate<? super K> predicate)
@@ -229,42 +236,60 @@ public abstract class AbstractKeys<K extends RoutableKey, KS extends Routables<K
     public final FullKeyRoute toRoute(RoutingKey homeKey)
     {
         if (isEmpty())
-            return new FullKeyRoute(homeKey, new RoutingKey[] { homeKey });
+            return new FullKeyRoute(homeKey, false, new RoutingKey[] { homeKey });
 
-        RoutingKey[] result = toRoutingKeysArray(homeKey);
-        int pos = Arrays.binarySearch(result, homeKey);
-        return new FullKeyRoute(result[pos], result);
+        return toRoutingKeysArray(homeKey, (routingKeys, homeKeyIndex, isParticipatingHomeKey) -> new FullKeyRoute(routingKeys[homeKeyIndex], isParticipatingHomeKey, routingKeys));
     }
 
     protected RoutingKey[] toRoutingKeysArray(RoutingKey withKey)
     {
-        RoutingKey[] result;
-        int resultCount;
-        int insertPos = Arrays.binarySearch(keys, withKey);
-        if (insertPos < 0)
-            insertPos = -1 - insertPos;
+        return toRoutingKeysArray(withKey, (routingKeys, homeKeyIndex, isParticipatingHomeKey) -> routingKeys);
+    }
 
-        if (insertPos < keys.length && keys[insertPos].toUnseekable().equals(withKey))
+    interface ToRoutingKeysFactory<T>
+    {
+        T apply(RoutingKey[] keys, int insertPos, boolean includesKey);
+    }
+
+    @SuppressWarnings("SuspiciousSystemArraycopy")
+    protected <T> T toRoutingKeysArray(RoutingKey withKey, ToRoutingKeysFactory<T> toRoutingKeysFactory)
+    {
+        if (keys.getClass() == RoutingKey[].class)
         {
-            result = new RoutingKey[keys.length];
-            resultCount = copyToRoutingKeys(keys, 0, result, 0, keys.length);
+            int insertPos = Arrays.binarySearch(keys, withKey);
+            if (insertPos >= 0)
+            {
+                Invariants.checkState(keys[insertPos].equals(withKey));
+                return toRoutingKeysFactory.apply((RoutingKey[])keys, insertPos, true);
+            }
+
+            insertPos = -1 - insertPos;
+            RoutingKey[] result = new RoutingKey[1 + keys.length];
+            System.arraycopy(keys, 0, result, 0, insertPos);
+            result[insertPos] = withKey;
+            System.arraycopy(keys, insertPos, result, insertPos + 1, keys.length - insertPos);
+            return toRoutingKeysFactory.apply(result, insertPos, false);
         }
         else
         {
-            result = new RoutingKey[1 + keys.length];
-            resultCount = copyToRoutingKeys(keys, 0, result, 0, insertPos);
-            if (resultCount == 0 || !withKey.equals(result[resultCount - 1]))
-                result[resultCount++] = withKey;
-            resultCount += copyToRoutingKeys(keys, insertPos, result, resultCount, keys.length - insertPos);
+            RoutingKey[] result = new RoutingKey[keys.length];
+            for (int i = 0; i < keys.length; i++)
+                result[i] = keys[i].toUnseekable();
+            int insertPos = Arrays.binarySearch(result, withKey);
+            if (insertPos >= 0)
+                return toRoutingKeysFactory.apply(result, insertPos, true);
+            else
+                insertPos = -1 - insertPos;
+
+            RoutingKey[] newResult = new RoutingKey[1 + keys.length];
+            System.arraycopy(result, 0, newResult, 0, insertPos);
+            newResult[insertPos] = withKey;
+            System.arraycopy(result, insertPos, newResult, insertPos + 1, result.length - insertPos);
+            return toRoutingKeysFactory.apply(newResult, insertPos, false);
         }
-
-        if (resultCount < result.length)
-            result = Arrays.copyOf(result, resultCount);
-
-        return result;
     }
 
-    public final RoutingKeys toUnseekables()
+    public final RoutingKeys toParticipants()
     {
         return toUnseekables(array -> array.length == 0 ? RoutingKeys.EMPTY : new RoutingKeys(array));
     }

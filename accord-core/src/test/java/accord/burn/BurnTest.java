@@ -93,7 +93,7 @@ public class BurnTest
         for (int count = 0 ; count < operations ; ++count)
         {
             Id client = clients.get(random.nextInt(clients.size()));
-            Id node = nodes.get(random.nextInt(clients.size()));
+            Id node = nodes.get(random.nextInt(nodes.size()));
 
             boolean isRangeQuery = random.nextBoolean();
             if (isRangeQuery)
@@ -216,6 +216,8 @@ public class BurnTest
         AtomicInteger acks = new AtomicInteger();
         AtomicInteger nacks = new AtomicInteger();
         AtomicInteger lost = new AtomicInteger();
+        AtomicInteger truncated = new AtomicInteger();
+        AtomicInteger failedToCheck = new AtomicInteger();
         AtomicInteger clock = new AtomicInteger();
         AtomicInteger requestIndex = new AtomicInteger();
         Queue<Packet> initialRequests = new ArrayDeque<>();
@@ -256,6 +258,8 @@ public class BurnTest
                 {
                     if (reply.read == null) nacks.incrementAndGet();
                     else if (reply.read.length == 1) lost.incrementAndGet();
+                    else if (reply.read.length == 2) truncated.incrementAndGet();
+                    else if (reply.read.length == 3) failedToCheck.incrementAndGet();
                     else throw new AssertionError();
                     return;
                 }
@@ -305,7 +309,7 @@ public class BurnTest
             throw t;
         }
 
-        logger.info("Received {} acks, {} nacks and {} lost ({} total) to {} operations", acks.get(), nacks.get(), lost.get(), acks.get() + nacks.get() + lost.get(), operations);
+        logger.info("Received {} acks, {} nacks, {} lost, {} truncated ({} total) to {} operations", acks.get(), nacks.get(), lost.get(), truncated.get(), acks.get() + nacks.get() + lost.get() + truncated.get(), operations);
         logger.info("Message counts: {}", messageStatsMap.entrySet());
         if (clock.get() != operations * 2)
         {
@@ -322,7 +326,7 @@ public class BurnTest
     {
         int count = 1;
         int operations = 1000;
-        Long overrideSeed = -3309027396608571728L;
+        Long overrideSeed = null;
         LongSupplier seedGenerator = ThreadLocalRandom.current()::nextLong;
         for (int i = 0 ; i < args.length ; i += 2)
         {
@@ -364,8 +368,17 @@ public class BurnTest
         try
         {
             List<Id> clients = generateIds(true, 1 + random.nextInt(4));
-            List<Id> nodes = generateIds(false, 5 + random.nextInt(5));
-            burn(random, new TopologyFactory(nodes.size() == 5 ? 3 : (2 + random.nextInt(3)), IntHashKey.ranges(4 + random.nextInt(12))),
+            int rf;
+            float chance = random.nextFloat();
+            if (chance < 0.2f)      { rf = random.nextInt(2, 9); }
+            else if (chance < 0.4f) { rf = 3; }
+            else if (chance < 0.7f) { rf = 5; }
+            else if (chance < 0.8f) { rf = 7; }
+            else                    { rf = 9; }
+
+            List<Id> nodes = generateIds(false, random.nextInt(rf, rf * 3));
+
+            burn(random, new TopologyFactory(rf, IntHashKey.ranges(random.nextInt(Math.max(nodes.size() + 1, rf), nodes.size() * 3))),
                     clients,
                     nodes,
                     5 + random.nextInt(15),

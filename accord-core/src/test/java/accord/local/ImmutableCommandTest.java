@@ -18,29 +18,43 @@
 
 package accord.local;
 
+import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+
+import com.google.common.collect.Lists;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
+import accord.api.Scheduler;
 import accord.api.TestableConfigurationService;
-import accord.impl.*;
+import accord.impl.InMemoryCommandStore;
+import accord.impl.InMemoryCommandStores;
+import accord.impl.IntKey;
+import accord.impl.SizeOfIntersectionSorter;
+import accord.impl.TestAgent;
+import accord.impl.TopologyFactory;
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
 import accord.impl.mock.MockStore;
 import accord.local.Node.Id;
-import accord.local.Status.Known;
-import accord.primitives.*;
+import accord.local.SaveStatus.LocalExecution;
+import accord.primitives.FullKeyRoute;
+import accord.primitives.Keys;
+import accord.primitives.Participants;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.Route;
+import accord.primitives.RoutingKeys;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
 import accord.topology.Topology;
-import com.google.common.collect.Lists;
 import accord.utils.DefaultRandom;
-
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-
-import javax.annotation.Nullable;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 
 import static accord.Utils.id;
 import static accord.Utils.writeTxn;
@@ -81,23 +95,23 @@ public class ImmutableCommandTest
 
     private static class NoOpProgressLog implements ProgressLog
     {
-        @Override public void unwitnessed(TxnId txnId, RoutingKey homeKey, ProgressShard shard) {}
+        @Override public void unwitnessed(TxnId txnId, ProgressShard shard) {}
         @Override public void preaccepted(Command command, ProgressShard shard) {}
         @Override public void accepted(Command command, ProgressShard shard) {}
         @Override public void committed(Command command, ProgressShard shard) {}
-        @Override public void readyToExecute(Command command, ProgressShard shard) {}
+        @Override public void readyToExecute(Command command) {}
         @Override public void executed(Command command, ProgressShard shard) {}
-        @Override public void invalidated(Command command, ProgressShard shard) {}
-        @Override public void durableLocal(TxnId txnId) {}
-        @Override public void durable(Command command, @Nullable Set<Id> persistedOn) {}
-        @Override public void durable(TxnId txnId, @Nullable Unseekables<?, ?> unseekables, ProgressShard shard) {}
-        @Override public void waiting(TxnId blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn) {}
+        @Override public void durable(Command command) {}
+        @Override public void waiting(SafeCommand blockedBy, LocalExecution blockedUntil, Route<?> blockedOnRoute, Participants<?> blockedOnParticipants) {}
+        @Override public void clear(TxnId txnId) {}
     }
 
     private static Node createNode(Id id, CommandStoreSupport storeSupport)
     {
+        MockCluster.Clock clock = new MockCluster.Clock(100);
         Node node = new Node(id, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
-                        new MockCluster.Clock(100), () -> storeSupport.data, new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), new TestAgent(), new DefaultRandom(), null,
+                        clock, NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, clock),
+                        () -> storeSupport.data, new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), new TestAgent(), new DefaultRandom(), Scheduler.NEVER_RUN_SCHEDULED,
                         SizeOfIntersectionSorter.SUPPLIER, ignore -> ignore2 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new);
         awaitUninterruptibly(node.start());
         node.onTopologyUpdate(storeSupport.local.get(), true);
@@ -115,14 +129,15 @@ public class ImmutableCommandTest
         Txn txn = writeTxn(keys);
 
         {
-            Command command = Command.NotWitnessed.notWitnessed(txnId);
+            Command command = Command.NotDefined.uninitialised(txnId);
             Assertions.assertNull(inMemory(commands).command(txnId).value());
-            Assertions.assertEquals(Status.NotWitnessed, command.status());
+            Assertions.assertEquals(Status.NotDefined, command.status());
             Assertions.assertNull(command.executeAt());
         }
         SafeCommandStore safeStore = commands.beginOperation(PreLoadContext.contextFor(txnId, keys));
-        Commands.preaccept(safeStore, txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY);
-        Command command = safeStore.command(txnId).current();
+        SafeCommand  safeCommand = safeStore.get(txnId, txnId, ROUTE);
+        Commands.preaccept(safeStore, safeCommand, txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY);
+        Command command = safeStore.get(txnId).current();
         Assertions.assertEquals(Status.PreAccepted, command.status());
         Assertions.assertEquals(txnId, command.executeAt());
     }
@@ -138,9 +153,9 @@ public class ImmutableCommandTest
         Txn txn = writeTxn(keys);
 
         {
-            Command command = Command.NotWitnessed.notWitnessed(txnId);
+            Command command = Command.NotDefined.uninitialised(txnId);
             Assertions.assertNull(inMemory(commands).command(txnId).value());
-            Assertions.assertEquals(Status.NotWitnessed, command.status());
+            Assertions.assertEquals(Status.NotDefined, command.status());
             Assertions.assertNull(command.executeAt());
         }
         PreLoadContext context = PreLoadContext.contextFor(txnId, keys);
@@ -148,9 +163,9 @@ public class ImmutableCommandTest
         setTopologyEpoch(support.local, 2);
         ((TestableConfigurationService)node.configService()).reportTopology(support.local.get().withEpoch(2));
         Timestamp expectedTimestamp = Timestamp.fromValues(2, 110, ID1);
-        getUninterruptibly(commands.execute(context, (Consumer<? super SafeCommandStore>) store -> Commands.preaccept(store, txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY)));
+        getUninterruptibly(commands.execute(context, (Consumer<? super SafeCommandStore>) store -> Commands.preaccept(store, store.get(txnId, txnId, ROUTE), txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY)));
         commands.execute(PreLoadContext.contextFor(txnId, txn.keys()), safeStore -> {
-            Command command = safeStore.command(txnId).current();
+            Command command = safeStore.get(txnId).current();
             Assertions.assertEquals(Status.PreAccepted, command.status());
             Assertions.assertEquals(expectedTimestamp, command.executeAt());
         });

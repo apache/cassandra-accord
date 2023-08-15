@@ -44,13 +44,8 @@ public interface DataStore
          * To be invoked by implementation once we hear back from the replica that it
          * has taken a snapshot to process.
          *
-         * Required parameter unbootstrapped provides those TxnId that were dependencies
-         * of the SyncPoint but that were assigned a later execution time, and therefore
-         * may be our responsibility, and that we must therefore both apply locally and
-         * also retain dependencies to.
-         *
-         * Optional parameter maxApplied can provide the maximum timestamp of any applied
-         * transaction in the data being bootstrapped from this source. If not applied
+         * Optional parameter maxApplied can supply the maximum timestamp of any applied
+         * transaction in the data being bootstrapped from this source. If not provided
          * the store will coordinate a cheap global transaction to calculate a lower bound.
          *
          * Note: if the membership has entirely changed, or all other replicas are still themselves

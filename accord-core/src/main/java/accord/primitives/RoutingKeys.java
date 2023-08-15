@@ -26,7 +26,7 @@ import static accord.utils.Invariants.checkArgument;
 import static accord.utils.SortedArrays.isSortedUnique;
 import static accord.utils.SortedArrays.toUnique;
 
-public class RoutingKeys extends AbstractUnseekableKeys<AbstractUnseekableKeys<?>> implements Unseekables<RoutingKey, AbstractUnseekableKeys<?>>
+public class RoutingKeys extends AbstractUnseekableKeys implements Unseekables<RoutingKey>
 {
     public static class SerializationSupport
     {
@@ -54,13 +54,26 @@ public class RoutingKeys extends AbstractUnseekableKeys<AbstractUnseekableKeys<?
         return new RoutingKeys(keys);
     }
 
+    @SuppressWarnings("unchecked")
     @Override
-    public Unseekables<RoutingKey, ?> with(Unseekables<RoutingKey, ?> with)
+    public RoutingKeys with(Unseekables<RoutingKey> with)
     {
-        AbstractKeys<RoutingKey, ?> that = (AbstractKeys<RoutingKey, ?>) with;
-        return wrap(SortedArrays.linearUnion(keys, that.keys, cachedRoutingKeys()), that);
+        return with((AbstractKeys<RoutingKey>) with);
     }
 
+    @SuppressWarnings("unchecked")
+    @Override
+    public RoutingKeys with(Participants<RoutingKey> with)
+    {
+        return with((AbstractKeys<RoutingKey>) with);
+    }
+
+    private RoutingKeys with(AbstractKeys<RoutingKey> with)
+    {
+        return wrap(SortedArrays.linearUnion(keys, with.keys, cachedRoutingKeys()), with);
+    }
+
+    @Override
     public RoutingKeys with(RoutingKey with)
     {
         if (contains(with))
@@ -81,12 +94,13 @@ public class RoutingKeys extends AbstractUnseekableKeys<AbstractUnseekableKeys<?
         return wrap(slice(ranges, RoutingKey[]::new));
     }
 
+    @Override
     public RoutingKeys slice(Ranges ranges, Slice slice)
     {
         return slice(ranges);
     }
 
-    private RoutingKeys wrap(RoutingKey[] wrap, AbstractKeys<RoutingKey, ?> that)
+    private RoutingKeys wrap(RoutingKey[] wrap, AbstractKeys<RoutingKey> that)
     {
         return wrap == keys ? this : wrap == that.keys && that instanceof RoutingKeys ? (RoutingKeys)that : new RoutingKeys(wrap);
     }

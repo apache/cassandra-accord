@@ -30,6 +30,7 @@ import accord.impl.CommandTimeseries.CommandLoader;
 import accord.local.Command;
 import accord.local.CommonAttributes;
 import accord.local.PreLoadContext;
+import accord.local.RedundantBefore;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.primitives.Ranges;
@@ -38,7 +39,7 @@ import accord.primitives.Seekable;
 import accord.primitives.Seekables;
 import accord.primitives.TxnId;
 
-public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, CommandsForKeyType extends SafeCommandsForKey> implements SafeCommandStore
+public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, CommandsForKeyType extends SafeCommandsForKey> extends SafeCommandStore
 {
     private static class PendingRegistration<T>
     {
@@ -85,47 +86,42 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
     }
 
     @Override
-    public CommandType ifPresent(TxnId txnId)
-    {
-        CommandType command = getCommandInternal(txnId);
-        if (command == null)
-            throw new IllegalStateException(String.format("%s was not specified in PreLoadContext", txnId));
-        if (command.isEmpty())
-            return null;
-        return command;
-    }
-
-    @Override
-    public CommandType ifLoaded(TxnId txnId)
+    protected CommandType getInternalIfLoadedAndInitialised(TxnId txnId)
     {
         CommandType command = getIfLoaded(txnId, this::getCommandInternal, this::addCommandInternal, this::getIfLoaded);
-        if (command == null)
+        if (command == null || command.isEmpty())
             return null;
-        if (command.isEmpty())
-            command.notWitnessed();
         return command;
     }
 
     @Override
-    public CommandType command(TxnId txnId)
+    public CommandType getInternal(TxnId txnId)
     {
         CommandType command = getCommandInternal(txnId);
         if (command == null)
             throw new IllegalStateException(String.format("%s was not specified in PreLoadContext", txnId));
         if (command.isEmpty())
-            command.notWitnessed();
+            command.uninitialised();
         return command;
     }
 
-    protected abstract CommandLoader<?> cfkLoader();
+    protected abstract CommandLoader<?> cfkLoader(RoutableKey key);
 
-    public CommandsForKeyType ifLoaded(RoutableKey key)
+    public CommandsForKeyType ifLoadedAndInitialised(RoutableKey key)
     {
         CommandsForKeyType cfk = getIfLoaded(key, this::getCommandsForKeyInternal, this::addCommandsForKeyInternal, this::getIfLoaded);
         if (cfk == null)
             return null;
         if (cfk.isEmpty())
-            cfk.initialize(cfkLoader());
+        {
+            cfk.initialize(cfkLoader(key));
+        }
+        else
+        {
+            RedundantBefore.Entry entry = commandStore().redundantBefore().get(key.toUnseekable());
+            if (entry != null && cfk.current().hasRedundant(entry.redundantBefore))
+                cfk.set(cfk.current().withoutRedundant(entry.redundantBefore));
+        }
         return cfk;
     }
 
@@ -135,7 +131,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
         if (cfk == null)
             throw new IllegalStateException(String.format("%s was not specified in PreLoadContext", key));
         if (cfk.isEmpty())
-            cfk.initialize(cfkLoader());
+            cfk.initialize(cfkLoader(key));
         return cfk;
     }
 
@@ -189,7 +185,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
         for (PendingRegistration<T> pendingRegistration : pendingRegistrations)
         {
             TxnId txnId = pendingRegistration.txnId;
-            CommandType safeCommand = command(pendingRegistration.txnId);
+            CommandType safeCommand = getInternal(pendingRegistration.txnId);
             Command command = safeCommand.current();
             CommonAttributes attrs = updates.getOrDefault(txnId, command);
             attrs = completer.complete(pendingRegistration.value, pendingRegistration.slice, safeCommand, attrs);
@@ -207,7 +203,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
             Map<TxnId, CommonAttributes> attributeUpdates = new HashMap<>();
             completeRegistrations(attributeUpdates, pendingSeekablesRegistrations, this::completeRegistration);
             completeRegistrations(attributeUpdates, pendingSeekableRegistrations, this::completeRegistration);
-            attributeUpdates.forEach(((txnId, attributes) -> command(txnId).updateAttributes(attributes)));
+            attributeUpdates.forEach(((txnId, attributes) -> get(txnId).updateAttributes(attributes)));
         }
     }
 

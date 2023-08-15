@@ -54,12 +54,26 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 
     public static class DelayedCommandStore extends InMemoryCommandStore
     {
+        private class DelayedTask<T> extends Task<T>
+        {
+            private DelayedTask(Callable<T> fn)
+            {
+                super(fn);
+            }
+
+            @Override
+            public void run()
+            {
+                unsafeRunIn(super::run);
+            }
+        }
+
         private final SimulatedDelayedExecutorService executor;
         private final Queue<Task<?>> pending = new LinkedList<>();
 
-        public DelayedCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, RangesForEpochHolder rangesForEpochHolder, SimulatedDelayedExecutorService executor)
+        public DelayedCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder, SimulatedDelayedExecutorService executor)
         {
-            super(id, time, agent, store, progressLogFactory, rangesForEpochHolder);
+            super(id, time, agent, store, progressLogFactory, epochUpdateHolder);
             this.executor = executor;
         }
 
@@ -89,7 +103,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         @Override
         public <T> AsyncChain<T> submit(Callable<T> fn)
         {
-            Task<T> task = new Task<>(() -> this.unsafeRunIn(fn));
+            Task<T> task = new DelayedTask<>(fn);
             boolean wasEmpty = pending.isEmpty();
             pending.add(task);
             if (wasEmpty)

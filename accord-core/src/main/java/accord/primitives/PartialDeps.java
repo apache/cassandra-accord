@@ -43,6 +43,7 @@ public class PartialDeps extends Deps
         }
     }
 
+    // TODO (expected): we no longer need this if everyone has a FullRoute
     public final Ranges covering;
 
     public PartialDeps(Ranges covering, KeyDeps keyDeps, RangeDeps rangeDeps)
@@ -53,9 +54,9 @@ public class PartialDeps extends Deps
         Invariants.checkState(rangeDeps.isCoveredBy(covering));
     }
 
-    public boolean covers(Unseekables<?, ?> keysOrRanges)
+    public boolean covers(Participants<?> participants)
     {
-        return covering.containsAll(keysOrRanges);
+        return covering.containsAll(participants);
     }
 
     public PartialDeps with(PartialDeps that)
@@ -68,7 +69,7 @@ public class PartialDeps extends Deps
 
     public Deps reconstitute(FullRoute<?> route)
     {
-        if (!covers(route))
+        if (!covers(route.participants()))
             throw new IllegalArgumentException();
         return new Deps(keyDeps, rangeDeps);
     }

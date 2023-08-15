@@ -54,6 +54,12 @@ public class IntKey implements RoutableKey
         }
 
         @Override
+        public Long valueOf(int v)
+        {
+            return (long)v;
+        }
+
+        @Override
         public Long zero()
         {
             return 0L;
@@ -75,6 +81,12 @@ public class IntKey implements RoutableKey
         public Long divide(Long a, int i)
         {
             return a / i;
+        }
+
+        @Override
+        public Long divide(Long a, Long b)
+        {
+            return a / b;
         }
 
         @Override
@@ -167,7 +179,7 @@ public class IntKey implements RoutableKey
 
     public static RoutingKeys scope(int k0, int... kn)
     {
-        return keys(k0, kn).toUnseekables();
+        return keys(k0, kn).toParticipants();
     }
 
     public static Keys keys(int[] keyArray)

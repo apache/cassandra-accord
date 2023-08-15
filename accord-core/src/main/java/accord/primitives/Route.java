@@ -22,9 +22,15 @@ import accord.api.RoutingKey;
 
 import javax.annotation.Nullable;
 
-public interface Route<K extends Unseekable> extends Unseekables<K, Route<K>>
+public interface Route<K extends Unseekable> extends Unseekables<K>
 {
     RoutingKey homeKey();
+
+    /**
+     * @return true iff homeKey() is not involved in the transaction, only in its coordination (i.e. !txn.keys().contains(homeKey())
+     */
+    boolean isParticipatingHomeKey();
+    RoutingKey someParticipatingKey();
 
     default boolean isRoute() { return true; }
 
@@ -41,23 +47,40 @@ public interface Route<K extends Unseekable> extends Unseekables<K, Route<K>>
 
     @Override
     PartialRoute<K> slice(Ranges ranges);
+    PartialRoute<K> slice(Ranges ranges, Slice slice);
     PartialRoute<K> sliceStrict(Ranges ranges);
     Ranges sliceCovering(Ranges ranges, Slice slice);
 
+    Route<K> withHomeKey();
+
     /**
-     * @return a PureRoutables that includes every shard we know of, not just those we contact
-     * (i.e., includes the homeKey if not already included)
+     * Do any of the parts of the route that are not exclusively a homeKey intersect with the provided ranges
      */
-    Unseekables<K, ?> toMaximalUnseekables();
+    boolean participatesIn(Ranges ranges);
+
+    /**
+     * Return the unseekables excluding any coordination-only home key
+     */
+    Participants<K> participants();
+
+    /**
+     * Return the unseekables excluding any coordination-only home key, that intersect the provided ranges
+     */
+    Participants<K> participants(Ranges ranges);
+
+    default boolean hasParticipants()
+    {
+        return size() > (isParticipatingHomeKey() || !contains(homeKey()) ? 0 : 1);
+    }
 
     // this method exists solely to circumvent JDK bug with testing and casting interfaces
-    static boolean isFullRoute(@Nullable Unseekables<?, ?> unseekables) { return unseekables != null && unseekables.kind().isFullRoute(); }
+    static boolean isFullRoute(@Nullable Unseekables<?> unseekables) { return unseekables != null && unseekables.kind().isFullRoute(); }
 
     // this method exists solely to circumvent JDK bug with testing and casting interfaces
-    static boolean isRoute(@Nullable Unseekables<?, ?> unseekables) { return unseekables != null && unseekables.kind().isRoute(); }
+    static boolean isRoute(@Nullable Unseekables<?> unseekables) { return unseekables != null && unseekables.kind().isRoute(); }
 
     // this method exists solely to circumvent JDK bug with testing and casting interfaces
-    static FullRoute<?> castToFullRoute(@Nullable Unseekables<?, ?> unseekables)
+    static FullRoute<?> castToFullRoute(@Nullable Unseekables<?> unseekables)
     {
         if (unseekables == null)
             return null;
@@ -70,7 +93,7 @@ public interface Route<K extends Unseekable> extends Unseekables<K, Route<K>>
         }
     }
 
-    static Route<?> castToRoute(@Nullable Unseekables<?, ?> unseekables)
+    static Route<?> castToRoute(@Nullable Unseekables<?> unseekables)
     {
         if (unseekables == null)
             return null;
@@ -84,7 +107,7 @@ public interface Route<K extends Unseekable> extends Unseekables<K, Route<K>>
     }
 
     // this method exists solely to circumvent JDK bug with testing and casting interfaces
-    static Route<?> tryCastToRoute(@Nullable Unseekables<?, ?> unseekables)
+    static Route<?> tryCastToRoute(@Nullable Unseekables<?> unseekables)
     {
         if (unseekables == null)
             return null;
@@ -107,7 +130,7 @@ public interface Route<K extends Unseekable> extends Unseekables<K, Route<K>>
     }
 
     // this method exists solely to circumvent JDK bug with testing and casting interfaces
-    static PartialRoute<?> castToPartialRoute(@Nullable Unseekables<?, ?> unseekables)
+    static PartialRoute<?> castToPartialRoute(@Nullable Unseekables<?> unseekables)
     {
         if (unseekables == null)
             return null;

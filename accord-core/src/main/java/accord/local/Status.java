@@ -20,7 +20,8 @@ package accord.local;
 
 import accord.messages.BeginRecovery;
 import accord.primitives.Ballot;
-import accord.utils.Invariants;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 
 import java.util.List;
 import java.util.Objects;
@@ -29,21 +30,21 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import javax.annotation.Nullable;
+
 import static accord.local.Status.Definition.*;
 import static accord.local.Status.Known.*;
 import static accord.local.Status.KnownDeps.*;
 import static accord.local.Status.KnownExecuteAt.*;
-import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
-import static accord.local.Status.KnownExecuteAt.ExecuteAtProposed;
 import static accord.local.Status.Outcome.*;
 import static accord.local.Status.Phase.*;
 
 public enum Status
 {
-    NotWitnessed      (None,      Nothing),
+    NotDefined        (None,      Nothing),
     PreAccepted       (PreAccept, DefinitionOnly),
-    AcceptedInvalidate(Accept,    DefinitionUnknown, ExecuteAtUnknown,  DepsUnknown,  OutcomeUnknown), // may or may not have witnessed
-    Accepted          (Accept,    DefinitionUnknown, ExecuteAtProposed, DepsProposed, OutcomeUnknown), // may or may not have witnessed
+    AcceptedInvalidate(Accept,    DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Unknown), // may or may not have witnessed
+    Accepted          (Accept,    DefinitionUnknown, ExecuteAtProposed, DepsProposed, Unknown), // may or may not have witnessed
 
     /**
      * PreCommitted is a peculiar state, half-way between Accepted and Committed.
@@ -70,13 +71,17 @@ public enum Status
      * To solve this problem we simply permit the executeAt we discover for B to be propagated to A* without
      * its dependencies. Though this does complicate the state machine a little.
      */
-    PreCommitted      (Accept,    DefinitionUnknown, ExecuteAtKnown, DepsUnknown, OutcomeUnknown),
+    PreCommitted      (Accept,  DefinitionUnknown, ExecuteAtKnown,   DepsUnknown, Unknown),
 
-    Committed         (Commit,    DefinitionKnown,   ExecuteAtKnown, DepsKnown,   OutcomeUnknown),
-    ReadyToExecute    (Commit,    DefinitionKnown,   ExecuteAtKnown, DepsKnown,   OutcomeUnknown),
-    PreApplied        (Persist,   DefinitionKnown,   ExecuteAtKnown, DepsKnown,   OutcomeKnown),
-    Applied           (Persist,   DefinitionKnown,   ExecuteAtKnown, DepsKnown,   OutcomeApplied),
-    Invalidated       (Persist,   NoOp,              NoExecuteAt,    NoDeps,      InvalidationApplied);
+    Committed         (Commit,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Unknown),
+    // TODO (expected): do we need ReadyToExecute here, or can we keep it to SaveStatus only?
+    ReadyToExecute    (Commit,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Unknown),
+    // TODO (expected): do we need both PreApplied and Applied here, or can we keep them to SaveStatus only?
+    PreApplied        (Persist, DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Outcome.Apply),
+    Applied           (Persist, DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Outcome.Apply),
+    Truncated         (Cleanup, DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Unknown),
+    Invalidated       (Persist, NoOp,              NoExecuteAt,      NoDeps,      Outcome.Invalidated),
+    ;
 
     /**
      * Represents the phase of a transaction from the perspective of coordination
@@ -85,10 +90,11 @@ public enum Status
      * Accept:     the transaction did not achieve 1RT consensus and is making durable its execution order
      * Commit:     the transaction's execution order has been durably decided, and is being disseminated
      * Persist:    the transaction has executed, and its outcome is being persisted
+     * Cleanup:    the transaction has completed, and state used for processing it is being reclaimed
      */
     public enum Phase
     {
-        None, PreAccept, Accept, Commit, Persist
+        None, PreAccept, Accept, Commit, Persist, Cleanup
     }
 
     /**
@@ -98,10 +104,12 @@ public enum Status
      */
     public static class Known
     {
-        public static final Known Nothing           = new Known(DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, OutcomeUnknown);
-        public static final Known DefinitionOnly    = new Known(DefinitionKnown,   ExecuteAtUnknown, DepsUnknown, OutcomeUnknown);
-        public static final Known ExecuteAtOnly     = new Known(DefinitionUnknown, ExecuteAtKnown,   DepsUnknown, OutcomeUnknown);
-        public static final Known Done              = new Known(DefinitionUnknown, ExecuteAtKnown,   DepsKnown,   OutcomeApplied);
+        public static final Known Nothing           = new Known(DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Unknown);
+        public static final Known DefinitionOnly    = new Known(DefinitionKnown,   ExecuteAtUnknown, DepsUnknown, Unknown);
+        public static final Known ExecuteAtOnly     = new Known(DefinitionUnknown, ExecuteAtKnown,   DepsUnknown, Unknown);
+        public static final Known Decision          = new Known(DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Unknown);
+        public static final Known Apply             = new Known(DefinitionUnknown, ExecuteAtKnown,   DepsKnown,   Outcome.Apply);
+        public static final Known Invalidated       = new Known(DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Outcome.Invalidated);
 
         public final Definition definition;
         public final KnownExecuteAt executeAt;
@@ -134,7 +142,7 @@ public enum Status
             return this.definition.compareTo(that.definition) <= 0
                     && this.executeAt.compareTo(that.executeAt) <= 0
                     && this.deps.compareTo(that.deps) <= 0
-                    && this.outcome.compareTo(that.outcome) <= 0;
+                    && this.outcome.isSatisfiedBy(that.outcome);
         }
 
         /**
@@ -143,10 +151,21 @@ public enum Status
          */
         public LogicalEpoch epoch()
         {
-            if (outcome.isKnown())
+            if (outcome.isOrWasApply())
                 return LogicalEpoch.Execution;
 
             return LogicalEpoch.Coordination;
+        }
+
+        public long fetchEpoch(TxnId txnId, @Nullable Timestamp executeAt)
+        {
+            if (executeAt == null)
+                return txnId.epoch();
+
+            if (outcome.isOrWasApply() && !executeAt.equals(Timestamp.NONE))
+                return executeAt.epoch();
+
+            return txnId.epoch();
         }
 
         public Known with(Outcome newOutcome)
@@ -168,15 +187,18 @@ public enum Status
             switch (outcome)
             {
                 default: throw new AssertionError();
-                case InvalidationApplied:
-                    return Invalidated;
+                case Erased:
+                    return Status.Truncated;
 
-                case OutcomeApplied:
-                case OutcomeKnown:
+                case Invalidated:
+                    return Status.Invalidated;
+
+                case Apply:
+                case WasApply:
                     if (executeAt.hasDecidedExecuteAt() && definition.isKnown() && deps.hasDecidedDeps())
                         return PreApplied;
 
-                case OutcomeUnknown:
+                case Unknown:
                     if (executeAt.hasDecidedExecuteAt() && definition.isKnown() && deps.hasDecidedDeps())
                         return Committed;
 
@@ -190,7 +212,7 @@ public enum Status
                         throw new IllegalStateException();
             }
 
-            return NotWitnessed;
+            return NotDefined;
         }
 
         public boolean isDefinitionKnown()
@@ -198,12 +220,17 @@ public enum Status
             return definition.isKnown();
         }
 
-        public boolean isDecisionKnown()
+        /**
+         * The command may have an incomplete route when this is false
+         */
+        public boolean hasFullRoute()
         {
-            if (!deps.hasDecidedDeps())
-                return false;
-            Invariants.checkState(executeAt.hasDecidedExecuteAt());
-            return true;
+            return definition.isKnown() || outcome.isOrWasApply();
+        }
+
+        public boolean canProposeInvalidation()
+        {
+            return deps.canProposeInvalidation() && executeAt.canProposeInvalidation() && outcome.canProposeInvalidation();
         }
 
         public String toString()
@@ -211,7 +238,7 @@ public enum Status
             return Stream.of(definition.isKnown() ? "Definition" : null,
                              executeAt.hasDecidedExecuteAt() ? "ExecuteAt" : null,
                              deps.hasDecidedDeps() ? "Deps" : null,
-                             outcome.isKnown() ? "Outcome" : null
+                             outcome.isOrWasApply() ? "Outcome" : null
             ).filter(Objects::nonNull).collect(Collectors.joining(",", "[", "]"));
         }
     }
@@ -236,12 +263,27 @@ public enum Status
         /**
          * A decision to invalidate the transaction is known to have been reached
          */
-        NoExecuteAt,
+        NoExecuteAt
         ;
 
         public boolean hasDecidedExecuteAt()
         {
             return compareTo(ExecuteAtKnown) >= 0;
+        }
+
+        public boolean hasDecidedNonZeroExecuteAt()
+        {
+            return this == ExecuteAtKnown;
+        }
+
+        public final Timestamp executeAtIfKnownElseTxnId(TxnId txnId, Timestamp executeAt)
+        {
+            return this == ExecuteAtKnown ? executeAt : txnId;
+        }
+
+        public boolean canProposeInvalidation()
+        {
+            return this == ExecuteAtUnknown;
         }
     }
 
@@ -267,7 +309,7 @@ public enum Status
         /**
          * A decision to invalidate the transaction is known to have been reached
          */
-        NoDeps,
+        NoDeps
         ;
 
         public boolean hasDecidedDeps()
@@ -278,6 +320,11 @@ public enum Status
         public boolean isDecided()
         {
             return compareTo(DepsKnown) >= 0;
+        }
+
+        public boolean canProposeInvalidation()
+        {
+            return this == DepsUnknown;
         }
 
         public boolean hasProposedOrDecidedDeps()
@@ -298,6 +345,8 @@ public enum Status
 
         /**
          * The definition is known
+         *
+         * TODO (expected, clarity): distinguish between known for coordination epoch and known for commit/execute
          */
         DefinitionKnown,
 
@@ -305,6 +354,11 @@ public enum Status
          * The definition is irrelevant, as the transaction has been invalidated and may be treated as a no-op
          */
         NoOp;
+
+        public boolean canProposeInvalidation()
+        {
+            return this == DefinitionUnknown;
+        }
 
         public boolean isKnown()
         {
@@ -320,31 +374,71 @@ public enum Status
         /**
          * The outcome is not yet known (and may not yet be decided)
          */
-        OutcomeUnknown,
+        Unknown,
 
         /**
-         * The outcome is known, but may not have been applied
+         * The outcome is known
          */
-        OutcomeKnown,
+        Apply,
 
         /**
-         * The outcome is known to have applied (at the source of this message)
+         * The transaction has been cleaned-up, but was applied and the relevant portion of its outcome has been cleaned up
+         * TODO (expected): is this state helpful? Feels like we can do without it
          */
-        OutcomeApplied,
+        WasApply,
 
         /**
          * The transaction is known to have been invalidated
          */
-        InvalidationApplied;
+        Invalidated,
 
-        public boolean isKnown()
+        /**
+         * The transaction has been *completely cleaned up* - this means it has been made
+         * durable at every live replica of every shard we contacted
+         */
+        Erased
+        ;
+
+        public boolean isOrWasApply()
         {
-            return this == OutcomeKnown || this == OutcomeApplied;
+            return this == Apply || this == WasApply;
+        }
+
+        public boolean isSatisfiedBy(Outcome other)
+        {
+            switch (this)
+            {
+                default: throw new AssertionError();
+                case Unknown:
+                    return true;
+                case WasApply:
+                    if (other == Apply)
+                        return true;
+                case Apply:
+                case Invalidated:
+                case Erased:
+                    return other == this;
+            }
+        }
+
+        public boolean canProposeInvalidation()
+        {
+            return this == Unknown;
         }
 
         public boolean isInvalidated()
         {
-            return this == InvalidationApplied;
+            return this == Invalidated;
+        }
+
+        public boolean propagatesBetweenShards()
+        {
+            return this == Invalidated;
+        }
+
+        public boolean isTruncated()
+        {
+            return this == Erased || this == WasApply;
         }
     }
 
@@ -357,16 +451,22 @@ public enum Status
      * Represents the durability of a transaction's Persist phase.
      * NotDurable: the outcome has not been durably recorded
      * Local:      the outcome has been durably recorded at least locally
-     * Durable:    the outcome has been durably recorded to the specified level across the cluster
+     * Majority:   the outcome has been durably recorded to a majority of each participating shard
      * Universal:  the outcome has been durably recorded to every participating replica
+     * DurableOrInvalidated:  the outcome was either invalidated, or has been durably recorded to every replica
      */
     public enum Durability
     {
-        NotDurable, Local, Durable, Universal;
+        NotDurable, Local, Majority, Universal, DurableOrInvalidated;
 
         public boolean isDurable()
         {
-            return compareTo(Durable) >= 0;
+            return compareTo(Majority) >= 0 && compareTo(DurableOrInvalidated) < 0;
+        }
+
+        public boolean isDurableOrInvalidated()
+        {
+            return compareTo(Majority) >= 0;
         }
     }
 
@@ -430,8 +530,8 @@ public enum Status
         return b;
     }
 
-    public static Status max(Status a, Ballot acceptedA, Status b, Ballot acceptedB)
+    public static Status simpleMax(Status a, Status b)
     {
-        return max(a, a, acceptedA, b, b, acceptedB);
+        return a.compareTo(b) >= 0 ? a : b;
     }
 }

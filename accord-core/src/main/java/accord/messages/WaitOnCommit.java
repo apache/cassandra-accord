@@ -27,7 +27,8 @@ import accord.utils.MapReduceConsume;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static accord.local.Status.Committed;
+import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
+
 import accord.topology.Topology;
 
 public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore, Void>, PreLoadContext, Command.TransientListener
@@ -36,14 +37,14 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
 
     public static class SerializerSupport
     {
-        public static WaitOnCommit create(TxnId txnId, Unseekables<?, ?> scope)
+        public static WaitOnCommit create(TxnId txnId, Participants<?> scope)
         {
             return new WaitOnCommit(txnId, scope);
         }
     }
 
     public final TxnId txnId;
-    public final Unseekables<?, ?> scope;
+    public final Participants<?> scope;
 
     private transient Node node;
     private transient Id replyTo;
@@ -51,13 +52,13 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
     private transient volatile int waitingOn;
     private static final AtomicIntegerFieldUpdater<WaitOnCommit> waitingOnUpdater = AtomicIntegerFieldUpdater.newUpdater(WaitOnCommit.class, "waitingOn");
 
-    public WaitOnCommit(Id to, Topology topologies, TxnId txnId, Unseekables<?, ?> unseekables)
+    public WaitOnCommit(Id to, Topology topologies, TxnId txnId, Participants<?> participants)
     {
         this.txnId = txnId;
-        this.scope = unseekables.slice(topologies.rangesForNode(to));
+        this.scope = participants.slice(topologies.rangesForNode(to));
     }
 
-    public WaitOnCommit(TxnId txnId, Unseekables<?, ?> scope)
+    public WaitOnCommit(TxnId txnId, Participants<?> scope)
     {
         this.txnId = txnId;
         this.scope = scope;
@@ -75,25 +76,29 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
     @Override
     public Void apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.command(txnId);
+        SafeCommand safeCommand = safeStore.get(txnId, txnId, scope);
         Command command = safeCommand.current();
         switch (command.status())
         {
             default: throw new AssertionError();
-            case NotWitnessed:
+            case NotDefined:
+                // TODO (expected): this could be Uninitialised and logically Truncated;
+                //    can detect truncation beforehand or, better, we can pass scope to safeStore.command
+                //    and have it yield a stock Truncated SafeCommand if it has been truncated
             case PreAccepted:
             case Accepted:
             case AcceptedInvalidate:
             case PreCommitted:
                 waitingOnUpdater.incrementAndGet(this);
                 safeCommand.addListener(this);
-                safeStore.progressLog().waiting(txnId, Committed.minKnown, scope);
+                safeStore.progressLog().waiting(safeCommand, WaitingToExecute, null, scope);
                 break;
 
             case Committed:
             case PreApplied:
             case Applied:
             case Invalidated:
+            case Truncated:
             case ReadyToExecute:
         }
         return null;
@@ -108,7 +113,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
         switch (command.status())
         {
             default: throw new AssertionError();
-            case NotWitnessed:
+            case NotDefined:
             case PreAccepted:
             case Accepted:
             case AcceptedInvalidate:
@@ -119,6 +124,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
             case ReadyToExecute:
             case PreApplied:
             case Applied:
+            case Truncated:
             case Invalidated:
         }
 

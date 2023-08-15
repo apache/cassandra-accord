@@ -141,9 +141,9 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
      *   }
      * }
      */
-    final int[] keysToTxnIds; // Key -> [TxnId]
-    // Lazy loaded in ensureTxnIdToKey()
-    int[] txnIdsToKeys; // TxnId -> [Key] TODO (low priority, efficiency): this could be a BTree?
+    // TODO (expected): support deserializing to one or the other
+    int[] keysToTxnIds; // Key -> [TxnId]
+    int[] txnIdsToKeys; // TxnId -> [Key]
 
     KeyDeps(Key[] keys, TxnId[] txnIds, int[] keysToTxnIds)
     {
@@ -244,13 +244,13 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return keysToTxnIds.length == keys.size();
     }
 
-    public Keys someKeys(TxnId txnId)
+    public Keys participatingKeys(TxnId txnId)
     {
         int txnIdIndex = Arrays.binarySearch(txnIds, txnId);
         if (txnIdIndex < 0)
             return Keys.EMPTY;
 
-        ensureTxnIdToKey();
+        int[] txnIdsToKeys = txnIdsToKeys();
 
         int start = txnIdIndex == 0 ? txnIds.length : txnIdsToKeys[txnIdIndex - 1];
         int end = txnIdsToKeys[txnIdIndex];
@@ -263,13 +263,14 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return Keys.of(result);
     }
 
-    public Unseekables<RoutingKey, ?> someUnseekables(TxnId txnId)
+    // TODO (desired): consider optionally not inverting before answering, as a single txnId may be answered more efficiently without inversion
+    public RoutingKeys participants(TxnId txnId)
     {
         int txnIdIndex = Arrays.binarySearch(txnIds, txnId);
         if (txnIdIndex < 0)
             throw new IllegalStateException("Cannot create a RouteFragment without any keys");
 
-        ensureTxnIdToKey();
+        int[] txnIdsToKeys = txnIdsToKeys();
 
         int start = txnIdIndex == 0 ? txnIds.length : txnIdsToKeys[txnIdIndex - 1];
         int end = txnIdsToKeys[txnIdIndex];
@@ -291,16 +292,23 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return new RoutingKeys(result);
     }
 
-    void ensureTxnIdToKey()
+    int[] txnIdsToKeys()
     {
-        if (txnIdsToKeys != null)
-            return;
+        if (txnIdsToKeys == null)
+            txnIdsToKeys = invert(keysToTxnIds, keysToTxnIds.length, keys.size(), txnIds.length);
+        return txnIdsToKeys;
+    }
 
-        txnIdsToKeys = invert(keysToTxnIds, keysToTxnIds.length, keys.size(), txnIds.length);
+    int[] keysToTxnIds()
+    {
+        if (keysToTxnIds == null)
+            keysToTxnIds = invert(txnIdsToKeys, txnIdsToKeys.length, txnIds.length, keys.size());
+        return keysToTxnIds;
     }
 
     public void forEach(Ranges ranges, BiConsumer<Key, TxnId> forEach)
     {
+        int[] keysToTxnIds = keysToTxnIds();
         Routables.foldl(keys, ranges, (key, value, index) -> {
             for (int t = startOffset(index), end = endOffset(index); t < end ; ++t)
             {
@@ -321,6 +329,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         if (txnIds.length == 0)
             return;
 
+        int[] keysToTxnIds = keysToTxnIds();
         if (txnIds.length <= 64)
         {
             long bitset = Routables.foldl(keys, ranges, (key, ignore, value, keyIndex) -> {
@@ -368,14 +377,16 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         if (keyIndex < 0)
             return;
 
+        int[] keysToTxnIds = keysToTxnIds();
         int index = startOffset(keyIndex);
         int end = endOffset(keyIndex);
         while (index < end)
             forEach.accept(txnIds[keysToTxnIds[index++]]);
     }
 
-    public <P> void forEach(Ranges ranges, IndexedBiConsumer<P, TxnId> forEach, P param)
+    public <P1, P2> void forEach(Ranges ranges, int inclIdx, int exclIdx, P1 p1, P2 p2, IndexedBiConsumer<P1, P2> forEach)
     {
+        int[] keysToTxnIds = keysToTxnIds();
         for (int i = 0; i < ranges.size(); ++i)
         {
             Range range = ranges.get(i);
@@ -392,7 +403,8 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
             while (start < end)
             {
                 int txnIdx = keysToTxnIds[start++];
-                forEach.accept(param, txnIds[txnIdx], txnIdx);
+                if (txnIdx >= inclIdx && txnIdx < exclIdx)
+                    forEach.accept(p1, p2, txnIdx);
             }
         }
     }
@@ -428,13 +440,19 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         if (keyIndex < 0)
             return Collections.emptyList();
 
-        int start = startOffset(keyIndex);
-        int end = endOffset(keyIndex);
-        int size = end - start;
-        return txnIds(keysToTxnIds, start, size);
+        return txnIdsForKeyIndex(keyIndex);
     }
 
-    public List<TxnId> txnIds(Range range)
+    public SortedRelationList<TxnId> txnIdsForKeyIndex(int keyIndex)
+    {
+        int[] keysToTxnIds = keysToTxnIds();
+        int start = startOffset(keyIndex);
+        int end = endOffset(keyIndex);
+        return txnIds(keysToTxnIds, start, end);
+    }
+
+    @SuppressWarnings("unchecked")
+    public SortedRelationList<TxnId> txnIds(Range range)
     {
         int startIndex = keys.indexOf(range.start());
         if (startIndex < 0) startIndex = -1 - startIndex;
@@ -445,8 +463,9 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         else if (range.endInclusive()) ++endIndex;
 
         if (startIndex == endIndex)
-            return Collections.emptyList();
+            return SortedRelationList.EMPTY;
 
+        int[] keysToTxnIds = keysToTxnIds();
         int maxLength = Math.min(txnIds.length, startOffset(endIndex) - startOffset(startIndex));
         int[] scratch = cachedInts().getInts(maxLength);
         int count = 0;
@@ -485,24 +504,13 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return txnIds(ids, 0, count);
     }
 
-    private List<TxnId> txnIds(int[] ids, int start, int size)
+    @SuppressWarnings("unchecked")
+    private SortedRelationList<TxnId> txnIds(int[] ids, int start, int end)
     {
-        return new AbstractList<TxnId>()
-        {
-            @Override
-            public TxnId get(int index)
-            {
-                if (index > size)
-                    throw new IndexOutOfBoundsException();
-                return txnIds[ids[start + index]];
-            }
+        if (start == end)
+            return SortedRelationList.EMPTY;
 
-            @Override
-            public int size()
-            {
-                return size;
-            }
-        };
+        return new SortedRelationList<>(txnIds, ids, start, end);
     }
 
     private int startOffset(int keyIndex)

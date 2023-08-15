@@ -18,40 +18,38 @@
 
 package accord.messages;
 
-import accord.api.RoutingKey;
 import accord.local.*;
+import accord.primitives.Route;
 import accord.primitives.TxnId;
 
-import static accord.api.ProgressLog.ProgressShard.Home;
+import static accord.local.Status.PreAccepted;
 import static accord.messages.SimpleReply.Nack;
 import static accord.messages.SimpleReply.Ok;
 
 public class InformOfTxnId extends AbstractEpochRequest<Reply> implements Request, PreLoadContext
 {
-    public final RoutingKey homeKey;
+    public final Route<?> someRoute;
 
-    public InformOfTxnId(TxnId txnId, RoutingKey homeKey)
+    public InformOfTxnId(TxnId txnId, Route<?> someRoute)
     {
         super(txnId);
-        this.homeKey = homeKey;
+        this.someRoute = someRoute;
     }
 
     @Override
     public void process()
     {
         // TODO (expected, efficiency): do not first load txnId
-        node.mapReduceConsumeLocal(this, homeKey, txnId.epoch(), this);
+        node.mapReduceConsumeLocal(this, someRoute.homeKey(), txnId.epoch(), this);
     }
 
     @Override
     public Reply apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.command(txnId);
-        if (!safeCommand.current().hasBeen(Status.PreAccepted))
-        {
-            Commands.updateHomeKey(safeStore, safeCommand, homeKey);
-            safeStore.progressLog().unwitnessed(txnId, homeKey, Home);
-        }
+        SafeCommand safeCommand = safeStore.get(txnId, txnId, someRoute);
+        Command current = safeCommand.current();
+        if (!current.hasBeen(PreAccepted))
+            Commands.informHome(safeStore, safeCommand, someRoute);
         return Ok;
     }
 

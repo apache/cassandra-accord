@@ -95,6 +95,10 @@ abstract class Propose<R> implements Callback<AcceptReply>
         switch (reply.outcome())
         {
             default: throw new IllegalStateException();
+            case Truncated:
+                isDone = true;
+                callback.accept(null, new Truncated(txnId, route.homeKey()));
+                break;
             case Redundant:
             case RejectedBallot:
                 isDone = true;
@@ -135,33 +139,34 @@ abstract class Propose<R> implements Callback<AcceptReply>
         final Node node;
         final Ballot ballot;
         final TxnId txnId;
-        final RoutingKey invalidateWithKey;
+        final RoutingKey someParticipant;
         final BiConsumer<Void, Throwable> callback;
+        final Map<Id, AcceptReply> debug = debug() ? new HashMap<>() : null;
 
         private final QuorumShardTracker acceptTracker;
         private boolean isDone;
 
-        Invalidate(Node node, Shard shard, Ballot ballot, TxnId txnId, RoutingKey invalidateWithKey, BiConsumer<Void, Throwable> callback)
+        Invalidate(Node node, Shard shard, Ballot ballot, TxnId txnId, RoutingKey someParticipant, BiConsumer<Void, Throwable> callback)
         {
             this.node = node;
             this.acceptTracker = new QuorumShardTracker(shard);
             this.ballot = ballot;
             this.txnId = txnId;
-            this.invalidateWithKey = invalidateWithKey;
+            this.someParticipant = someParticipant;
             this.callback = callback;
         }
 
-        public static Invalidate proposeInvalidate(Node node, Ballot ballot, TxnId txnId, RoutingKey invalidateWithKey, BiConsumer<Void, Throwable> callback)
+        public static Invalidate proposeInvalidate(Node node, Ballot ballot, TxnId txnId, RoutingKey invalidateWithParticipant, BiConsumer<Void, Throwable> callback)
         {
-            Shard shard = node.topology().forEpochIfKnown(invalidateWithKey, txnId.epoch());
-            Invalidate invalidate = new Invalidate(node, shard, ballot, txnId, invalidateWithKey, callback);
-            node.send(shard.nodes, to -> new Accept.Invalidate(ballot, txnId, invalidateWithKey), invalidate);
+            Shard shard = node.topology().forEpochIfKnown(invalidateWithParticipant, txnId.epoch());
+            Invalidate invalidate = new Invalidate(node, shard, ballot, txnId, invalidateWithParticipant, callback);
+            node.send(shard.nodes, to -> new Accept.Invalidate(ballot, txnId, invalidateWithParticipant), invalidate);
             return invalidate;
         }
 
-        public static Invalidate proposeAndCommitInvalidate(Node node, Ballot ballot, TxnId txnId, RoutingKey invalidateWithKey, Route<?> commitInvalidationTo, Timestamp invalidateUntil, BiConsumer<?, Throwable> callback)
+        public static Invalidate proposeAndCommitInvalidate(Node node, Ballot ballot, TxnId txnId, RoutingKey invalidateWithParticipant, Route<?> commitInvalidationTo, Timestamp invalidateUntil, BiConsumer<?, Throwable> callback)
         {
-            return proposeInvalidate(node, ballot, txnId, invalidateWithKey, (success, fail) -> {
+            return proposeInvalidate(node, ballot, txnId, invalidateWithParticipant, (success, fail) -> {
                 if (fail != null)
                 {
                     callback.accept(null, fail);
@@ -170,7 +175,7 @@ abstract class Propose<R> implements Callback<AcceptReply>
                 {
                     node.withEpoch(invalidateUntil.epoch(), () -> {
                         commitInvalidate(node, txnId, commitInvalidationTo, invalidateUntil);
-                        callback.accept(null, new Invalidated(txnId, invalidateWithKey));
+                        callback.accept(null, new Invalidated(txnId, invalidateWithParticipant));
                     });
                 }
             });
@@ -181,6 +186,8 @@ abstract class Propose<R> implements Callback<AcceptReply>
         {
             if (isDone)
                 return;
+
+            if (debug != null) debug.put(from, reply);
 
             if (!reply.isOk())
             {

@@ -82,6 +82,7 @@ public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathQuo
         }
 
         // return NewQuorumSuccess ONLY once fast path is rejected
+        @Override
         public ShardOutcome<? super FastPathTracker> onQuorumSuccess(Node.Id node)
         {
             ++successes;
@@ -98,6 +99,7 @@ public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathQuo
             return NoChange;
         }
 
+        @Override
         public ShardOutcome<? super FastPathTracker> onMaybeFastPathSuccess(Node.Id node)
         {
             ++successes;
@@ -110,6 +112,7 @@ public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathQuo
             return quorumIfRejectsFastPath();
         }
 
+        @Override
         public ShardOutcome<? super FastPathTracker> onFailure(@Nonnull Node.Id from)
         {
             if (++failures > shard.maxFailures)
@@ -145,12 +148,14 @@ public class FastPathTracker extends AbstractTracker<FastPathTracker.FastPathQuo
             return fastPathAccepts == shard.fastPathQuorumSize;
         }
 
+        @Override
         @VisibleForTesting
         public boolean hasMetFastPathCriteria()
         {
             return fastPathAccepts >= shard.fastPathQuorumSize;
         }
 
+        @Override
         @VisibleForTesting
         public boolean hasRejectedFastPath()
         {

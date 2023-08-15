@@ -30,9 +30,11 @@ import javax.annotation.Nonnull;
  */
 public class ProgressToken implements Comparable<ProgressToken>, Outcome
 {
-    public static final ProgressToken NONE = new ProgressToken(Durability.NotDurable, Status.NotWitnessed, Ballot.ZERO, false);
-    public static final ProgressToken INVALIDATED = new ProgressToken(Durability.Durable, Status.Invalidated, Ballot.ZERO, false);
-    public static final ProgressToken APPLIED = new ProgressToken(Durability.Durable, Status.PreApplied, Ballot.ZERO, false);
+    public static final ProgressToken NONE = new ProgressToken(Durability.NotDurable, Status.NotDefined, Ballot.ZERO, false);
+    public static final ProgressToken INVALIDATED = new ProgressToken(Durability.DurableOrInvalidated, Status.Invalidated, Ballot.ZERO, false);
+    public static final ProgressToken APPLIED = new ProgressToken(Durability.NotDurable, Status.PreApplied, Ballot.ZERO, false);
+    public static final ProgressToken DURABLE = new ProgressToken(Durability.Majority, Status.PreApplied, Ballot.ZERO, false);
+    public static final ProgressToken TRUNCATED = new ProgressToken(Durability.DurableOrInvalidated, Status.Truncated, Ballot.ZERO, false);
 
     public final Durability durability;
     public final Status status;

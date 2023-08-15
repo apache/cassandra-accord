@@ -26,5 +26,6 @@ public interface IndexedFold<P1, Accumulate> extends IndexedBiFunction<P1, Accum
      *
      * This function is used for efficiently folding over some subset of a collection.
      */
+    @Override
     Accumulate apply(P1 p1, Accumulate p2, int index);
 }

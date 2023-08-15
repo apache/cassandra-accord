@@ -26,44 +26,6 @@ import javax.annotation.Nullable;
 
 public interface RoutableKey extends Routable, Comparable<RoutableKey>
 {
-    /**
-     * A special RoutingKey that sorts before or after everything, so that exclusive bounds may still cover
-     * the full range of possible RoutingKey.
-     *
-     * All RoutingKey implementations must sort correctly with this type.
-     *
-     * TODO (expected, testing): need to partition range from/to -/+ infinity as otherwise we exclude at least one key
-     */
-    class InfiniteRoutableKey implements RoutableKey
-    {
-        public static final InfiniteRoutableKey POSITIVE_INFINITY = new InfiniteRoutableKey(1);
-        public static final InfiniteRoutableKey NEGATIVE_INFINITY = new InfiniteRoutableKey(-1);
-
-        final int compareTo;
-
-        public InfiniteRoutableKey(int compareTo)
-        {
-            this.compareTo = compareTo;
-        }
-
-        @Override
-        public int compareTo(@Nonnull RoutableKey ignore)
-        {
-            return compareTo;
-        }
-
-        @Override
-        public RoutingKey toUnseekable() { throw new UnsupportedOperationException(); }
-
-        @Override
-        public RoutingKey someIntersectingRoutingKey(@Nullable Ranges ranges) { throw new UnsupportedOperationException(); }
-    }
-
-    /**
-     * Implementations must be comparable with {@link InfiniteRoutableKey}
-     * @param that the object to be compared.
-     * @return
-     */
     @Override
     int compareTo(@Nonnull RoutableKey that);
 
@@ -72,6 +34,17 @@ public interface RoutableKey extends Routable, Comparable<RoutableKey>
 
     @Override
     RoutingKey toUnseekable();
+
+    /**
+     * Some prefix that may be shared by other keys, particularly in a Range or Ranges.
+     * Mostly used for pretty printing Range and Ranges.
+     */
+    default Object prefix() { return null; }
+
+    /**
+     * Some suffix that, combined with prefix(), uniquely identifies the Key.
+     */
+    default String suffix() { return toString(); }
 
     @Override default RoutingKey someIntersectingRoutingKey(@Nullable Ranges ranges)
     {

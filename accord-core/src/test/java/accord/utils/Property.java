@@ -63,6 +63,11 @@ public class Property
 
     public static class ForBuilder extends Common<ForBuilder>
     {
+        public void check(FailingConsumer<RandomSource> fn)
+        {
+            forAll(Gens.random()).check(fn);
+        }
+
         public <T> SingleBuilder<T> forAll(Gen<T> gen)
         {
             return new SingleBuilder<>(gen, this);
@@ -104,7 +109,14 @@ public class Property
             if (Double.TYPE == subType)
                 return Arrays.toString((double[]) value);
         }
-        return value;
+        try
+        {
+            return value.toString();
+        }
+        catch (Throwable t)
+        {
+            return "Object.toString failed: " + t.getClass().getCanonicalName() + ": " + t.getMessage();
+        }
     }
 
     private static String propertyError(Common<?> input, Throwable cause, Object... values)

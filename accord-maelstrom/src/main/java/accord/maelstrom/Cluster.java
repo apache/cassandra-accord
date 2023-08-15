@@ -39,20 +39,21 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
-import accord.impl.SizeOfIntersectionSorter;
-import accord.impl.SimpleProgressLog;
+import accord.api.MessageSink;
+import accord.api.Scheduler;
 import accord.impl.InMemoryCommandStores;
+import accord.impl.SimpleProgressLog;
+import accord.impl.SizeOfIntersectionSorter;
 import accord.local.AgentExecutor;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.api.MessageSink;
+import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
 import accord.messages.Callback;
-import accord.messages.SafeCallback;
 import accord.messages.Reply;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
-import accord.api.Scheduler;
+import accord.messages.SafeCallback;
 import accord.topology.Topology;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChains;
@@ -277,11 +278,11 @@ public class Cluster implements Scheduler
         run.run();
     }
 
-    public static void run(Id[] nodes, QueueSupplier queueSupplier, Consumer<Packet> responseSink, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, InputStream stdin, OutputStream stderr) throws IOException
+    public static void run(Id[] nodes, QueueSupplier queueSupplier, Consumer<Packet> responseSink, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplierSupplier, TopologyFactory topologyFactory, InputStream stdin, OutputStream stderr) throws IOException
     {
         try (BufferedReader in = new BufferedReader(new InputStreamReader(stdin)))
         {
-            run(nodes, queueSupplier, responseSink, randomSupplier, nowSupplier, topologyFactory, () -> {
+            run(nodes, queueSupplier, responseSink, randomSupplier, nowSupplierSupplier, topologyFactory, () -> {
                 try
                 {
                     return Packet.parse(in.readLine());
@@ -294,7 +295,7 @@ public class Cluster implements Scheduler
         }
     }
 
-    public static void run(Id[] nodes, QueueSupplier queueSupplier, Consumer<Packet> responseSink, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, OutputStream stderr)
+    public static void run(Id[] nodes, QueueSupplier queueSupplier, Consumer<Packet> responseSink, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplierSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, OutputStream stderr)
     {
         Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> lookup = new HashMap<>();
@@ -304,8 +305,10 @@ public class Cluster implements Scheduler
             for (Id node : nodes)
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
+                LongSupplier nowSupplier = nowSupplierSupplier.get();
                 lookup.put(node, new Node(node, messageSink, new SimpleConfigService(topology),
-                                          nowSupplier.get(), MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
+                                          nowSupplier, NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, nowSupplier),
+                                          MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                                           MaelstromAgent.INSTANCE,
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
                                           SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new));

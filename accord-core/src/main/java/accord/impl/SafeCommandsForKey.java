@@ -29,7 +29,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static accord.local.Command.NotWitnessed.notWitnessed;
+import static accord.local.Command.NotDefined.uninitialised;
 
 public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
 {
@@ -80,7 +80,7 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
         return update(new CommandsForKey(current.key(),
                                          updateMax(current, timestamp),
                                          current.lastExecutedTimestamp(),
-                                         current.lastExecutedMicros(),
+                                         current.rawLastExecutedHlc(),
                                          current.lastWriteTimestamp(),
                                          (CommandTimeseries<D>) current().byId(),
                                          (CommandTimeseries<D>) current().byExecuteAt()));
@@ -94,7 +94,7 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
         return update(new CommandsForKey(current.key(),
                                          updateMax(current, command.executeAt()),
                                          current.lastExecutedTimestamp(),
-                                         current.lastExecutedMicros(),
+                                         current.lastExecutedHlc(),
                                          current.lastWriteTimestamp(),
                                          byId.add(command.txnId(), command).build(),
                                          byExecuteAt.add(command.txnId(), command).build() ));
@@ -111,10 +111,10 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
         return update(new CommandsForKey(current.key(),
                                          updateMax(current, txnId),
                                          current.lastExecutedTimestamp(),
-                                         current.lastExecutedMicros(),
+                                         current.lastExecutedHlc(),
                                          current.lastWriteTimestamp(),
-                                         byId.add(txnId, notWitnessed(txnId)).build(),
-                                         byExecuteAt.add(txnId, notWitnessed(txnId)).build()));
+                                         byId.add(txnId, uninitialised(txnId)).build(),
+                                         byExecuteAt.add(txnId, uninitialised(txnId)).build()));
     }
 
     public <D> CommandsForKey listenerUpdate(Command command)
@@ -133,7 +133,7 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
         {
             default: throw new AssertionError();
             case PreAccepted:
-            case NotWitnessed:
+            case NotDefined:
             case Accepted:
             case AcceptedInvalidate:
             case PreCommitted:
@@ -151,13 +151,14 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
             case Invalidated:
                 byId.remove(command.txnId());
                 byExecuteAt.remove(command.txnId());
+            case Truncated:
                 break;
         }
 
         return update(new CommandsForKey(current.key(),
                                          updateMax(current, command.executeAt()),
                                          current.lastExecutedTimestamp(),
-                                         current.lastExecutedMicros(),
+                                         current.lastExecutedHlc(),
                                          current.lastWriteTimestamp(),
                                          byId.build(),
                                          byExecuteAt.build()));
@@ -182,16 +183,16 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
             throw new IllegalArgumentException(String.format("%s is less than the most recent executed timestamp %s", executeAt, lastExecuted));
 
         long micros = executeAt.hlc();
-        long lastMicros = current.lastExecutedMicros();
+        long lastMicros = current.lastExecutedHlc();
 
         Timestamp lastExecutedTimestamp = executeAt;
-        long lastExecutedMicros = Math.max(micros, lastMicros + 1);
+        long lastExecutedHlc = micros > lastMicros ? Long.MIN_VALUE : lastMicros + 1;
         Timestamp lastWriteTimestamp = isForWriteTxn ? executeAt : current.lastWriteTimestamp();
 
         return update(new CommandsForKey(current.key(),
                                          current.max(),
                                          lastExecutedTimestamp,
-                                         lastExecutedMicros,
+                                         lastExecutedHlc,
                                          lastWriteTimestamp,
                                          (CommandTimeseries<D>) current.byId(),
                                          (CommandTimeseries<D>) current.byExecuteAt()));

@@ -30,9 +30,6 @@ import accord.primitives.*;
 import static accord.local.Node.Id.NONE;
 import static com.google.common.base.Functions.identity;
 
-import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
-
 public class ListAgent implements Agent
 {
     final long timeout;
@@ -84,7 +81,7 @@ public class ListAgent implements Agent
     @Override
     public boolean isExpired(TxnId initiated, long now)
     {
-        return now - initiated.hlc() >= timeout;
+        return now - initiated.hlc() >= timeout && !initiated.rw().isSyncPoint();
     }
 
     @Override

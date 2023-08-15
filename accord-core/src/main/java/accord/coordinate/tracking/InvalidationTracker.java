@@ -32,8 +32,9 @@ public class InvalidationTracker extends AbstractTracker<InvalidationTracker.Inv
         private int fastPathRejects;
         private int fastPathInflight;
         private int promises;
+        private boolean hasDecision;
         private int inflight;
-        private boolean isDecided;
+        private boolean isFinal;
 
         private InvalidationShardTracker(Shard shard)
         {
@@ -42,7 +43,7 @@ public class InvalidationTracker extends AbstractTracker<InvalidationTracker.Inv
             fastPathInflight = shard.fastPathElectorate.size();
         }
 
-        public InvalidationShardTracker onSuccess(Node.Id from, boolean isPromised, boolean withFastPath)
+        public InvalidationShardTracker onSuccess(Node.Id from, boolean isPromised, boolean isDecided, boolean withFastPath)
         {
             if (shard.fastPathElectorate.contains(from))
             {
@@ -50,6 +51,7 @@ public class InvalidationTracker extends AbstractTracker<InvalidationTracker.Inv
                 if (!withFastPath) ++fastPathRejects;
             }
             if (isPromised) ++promises;
+            if (isDecided) hasDecision = true;
             --inflight;
             return this;
         }
@@ -62,9 +64,9 @@ public class InvalidationTracker extends AbstractTracker<InvalidationTracker.Inv
             return this;
         }
 
-        public boolean isDecided()
+        public boolean isFinal()
         {
-            return isFastPathDecided() && isPromiseDecided();
+            return hasDecision || (isFastPathDecided() && isPromiseDecided());
         }
 
         private boolean isFastPathDecided()
@@ -97,15 +99,25 @@ public class InvalidationTracker extends AbstractTracker<InvalidationTracker.Inv
             return promises >= shard.slowPathQuorumSize;
         }
 
+        public boolean isPromisedOrHasDecision()
+        {
+            return isPromised() || hasDecision();
+        }
+
+        public boolean hasDecision()
+        {
+            return hasDecision;
+        }
+
         @Override
         public ShardOutcomes apply(InvalidationTracker tracker, int shardIndex)
         {
-            if (isDecided)
+            if (isFinal)
                 return NoChange;
 
             if (isFastPathRejected()) tracker.rejectsFastPath = true;
             if (isPromised() && tracker.promisedShard < 0) tracker.promisedShard = shardIndex;
-            if (isDecided()) isDecided = true;
+            if (isFinal()) isFinal = true;
 
             if (tracker.rejectsFastPath && tracker.promisedShard >= 0)
             {
@@ -113,8 +125,8 @@ public class InvalidationTracker extends AbstractTracker<InvalidationTracker.Inv
                 return Success;
             }
 
-            if (isDecided && --tracker.waitingOnShards == 0)
-                return tracker.all(InvalidationShardTracker::isPromised) ? Success : Fail;
+            if (isFinal && --tracker.waitingOnShards == 0)
+                return tracker.all(InvalidationShardTracker::isPromisedOrHasDecision) ? Success : Fail;
 
             return NoChange;
         }
@@ -149,9 +161,9 @@ public class InvalidationTracker extends AbstractTracker<InvalidationTracker.Inv
         return get(shardIndex, withinShardIndex).isPromised();
     }
 
-    public RequestStatus recordSuccess(Node.Id from, boolean isPromised, boolean acceptedFastPath)
+    public RequestStatus recordSuccess(Node.Id from, boolean isPromised, boolean hasDecision, boolean acceptedFastPath)
     {
-        return recordResponse(this, from, (shard, node) -> shard.onSuccess(node, isPromised, acceptedFastPath), from);
+        return recordResponse(this, from, (shard, node) -> shard.onSuccess(node, isPromised, hasDecision, acceptedFastPath), from);
     }
 
     // return true iff hasFailed()

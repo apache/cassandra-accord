@@ -25,6 +25,7 @@ import com.google.common.collect.Lists;
 import accord.coordinate.tracking.ReadTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.messages.CheckStatus.WithQuorum;
 import accord.primitives.Ranges;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
@@ -32,6 +33,8 @@ import accord.utils.Invariants;
 
 import java.util.*;
 
+import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
+import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
 import static accord.utils.Invariants.debug;
 import static com.google.common.collect.Sets.newHashSetWithExpectedSize;
 
@@ -40,9 +43,9 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
     public enum Action
     {
         /**
-         * Immediately fail the coordination
+         * The coordination has been failed prior to returning this response, and no further action should be taken.
          */
-        Abort,
+        Aborted,
 
         /**
          * This response is unsuitable for the purposes of this coordination, whether individually or as a quorum.
@@ -77,7 +80,17 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
         ApprovePartial
     }
 
-    protected enum Success { Quorum, Success }
+    protected enum Success
+    {
+        Quorum(HasQuorum), Success(NoQuorum);
+
+        public final WithQuorum withQuorum;
+
+        Success(WithQuorum withQuorum)
+        {
+            this.withQuorum = withQuorum;
+        }
+    }
 
     protected final Node node;
     protected final TxnId txnId;
@@ -109,7 +122,7 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
         switch (process(from, reply))
         {
             default: throw new IllegalStateException();
-            case Abort:
+            case Aborted:
                 isDone = true;
                 break;
 
@@ -176,13 +189,37 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
         finishOnFailure();
     }
 
+    protected void finishOnFailure(Throwable failure, boolean overrideExistingFailure)
+    {
+        Invariants.checkState(!isDone);
+        if (overrideExistingFailure)
+        {
+            if (this.failure != null)
+                failure.addSuppressed(this.failure);
+            this.failure = failure;
+        }
+        else
+        {
+            if (this.failure != null) this.failure.addSuppressed(failure);
+            else this.failure = failure;
+        }
+        finishOnFailure();
+    }
+
     protected void finishOnFailure()
     {
         Invariants.checkState(!isDone);
+        Invariants.checkState(failure != null);
         isDone = true;
+        onDone(null, failure);
+    }
+
+    protected void finishOnExhaustion()
+    {
+        Invariants.checkState(!isDone);
         if (failure == null)
             failure = new Exhausted(txnId, null);
-        onDone(null, failure);
+        finishOnFailure();
     }
 
     private void handle(RequestStatus result)
@@ -198,7 +235,7 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
                 onDone(waitingOnData == 0 ? Success.Success : Success.Quorum, null);
                 break;
             case Failed:
-                finishOnFailure();
+                finishOnExhaustion();
         }
     }
 

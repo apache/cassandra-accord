@@ -18,12 +18,36 @@
 
 package accord.local;
 
+import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
+import java.util.function.ToLongFunction;
+
 import accord.primitives.Timestamp;
+import accord.utils.Invariants;
 
 public interface NodeTimeService
 {
     Node.Id id();
     long epoch();
+
+    /**
+     * Current time in some time unit that may be simulated and not match system time
+     */
     long now();
+
+    /**
+     * Return the current time since the Unix epoch in the specified time unit. May still be simulated time and not
+     * real time.
+     */
+    long unix(TimeUnit unit);
+
     Timestamp uniqueNow(Timestamp atLeast);
+
+    static ToLongFunction<TimeUnit> unixWrapper(TimeUnit sourceUnit, LongSupplier nowSupplier)
+    {
+        return resultUnit -> {
+            Invariants.checkArgument(resultUnit != TimeUnit.NANOSECONDS, "Nanoseconds since epoch doesn't fit in a long");
+            return resultUnit.convert(nowSupplier.getAsLong(), sourceUnit);
+        };
+    }
 }

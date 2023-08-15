@@ -25,30 +25,33 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.Data;
 import accord.local.Command;
+import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.Status;
+import accord.primitives.EpochSupplier;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
+import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
 import static accord.local.Status.Committed;
 import static accord.messages.ReadData.ReadNack.NotCommitted;
 import static accord.messages.ReadData.ReadNack.Redundant;
 import static accord.utils.MapReduceConsume.forEach;
 
 // TODO (required, efficiency): dedup - can currently have infinite pending reads that will be executed independently
-public class ReadTxnData extends ReadData implements Command.TransientListener
+public class ReadTxnData extends ReadData implements Command.TransientListener, EpochSupplier
 {
     private static final Logger logger = LoggerFactory.getLogger(ReadTxnData.class);
 
     public static class SerializerSupport
     {
-        public static ReadTxnData create(TxnId txnId, Seekables<?, ?> scope, long executeAtEpoch, long waitForEpoch)
+        public static ReadTxnData create(TxnId txnId, Participants<?> scope, long executeAtEpoch, long waitForEpoch)
         {
             return new ReadTxnData(txnId, scope, executeAtEpoch, waitForEpoch);
         }
@@ -64,6 +67,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener
                 case PreApplied:
                 case Applied:
                 case Invalidated:
+                case Truncated:
                     obsoleteAndSend();
                     safeCommand.removeListener(this);
             }
@@ -82,13 +86,13 @@ public class ReadTxnData extends ReadData implements Command.TransientListener
     final ObsoleteTracker obsoleteTracker = new ObsoleteTracker();
     private transient State state = State.PENDING; // TODO (low priority, semantics): respond with the Executed result we have stored?
 
-    public ReadTxnData(Node.Id to, Topologies topologies, TxnId txnId, Seekables<?, ?> readScope, Timestamp executeAt)
+    public ReadTxnData(Node.Id to, Topologies topologies, TxnId txnId, Participants<?> readScope, Timestamp executeAt)
     {
         super(to, topologies, txnId, readScope);
         this.executeAtEpoch = executeAt.epoch();
     }
 
-    protected ReadTxnData(TxnId txnId, Seekables<?, ?> readScope, long executeAtEpoch, long waitForEpoch)
+    protected ReadTxnData(TxnId txnId, Participants<?> readScope, long executeAtEpoch, long waitForEpoch)
     {
         super(txnId, readScope, waitForEpoch);
         this.executeAtEpoch = executeAtEpoch;
@@ -96,6 +100,12 @@ public class ReadTxnData extends ReadData implements Command.TransientListener
 
     @Override
     protected long executeAtEpoch()
+    {
+        return executeAtEpoch;
+    }
+
+    @Override
+    public long epoch()
     {
         return executeAtEpoch;
     }
@@ -115,7 +125,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener
         switch (command.status())
         {
             default: throw new AssertionError();
-            case NotWitnessed:
+            case NotDefined:
             case PreAccepted:
             case Accepted:
             case AcceptedInvalidate:
@@ -126,6 +136,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener
             case PreApplied:
             case Applied:
             case Invalidated:
+            case Truncated:
                 obsoleteAndSend();
                 return;
             case ReadyToExecute:
@@ -138,7 +149,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener
     @Override
     public synchronized ReadNack apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.command(txnId);
+        SafeCommand safeCommand = safeStore.get(txnId, this, readScope);
         return apply(safeStore, safeCommand);
     }
 
@@ -155,7 +166,7 @@ public class ReadTxnData extends ReadData implements Command.TransientListener
             default:
                 throw new AssertionError();
             case Committed:
-            case NotWitnessed:
+            case NotDefined:
             case PreAccepted:
             case Accepted:
             case AcceptedInvalidate:
@@ -164,20 +175,14 @@ public class ReadTxnData extends ReadData implements Command.TransientListener
                 ++waitingOnCount;
                 safeCommand.addListener(this);
 
-                if (status == Committed)
-                {
-                    return null;
-                }
-                else
-                {
-                    safeStore.progressLog().waiting(txnId, Committed.minKnown, readScope.toUnseekables());
-                    return NotCommitted;
-                }
-
+                safeStore.progressLog().waiting(safeCommand, WaitingToExecute, null, readScope);
+                if (status == Committed) return null;
+                else return NotCommitted;
 
             case PreApplied:
             case Applied:
             case Invalidated:
+            case Truncated:
                 state = State.OBSOLETE;
                 return Redundant;
 
@@ -219,6 +224,13 @@ public class ReadTxnData extends ReadData implements Command.TransientListener
     }
 
     @Override
+    protected synchronized void readComplete(CommandStore commandStore, @Nullable Data result, @Nullable Ranges unavailable)
+    {
+        // TODO (expected): we should unregister our listener, but this is quite costly today
+        super.readComplete(commandStore, result, unavailable);
+    }
+
+    @Override
     protected void reply(@Nullable Ranges unavailable, @Nullable Data data)
     {
         switch (state)
@@ -239,12 +251,19 @@ public class ReadTxnData extends ReadData implements Command.TransientListener
 
     private void removeListener(SafeCommandStore safeStore, TxnId txnId)
     {
-        safeStore.command(txnId).removeListener(this);
+        safeStore.get(txnId, this, readScope).removeListener(this);
     }
 
+    @Override
     protected void cancel()
     {
         node.commandStores().mapReduceConsume(this, waitingOn.stream(), forEach(in -> removeListener(in, txnId), node.agent()));
+    }
+
+    @Override
+    public MessageType type()
+    {
+        return MessageType.READ_REQ;
     }
 
     @Override

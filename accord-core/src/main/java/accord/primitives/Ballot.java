@@ -38,6 +38,7 @@ public class Ballot extends Timestamp
     }
 
     public static final Ballot ZERO = new Ballot(Timestamp.NONE);
+    public static final Ballot MAX = new Ballot(Timestamp.MAX);
 
     public Ballot(Timestamp from)
     {

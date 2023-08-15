@@ -156,6 +156,7 @@ public abstract class AbstractTracker<ST extends ShardTracker>
     {
         for (ST tracker : trackers)
         {
+            if (tracker == null) continue;
             if (test.test(tracker))
                 return true;
         }
@@ -166,6 +167,7 @@ public abstract class AbstractTracker<ST extends ShardTracker>
     {
         for (ST tracker : trackers)
         {
+            if (tracker == null) continue;
             if (!test.test(tracker))
                 return false;
         }

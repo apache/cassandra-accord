@@ -56,14 +56,14 @@ public class Utils
         return dst;
     }
 
-    public static <T> ImmutableSortedSet<T> ensureSortedImmutable(NavigableSet<T> set)
+    public static <T> ImmutableSortedSet<T> ensureSortedImmutable(SortedSet<T> set)
     {
         if (set == null || set.isEmpty())
             return ImmutableSortedSet.of();
         return set instanceof ImmutableSortedSet ? (ImmutableSortedSet<T>) set : ImmutableSortedSet.copyOf(set);
     }
 
-    public static <K, V> ImmutableSortedMap<K, V> ensureSortedImmutable(NavigableMap<K, V> map)
+    public static <K, V> ImmutableSortedMap<K, V> ensureSortedImmutable(SortedMap<K, V> map)
     {
         if (map == null || map.isEmpty())
             return ImmutableSortedMap.of();
@@ -96,5 +96,15 @@ public class Utils
         if (set == null)
             return new HashSet<>();
         return set instanceof ImmutableSet ? new HashSet<>(set) : set;
+    }
+
+    public static SimpleBitSet ensureMutable(SimpleBitSet set)
+    {
+        return set instanceof ImmutableBitSet ? new SimpleBitSet(set) : set;
+    }
+
+    public static ImmutableBitSet ensureImmutable(SimpleBitSet set)
+    {
+        return set instanceof ImmutableBitSet ? (ImmutableBitSet) set : new ImmutableBitSet(set);
     }
 }

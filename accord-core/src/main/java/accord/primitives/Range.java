@@ -70,12 +70,6 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         {
             return new EndInclusive(start, end);
         }
-
-        @Override
-        public String toString()
-        {
-            return "Range(" + start() + ", " + end() + ']';
-        }
     }
 
     public static class StartInclusive extends Range
@@ -111,12 +105,6 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         public Range newRange(RoutingKey start, RoutingKey end)
         {
             return new StartInclusive(start, end);
-        }
-
-        @Override
-        public String toString()
-        {
-            return "Range[" + start() + ", " + end() + ')';
         }
     }
 
@@ -272,11 +260,13 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         return that.start.compareTo(this.start) >= 0 && that.end.compareTo(this.end) <= 0;
     }
 
+    @Override
     public Range slice(Range truncateTo)
     {
         int cs = start.compareTo(truncateTo.start);
         int ce = end.compareTo(truncateTo.end);
         if (cs >= 0 && ce <= 0) return this;
+        if (cs <= 0 && ce >= 0) return truncateTo;
         return newRange(cs >= 0 ? start : truncateTo.start, ce <= 0 ? end : truncateTo.end);
     }
 
@@ -285,7 +275,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         return compare(range);
     }
 
-    public boolean intersects(AbstractKeys<?, ?> keys)
+    public boolean intersects(AbstractKeys<?> keys)
     {
         return SortedArrays.binarySearch(keys.keys, 0, keys.size(), this, Range::compareTo, FAST) >= 0;
     }
@@ -307,7 +297,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
     /**
      * returns the index of the first key larger than what's covered by this range
      */
-    public int nextHigherKeyIndex(AbstractKeys<?, ?> keys, int from)
+    public int nextHigherKeyIndex(AbstractKeys<?> keys, int from)
     {
         int i = SortedArrays.exponentialSearch(keys.keys, from, keys.size(), this, Range::compareTo, Search.FLOOR);
         if (i < 0) i = -1 - i;
@@ -373,4 +363,25 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
     {
         return this;
     }
+
+
+    @Override
+    public String toString()
+    {
+        Object prefix = start().prefix();
+        if (prefix == null || !prefix.equals(end().prefix()))
+        {
+            return (startInclusive() ? "[" : "(") + start() + "," + end() + (endInclusive() ? ']' : ')');
+        }
+        else
+        {
+            return prefix + ":" + toSuffixString();
+        }
+    }
+
+    public String toSuffixString()
+    {
+        return (startInclusive() ? "[" : "(") + start().suffix() + "," + end().suffix() + (endInclusive() ? ']' : ')');
+    }
+
 }

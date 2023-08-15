@@ -146,6 +146,13 @@ public class Invariants
         return param;
     }
 
+    public static <T> T nonNull(T param, String fmt, Object... args)
+    {
+        if (param == null)
+            throw new NullPointerException(format(fmt, args));
+        return param;
+    }
+
     public static int isNatural(int input)
     {
         if (input < 0)
@@ -303,5 +310,18 @@ public class Invariants
         {
             throw new IllegalArgumentException(format("Unable to cast %s to %s", o, klass.getName()));
         }
+    }
+
+    public static void checkIndexInBounds(int realLength, int offset, int length)
+    {
+        if (realLength == 0 || length == 0)
+            throw new IndexOutOfBoundsException("Unable to access offset " + offset + "; empty");
+        if (offset < 0)
+            throw new IndexOutOfBoundsException("Offset " + offset + " must not be negative");
+        if (length < 0)
+            throw new IndexOutOfBoundsException("Length " + length + " must not be negative");
+        int endOffset = offset + length;
+        if (endOffset > realLength)
+            throw new IndexOutOfBoundsException(String.format("Offset %d, length = %d; real length was %d", offset, length, realLength));
     }
 }

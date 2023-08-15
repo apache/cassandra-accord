@@ -29,7 +29,7 @@ import static accord.utils.ArrayBuffers.cachedKeys;
 import static accord.utils.SortedArrays.isSortedUnique;
 
 // TODO (low priority, efficiency): this should probably be a BTree
-public class Keys extends AbstractKeys<Key, Keys> implements Seekables<Key, Keys>
+public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
 {
     public static class SerializationSupport
     {
@@ -65,6 +65,7 @@ public class Keys extends AbstractKeys<Key, Keys> implements Seekables<Key, Keys
         return Arrays.equals(keys, keys1.keys);
     }
 
+    @Override
     public Keys with(Keys that)
     {
         return wrap(SortedArrays.linearUnion(keys, that.keys, cachedKeys()), that);
@@ -203,7 +204,7 @@ public class Keys extends AbstractKeys<Key, Keys> implements Seekables<Key, Keys
         return new Keys(keys);
     }
 
-    private Keys wrap(Key[] wrap, AbstractKeys<Key, ?> that)
+    private Keys wrap(Key[] wrap, AbstractKeys<Key> that)
     {
         return wrap == keys ? this : wrap == that.keys && that instanceof Keys ? (Keys)that : new Keys(wrap);
     }

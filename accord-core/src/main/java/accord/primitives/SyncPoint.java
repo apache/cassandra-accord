@@ -18,6 +18,9 @@
 
 package accord.primitives;
 
+import accord.api.RoutingKey;
+import accord.utils.Invariants;
+
 /**
  * Defines an inequality point in the processing of the distributed transaction log, which is to say that
  * this is able to say that the point has passed, or that it has not yet passed, but it is unable to
@@ -28,17 +31,42 @@ package accord.primitives;
  */
 public class SyncPoint
 {
+    public static class SerializationSupport
+    {
+        public static SyncPoint construct(TxnId syncId, Deps waitFor, Ranges ranges, RoutingKey homeKey)
+        {
+            return new SyncPoint(syncId, waitFor, ranges, homeKey);
+        }
+    }
+
     public final TxnId syncId;
     public final Deps waitFor;
-    public final Route<?> route;
+    public final Ranges ranges;
+    public final RoutingKey homeKey;
 
-    public SyncPoint(TxnId syncId, Deps waitFor, Route<?> route)
+    public SyncPoint(TxnId syncId, Deps waitFor, Ranges ranges, FullRangeRoute route)
+    {
+        Invariants.checkArgument(ranges.toRoute(route.homeKey).equals(route), "Expected homeKey %s from route %s to be in ranges %s", route.homeKey, route, ranges);
+        this.syncId = syncId;
+        this.waitFor = waitFor;
+        this.ranges = ranges;
+        this.homeKey = route.homeKey();
+    }
+
+    private SyncPoint(TxnId syncId, Deps waitFor, Ranges ranges, RoutingKey homeKey)
     {
         this.syncId = syncId;
         this.waitFor = waitFor;
-        this.route = route;
+        this.ranges = ranges;
+        this.homeKey = homeKey;
     }
 
+    public FullRangeRoute route()
+    {
+        return ranges.toRoute(homeKey);
+    }
+
+    // TODO (required): document this and its usages; make sure call-sites make sense
     public long sourceEpoch()
     {
         TxnId maxDep = waitFor.maxTxnId();

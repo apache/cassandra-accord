@@ -19,10 +19,9 @@
 package accord.local;
 
 import java.util.Arrays;
-import java.util.BitSet;
 import java.util.Collection;
-import java.util.Map;
 import java.util.function.Consumer;
+import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,16 +29,19 @@ import org.slf4j.LoggerFactory;
 import accord.api.ProgressLog.ProgressShard;
 import accord.api.Result;
 import accord.api.RoutingKey;
+import accord.coordinate.Infer;
+import accord.local.Command.ProxyListener;
 import accord.local.Command.WaitingOn;
+import accord.local.SaveStatus.LocalExecution;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
-import accord.primitives.Keys;
+import accord.primitives.EpochSupplier;
+import accord.primitives.FullRoute;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialRoute;
 import accord.primitives.PartialTxn;
-import accord.primitives.Range;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
-import accord.primitives.RoutableKey;
 import accord.primitives.Routables;
 import accord.primitives.Route;
 import accord.primitives.Seekables;
@@ -50,36 +52,46 @@ import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
-import accord.utils.SortedArrays;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
-import net.nicoulaj.compilecommand.annotations.Inline;
-
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 import static accord.api.ProgressLog.ProgressShard.Home;
 import static accord.api.ProgressLog.ProgressShard.Local;
 import static accord.api.ProgressLog.ProgressShard.No;
 import static accord.api.ProgressLog.ProgressShard.UnmanagedHome;
 import static accord.api.ProgressLog.ProgressShard.Unsure;
+import static accord.local.Command.Truncated.erased;
+import static accord.local.Command.Truncated.truncatedApply;
+import static accord.local.Command.Truncated.truncatedApplyWithOutcome;
+import static accord.local.Commands.Cleanup.ERASE;
+import static accord.local.Commands.Cleanup.NO;
+import static accord.local.Commands.Cleanup.TRUNCATE;
 import static accord.local.Commands.EnsureAction.Add;
 import static accord.local.Commands.EnsureAction.Check;
 import static accord.local.Commands.EnsureAction.Ignore;
 import static accord.local.Commands.EnsureAction.Set;
 import static accord.local.Commands.EnsureAction.TrySet;
+import static accord.local.RedundantStatus.NOT_OWNED;
+import static accord.local.RedundantStatus.PRE_BOOTSTRAP;
+import static accord.local.SaveStatus.Applying;
+import static accord.local.SaveStatus.Erased;
+import static accord.local.SaveStatus.TruncatedApply;
+import static accord.local.SaveStatus.TruncatedApplyWithOutcome;
+import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.Accepted;
 import static accord.local.Status.AcceptedInvalidate;
 import static accord.local.Status.Applied;
 import static accord.local.Status.Committed;
 import static accord.local.Status.Durability;
+import static accord.local.Status.Durability.Majority;
+import static accord.local.Status.Durability.Universal;
 import static accord.local.Status.Invalidated;
-import static accord.local.Status.Known;
-import static accord.local.Status.Known.ExecuteAtOnly;
+import static accord.local.Status.NotDefined;
+import static accord.local.Status.PreAccepted;
 import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
 import static accord.local.Status.ReadyToExecute;
-import static accord.primitives.Routables.Slice.Minimal;
+import static accord.local.Status.Truncated;
 import static accord.primitives.Route.isFullRoute;
 
 public class Commands
@@ -113,28 +125,28 @@ public class Commands
         return safeStore.ranges().allAt(epoch).contains(someKey);
     }
 
-    public static RoutingKey noProgressKey()
+    public enum AcceptOutcome { Success, Redundant, RejectedBallot, Truncated }
+
+    public static AcceptOutcome preaccept(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId txnId, long acceptEpoch, PartialTxn partialTxn, FullRoute<?> route, @Nullable RoutingKey progressKey)
     {
-        return NO_PROGRESS_KEY;
+        return preacceptOrRecover(safeStore, safeCommand, txnId, acceptEpoch, partialTxn, route, progressKey, Ballot.ZERO);
     }
 
-    public enum AcceptOutcome {Success, Redundant, RejectedBallot}
-
-    public static AcceptOutcome preaccept(SafeCommandStore safeStore, TxnId txnId, long acceptEpoch, PartialTxn partialTxn, Route<?> route, @Nullable RoutingKey progressKey)
-    {
-        return preacceptOrRecover(safeStore, txnId, acceptEpoch, partialTxn, route, progressKey, Ballot.ZERO);
-    }
-
-    public static AcceptOutcome recover(SafeCommandStore safeStore, TxnId txnId, PartialTxn partialTxn, Route<?> route, @Nullable RoutingKey progressKey, Ballot ballot)
+    public static AcceptOutcome recover(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId txnId, PartialTxn partialTxn, FullRoute<?> route, @Nullable RoutingKey progressKey, Ballot ballot)
     {
         // for recovery we only ever propose either the original epoch or an Accept that we witness; otherwise we invalidate
-        return preacceptOrRecover(safeStore, txnId, txnId.epoch(), partialTxn, route, progressKey, ballot);
+        return preacceptOrRecover(safeStore, safeCommand, txnId, txnId.epoch(), partialTxn, route, progressKey, ballot);
     }
 
-    private static AcceptOutcome preacceptOrRecover(SafeCommandStore safeStore, TxnId txnId, long acceptEpoch, PartialTxn partialTxn, Route<?> route, @Nullable RoutingKey progressKey, Ballot ballot)
+    private static AcceptOutcome preacceptOrRecover(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId txnId, long acceptEpoch, PartialTxn partialTxn, FullRoute<?> route, @Nullable RoutingKey progressKey, Ballot ballot)
     {
-        SafeCommand safeCommand = safeStore.command(txnId);
         Command command = safeCommand.current();
+
+        if (command.hasBeen(Truncated))
+        {
+            logger.trace("{}: skipping preaccept - command is truncated", txnId);
+            return command.is(Invalidated) ? AcceptOutcome.Redundant : AcceptOutcome.Truncated;
+        }
 
         int compareBallots = command.promised().compareTo(ballot);
         if (compareBallots > 0)
@@ -155,12 +167,11 @@ public class Commands
 
         Ranges coordinateRanges = coordinateRanges(safeStore, txnId, acceptEpoch);
         Invariants.checkState(!coordinateRanges.isEmpty());
-        CommonAttributes attrs = updateHomeAndProgressKeys(safeStore, command.txnId(), command, route, progressKey, coordinateRanges);
-        ProgressShard shard = progressShard(attrs, progressKey, coordinateRanges);
-        Invariants.checkState(validate(command.status(), attrs, Ranges.EMPTY, coordinateRanges, shard, route, Set, partialTxn, Set, null, Ignore));
+        ProgressShard shard = progressShard(route, progressKey, coordinateRanges);
+        Invariants.checkState(validate(command.status(), command, Ranges.EMPTY, coordinateRanges, shard, route, Set, partialTxn, Set, null, Ignore));
 
         // FIXME: this should go into a consumer method
-        attrs = set(safeStore, command, attrs, Ranges.EMPTY, coordinateRanges, shard, route, partialTxn, Set, null, Ignore);
+        CommonAttributes attrs = set(safeStore, command, command, Ranges.EMPTY, coordinateRanges, shard, route, partialTxn, Set, null, Ignore);
         if (command.executeAt() == null)
         {
             // unlike in the Accord paper, we partition shards within a node, so that to ensure a total order we must either:
@@ -168,9 +179,8 @@ public class Commands
             //  - assign each shard _and_ process a unique id, and use both as components of the timestamp
             // if we are performing recovery (i.e. non-zero ballot), do not permit a fast path decision as we want to
             // invalidate any transactions that were not completed by their initial coordinator
-            Timestamp executeAt = ballot.equals(Ballot.ZERO)
-                    ? safeStore.commandStore().preaccept(txnId, partialTxn.keys(), safeStore)
-                    : safeStore.time().uniqueNow(txnId);
+            // TODO (desired): limit preaccept to keys we include, to avoid inflating unnecessary state
+            Timestamp executeAt = safeStore.commandStore().preaccept(txnId, partialTxn.keys(), safeStore, ballot.equals(Ballot.ZERO));
             command = safeCommand.preaccept(attrs, executeAt, ballot);
             safeStore.progressLog().preaccepted(command, shard);
         }
@@ -184,10 +194,18 @@ public class Commands
         return AcceptOutcome.Success;
     }
 
-    public static boolean preacceptInvalidate(SafeCommandStore safeStore, TxnId txnId, Ballot ballot)
+    public static boolean preacceptInvalidate(SafeCommand safeCommand, Ballot ballot)
     {
-        SafeCommand safeCommand = safeStore.command(txnId);
         Command command = safeCommand.current();
+
+        if (command.hasBeen(Status.Committed))
+        {
+            if (command.is(Truncated)) logger.trace("{}: skipping preacceptInvalidate - already truncated", command.txnId());
+            else if (command.is(Invalidated)) logger.trace("{}: skipping preacceptInvalidate - already invalidated", command.txnId());
+            else logger.trace("{}: skipping preacceptInvalidate - already committed", command.txnId());
+            return false;
+        }
+
         if (command.promised().compareTo(ballot) > 0)
         {
             logger.trace("{}: skipping preacceptInvalidate - witnessed higher ballot ({})", command.txnId(), command.promised());
@@ -199,32 +217,43 @@ public class Commands
 
     public static AcceptOutcome accept(SafeCommandStore safeStore, TxnId txnId, Ballot ballot, PartialRoute<?> route, Seekables<?, ?> keys, @Nullable RoutingKey progressKey, Timestamp executeAt, PartialDeps partialDeps)
     {
-        SafeCommand safeCommand = safeStore.command(txnId);
+        SafeCommand safeCommand = safeStore.get(txnId, executeAt, route);
         Command command = safeCommand.current();
+        if (command.hasBeen(PreCommitted))
+        {
+            if (command.is(Invalidated))
+            {
+                logger.trace("{}: skipping accept - command is invalidated", txnId);
+                return AcceptOutcome.Redundant;
+            }
+
+            if (command.is(Truncated))
+            {
+                logger.trace("{}: skipping accept - command is truncated", txnId);
+                return AcceptOutcome.Truncated;
+            }
+
+            logger.trace("{}: skipping accept - already committed ({})", txnId, command.status());
+            return AcceptOutcome.Redundant;
+        }
+
         if (command.promised().compareTo(ballot) > 0)
         {
             logger.trace("{}: skipping accept - witnessed higher ballot ({} > {})", txnId, command.promised(), ballot);
             return AcceptOutcome.RejectedBallot;
         }
 
-        if (command.hasBeen(PreCommitted))
-        {
-            logger.trace("{}: skipping accept - already committed ({})", txnId, command.status());
-            return AcceptOutcome.Redundant;
-        }
-
         Ranges coordinateRanges = coordinateRanges(safeStore, txnId);
         Ranges acceptRanges = acceptRanges(safeStore, txnId, executeAt, coordinateRanges);
         Invariants.checkState(!acceptRanges.isEmpty());
 
-        CommonAttributes attrs = updateHomeAndProgressKeys(safeStore, command.txnId(), command, route, progressKey, coordinateRanges);
-        ProgressShard shard = progressShard(attrs, progressKey, coordinateRanges);
-        Invariants.checkState(validate(command.status(), attrs, coordinateRanges, acceptRanges, shard, route, Ignore, null, Ignore, partialDeps, Set));
+        ProgressShard shard = progressShard(route, progressKey, coordinateRanges);
+        Invariants.checkState(validate(command.status(), command, coordinateRanges, acceptRanges, shard, route, Ignore, null, Ignore, partialDeps, Set));
 
         // TODO (desired, clarity/efficiency): we don't need to set the route here, and perhaps we don't even need to
         //  distributed partialDeps at all, since all we gain is not waiting for these transactions to commit during
         //  recovery. We probably don't want to directly persist a Route in any other circumstances, either, to ease persistence.
-        attrs = set(safeStore, command, attrs, coordinateRanges, acceptRanges, shard, route, null, Ignore, partialDeps, Set);
+        CommonAttributes attrs = set(safeStore, command, command, coordinateRanges, acceptRanges, shard, route, null, Ignore, partialDeps, Set);
 
         // set only registers by transaction keys, which we mightn't already have received
         if (!command.known().isDefinitionKnown())
@@ -239,17 +268,30 @@ public class Commands
 
     public static AcceptOutcome acceptInvalidate(SafeCommandStore safeStore, SafeCommand safeCommand, Ballot ballot)
     {
+        // TODO (expected): save some partial route we can use to determine if it can be GC'd
         Command command = safeCommand.current();
+        if (command.hasBeen(PreCommitted))
+        {
+            if (command.is(Invalidated))
+            {
+                logger.trace("{}: skipping accept invalidated - already invalidated ({})", command.txnId(), command.status());
+                return AcceptOutcome.Redundant;
+            }
+
+            if (command.is(Truncated))
+            {
+                logger.trace("{}: skipping accept invalidated - already truncated ({})", command.txnId(), command.status());
+                return AcceptOutcome.Truncated;
+            }
+
+            logger.trace("{}: skipping accept invalidated - already committed ({})", command.txnId(), command.status());
+            return AcceptOutcome.Redundant;
+        }
+
         if (command.promised().compareTo(ballot) > 0)
         {
             logger.trace("{}: skipping accept invalidated - witnessed higher ballot ({} > {})", command.txnId(), command.promised(), ballot);
             return AcceptOutcome.RejectedBallot;
-        }
-
-        if (command.hasBeen(PreCommitted))
-        {
-            logger.trace("{}: skipping accept invalidated - already committed ({})", command.txnId(), command.status());
-            return AcceptOutcome.Redundant;
         }
 
         logger.trace("{}: accepted invalidated", command.txnId());
@@ -259,20 +301,26 @@ public class Commands
         return AcceptOutcome.Success;
     }
 
-    public enum CommitOutcome {Success, Redundant, Insufficient;}
+    public enum CommitOutcome { Success, Redundant, Insufficient }
 
 
     // relies on mutual exclusion for each key
-    public static CommitOutcome commit(SafeCommandStore safeStore, TxnId txnId, Route<?> route, @Nullable RoutingKey progressKey, @Nullable PartialTxn partialTxn, Timestamp executeAt, PartialDeps partialDeps)
+    public static CommitOutcome commit(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId txnId, Route<?> route, @Nullable RoutingKey progressKey, @Nullable PartialTxn partialTxn, Timestamp executeAt, PartialDeps partialDeps)
     {
-        SafeCommand safeCommand = safeStore.command(txnId);
         Command command = safeCommand.current();
 
         if (command.hasBeen(PreCommitted))
         {
-            logger.trace("{}: skipping commit - already committed ({})", txnId, command.status());
-            if (!executeAt.equals(command.executeAt()) || command.status() == Invalidated)
-                safeStore.agent().onInconsistentTimestamp(command, (command.status() == Invalidated ? Timestamp.NONE : command.executeAt()), executeAt);
+            if (command.is(Truncated))
+            {
+                logger.trace("{}: skipping commit - already truncated ({})", txnId, command.status());
+            }
+            else
+            {
+                logger.trace("{}: skipping commit - already committed ({})", txnId, command.status());
+                if (!executeAt.equals(command.executeAt()) || command.status() == Invalidated)
+                    safeStore.agent().onInconsistentTimestamp(command, (command.status() == Invalidated ? Timestamp.NONE : command.executeAt()), executeAt);
+            }
 
             if (command.hasBeen(Committed))
                 return CommitOutcome.Redundant;
@@ -283,80 +331,89 @@ public class Commands
         // TODO (expected, consider): consider ranges between coordinateRanges and executeRanges? Perhaps don't need them
         Ranges executeRanges = executeRanges(safeStore, executeAt);
 
-        CommonAttributes attrs = updateHomeAndProgressKeys(safeStore, command.txnId(), command, route, progressKey, coordinateRanges);
-        ProgressShard shard = progressShard(attrs, progressKey, coordinateRanges);
+        ProgressShard shard = progressShard(route, progressKey, coordinateRanges);
 
-        if (!validate(command.status(), attrs, acceptRanges, executeRanges, shard, route, Check, partialTxn, Add, partialDeps, Set))
-        {
-            safeCommand.updateAttributes(attrs);
+        if (!validate(command.status(), command, acceptRanges, executeRanges, shard, route, Check, partialTxn, Add, partialDeps, Set))
             return CommitOutcome.Insufficient;
-        }
 
         // FIXME: split up set
-        attrs = set(safeStore, command, attrs, acceptRanges, executeRanges, shard, route, partialTxn, Add, partialDeps, Set);
+        CommonAttributes attrs = set(safeStore, command, command, acceptRanges, executeRanges, shard, route, partialTxn, Add, partialDeps, Set);
 
         logger.trace("{}: committed with executeAt: {}, deps: {}", txnId, executeAt, partialDeps);
-        WaitingOn waitingOn = populateWaitingOn(safeStore, txnId, executeAt, partialDeps);
+        WaitingOn waitingOn = initialiseWaitingOn(safeStore, txnId, executeAt, attrs.partialDeps(), attrs.route());
         command = safeCommand.commit(attrs, executeAt, waitingOn);
-
         safeStore.progressLog().committed(command, shard);
 
         // TODO (expected, safety): introduce intermediate status to avoid reentry when notifying listeners (which might notify us)
-        maybeExecute(safeStore, safeCommand, shard, true, true);
+        maybeExecute(safeStore, safeCommand, true, true);
         return CommitOutcome.Success;
     }
 
     // relies on mutual exclusion for each key
-    public static void precommit(SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt)
+    public static CommitOutcome precommit(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId txnId, Timestamp executeAt, Route<?> route)
     {
-        SafeCommand safeCommand = safeStore.command(txnId);
         Command command = safeCommand.current();
         if (command.hasBeen(PreCommitted))
         {
-            logger.trace("{}: skipping precommit - already committed ({})", txnId, command.status());
-            if (executeAt.equals(command.executeAt()) && command.status() != Invalidated)
-                return;
+            if (command.is(Truncated))
+            {
+                logger.trace("{}: skipping commit - already truncated ({})", txnId, command.status());
+                return CommitOutcome.Redundant;
+            }
+            else
+            {
+                logger.trace("{}: skipping precommit - already committed ({})", txnId, command.status());
+                if (executeAt.equals(command.executeAt()) && command.status() != Invalidated)
+                    return CommitOutcome.Redundant;
 
-            safeStore.agent().onInconsistentTimestamp(command, (command.status() == Invalidated ? Timestamp.NONE : command.executeAt()), executeAt);
+                safeStore.agent().onInconsistentTimestamp(command, (command.status() == Invalidated ? Timestamp.NONE : command.executeAt()), executeAt);
+            }
         }
 
-        safeCommand.precommit(executeAt);
+        CommonAttributes attrs = command;
+        if (command.route() == null || !command.route().kind().isFullRoute())
+        {
+            if (!route.kind().isFullRoute())
+                return CommitOutcome.Insufficient;
+            attrs = updateRoute(command, route);
+        }
+
+        safeCommand.precommit(attrs, executeAt);
         safeStore.notifyListeners(safeCommand);
         logger.trace("{}: precommitted with executeAt: {}", txnId, executeAt);
+        return CommitOutcome.Success;
     }
 
     public static void commitRecipientLocalSyncPoint(SafeCommandStore safeStore, TxnId localSyncId, SyncPoint syncPoint, Seekables<?, ?> keys)
     {
-        SafeCommand safeCommand = safeStore.command(localSyncId);
+        SafeCommand safeCommand = safeStore.get(localSyncId);
         Command command = safeCommand.current();
         Invariants.checkState(!command.hasBeen(Committed));
-        commitRecipientLocalSyncPoint(safeStore, localSyncId, keys, syncPoint.route);
+        commitRecipientLocalSyncPoint(safeStore, localSyncId, keys, syncPoint.route());
     }
 
     private static void commitRecipientLocalSyncPoint(SafeCommandStore safeStore, TxnId localSyncId, Seekables<?, ?> keys, Route<?> route)
     {
-        SafeCommand safeCommand = safeStore.command(localSyncId);
+        SafeCommand safeCommand = safeStore.get(localSyncId);
         Command command = safeCommand.current();
         if (command.hasBeen(Committed))
             return;
 
         Ranges coordinateRanges = coordinateRanges(safeStore, localSyncId);
         // TODO (desired, consider): in the case of sync points, the coordinator is unlikely to be a home shard, do we mind this? should document at least
-        ProgressShard progressShard = coordinateRanges.contains(route.homeKey()) ? UnmanagedHome : No;
         Txn emptyTxn = safeStore.agent().emptyTxn(localSyncId.rw(), keys);
-        CommonAttributes newAttributes = new CommonAttributes.Mutable(command)
-                                         .progressKey(progressShard == UnmanagedHome ? route.homeKey() : NO_PROGRESS_KEY);
+        ProgressShard progressShard = coordinateRanges.contains(route.homeKey()) ? UnmanagedHome : No;
         PartialDeps none = Deps.NONE.slice(coordinateRanges);
         PartialTxn partialTxn = emptyTxn.slice(coordinateRanges, true);
-        Invariants.checkState(validate(command.status(), newAttributes, Ranges.EMPTY, coordinateRanges, progressShard, route, Set, partialTxn, Set, none, Set));
-        newAttributes = set(safeStore, command, newAttributes, Ranges.EMPTY, coordinateRanges, progressShard, route, partialTxn, Set, none, Set);
+        Invariants.checkState(validate(command.status(), command, Ranges.EMPTY, coordinateRanges, progressShard, route, Set, partialTxn, Set, none, Set));
+        CommonAttributes newAttributes = set(safeStore, command, command, Ranges.EMPTY, coordinateRanges, progressShard, route, partialTxn, Set, none, Set);
         safeCommand.commit(newAttributes, localSyncId, WaitingOn.EMPTY);
         safeStore.notifyListeners(safeCommand);
     }
 
     public static void applyRecipientLocalSyncPoint(SafeCommandStore safeStore, TxnId localSyncId, Seekables<?, ?> keys)
     {
-        SafeCommand safeCommand = safeStore.command(localSyncId);
+        SafeCommand safeCommand = safeStore.get(localSyncId);
         Command.Committed command = safeCommand.current().asCommitted();
         if (command.hasBeen(PreApplied))
             return;
@@ -364,40 +421,40 @@ public class Commands
         // NOTE: if this is ever made a non-empty txn this will introduce a potential bug where the txn is registered against CommandsForKeys
         Txn emptyTxn = safeStore.agent().emptyTxn(localSyncId.rw(), keys);
         safeCommand.preapplied(command, command.executeAt(), command.waitingOn(), emptyTxn.execute(localSyncId, localSyncId, null), emptyTxn.result(localSyncId, localSyncId, null));
-        maybeExecute(safeStore, safeCommand, Unsure, true, false);
+        maybeExecute(safeStore, safeCommand, true, false);
     }
 
     // TODO (expected, ?): commitInvalidate may need to update cfks _if_ possible
-    public static void commitInvalidate(SafeCommandStore safeStore, TxnId txnId)
+    public static void commitInvalidate(SafeCommandStore safeStore, SafeCommand safeCommand, Unseekables<?> scope)
     {
-        SafeCommand safeCommand = safeStore.command(txnId);
         Command command = safeCommand.current();
         if (command.hasBeen(PreCommitted))
         {
-            logger.trace("{}: skipping commit invalidated - already committed ({})", txnId, command.status());
-            if (!command.hasBeen(Invalidated))
-                safeStore.agent().onInconsistentTimestamp(command, Timestamp.NONE, command.executeAt());
-
+            if (command.is(Truncated))
+            {
+                logger.trace("{}: skipping commit invalidated - already truncated ({})", safeCommand.txnId(), command.status());
+            }
+            else
+            {
+                logger.trace("{}: skipping commit invalidated - already committed ({})", safeCommand.txnId(), command.status());
+                if (!command.is(Invalidated) && !(command.is(Truncated) && command.executeAt().equals(Timestamp.NONE)))
+                    safeStore.agent().onInconsistentTimestamp(command, Timestamp.NONE, command.executeAt());
+            }
             return;
         }
+        else if (command.saveStatus().isUninitialised() && !safeStore.ranges().allAt(command.txnId().epoch()).intersects(scope))
+            return; // don't bother propagating the invalidation to future epochs where the replica didn't already witness the command
 
-        ProgressShard shard = progressShard(safeStore, command);
-        safeStore.progressLog().invalidated(command, shard);
-
-        CommonAttributes attrs = command;
-        if (command.partialDeps() == null)
-            attrs = attrs.mutable().partialDeps(PartialDeps.NONE);
-        safeCommand.commitInvalidated(attrs, txnId);
-        logger.trace("{}: committed invalidated", txnId);
-
-        safeStore.notifyListeners(safeCommand);
+        safeCommand.commitInvalidated();
+        safeStore.progressLog().clear(command.txnId());
+        logger.trace("{}: committed invalidated", safeCommand.txnId());
+        safeStore.notifyListeners(safeCommand, command, command.durableListeners(), safeCommand.transientListeners());
     }
 
     public enum ApplyOutcome {Success, Redundant, Insufficient}
 
-    public static ApplyOutcome apply(SafeCommandStore safeStore, TxnId txnId, long untilEpoch, Route<?> route, Timestamp executeAt, @Nullable PartialDeps partialDeps, Writes writes, Result result)
+    public static ApplyOutcome apply(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId txnId, Route<?> route, @Nullable RoutingKey progressKey, Timestamp executeAt, @Nullable PartialDeps partialDeps, @Nullable PartialTxn partialTxn, Writes writes, Result result)
     {
-        SafeCommand safeCommand = safeStore.command(txnId);
         Command command = safeCommand.current();
         if (command.hasBeen(PreApplied) && executeAt.equals(command.executeAt()))
         {
@@ -406,35 +463,28 @@ public class Commands
         }
         else if (command.hasBeen(PreCommitted) && !executeAt.equals(command.executeAt()))
         {
+            if (command.is(Truncated) && command.executeAt() == null)
+                return ApplyOutcome.Redundant;
             safeStore.agent().onInconsistentTimestamp(command, command.executeAt(), executeAt);
         }
 
         Ranges coordinateRanges = coordinateRanges(safeStore, txnId);
         Ranges acceptRanges = acceptRanges(safeStore, txnId, executeAt, coordinateRanges);
         Ranges executeRanges = executeRanges(safeStore, executeAt);
-        if (untilEpoch < safeStore.latestEpoch())
-        {
-            Ranges expectedRanges = safeStore.ranges().allBetween(executeAt.epoch(), untilEpoch);
-            Invariants.checkState(expectedRanges.containsAll(executeRanges));
-        }
 
-        CommonAttributes attrs = updateHomeAndProgressKeys(safeStore, command.txnId(), command, route, coordinateRanges);
-        ProgressShard shard = progressShard(attrs, coordinateRanges);
+        ProgressShard shard = progressShard(route, progressKey, coordinateRanges);
 
-        if (!validate(command.status(), attrs, acceptRanges, executeRanges, shard, route, Check, null, Check, partialDeps, command.hasBeen(Committed) ? Add : TrySet))
-        {
-            safeCommand.updateAttributes(attrs);
+        if (!validate(command.status(), command, acceptRanges, executeRanges, shard, route, Check, partialTxn, Add, partialDeps, command.hasBeen(Committed) ? Check : TrySet))
             return ApplyOutcome.Insufficient; // TODO (expected, consider): this should probably be an assertion failure if !TrySet
-        }
 
-        WaitingOn waitingOn = !command.hasBeen(Committed) ? populateWaitingOn(safeStore, txnId, executeAt, partialDeps) : command.asCommitted().waitingOn();
-        attrs = set(safeStore, command, attrs, acceptRanges, executeRanges, shard, route, null, Check, partialDeps, command.hasBeen(Committed) ? Add : TrySet);
+        CommonAttributes attrs = set(safeStore, command, command, acceptRanges, executeRanges, shard, route, partialTxn, Add, partialDeps, command.hasBeen(Committed) ? Check : TrySet);
 
+        WaitingOn waitingOn = !command.hasBeen(Committed) ? initialiseWaitingOn(safeStore, txnId, executeAt, attrs.partialDeps(), attrs.route()) : command.asCommitted().waitingOn();
         safeCommand.preapplied(attrs, executeAt, waitingOn, writes, result);
         safeStore.notifyListeners(safeCommand);
         logger.trace("{}: apply, status set to Executed with executeAt: {}, deps: {}", txnId, executeAt, partialDeps);
 
-        maybeExecute(safeStore, safeCommand, shard, true, true);
+        maybeExecute(safeStore, safeCommand, true, true);
         safeStore.progressLog().executed(safeCommand.current(), shard);
 
         return ApplyOutcome.Success;
@@ -444,13 +494,23 @@ public class Commands
     {
         Command listener = safeListener.current();
         Command updated = safeUpdated.current();
+        if (listener.is(NotDefined) || listener.is(Truncated))
+        {
+            // This listener must be a stale vestige
+            // TODO (desired): would be nice to ensure these are deregistered explicitly, but would be costly
+            Invariants.checkState(listener.saveStatus().isUninitialised() || listener.is(Truncated), "Listener status expected to be Uninitialised or Truncated, but was %s", listener.saveStatus());
+            Invariants.checkState(updated.hasBeen(Applied) || updated.is(NotDefined), "Updated status expected to be Applied or NotDefined, but was %s", updated);
+            safeUpdated.removeListener(listener.asListener());
+            return;
+        }
+
         logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
                      listener.txnId(), updated.txnId(), updated.status(), updated);
         switch (updated.status())
         {
             default:
                 throw new IllegalStateException("Unexpected status: " + updated.status());
-            case NotWitnessed:
+            case NotDefined:
             case PreAccepted:
             case Accepted:
             case AcceptedInvalidate:
@@ -462,6 +522,7 @@ public class Commands
             case PreApplied:
             case Applied:
             case Invalidated:
+            case Truncated:
                 updateDependencyAndMaybeExecute(safeStore, safeListener, safeUpdated, true);
                 break;
         }
@@ -470,7 +531,7 @@ public class Commands
     protected static void postApply(SafeCommandStore safeStore, TxnId txnId)
     {
         logger.trace("{} applied, setting status to Applied and notifying listeners", txnId);
-        SafeCommand safeCommand = safeStore.command(txnId);
+        SafeCommand safeCommand = safeStore.get(txnId);
         safeCommand.applied();
         safeStore.notifyListeners(safeCommand);
     }
@@ -491,11 +552,6 @@ public class Commands
         return safeStore.ranges().allBetween(txnId.epoch(), untilEpoch);
     }
 
-    private static boolean coordinates(SafeCommandStore safeStore, TxnId txnId, RoutingKey key)
-    {
-        return coordinateRanges(safeStore, txnId).contains(key);
-    }
-
     private static Ranges acceptRanges(SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt, Ranges coordinateRanges)
     {
         return txnId.epoch() == executeAt.epoch() ? coordinateRanges : safeStore.ranges().allBetween(txnId, executeAt);
@@ -503,7 +559,7 @@ public class Commands
 
     private static Ranges executeRanges(SafeCommandStore safeStore, Timestamp executeAt)
     {
-        return safeStore.ranges().allSince(executeAt.epoch());
+        return safeStore.ranges().allAt(executeAt.epoch());
     }
 
     /**
@@ -518,10 +574,13 @@ public class Commands
 
     private static AsyncChain<Void> applyChain(SafeCommandStore safeStore, PreLoadContext context, TxnId txnId)
     {
-        Command.Executed command = safeStore.command(txnId).current().asExecuted();
+        Command.Executed command = safeStore.get(txnId).current().asExecuted();
         if (command.hasBeen(Applied))
             return AsyncChains.success(null);
 
+        // TODO (required): make sure we are correctly handling (esp. C* side with validation logic) executing a transaction
+        //  that was pre-bootstrap for some range (so redundant and we may have gone ahead of), but had to be executed locally
+        //  for another range
         CommandStore unsafeStore = safeStore.commandStore();
         return command.writes().apply(safeStore, applyRanges(safeStore, command.executeAt()))
                .flatMap(unused -> unsafeStore.submit(context, ss -> {
@@ -550,7 +609,7 @@ public class Commands
     }
 
     // TODO (expected, API consistency): maybe split into maybeExecute and maybeApply?
-    private static boolean maybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, ProgressShard shard, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
+    private static boolean maybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, boolean alwaysNotifyListeners, boolean notifyWaitingOn)
     {
         Command command = safeCommand.current();
         if (logger.isTraceEnabled())
@@ -573,6 +632,7 @@ public class Commands
             return false;
         }
 
+        // TODO (required): slice our execute ranges based on any pre-bootstrap state
         // FIXME: need to communicate to caller that we didn't execute if we take one of the above paths
 
         switch (command.status())
@@ -581,7 +641,7 @@ public class Commands
                 // TODO (desirable, efficiency): maintain distinct ReadyToRead and ReadyToWrite states
                 command = safeCommand.readyToExecute();
                 logger.trace("{}: set to ReadyToExecute", command.txnId());
-                safeStore.progressLog().readyToExecute(command, shard);
+                safeStore.progressLog().readyToExecute(command);
                 safeStore.notifyListeners(safeCommand);
                 return true;
 
@@ -592,6 +652,7 @@ public class Commands
 
                 if (intersects)
                 {
+                    safeCommand.applying();
                     logger.trace("{}: applying", command.txnId());
                     apply(safeStore, executed);
                     return true;
@@ -606,276 +667,377 @@ public class Commands
                     return true;
                 }
             default:
-                throw new IllegalStateException();
+                throw new IllegalStateException("Unexpected status: " + command.status());
         }
     }
 
-    protected static WaitingOn populateWaitingOn(SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt, PartialDeps partialDeps)
+    protected static WaitingOn initialiseWaitingOn(SafeCommandStore safeStore, TxnId waitingId, Timestamp executeWaitingAt, PartialDeps partialDeps, Route<?> route)
     {
-        Ranges ranges = applyRanges(safeStore, executeAt);
-        if (ranges.isEmpty())
-            return WaitingOn.EMPTY;
-
-        return populateWaitingOn(safeStore, ranges, txnId, executeAt, partialDeps);
+        Ranges ranges = safeStore.ranges().allAt(executeWaitingAt);
+        Unseekables<?> executionParticipants = route.participants().slice(ranges);
+        WaitingOn.Update update = new WaitingOn.Update(ranges, executionParticipants, partialDeps);
+        return updateWaitingOn(safeStore, waitingId, executeWaitingAt, update, route.participants()).build();
     }
 
-    protected static <P> void visitWaitingOn(SafeCommandStore safeStore, TxnId txnId, Timestamp waitUntil, Deps waitOn, Timestamp executeAt, WaitingOnVisitor<P> visitor, P param)
+    protected static WaitingOn.Update updateWaitingOn(SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt, WaitingOn.Update update, Participants<?> participants)
     {
-        Ranges ranges = applyRanges(safeStore, executeAt);
-        if (ranges.isEmpty())
-            return;
+        CommandStore commandStore = safeStore.commandStore();
+        TxnId minWaitingOnTxnId = update.minWaitingOnTxnId();
+        if (minWaitingOnTxnId != null && commandStore.hasLocallyRedundantDependencies(update.minWaitingOnTxnId(), executeAt, participants))
+            safeStore.commandStore().removeRedundantDependencies(participants, update);
 
-        visitWaitingOn(safeStore, ranges, txnId, waitUntil, waitOn, visitor, param);
-    }
+        update.forEachWaitingOnCommit(safeStore, update, txnId, executeAt, (safeStore0, upd, id, exec, i) -> {
+            // TODO (expected): load read-only to reduce overhead; upgrade only if we need to remove listener
+            SafeCommand dep = safeStore0.ifLoadedAndInitialised(upd.deps.txnId(i));
+            if (dep == null || !dep.current().hasBeen(PreCommitted))
+                return;
+            updateWaitingOn(safeStore0, id, exec, upd, dep);
+        });
 
-    protected static WaitingOn populateWaitingOn(SafeCommandStore safeStore, Ranges ranges, TxnId waitingId, Timestamp executeAt, PartialDeps partialDeps)
-    {
-        WaitingOn.Update update = new WaitingOn.Update();
-        visitWaitingOn(safeStore, ranges, waitingId, executeAt, partialDeps, Commands::populateWaitingOn, update);
-        return update.build();
-    }
+        update.forEachWaitingOnApply(safeStore, update, txnId, executeAt, (store, upd, id, exec, i) -> {
+            SafeCommand dep = store.ifLoadedAndInitialised(upd.deps.txnId(i));
+            if (dep == null || !dep.current().hasBeen(PreCommitted))
+                return;
+            updateWaitingOn(store, id, exec, upd, dep);
+        });
 
-    public interface WaitingOnVisitor<P>
-    {
-        void visit(SafeCommandStore safeStore, TxnId waitingId, Timestamp executeAt, TxnId dependencyId, P param);
-    }
-
-    protected static <P> void visitWaitingOn(SafeCommandStore safeStore, Ranges ranges, TxnId waitingId, Timestamp waitUntil, Deps deps, WaitingOnVisitor<P> visitor, P param)
-    {
-        boolean isAffectedByBootstrap = safeStore.commandStore().isAffectedByBootstrap(deps);
-        if (!isAffectedByBootstrap)
-        {
-            deps.forEachUniqueTxnId(ranges, dependencyId -> visitor.visit(safeStore, waitingId, waitUntil, dependencyId, param));
-            return;
-        }
-
-        BitSet bits = new BitSet(Math.max(deps.keyDeps.txnIdCount(), deps.rangeDeps.txnIdCount()));
-        if (!deps.keyDeps.isEmpty())
-        {
-            SortedArrays.SortedArrayList<TxnId> dependencyIds = deps.keyDeps.txnIds();
-            // process each interval of TxnId we have a different incomplete range for in a batch,
-            safeStore.commandStore().forEachBootstrapRange(dependencyIds, (kdeps, bootstrapId, rs, start, end) -> {
-                // We do not need to depend on the bootstrap transaction for writes, as we have a timestamp store
-                // (so any write we perform will persist past the bootstrap completing).
-                // For most reads we can rely on safeToRead, but this is not the case for reads that depend on
-                // writes that started before our ExclusiveSyncPoint but execute afterwards.
-                // We must retain a dependency on these transactions.
-
-                rs = ranges.slice(rs, Minimal);
-                kdeps.forEach(rs, (bs, txnId, i) -> {
-                    if (i < end && i >= start)
-                        bs.set(i);
-                }, bits);
-            }, deps.keyDeps);
-            int i = -1;
-            while ((i = bits.nextSetBit(i + 1)) >= 0)
-                visitor.visit(safeStore, waitingId, waitUntil, dependencyIds.get(i), param);
-        }
-
-        if (!deps.rangeDeps.isEmpty())
-        {
-            bits.clear();
-            SortedArrays.SortedArrayList<TxnId> dependencyIds = deps.rangeDeps.txnIds();
-            safeStore.commandStore().forEachBootstrapRange(dependencyIds, (rdeps, bootstrapId, rs, start, end) -> {
-                rs = ranges.slice(rs, Minimal);
-                rdeps.forEach(rs, (bs, i) -> {
-                    if (i >= start && i < end)
-                        bs.set(i);
-                }, bits);
-            }, deps.rangeDeps);
-            int i = -1;
-            while ((i = bits.nextSetBit(i + 1)) >= 0)
-                visitor.visit(safeStore, waitingId, waitUntil, dependencyIds.get(i), param);
-        }
-    }
-
-    @Inline
-    private static void populateWaitingOn(SafeCommandStore safeStore, TxnId waitingId, Timestamp executeAt, TxnId dependencyId, WaitingOn.Update update)
-    {
-        SafeCommand dependencySafeCommand = safeStore.ifLoaded(dependencyId);
-        if (dependencySafeCommand == null)
-        {
-            update.addWaitingOnCommit(dependencyId);
-            safeStore.addAndInvokeListener(dependencyId, waitingId);
-        }
-        else
-        {
-            Command command = dependencySafeCommand.current();
-            switch (command.status())
-            {
-                default:
-                    throw new IllegalStateException();
-                case NotWitnessed:
-                case PreAccepted:
-                case Accepted:
-                case AcceptedInvalidate:
-                case PreCommitted:
-                    // we don't know when these dependencies will execute, and cannot execute until we do
-
-                    command = dependencySafeCommand.addListener(new Command.ProxyListener(waitingId));
-                    update.addWaitingOnCommit(command.txnId());
-                    break;
-                case Committed:
-                    // TODO (desired, efficiency): split into ReadyToRead and ReadyToWrite;
-                    //                             the distributed read can be performed as soon as those keys are ready,
-                    //                             and in parallel with any other reads. the client can even ACK immediately after;
-                    //                             only the write needs to be postponed until other in-progress reads complete
-                case ReadyToExecute:
-                case PreApplied:
-                    command = dependencySafeCommand.addListener(new Command.ProxyListener(waitingId));
-                    insertWaitingOn(waitingId, executeAt, update, command);
-                case Applied:
-                case Invalidated:
-                    break;
-            }
-        }
-    }
-
-    private static void insertWaitingOn(TxnId txnId, Timestamp executeAt, WaitingOn.Update update, Command dependencyId)
-    {
-        Invariants.checkState(dependencyId.hasBeen(Committed));
-        if (dependencyId.hasBeen(Invalidated))
-        {
-            logger.trace("{}: {} is invalidated. Do not insert.", txnId, dependencyId.txnId());
-        }
-        else if (dependencyId.executeAt().compareTo(executeAt) > 0)
-        {
-            // dependency cannot be a predecessor if it executes later
-            logger.trace("{}: {} executes after us. Do not insert.", txnId, dependencyId.txnId());
-        }
-        else if (dependencyId.hasBeen(Applied))
-        {
-            logger.trace("{}: {} has been applied. Do not insert.", txnId, dependencyId.txnId());
-        }
-        else
-        {
-            logger.trace("{}: adding {} to waiting on apply set.", txnId, dependencyId.txnId());
-            update.addWaitingOnApply(dependencyId.txnId(), dependencyId.executeAt());
-        }
+        return update;
     }
 
     /**
-     * @param safeDependency is either committed or invalidated
+     * @param dependencySafeCommand is either committed truncated, or invalidated
      * @return true iff {@code maybeExecute} might now have a different outcome
      */
-    private static boolean updateWaitingOn(SafeCommand dependencySafeCommand, WaitingOn.Update waitingOn, SafeCommand safeDependency)
+    private static boolean updateWaitingOn(SafeCommandStore safeStore, TxnId waitingId, Timestamp executeWaitingAt, WaitingOn.Update waitingOn, SafeCommand dependencySafeCommand)
     {
-        Command.Committed command = dependencySafeCommand.current().asCommitted();
-        Command dependency = safeDependency.current();
+        Command dependency = dependencySafeCommand.current();
         Invariants.checkState(dependency.hasBeen(PreCommitted));
-        if (dependency.hasBeen(Invalidated))
+        TxnId dependencyId = dependency.txnId();
+        if (dependency.is(Truncated))
         {
-            logger.trace("{}: {} is invalidated. Stop listening and removing from waiting on commit set.", command.txnId(), dependency.txnId());
-            safeDependency.removeListener(command.asListener());
-            waitingOn.removeWaitingOnCommit(dependency.txnId());
-            return true;
+            logger.trace("{}: {} is truncated. Stop listening and removing from waiting on commit set.", waitingId, dependencyId);
+            dependencySafeCommand.removeListener(new ProxyListener(waitingId));
+            return waitingOn.removeInvalidatedAppliedOrTruncated(dependencyId);
         }
-        else if (dependency.executeAt().compareTo(command.executeAt()) > 0)
+        else if (dependency.is(Invalidated))
+        {
+            logger.trace("{}: {} is invalidated. Stop listening and removing from waiting on commit set.", waitingId, dependencyId);
+            dependencySafeCommand.removeListener(new ProxyListener(waitingId));
+            return waitingOn.removeInvalidatedAppliedOrTruncated(dependencyId);
+        }
+        else if (dependency.executeAt().compareTo(executeWaitingAt) > 0 && !waitingId.rw().awaitsFutureDeps())
         {
             // dependency cannot be a predecessor if it executes later
-            logger.trace("{}: {} executes after us. Stop listening and removing from waiting on apply set.", command.txnId(), dependency.txnId());
-            waitingOn.removeWaitingOn(dependency.txnId(), dependency.executeAt());
-            safeDependency.removeListener(command.asListener());
-            return true;
+            logger.trace("{}: {} executes after us. Stop listening and removing from waiting on apply set.", waitingId, dependencyId);
+            dependencySafeCommand.removeListener(new ProxyListener(waitingId));
+            return waitingOn.removeWaitingOn(dependencyId);
         }
         else if (dependency.hasBeen(Applied))
         {
-            logger.trace("{}: {} has been applied. Stop listening and removing from waiting on apply set.", command.txnId(), dependency.txnId());
-            waitingOn.removeWaitingOn(dependency.txnId(), dependency.executeAt());
-            safeDependency.removeListener(command.asListener());
+            logger.trace("{}: {} has been applied. Stop listening and removing from waiting on apply set.", waitingId, dependencyId);
+            dependencySafeCommand.removeListener(new ProxyListener(waitingId));
+            return waitingOn.removeApplied(dependencyId, dependency.asCommitted().waitingOn());
+        }
+        else if (waitingOn.removeWaitingOnCommit(dependencyId))
+        {
+            logger.trace("{}: adding {} to waiting on apply set.", waitingId, dependencyId);
+            boolean addedWaitingOnApply = waitingOn.addWaitingOnApply(dependencyId);
+            Invariants.checkState(addedWaitingOnApply);
             return true;
         }
-        else if (command.isWaitingOnDependency())
+        else if (waitingOn.isWaitingOnApply(dependencyId))
         {
-            logger.trace("{}: adding {} to waiting on apply set.", command.txnId(), dependency.txnId());
-            waitingOn.addWaitingOnApply(dependency.txnId(), dependency.executeAt());
-            waitingOn.removeWaitingOnCommit(dependency.txnId());
+            return false;
+        }
+        else if (safeStore.isFullyPreBootstrap(dependency, waitingOn.deps.participants(dependency.txnId())))
+        {
+            // TODO (expected): erase or otherwise prevent from executing
             return false;
         }
         else
         {
-            throw new IllegalStateException();
+            throw new IllegalStateException("We have a dependency to wait on, but have already finished waiting");
         }
     }
 
-    static void updateDependencyAndMaybeExecute(SafeCommandStore safeStore, SafeCommand dependencySafeCommand, SafeCommand livePredecessor, boolean notifyWaitingOn)
+    static void updateDependencyAndMaybeExecute(SafeCommandStore safeStore, SafeCommand safeCommand, SafeCommand predecessor, boolean notifyWaitingOn)
     {
-        Command.Committed command = dependencySafeCommand.current().asCommitted();
+        Command.Committed command = safeCommand.current().asCommitted();
         if (command.hasBeen(Applied))
             return;
 
         WaitingOn.Update waitingOn = new WaitingOn.Update(command);
-        boolean attemptExecution = updateWaitingOn(dependencySafeCommand, waitingOn, livePredecessor);
-        command = dependencySafeCommand.updateWaitingOn(waitingOn);
-
-        if (attemptExecution)
-            maybeExecute(safeStore, dependencySafeCommand, progressShard(safeStore, command), false, notifyWaitingOn);
+        if (updateWaitingOn(safeStore, command.txnId(), command.executeAt(), waitingOn, predecessor))
+        {
+            safeCommand.updateWaitingOn(waitingOn);
+            maybeExecute(safeStore, safeCommand, false, notifyWaitingOn);
+        }
+        else
+        {
+            Command pred = predecessor.current();
+            if (pred.hasBeen(PreCommitted))
+            {
+                TxnId nextWaitingOn = command.waitingOn().nextWaitingOn();
+                if (nextWaitingOn != null && nextWaitingOn.equals(pred.txnId()))
+                    safeStore.progressLog().waiting(predecessor, LocalExecution.Applied, pred.route(), null);
+            }
+        }
     }
 
-    // TODO (now): check/move methods below
-    private static Command setDurability(SafeCommandStore safeStore, SafeCommand dependencySafeCommand, Durability durability, RoutingKey homeKey, @Nullable Timestamp executeAt)
+    public enum Cleanup
     {
-        Command command = dependencySafeCommand.current();
-        CommonAttributes attrs = updateHomeKey(safeStore, command.txnId(), command, homeKey);
+        NO(Uninitialised),
+        TRUNCATE_WITH_OUTCOME(TruncatedApplyWithOutcome),
+        TRUNCATE(TruncatedApply),
+        ERASE(Erased);
+
+        public final SaveStatus appliesIfNot;
+
+        Cleanup(SaveStatus appliesIfNot)
+        {
+            this.appliesIfNot = appliesIfNot;
+        }
+    }
+
+    // TODO (now): document and justify all calls
+    public static void setTruncatedApply(SafeCommandStore safeStore, SafeCommand safeCommand)
+    {
+        cleanup(safeStore, safeCommand, TRUNCATE, true);
+    }
+
+    public static void setErased(SafeCommandStore safeStore, SafeCommand safeCommand)
+    {
+        cleanup(safeStore, safeCommand, ERASE, true);
+    }
+
+    public static Command cleanup(SafeCommandStore safeStore, SafeCommand safeCommand, Cleanup cleanup, boolean notifyListeners)
+    {
+        Command command = safeCommand.current();
+
+        //   1) a command has been applied; or
+        //   2) has been coordinated but *will not* be applied (we just haven't witnessed the invalidation yet); or
+        //   3) a command is durably decided and this shard only hosts its home data, so no explicit truncation is necessary to remove it
+        // TODO (desired): consider if there are better invariants we can impose for undecided transactions, to verify they aren't later committed (should be detected already, but more is better)
+        // note that our invariant here is imperfectly applied to keep the code cleaner: we don't verify that the caller was safe to invoke if we don't already have a route in the command and we're only PreCommitted
+        Invariants.checkState(command.hasBeen(Applied) || !command.hasBeen(PreCommitted)
+                              || (command.route() == null || Infer.safeToCleanup(safeStore, command, command.route(), command.executeAt()) || safeStore.isFullyPreBootstrap(command, command.route().participants()))
+        , "Command %s could not be truncated", command);
+
+        Command result;
+        switch (cleanup)
+        {
+            default: throw new AssertionError("Unexpected status: " + cleanup);
+            case TRUNCATE_WITH_OUTCOME:
+                Invariants.checkArgument(!command.hasBeen(Truncated));
+                if (command.hasBeen(PreApplied))
+                {
+                    result = truncatedApplyWithOutcome(command.asExecuted());
+                    break;
+                }
+                // TODO (expected, consider): should we downgrade to no truncation in this case? Or are we stale?
+
+            case TRUNCATE:
+                Invariants.checkState(command.saveStatus().compareTo(TruncatedApply) < 0);
+                if (command.hasBeen(PreCommitted)) result = truncatedApply(command);
+                else result = erased(command); // TODO (expected): check if we are stale; if not, is erase anyway correct outcome?
+                break;
+
+            case ERASE:
+                Invariants.checkState(command.saveStatus().compareTo(Erased) < 0);
+                result = erased(command);
+                break;
+        }
+
+        safeCommand.set(result);
+        safeStore.progressLog().clear(safeCommand.txnId());
+        if (notifyListeners)
+            safeStore.notifyListeners(safeCommand, result, command.durableListeners(), safeCommand.transientListeners());
+        return result;
+    }
+
+    public static boolean cleanup(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, EpochSupplier toEpoch, Unseekables<?> maybeFullRoute)
+    {
+        Cleanup cleanup = shouldCleanup(safeStore, command, toEpoch, maybeFullRoute);
+        if (command.saveStatus().compareTo(cleanup.appliesIfNot) >= 0)
+            return false;
+
+        cleanup(safeStore, safeCommand, cleanup, true);
+        return true;
+    }
+
+    static Cleanup shouldCleanup(SafeCommandStore safeStore, Command command, EpochSupplier toEpoch, Unseekables<?> maybeFullRoute)
+    {
+        if (command.saveStatus() == Erased)
+            return NO; // once erased we no longer have executeAt, and may consider that a transaction is owned by us that should not be (as its txnId is an earlier epoch than we adopted a range)
+
+        Route<?> route = command.route();
+        if (!Route.isFullRoute(route))
+        {
+            if (command.known().hasFullRoute()) throw new IllegalStateException(command.saveStatus() + " should include full route, but only found " + route);
+            else if (Route.isFullRoute(maybeFullRoute)) route = Route.castToFullRoute(maybeFullRoute);
+            else return Cleanup.NO;
+        }
+
+        Timestamp executeAt = command.executeAt();
+        if (toEpoch == null || (executeAt != null && executeAt.epoch() > toEpoch.epoch()))
+            toEpoch = executeAt;
+
+        return shouldCleanup(command.txnId(), command.status(), command.durability(), toEpoch, route,
+                             safeStore.commandStore().redundantBefore(), safeStore.commandStore().durableBefore());
+    }
+
+    public static Cleanup shouldCleanup(TxnId txnId, Status status, Durability durability, EpochSupplier toEpoch, Route<?> route, RedundantBefore redundantBefore, DurableBefore durableBefore)
+    {
+        if (durableBefore.min(txnId) == Universal)
+        {
+            if (status.hasBeen(PreCommitted) && !status.hasBeen(Applied)) // TODO (expected): may be stale
+                throw new IllegalStateException("Loading universally-durable command that has been PreCommitted but not Applied");
+            return Cleanup.ERASE;
+        }
+
+        if (!Route.isFullRoute(route))
+            return NO;
+
+        // We first check if the command is redundant locally, i.e. whether it has been applied to all non-faulty replicas of the local shard
+        // If not, we don't want to truncate its state else we may make catching up for these other replicas much harder
+        RedundantStatus redundant = redundantBefore.status(txnId, toEpoch, route.participants());
+        switch (redundant)
+        {
+            default: throw new AssertionError();
+            case NOT_OWNED:
+                // TODO (expected): we can impose additional validations here IF we receive an epoch upper bound
+                // TODO (expected): we should be more robust to the presence/absence of executeAt
+                if (route.isParticipatingHomeKey() || redundantBefore.get(txnId, toEpoch, route.homeKey()) == NOT_OWNED)
+                    throw new IllegalStateException("Command " + txnId + " that is being loaded is not owned by this shard on route " + route);
+            case LIVE:
+            case PARTIALLY_PRE_BOOTSTRAP:
+            case PRE_BOOTSTRAP:
+                return NO;
+            case LOCALLY_REDUNDANT:
+                if (status.hasBeen(PreCommitted) && !status.hasBeen(Applied)) // TODO (required): may be stale
+                    throw new IllegalStateException("Loading redundant command that has been PreCommitted but not Applied");
+        }
+
+        Durability min = durableBefore.min(txnId, route);
+        switch (min)
+        {
+            default:
+            case Local:
+            case DurableOrInvalidated:
+                throw new AssertionError("Unexpected durability: " + min);
+            case NotDurable:
+                if (durability == Majority)
+                    return Cleanup.TRUNCATE;
+
+                return Cleanup.TRUNCATE_WITH_OUTCOME;
+
+            case Majority:
+                return Cleanup.TRUNCATE;
+
+            case Universal:
+                return Cleanup.ERASE;
+        }
+    }
+
+    // TODO (now): either ignore this message if we don't have a route, or else require FullRoute requiring route, or else require FullRoute
+    public static Command setDurability(SafeCommandStore safeStore, SafeCommand safeCommand, Durability durability, @Nullable Route<?> route, @Nullable Timestamp executeAt)
+    {
+        Command command = safeCommand.current();
+        if (command.is(Truncated))
+            return command;
+
+        if (command.durability().compareTo(durability) >= 0)
+            return command;
+
+        CommonAttributes attrs = route == null ? command : updateRoute(command, route);
         if (executeAt != null && command.status().hasBeen(Committed) && !command.asCommitted().executeAt().equals(executeAt))
             safeStore.agent().onInconsistentTimestamp(command, command.asCommitted().executeAt(), executeAt);
         attrs = attrs.mutable().durability(durability);
-        return dependencySafeCommand.updateAttributes(attrs);
+        command = safeCommand.updateAttributes(attrs);
+
+        if (cleanup(safeStore, safeCommand, command, null, route))
+            return safeCommand.current();
+
+        safeStore.progressLog().durable(command);
+        safeStore.notifyListeners(safeCommand);
+        return command;
     }
 
-    public static Command setDurability(SafeCommandStore safeStore, TxnId txnId, Durability durability, RoutingKey homeKey, @Nullable Timestamp executeAt)
+    public static Command setDurability(SafeCommandStore safeStore, SafeCommand safeCommand, Durability durability)
     {
-        return setDurability(safeStore, safeStore.command(txnId), durability, homeKey, executeAt);
+        return setDurability(safeStore, safeCommand, durability, null, null);
     }
 
-    private static TxnId firstWaitingOnCommit(Command command)
-    {
-        if (!command.hasBeen(Committed))
-            return null;
-
-        Command.Committed committed = command.asCommitted();
-        return committed.isWaitingOnCommit() ? committed.waitingOnCommit().first() : null;
-    }
-
-    private static TxnId firstWaitingOnApply(Command command, @Nullable TxnId ifExecutesBefore)
-    {
-        if (!command.hasBeen(Committed))
-            return null;
-
-        Command.Committed committed = command.asCommitted();
-        if (!committed.isWaitingOnApply())
-            return null;
-
-        Map.Entry<Timestamp, TxnId> first = committed.waitingOnApply().firstEntry();
-        if (ifExecutesBefore == null || first.getKey().compareTo(ifExecutesBefore) < 0)
-            return first.getValue();
-
-        return null;
-    }
-
-    // TODO (expected): this should integrate with LocalBarrier so that we do not need to register interest with every transaction
+    // TODO (expected): we should have a new SaveState that avoids us duplicating work that indicates we're WaitingToExecute;
+    //  this means that once we have begun visiting a transaction on behalf of some later transaction, we don't need to do so again.
     static class NotifyWaitingOn implements PreLoadContext, Consumer<SafeCommandStore>
     {
-        Known[] blockedUntil = new Known[4];
+        LocalExecution[] blockedUntil = new LocalExecution[4];
         TxnId[] txnIds = new TxnId[4];
         int depth;
 
         public NotifyWaitingOn(SafeCommand root)
         {
             txnIds[0] = root.txnId();
-            blockedUntil[0] = Known.Done;
+            blockedUntil[0] = LocalExecution.Applied;
         }
 
         @Override
         public void accept(SafeCommandStore safeStore)
         {
-            SafeCommand prevSafe = get(safeStore, depth - 1);
-            while (depth >= 0)
+            // first do a simple loop to skip over txns that have been truncated
+            SafeCommand prevSafe = ifInitialised(safeStore, depth - 1);
+            if (depth > 0 && (prevSafe == null || prevSafe.current().hasBeen(Truncated)))
             {
+                while (depth > 0 && (prevSafe == null || prevSafe.current().hasBeen(Truncated)))
+                    prevSafe = ifInitialised(safeStore, --depth - 1);
+            }
+            else
+            {
+                // we know we loaded cur, so if it's null it's either truncated or we haven't witnessed it and need to initialise;
+                // in this case use our predecessor's intersecting keys to decide which
+                SafeCommand curSafe = ifInitialised(safeStore, depth);
+                if (curSafe == null)
+                {
+                    if (prevSafe != null)
+                    {
+                        RedundantStatus redundantStatus = safeStore.commandStore().redundantBefore().status(txnIds[depth], prevSafe.current().executeAt(), prevSafe.current().partialDeps().participants(txnIds[depth]));
+                        switch (redundantStatus)
+                        {
+                            default: throw new AssertionError("Unexpected redundant status: " + redundantStatus);
+                            case NOT_OWNED: throw new AssertionError("Invalid state: waiting for execution of command that is not owned at the execution time");
+                            case LOCALLY_REDUNDANT:
+                            case PRE_BOOTSTRAP:
+                                removeRedundantDependencies(safeStore, prevSafe, txnIds[depth], redundantStatus == PRE_BOOTSTRAP);
+                                prevSafe = get(safeStore, --depth - 1);
+                                break;
+                            case LIVE:
+                            case PARTIALLY_PRE_BOOTSTRAP:
+                                initialise(safeStore, depth);
+                        }
+                    }
+                    else
+                    {
+                        do
+                        {
+                            if (--depth == -1)
+                                return; // the command must have been truncated
+                            curSafe = prevSafe;
+                            prevSafe = ifInitialised(safeStore, depth - 1);
+                        } while (curSafe == null);
+                    }
+                }
+            }
+
+            Invariants.checkState(depth == 0 || prevSafe != null);
+            loop: while (depth >= 0)
+            {
+                if (depth > 100000) // TODO (expected): dump more debug info to aid investigation
+                    throw new StackOverflowError("Exploring a probably-recursive or otherwise faulty dependency graph from " + txnIds[0]);
                 Command prev = prevSafe != null ? prevSafe.current() : null;
-                SafeCommand curSafe = ifLoaded(safeStore, depth);
+                SafeCommand curSafe = ifLoadedAndInitialised(safeStore, depth);
                 Command cur = curSafe != null ? curSafe.current() : null;
-                Known until = blockedUntil[depth];
+                LocalExecution until = blockedUntil[depth];
                 if (cur == null)
                 {
                     // need to load; schedule execution for later
@@ -885,7 +1047,7 @@ public class Commands
 
                 if (prev != null)
                 {
-                    if (cur.has(until) || (cur.hasBeen(PreCommitted) && cur.executeAt().compareTo(prev.executeAt()) > 0))
+                    if (cur.isAtLeast(until) || (cur.hasBeen(PreCommitted) && cur.executeAt().compareTo(prev.executeAt()) > 0 && !prev.txnId().rw().awaitsFutureDeps()))
                     {
                         updateDependencyAndMaybeExecute(safeStore, prevSafe, curSafe, false);
                         --depth;
@@ -893,57 +1055,101 @@ public class Commands
                         continue;
                     }
                 }
-                else if (cur.has(until))
+                else if (cur.isAtLeast(until))
                 {
-                    // we're done; have already applied
+                    // we're done; already applying
                     Invariants.checkState(depth == 0);
                     break;
                 }
 
-                TxnId directlyBlockedOnCommit = firstWaitingOnCommit(cur);
-                TxnId directlyBlockedOnApply = firstWaitingOnApply(cur, directlyBlockedOnCommit);
+                WaitingOn waitingOn = cur.hasBeen(Committed) ? cur.asCommitted().waitingOn() : WaitingOn.EMPTY;
+                TxnId directlyBlockedOnCommit;
+                TxnId directlyBlockedOnApply = waitingOn.nextWaitingOnApply();
                 if (directlyBlockedOnApply != null)
                 {
-                    push(directlyBlockedOnApply, Known.Done);
+                    // preferentially block on apply, as this probably saves us additional bookkeeping
+                    // by giving other dependencies time to complete
+                    push(directlyBlockedOnApply, LocalExecution.Applied);
+                    prevSafe = curSafe;
                 }
-                else if (directlyBlockedOnCommit != null)
+                else if ((directlyBlockedOnCommit = waitingOn.nextWaitingOnCommit()) != null)
                 {
-                    push(directlyBlockedOnCommit, ExecuteAtOnly);
+                    push(directlyBlockedOnCommit, LocalExecution.ReadyToExclude);
+                    prevSafe = curSafe;
                 }
                 else
                 {
-                    if (cur.hasBeen(Committed) && !cur.hasBeen(ReadyToExecute) && !cur.asCommitted().isWaitingOnDependency())
+                    if (cur.hasBeen(Committed) && !cur.is(ReadyToExecute) && cur.saveStatus() != Applying && !cur.asCommitted().isWaitingOnDependency())
                     {
-                        if (!maybeExecute(safeStore, curSafe, progressShard(safeStore, cur), false, false))
+                        if (!maybeExecute(safeStore, curSafe, false, false))
                             throw new AssertionError("Is able to Apply, but has not done so");
                         // loop and re-test the command's status; we may still want to notify blocking, esp. if not homeShard
                         continue;
                     }
 
-                    Unseekables<?, ?> someKeys = cur.maxUnseekables();
-                    if (someKeys == null && prev != null) someKeys = prev.partialDeps().someUnseekables(cur.txnId());
-                    Invariants.checkState(someKeys != null);
-                    logger.trace("{} blocked on {} until {}", txnIds[0], cur.txnId(), until);
-                    safeStore.progressLog().waiting(cur.txnId(), until, someKeys);
-                    return;
+                    Timestamp executeAt = prev == null ? cur.executeAt() : prev.executeAt();
+                    Participants<?> participants = prev != null // TODO (desired): slightly costly to invert a large partialDeps collection
+                                                   ? prev.partialDeps().participants(cur.txnId()) // we do want to limit to the intersection of keys with the waiting transaction
+                                                   : cur.route().participants(); // no need to slice to execution ranges, as implicitly done for us by RedundantBefore
+
+                    RedundantStatus redundantStatus = safeStore.commandStore().redundantBefore().status(cur.txnId(), executeAt, participants);
+                    switch (redundantStatus)
+                    {
+                        default: throw new AssertionError("Unknown redundant status: " + redundantStatus);
+                        case NOT_OWNED: throw new AssertionError("Invalid state: waiting for execution of command that is not owned at the execution time");
+                        case LIVE:
+                        case PARTIALLY_PRE_BOOTSTRAP:
+                            logger.trace("{} blocked on {} until {}", txnIds[0], cur.txnId(), until);
+                            safeStore.progressLog().waiting(curSafe, until, null, participants);
+                            break loop;
+
+                        case PRE_BOOTSTRAP:
+                        case LOCALLY_REDUNDANT:
+                            Invariants.checkState(cur.hasBeen(Applied) || !cur.hasBeen(PreCommitted) || redundantStatus == PRE_BOOTSTRAP);
+                            if (prev == null)
+                                return;
+
+                            curSafe.removeListener(prev.asListener());
+
+                            // we've been applied, invalidated, or are no longer relevant
+                            if (cur.hasBeen(Applied)) removeInvalidatedAppliedOrTruncatedDependency(prevSafe, cur.txnId());
+                            else removeRedundantDependencies(safeStore, prevSafe, cur.txnId(), redundantStatus == PRE_BOOTSTRAP);
+
+                            --depth;
+                            prevSafe = get(safeStore, depth - 1);
+                    }
                 }
-                prevSafe = curSafe;
             }
+            for (int i = 1 ; i <= depth ; ++i)
+                get(safeStore, i).addListener(get(safeStore, i - 1).current().asListener());
         }
 
-        private SafeCommand ifLoaded(SafeCommandStore safeStore, int i)
+        private SafeCommand ifInitialised(SafeCommandStore safeStore, int i)
         {
             if (i < 0) return null;
-            return safeStore.ifLoaded(txnIds[i]);
+            return safeStore.ifInitialised(txnIds[i]);
+        }
+
+        private SafeCommand ifLoadedAndInitialised(SafeCommandStore safeStore, int i)
+        {
+            if (i < 0) return null;
+            return safeStore.ifLoadedAndInitialised(txnIds[i]);
         }
 
         private SafeCommand get(SafeCommandStore safeStore, int i)
         {
             if (i < 0) return null;
-            return safeStore.command(txnIds[i]);
+            SafeCommand result = safeStore.ifInitialised(txnIds[i]);
+            Invariants.checkState(result != null);
+            return result;
         }
 
-        void push(TxnId by, Known until)
+        private SafeCommand initialise(SafeCommandStore safeStore, int i)
+        {
+            return safeStore.get(txnIds[i]);
+        }
+
+        void push(TxnId by, LocalExecution until)
         {
             if (++depth == txnIds.length)
             {
@@ -965,19 +1171,42 @@ public class Commands
         {
             return Arrays.asList(txnIds).subList(1, depth + 1);
         }
-
-        @Override
-        public Seekables<?, ?> keys()
-        {
-            return Keys.EMPTY;
-        }
     }
 
-    public static Command updateHomeKey(SafeCommandStore safeStore, SafeCommand dependencySafeCommand, RoutingKey homeKey)
+    static Command removeInvalidatedAppliedOrTruncatedDependency(SafeCommand safeCommand, TxnId redundant)
     {
-        Command command = dependencySafeCommand.current();
-        CommonAttributes attrs = updateHomeKey(safeStore, command.txnId(), command, homeKey);
-        return dependencySafeCommand.updateAttributes(attrs);
+        Command.Committed current = safeCommand.current().asCommitted();
+        WaitingOn.Update update = new WaitingOn.Update(current.waitingOn);
+        update.removeInvalidatedAppliedOrTruncated(redundant);
+        return safeCommand.updateWaitingOn(update);
+    }
+
+    static Command removeRedundantDependencies(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId redundant, boolean isPreBootstrap)
+    {
+        CommandStore commandStore = safeStore.commandStore();
+        Command.Committed current = safeCommand.current().asCommitted();
+        WaitingOn.Update update = new WaitingOn.Update(current.waitingOn);
+        TxnId minWaitingOnTxnId = update.minWaitingOnTxnId();
+        if (minWaitingOnTxnId != null && commandStore.hasLocallyRedundantDependencies(update.minWaitingOnTxnId(), current.executeAt(), current.route().participants()))
+            safeStore.commandStore().removeRedundantDependencies(current.route().participants(), update);
+
+        if (isPreBootstrap) update.removeWaitingOn(redundant); // above operation not guaranteed to remove all redundant dependencies; transaction may
+        else update.removeInvalidatedAppliedOrTruncated(redundant);
+        return safeCommand.updateWaitingOn(update);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static Command informHome(SafeCommandStore safeStore, SafeCommand safeCommand, Route<?> someRoute)
+    {
+        Command command = safeCommand.current();
+        Invariants.checkState(owns(safeStore, command.txnId().epoch(), someRoute.homeKey()));
+        // TODO (expected): tighten up definition of what we know about a Route (pack it into Known) and whether we've been witnessed to decide our action here
+        if (command.hasBeen(PreAccepted))
+            return command;
+
+        Command result = safeCommand.updateAttributes(command.mutable().route(Route.merge((Route)someRoute, command.route())));
+        safeStore.progressLog().unwitnessed(safeCommand.txnId(), Home);
+        return result;
     }
 
     /**
@@ -989,95 +1218,38 @@ public class Commands
      * Note that for ProgressLog purposes the "home shard" is the shard as of txnId.epoch.
      * For recovery purposes the "home shard" is as of txnId.epoch until Committed, and executeAt.epoch once Executed
      */
-    public static CommonAttributes updateHomeKey(SafeCommandStore safeStore, TxnId txnId, CommonAttributes attrs, RoutingKey homeKey)
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static CommonAttributes updateRoute(Command command, Route<?> route)
     {
-        if (attrs.homeKey() == null)
-        {
-            attrs = attrs.mutable().homeKey(homeKey);
-            // TODO (low priority, safety): if we're processed on a node that does not know the latest epoch,
-            //      do we guarantee the home key calculation is unchanged since the prior epoch?
-            if (attrs.progressKey() == null && owns(safeStore, txnId.epoch(), homeKey))
-                attrs = attrs.mutable().progressKey(homeKey);
-        }
-        else if (!attrs.homeKey().equals(homeKey))
-        {
-            throw new IllegalStateException();
-        }
-        return attrs;
+        if (command.route() == null || !command.route().containsAll(route))
+            return command.mutable().route(Route.merge((Route)route, command.route()));
+
+        return command;
     }
 
-    private static CommonAttributes updateHomeAndProgressKeys(SafeCommandStore safeStore, TxnId txnId, CommonAttributes attrs, Route<?> route, @Nullable RoutingKey progressKey, Ranges coordinateRanges)
+    private static ProgressShard progressShard(Route<?> route, @Nullable RoutingKey progressKey, Ranges coordinates)
     {
-        attrs = updateHomeKey(safeStore, txnId, attrs, route.homeKey());
-        if (progressKey == null || progressKey == NO_PROGRESS_KEY)
-        {
-            if (attrs.progressKey() == null)
-                attrs = attrs.mutable().progressKey(NO_PROGRESS_KEY);
-            return attrs;
-        }
-        if (attrs.progressKey() == null) attrs = attrs.mutable().progressKey(progressKey);
-        else if (!attrs.progressKey().equals(progressKey))
-            throw new AssertionError();
-        return attrs;
-    }
-
-    private static CommonAttributes updateHomeAndProgressKeys(SafeCommandStore safeStore, TxnId txnId, CommonAttributes attrs, Route<?> route, Ranges coordinateRanges)
-    {
-        if (attrs.progressKey() == null)
-            return attrs;
-
-        return updateHomeAndProgressKeys(safeStore, txnId, attrs, route, attrs.progressKey(), coordinateRanges);
-    }
-
-    private static ProgressShard progressShard(CommonAttributes attrs, @Nullable RoutingKey progressKey, Ranges coordinateRanges)
-    {
-        if (progressKey == null || progressKey == NO_PROGRESS_KEY)
-            return No;
-
-        if (!coordinateRanges.contains(progressKey))
-            return No;
-
-        return progressKey.equals(attrs.homeKey()) ? Home : Local;
-    }
-
-    private static ProgressShard progressShard(CommonAttributes attrs, Ranges coordinateRanges)
-    {
-        if (attrs.progressKey() == null)
-            return Unsure;
-
-        return progressShard(attrs, attrs.progressKey(), coordinateRanges);
-    }
-
-    private static ProgressShard progressShard(SafeCommandStore safeStore, Command command)
-    {
-        RoutingKey progressKey = command.progressKey();
         if (progressKey == null)
-            return Unsure;
-
-        if (progressKey == noProgressKey())
             return No;
 
-        Ranges coordinateRanges = safeStore.ranges().coordinates(command.txnId());
-        if (!coordinateRanges.contains(progressKey))
+        if (!coordinates.contains(progressKey))
             return No;
 
-        return progressKey.equals(command.homeKey()) ? Home : Local;
+        return progressKey.equals(route.homeKey()) ? Home : Local;
     }
 
     enum EnsureAction { Ignore, Check, Add, TrySet, Set }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private static CommonAttributes set(SafeCommandStore safeStore, Command command, CommonAttributes attrs,
                                         Ranges existingRanges, Ranges additionalRanges, ProgressShard shard, Route<?> route,
                                         @Nullable PartialTxn partialTxn, EnsureAction ensurePartialTxn,
                                         @Nullable PartialDeps partialDeps, EnsureAction ensurePartialDeps)
     {
-        Invariants.checkState(attrs.progressKey() != null);
+        Invariants.checkState(shard != Unsure);
         Ranges allRanges = existingRanges.with(additionalRanges);
 
-        if (shard.isHome() || shard.isProgress())
-            attrs = attrs.mutable().route(Route.merge(attrs.route(), (Route)route));
-        else
-            attrs = attrs.mutable().route(route.slice(allRanges));
+        attrs = attrs.mutable().route(Route.merge(attrs.route(), (Route)route));
 
         // TODO (soon): stop round-robin hashing; partition only on ranges
         switch (ensurePartialTxn)
@@ -1091,7 +1263,8 @@ public class Commands
                     partialTxn = partialTxn.slice(allRanges, shard.isHome());
                     if (!command.txnId().rw().isLocal())
                     {
-                        Routables.foldlMissing((Seekables)partialTxn.keys(), attrs.partialTxn().keys(), (keyOrRange, p, v, i) -> {
+                        Invariants.checkState(attrs.partialTxn().covers(existingRanges));
+                        Routables.foldl(partialTxn.keys(), additionalRanges, (keyOrRange, p, v, i) -> {
                             // TODO (expected, efficiency): we may register the same ranges more than once
                             safeStore.register(keyOrRange, allRanges, command);
                             return v;
@@ -1103,7 +1276,8 @@ public class Commands
 
             case Set:
             case TrySet:
-                attrs = attrs.mutable().partialTxn(partialTxn = partialTxn.slice(allRanges, shard.isHome()));
+                // TODO (expected): only includeQuery if shard.isHome(); this affects state eviction and is low priority given size in C*
+                attrs = attrs.mutable().partialTxn(partialTxn = partialTxn.slice(allRanges, true));
                 // TODO (expected, efficiency): we may register the same ranges more than once
                 // TODO (desirable, efficiency): no need to register on PreAccept if already Accepted
                 if (!command.txnId().rw().isLocal())
@@ -1144,34 +1318,22 @@ public class Commands
             return false;
 
         // first validate route
-        if (shard.isHome())
+        switch (ensureRoute)
         {
-            switch (ensureRoute)
-            {
-                default: throw new AssertionError();
-                case Check:
-                    if (!isFullRoute(attrs.route()) && !isFullRoute(route))
-                        return false;
-                case Ignore:
-                    break;
-                case Add:
-                case Set:
-                    if (!isFullRoute(route))
-                        throw new IllegalArgumentException("Incomplete route (" + route + ") sent to home shard");
-                    break;
-                case TrySet:
-                    if (!isFullRoute(route))
-                        return false;
-            }
-        }
-        else
-        {
-            // failing any of these tests is always an illegal state
-            if (!route.covers(existingRanges))
-                return false;
-
-            if (existingRanges != additionalRanges && !route.covers(additionalRanges))
-                throw new IllegalArgumentException("Incomplete route (" + route + ") provided; does not cover " + additionalRanges);
+            default: throw new AssertionError("Unexpected action: " + ensureRoute);
+            case Check:
+                if (!isFullRoute(attrs.route()) && !isFullRoute(route))
+                    return false;
+            case Ignore:
+                break;
+            case Add:
+            case Set:
+                if (!isFullRoute(route))
+                    throw new IllegalArgumentException("Incomplete route (" + route + ") sent to home shard");
+                break;
+            case TrySet:
+                if (!isFullRoute(route))
+                    return false;
         }
 
         // invalid to Add deps to Accepted or AcceptedInvalidate statuses, as Committed deps are not equivalent
@@ -1183,14 +1345,8 @@ public class Commands
         if (!validate(ensurePartialTxn, existingRanges, additionalRanges, covers(attrs.partialTxn()), covers(partialTxn), "txn", partialTxn))
             return false;
 
-        if (partialTxn != null && attrs.txnId().rw() != null && !attrs.txnId().rw().equals(partialTxn.kind()))
-            throw new IllegalArgumentException("Transaction has different kind to its TxnId");
-
-        if (shard.isHome() && ensurePartialTxn != Ignore)
-        {
-            if (!hasQuery(attrs.partialTxn()) && !hasQuery(partialTxn))
-                throw new IllegalStateException();
-        }
+        Invariants.checkState(partialTxn == null || attrs.txnId().rw() == null || attrs.txnId().rw().equals(partialTxn.kind()), "Transaction has different kind to its TxnId");
+        Invariants.checkState(!shard.isHome() || ensurePartialTxn == Ignore || hasQuery(attrs.partialTxn()) || hasQuery(partialTxn), "Home transaction should include query");
 
         return validate(ensurePartialDeps, existingRanges, additionalRanges, covers(attrs.partialDeps()), covers(partialDeps), "deps", partialDeps);
     }
@@ -1201,7 +1357,7 @@ public class Commands
     {
         switch (action)
         {
-            default: throw new IllegalStateException();
+            default: throw new IllegalStateException("Unexpected action: " + action);
             case Ignore:
                 break;
 
@@ -1239,7 +1395,7 @@ public class Commands
                         if (action == Check)
                             return false;
 
-                        throw new IllegalArgumentException("Missing additional " + kind + "; existing does not cover " + additionalRanges.difference(existingRanges));
+                        throw new IllegalArgumentException("Missing additional " + kind + "; existing does not cover " + additionalRanges.subtract(existingRanges));
                     }
                 }
                 else if (existing != null)
@@ -1251,7 +1407,7 @@ public class Commands
                         if (action == Check)
                             return false;
 
-                        throw new IllegalArgumentException("Incomplete additional " + kind + " (" + obj + ") provided; does not cover " + additionalRanges.difference(existingRanges));
+                        throw new IllegalArgumentException("Incomplete additional " + kind + " (" + obj + ") provided; does not cover " + additionalRanges.subtract(existingRanges));
                     }
                 }
                 else
@@ -1264,7 +1420,7 @@ public class Commands
                         if (action == Check)
                             return false;
 
-                        throw new IllegalArgumentException("Incomplete additional " + kind + " (" + obj + ") provided; does not cover " + additionalRanges.difference(existingRanges));
+                        throw new IllegalArgumentException("Incomplete additional " + kind + " (" + obj + ") provided; does not cover " + additionalRanges.subtract(existingRanges));
                     }
                 }
                 break;
@@ -1272,23 +1428,4 @@ public class Commands
 
         return true;
     }
-
-    // TODO (low priority, API): this is an ugly hack, need to encode progress/homeKey/Route state combinations much more clearly
-    //                           (perhaps introduce encapsulating class representing each possible arrangement)
-    static class NoProgressKey implements RoutingKey
-    {
-        @Override
-        public int compareTo(@Nonnull RoutableKey that)
-        {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public Range asRange()
-        {
-            throw new UnsupportedOperationException();
-        }
-    }
-
-    private static final NoProgressKey NO_PROGRESS_KEY = new NoProgressKey();
 }

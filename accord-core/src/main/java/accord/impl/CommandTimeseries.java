@@ -44,8 +44,7 @@ import static accord.utils.Utils.ensureSortedMutable;
 
 public class CommandTimeseries<D>
 {
-    public enum TestTimestamp
-    {BEFORE, AFTER}
+    public enum TestTimestamp { BEFORE, AFTER }
 
     private final Seekable keyOrRange;
     protected final CommandLoader<D> loader;
@@ -104,6 +103,11 @@ public class CommandTimeseries<D>
         return commands.isEmpty() ? Timestamp.NONE : commands.keySet().last();
     }
 
+    public Timestamp minTimestamp()
+    {
+        return commands.isEmpty() ? Timestamp.NONE : commands.keySet().first();
+    }
+
     /**
      * All commands before/after (exclusive of) the given timestamp
      * <p>
@@ -137,6 +141,12 @@ public class CommandTimeseries<D>
                 break;
         }
         return initialValue;
+    }
+
+    public Timestamp maxExecuteAtBefore(Timestamp before)
+    {
+        return commands.headMap(before).values().stream().map(loader::executeAt)
+                       .filter(Objects::nonNull).reduce(Timestamp::max).orElse(before);
     }
 
     Stream<TxnId> between(Timestamp min, Timestamp max, Predicate<Status> statusPredicate)
@@ -218,6 +228,13 @@ public class CommandTimeseries<D>
         {
             commands = ensureSortedMutable(commands);
             commands.remove(timestamp);
+            return this;
+        }
+
+        public Update<D> removeBefore(Timestamp timestamp)
+        {
+            commands = ensureSortedMutable(commands);
+            commands.headMap(timestamp, false).clear();
             return this;
         }
 

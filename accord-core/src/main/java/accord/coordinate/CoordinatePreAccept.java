@@ -19,12 +19,15 @@
 package accord.coordinate;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
 
 import accord.coordinate.tracking.FastPathTracker;
 import accord.coordinate.tracking.QuorumTracker;
+import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Callback;
@@ -86,6 +89,7 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
             CoordinatePreAccept.this.onCallbackFailure(from, failure);
         }
 
+        @Override
         public void onSuccess(Id from, PreAcceptReply reply)
         {
             synchronized (CoordinatePreAccept.this)
@@ -119,14 +123,20 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
     private final List<PreAcceptOk> successes;
     private boolean initialPreAcceptIsDone;
     private ExtraPreAccept extraPreAccept;
+    private Map<Id, Object> debug = Invariants.debug() ? new LinkedHashMap<>() : null;
 
     CoordinatePreAccept(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
+    {
+        this(node, txnId, txn, route, node.topology().withUnsyncedEpochs(route, txnId, txnId));
+    }
+
+    CoordinatePreAccept(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Topologies topologies)
     {
         this.node = node;
         this.txnId = txnId;
         this.txn = txn;
         this.route = route;
-        topologies = node.topology().withUnsyncedEpochs(route, txnId, txnId);
+        this.topologies = topologies;
         this.tracker = new FastPathTracker(topologies);
         this.successes = new ArrayList<>(topologies.estimateUniqueNodes());
     }
@@ -140,13 +150,15 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
     {
         // TODO (desired, efficiency): consider sending only to electorate of most recent topology (as only these PreAccept votes matter)
         // note that we must send to all replicas of old topology, as electorate may not be reachable
-        node.send(nodes, to -> new PreAccept(to, topologies, txnId, txn, route),
-                  node.commandStores().select(route.homeKey()), callback);
+        CommandStore commandStore = CommandStore.maybeCurrent();
+        if (commandStore == null) commandStore = node.commandStores().select(route.homeKey());
+        node.send(nodes, to -> new PreAccept(to, topologies, txnId, txn, route), commandStore, callback);
     }
 
     @Override
     public synchronized void onFailure(Id from, Throwable failure)
     {
+        if (debug != null) debug.putIfAbsent(from, failure);
         if (initialPreAcceptIsDone)
             return;
 
@@ -173,8 +185,10 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
         tryFailure(failure);
     }
 
+    @Override
     public synchronized void onSuccess(Id from, PreAcceptReply reply)
     {
+        if (debug != null) debug.putIfAbsent(from, reply);
         if (initialPreAcceptIsDone)
             return;
 
@@ -194,6 +208,7 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
         }
     }
 
+    @Override
     public void setFailure(Throwable failure)
     {
         Invariants.checkState(!initialPreAcceptIsDone || (extraPreAccept != null && !extraPreAccept.extraPreAcceptIsDone));
@@ -227,22 +242,19 @@ abstract class CoordinatePreAccept<T> extends SettableResult<T> implements Callb
         // TODO (desired, efficiency): check if we have already have a valid quorum for the future epoch
         //  (noting that nodes may have adopted new ranges, in which case they should be discounted, and quorums may have changed shape)
         node.withEpoch(executeAt.epoch(), () -> {
-            synchronized (CoordinatePreAccept.this)
-            {
-                topologies = node.topology().withUnsyncedEpochs(route, txnId.epoch(), executeAt.epoch());
-                boolean equivalent = topologies.oldestEpoch() <= prevTopologies.currentEpoch();
-                for (long epoch = topologies.currentEpoch() ; equivalent && epoch > prevTopologies.currentEpoch() ; --epoch)
-                    equivalent = topologies.forEpoch(epoch).shards().equals(prevTopologies.current().shards());
+            topologies = node.topology().withUnsyncedEpochs(route, txnId.epoch(), executeAt.epoch());
+            boolean equivalent = topologies.oldestEpoch() <= prevTopologies.currentEpoch();
+            for (long epoch = topologies.currentEpoch() ; equivalent && epoch > prevTopologies.currentEpoch() ; --epoch)
+                equivalent = topologies.forEpoch(epoch).shards().equals(prevTopologies.current().shards());
 
-                if (equivalent)
-                {
-                    onPreAccepted(topologies, executeAt, successes);
-                }
-                else
-                {
-                    extraPreAccept = new ExtraPreAccept(prevTopologies.currentEpoch() + 1, executeAt.epoch());
-                    extraPreAccept.start();
-                }
+            if (equivalent)
+            {
+                onPreAccepted(topologies, executeAt, successes);
+            }
+            else
+            {
+                extraPreAccept = new ExtraPreAccept(prevTopologies.currentEpoch() + 1, executeAt.epoch());
+                extraPreAccept.start();
             }
         });
     }

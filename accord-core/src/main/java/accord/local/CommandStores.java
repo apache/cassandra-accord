@@ -18,22 +18,6 @@
 
 package accord.local;
 
-import accord.api.*;
-import accord.api.ConfigurationService.EpochReady;
-import accord.primitives.*;
-import accord.api.RoutingKey;
-import accord.topology.Topology;
-import accord.utils.MapReduce;
-import accord.utils.MapReduceConsume;
-
-import com.google.common.annotations.VisibleForTesting;
-
-import accord.utils.RandomSource;
-import org.agrona.collections.Hashing;
-import org.agrona.collections.Int2ObjectHashMap;
-import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncChains;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -45,7 +29,32 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import com.google.common.annotations.VisibleForTesting;
+
+import accord.api.Agent;
+import accord.api.ConfigurationService.EpochReady;
+import accord.api.DataStore;
+import accord.api.Key;
+import accord.api.ProgressLog;
+import accord.api.RoutingKey;
+import accord.local.CommandStore.EpochUpdateHolder;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.Routables;
+import accord.primitives.Route;
+import accord.primitives.RoutingKeys;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.topology.Topology;
+import accord.utils.Invariants;
+import accord.utils.MapReduce;
+import accord.utils.MapReduceConsume;
+import accord.utils.RandomSource;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 import javax.annotation.Nonnull;
+import org.agrona.collections.Hashing;
+import org.agrona.collections.Int2ObjectHashMap;
 
 import static accord.api.ConfigurationService.EpochReady.done;
 import static accord.local.PreLoadContext.empty;
@@ -87,47 +96,34 @@ public abstract class CommandStores
             this.shardFactory = shardFactory;
         }
 
-        CommandStore create(int id, RangesForEpochHolder rangesForEpoch)
+        CommandStore create(int id, EpochUpdateHolder rangesForEpoch)
         {
             return shardFactory.create(id, time, agent, this.store, progressLogFactory, rangesForEpoch);
         }
     }
 
-    public static class RangesForEpochHolder
-    {
-        // no need for safe publication; RangesForEpoch members are final, and will be guarded by other synchronization actions
-        protected RangesForEpoch current;
-
-        /**
-         * This is updated asynchronously, so should only be fetched between executing tasks;
-         * otherwise the contents may differ between invocations for the same task.
-         * @return the current RangesForEpoch
-         */
-        public RangesForEpoch get() { return current; }
-    }
-
     static class ShardHolder
     {
         final CommandStore store;
-        final RangesForEpochHolder ranges;
+        RangesForEpoch ranges;
 
-        ShardHolder(CommandStore store, RangesForEpochHolder ranges)
+        ShardHolder(CommandStore store)
         {
             this.store = store;
-            this.ranges = ranges;
         }
 
         RangesForEpoch ranges()
         {
-            return ranges.current;
+            return ranges;
         }
 
         public String toString()
         {
-            return store.id() + " " + ranges.current;
+            return store.id() + " " + ranges;
         }
     }
 
+    // TODO (now): split into deterministic and non-deterministic methods; ensure we only use deterministic methods during commands execution
     public static class RangesForEpoch
     {
         final long[] epochs;
@@ -148,12 +144,15 @@ public abstract class CommandStores
             this.store = store;
         }
 
-        public RangesForEpoch withRanges(long epoch, Ranges ranges)
+        public RangesForEpoch withRanges(long epoch, Ranges latestRanges)
         {
-            long[] newEpochs = Arrays.copyOf(this.epochs, this.epochs.length + 1);
-            Ranges[] newRanges = Arrays.copyOf(this.ranges, this.ranges.length + 1);
-            newEpochs[this.epochs.length] = epoch;
-            newRanges[this.ranges.length] = ranges;
+            Invariants.checkArgument(epochs.length == 0 || epochs[epochs.length - 1] <= epoch);
+            int newLength = epochs.length == 0 || epochs[epochs.length - 1] < epoch ? epochs.length + 1 : epochs.length;
+            long[] newEpochs = Arrays.copyOf(epochs, newLength);
+            Ranges[] newRanges = Arrays.copyOf(ranges, newLength);
+            newEpochs[newLength - 1] = epoch;
+            newRanges[newLength - 1] = latestRanges;
+            Invariants.checkState(newEpochs[newLength - 1] == 0 || newEpochs[newLength - 1] == epoch, "Attempted to override historic epoch %d with %d", newEpochs[newLength - 1], epoch);
             return new RangesForEpoch(newEpochs, newRanges, store);
         }
 
@@ -169,7 +168,7 @@ public abstract class CommandStores
 
         public @Nonnull Ranges unsafeToReadAt(Timestamp at)
         {
-            return allAt(at).difference(store.safeToReadAt(at));
+            return allAt(at).subtract(store.safeToReadAt(at));
         }
 
         public @Nonnull Ranges allAt(Timestamp at)
@@ -203,53 +202,43 @@ public abstract class CommandStores
             if (fromInclusive == toInclusive)
                 return allAt(fromInclusive);
 
-            int i = Arrays.binarySearch(epochs, fromInclusive);
-            if (i < 0) i = -2 - i;
-            if (i < 0) i = 0;
-
-            int j = Arrays.binarySearch(epochs, toInclusive);
-            if (j < 0) j = -2 - j;
-            if (i > j) return Ranges.EMPTY;
-
-            Ranges result = ranges[i++];
-            while (i <= j)
-                result = result.with(ranges[i++]);
-
-            return result;
-        }
-
-        public @Nonnull Ranges allSince(long fromInclusive)
-        {
-            int i = Arrays.binarySearch(epochs, fromInclusive);
-            if (i < 0) i = Math.max(0, -2 -i);
-
-            Ranges result = ranges[i++];
-            while (i < ranges.length)
-                result = ranges[i++].with(result);
-
-            return result;
+            return allInternal(Math.max(0, floorIndex(fromInclusive)), 1 + floorIndex(toInclusive));
         }
 
         public @Nonnull Ranges all()
         {
-            if (ranges.length == 0)
-                return Ranges.EMPTY;
-
-            Ranges result = ranges[0];
-            for (int i = 1; i < ranges.length ; ++i)
-                result = ranges[i].with(result);
-
-            return result;
+            return allInternal(0, ranges.length);
         }
 
         public @Nonnull Ranges allBefore(long toExclusive)
         {
-            int limit = Arrays.binarySearch(epochs, toExclusive);
-            if (limit < 0) limit = Math.max(0, -1 -limit);
-            if (limit == 0) return Ranges.EMPTY;
+            return allInternal(0, ceilIndex(toExclusive));
+        }
 
-            Ranges result = ranges[0];
-            for (int i = 1 ; i < limit; ++i)
+        public @Nonnull Ranges allUntil(long toInclusive)
+        {
+            return allInternal(0, 1 + floorIndex(toInclusive));
+        }
+
+        private int floorIndex(long epoch)
+        {
+            int i = Arrays.binarySearch(epochs, epoch);
+            if (i < 0) i = -2 - i;
+            return i;
+        }
+
+        private int ceilIndex(long epoch)
+        {
+            int i = Arrays.binarySearch(epochs, epoch);
+            if (i < 0) i = -1 - i;
+            return i;
+        }
+
+        private @Nonnull Ranges allInternal(int startIndex, int endIndex)
+        {
+            if (startIndex >= endIndex) return Ranges.EMPTY;
+            Ranges result = ranges[startIndex];
+            for (int i = startIndex + 1 ; i < endIndex; ++i)
                 result = ranges[i].with(result);
 
             return result;
@@ -258,7 +247,7 @@ public abstract class CommandStores
         public @Nonnull Ranges applyRanges(Timestamp executeAt)
         {
             // Note: we COULD slice to only those ranges we haven't bootstrapped, but no harm redundantly writing
-            return allSince(executeAt.epoch());
+            return allAt(executeAt.epoch());
         }
 
         public @Nonnull Ranges currentRanges()
@@ -340,9 +329,17 @@ public abstract class CommandStores
             return new TopologyUpdate(prev, () -> done(epoch));
 
         Topology newLocalTopology = newTopology.forNode(supplier.time.id()).trim();
-        Ranges added = newLocalTopology.ranges().difference(prev.local.ranges());
-        Ranges subtracted = prev.local.ranges().difference(newLocalTopology.ranges());
+        Ranges addedGlobal = newTopology.ranges().subtract(prev.global.ranges());
+        if (!addedGlobal.isEmpty())
+        {
+            for (ShardHolder shard : prev.shards)
+            {
+                shard.store.epochUpdateHolder.updateGlobal(addedGlobal);
+            }
+        }
 
+        Ranges added = newLocalTopology.ranges().subtract(prev.local.ranges());
+        Ranges subtracted = prev.local.ranges().subtract(newLocalTopology.ranges());
         if (added.isEmpty() && subtracted.isEmpty())
         {
             Supplier<EpochReady> epochReady = () -> done(epoch);
@@ -357,11 +354,14 @@ public abstract class CommandStores
         List<ShardHolder> result = new ArrayList<>(prev.shards.length + added.size());
         for (ShardHolder shard : prev.shards)
         {
-            if (subtracted.intersects(shard.ranges().currentRanges()))
+            Ranges current = shard.ranges().currentRanges();
+            Ranges removeRanges = subtracted.slice(current, Minimal);
+            if (!removeRanges.isEmpty())
             {
-                RangesForEpoch newRanges = shard.ranges().withRanges(newTopology.epoch(), shard.ranges().currentRanges().difference(subtracted));
-                shard.ranges.current = newRanges;
-                bootstrapUpdates.add(shard.store.interruptBootstraps(epoch, newRanges.currentRanges()));
+                // TODO (required): This is updating the a non-volatile field in the previous Snapshot, why modify it at all, even with volatile the guaranteed visibility is weak even with mutual exclusion
+                shard.ranges = shard.ranges().withRanges(newTopology.epoch(), current.subtract(subtracted));
+                shard.store.epochUpdateHolder.remove(epoch, shard.ranges, removeRanges);
+                bootstrapUpdates.add(shard.store.unbootstrap(epoch, removeRanges));
             }
             // TODO (desired): only sync affected shards
             Ranges ranges = shard.ranges().currentRanges();
@@ -374,18 +374,20 @@ public abstract class CommandStores
         if (!added.isEmpty())
         {
             // TODO (required): shards must rebalance
-            for (Ranges add : shardDistributor.split(added))
+            for (Ranges addRanges : shardDistributor.split(added))
             {
-                RangesForEpochHolder rangesHolder = new RangesForEpochHolder();
-                ShardHolder shardHolder = new ShardHolder(supplier.create(nextId++, rangesHolder), rangesHolder);
-                rangesHolder.current = new RangesForEpoch(epoch, add, shardHolder.store);
+                EpochUpdateHolder updateHolder = new EpochUpdateHolder();
+                ShardHolder shard = new ShardHolder(supplier.create(nextId++, updateHolder));
+                shard.ranges = new RangesForEpoch(epoch, addRanges, shard.store);
+                shard.store.epochUpdateHolder.add(epoch, shard.ranges, addRanges);
+                shard.store.epochUpdateHolder.updateGlobal(newTopology.ranges());
 
-                Map<Boolean, Ranges> partitioned = add.partitioningBy(range -> shouldBootstrap(node, prev.global, newLocalTopology, range));
-                if (partitioned.containsKey(true))
-                    bootstrapUpdates.add(shardHolder.store.bootstrapper(node, partitioned.get(true), newLocalTopology.epoch()));
+                Map<Boolean, Ranges> partitioned = addRanges.partitioningBy(range -> shouldBootstrap(node, prev.global, newLocalTopology, range));
                 if (partitioned.containsKey(false))
-                    bootstrapUpdates.add(() -> shardHolder.store.initialise(epoch, partitioned.get(false)));
-                result.add(shardHolder);
+                    bootstrapUpdates.add(shard.store.initialise(epoch, partitioned.get(false)));
+                if (partitioned.containsKey(true))
+                    bootstrapUpdates.add(shard.store.bootstrapper(node, partitioned.get(true), newLocalTopology.epoch()));
+                result.add(shard);
             }
         }
 
@@ -423,12 +425,12 @@ public abstract class CommandStores
         return forEach(context, RoutingKeys.of(key), minEpoch, maxEpoch, forEach, true);
     }
 
-    public AsyncChain<Void> forEach(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
+    public AsyncChain<Void> forEach(PreLoadContext context, Routables<?> keys, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
     {
         return forEach(context, keys, minEpoch, maxEpoch, forEach, true);
     }
 
-    private AsyncChain<Void> forEach(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach, boolean matchesMultiple)
+    private AsyncChain<Void> forEach(PreLoadContext context, Routables<?> keys, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach, boolean matchesMultiple)
     {
         return this.mapReduce(context, keys, minEpoch, maxEpoch, new MapReduce<SafeCommandStore, Void>()
         {
@@ -467,7 +469,7 @@ public abstract class CommandStores
      *
      * Implementations are expected to invoke {@link #mapReduceConsume(PreLoadContext, Routables, long, long, MapReduceConsume)}
      */
-    protected <O> void mapReduceConsume(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
+    protected <O> void mapReduceConsume(PreLoadContext context, Routables<?> keys, long minEpoch, long maxEpoch, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
     {
         AsyncChain<O> reduced = mapReduce(context, keys, minEpoch, maxEpoch, mapReduceConsume);
         reduced.begin(mapReduceConsume);
@@ -479,7 +481,7 @@ public abstract class CommandStores
         reduced.begin(mapReduceConsume);
     }
 
-    public <O> AsyncChain<O> mapReduce(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduce<? super SafeCommandStore, O> mapReduce)
+    public <O> AsyncChain<O> mapReduce(PreLoadContext context, Routables<?> keys, long minEpoch, long maxEpoch, MapReduce<? super SafeCommandStore, O> mapReduce)
     {
         AsyncChain<O> chain = null;
         BiFunction<O, O, O> reducer = mapReduce::reduce;
@@ -495,9 +497,7 @@ public abstract class CommandStores
             AsyncChain<O> next = shard.store.submit(context, mapReduce);
             chain = chain != null ? AsyncChains.reduce(chain, next, reducer) : next;
         }
-        if (chain == null)
-            return AsyncChains.success(null);
-        return chain;
+        return chain == null ? AsyncChains.success(null) : chain;
     }
 
     protected <O> AsyncChain<O> mapReduce(PreLoadContext context, IntStream commandStoreIds, MapReduce<? super SafeCommandStore, O> mapReduce)
@@ -512,9 +512,27 @@ public abstract class CommandStores
             AsyncChain<O> next = commandStore.submit(context, mapReduce);
             chain = chain != null ? AsyncChains.reduce(chain, next, reducer) : next;
         }
-        if (chain == null)
-            return AsyncChains.success(null);
-        return chain;
+        return chain == null ? AsyncChains.success(null) : chain;
+    }
+
+    public <O> void mapReduceConsume(PreLoadContext context, MapReduceConsume<? super SafeCommandStore, O> mapReduceConsume)
+    {
+        AsyncChain<O> reduced = mapReduce(context, mapReduceConsume);
+        reduced.begin(mapReduceConsume);
+    }
+
+    protected <O> AsyncChain<O> mapReduce(PreLoadContext context, MapReduce<? super SafeCommandStore, O> mapReduce)
+    {
+        // TODO (low priority, efficiency): avoid using an array, or use a scratch buffer
+        AsyncChain<O> chain = null;
+        BiFunction<O, O, O> reducer = mapReduce::reduce;
+        for (ShardHolder shardHolder : current.shards)
+        {
+            CommandStore commandStore = shardHolder.store;
+            AsyncChain<O> next = commandStore.submit(context, mapReduce);
+            chain = chain != null ? AsyncChains.reduce(chain, next, reducer) : next;
+        }
+        return chain == null ? AsyncChains.success(null) : chain;
     }
 
     public synchronized Supplier<EpochReady> updateTopology(Node node, Topology newTopology, boolean startSync)
@@ -532,7 +550,7 @@ public abstract class CommandStores
 
     public CommandStore select(RoutingKey key)
     {
-        return  select(ranges -> ranges.contains(key));
+        return select(ranges -> ranges.contains(key));
     }
 
     public CommandStore select(Route<?> route)
@@ -580,6 +598,11 @@ public abstract class CommandStores
     public int count()
     {
         return current.shards.length;
+    }
+
+    public ShardDistributor shardDistributor()
+    {
+        return shardDistributor;
     }
 
     @VisibleForTesting

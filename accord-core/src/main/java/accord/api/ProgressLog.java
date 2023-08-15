@@ -18,16 +18,15 @@
 
 package accord.api;
 
-import java.util.Set;
-
 import javax.annotation.Nullable;
 
 import accord.coordinate.InformHomeOfTxn;
 import accord.local.Command;
 import accord.local.CommandStore;
-import accord.local.Node.Id;
-import accord.local.Status.Known;
-import accord.primitives.Unseekables;
+import accord.local.SafeCommand;
+import accord.local.SaveStatus.LocalExecution;
+import accord.primitives.Participants;
+import accord.primitives.Route;
 import accord.primitives.TxnId;
 
 /**
@@ -96,7 +95,7 @@ public interface ProgressLog
      * A home shard should monitor this transaction for global progress.
      * A non-home shard should not receive this message.
      */
-    void unwitnessed(TxnId txnId, RoutingKey homeKey, ProgressShard shard);
+    void unwitnessed(TxnId txnId, ProgressShard shard);
 
     /**
      * Has been pre-accepted.
@@ -129,7 +128,7 @@ public interface ProgressLog
      * A home shard should monitor this transaction for global progress.
      * A non-home shard can safely ignore this transaction, as it has been witnessed by a majority of the home shard.
      */
-    void readyToExecute(Command command, ProgressShard shard);
+    void readyToExecute(Command command);
 
     /**
      * The transaction's outcome has been durably recorded (but not necessarily applied) locally.
@@ -143,18 +142,6 @@ public interface ProgressLog
     void executed(Command command, ProgressShard shard);
 
     /**
-     * The transaction has been durably invalidated
-     */
-    void invalidated(Command command, ProgressShard shard);
-
-    /**
-     * The transaction's outcome has been durably recorded (but not necessarily applied) locally at all shards.
-     *
-     * This is only invoked on the home shard, once all local shards have successfully applied.
-     */
-    void durableLocal(TxnId txnId);
-
-    /**
      * The transaction's outcome has been durably recorded (but not necessarily applied) at a quorum of all shards,
      * including at least those node's ids that are provided.
      *
@@ -164,15 +151,7 @@ public interface ProgressLog
      * Otherwise, this transaction no longer needs to be monitored, but implementations may wish to ensure that
      * the result is propagated to every live replica.
      */
-    void durable(Command command, @Nullable Set<Id> persistedOn);
-
-    /**
-     * The transaction's outcome has been durably recorded (but not necessarily applied) at a quorum of all shards.
-     *
-     * If this replica has not witnessed the outcome of the transaction, it should poll a majority of each shard
-     * for its outcome, using the provided route (if any).
-     */
-    void durable(TxnId txnId, @Nullable Unseekables<?, ?> unseekables, ProgressShard shard);
+    void durable(Command command);
 
     /**
      * The parameter is a command that some other command's execution is most proximally blocked by.
@@ -190,9 +169,17 @@ public interface ProgressLog
      * <p>
      * In all other scenarios, the implementation is free to choose its course of action.
      *
-     * @param blockedBy     is the transaction id that is blocking progress
-     * @param blockedUntil  either Committed or Executed; the state we are waiting for
-     * @param blockedOn the keys we should report any progress updates to
+     * Either blockedOnRoute or blockedOnParticipants should be non-null.
+     *
+     * @param blockedBy             is the transaction id that is blocking progress
+     * @param blockedUntil          either Committed or Executed; the state we are waiting for
+     * @param blockedOnRoute        the route (if any) we are blocked on execution for
+     * @param blockedOnParticipants the participating keys on which we are blocked for execution
      */
-    void waiting(TxnId blockedBy, Known blockedUntil, Unseekables<?, ?> blockedOn);
+    void waiting(SafeCommand blockedBy, LocalExecution blockedUntil, @Nullable Route<?> blockedOnRoute, @Nullable Participants<?> blockedOnParticipants);
+
+    /**
+     * We have finished processing this transaction; ensure its state is cleared
+     */
+    void clear(TxnId txnId);
 }

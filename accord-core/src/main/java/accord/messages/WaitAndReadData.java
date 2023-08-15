@@ -18,53 +18,41 @@
 
 package accord.messages;
 
-import accord.local.LocalBarrier;
+import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.Status;
-import accord.primitives.Deps;
 import accord.primitives.PartialTxn;
-import accord.primitives.Seekables;
+import accord.primitives.Participants;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-import org.agrona.collections.Int2ObjectHashMap;
 
-public abstract class WaitAndReadData extends ReadData
+public abstract class WaitAndReadData extends WaitUntilApplied
 {
-    public final Status waitForStatus;
-    public final Deps waitOn;
-    public final Timestamp waitUntil; // this may be set to Timestamp.MAX if we want to wait for all deps, regardless of when they execute
-    public final Timestamp executeReadAt;
     public final PartialTxn read;
-    transient final Int2ObjectHashMap<LocalBarrier> barriers = new Int2ObjectHashMap<>();
 
-    protected WaitAndReadData(Seekables<?, ?> readScope, long waitForEpoch, Status waitForStatus, Deps waitOn, Timestamp waitUntil, Timestamp executeReadAt, PartialTxn read)
+    protected WaitAndReadData(TxnId txnId, Participants<?> readScope, Timestamp executeAt, long waitForEpoch, PartialTxn read)
     {
-        super(TxnId.NONE, readScope, waitForEpoch);
-        this.waitForStatus = waitForStatus;
-        this.waitOn = waitOn;
-        this.waitUntil = waitUntil;
-        this.executeReadAt = executeReadAt;
+        super(txnId, readScope, executeAt, waitForEpoch);
         this.read = read;
     }
 
     @Override
-    public synchronized ReadNack apply(SafeCommandStore safeStore)
+    void applied(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
-        waitingOn.set(safeStore.commandStore().id());
-        ++waitingOnCount;
-        barriers.put(safeStore.commandStore().id(), LocalBarrier.register(safeStore, waitForStatus, waitOn, waitUntil, executeReadAt, safeStore0 -> {
-            read(safeStore0, executeReadAt, read);
-        }));
-        return null;
-    }
+        if (isInvalid)
+            return;
 
-    protected void cancel()
-    {
+        read(safeStore, executeAt, read);
     }
 
     @Override
-    protected long executeAtEpoch()
+    protected boolean maybeReadAfterApply(SafeCommandStore safeStore)
     {
-        return executeReadAt.epoch();
+        read(safeStore, executeAt, read);
+        return true;
+    }
+
+    @Override
+    protected void cancel()
+    {
     }
 }

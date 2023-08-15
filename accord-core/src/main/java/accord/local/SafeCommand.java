@@ -21,6 +21,7 @@ package accord.local;
 import java.util.Collection;
 
 import accord.api.Result;
+import accord.local.Command.Truncated;
 import accord.primitives.Ballot;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -57,6 +58,8 @@ public abstract class SafeCommand
 
     private <C extends Command> C update(C update)
     {
+        // TODO (now): reenable this check
+//        Invariants.checkState(current() == null || !CommandStore.current().isTruncated(current()));
         set(update);
         return update;
     }
@@ -68,6 +71,9 @@ public abstract class SafeCommand
 
     public Command removeListener(Command.DurableAndIdempotentListener listener)
     {
+        Command current = current();
+        if (!current.durableListeners().contains(listener))
+            return current;
         return update(Command.removeListener(current(), listener));
     }
 
@@ -111,14 +117,18 @@ public abstract class SafeCommand
         return update(Command.commit(current(), attrs, executeAt, waitingOn));
     }
 
-    public Command precommit(Timestamp executeAt)
+    public Truncated commitInvalidated()
     {
-        return update(Command.precommit(current(), executeAt));
+        Command current = current();
+        if (current.hasBeen(Status.Truncated))
+            return (Truncated) current;
+
+        return update(Truncated.invalidated(current));
     }
 
-    public Command.Committed commitInvalidated(CommonAttributes attrs, Timestamp executeAt)
+    public Command precommit(CommonAttributes attrs, Timestamp executeAt)
     {
-        return update(Command.commitInvalidated(current(), attrs, executeAt));
+        return update(Command.precommit(attrs, current(), executeAt));
     }
 
     public Command.Committed readyToExecute()
@@ -131,14 +141,27 @@ public abstract class SafeCommand
         return update(Command.preapplied(current(), attrs, executeAt, waitingOn, writes, result));
     }
 
+    public Command.Executed applying()
+    {
+        return update(Command.applying(current().asExecuted()));
+    }
+
     public Command.Executed applied()
     {
         return update(Command.applied(current().asExecuted()));
     }
 
-    public Command.NotWitnessed notWitnessed()
+    public Command.NotDefined uninitialised()
     {
         Invariants.checkArgument(current() == null);
-        return update(Command.NotWitnessed.notWitnessed(txnId));
+        return update(Command.NotDefined.uninitialised(txnId));
+    }
+
+    public Command initialise()
+    {
+        Command current = current();
+        if (!current.saveStatus().isUninitialised())
+            return current;
+        return update(Command.NotDefined.notDefined(current, current.promised()));
     }
 }

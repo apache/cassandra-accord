@@ -46,12 +46,12 @@ public class TopologyUpdates
         Map<Node.Id, Ranges> nodeToNewRanges = new HashMap<>();
         for (Node.Id node : nodes)
         {
-            Ranges newRanges = update.rangesForNode(node).difference(prev.rangesForNode(node));
+            Ranges newRanges = update.rangesForNode(node).subtract(prev.rangesForNode(node));
             nodeToNewRanges.put(node, newRanges);
         }
         pendingTopologies.put(update.epoch(), nodeToNewRanges);
         return MessageTask.begin(originator, nodes, executor, "TopologyNotify:" + update.epoch(), (node, from, onDone) -> {
-            long nodeEpoch = node.topology().epoch();
+            long nodeEpoch = node.epoch();
             if (nodeEpoch + 1 < update.epoch())
                 onDone.accept(false);
             ((TestableConfigurationService) node.configService()).reportTopology(update);
@@ -71,6 +71,26 @@ public class TopologyUpdates
         MessageTask.begin(originator, cluster, executor, "SyncComplete:" + epoch, (node, from, onDone) -> {
             node.onRemoteSyncComplete(originator.id(), epoch);
             onDone.accept(true);
+        });
+    }
+
+    public synchronized void epochClosed(Node originator, Collection<Node.Id> cluster, Ranges ranges, long epoch)
+    {
+        executor.execute(() -> {
+            MessageTask.begin(originator, cluster, executor, "EpochClosed:" + epoch, (node, from, onDone) -> {
+                node.onEpochClosed(ranges, epoch);
+                onDone.accept(true);
+            });
+        });
+    }
+
+    public synchronized void epochRedundant(Node originator, Collection<Node.Id> cluster, Ranges ranges, long epoch)
+    {
+        executor.execute(() -> {
+            MessageTask.begin(originator, cluster, executor, "EpochComplete:" + epoch, (node, from, onDone) -> {
+                node.onEpochRedundant(ranges, epoch);
+                onDone.accept(true);
+            });
         });
     }
 

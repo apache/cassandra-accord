@@ -19,9 +19,7 @@
 package accord.messages;
 
 import accord.api.Result;
-import accord.local.SafeCommandStore;
 import accord.local.*;
-import accord.local.Status.Phase;
 import accord.primitives.*;
 import accord.topology.Topologies;
 
@@ -53,14 +51,15 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
 
     public final PartialTxn partialTxn;
     public final Ballot ballot;
-    public final @Nullable FullRoute<?> route;
+    public final FullRoute<?> route;
 
     public BeginRecovery(Id to, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Ballot ballot)
     {
         super(to, topologies, route, txnId);
-        this.partialTxn = txn.slice(scope.covering(), scope.contains(scope.homeKey()));
+        // TODO (expected): only scope.contains(route.homeKey); this affects state eviction and is low priority given size in C*
+        this.partialTxn = txn.slice(scope.covering(), true);
         this.ballot = ballot;
-        this.route = scope.contains(scope.homeKey()) ? route : null;
+        this.route = route;
     }
 
     private BeginRecovery(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, PartialTxn partialTxn, Ballot ballot, @Nullable FullRoute<?> route)
@@ -81,14 +80,15 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
 
     public RecoverReply apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.command(txnId);
-        switch (Commands.recover(safeStore, txnId, partialTxn, route != null ? route : scope, progressKey, ballot))
+        SafeCommand safeCommand = safeStore.get(txnId, txnId, route);
+        switch (Commands.recover(safeStore, safeCommand, txnId, partialTxn, route, progressKey, ballot))
         {
             default:
                 throw new IllegalStateException("Unhandled Outcome");
 
             case Redundant:
-                throw new IllegalStateException("Invalid Outcome");
+            case Truncated:
+                return new RecoverNack(null);
 
             case RejectedBallot:
                 return new RecoverNack(safeCommand.current().promised());
@@ -136,8 +136,8 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         Ballot accepted = command.accepted();
         Timestamp executeAt = command.executeAt();
         PartialDeps acceptedDeps = status.phase.compareTo(Phase.Accept) >= 0 ? deps : PartialDeps.NONE;
-        Writes writes = command.isExecuted() ? command.asExecuted().writes() : null;
-        Result result = command.isExecuted() ? command.asExecuted().result() : null;
+        Writes writes = command.writes();
+        Result result = command.result();
         return new RecoverOk(txnId, status, accepted, executeAt, deps, acceptedDeps, earlierCommittedWitness, earlierAcceptedNoWitness, rejectsFastPath, writes, result);
     }
 
@@ -296,8 +296,8 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
 
     public static class RecoverNack extends RecoverReply
     {
-        public final Ballot supersededBy;
-        public RecoverNack(Ballot supersededBy)
+        public final @Nullable Ballot supersededBy;
+        public RecoverNack(@Nullable Ballot supersededBy)
         {
             this.supersededBy = supersededBy;
         }

@@ -83,21 +83,21 @@ public abstract class FetchCoordinator
             contacted = contacted.with(ranges);
             inflight = inflight.with(ranges);
             waitingOn = waitingOn.with(ranges);
-            uncontacted = uncontacted.difference(ranges);
+            uncontacted = uncontacted.subtract(ranges);
         }
 
         void slow(Ranges ranges)
         {
             checkArgument(waitingOn.containsAll(ranges));
-            waitingOn = waitingOn.difference(ranges);
+            waitingOn = waitingOn.subtract(ranges);
         }
 
         void successful(Ranges ranges)
         {
             checkArgument(inflight.containsAll(ranges));
             successful = successful.with(ranges);
-            inflight = inflight.difference(ranges);
-            waitingOn = waitingOn.difference(ranges);
+            inflight = inflight.subtract(ranges);
+            waitingOn = waitingOn.subtract(ranges);
         }
 
         Ranges waitingOn(Ranges ranges)
@@ -109,8 +109,8 @@ public abstract class FetchCoordinator
         {
             checkArgument(inflight.containsAll(ranges));
             unsuccessful = unsuccessful.with(ranges);
-            inflight = inflight.difference(ranges);
-            waitingOn = waitingOn.difference(ranges);
+            inflight = inflight.subtract(ranges);
+            waitingOn = waitingOn.subtract(ranges);
         }
 
         void fail()
@@ -228,7 +228,7 @@ public abstract class FetchCoordinator
                 ++inflight;
             state.contact(contact);
             contact(state.id, contact);
-            needed = needed.difference(contact);
+            needed = needed.subtract(contact);
             if (needed.isEmpty())
                 break;
         }

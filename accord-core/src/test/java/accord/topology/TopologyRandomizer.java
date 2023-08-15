@@ -18,18 +18,6 @@
 
 package accord.topology;
 
-import accord.burn.TopologyUpdates;
-import accord.utils.RandomSource;
-import accord.impl.IntHashKey;
-import accord.impl.IntHashKey.Hash;
-import accord.local.Node;
-import accord.primitives.Range;
-import accord.primitives.Ranges;
-import accord.utils.Invariants;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -42,6 +30,19 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import javax.annotation.Nullable;
+
+import com.google.common.collect.Sets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import accord.burn.TopologyUpdates;
+import accord.impl.IntHashKey;
+import accord.impl.IntHashKey.Hash;
+import accord.local.Node;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.utils.Invariants;
+import accord.utils.RandomSource;
 
 
 // TODO (required, testing): add change replication factor
@@ -118,7 +119,9 @@ public class TopologyRandomizer
 
     private static Shard[] split(Shard[] shards, RandomSource random)
     {
-        int idx = random.nextInt(shards.length - 1);
+        if (shards.length == 0)
+            throw new IllegalArgumentException("Unable to split an empty array");
+        int idx = shards.length == 1 ? 0 : random.nextInt(shards.length - 1);
         Shard split = shards[idx];
         IntHashKey.Range splitRange = (IntHashKey.Range) split.range;
         IntHashKey minBound = (IntHashKey) splitRange.start();
@@ -181,11 +184,15 @@ public class TopologyRandomizer
         if (Arrays.stream(shards).allMatch(shard -> shard.sortedNodes.containsAll(shardLeft.sortedNodes) || shardLeft.containsAll(shard.sortedNodes)))
             return shards;
 
+        Set<Node.Id> joining = new HashSet<>();
+        joining.addAll(shardLeft.joining);
+
         int idxRight;
         Shard shardRight;
         do {
             idxRight = random.nextInt(shards.length);
             shardRight = shards[idxRight];
+            joining.addAll(shardRight.joining);
         } while (idxRight == idxLeft || shardLeft.sortedNodes.containsAll(shardRight.sortedNodes) || shardRight.sortedNodes.containsAll(shardLeft.sortedNodes));
 
         List<Node.Id> nodesLeft;
@@ -212,8 +219,8 @@ public class TopologyRandomizer
         nodesRight.add(toRight);
 
         Shard[] newShards = shards.clone();
-        newShards[idxLeft] = new Shard(shardLeft.range, nodesLeft, newFastPath(nodesLeft, random), shardLeft.joining);
-        newShards[idxRight] = new Shard(shardRight.range, nodesRight, newFastPath(nodesRight, random), shardRight.joining);
+        newShards[idxLeft] = new Shard(shardLeft.range, nodesLeft, newFastPath(nodesLeft, random), Sets.intersection(joining, new HashSet<>(nodesLeft)));
+        newShards[idxRight] = new Shard(shardRight.range, nodesRight, newFastPath(nodesRight, random), Sets.intersection(joining, new HashSet<>(nodesRight)));
         logger.debug("updated membership on {} & {} {} {} to {} {}",
                     idxLeft, idxRight,
                     shardLeft.toString(true), shardRight.toString(true),
@@ -257,7 +264,7 @@ public class TopologyRandomizer
             Ranges prev = current.rangesForNode(node);
             if (prev == null) prev = Ranges.EMPTY;
 
-            Ranges added = next.rangesForNode(node).difference(prev);
+            Ranges added = next.rangesForNode(node).subtract(prev);
             if (added.isEmpty())
                 continue;
 
@@ -279,7 +286,8 @@ public class TopologyRandomizer
         return false;
     }
 
-    public synchronized void maybeUpdateTopology() {
+    public synchronized void maybeUpdateTopology()
+    {
         // if we don't limit the number of pending topology changes in flight,
         // the topology randomizer will keep the burn test busy indefinitely
         if (topologyUpdates.pendingTopologies() > 5)
@@ -292,7 +300,7 @@ public class TopologyRandomizer
     {
         Topology current = epochs.get(epochs.size() - 1);
         Shard[] oldShards = current.unsafeGetShards().clone();
-        int remainingMutations = random.nextInt(current.size());
+        int remainingMutations = random.nextInt(Math.min(current.size() + 1, 10));
         int rejectedMutations = 0;
         logger.debug("Updating topology with {} mutations", remainingMutations);
         Shard[] newShards = oldShards;
@@ -314,6 +322,9 @@ public class TopologyRandomizer
             }
         }
 
+        if (newShards == oldShards)
+            return null;
+
         Topology nextTopology = new Topology(current.epoch + 1, newShards);
 
         Map<Node.Id, Ranges> nextAdditions = getAdditions(current, nextTopology);
@@ -327,7 +338,6 @@ public class TopologyRandomizer
 
 //        logger.debug("topology update to: {} from: {}", nextTopology, current);
         epochs.add(nextTopology);
-
 
         if (nodeLookup != null)
         {
@@ -346,7 +356,7 @@ public class TopologyRandomizer
             Shard iv = in[i];
             Shard ov = out[o];
             Invariants.checkState(iv.range.compareIntersecting(ov.range) == 0);
-            if (ov.nodes.stream().filter(id -> topologyUpdates.isPending(ov.range, id)).noneMatch(iv::contains))
+            if (ov.nodes.stream().filter(iv::contains).allMatch(id -> topologyUpdates.isPending(ov.range, id)))
                 return false;
             int c = iv.range.end().compareTo(ov.range.end());
             if (c <= 0) ++i;

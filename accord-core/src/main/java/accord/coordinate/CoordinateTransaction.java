@@ -56,6 +56,7 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
         return coordinate;
     }
 
+    @Override
     void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> successes)
     {
         if (tracker.hasFastPathAccepted())

@@ -99,4 +99,10 @@ public class InMemorySafeCommand extends SafeCommand implements SafeState<Comman
             lazy = null;
         }
     }
+
+    GlobalCommand global()
+    {
+        touch();
+        return global;
+    }
 }

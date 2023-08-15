@@ -21,6 +21,8 @@ package accord.utils.async;
 import accord.api.VisibleForImplementation;
 import accord.utils.Invariants;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.BiConsumer;
@@ -28,6 +30,8 @@ import java.util.function.Function;
 
 public class AsyncResults
 {
+    public static final AsyncResult<Void> SUCCESS_VOID = success(null);
+
     private AsyncResults() {}
 
     private static class Result<V>
@@ -61,10 +65,26 @@ public class AsyncResults
 
         private void notify(Listener<V> listener, Result<V> result)
         {
+            List<Throwable> failures = null;
             while (listener != null)
             {
-                listener.callback.accept(result.value, result.failure);
+                try
+                {
+                    listener.callback.accept(result.value, result.failure);
+                }
+                catch (Throwable t)
+                {
+                    if (failures == null)
+                        failures = new ArrayList<>();
+                    failures.add(t);
+                }
                 listener = listener.next;
+            }
+            if (failures != null)
+            {
+                IllegalStateException f = new IllegalStateException("Callbacks threw");
+                failures.forEach(f::addSuppressed);
+                throw f;
             }
         }
 
@@ -104,7 +124,12 @@ public class AsyncResults
         void setResult(V result, Throwable failure)
         {
             if (!trySetResult(result, failure))
-                throw new IllegalStateException("Result has already been set on " + this);
+            {
+                IllegalStateException f = new IllegalStateException("Result has already been set on " + this);
+                if (failure != null)
+                    f.addSuppressed(failure);
+                throw f;
+            }
         }
 
         @Override

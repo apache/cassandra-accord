@@ -21,6 +21,7 @@ package accord.api;
 import javax.annotation.Nullable;
 
 import accord.local.Node;
+import accord.primitives.Ranges;
 import accord.topology.Topology;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
@@ -118,6 +119,9 @@ public interface ConfigurationService
         /**
          * Called when accord data associated with a superseded epoch has been sync'd from previous replicas.
          * This should be invoked on each replica once EpochReady.coordination has returned on a replica.
+         *
+         * Once a quorum of these notifications have been received, no new TxnId may be executed in this epoch
+         * (though this is not a transitive property; earlier epochs may yet agree to execute TxnId if they have not been sync'd)
          */
         void onRemoteSyncComplete(Node.Id node, long epoch);
 
@@ -126,6 +130,19 @@ public interface ConfigurationService
          * the given epoch
          */
         void truncateTopologyUntil(long epoch);
+
+        /**
+         * Called when no new TxnId may be agreed with an epoch less than or equal to the provided one.
+         * This means future epochs are now aware of all TxnId with this epoch or earlier that may be executed
+         * on this range.
+         */
+        void onEpochClosed(Ranges ranges, long epoch);
+
+        /**
+         * Called when all TxnId with an epoch equal to or before this that interact with this range have been executed,
+         * in whatever epoch they execute in. Once the whole range is covered this epoch is redundant, and may be cleaned up.
+         */
+        void onEpochRedundant(Ranges ranges, long epoch);
     }
 
     void registerListener(Listener listener);
@@ -152,18 +169,13 @@ public interface ConfigurationService
     void fetchTopologyForEpoch(long epoch);
 
     /**
-     * Alert the configuration service of epochs it may not be aware of. This is called called for every TxnRequest
-     * received by Accord, so implementations should be lightweight, and avoid blocking or heavy computation.
-     */
-    default void reportEpoch(long epoch)
-    {
-        fetchTopologyForEpoch(epoch);
-    }
-
-    /**
      * Called after this node learns of an epoch as part of the {@code Listener#onTopologyUpdate} call.
      * On invocation the system is not necessarily ready to process the epoch, and the BootstrapReady parameter
      * provides indications of when the bootstrap has completed various phases of setup.
      */
     void acknowledgeEpoch(EpochReady ready);
+
+    void reportEpochClosed(Ranges ranges, long epoch);
+
+    void reportEpochRedundant(Ranges ranges, long epoch);
 }

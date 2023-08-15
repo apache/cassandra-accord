@@ -54,6 +54,12 @@ public abstract class IntHashKey implements RoutableKey
         }
 
         @Override
+        public Long valueOf(int v)
+        {
+            return (long)v;
+        }
+
+        @Override
         public Long zero()
         {
             return 0L;
@@ -75,6 +81,12 @@ public abstract class IntHashKey implements RoutableKey
         public Long divide(Long a, int i)
         {
             return a / i;
+        }
+
+        @Override
+        public Long divide(Long a, Long b)
+        {
+            return a / b;
         }
 
         @Override
@@ -137,7 +149,7 @@ public abstract class IntHashKey implements RoutableKey
             int endHash = ((IntHashKey)end()).hash;
             int currentSize = endHash - startHash;
             if (currentSize < count)
-                return Ranges.of(new accord.primitives.Range[]{this});
+                return Ranges.of(this);
             int interval =  currentSize / count;
 
             int last = 0;

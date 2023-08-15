@@ -27,12 +27,6 @@ import accord.local.Node.Id;
 import accord.topology.Topologies;
 
 import accord.api.RoutingKey;
-import accord.primitives.PartialDeps;
-import accord.primitives.FullRoute;
-import accord.primitives.Ballot;
-
-import accord.primitives.Deps;
-import accord.primitives.TxnId;
 
 import javax.annotation.Nonnull;
 
@@ -92,10 +86,12 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         switch (Commands.accept(safeStore, txnId, ballot, scope, keys, progressKey, executeAt, partialDeps))
         {
             default: throw new IllegalStateException();
+            case Truncated:
+                return AcceptReply.TRUNCATED;
             case Redundant:
                 return AcceptReply.REDUNDANT;
             case RejectedBallot:
-                return new AcceptReply(safeStore.command(txnId).current().promised());
+                return new AcceptReply(safeStore.get(txnId, executeAt, scope).current().promised());
             case Success:
                 // TODO (desirable, efficiency): we don't need to calculate deps if executeAt == txnId
                 return new AcceptReply(calculatePartialDeps(safeStore));
@@ -162,6 +158,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     {
         public static final AcceptReply ACCEPT_INVALIDATE = new AcceptReply(Success);
         public static final AcceptReply REDUNDANT = new AcceptReply(Redundant);
+        public static final AcceptReply TRUNCATED = new AcceptReply(Truncated);
 
         public final AcceptOutcome outcome;
         public final Ballot supersededBy;
@@ -223,6 +220,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     public static class Invalidate extends AbstractEpochRequest<AcceptReply>
     {
         public final Ballot ballot;
+        // should not be a non-participating home key
         public final RoutingKey someKey;
 
         public Invalidate(Ballot ballot, TxnId txnId, RoutingKey someKey)
@@ -241,10 +239,13 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         @Override
         public AcceptReply apply(SafeCommandStore safeStore)
         {
-            SafeCommand safeCommand = safeStore.command(txnId);
-            switch (Commands.acceptInvalidate(safeStore, safeCommand, ballot))
+            SafeCommand safeCommand = safeStore.get(txnId, someKey);
+            AcceptOutcome outcome = Commands.acceptInvalidate(safeStore, safeCommand, ballot);
+            switch (outcome)
             {
-                default:
+                default: throw new IllegalArgumentException("Unknown status: " + outcome);
+                case Truncated:
+                    return AcceptReply.TRUNCATED;
                 case Redundant:
                     return AcceptReply.REDUNDANT;
                 case Success:

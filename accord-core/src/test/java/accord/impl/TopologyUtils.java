@@ -64,8 +64,15 @@ public class TopologyUtils
         }
 
         final List<Shard> shards = new ArrayList<>();
+        Set<Node.Id> noShard = new HashSet<>(Arrays.asList(cluster));
         for (int i = 0 ; i < ranges.size() ; ++i)
+        {
             shards.add(new Shard(ranges.get(i), electorates.get(i % electorates.size()), fastPathElectorates.get(i % fastPathElectorates.size())));
+            noShard.removeAll(electorates.get(i % electorates.size()));
+        }
+        if (!noShard.isEmpty())
+            throw new AssertionError(String.format("The following electorates were found without a shard: %s", noShard));
+
         return new Topology(1, toArray(shards, Shard[]::new));
     }
 

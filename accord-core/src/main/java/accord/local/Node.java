@@ -23,52 +23,69 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
-
-import accord.api.ConfigurationService.EpochReady;
-import accord.coordinate.*;
-import accord.messages.*;
-import accord.primitives.*;
-import accord.primitives.Routable.Domain;
-import accord.utils.MapReduceConsume;
-import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncResult;
-import accord.utils.async.AsyncResults;
-import accord.utils.RandomSource;
-import com.google.common.annotations.VisibleForTesting;
-
-import accord.api.*;
-
+import java.util.function.ToLongFunction;
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import accord.primitives.EpochSupplier;
+import com.google.common.annotations.VisibleForTesting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import accord.api.Agent;
+import accord.api.ConfigurationService;
+import accord.api.ConfigurationService.EpochReady;
+import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.MessageSink;
-import accord.api.Result;
 import accord.api.ProgressLog;
+import accord.api.Result;
+import accord.api.RoutingKey;
 import accord.api.Scheduler;
-import accord.api.DataStore;
+import accord.api.TopologySorter;
+import accord.coordinate.CoordinateTransaction;
+import accord.coordinate.MaybeRecover;
+import accord.coordinate.Outcome;
+import accord.coordinate.RecoverWithRoute;
 import accord.messages.Callback;
+import accord.messages.Reply;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
-import accord.messages.Reply;
-import accord.coordinate.RecoverWithRoute;
-import accord.topology.Shard;
-import accord.topology.Topology;
-import accord.topology.TopologyManager;
-import net.nicoulaj.compilecommand.annotations.Inline;
+import accord.messages.TxnRequest;
 import accord.primitives.Ballot;
+import accord.primitives.FullRoute;
+import accord.primitives.ProgressToken;
+import accord.primitives.Range;
+import accord.primitives.Ranges;
+import accord.primitives.Routable.Domain;
+import accord.primitives.Routables;
+import accord.primitives.Route;
+import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
+import accord.topology.Shard;
+import accord.topology.Topology;
+import accord.topology.TopologyManager;
+import accord.utils.MapReduceConsume;
+import accord.utils.RandomSource;
+import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
+import net.nicoulaj.compilecommand.annotations.Inline;
 
 public class Node implements ConfigurationService.Listener, NodeTimeService
 {
+    private static final Logger logger = LoggerFactory.getLogger(Node.class);
+
     public static class Id implements Comparable<Id>
     {
         public static final Id NONE = new Id(0);
@@ -122,6 +139,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private final CommandStores commandStores;
 
     private final LongSupplier nowSupplier;
+    private final ToLongFunction<TimeUnit> nowTimeUnit;
     private final AtomicReference<Timestamp> now;
     private final Agent agent;
     private final RandomSource random;
@@ -132,7 +150,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     // TODO (expected, liveness): monitor the contents of this collection for stalled coordination, and excise them
     private final Map<TxnId, AsyncResult<? extends Outcome>> coordinating = new ConcurrentHashMap<>();
 
-    public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier,
+    public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier, ToLongFunction<TimeUnit> nowTimeUnit,
                 Supplier<DataStore> dataSupplier, ShardDistributor shardDistributor, Agent agent, RandomSource random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
                 Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory)
     {
@@ -141,11 +159,13 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.configService = configService;
         this.topology = new TopologyManager(topologySorter, id);
         this.nowSupplier = nowSupplier;
+        this.nowTimeUnit = nowTimeUnit;
         this.now = new AtomicReference<>(Timestamp.fromValues(topology.epoch(), nowSupplier.getAsLong(), id));
         this.agent = agent;
         this.random = random;
         this.scheduler = scheduler;
         this.commandStores = factory.create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this));
+        // TODO review these leak a reference to an object that hasn't finished construction, possibly to other threads
         configService.registerListener(this);
     }
 
@@ -179,8 +199,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private synchronized EpochReady onTopologyUpdateInternal(Topology topology, boolean startSync)
     {
         Supplier<EpochReady> bootstrap = commandStores.updateTopology(this, topology, startSync);
-        this.topology.onTopologyUpdate(topology);
-        return bootstrap.get();
+        return this.topology.onTopologyUpdate(topology, bootstrap);
     }
 
     @Override
@@ -189,6 +208,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         if (topology.epoch() <= this.topology.epoch())
             return AsyncResults.success(null);
         EpochReady ready = onTopologyUpdateInternal(topology, startSync);
+        ready.coordination.addCallback(() -> this.topology.onEpochSyncComplete(id, topology.epoch()));
         configService.acknowledgeEpoch(ready);
         return ready.coordination;
     }
@@ -205,6 +225,33 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         topology.truncateTopologyUntil(epoch);
     }
 
+    @Override
+    public void onEpochClosed(Ranges ranges, long epoch)
+    {
+        topology.onEpochClosed(ranges, epoch);
+    }
+
+    @Override
+    public void onEpochRedundant(Ranges ranges, long epoch)
+    {
+        topology.onEpochRedundant(ranges, epoch);
+    }
+
+    public AsyncChain<?> awaitEpoch(long epoch)
+    {
+        if (topology.hasEpoch(epoch))
+            return AsyncResults.SUCCESS_VOID;
+        configService.fetchTopologyForEpoch(epoch);
+        return topology.awaitEpoch(epoch);
+    }
+
+    public AsyncChain<?> awaitEpoch(@Nullable EpochSupplier epochSupplier)
+    {
+        if (epochSupplier == null)
+            return AsyncResults.SUCCESS_VOID;
+        return awaitEpoch(epochSupplier.epoch());
+    }
+
     public void withEpoch(long epoch, Runnable runnable)
     {
         if (topology.hasEpoch(epoch))
@@ -214,7 +261,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         else
         {
             configService.fetchTopologyForEpoch(epoch);
-            topology.awaitEpoch(epoch).addCallback(runnable).begin(agent());
+            topology.awaitEpoch(epoch).addCallback(runnable).begin(agent);
         }
     }
 
@@ -230,6 +277,14 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
             configService.fetchTopologyForEpoch(epoch);
             return topology.awaitEpoch(epoch).flatMap(ignore -> supplier.get());
         }
+    }
+
+    @Inline
+    public <T> AsyncChain<T> withEpoch(@Nullable EpochSupplier epochSupplier, Supplier<? extends AsyncChain<T>> supplier)
+    {
+        if (epochSupplier == null)
+            return supplier.get();
+        return withEpoch(epochSupplier.epoch(), supplier);
     }
 
     public TopologyManager topology()
@@ -255,17 +310,6 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         }
     }
 
-    public Timestamp uniqueNowWithStaleEpoch(long epoch)
-    {
-        while (true)
-        {
-            Timestamp cur = now.get();
-            Timestamp next = cur.withNextHlc(nowSupplier.getAsLong());
-            if (now.compareAndSet(cur, next))
-                return next.withStaleEpoch(epoch);
-        }
-    }
-
     @Override
     public Timestamp uniqueNow(Timestamp atLeast)
     {
@@ -278,6 +322,12 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
             now.accumulateAndGet(atLeast, Node::nowAtLeast);
         }
         return uniqueNow();
+    }
+
+    @Override
+    public long unix(TimeUnit timeUnit)
+    {
+        return nowTimeUnit.applyAsLong(timeUnit);
     }
 
     private static Timestamp nowAtLeast(Timestamp current, Timestamp proposed)
@@ -296,12 +346,12 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return nowSupplier.getAsLong();
     }
 
-    public AsyncChain<Void> forEachLocal(PreLoadContext context, Unseekables<?, ?> unseekables, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
+    public AsyncChain<Void> forEachLocal(PreLoadContext context, Unseekables<?> unseekables, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
     {
         return commandStores.forEach(context, unseekables, minEpoch, maxEpoch, forEach);
     }
 
-    public AsyncChain<Void> forEachLocalSince(PreLoadContext context, Unseekables<?, ?> unseekables, Timestamp since, Consumer<SafeCommandStore> forEach)
+    public AsyncChain<Void> forEachLocalSince(PreLoadContext context, Unseekables<?> unseekables, Timestamp since, Consumer<SafeCommandStore> forEach)
     {
         return commandStores.forEach(context, unseekables, since.epoch(), Long.MAX_VALUE, forEach);
     }
@@ -326,9 +376,14 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         commandStores.mapReduceConsume(context, key, minEpoch, maxEpoch, mapReduceConsume);
     }
 
-    public <T> void mapReduceConsumeLocal(PreLoadContext context, Routables<?, ?> keys, long minEpoch, long maxEpoch, MapReduceConsume<SafeCommandStore, T> mapReduceConsume)
+    public <T> void mapReduceConsumeLocal(PreLoadContext context, Routables<?> keys, long minEpoch, long maxEpoch, MapReduceConsume<SafeCommandStore, T> mapReduceConsume)
     {
         commandStores.mapReduceConsume(context, keys, minEpoch, maxEpoch, mapReduceConsume);
+    }
+
+    public <T> void mapReduceConsumeAllLocal(PreLoadContext context, MapReduceConsume<SafeCommandStore, T> mapReduceConsume)
+    {
+        commandStores.mapReduceConsume(context, mapReduceConsume);
     }
 
     // send to every node besides ourselves
@@ -422,8 +477,13 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public void reply(Id replyingToNode, ReplyContext replyContext, Reply send)
     {
+        // TODO (usability, now): add Throwable as an argument so the error check is here, every single message gets this wrong causing a NPE here
         if (send == null)
-            throw new NullPointerException();
+        {
+            NullPointerException e = new NullPointerException();
+            agent.onUncaughtException(e);
+            throw e;
+        }
         messageSink.reply(replyingToNode, replyContext, send);
     }
 
@@ -511,7 +571,12 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     public RoutingKey selectRandomHomeKey(TxnId txnId)
     {
         Ranges ranges = topology().localForEpoch(txnId.epoch()).ranges();
-        Range range = ranges.get(ranges.size() == 1 ? 0 : random.nextInt(ranges.size()));
+        // TODO (expected): should we try to pick keys in the same Keyspace in C*? Might want to adapt this to an Agent behaviour
+        if (ranges.isEmpty()) // should not really happen, but pick some other replica to serve as home key
+            ranges = topology().globalForEpoch(txnId.epoch()).ranges();
+        if (ranges.isEmpty())
+            throw new IllegalStateException("Unable to select a HomeKey as the topology does not have any ranges for epoch " + txnId.epoch());
+        Range range = ranges.get(random.nextInt(ranges.size()));
         return range.someIntersectingRoutingKey(null);
     }
 
@@ -544,14 +609,14 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     }
 
     // TODO (low priority, API/efficiency): coalesce maybeRecover calls? perhaps have mutable knownStatuses so we can inject newer ones?
-    public AsyncResult<? extends Outcome> maybeRecover(TxnId txnId, RoutingKey homeKey, @Nullable Route<?> route, ProgressToken prevProgress)
+    public AsyncResult<? extends Outcome> maybeRecover(TxnId txnId, @Nonnull Route<?> someRoute, ProgressToken prevProgress)
     {
         AsyncResult<? extends Outcome> result = coordinating.get(txnId);
         if (result != null)
             return result;
 
         RecoverFuture<Outcome> future = new RecoverFuture<>();
-        MaybeRecover.maybeRecover(this, txnId, homeKey, route, prevProgress, future);
+        MaybeRecover.maybeRecover(this, txnId, someRoute, prevProgress, future);
         return future;
     }
 

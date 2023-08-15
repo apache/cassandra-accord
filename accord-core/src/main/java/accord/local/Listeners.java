@@ -18,12 +18,12 @@
 
 package accord.local;
 
-import accord.utils.DeterministicIdentitySet;
-
 import java.util.Collection;
 import java.util.function.Predicate;
 
-public class Listeners<L extends Command.Listener> extends DeterministicIdentitySet<L>
+import accord.utils.DeterministicSet;
+
+public class Listeners<L extends Command.Listener> extends DeterministicSet<L>
 {
     public Listeners()
     {

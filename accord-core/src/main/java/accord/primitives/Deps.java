@@ -23,6 +23,7 @@ import accord.utils.Invariants;
 
 import java.util.AbstractList;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -138,6 +139,21 @@ public class Deps
         return keyDeps.txnIdCount() + rangeDeps.txnIdCount();
     }
 
+    public int indexOf(TxnId txnId)
+    {
+        switch (txnId.domain())
+        {
+            default: throw new AssertionError("Unknown domain: " + txnId.domain());
+            case Key:
+                return Arrays.binarySearch(keyDeps.txnIds, txnId);
+            case Range:
+                int i = Arrays.binarySearch(rangeDeps.txnIds, txnId);
+                if (i < 0) i -= keyDeps.txnIdCount();
+                else i += keyDeps.txnIdCount();
+                return i;
+        }
+    }
+
     public TxnId txnId(int i)
     {
         return i < keyDeps.txnIdCount()
@@ -175,7 +191,7 @@ public class Deps
         };
     }
 
-    public List<TxnId> txnIds(Seekable keyOrRange)
+    public List<TxnId> computeTxnIds(Seekable keyOrRange)
     {
         List<TxnId> keyIds, rangeIds;
         switch (keyOrRange.domain())
@@ -185,14 +201,14 @@ public class Deps
             {
                 Key key = keyOrRange.asKey();
                 keyIds = keyDeps.txnIds(key);
-                rangeIds = rangeDeps.txnIds(key);
+                rangeIds = rangeDeps.computeTxnIds(key);
                 break;
             }
             case Range:
             {
                 Range range = keyOrRange.asRange();
                 keyIds = keyDeps.txnIds(range);
-                rangeIds = rangeDeps.txnIds(range);
+                rangeIds = rangeDeps.computeTxnIds(range);
             }
         }
 
@@ -215,12 +231,14 @@ public class Deps
         return output;
     }
 
-    public Unseekables<?, ?> someUnseekables(TxnId txnId)
+    public Participants<?> participants(TxnId txnId)
     {
-        if (keyDeps.contains(txnId))
-            return keyDeps.someUnseekables(txnId);
-        else
-            return rangeDeps.someUnseekables(txnId);
+        switch (txnId.domain())
+        {
+            default:    throw new AssertionError();
+            case Key:   return keyDeps.participants(txnId);
+            case Range: return rangeDeps.participants(txnId);
+        }
     }
 
     // NOTE: filter only applied to keyDeps

@@ -28,17 +28,16 @@ import accord.local.Node.Id;
 import accord.messages.TxnRequest.WithUnsynced;
 import accord.topology.Shard;
 import accord.topology.Topologies;
-import accord.primitives.Timestamp;
+
 import javax.annotation.Nullable;
 
 import accord.primitives.*;
 
-import accord.primitives.TxnId;
-
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestTimestamp.STARTED_BEFORE;
+import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 
-public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
+public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements EpochSupplier
 {
     public static class SerializerSupport
     {
@@ -49,15 +48,16 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     }
 
     public final PartialTxn partialTxn;
-    public final @Nullable FullRoute<?> route; // ordinarily only set on home shard
+    public final FullRoute<?> route;
     public final long maxEpoch;
 
     public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route)
     {
         super(to, topologies, txnId, route);
-        this.partialTxn = txn.slice(scope.covering(), route.contains(route.homeKey()));
+        // TODO (expected): only includeQuery if route.contains(route.homeKey()); this affects state eviction and is low priority given size in C*
+        this.partialTxn = txn.slice(scope.covering(), true);
         this.maxEpoch = topologies.currentEpoch();
-        this.route = scope.contains(scope.homeKey()) ? route : null;
+        this.route = route;
     }
 
     PreAccept(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, long maxEpoch, PartialTxn partialTxn, @Nullable FullRoute<?> fullRoute)
@@ -90,6 +90,8 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
     {
         // we only preaccept in the coordination epoch, but we might contact other epochs for dependencies
         Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, txnId);
+        if (txnId.rw() == ExclusiveSyncPoint)
+            safeStore.commandStore().markExclusiveSyncPoint(safeStore, txnId, ranges);
         return new PreAcceptOk(txnId, txnId, calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, ranges));
     }
 
@@ -103,12 +105,13 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         if (minUnsyncedEpoch < txnId.epoch() && !safeStore.ranges().coordinates(txnId).intersects(scope))
             return applyIfDoesNotCoordinate(safeStore);
 
-        switch (Commands.preaccept(safeStore, txnId, maxEpoch, partialTxn, route != null ? route : scope, progressKey))
+        SafeCommand safeCommand = safeStore.get(txnId, this, route);
+        switch (Commands.preaccept(safeStore, safeCommand, txnId, maxEpoch, partialTxn, route, progressKey))
         {
             default:
             case Success:
             case Redundant: // we might hit 'Redundant' if we have to contact later epochs and partially re-contact a node we already contacted
-                Command command = safeStore.command(txnId).current();
+                Command command = safeCommand.current();
                 // for efficiency, we don't usually return dependencies newer than txnId as they aren't necessarily needed
                 // for recovery, and it's better to persist less data than more. However, for exclusive sync points we
                 // don't need to perform an Accept round, nor do we need to persist this state to aid recovery. We just
@@ -117,6 +120,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
                 return new PreAcceptOk(txnId, command.executeAt(),
                         calculatePartialDeps(safeStore, txnId, partialTxn.keys(), txnId, safeStore.ranges().allBetween(minUnsyncedEpoch, txnId)));
 
+            case Truncated:
             case RejectedBallot:
                 return PreAcceptNack.INSTANCE;
         }
@@ -132,10 +136,12 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
         PreAcceptOk okMax = ok1.witnessedAt.compareTo(ok2.witnessedAt) >= 0 ? ok1 : ok2;
         PreAcceptOk okMin = okMax == ok1 ? ok2 : ok1;
 
+        Timestamp witnessedAt = Timestamp.mergeMax(okMax.witnessedAt, okMin.witnessedAt);
         PartialDeps deps = ok1.deps.with(ok2.deps);
-        if (deps == okMax.deps)
+
+        if (deps == okMax.deps && witnessedAt == okMax.witnessedAt)
             return okMax;
-        return new PreAcceptOk(txnId, okMax.witnessedAt.mergeFlags(okMin.witnessedAt), deps);
+        return new PreAcceptOk(txnId, witnessedAt, deps);
     }
 
     @Override
@@ -329,5 +335,11 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
                ", txn:" + partialTxn +
                ", scope:" + scope +
                '}';
+    }
+
+    @Override
+    public long epoch()
+    {
+        return maxEpoch;
     }
 }

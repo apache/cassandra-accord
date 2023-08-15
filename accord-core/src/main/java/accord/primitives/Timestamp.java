@@ -25,7 +25,7 @@ import static accord.utils.Invariants.checkArgument;
 
 import javax.annotation.Nonnull;
 
-public class Timestamp implements Comparable<Timestamp>
+public class Timestamp implements Comparable<Timestamp>, EpochSupplier
 {
     public static final Timestamp MAX = new Timestamp(Long.MAX_VALUE, Long.MAX_VALUE, Id.MAX);
     public static final Timestamp NONE = new Timestamp(0, 0, 0, Id.NONE);
@@ -112,6 +112,7 @@ public class Timestamp implements Comparable<Timestamp>
         this.node = copy.node;
     }
 
+    @Override
     public long epoch()
     {
         return epoch(msb);
@@ -205,6 +206,15 @@ public class Timestamp implements Comparable<Timestamp>
         if (this == that) return 0;
         int c = Long.compareUnsigned(this.msb, that.msb);
         if (c == 0) c = Long.compare(lowHlc(this.lsb), lowHlc(that.lsb));
+        if (c == 0) c = Long.compare(this.lsb & IDENTITY_FLAGS, that.lsb & IDENTITY_FLAGS);
+        if (c == 0) c = this.node.compareTo(that.node);
+        return c;
+    }
+
+    public int compareToWithoutEpoch(@Nonnull Timestamp that)
+    {
+        if (this == that) return 0;
+        int c = Long.compare(highHlc(this.msb), highHlc(that.msb));
         if (c == 0) c = Long.compare(lowHlc(this.lsb), lowHlc(that.lsb));
         if (c == 0) c = Long.compare(this.lsb & IDENTITY_FLAGS, that.lsb & IDENTITY_FLAGS);
         if (c == 0) c = this.node.compareTo(that.node);
@@ -257,7 +267,10 @@ public class Timestamp implements Comparable<Timestamp>
      */
     public static Timestamp mergeMax(Timestamp a, Timestamp b)
     {
-        return a.compareTo(b) >= 0 ? a.mergeFlags(b) : b.mergeFlags(a);
+        // Note: it is not safe to take the highest HLC while retaining the current node;
+        //       however, it is safe to take the highest epoch, as the originating node will always advance the hlc()
+        return a.compareToWithoutEpoch(b) >= 0 ? a.mergeFlags(b).withEpochAtLeast(b.epoch())
+                                               : b.mergeFlags(a).withEpochAtLeast(a.epoch());
     }
 
     public static <T extends Timestamp> T rejectedOrMax(T a, T b)
@@ -277,6 +290,11 @@ public class Timestamp implements Comparable<Timestamp>
         return a == null ? b : b == null ? a : max(a, b);
     }
 
+    public static <T extends Timestamp> T nonNullOrMin(T a, T b)
+    {
+        return a == null ? b : b == null ? a : min(a, b);
+    }
+
     public static <T extends Timestamp> T min(T a, T b)
     {
         return a.compareTo(b) <= 0 ? a : b;
@@ -287,7 +305,7 @@ public class Timestamp implements Comparable<Timestamp>
         return msb >>> 15;
     }
 
-    private static long epochMsb(long epoch)
+    static long epochMsb(long epoch)
     {
         return epoch << 15;
     }

@@ -18,6 +18,7 @@
 
 package accord.impl.list;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -63,7 +64,7 @@ public class ListStore implements DataStore
 
     public synchronized void write(Key key, Timestamp executeAt, int[] value)
     {
-        data.merge(key, new Timestamped<>(executeAt, value), Timestamped::merge);
+        data.merge(key, new Timestamped<>(executeAt, value), ListStore::merge);
     }
 
     @Override
@@ -72,5 +73,27 @@ public class ListStore implements DataStore
         ListFetchCoordinator coordinator = new ListFetchCoordinator(node, ranges, syncPoint, callback, safeStore.commandStore(), this);
         coordinator.start();
         return coordinator.result();
+    }
+
+    static Timestamped<int[]> merge(Timestamped<int[]> a, Timestamped<int[]> b)
+    {
+        return Timestamped.merge(a, b, ListStore::isStrictPrefix, Arrays::equals);
+    }
+
+    static Timestamped<int[]> mergeEqual(Timestamped<int[]> a, Timestamped<int[]> b)
+    {
+        return Timestamped.mergeEqual(a, b, Arrays::equals);
+    }
+
+    private static boolean isStrictPrefix(int[] a, int[] b)
+    {
+        if (a.length >= b.length)
+            return false;
+        for (int i = 0; i < a.length ; ++i)
+        {
+            if (a[i] != b[i])
+                return false;
+        }
+        return true;
     }
 }

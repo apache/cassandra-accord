@@ -18,11 +18,8 @@
 
 package accord.utils.async;
 
-import com.google.common.collect.Lists;
-import com.google.common.util.concurrent.MoreExecutors;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.RejectedExecutionException;
@@ -30,6 +27,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
+import java.util.function.Supplier;
+
+import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.MoreExecutors;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+import org.assertj.core.api.AbstractThrowableAssert;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
+
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class AsyncChainsTest
 {
@@ -135,50 +144,6 @@ public class AsyncChainsTest
         ResultCallback<Integer> callback = new ResultCallback<>();
         reduced.begin(callback);
         Assertions.assertEquals(6, callback.value());
-    }
-
-    private static void assertCombinerSize(int size, AsyncChain<?> chain)
-    {
-        Assertions.assertTrue(chain instanceof AsyncChainCombiner, () -> String.format("%s is not an instance of AsyncChainCombiner", chain));
-        AsyncChainCombiner<?, ?> combiner = (AsyncChainCombiner<?, ?>) chain;
-        Assertions.assertEquals(size, combiner.size());
-    }
-
-    @Test
-    void appendingReduceTest()
-    {
-        AsyncChain<Integer> chain1 = AsyncChains.success(1);
-        AsyncChain<Integer> chain2 = AsyncChains.success(2);
-        AsyncChain<Integer> chain3 = AsyncChains.success(3);
-        BiFunction<Integer, Integer, Integer> add = (a, b) -> a + b;
-        AsyncChain<Integer> reduction1 = AsyncChains.reduce(chain1, chain2, add);
-        assertCombinerSize(2, reduction1);
-        AsyncChain<Integer> reduction2 = AsyncChains.reduce(reduction1, chain3, add);
-        assertCombinerSize(3, reduction2);
-        Assertions.assertSame(reduction1, reduction2);
-
-        ResultCallback<Integer> callback = new ResultCallback<>();
-        reduction2.begin(callback);
-        Assertions.assertEquals(6, callback.value());
-    }
-
-    @Test
-    void uncombinableReduce()
-    {
-        AsyncChain<Integer> chain1 = AsyncChains.success(1);
-        AsyncChain<Integer> chain2 = AsyncChains.success(2);
-        AsyncChain<Integer> chain3 = AsyncChains.success(3);
-        BiFunction<Integer, Integer, Integer> add = (a, b) -> a + b;
-        BiFunction<Integer, Integer, Integer> mult = (a, b) -> a * b;
-        AsyncChain<Integer> reduction1 = AsyncChains.reduce(chain1, chain2, add);
-        assertCombinerSize(2, reduction1);
-        AsyncChain<Integer> reduction2 = AsyncChains.reduce(reduction1, chain3, mult);
-        assertCombinerSize(2, reduction2);
-        Assertions.assertNotSame(reduction1, reduction2);
-
-        ResultCallback<Integer> callback = new ResultCallback<>();
-        reduction2.begin(callback);
-        Assertions.assertEquals(9, callback.value());
     }
 
     @Test
@@ -299,5 +264,100 @@ public class AsyncChainsTest
                      .map(i -> i + 5);
 
         Assertions.assertEquals(15, AsyncChains.getBlocking(chain));
+    }
+
+    private static void assertCombinerSize(int size, AsyncChain<?> chain)
+    {
+        Assertions.assertTrue(chain instanceof AsyncChains.AccumulatingReducerAsyncChain, () -> String.format("%s is not an instance of AsyncChainCombiner", chain));
+        AsyncChains.AccumulatingReducerAsyncChain<?> combiner = (AsyncChains.AccumulatingReducerAsyncChain<?>) chain;
+        Assertions.assertEquals(size, combiner.size());
+    }
+
+    @Test
+    void appendingReduceTest()
+    {
+        AsyncChain<Integer> chain1 = AsyncChains.success(1);
+        AsyncChain<Integer> chain2 = AsyncChains.success(2);
+        AsyncChain<Integer> chain3 = AsyncChains.success(3);
+        BiFunction<Integer, Integer, Integer> add = (a, b) -> a + b;
+        AsyncChain<Integer> reduction1 = AsyncChains.reduce(chain1, chain2, add);
+        assertCombinerSize(2, reduction1);
+        AsyncChain<Integer> reduction2 = AsyncChains.reduce(reduction1, chain3, add);
+        assertCombinerSize(3, reduction2);
+        Assertions.assertSame(reduction1, reduction2);
+
+        ResultCallback<Integer> callback = new ResultCallback<>();
+        reduction2.begin(callback);
+        Assertions.assertEquals(6, callback.value());
+    }
+
+    @Test
+    void uncombinableReduce()
+    {
+        AsyncChain<Integer> chain1 = AsyncChains.success(1);
+        AsyncChain<Integer> chain2 = AsyncChains.success(2);
+        AsyncChain<Integer> chain3 = AsyncChains.success(3);
+        BiFunction<Integer, Integer, Integer> add = (a, b) -> a + b;
+        BiFunction<Integer, Integer, Integer> mult = (a, b) -> a * b;
+        AsyncChain<Integer> reduction1 = AsyncChains.reduce(chain1, chain2, add);
+        assertCombinerSize(2, reduction1);
+        AsyncChain<Integer> reduction2 = AsyncChains.reduce(reduction1, chain3, mult);
+        assertCombinerSize(2, reduction2);
+        Assertions.assertNotSame(reduction1, reduction2);
+
+        ResultCallback<Integer> callback = new ResultCallback<>();
+        reduction2.begin(callback);
+        Assertions.assertEquals(9, callback.value());
+    }
+
+    @Test
+    void exceptionHandling()
+    {
+        List<Supplier<? extends AsyncChain<? extends Object>>> topLevel = new ArrayList<>();
+        topLevel.add(() -> AsyncChains.success(42));
+        topLevel.add(() -> new AsyncChains.Head<Integer>()
+        {
+            @Override
+            protected void start(BiConsumer<? super Integer, Throwable> callback)
+            {
+                callback.accept(42, null);
+            }
+        });
+        topLevel.add(() -> {
+            AsyncResult.Settable<Integer> settable = AsyncResults.settable();
+            settable.setSuccess(42);
+            return settable;
+        });
+        topLevel.add(() -> AsyncChains.allOf(Arrays.asList(AsyncChains.success(0), AsyncChains.success(0), AsyncChains.success(42))));
+        topLevel.add(() -> AsyncChains.reduce(AsyncChains.success(1), AsyncChains.success(1), (a, b) -> a + b));
+
+        for (Supplier<? extends AsyncChain<? extends Object>> start : topLevel)
+        {
+            assertWillSeeFailure(start.get().map(ignore -> {throw new UserFailure();})).isInstanceOf(UserFailure.class);
+            assertWillSeeFailure(start.get().map(i -> i.toString()).map(ignore -> {throw new UserFailure();})).isInstanceOf(UserFailure.class);
+            assertWillSeeFailure(start.get().flatMap(i -> AsyncChains.success(i)).map(ignore -> {throw new UserFailure();})).isInstanceOf(UserFailure.class);
+
+            assertWillSeeFailure(start.get().flatMap(ignore -> {throw new UserFailure();})).isInstanceOf(UserFailure.class);
+            assertWillSeeFailure(start.get().map(i -> i.toString()).flatMap(ignore -> {throw new UserFailure();})).isInstanceOf(UserFailure.class);
+            assertWillSeeFailure(start.get().flatMap(i -> AsyncChains.success(i)).flatMap(ignore -> {throw new UserFailure();})).isInstanceOf(UserFailure.class);
+
+            assertThatThrownBy(() -> start.get().begin((s, f) -> {throw new UserFailure();})).isInstanceOf(UserFailure.class);
+            assertThatThrownBy(() -> start.get().map(i -> i.toString()).begin((s, f) -> {throw new UserFailure();})).isInstanceOf(UserFailure.class);
+            assertThatThrownBy(() -> start.get().flatMap(i -> AsyncChains.success(i)).begin((s, f) -> {throw new UserFailure();})).isInstanceOf(UserFailure.class);
+        }
+    }
+
+    private static class UserFailure extends RuntimeException
+    {
+
+    }
+
+    private static <T> AbstractThrowableAssert<?, ? extends Throwable> assertWillSeeFailure(AsyncChain<T> chain)
+    {
+        BiConsumer<? super T, Throwable> mock = Mockito.mock(BiConsumer.class);
+        ArgumentCaptor<Throwable> captor = ArgumentCaptor.forClass(Throwable.class);
+        Mockito.doNothing().when(mock).accept(Mockito.isNull(), captor.capture());
+        chain.begin(mock);
+        return org.assertj.core.api.Assertions.assertThat(captor.getValue());
     }
 }

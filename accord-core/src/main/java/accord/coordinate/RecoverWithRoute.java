@@ -20,42 +20,51 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
-import accord.local.Status;
-import accord.local.Status.Known;
-import accord.primitives.*;
-import accord.utils.Invariants;
-
+import accord.coordinate.FetchData.OnDone;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.local.Status;
+import accord.local.Status.Known;
 import accord.messages.CheckStatus;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.messages.CheckStatus.IncludeInfo;
+import accord.primitives.Ballot;
+import accord.primitives.Deps;
+import accord.primitives.FullRoute;
+import accord.primitives.PartialRoute;
+import accord.primitives.Ranges;
+import accord.primitives.Route;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.topology.Topologies;
-
+import accord.utils.Invariants;
 import javax.annotation.Nullable;
 
-import static accord.messages.Commit.Invalidate.commitInvalidate;
+import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
+import static accord.local.Status.Outcome.Apply;
+import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
+import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
 import static accord.primitives.ProgressToken.APPLIED;
 import static accord.primitives.ProgressToken.INVALIDATED;
+import static accord.primitives.ProgressToken.TRUNCATED;
 import static accord.primitives.Route.castToFullRoute;
 
-public class RecoverWithRoute extends CheckShards
+public class RecoverWithRoute extends CheckShards<FullRoute<?>>
 {
     final @Nullable Ballot promisedBallot; // if non-null, has already been promised by some shard
-    final FullRoute<?> route;
     final BiConsumer<Outcome, Throwable> callback;
     final Status witnessedByInvalidation;
 
     private RecoverWithRoute(Node node, Topologies topologies, @Nullable Ballot promisedBallot, TxnId txnId, FullRoute<?> route, Status witnessedByInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
-        super(node, txnId, route, txnId.epoch(), IncludeInfo.All);
+        super(node, txnId, route, IncludeInfo.All);
         // if witnessedByInvalidation == AcceptedInvalidate then we cannot assume its definition was known, and our comparison with the status is invalid
         Invariants.checkState(witnessedByInvalidation != Status.AcceptedInvalidate);
         // if witnessedByInvalidation == Invalidated we should anyway not be recovering
         Invariants.checkState(witnessedByInvalidation != Status.Invalidated);
         this.promisedBallot = promisedBallot;
-        this.route = route;
         this.callback = callback;
         this.witnessedByInvalidation = witnessedByInvalidation;
         assert topologies.oldestEpoch() == topologies.currentEpoch() && topologies.currentEpoch() == txnId.epoch();
@@ -85,13 +94,13 @@ public class RecoverWithRoute extends CheckShards
 
     private FullRoute<?> route()
     {
-        return castToFullRoute(contact);
+        return castToFullRoute(this.route);
     }
 
     @Override
     public void contact(Id to)
     {
-        node.send(to, new CheckStatus(to, topologies(), txnId, route, IncludeInfo.All), this);
+        node.send(to, new CheckStatus(to, topologies(), txnId, route, sourceEpoch, IncludeInfo.All), this);
     }
 
     @Override
@@ -111,7 +120,7 @@ public class RecoverWithRoute extends CheckShards
     protected boolean isSufficient(Route<?> route, CheckStatusOk ok)
     {
         CheckStatusOkFull full = (CheckStatusOkFull)ok;
-        Known sufficientTo = full.sufficientFor(route);
+        Known sufficientTo = full.sufficientFor(route.participants(), NoQuorum);
         if (!sufficientTo.isDefinitionKnown())
             return false;
 
@@ -131,15 +140,16 @@ public class RecoverWithRoute extends CheckShards
             return;
         }
 
-        CheckStatusOkFull merged = (CheckStatusOkFull) this.merged;
-        Known known = merged.sufficientFor(route);
+        CheckStatusOkFull full = (CheckStatusOkFull) this.merged;
+        Known known = full.sufficientFor(route.participants(), success == Success.Quorum ? HasQuorum : NoQuorum);
+
         switch (known.outcome)
         {
             default: throw new AssertionError();
-            case OutcomeUnknown:
+            case Unknown:
                 if (known.definition.isKnown())
                 {
-                    Txn txn = merged.partialTxn.reconstitute(route);
+                    Txn txn = full.partialTxn.reconstitute(route);
                     Recover.recover(node, txnId, txn, route, callback);
                 }
                 else
@@ -150,17 +160,34 @@ public class RecoverWithRoute extends CheckShards
                 }
                 break;
 
-            case OutcomeApplied:
-            case OutcomeKnown:
-                Invariants.checkState(known.definition.isKnown());
-                Invariants.checkState(known.executeAt.hasDecidedExecuteAt());
-                // TODO (required): we might not be able to reconstitute Txn if we have GC'd on some shards
-                Txn txn = merged.partialTxn.reconstitute(route);
+            case WasApply:
+            case Apply:
+                if (!known.isDefinitionKnown() || known.executeAt != ExecuteAtKnown || known.outcome != Apply)
+                {
+                    if (!full.truncated.isEmpty() && known.executeAt == ExecuteAtKnown)
+                    {
+                        // we might have only part of the full transaction, and a shard may have truncated;
+                        // in this case we want to skip straight to apply, but only for the shards that haven't truncated
+                        Unseekables<?> sendTo = route.subtract(full.truncated);
+                        if (!sendTo.isEmpty())
+                        {
+                            Invariants.checkState(full.committedDeps.covering.containsAll(sendTo));
+                            Invariants.checkState(full.partialTxn.covering().containsAll(sendTo));
+                            Persist.persistPartialMaximal(node, txnId, sendTo, route, full.partialTxn, full.executeAt, full.committedDeps, full.writes, full.result);
+                        }
+                    }
+
+                    OnDone.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? full.toProgressToken() : null, f));
+                    break;
+                }
+
+                // TODO (required): might not be able to fully recover transaction - may only have enough for local shard
+                Txn txn = full.partialTxn.reconstitute(route);
                 if (known.deps.hasDecidedDeps())
                 {
-                    Deps deps = merged.committedDeps.reconstitute(route());
-                    node.withEpoch(merged.executeAt.epoch(), () -> {
-                        Persist.persistAndCommitMaximal(node, txnId, route(), txn, merged.executeAt, deps, merged.writes, merged.result);
+                    Deps deps = full.committedDeps.reconstitute(route());
+                    node.withEpoch(full.executeAt.epoch(), () -> {
+                        Persist.persistMaximal(node, txnId, route(), txn, full.executeAt, deps, full.writes, full.result);
                     });
                     callback.accept(APPLIED, null);
                 }
@@ -170,13 +197,15 @@ public class RecoverWithRoute extends CheckShards
                 }
                 break;
 
-            case InvalidationApplied:
+            case Invalidated:
                 if (witnessedByInvalidation != null && witnessedByInvalidation.hasBeen(Status.PreCommitted))
                     throw new IllegalStateException("We previously invalidated, finding a status that should be recoverable");
 
-                long untilEpoch = node.topology().epoch();
-                commitInvalidate(node, txnId, route, untilEpoch);
-                callback.accept(INVALIDATED, null);
+                OnDone.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? INVALIDATED : null, f));
+                break;
+
+            case Erased:
+                OnDone.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? TRUNCATED : null, f));
                 break;
         }
     }

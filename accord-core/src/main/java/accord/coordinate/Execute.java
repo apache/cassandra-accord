@@ -41,23 +41,23 @@ import static accord.messages.Commit.Kind.Maximal;
 class Execute extends ReadCoordinator<ReadReply>
 {
     final Txn txn;
-    final Seekables<?, ?> readScope;
+    final Participants<?> readScope;
     final FullRoute<?> route;
     final Timestamp executeAt;
     final Deps deps;
-    final Topologies applyTo;
+    final Topologies executes;
     final BiConsumer<? super Result, Throwable> callback;
     private Data data;
 
-    private Execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Seekables<?, ?> readScope, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
+    private Execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Participants<?> readScope, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
     {
-        super(node, node.topology().forEpoch(readScope.toUnseekables(), executeAt.epoch()), txnId);
+        super(node, node.topology().forEpoch(readScope, executeAt.epoch()), txnId);
         this.txn = txn;
         this.route = route;
         this.readScope = readScope;
         this.executeAt = executeAt;
         this.deps = deps;
-        this.applyTo = node.topology().forEpoch(route, executeAt.epoch());
+        this.executes = node.topology().forEpoch(route, executeAt.epoch());
         this.callback = callback;
     }
 
@@ -65,15 +65,13 @@ class Execute extends ReadCoordinator<ReadReply>
     {
         if (txn.read().keys().isEmpty())
         {
-            Topologies applyTo = node.topology().forEpoch(route, executeAt.epoch());
-            Topologies persistTo = txnId.epoch() == executeAt.epoch() ? applyTo : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
             Result result = txn.result(txnId, executeAt, null);
-            Persist.persist(node, persistTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, null), result);
+            Persist.persist(node, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, null), result);
             callback.accept(result, null);
         }
         else
         {
-            Execute execute = new Execute(node, txnId, txn, route, txn.keys(), executeAt, deps, callback);
+            Execute execute = new Execute(node, txnId, txn, route, txn.keys().toParticipants(), executeAt, deps, callback);
             execute.start();
         }
     }
@@ -81,7 +79,7 @@ class Execute extends ReadCoordinator<ReadReply>
     @Override
     protected void start(Set<Id> readSet)
     {
-        Commit.commitMinimalAndRead(node, applyTo, txnId, txn, route, readScope, executeAt, deps, readSet, this);
+        Commit.commitMinimalAndRead(node, executes, txnId, txn, route, readScope, executeAt, deps, readSet, this);
     }
 
     @Override
@@ -118,7 +116,7 @@ class Execute extends ReadCoordinator<ReadReply>
                 return Action.Reject;
             case Redundant:
                 callback.accept(null, new Preempted(txnId, route.homeKey()));
-                return Action.Abort;
+                return Action.Aborted;
             case NotCommitted:
                 // the replica may be missing the original commit, or the additional commit, so send everything
                 Topologies topology = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
@@ -128,7 +126,7 @@ class Execute extends ReadCoordinator<ReadReply>
                 return Action.TryAlternative;
             case Invalid:
                 callback.accept(null, new IllegalStateException("Submitted a read command to a replica that did not own the range"));
-                return Action.Abort;
+                return Action.Aborted;
         }
     }
 
@@ -141,8 +139,7 @@ class Execute extends ReadCoordinator<ReadReply>
             Result result = txn.result(txnId, executeAt, data);
             callback.accept(result, null);
             // avoid re-calculating topologies if it is unchanged
-            Topologies persistTo = txnId.epoch() == executeAt.epoch() ? applyTo : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
-            Persist.persist(node, persistTo, applyTo, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, data), result);
+            Persist.persist(node, executes, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, data), result);
         }
         else
         {

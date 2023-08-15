@@ -20,9 +20,6 @@ package accord.api;
 
 import accord.local.SafeCommandStore;
 import accord.primitives.*;
-import accord.primitives.Ranges;
-import accord.primitives.Timestamp;
-import accord.primitives.Txn;
 import accord.utils.async.AsyncChain;
 
 

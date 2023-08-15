@@ -18,7 +18,7 @@
 
 package accord.utils;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.primitives.Range;
 import accord.primitives.RoutableKey;
 import accord.utils.SearchableRangeListBuilder.Links;
@@ -147,14 +147,19 @@ public class SearchableRangeList
     @Inline
     public <P1, P2, P3> int forEach(Range range, IndexedTriConsumer<P1, P2, P3> forEachScanOrCheckpoint, IndexedRangeTriConsumer<P1, P2, P3> forEachRange, P1 p1, P2 p2, P3 p3, int minIndex)
     {
+        return forEach(range.start(), range.end(), forEachScanOrCheckpoint, forEachRange, p1, p2, p3, minIndex);
+    }
+
+    public <P1, P2, P3> int forEach(RoutingKey startKey, RoutingKey endKey, IndexedTriConsumer<P1, P2, P3> forEachScanOrCheckpoint, IndexedRangeTriConsumer<P1, P2, P3> forEachRange, P1 p1, P2 p2, P3 p3, int minIndex)
+    {
         if (ranges.length == 0 || minIndex == ranges.length)
             return minIndex;
 
-        int end = SortedArrays.binarySearch(ranges, minIndex, ranges.length, range.end(), (a, b) -> a.compareTo(b.start()), CEIL);
+        int end = SortedArrays.binarySearch(ranges, minIndex, ranges.length, endKey, (a, b) -> a.compareTo(b.start()), CEIL);
         if (end < 0) end = -1 - end;
         if (end <= minIndex) return minIndex;
 
-        int floor = SortedArrays.binarySearch(ranges, minIndex, ranges.length, range.start(), (a, b) -> a.compareTo(b.start()), CEIL);
+        int floor = SortedArrays.binarySearch(ranges, minIndex, ranges.length, startKey, (a, b) -> a.compareTo(b.start()), CEIL);
         int start = floor;
         if (floor < 0)
         {
@@ -166,15 +171,15 @@ public class SearchableRangeList
             start = floor = -2 - floor;
             if (start < 0)
                 start = floor = 0;
-            else if (ranges[start].end().compareTo(range.start()) <= 0)
+            else if (ranges[start].end().compareTo(startKey) <= 0)
                 ++start;
         }
 
-        return forEach(start, end, floor, range.start(), forEachScanOrCheckpoint, forEachRange, p1, p2, p3, minIndex);
+        return forEach(start, end, floor, startKey, forEachScanOrCheckpoint, forEachRange, p1, p2, p3, minIndex);
     }
 
     @Inline
-    public <P1, P2, P3> int forEach(Key key, IndexedTriConsumer<P1, P2, P3> forEachScanOrCheckpoint, IndexedRangeTriConsumer<P1, P2, P3> forEachRange, P1 p1, P2 p2, P3 p3, int minIndex)
+    public <P1, P2, P3> int forEach(RoutableKey key, IndexedTriConsumer<P1, P2, P3> forEachScanOrCheckpoint, IndexedRangeTriConsumer<P1, P2, P3> forEachRange, P1 p1, P2 p2, P3 p3, int minIndex)
     {
         if (ranges.length == 0 || minIndex == ranges.length)
             return minIndex;

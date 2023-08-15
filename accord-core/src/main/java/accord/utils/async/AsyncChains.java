@@ -18,24 +18,26 @@
 
 package accord.utils.async;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
-import accord.api.VisibleForImplementation;
-import accord.utils.Invariants;
-import accord.utils.async.AsyncChainCombiner.ReduceWithIdentity;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static accord.utils.async.AsyncChainCombiner.Reduce;
+import accord.api.VisibleForImplementation;
+import accord.utils.Invariants;
 
 public abstract class AsyncChains<V> implements AsyncChain<V>
 {
@@ -61,7 +63,14 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         {
             if (value != null && value.getClass() == FailureHolder.class)
                 return (AsyncChain<T>) this;
-            return new Immediate<>(mapper.apply((V) value));
+            try
+            {
+                return new Immediate<>(mapper.apply((V) value));
+            }
+            catch (Throwable t)
+            {
+                return new Immediate<>(t);
+            }
         }
 
         @Override
@@ -69,7 +78,14 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         {
             if (value != null && value.getClass() == FailureHolder.class)
                 return (AsyncChain<T>) this;
-            return mapper.apply((V) value);
+            try
+            {
+                return mapper.apply((V) value);
+            }
+            catch (Throwable t)
+            {
+                return new Immediate<>(t);
+            }
         }
 
         @Override
@@ -152,7 +168,20 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         public void accept(I i, Throwable throwable)
         {
             if (throwable != null) next.accept(null, throwable);
-            else next.accept(apply(i), null);
+            else
+            {
+                O update;
+                try
+                {
+                    update = apply(i);
+                }
+                catch (Throwable t)
+                {
+                    next.accept(null, t);
+                    return;
+                }
+                next.accept(update, null);
+            }
         }
     }
 
@@ -201,7 +230,14 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         @Override
         public AsyncChain<O> apply(I i)
         {
-            return map.apply(i);
+            try
+            {
+                return map.apply(i);
+            }
+            catch (Throwable t)
+            {
+                return AsyncChains.failure(t);
+            }
         }
     }
 
@@ -235,6 +271,44 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         {
             super.accept(i, throwable);
             callback.accept(i, throwable);
+        }
+    }
+
+    @VisibleForTesting
+    static class AccumulatingReducerAsyncChain<V> extends AsyncChains.Head<V>
+    {
+        private final BiFunction<? super V, ? super V, ? extends V> reducer;
+        private final AsyncChainCombiner<V> chain;
+
+        private AccumulatingReducerAsyncChain(AsyncChain<V> accum, AsyncChain<V> add, BiFunction<? super V, ? super V, ? extends V> reducer)
+        {
+            List<AsyncChain<V>> list = new ArrayList<>(2);
+            list.add(accum);
+            list.add(add);
+            this.chain = new AsyncChainCombiner<>(list);
+            this.reducer = reducer;
+        }
+
+        private static <V> boolean match(AsyncChain<V> accum, BiFunction<? super V, ? super V, ? extends V> reducer)
+        {
+            return accum instanceof AccumulatingReducerAsyncChain && ((AccumulatingReducerAsyncChain<?>) accum).reducer == reducer;
+        }
+
+        private void add(AsyncChain<V> a)
+        {
+            chain.inputs().add(a);
+        }
+
+        @VisibleForTesting
+        int size()
+        {
+            return chain.inputs().size();
+        }
+
+        @Override
+        protected void start(BiConsumer<? super V, Throwable> callback)
+        {
+            chain.map(r -> reduceArray(r, reducer)).begin(callback);
         }
     }
 
@@ -454,35 +528,52 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         });
     }
 
+    public static <V> AsyncChain<V[]> allOf(List<? extends AsyncChain<? extends V>> chains)
+    {
+        return new AsyncChainCombiner<>(chains);
+    }
+
     public static <V> AsyncChain<List<V>> all(List<? extends AsyncChain<? extends V>> chains)
     {
-        Invariants.checkArgument(!chains.isEmpty());
-        return new AsyncChainCombiner.All<>(chains);
+        return new AsyncChainCombiner<>(chains).map(Lists::newArrayList);
     }
 
-    public static <V> AsyncChain<V> reduce(List<? extends AsyncChain<? extends V>> chains, BiFunction<V, V, V> reducer)
+    public static <V> AsyncChain<V> reduce(List<? extends AsyncChain<? extends V>> chains, BiFunction<? super V, ? super V, ? extends V> reducer)
     {
-        Invariants.checkArgument(!chains.isEmpty(), "List of chains is empty");
         if (chains.size() == 1)
             return (AsyncChain<V>) chains.get(0);
-        if (Reduce.canAppendTo(chains.get(0), reducer))
-        {
-            AsyncChainCombiner.Reduce<V> appendTo = (AsyncChainCombiner.Reduce<V>) chains.get(0);
-            appendTo.addAll(chains.subList(1, chains.size()));
-            return appendTo;
-        }
-        return new Reduce<>(chains, reducer);
+        return allOf(chains).map(r -> reduceArray(r, reducer));
     }
 
-    public static <V> AsyncChain<V> reduce(AsyncChain<V> a, AsyncChain<V> b, BiFunction<V, V, V> reducer)
+    private static <V> V reduceArray(V[] results, BiFunction<? super V, ? super V, ? extends V> reducer)
     {
-        if (Reduce.canAppendTo(a, reducer))
+        V result = results[0];
+        for (int i=1; i< results.length; i++)
+            result = reducer.apply(result, results[i]);
+        return result;
+    }
+
+    /**
+     * Special variant of {@link #reduce(List, BiFunction)} that returns a mutable chain, where new chains can be appended as long as the returned chain has not started.  The target use case are for patterns such as the following
+     * <p/>
+     * <pre>{@code
+     * BiFunction<? super V, ? super V, ? extends V> reducer = ...;
+     * AsyncChain<V> chain = null;
+     * for (...)
+     * {
+     *   AsyncChain<V> next = ...;
+     *   chain = chain == null ? next : reduce(chain, next, reducer);
+     * }
+     * }</pre>
+     */
+    public static <V> AsyncChain<V> reduce(AsyncChain<V> accum, AsyncChain<V> add, BiFunction<? super V, ? super V, ? extends V> reducer)
+    {
+        if (AccumulatingReducerAsyncChain.match(accum, reducer))
         {
-            AsyncChainCombiner.Reduce<V> appendTo = (AsyncChainCombiner.Reduce<V>) a;
-            appendTo.add(b);
-            return a;
+            ((AccumulatingReducerAsyncChain<V>) accum).add(add);
+            return accum;
         }
-        return new Reduce<>(Lists.newArrayList(a, b), reducer);
+        return new AccumulatingReducerAsyncChain<>(accum, add, reducer);
     }
 
     public static <A, B> AsyncChain<B> reduce(List<? extends AsyncChain<? extends A>> chains, B identity, BiFunction<B, ? super A, B> reducer)
@@ -492,7 +583,12 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
             case 0: return AsyncChains.success(identity);
             case 1: return chains.get(0).map(a -> reducer.apply(identity, a));
         }
-        return new ReduceWithIdentity<>(chains, identity, reducer);
+        return allOf(chains).map(results -> {
+            B result = identity;
+            for (A r : results)
+                result = reducer.apply(result, r);
+            return result;
+        });
     }
 
     public static <V> V getBlocking(AsyncChain<V> chain) throws InterruptedException, ExecutionException
@@ -521,6 +617,42 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         Result result = callbackResult.get();
         if (result.failure == null) return result.result;
         else throw new ExecutionException(result.failure);
+    }
+
+    public static <V> V getBlockingAndRethrow(AsyncChain<V> chain)
+    {
+        class Result
+        {
+            final V result;
+            final Throwable failure;
+
+            public Result(V result, Throwable failure)
+            {
+                this.result = result;
+                this.failure = failure;
+            }
+        }
+
+        AtomicReference<Result> callbackResult = new AtomicReference<>();
+        CountDownLatch latch = new CountDownLatch(1);
+
+        chain.begin((result, failure) -> {
+            callbackResult.set(new Result(result, failure));
+            latch.countDown();
+        });
+
+        try
+        {
+            latch.await();
+        }
+        catch (InterruptedException e)
+        {
+            throw new RuntimeException(e);
+        }
+
+        Result result = callbackResult.get();
+        if (result.failure == null) return result.result;
+        else throw new RuntimeException(result.failure);
     }
 
     public static <V> V getBlocking(AsyncChain<V> chain, long timeout, TimeUnit unit) throws InterruptedException, TimeoutException, ExecutionException
