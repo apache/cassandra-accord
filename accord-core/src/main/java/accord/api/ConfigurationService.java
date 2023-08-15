@@ -173,7 +173,7 @@ public interface ConfigurationService
      * On invocation the system is not necessarily ready to process the epoch, and the BootstrapReady parameter
      * provides indications of when the bootstrap has completed various phases of setup.
      */
-    void acknowledgeEpoch(EpochReady ready);
+    void acknowledgeEpoch(EpochReady ready, boolean startSync);
 
     void reportEpochClosed(Ranges ranges, long epoch);
 

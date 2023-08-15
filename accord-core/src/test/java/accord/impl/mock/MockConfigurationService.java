@@ -83,7 +83,7 @@ public class MockConfigurationService implements TestableConfigurationService
     }
 
     @Override
-    public synchronized void acknowledgeEpoch(EpochReady epoch)
+    public synchronized void acknowledgeEpoch(EpochReady epoch, boolean startSync)
     {
         Assertions.assertFalse(acks.containsKey(epoch.epoch));
         acks.put(epoch.epoch, epoch);
