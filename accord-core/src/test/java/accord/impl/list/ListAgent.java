@@ -55,8 +55,7 @@ public class ListAgent implements Agent
         if (fail != null)
         {
             checkState(success == null, "fail (%s) and success (%s) are both not null", fail, success);
-            // Can't respond without success and requestId
-            node.agent().onUncaughtException(fail);
+            // We don't really process errors for Recover here even though it is provided in the interface
         }
         if (success != null)
         {
