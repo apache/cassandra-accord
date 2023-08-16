@@ -209,7 +209,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
             return AsyncResults.success(null);
         EpochReady ready = onTopologyUpdateInternal(topology, startSync);
         ready.coordination.addCallback(() -> this.topology.onEpochSyncComplete(id, topology.epoch()));
-        configService.acknowledgeEpoch(ready);
+        configService.acknowledgeEpoch(ready, startSync);
         return ready.coordination;
     }
 

@@ -158,7 +158,7 @@ public class BurnTestConfigurationService extends AbstractConfigurationService.M
     }
 
     @Override
-    protected void localSyncComplete(Topology topology)
+    protected void localSyncComplete(Topology topology, boolean startSync)
     {
         topologyUpdates.syncComplete(lookup.apply(localId), topology.nodes(), topology.epoch());
     }

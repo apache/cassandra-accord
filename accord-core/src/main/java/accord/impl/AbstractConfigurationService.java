@@ -233,10 +233,10 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
         fetchTopologyInternal(epoch);
     }
 
-    protected abstract void localSyncComplete(Topology topology);
+    protected abstract void localSyncComplete(Topology topology, boolean startSync);
 
     @Override
-    public void acknowledgeEpoch(EpochReady ready)
+    public void acknowledgeEpoch(EpochReady ready, boolean startSync)
     {
         ready.metadata.addCallback(() -> {
             synchronized (AbstractConfigurationService.this)
@@ -247,7 +247,7 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
         ready.coordination.addCallback(() ->  {
             synchronized (AbstractConfigurationService.this)
             {
-                localSyncComplete(epochs.getOrCreate(ready.epoch).topology);
+                localSyncComplete(epochs.getOrCreate(ready.epoch).topology, startSync);
             }
         });
     }
