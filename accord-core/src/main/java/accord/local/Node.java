@@ -640,7 +640,16 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
                 return;
             }
         }
-        scheduler.now(() -> request.process(this, from, replyContext));
+        scheduler.now(() -> {
+            try
+            {
+                request.process(this, from, replyContext);
+            }
+            catch (Throwable t)
+            {
+                reply(from, replyContext, null, t);
+            }
+        });
     }
 
     public Scheduler scheduler()

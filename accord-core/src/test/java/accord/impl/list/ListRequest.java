@@ -107,12 +107,7 @@ public class ListRequest implements Request
         @Override
         public void accept(Result success, Throwable fail)
         {
-            // TODO (desired, testing): error handling
-            if (success != null)
-            {
-                node.reply(client, replyContext, (ListResult) success, null);
-            }
-            else if (fail instanceof CoordinationFailed)
+            if (fail instanceof CoordinationFailed)
             {
                 RoutingKey homeKey = ((CoordinationFailed) fail).homeKey();
                 TxnId txnId = ((CoordinationFailed) fail).txnId();
@@ -148,6 +143,10 @@ public class ListRequest implements Request
                             }
                         }));
                 });
+            }
+            else
+            {
+                node.reply(client, replyContext, (ListResult) success, fail);
             }
         }
     }

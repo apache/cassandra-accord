@@ -19,7 +19,6 @@
 package accord.messages;
 
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
-import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -135,7 +134,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
         }
 
         if (safeCommand.removeListener(this))
-            ack(null);
+            ack();
     }
 
     @Override
@@ -147,13 +146,30 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
     @Override
     public void accept(Void result, Throwable failure)
     {
-        ack(failure);
+        if (failure != null)
+        {
+            while (true)
+            {
+                int initialValue = waitingOnUpdater.get(this);
+                if (initialValue == -1)
+                {
+                    logger.error("Had error in WaitOnCommit, but already replied so can't send failure response", failure);
+                    break;
+                }
+                if (waitingOnUpdater.compareAndSet(this, initialValue, -1))
+                    node.reply(replyTo, replyContext, null, failure);
+            }
+        }
+        else
+        {
+            ack();
+        }
     }
 
-    private void ack(@Nullable Throwable fail)
+    private void ack()
     {
         if (waitingOnUpdater.decrementAndGet(this) == -1)
-            node.reply(replyTo, replyContext, fail != null ? WaitOnCommitOk.INSTANCE : null, fail);
+            node.reply(replyTo, replyContext, WaitOnCommitOk.INSTANCE, null);
     }
 
     @Override

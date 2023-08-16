@@ -99,7 +99,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
     {
         if (reply != null)
         {
-            node.reply(replyTo, replyContext, reply, null);
+            node.reply(replyTo, replyContext, reply, failure);
         }
         else if (failure != null)
         {
@@ -129,9 +129,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
         // and prevents races where we respond before dispatching all the required reads (if the reads are
         // completing faster than the reads can be setup on all required shards)
         if (-1 == --waitingOnCount)
-        {
             reply(this.unavailable, fail == null ? data : null, fail);
-        }
     }
 
     protected synchronized void readComplete(CommandStore commandStore, @Nullable Data result, @Nullable Ranges unavailable)
