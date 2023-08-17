@@ -20,6 +20,7 @@ package accord.burn;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
@@ -46,6 +47,7 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.Key;
 import accord.impl.IntHashKey;
+import accord.impl.PrefixedIntHashKey;
 import accord.impl.basic.Cluster;
 import accord.impl.basic.PendingRunnable;
 import accord.impl.basic.PropagatingPendingQueue;
@@ -62,16 +64,20 @@ import accord.impl.list.ListRequest;
 import accord.impl.list.ListResult;
 import accord.impl.list.ListUpdate;
 import accord.local.CommandStore;
+import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.MessageType;
 import accord.primitives.Keys;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Txn;
+import accord.topology.Shard;
+import accord.topology.Topology;
 import accord.utils.DefaultRandom;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncExecutor;
 import accord.verify.StrictSerializabilityVerifier;
+import org.agrona.collections.IntHashSet;
 
 import static accord.impl.IntHashKey.forHash;
 import static accord.utils.Utils.toArray;
@@ -92,72 +98,101 @@ public class BurnTest
 
         for (int count = 0 ; count < operations ; ++count)
         {
+            int finalCount = count;
             Id client = clients.get(random.nextInt(clients.size()));
             Id node = nodes.get(random.nextInt(nodes.size()));
 
             boolean isRangeQuery = random.nextBoolean();
+            String description;
+            Function<Node, Txn> gen;
             if (isRangeQuery)
             {
-                int rangeCount = 1 + random.nextInt(2);
-                List<Range> requestRanges = new ArrayList<>();
-                while (--rangeCount >= 0)
-                {
-                    int j = 1 + random.nextInt(0xffff), i = Math.max(0, j - (1 + random.nextInt(0x1ffe)));
-                    requestRanges.add(IntHashKey.range(forHash(i), forHash(j)));
-                }
-                Ranges ranges = Ranges.of(requestRanges.toArray(new Range[0]));
-                ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, ranges, ranges);
-                ListQuery query = new ListQuery(client, count);
-                ListRequest request = new ListRequest(new Txn.InMemory(ranges, read, query, null));
-                packets.add(new Packet(client, node, count, request));
+                description = "range";
+                gen = n -> {
+                    int[] prefixes = prefixes(n.topology().current());
 
-
+                    int rangeCount = 1 + random.nextInt(2);
+                    List<Range> requestRanges = new ArrayList<>();
+                    while (--rangeCount >= 0)
+                    {
+                        int j = 1 + random.nextInt(0xffff), i = Math.max(0, j - (1 + random.nextInt(0x1ffe)));
+                        int prefix = random.pickInt(prefixes);
+                        requestRanges.add(PrefixedIntHashKey.range(PrefixedIntHashKey.forHash(prefix, i), PrefixedIntHashKey.forHash(prefix, j)));
+                    }
+                    Ranges ranges = Ranges.of(requestRanges.toArray(new Range[0]));
+                    ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, ranges, ranges);
+                    ListQuery query = new ListQuery(client, finalCount);
+                    return new Txn.InMemory(ranges, read, query, null);
+                };
             }
             else
             {
-                boolean isWrite = random.nextBoolean();
-                int readCount = 1 + random.nextInt(2);
-                int writeCount = isWrite ? random.nextInt(3) : 0;
+                description = "key";
+                gen = n -> {
+                    int[] prefixes = prefixes(n.topology().current());
 
-                TreeSet<Key> requestKeys = new TreeSet<>();
-                while (readCount-- > 0)
-                    requestKeys.add(randomKey(random, keys, requestKeys));
+                    boolean isWrite = random.nextBoolean();
+                    int readCount = 1 + random.nextInt(2);
+                    int writeCount = isWrite ? random.nextInt(3) : 0;
 
-                ListUpdate update = isWrite ? new ListUpdate(executor) : null;
-                while (writeCount-- > 0)
-                {
-                    int i = randomKeyIndex(random, keys, update.keySet());
-                    update.put(keys.get(i), ++next[i]);
-                }
+                    TreeSet<Key> requestKeys = new TreeSet<>();
+                    IntHashSet readValues = new IntHashSet();
+                    while (readCount-- > 0)
+                        requestKeys.add(randomKey(random, prefixes, keyCount, readValues));
 
-                Keys readKeys = new Keys(requestKeys);
-                if (isWrite)
-                    requestKeys.addAll(update.keySet());
-                ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, readKeys, new Keys(requestKeys));
-                ListQuery query = new ListQuery(client, count);
-                ListRequest request = new ListRequest(new Txn.InMemory(new Keys(requestKeys), read, query, update));
-                packets.add(new Packet(client, node, count, request));
+                    ListUpdate update = isWrite ? new ListUpdate(executor) : null;
+                    IntHashSet writeValues = isWrite ? new IntHashSet() : null;
+                    while (writeCount-- > 0)
+                    {
+                        int i = randomKeyValue(random, keyCount, writeValues);
+                        int prefix = random.pickInt(prefixes);
+                        update.put(PrefixedIntHashKey.key(prefix, i), ++next[i]);
+                    }
+
+                    Keys readKeys = new Keys(requestKeys);
+                    if (isWrite)
+                        requestKeys.addAll(update.keySet());
+                    ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, readKeys, new Keys(requestKeys));
+                    ListQuery query = new ListQuery(client, finalCount);
+                    return new Txn.InMemory(new Keys(requestKeys), read, query, update);
+                };
             }
+            packets.add(new Packet(client, node, count, new ListRequest(description, gen)));
         }
 
         return packets;
     }
 
-    private static Key randomKey(RandomSource random, List<Key> keys, Set<Key> notIn)
+    private static int[] prefixes(Topology topology)
     {
-        return keys.get(randomKeyIndex(random, keys, notIn));
+        IntHashSet uniq = new IntHashSet();
+        for (Shard shard : topology.shards())
+            uniq.add(((PrefixedIntHashKey) shard.range.start()).prefix);
+        int[] prefixes = new int[uniq.size()];
+        IntHashSet.IntIterator it = uniq.iterator();
+        for (int i = 0; it.hasNext(); i++)
+            prefixes[i] = it.nextValue();
+        Arrays.sort(prefixes);
+        return prefixes;
     }
 
-    private static int randomKeyIndex(RandomSource random, List<Key> keys, Set<Key> notIn)
+    private static Key randomKey(RandomSource random, int[] prefixes, int keyCount, Set<Integer> notIn)
     {
-        return randomKeyIndex(random, keys, notIn::contains);
+        int prefix = random.pickInt(prefixes);
+        int value = randomKeyValue(random, keyCount, notIn);
+        return PrefixedIntHashKey.key(prefix, value);
     }
 
-    private static int randomKeyIndex(RandomSource random, List<Key> keys, Predicate<Key> notIn)
+    private static int randomKeyValue(RandomSource random, int keyCount, Set<Integer> notIn)
+    {
+        return randomKeyValue(random, keyCount, notIn::contains);
+    }
+
+    private static int randomKeyValue(RandomSource random, int keyCount, Predicate<Integer> notIn)
     {
         int i;
         //noinspection StatementWithEmptyBody
-        while (notIn.test(keys.get(i = random.nextInt(keys.size()))));
+        while (notIn.test(i = random.nextInt(keyCount)));
         return i;
     }
 
@@ -378,7 +413,7 @@ public class BurnTest
 
             List<Id> nodes = generateIds(false, random.nextInt(rf, rf * 3));
 
-            burn(random, new TopologyFactory(rf, IntHashKey.ranges(random.nextInt(Math.max(nodes.size() + 1, rf), nodes.size() * 3))),
+            burn(random, new TopologyFactory(rf, PrefixedIntHashKey.ranges(0, random.nextInt(Math.max(nodes.size() + 1, rf), nodes.size() * 3))),
                     clients,
                     nodes,
                     5 + random.nextInt(15),
@@ -402,6 +437,11 @@ public class BurnTest
 
     private static int key(Key key)
     {
-        return ((IntHashKey) key).key;
+        return ((PrefixedIntHashKey) key).key;
+    }
+
+    private static int prefix(Key key)
+    {
+        return ((PrefixedIntHashKey) key).prefix;
     }
 }

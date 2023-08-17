@@ -45,6 +45,7 @@ import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
 import accord.impl.CoordinateDurabilityScheduling;
 import accord.impl.IntHashKey;
+import accord.impl.PrefixedIntHashKey;
 import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TopologyFactory;
@@ -235,7 +236,7 @@ public class Cluster implements Scheduler
                 LongSupplier nowSupplier = nowSupplierSupplier.get();
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(id, executor, randomSupplier, topology, lookup::get, topologyUpdates);
                 Node node = new Node(id, messageSink, configService, nowSupplier, NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, nowSupplier),
-                                     () -> new ListStore(id), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
+                                     () -> new ListStore(id), new ShardDistributor.EvenSplit<>(8, ignore -> new PrefixedIntHashKey.Splitter()),
                                      executor.agent(),
                                      randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
                                      SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending));

@@ -36,8 +36,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.burn.TopologyUpdates;
-import accord.impl.IntHashKey;
-import accord.impl.IntHashKey.Hash;
+import accord.impl.PrefixedIntHashKey;
+import accord.impl.PrefixedIntHashKey.Hash;
 import accord.local.Node;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
@@ -97,20 +97,20 @@ public class TopologyRandomizer
     {
         int idx = random.nextInt(shards.length - 1);
         Shard left = shards[idx];
-        IntHashKey.Range leftRange = (IntHashKey.Range) left.range;
+        PrefixedIntHashKey.Range leftRange = (PrefixedIntHashKey.Range) left.range;
         Shard right = shards[idx + 1];
-        IntHashKey.Range rightRange = (IntHashKey.Range) right.range;
-        IntHashKey minBound = (IntHashKey) leftRange.split(2).get(0).end();
-        IntHashKey maxBound = (IntHashKey) rightRange.split(2).get(0).start();
+        PrefixedIntHashKey.Range rightRange = (PrefixedIntHashKey.Range) right.range;
+        PrefixedIntHashKey minBound = (PrefixedIntHashKey) leftRange.split(2).get(0).end();
+        PrefixedIntHashKey maxBound = (PrefixedIntHashKey) rightRange.split(2).get(0).start();
 
         if (minBound.hash == maxBound.hash)
             // no adjustment is possible
             return shards;
 
-        Hash newBound = IntHashKey.forHash(minBound.hash + random.nextInt(maxBound.hash - minBound.hash));
+        Hash newBound = PrefixedIntHashKey.forHash(minBound.prefix, minBound.hash + random.nextInt(maxBound.hash - minBound.hash));
 
-        shards[idx] = new Shard(IntHashKey.range((Hash)leftRange.start(), newBound), left.nodes, left.fastPathElectorate, left.joining);
-        shards[idx+1] = new Shard(IntHashKey.range(newBound, (Hash)rightRange.end()), right.nodes, right.fastPathElectorate, right.joining);
+        shards[idx] = new Shard(PrefixedIntHashKey.range((Hash)leftRange.start(), newBound), left.nodes, left.fastPathElectorate, left.joining);
+        shards[idx+1] = new Shard(PrefixedIntHashKey.range(newBound, (Hash)rightRange.end()), right.nodes, right.fastPathElectorate, right.joining);
 //        logger.debug("Updated boundary on {} & {} {} {} to {} {}", idx, idx + 1, left, right,
 //                     shards[idx].toString(true), shards[idx + 1].toString(true));
 
@@ -123,21 +123,21 @@ public class TopologyRandomizer
             throw new IllegalArgumentException("Unable to split an empty array");
         int idx = shards.length == 1 ? 0 : random.nextInt(shards.length - 1);
         Shard split = shards[idx];
-        IntHashKey.Range splitRange = (IntHashKey.Range) split.range;
-        IntHashKey minBound = (IntHashKey) splitRange.start();
-        IntHashKey maxBound = (IntHashKey) splitRange.end();
+        PrefixedIntHashKey.Range splitRange = (PrefixedIntHashKey.Range) split.range;
+        PrefixedIntHashKey minBound = (PrefixedIntHashKey) splitRange.start();
+        PrefixedIntHashKey maxBound = (PrefixedIntHashKey) splitRange.end();
 
         if (minBound.hash + 1 == maxBound.hash)
             // no split is possible
             return shards;
 
-        Hash newBound = IntHashKey.forHash(minBound.hash + 1 + random.nextInt(maxBound.hash - (1 + minBound.hash)));
+        Hash newBound = PrefixedIntHashKey.forHash(minBound.prefix, minBound.hash + 1 + random.nextInt(maxBound.hash - (1 + minBound.hash)));
 
         Shard[] result = new Shard[shards.length + 1];
         System.arraycopy(shards, 0, result, 0, idx);
         System.arraycopy(shards, idx, result, idx + 1, shards.length - idx);
-        result[idx] = new Shard(IntHashKey.range((Hash)splitRange.start(), newBound), split.nodes, split.fastPathElectorate, split.joining);
-        result[idx+1] = new Shard(IntHashKey.range(newBound, (Hash)splitRange.end()), split.nodes, split.fastPathElectorate, split.joining);
+        result[idx] = new Shard(PrefixedIntHashKey.range((Hash)splitRange.start(), newBound), split.nodes, split.fastPathElectorate, split.joining);
+        result[idx+1] = new Shard(PrefixedIntHashKey.range(newBound, (Hash)splitRange.end()), split.nodes, split.fastPathElectorate, split.joining);
         logger.debug("Split boundary on {} & {} {} to {} {}", idx, idx + 1, split,
                      result[idx].toString(true), result[idx + 1].toString(true));
 
@@ -156,7 +156,7 @@ public class TopologyRandomizer
         Shard[] result = new Shard[shards.length - 1];
         System.arraycopy(shards, 0, result, 0, idx);
         System.arraycopy(shards, idx + 2, result, idx + 1, shards.length - (idx + 2));
-        Range range = IntHashKey.range((Hash)left.range.start(), (Hash)right.range.end());
+        Range range = PrefixedIntHashKey.range((Hash)left.range.start(), (Hash)right.range.end());
         List<Node.Id> nodes; {
             TreeSet<Node.Id> tmp = new TreeSet<>();
             tmp.addAll(left.nodes);
