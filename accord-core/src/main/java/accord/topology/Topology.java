@@ -211,7 +211,8 @@ public class Topology
         return forSubset(subsetFor(select), nodes);
     }
 
-    private Topology forSubset(int[] newSubset)
+    @VisibleForTesting
+    Topology forSubset(int[] newSubset)
     {
         Ranges rangeSubset = ranges.select(newSubset);
 
@@ -225,7 +226,8 @@ public class Topology
         return new Topology(epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
     }
 
-    private Topology forSubset(int[] newSubset, Collection<Id> nodes)
+    @VisibleForTesting
+    Topology forSubset(int[] newSubset, Collection<Id> nodes)
     {
         Ranges rangeSubset = ranges.select(newSubset);
         Map<Id, NodeInfo> nodeLookup = new HashMap<>();
