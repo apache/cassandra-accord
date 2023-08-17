@@ -38,6 +38,7 @@ import accord.local.SafeCommandStore;
 import accord.local.ShardDistributor;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 
 public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 {
@@ -104,11 +105,12 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         public <T> AsyncChain<T> submit(Callable<T> fn)
         {
             Task<T> task = new DelayedTask<>(fn);
-            boolean wasEmpty = pending.isEmpty();
-            pending.add(task);
-            if (wasEmpty)
-                runNextTask();
-            return task;
+            return AsyncChains.detectLeak(agent::onUncaughtException, () -> {
+                boolean wasEmpty = pending.isEmpty();
+                pending.add(task);
+                if (wasEmpty)
+                    runNextTask();
+            }).flatMap(ignore -> task);
         }
 
         private void runNextTask()
