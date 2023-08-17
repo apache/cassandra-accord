@@ -82,8 +82,6 @@ import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
-import static accord.utils.Invariants.checkState;
-
 public class Node implements ConfigurationService.Listener, NodeTimeService
 {
     private static final Logger logger = LoggerFactory.getLogger(Node.class);
@@ -481,7 +479,8 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     {
         if (failure != null)
         {
-            checkState(send == null, "fail (%s) and send (%s) are both not null", failure, send);
+            if (send != null)
+                agent().onUncaughtException(new IllegalArgumentException(String.format("fail (%s) and send (%s) are both not null", failure, send)));
             messageSink.replyWithFailure(replyingToNode, replyContext, failure);
             return;
         }
