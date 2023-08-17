@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -43,12 +44,15 @@ import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.utils.Invariants;
 import accord.utils.RandomSource;
+import org.agrona.collections.IntHashSet;
 
 
 // TODO (required, testing): add change replication factor
 public class TopologyRandomizer
 {
     private static final Logger logger = LoggerFactory.getLogger(TopologyRandomizer.class);
+    private static final AtomicInteger CURRENT_PREFIX = new AtomicInteger(0);
+
     private final RandomSource random;
     private final List<Topology> epochs = new ArrayList<>();
     private final Function<Node.Id, Node> nodeLookup;
@@ -72,7 +76,9 @@ public class TopologyRandomizer
         SPLIT(TopologyRandomizer::split),
         MERGE(TopologyRandomizer::merge),
         MEMBERSHIP(TopologyRandomizer::updateMembership),
-        FASTPATH(TopologyRandomizer::updateFastPath);
+        FASTPATH(TopologyRandomizer::updateFastPath),
+        ADD_PREFIX(TopologyRandomizer::addPrefix),
+        REMOVE_PREFIX(TopologyRandomizer::removePrefix);
 
         private final BiFunction<Shard[], RandomSource, Shard[]> function;
 
@@ -254,6 +260,86 @@ public class TopologyRandomizer
         shards[idx] = new Shard(shard.range, shard.nodes, newFastPath(shard.nodes, random), shard.joining);
 //        logger.debug("Updated fast path on {} {} to {}", idx, shard.toString(true), shards[idx].toString(true));
         return shards;
+    }
+
+    private static Shard[] addPrefix(Shard[] shards, RandomSource random)
+    {
+        // TODO (coverage): add support for bringing prefixes back after removal
+        // In implementations (such as Apache Cassandra) its possible that a range exists, gets removed, then added back (CREATE KEYSPACE, DROP KEYSPACE, CREATE KEYSPACE),
+        // in this case the old prefix should be "cleared".
+        int prefix = CURRENT_PREFIX.incrementAndGet();
+        Set<Node.Id> joining = new HashSet<>();
+        Node.Id[] nodes;
+        {
+            Set<Node.Id> uniq = new HashSet<>();
+            for (Shard shard : shards)
+            {
+                uniq.addAll(shard.nodes);
+                joining.addAll(shard.joining);
+            }
+            Node.Id[] result = uniq.toArray(new Node.Id[uniq.size()]);
+            Arrays.sort(result);
+            nodes = result;
+        }
+        int rf = Math.min(3, nodes.length);
+        List<Shard> result = new ArrayList<>(shards.length + nodes.length);
+        result.addAll(Arrays.asList(shards));
+        Range[] ranges = PrefixedIntHashKey.ranges(prefix, nodes.length);
+        for (int i = 0; i < ranges.length; i++)
+        {
+            Range range = ranges[i];
+            List<Node.Id> replicas = select(nodes, rf, random);
+            Set<Node.Id> fastPath = newFastPath(replicas, random);
+            result.add(new Shard(range, replicas, fastPath, Sets.intersection(joining, new HashSet<>(replicas))));
+        }
+        return result.toArray(new Shard[result.size()]);
+    }
+
+    private static List<Node.Id> select(Node.Id[] nodes, int rf, RandomSource random)
+    {
+        List<Node.Id> result = new ArrayList<>(rf);
+        while (result.size() < rf)
+        {
+            Node.Id id = random.pick(nodes);
+            // TODO (efficiency) : rf is normally 3, so is it worth it to have a set, bitset, or another structure?
+            if (!result.contains(id))
+                result.add(id);
+        }
+        return result;
+    }
+
+    private static Shard[] removePrefix(Shard[] shards, RandomSource random)
+    {
+        int[] prefixes = prefixes(shards);
+        if (prefixes.length <= 1)
+            return shards;
+        int prefix = prefixes[random.nextInt(prefixes.length)];
+        List<Shard> result = new ArrayList<>(shards.length);
+        for (Shard shard : shards)
+        {
+            int shardPrefix = prefix(shard);
+            if (shardPrefix == prefix) continue;
+            result.add(shard);
+        }
+        return result.toArray(result.toArray(new Shard[result.size()]));
+    }
+
+    private static int[] prefixes(Shard[] shards)
+    {
+        IntHashSet prefixes = new IntHashSet();
+        for (Shard shard : shards)
+            prefixes.add(prefix(shard));
+        int[] result = new int[prefixes.size()];
+        IntHashSet.IntIterator it = prefixes.iterator();
+        for (int i = 0; it.hasNext(); i++)
+            result[i] = it.nextValue();
+        Arrays.sort(result);
+        return result;
+    }
+
+    private static int prefix(Shard shard)
+    {
+        return ((PrefixedIntHashKey) shard.range.start()).prefix;
     }
 
     private static Map<Node.Id, Ranges> getAdditions(Topology current, Topology next)
