@@ -32,6 +32,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,7 +71,8 @@ public class TopologyRandomizer
         this.nodeLookup = nodeLookup;
     }
 
-    private enum UpdateType
+    @VisibleForTesting
+    enum UpdateType
     {
 //        BOUNDARY(TopologyRandomizer::updateBoundary),
         SPLIT(TopologyRandomizer::split),
