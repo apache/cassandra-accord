@@ -382,7 +382,10 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         if (ranges == null)
             return startInclusive() ? start.toUnseekable() : end.toUnseekable();
 
-        int i = ranges.indexOf(this);
+        // Use "CEIL" so we return the first match in the list and not any random match seen first.  This can become imporant
+        // when different views of Ranges may have more or less non-intersecting ranges in the backing array, causing
+        // different nodes to return different matches
+        int i = ranges.ceilIndexOf(this);
         Range that = ranges.get(i);
         if (this.start().compareTo(that.start()) <= 0)
         {

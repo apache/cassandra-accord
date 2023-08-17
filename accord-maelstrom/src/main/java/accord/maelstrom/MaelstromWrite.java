@@ -38,7 +38,7 @@ public class MaelstromWrite extends TreeMap<Key, Value> implements Write
     {
         MaelstromStore s = (MaelstromStore) store;
         if (containsKey(key))
-            s.data.merge((Key)key, new Timestamped<>(executeAt, get(key)), Timestamped::merge);
+            s.data.merge((Key)key, new Timestamped<>(executeAt, get(key), Value::toString), Timestamped::merge);
         return Writes.SUCCESS;
     }
 }

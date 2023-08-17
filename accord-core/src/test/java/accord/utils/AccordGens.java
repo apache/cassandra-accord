@@ -18,26 +18,39 @@
 
 package accord.utils;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiFunction;
+
+import javax.annotation.Nullable;
 
 import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.impl.IntHashKey;
 import accord.impl.IntKey;
+import accord.impl.PrefixedIntHashKey;
 import accord.local.Node;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.KeyDeps;
 import accord.primitives.Range;
 import accord.primitives.RangeDeps;
+import accord.primitives.Ranges;
 import accord.primitives.Routable;
+import accord.primitives.RoutableKey;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.topology.Shard;
+import accord.topology.Topology;
+import org.agrona.collections.IntHashSet;
+
+import static accord.utils.Utils.toArray;
 
 public class AccordGens
 {
@@ -98,9 +111,101 @@ public class AccordGens
         return rs -> new IntKey.Raw(rs.nextInt());
     }
 
+    public static Gen<Key> intKeysInsideRanges(Ranges ranges)
+    {
+        return rs -> {
+            Range range = ranges.get(rs.nextInt(0, ranges.size()));
+            int start = intKey(range.start());
+            int end = intKey(range.end());
+            // end inclusive, so +1 the result to include end and exclude start
+            return IntKey.key(rs.nextInt(start, end) + 1);
+        };
+    }
+
+    public static Gen<Key> intKeysOutsideRanges(Ranges ranges)
+    {
+        return rs -> {
+            for (int i = 0; i < 10; i++)
+            {
+                int index = rs.nextInt(0, ranges.size());
+                Range first = index == 0 ? null : ranges.get(index - 1);
+                Range second = ranges.get(index);
+                // retries
+                for (int j = 0; j < 10; j++)
+                {
+                    Key key = intKeyOutside(rs, first, second);
+                    if (key == null)
+                        continue;
+                    return key;
+                }
+            }
+            throw new AssertionError("Unable to find keys within the range " + ranges);
+        };
+    }
+
+    private static Key intKeyOutside(RandomSource rs, @Nullable Range first, Range second)
+    {
+        int start;
+        int end;
+        if (first == null)
+        {
+            start = Integer.MIN_VALUE;
+            end = intKey(second.start()); // start is not inclusive, so can use
+        }
+        else
+        {
+            start = intKey(first.end()) + 1; // end is inclusive, so +1 to skip
+            end = intKey(second.start()); // start is not inclusive, so can use
+        }
+        if (start == end)
+            return null;
+        return IntKey.key(rs.nextInt(start, end + 1));
+    }
+
+    private static int intKey(RoutableKey key)
+    {
+        return ((IntKey.Routing) key).key;
+    }
+
+    public static Gen<IntKey.Routing> intRoutingKey()
+    {
+        return rs -> IntKey.routing(rs.nextInt());
+    }
+
     public static Gen<Key> intHashKeys()
     {
         return rs -> IntHashKey.key(rs.nextInt());
+    }
+
+    public static Gen<Key> prefixedIntHashKey()
+    {
+        return prefixedIntHashKey(RandomSource::nextInt, rs -> rs.nextInt(PrefixedIntHashKey.MIN_KEY, Integer.MAX_VALUE));
+    }
+
+    public static Gen<Key> prefixedIntHashKey(Gen.IntGen prefixGen)
+    {
+        return prefixedIntHashKey(prefixGen, rs -> rs.nextInt(PrefixedIntHashKey.MIN_KEY, Integer.MAX_VALUE));
+    }
+
+    public static Gen<Key> prefixedIntHashKey(Gen.IntGen prefixGen, Gen.IntGen valueGen)
+    {
+        return rs -> PrefixedIntHashKey.key(prefixGen.nextInt(rs), valueGen.nextInt(rs));
+    }
+
+    public static Gen<Key> prefixedIntHashKeyInsideRanges(Ranges ranges)
+    {
+        return rs -> {
+            Range range = ranges.get(rs.nextInt(0, ranges.size()));
+            PrefixedIntHashKey start = (PrefixedIntHashKey) range.start();
+            PrefixedIntHashKey end = (PrefixedIntHashKey) range.end();
+            // end inclusive, so +1 the result to include end and exclude start
+            int hash = rs.nextInt(start.hash, end.hash) + 1;
+            int key = CRCUtils.reverseCRC32LittleEnding(hash);
+            PrefixedIntHashKey.Key ret = PrefixedIntHashKey.key(start.prefix, key);
+            // we have tests to make sure this doesn't fail... just a safety check
+            assert ret.hash == hash;
+            return ret;
+        };
     }
 
     public static Gen<KeyDeps> keyDeps(Gen<? extends Key> keyGen)
@@ -131,9 +236,94 @@ public class AccordGens
         };
     }
 
-    public interface RangeFactory
+    public static Gen<Shard> shards(Gen<Range> rangeGen, Gen<List<Node.Id>> nodesGen)
     {
-        Range create(RandomSource rs, RoutingKey a, RoutingKey b);
+        return rs -> {
+            Range range = rangeGen.next(rs);
+            List<Node.Id> nodes = nodesGen.next(rs);
+            int maxFailures = (nodes.size() - 1) / 2;
+            Set<Node.Id> fastPath = new HashSet<>();
+            if (maxFailures == 0)
+            {
+                fastPath.addAll(nodes);
+            }
+            else
+            {
+                int minElectorate = nodes.size() - maxFailures;
+                for (int i = 0, size = rs.nextInt(minElectorate, nodes.size()); i < size; i++)
+                {
+                    //noinspection StatementWithEmptyBody
+                    while (!fastPath.add(nodes.get(rs.nextInt(nodes.size()))));
+                }
+            }
+            Set<Node.Id> joining = new HashSet<>();
+            for (int i = 0, size = rs.nextInt(nodes.size()); i < size; i++)
+            {
+                //noinspection StatementWithEmptyBody
+                while (!joining.add(nodes.get(rs.nextInt(nodes.size()))));
+            }
+            return new Shard(range, nodes, fastPath, joining);
+        };
+    }
+
+    public static Gen<Topology> topologys()
+    {
+        return topologys(epochs(), nodes());
+    }
+
+    public static Gen<Topology> topologys(Gen.LongGen epochGen)
+    {
+        return topologys(epochGen, nodes());
+    }
+
+    public static Gen<Topology> topologys(Gen.LongGen epochGen, Gen<Node.Id> nodeGen)
+    {
+        return topologys(epochGen, nodeGen, AccordGens::prefixedIntHashKeyRanges);
+    }
+
+    public static Gen<Topology> topologys(Gen.LongGen epochGen, Gen<Node.Id> nodeGen, RangesGenFactory rangesGenFactory)
+    {
+        return rs -> {
+            long epoch = epochGen.nextLong(rs);
+            float chance = rs.nextFloat();
+            int rf;
+            if (chance < 0.2f)      { rf = rs.nextInt(2, 9); }
+            else if (chance < 0.4f) { rf = 3; }
+            else if (chance < 0.7f) { rf = 5; }
+            else if (chance < 0.8f) { rf = 7; }
+            else                    { rf = 9; }
+            Node.Id[] nodes = Utils.toArray(Gens.lists(nodeGen).unique().ofSizeBetween(rf, rf * 3).next(rs), Node.Id[]::new);
+            Ranges ranges = rangesGenFactory.apply(nodes.length, rf).next(rs);
+
+            int numElectorate = nodes.length + rf - 1;
+            List<WrapAroundList<Node.Id>> electorates = new ArrayList<>(numElectorate);
+            for (int i = 0; i < numElectorate; i++)
+                electorates.add(new WrapAroundList<>(nodes, i % nodes.length, (i + rf) % nodes.length));
+
+            final List<Shard> shards = new ArrayList<>();
+            Set<Node.Id> noShard = new HashSet<>(Arrays.asList(nodes));
+            for (int i = 0; i < ranges.size() ; ++i)
+            {
+                WrapAroundList<Node.Id> replicas = electorates.get(i % electorates.size());
+                Range range = ranges.get(i);
+                shards.add(shards(ignore -> range, ignore -> replicas).next(rs));
+                replicas.forEach(noShard::remove);
+            }
+            if (!noShard.isEmpty())
+                throw new AssertionError(String.format("The following electorates were found without a shard: %s", noShard));
+
+            return new Topology(epoch, toArray(shards, Shard[]::new));
+        };
+    }
+
+    public interface RangesGenFactory
+    {
+        Gen<Ranges> apply(int nodeCount, int rf);
+    }
+
+    public interface RangeFactory<T extends RoutingKey>
+    {
+        Range create(RandomSource rs, T a, T b);
     }
 
     public static Gen<Range> ranges(Gen<? extends RoutingKey> keyGen, BiFunction<? super RoutingKey, ? super RoutingKey, ? extends Range> factory)
@@ -149,16 +339,51 @@ public class AccordGens
         });
     }
 
-    public static Gen<Range> ranges(Gen<? extends RoutingKey> keyGen, RangeFactory factory)
+    public static <T extends RoutingKey> Gen<Range> ranges(Gen<T> keyGen, RangeFactory<T> factory)
     {
-        RoutingKey[] keys = new RoutingKey[2];
+        List<T> keys = Arrays.asList(null, null);
         return rs -> {
-            keys[0] = keyGen.next(rs);
+            keys.set(0, keyGen.next(rs));
             // range doesn't allow a=b
-            do keys[1] = keyGen.next(rs);
-            while (Objects.equals(keys[0], keys[1]));
-            Arrays.sort(keys);
-            return factory.create(rs, keys[0], keys[1]);
+            do keys.set(1, keyGen.next(rs));
+            while (Objects.equals(keys.get(0), keys.get(1)));
+            keys.sort(Comparator.naturalOrder());
+            return factory.create(rs, keys.get(0), keys.get(1));
+        };
+    }
+
+    public static <T extends RoutingKey> Gen<Ranges> ranges(Gen.IntGen sizeGen, Gen<T> keyGen, RangeFactory<T> factory)
+    {
+        Gen<Range> rangeGen = ranges(keyGen, factory);
+        return rs -> {
+            int size = sizeGen.nextInt(rs);
+            Range[] ranges = new Range[size];
+            for (int i = 0; i < size; i++)
+                ranges[i] = rangeGen.next(rs);
+            return Ranges.of(ranges);
+        };
+    }
+
+    public static <T extends RoutingKey> Gen<Ranges> ranges(Gen.IntGen sizeGen, Gen<T> keyGen, BiFunction<? super T, ? super T, ? extends Range> factory)
+    {
+        return ranges(sizeGen, keyGen, (ignore, a, b) -> factory.apply(a, b));
+    }
+
+    public static Gen<Ranges> prefixedIntHashKeyRanges(int numNodes, int rf)
+    {
+        return rs -> {
+            int numPrefixes = rs.nextInt(1, 10);
+            List<Range> ranges = new ArrayList<>(numPrefixes * numNodes * rf);
+            IntHashSet prefixes = new IntHashSet();
+            for (int i = 0; i < numPrefixes; i++)
+            {
+                int prefix;
+                //noinspection StatementWithEmptyBody
+                while (!prefixes.add(prefix = rs.nextInt(0, 100)));
+                ranges.addAll(Arrays.asList(PrefixedIntHashKey.ranges(prefix, numNodes * rf)));
+            }
+            ranges.sort(Range::compare);
+            return Ranges.ofSortedAndDeoverlapped(Utils.toArray(ranges, Range[]::new));
         };
     }
 

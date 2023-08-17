@@ -30,7 +30,7 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Assertions;
 
 import accord.burn.TopologyUpdates;
-import accord.impl.IntHashKey;
+import accord.impl.PrefixedIntHashKey;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TestAgent;
 import accord.impl.TopologyFactory;
@@ -110,7 +110,7 @@ public abstract class TrackerReconciler<ST extends ShardTracker, T extends Abstr
     //                           also, select a subset of the generated topologies to correctly simulate topology consumption logic
     private static Stream<Topologies> topologies(RandomSource random, AgentExecutor executor)
     {
-        TopologyFactory factory = new TopologyFactory(2 + random.nextInt(3), IntHashKey.ranges(4 + random.nextInt(12)));
+        TopologyFactory factory = new TopologyFactory(2 + random.nextInt(3), PrefixedIntHashKey.ranges(0, 4 + random.nextInt(12)));
         List<Id> nodes = cluster( 1 + random.nextInt(factory.shardRanges.length));
         Topology topology = factory.toTopology(nodes);
         int count = 1 + random.nextInt(3);
@@ -123,8 +123,8 @@ public abstract class TrackerReconciler<ST extends ShardTracker, T extends Abstr
 
         Deque<Topology> topologies = new ArrayDeque<>();
         topologies.add(topology);
-        TopologyUpdates topologyUpdates = new TopologyUpdates(null);
-        TopologyRandomizer configRandomizer = new TopologyRandomizer(() -> random, topology, topologyUpdates, null);
+        TopologyUpdates topologyUpdates = new TopologyUpdates(ignore -> executor);
+        TopologyRandomizer configRandomizer = new TopologyRandomizer(() -> random, topology, topologyUpdates, null, TopologyRandomizer.Listeners.NOOP);
         while (--count > 0)
         {
             Topology next = configRandomizer.updateTopology();

@@ -18,7 +18,12 @@
 
 package accord.utils;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.NavigableSet;
 import java.util.Random;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
@@ -232,6 +237,93 @@ public interface RandomSource
     }
 
     double nextGaussian();
+
+    default int pickInt(int first, int second, int... rest)
+    {
+        int offset = nextInt(0, rest.length + 2);
+        switch (offset)
+        {
+            case 0:  return first;
+            case 1:  return second;
+            default: return rest[offset - 2];
+        }
+    }
+
+    default int pickInt(int[] array)
+    {
+        return pickInt(array, 0, array.length);
+    }
+
+    default int pickInt(int[] array, int offset, int length)
+    {
+        Invariants.checkIndexInBounds(array.length, offset, length);
+        if (length == 1)
+            return array[offset];
+        return array[nextInt(offset, offset + length)];
+    }
+
+    default long pickLong(long first, long second, long... rest)
+    {
+        int offset = nextInt(0, rest.length + 2);
+        switch (offset)
+        {
+            case 0:  return first;
+            case 1:  return second;
+            default: return rest[offset - 2];
+        }
+    }
+
+    default long pickLong(long[] array)
+    {
+        return pickLong(array, 0, array.length);
+    }
+
+    default long pickLong(long[] array, int offset, int length)
+    {
+        Invariants.checkIndexInBounds(array.length, offset, length);
+        if (length == 1)
+            return array[offset];
+        return array[nextInt(offset, offset + length)];
+    }
+
+    default <T extends Comparable<T>> T pick(Set<T> set)
+    {
+        List<T> values = new ArrayList<>(set);
+        // Non-ordered sets may have different iteration order on different environments, which would make a seed produce different histories!
+        // To avoid such a problem, make sure to apply a deterministic function (sort).
+        if (!(set instanceof NavigableSet))
+            values.sort(Comparator.naturalOrder());
+        return pick(values);
+    }
+
+    default <T> T pick(T first, T second, T... rest)
+    {
+        int offset = nextInt(0, rest.length + 2);
+        switch (offset)
+        {
+            case 0:  return first;
+            case 1:  return second;
+            default: return rest[offset - 2];
+        }
+    }
+
+    default <T> T pick(T[] array)
+    {
+        return array[nextInt(array.length)];
+    }
+
+    default <T> T pick(List<T> values)
+    {
+        return pick(values, 0, values.size());
+    }
+
+    default <T> T pick(List<T> values, int offset, int length)
+    {
+        Invariants.checkIndexInBounds(values.size(), offset, length);
+        if (length == 1)
+            return values.get(offset);
+        return values.get(nextInt(offset, offset + length));
+    }
 
     default <T> Supplier<T> randomWeightedPicker(T[] objects) { return Picker.WeightedObjectPicker.randomWeighted(this, objects); }
     default <T> Supplier<T> randomWeightedPicker(T[] objects, float[] bias) { return Picker.WeightedObjectPicker.randomWeighted(this, objects, bias); }

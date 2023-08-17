@@ -19,7 +19,6 @@
 package accord.coordinate;
 
 import java.util.Objects;
-import java.util.concurrent.ExecutionException;
 import javax.annotation.Nonnull;
 
 import accord.local.*;
@@ -34,16 +33,17 @@ import accord.local.SafeCommandStore.TestDep;
 import accord.local.SafeCommandStore.TestTimestamp;
 import accord.primitives.Routable.Domain;
 import accord.primitives.Seekables;
+import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.utils.MapReduceConsume;
+import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
 import static accord.local.PreLoadContext.contextFor;
 import static accord.primitives.Txn.Kind.Kinds.Any;
 import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.checkState;
-import static accord.utils.async.AsyncChains.getUninterruptibly;
 
 /**
  * Local or global barriers that return a result once all transactions have their side effects visible.
@@ -66,7 +66,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
     private final BarrierType barrierType;
 
     @VisibleForTesting
-    CoordinateSyncPoint<S> coordinateSyncPoint;
+    AsyncResult<SyncPoint<S>> coordinateSyncPoint;
     @VisibleForTesting
     ExistingTransactionCheck existingTransactionCheck;
 
@@ -142,15 +142,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
 
     private void createSyncPoint()
     {
-        try
-        {
-            coordinateSyncPoint = getUninterruptibly(CoordinateSyncPoint.inclusive(node, seekables, barrierType.async));
-        }
-        catch (ExecutionException e)
-        {
-            tryFailure(e);
-            return;
-        }
+        coordinateSyncPoint = CoordinateSyncPoint.inclusive(node, seekables, barrierType.async);
         coordinateSyncPoint.addCallback((syncPoint, syncPointFailure) -> {
             if (syncPointFailure != null)
             {

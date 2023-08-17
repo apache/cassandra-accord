@@ -42,7 +42,6 @@ public interface Routables<K extends Routable> extends Iterable<K>
         Maximal
     }
 
-    int indexOf(K item);
     K get(int i);
     int size();
 

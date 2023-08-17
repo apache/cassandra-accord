@@ -32,6 +32,7 @@ import accord.coordinate.tracking.QuorumTracker;
 import accord.coordinate.tracking.RecoveryTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.local.Status;
 import accord.messages.BeginRecovery;
 import accord.messages.BeginRecovery.RecoverOk;
 import accord.messages.BeginRecovery.RecoverReply;
@@ -361,7 +362,9 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     private void commitInvalidate()
     {
-        Timestamp invalidateUntil = recoverOks.stream().map(ok -> ok.executeAt).reduce(txnId, Timestamp::max);
+        // If not accepted then the executeAt is not consistent cross the peers and likely different on every node.  There is also an edge case
+        // when ranges are removed from the topology, during this case the executeAt won't know the ranges and the invalidate commit will fail.
+        Timestamp invalidateUntil = recoverOks.stream().map(ok -> ok.status.hasBeen(Status.Accepted) ? ok.executeAt : ok.txnId).reduce(txnId, Timestamp::max);
         node.withEpoch(invalidateUntil.epoch(), () -> Commit.Invalidate.commitInvalidate(node, txnId, route, invalidateUntil));
         isDone = true;
         locallyInvalidateAndCallback(node, txnId, route, ProgressToken.INVALIDATED, callback);

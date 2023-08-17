@@ -36,7 +36,6 @@ import java.util.*;
 import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
 import static accord.utils.Invariants.debug;
-import static com.google.common.collect.Sets.newHashSetWithExpectedSize;
 
 public abstract class ReadCoordinator<Reply extends accord.messages.Reply> extends ReadTracker implements Callback<Reply>
 {
@@ -244,15 +243,15 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
         }
     }
 
-    protected void start(Set<Id> to)
+    protected void start(Iterable<Id> to)
     {
         to.forEach(this::contact);
     }
 
     public void start()
     {
-        Set<Id> contact = newHashSetWithExpectedSize(maxShardsPerEpoch());
-        if (trySendMore(Set::add, contact) != RequestStatus.NoChange)
+        List<Id> contact = new ArrayList<>(maxShardsPerEpoch());
+        if (trySendMore(List::add, contact) != RequestStatus.NoChange)
             throw new IllegalStateException();
         start(contact);
     }

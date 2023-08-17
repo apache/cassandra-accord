@@ -330,6 +330,7 @@ public class AsyncChainsTest
         });
         topLevel.add(() -> AsyncChains.allOf(Arrays.asList(AsyncChains.success(0), AsyncChains.success(0), AsyncChains.success(42))));
         topLevel.add(() -> AsyncChains.reduce(AsyncChains.success(1), AsyncChains.success(1), (a, b) -> a + b));
+        topLevel.add(() -> AsyncChains.<Integer>failure(new NullPointerException()).recover(ignore -> AsyncChains.success(42)));
 
         for (Supplier<? extends AsyncChain<? extends Object>> start : topLevel)
         {

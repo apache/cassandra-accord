@@ -20,7 +20,10 @@ package accord.local;
 
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.NavigableSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -34,6 +37,8 @@ import java.util.function.ToLongFunction;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import accord.utils.DeterministicSet;
+import accord.utils.Invariants;
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -452,11 +457,13 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public void send(Collection<Id> to, Request send)
     {
+        checkIterationSafe(to);
         to.forEach(dst -> send(dst, send));
     }
 
     public void send(Collection<Id> to, Function<Id, Request> requestFactory)
     {
+        checkIterationSafe(to);
         to.forEach(dst -> send(dst, requestFactory.apply(dst)));
     }
 
@@ -468,6 +475,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     public <T> void send(Collection<Id> to, Request send, AgentExecutor executor, Callback<T> callback)
     {
         checkStore(executor);
+        checkIterationSafe(to);
         to.forEach(dst -> messageSink.send(dst, send, executor, callback));
     }
 
@@ -479,7 +487,20 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     public <T> void send(Collection<Id> to, Function<Id, Request> requestFactory, AgentExecutor executor, Callback<T> callback)
     {
         checkStore(executor);
+        checkIterationSafe(to);
         to.forEach(dst -> messageSink.send(dst, requestFactory.apply(dst), executor, callback));
+    }
+
+    private static void checkIterationSafe(Collection<?> collection)
+    {
+        if (!Invariants.isParanoid())
+            return;
+        if (collection instanceof List) return;
+        if (collection instanceof NavigableSet
+            || collection instanceof LinkedHashSet
+            || "java.util.LinkedHashMap.LinkedKeySet".equals(collection.getClass().getCanonicalName())
+            || collection instanceof DeterministicSet) return;
+        throw new IllegalArgumentException("Attempted to use a collection that is unsafe for iteration: " + collection.getClass());
     }
 
     // send to a specific node

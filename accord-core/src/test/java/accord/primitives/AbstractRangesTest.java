@@ -18,11 +18,19 @@
 
 package accord.primitives;
 
+import accord.api.Key;
 import accord.impl.IntKey;
+import accord.utils.AccordGens;
+import accord.utils.Gen;
+import accord.utils.Gens;
+import accord.utils.RandomSource;
+import org.assertj.core.api.Assertions;
+
 import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nonnull;
 
+import static accord.utils.Property.qt;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AbstractRangesTest
@@ -37,6 +45,41 @@ class AbstractRangesTest
                 range("third", 30, 40)
         );
         assertThat(ranges.toString()).isEqualTo("[first:[[0,10), [10,20)], second:[[20,30)], third:[[30,40)]]");
+    }
+
+    @Test
+    public void testContainsAll()
+    {
+        Gen<accord.primitives.Ranges> rangesGen = AccordGens.ranges(Gens.ints().between(1, 10), AccordGens.intRoutingKey(), IntKey::range);
+        qt().forAll(Gens.random(), rangesGen).check((rs, ranges) -> {
+            Keys inside = intKeyInside(rs, ranges);
+            Assertions.assertThat(ranges.containsAll(inside)).isTrue();
+            Assertions.assertThat(inside.slice(ranges, Routables.Slice.Minimal)).isEqualTo(inside);
+            Keys outside = intKeyOutside(rs, ranges);
+            if (outside != null)
+            {
+                Assertions.assertThat(ranges.containsAll(outside)).isFalse();
+                Assertions.assertThat(outside.slice(ranges, Routables.Slice.Minimal)).isNotEqualTo(outside);
+            }
+        });
+    }
+
+    private Keys intKeyInside(RandomSource rs, accord.primitives.Ranges ranges)
+    {
+        return Gens.lists(AccordGens.intKeysInsideRanges(ranges))
+               .unique()
+               .ofSizeBetween(1, 10)
+                   .map(l -> Keys.ofUnique(l.toArray(Key[]::new)))
+                   .next(rs);
+    }
+
+    private Keys intKeyOutside(RandomSource rs, accord.primitives.Ranges ranges)
+    {
+        return Gens.lists(AccordGens.intKeysOutsideRanges(ranges))
+                   .unique()
+                   .ofSizeBetween(1, 10)
+                   .map(l -> Keys.ofUnique(l.toArray(Key[]::new)))
+                   .next(rs);
     }
 
     private static Range range(Object prefix, int start, int end)

@@ -31,9 +31,11 @@ import com.google.common.annotations.VisibleForTesting;
 import accord.api.ConfigurationService.EpochReady;
 import accord.api.RoutingKey;
 import accord.api.TopologySorter;
+import accord.coordinate.TopologyMismatch;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.CommandStore;
 import accord.local.Node.Id;
+import accord.primitives.EpochSupplier;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.Unseekables;
@@ -179,6 +181,14 @@ public class TopologyManager
         boolean syncCompleteFor(Unseekables<?> intersect)
         {
             return syncComplete.containsAll(intersect);
+        }
+
+        @Override
+        public String toString()
+        {
+            return "EpochState{" +
+                   "epoch=" + global.epoch() +
+                   '}';
         }
     }
 
@@ -498,7 +508,7 @@ public class TopologyManager
         return withSufficientEpochs(select, minEpoch, maxEpoch, epochState -> epochState.syncComplete);
     }
 
-    public Topologies withOpenEpochs(Unseekables<?> select, Timestamp min, Timestamp max)
+    public Topologies withOpenEpochs(Unseekables<?> select, EpochSupplier min, EpochSupplier max)
     {
         return withSufficientEpochs(select, min.epoch(), max.epoch(), epochState -> epochState.closed);
     }
@@ -507,6 +517,10 @@ public class TopologyManager
     {
         Invariants.checkArgument(minEpoch <= maxEpoch);
         Epochs snapshot = epochs;
+
+        TopologyMismatch tm = TopologyMismatch.checkForMismatch(snapshot.get(maxEpoch).global(), select);
+        if (tm != null)
+            throw tm;
 
         if (maxEpoch == Long.MAX_VALUE) maxEpoch = snapshot.currentEpoch;
         else Invariants.checkState(snapshot.currentEpoch >= maxEpoch, "current epoch %d < max %d", snapshot.currentEpoch, maxEpoch);
@@ -519,31 +533,51 @@ public class TopologyManager
         int maxi = (int)(Math.min(1 + snapshot.currentEpoch - minEpoch, snapshot.epochs.length));
         Topologies.Builder topologies = new Topologies.Builder(maxi - i);
 
-        Unseekables<?> remaining = select;
+        // Previous logic would exclude synced ranges, but this was removed as that makes min epoch selection harder.
+        // An issue was found where a range was removed from a replica and min selection picked the epoch before that,
+        // which caused a node to get included in the txn that actually lost the range
+        // See CASSANDRA-18804
         while (i < maxi)
         {
             EpochState epochState = snapshot.epochs[i++];
             topologies.add(epochState.global.forSelection(select));
-            remaining = remaining.subtract(epochState.addedRanges);
+            select = select.subtract(epochState.addedRanges);
         }
 
-        if (i == snapshot.epochs.length)
+        if (select.isEmpty())
             return topologies.build(sorter);
+
+        if (i == snapshot.epochs.length)
+        {
+            if (!select.isEmpty())
+                throw new IllegalArgumentException("Ranges " + select + " could not be found");
+            return topologies.build(sorter);
+        }
+
+        // remaining is updated based off isSufficientFor, but select is not
+        Unseekables<?> remaining = select;
 
         // include any additional epochs to reach sufficiency
         EpochState prev = snapshot.epochs[maxi - 1];
         do
         {
-            Ranges sufficient = isSufficientFor.apply(prev);
-            remaining = remaining.subtract(sufficient);
-            remaining = remaining.subtract(prev.addedRanges);
+            remaining = remaining.subtract(isSufficientFor.apply(prev));
+            Unseekables<?> prevSelect = select;
+            select = select.subtract(prev.addedRanges);
+            if (prevSelect != select) // perf optimization; if select wasn't changed (it does not intersect addedRanges), then remaining won't
+                remaining = remaining.subtract(prev.addedRanges);
             if (remaining.isEmpty())
                 return topologies.build(sorter);
 
             EpochState next = snapshot.epochs[i++];
-            topologies.add(next.global.forSelection(remaining));
+            topologies.add(next.global.forSelection(select));
             prev = next;
         } while (i < snapshot.epochs.length);
+        // needd to remove sufficent / added else remaining may not be empty when the final matches are the last epoch
+        remaining = remaining.subtract(isSufficientFor.apply(prev));
+        remaining = remaining.subtract(prev.addedRanges);
+
+        if (!remaining.isEmpty()) throw new IllegalArgumentException("Ranges " + remaining + " could not be found");
 
         return topologies.build(sorter);
     }
@@ -551,6 +585,10 @@ public class TopologyManager
     public Topologies preciseEpochs(Unseekables<?> select, long minEpoch, long maxEpoch)
     {
         Epochs snapshot = epochs;
+
+        TopologyMismatch tm = TopologyMismatch.checkForMismatch(snapshot.get(maxEpoch).global(), select);
+        if (tm != null)
+            throw tm;
 
         if (minEpoch == maxEpoch)
             return new Single(sorter, snapshot.get(minEpoch).global.forSelection(select));
@@ -563,7 +601,6 @@ public class TopologyManager
             topologies.add(epochState.global.forSelection(select));
             select = select.subtract(epochState.addedRanges);
         }
-
         Invariants.checkState(!topologies.isEmpty(), "Unable to find an epoch that contained %s", select);
 
         return topologies.build(sorter);
@@ -620,6 +657,9 @@ public class TopologyManager
 
     public Topology globalForEpoch(long epoch)
     {
-        return epochs.get(epoch).global();
+        EpochState epochState = epochs.get(epoch);
+        if (epochState == null)
+            throw new IllegalArgumentException("Unknown epoch: " + epoch);
+        return epochState.global();
     }
 }

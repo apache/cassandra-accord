@@ -32,7 +32,8 @@ import accord.primitives.TxnId;
 
 public class ListResult implements Result, Reply
 {
-    public enum Fault { HeartBeat, Invalidated, Lost, Other, Truncated, Failure }
+    public enum Status
+    { Applied, RecoveryApplied, HeartBeat, Invalidated, Lost, Other, Truncated, Failure }
     public final Id client;
     public final long requestId;
     public final TxnId txnId;
@@ -40,9 +41,9 @@ public class ListResult implements Result, Reply
     public final Keys responseKeys;
     public final int[][] read; // equal in size to keys.size()
     public final ListUpdate update;
-    private final Fault fault;
+    private final Status status;
 
-    public ListResult(Id client, long requestId, TxnId txnId, Seekables<?, ?> readKeys, Keys responseKeys, int[][] read, ListUpdate update)
+    public ListResult(Status status, Id client, long requestId, TxnId txnId, Seekables<?, ?> readKeys, Keys responseKeys, int[][] read, ListUpdate update)
     {
         this.client = client;
         this.requestId = requestId;
@@ -51,10 +52,10 @@ public class ListResult implements Result, Reply
         this.responseKeys = responseKeys;
         this.read = read;
         this.update = update;
-        this.fault = null;
+        this.status = status;
     }
 
-    private ListResult(Id client, long requestId, TxnId txnId, Fault fault)
+    private ListResult(Id client, long requestId, TxnId txnId, Status status)
     {
         this.client = client;
         this.requestId = requestId;
@@ -63,37 +64,37 @@ public class ListResult implements Result, Reply
         this.responseKeys = null;
         this.read = null;
         this.update = null;
-        this.fault = fault;
+        this.status = status;
     }
 
     public static ListResult heartBeat(Id client, long requestId, TxnId txnId)
     {
-        return new ListResult(client, requestId, txnId, Fault.HeartBeat);
+        return new ListResult(client, requestId, txnId, Status.HeartBeat);
     }
 
     public static ListResult invalidated(Id client, long requestId, TxnId txnId)
     {
-        return new ListResult(client, requestId, txnId, Fault.Invalidated);
+        return new ListResult(client, requestId, txnId, Status.Invalidated);
     }
 
     public static ListResult lost(Id client, long requestId, TxnId txnId)
     {
-        return new ListResult(client, requestId, txnId, Fault.Lost);
+        return new ListResult(client, requestId, txnId, Status.Lost);
     }
 
     public static ListResult other(Id client, long requestId, TxnId txnId)
     {
-        return new ListResult(client, requestId, txnId, Fault.Other);
+        return new ListResult(client, requestId, txnId, Status.Other);
     }
 
     public static ListResult truncated(Id client, long requestId, TxnId txnId)
     {
-        return new ListResult(client, requestId, txnId, Fault.Truncated);
+        return new ListResult(client, requestId, txnId, Status.Truncated);
     }
 
     public static ListResult failure(Id client, long requestId, TxnId txnId)
     {
-        return new ListResult(client, requestId, txnId, Fault.Failure);
+        return new ListResult(client, requestId, txnId, Status.Failure);
     }
 
     @Override
@@ -104,14 +105,12 @@ public class ListResult implements Result, Reply
 
     public boolean isSuccess()
     {
-        return fault == null;
+        return status.compareTo(Status.RecoveryApplied) <= 0;
     }
 
-    public Fault fault()
+    public Status status()
     {
-        if (isSuccess())
-            throw new IllegalStateException("Unable to find fault with successful results");
-        return fault;
+        return status;
     }
 
     @Override

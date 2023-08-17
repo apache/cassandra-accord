@@ -262,7 +262,7 @@ public class Infer
             // we're applying an invalidation, so the record will not be cleaned up until the whole range is truncated
             Command command = safeCommand.current();
             // TODO (required): consider the !command.hasBeen(PreCommitted) condition
-            Invariants.checkState(!command.hasBeen(PreCommitted) || command.hasBeen(Status.Truncated));
+            Invariants.checkState(!command.hasBeen(PreCommitted) || command.hasBeen(Status.Truncated), "Unexpected status for %s", command);
             Commands.commitInvalidate(safeStore, safeCommand, someUnseekables);
             return null;
         }

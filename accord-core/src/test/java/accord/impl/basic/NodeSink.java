@@ -97,6 +97,7 @@ public class NodeSink implements MessageSink
         Link link = parent.links.apply(self, to);
         if (to.equals(self) || lookup.apply(to) == null /* client */)
         {
+            parent.messageListener.onMessage(Action.DELIVER, self, to, id, message);
             deliver(to, id, message, link);
             return true;
         }

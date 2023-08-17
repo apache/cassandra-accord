@@ -48,6 +48,23 @@ public interface AsyncChain<V>
         return AsyncChains.flatMap(this, mapper, executor);
     }
 
+    /**
+     * When the chain has failed, this allows the chain to attempt to recover if possible.  The provided function may return a {@code null} to represent
+     * that recovery was not possible and that the original exception should propgate.
+     * <p/>
+     * This is similiar to {@link java.util.concurrent.CompletableFuture#exceptionally(Function)} but with async handling; would have the same semantics as the following
+     * <p/>
+     * {@code
+     * CompletableFuture<V> failedFuture ...
+     * failedFuture.exceptionally(cause -> {
+     *     if (canHandle(cause)
+     *       return handle(cause); // returns CompletableFuture<V>
+     *     return CompletableFuture.completeExceptionally(cause) // return original exception
+     * }).flatMap(f -> f); // "flatten" from CompletableFuture<CompletableFuture<V>> to CompletableFuture<V>
+     * }
+     */
+    AsyncChain<V> recover(Function<? super Throwable, ? extends AsyncChain<V>> mapper);
+
     default AsyncChain<Void> accept(Consumer<? super V> action)
     {
         return map(r -> {

@@ -18,11 +18,11 @@
 
 package accord.coordinate.tracking;
 
-import accord.impl.TopologyUtils;
 import accord.local.Node.Id;
 import accord.primitives.Ranges;
 import accord.topology.Topologies;
 import accord.topology.Topology;
+import accord.topology.TopologyUtils;
 import com.google.common.collect.Sets;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;

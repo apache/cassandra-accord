@@ -49,7 +49,7 @@ public class ListQuery implements Query
     public Result compute(@Nonnull TxnId txnId, @Nonnull Timestamp executeAt, @Nonnull Seekables<?, ?> keys, Data data, Read untypedRead, Update update)
     {
         if (data == null)
-            return new ListResult(client, requestId, txnId, Keys.EMPTY, Keys.EMPTY, new int[0][0], (ListUpdate) update);
+            return new ListResult(ListResult.Status.Applied, client, requestId, txnId, Keys.EMPTY, Keys.EMPTY, new int[0][0], (ListUpdate) update);
 
         ListRead read = (ListRead) untypedRead;
         Keys responseKeys = Keys.ofSortedUnique(((ListData)data).keySet());
@@ -60,6 +60,6 @@ public class ListQuery implements Query
             if (i >= 0)
                 values[i] = e.getValue().data;
         }
-        return new ListResult(client, requestId, txnId, read.readKeys, responseKeys, values, (ListUpdate) update);
+        return new ListResult(ListResult.Status.Applied, client, requestId, txnId, read.readKeys, responseKeys, values, (ListUpdate) update);
     }
 }

@@ -148,6 +148,62 @@ public class GenTest {
         });
     }
 
+    @Test
+    public void zipf()
+    {
+        final int samples = 1_000;
+        int maxRetries = 100;
+        qt().check(rs -> {
+            int size = rs.nextInt(2, 100);
+            int[] array = IntStream.range(0, size).toArray();
+            int[] counts = new int[array.length];
+            Gen.IntGen gen = Gens.pickZipf(array);
+            outter: for (int retries = 0; retries < maxRetries; retries++)
+            {
+                boolean lastAttempt = retries == maxRetries - 1;
+                for (int i = 0; i < samples; i++)
+                    counts[Arrays.binarySearch(array, gen.nextInt(rs))]++;
+                int baseline = counts[0];
+                String histogram = histogram(array, counts);
+                for (int i = 1; i < counts.length; i++)
+                {
+                    int count = counts[i];
+                    int expected = baseline / (i + 1);
+                    double wiggleRoom = .3d;
+                    double min = expected * (1d - wiggleRoom);
+                    double max = expected * (1d + wiggleRoom);
+                    if (lastAttempt)
+                    {
+                        org.assertj.core.api.Assertions.assertThat(count).describedAs("Expected %dth element to be 1/%d of %d;\n%s", (i + 1), (i + 1), baseline, histogram).isBetween((int) Math.ceil(min), (int) Math.floor(max));
+                    }
+                    else
+                    {
+                        if (count < min || count > max)
+                            continue outter; // add more samples...
+                    }
+                }
+                break;
+            }
+        });
+    }
+
+    private static String histogram(int[] array, int[] counts)
+    {
+        long total = IntStream.of(counts).sum();
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < array.length; i++)
+        {
+            int value = array[i];
+            int count = counts[i];
+            int p = (int) ((count / (double) total) * 100d);
+            sb.append(value).append(" (").append(count).append(")").append(": ");
+            for (int j = 0; j < p; j++)
+                sb.append('*');
+            sb.append('\n');
+        }
+        return sb.toString();
+    }
+
     private static class Runs
     {
         private final Map<Boolean, Long> counts;

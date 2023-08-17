@@ -59,6 +59,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topology;
+import accord.topology.TopologyUtils;
 import accord.utils.DefaultRandom;
 
 import static accord.Utils.id;
@@ -90,7 +91,7 @@ public class ImmutableCommandTest
 
     private static void setTopologyEpoch(AtomicReference<Topology> topology, long epoch)
     {
-        topology.set(topology.get().withEpoch(epoch));
+        topology.set(TopologyUtils.withEpoch(topology.get(), epoch));
     }
 
     private static InMemoryCommandStore createStore(CommandStoreSupport storeSupport)
@@ -170,7 +171,7 @@ public class ImmutableCommandTest
         PreLoadContext context = PreLoadContext.contextFor(txnId, keys);
 
         setTopologyEpoch(support.local, 2);
-        ((TestableConfigurationService)node.configService()).reportTopology(support.local.get().withEpoch(2));
+        ((TestableConfigurationService)node.configService()).reportTopology(TopologyUtils.withEpoch(support.local.get(), 2));
         Timestamp expectedTimestamp = Timestamp.fromValues(2, 110, ID1);
         getUninterruptibly(commands.execute(context, (Consumer<? super SafeCommandStore>) store -> Commands.preaccept(store, store.get(txnId, txnId, ROUTE), txnId, txnId.epoch(), txn.slice(FULL_RANGES, true), ROUTE, HOME_KEY)));
         commands.execute(PreLoadContext.contextFor(txnId, txn.keys()), safeStore -> {

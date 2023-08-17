@@ -23,9 +23,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 import com.google.common.collect.Sets;
 
+import accord.api.Key;
 import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.coordinate.TxnExecute;
@@ -36,6 +38,9 @@ import accord.impl.IntKey;
 import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TestAgent;
+import accord.impl.list.ListQuery;
+import accord.impl.list.ListRead;
+import accord.impl.list.ListUpdate;
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
 import accord.impl.mock.MockStore;
@@ -116,6 +121,16 @@ public class Utils
     public static Txn writeTxn(Ranges ranges)
     {
         return new Txn.InMemory(ranges, MockStore.read(ranges), MockStore.QUERY, MockStore.update(ranges));
+    }
+
+    public static Txn listWriteTxn(Node.Id client, Keys keys)
+    {
+        ListUpdate update = new ListUpdate(Function.identity());
+        for (Key k : keys)
+            update.put(k, 1);
+        ListRead read = new ListRead(Function.identity(), keys, keys);
+        ListQuery query = new ListQuery(client, keys.size());
+        return new Txn.InMemory(keys, read, query, update);
     }
 
     public static Txn readTxn(Keys keys)

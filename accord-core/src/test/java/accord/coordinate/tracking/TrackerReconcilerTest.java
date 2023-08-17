@@ -67,7 +67,14 @@ public class TrackerReconcilerTest
     static <ST extends ShardTracker, T extends AbstractTracker<ST>, E extends Enum<E>>
     void test(long seed, BiFunction<RandomSource, Topologies, ? extends TrackerReconciler<ST, T, E>> constructor)
     {
-        for (TrackerReconciler<?, ?, ?> test : TrackerReconciler.generate(seed, constructor))
-            test.test();
+        try
+        {
+            for (TrackerReconciler<?, ?, ?> test : TrackerReconciler.generate(seed, constructor))
+                test.test();
+        }
+        catch (Throwable t)
+        {
+            throw new AssertionError("Failure for seed " + seed, t);
+        }
     }
 }

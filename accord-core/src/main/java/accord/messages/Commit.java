@@ -17,7 +17,6 @@
  */
 package accord.messages;
 
-import java.util.Set;
 import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
@@ -49,6 +48,7 @@ import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.TriFunction;
+import org.agrona.collections.IntHashSet;
 
 import static accord.messages.Commit.Kind.Maximal;
 import static accord.utils.Invariants.checkArgument;
@@ -130,7 +130,7 @@ public class Commit extends TxnRequest<ReadNack>
 
     // TODO (low priority, clarity): accept Topology not Topologies
     // TODO (desired, efficiency): do not commit if we're already ready to execute (requires extra info in Accept responses)
-    public static void commitMinimalAndRead(Node node, Topologies executeTopologies, TxnId txnId, Txn txn, FullRoute<?> route, Participants<?> readScope, Timestamp executeAt, Deps deps, Set<Id> readSet, Callback<ReadReply> callback)
+    public static void commitMinimalAndRead(Node node, Topologies executeTopologies, TxnId txnId, Txn txn, FullRoute<?> route, Participants<?> readScope, Timestamp executeAt, Deps deps, IntHashSet readSet, Callback<ReadReply> callback)
     {
         Topologies allTopologies = executeTopologies;
         if (txnId.epoch() != executeAt.epoch())
@@ -140,7 +140,7 @@ public class Commit extends TxnRequest<ReadNack>
         Topology coordinateTopology = allTopologies.forEpoch(txnId.epoch());
         for (Node.Id to : executeTopology.nodes())
         {
-            boolean read = readSet.contains(to);
+            boolean read = readSet.contains(to.id);
             Commit send = new Commit(Kind.Minimal, to, coordinateTopology, allTopologies, txnId, txn, route, readScope, executeAt, deps, read);
             if (read) node.send(to, send, callback);
             else node.send(to, send);

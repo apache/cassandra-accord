@@ -434,6 +434,7 @@ public abstract class Command implements CommonAttributes
      * This will be homeKey if it is owned by the node, and some other key otherwise. If not the home shard, the progress
      * shard has much weaker responsibilities, only ensuring that the home shard has durably witnessed the txnId.
      */
+    @Nullable
     public RoutingKey homeKey()
     {
         Route<?> route = route();

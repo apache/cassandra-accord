@@ -18,7 +18,6 @@
 
 package accord.coordinate;
 
-import java.util.Set;
 import java.util.function.BiConsumer;
 
 import org.slf4j.Logger;
@@ -41,6 +40,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
+import org.agrona.collections.IntHashSet;
 
 import static accord.coordinate.ReadCoordinator.Action.Approve;
 import static accord.coordinate.ReadCoordinator.Action.ApprovePartial;
@@ -74,8 +74,10 @@ public class TxnExecute extends ReadCoordinator<ReadReply> implements Execute
     }
 
     @Override
-    protected void start(Set<Id> readSet)
+    protected void start(Iterable<Id> to)
     {
+        IntHashSet readSet = new IntHashSet();
+        to.forEach(i -> readSet.add(i.id));
         Commit.commitMinimalAndRead(node, executes, txnId, txn, route, readScope, executeAt, deps, readSet, this);
     }
 

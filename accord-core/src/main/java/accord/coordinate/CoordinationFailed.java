@@ -30,13 +30,13 @@ public class CoordinationFailed extends RuntimeException
 {
     private @Nullable TxnId txnId;
     private @Nullable RoutingKey homeKey;
-    public CoordinationFailed(TxnId txnId, @Nullable RoutingKey homeKey)
+    public CoordinationFailed(@Nullable TxnId txnId, @Nullable RoutingKey homeKey)
     {
         this.txnId = txnId;
         this.homeKey = homeKey;
     }
 
-    public CoordinationFailed(TxnId txnId, @Nullable RoutingKey homeKey, String message)
+    public CoordinationFailed(@Nullable TxnId txnId, @Nullable RoutingKey homeKey, String message)
     {
         super(message);
         this.txnId = txnId;

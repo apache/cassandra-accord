@@ -58,7 +58,7 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
 
         return executor.apply(safeStore.commandStore()).submit(() -> {
             int[] data = get(key);
-            s.data.merge((Key)key, new Timestamped<>(executeAt, data), ListStore::merge);
+            s.data.merge((Key)key, new Timestamped<>(executeAt, data, Arrays::toString), ListStore::merge);
             logger.trace("WRITE on {} at {} key:{} -> {}", s.node, executeAt, key, data);
             return null;
         });

@@ -23,6 +23,7 @@ import accord.local.Node;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.topology.Topology;
+import accord.topology.TopologyUtils;
 
 import java.util.*;
 

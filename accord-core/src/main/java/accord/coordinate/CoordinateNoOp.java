@@ -35,6 +35,7 @@ import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 
 import static accord.coordinate.Propose.Invalidate.proposeAndCommitInvalidate;
 import static accord.primitives.Txn.Kind.NoOp;
@@ -62,6 +63,9 @@ public class CoordinateNoOp extends CoordinatePreAccept<Timestamp>
     {
         Invariants.checkArgument(txnId.rw() == NoOp);
         FullRoute<?> route = node.computeRoute(txnId, keysOrRanges);
+        TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(txnId.epoch()), txnId, route.homeKey(), keysOrRanges);
+        if (mismatch != null)
+            return AsyncResults.failure(mismatch);
         CoordinateNoOp coordinate = new CoordinateNoOp(node, txnId, node.agent().emptyTxn(NoOp, keysOrRanges), route);
         coordinate.start();
         return coordinate;

@@ -18,8 +18,10 @@
 
 package accord.burn;
 
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -37,12 +39,17 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.stream.IntStream;
+import java.util.zip.CRC32;
 
 import accord.burn.random.FrequentLargeRange;
 import accord.impl.MessageListener;
+import accord.utils.Gen;
+import accord.utils.Gens;
+import accord.utils.Utils;
 import accord.verify.CompositeVerifier;
 import accord.verify.ElleVerifier;
 import accord.verify.StrictSerializabilityVerifier;
@@ -53,8 +60,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.api.Key;
-import accord.impl.IntHashKey;
 import accord.impl.TopologyFactory;
+import accord.impl.PrefixedIntHashKey;
 import accord.impl.basic.Cluster;
 import accord.impl.basic.Cluster.Stats;
 import accord.impl.basic.Packet;
@@ -70,101 +77,206 @@ import accord.impl.list.ListRequest;
 import accord.impl.list.ListResult;
 import accord.impl.list.ListUpdate;
 import accord.local.CommandStore;
+import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.MessageType;
+import accord.messages.Reply;
 import accord.primitives.Keys;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
+import accord.topology.Shard;
+import accord.topology.Topology;
 import accord.utils.DefaultRandom;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncExecutor;
+import org.agrona.collections.Int2ObjectHashMap;
+import org.agrona.collections.IntHashSet;
 
-import static accord.impl.IntHashKey.forHash;
+import static accord.impl.PrefixedIntHashKey.forHash;
+import static accord.impl.PrefixedIntHashKey.range;
+import static accord.impl.PrefixedIntHashKey.ranges;
 import static accord.utils.Utils.toArray;
 
 public class BurnTest
 {
     private static final Logger logger = LoggerFactory.getLogger(BurnTest.class);
 
-    static List<Packet> generate(RandomSource random, MessageListener listener, Function<? super CommandStore, AsyncExecutor> executor, List<Id> clients, List<Id> nodes, int keyCount, int operations)
-    {
-        List<Key> keys = new ArrayList<>();
-        for (int i = 0 ; i < keyCount ; ++i)
-            keys.add(IntHashKey.key(i));
+    /**
+     * Min hash value for the test domain, this value must be respected by the hash function
+     * @see {@link BurnTest#hash(int)}
+     */
+    private static final int HASH_RANGE_START = 0;
+    /**
+     * Max hash value for the test domain, this value must be respected by the hash function
+     * @see {@link BurnTest#hash(int)}
+     */
+    private static final int HASH_RANGE_END = 1 << 16;
+    private static final Range[] EMPTY_RANGES = new Range[0];
 
+    static List<Packet> generate(RandomSource random, MessageListener listener, Function<? super CommandStore, AsyncExecutor> executor, List<Id> clients, List<Id> nodes, int[] keys, int operations)
+    {
         List<Packet> packets = new ArrayList<>();
-        int[] next = new int[keyCount];
+        Int2ObjectHashMap<int[]> prefixKeyUpdates = new Int2ObjectHashMap<>();
         double readInCommandStore = random.nextDouble();
+        Function<int[], Range> nextRange = randomRanges(random);
 
         for (int count = 0 ; count < operations ; ++count)
         {
+            int finalCount = count;
             Id client = clients.get(random.nextInt(clients.size()));
             Id node = nodes.get(random.nextInt(nodes.size()));
 
             boolean isRangeQuery = random.nextBoolean();
+            String description;
+            Function<Node, Txn> txnGenerator;
             if (isRangeQuery)
             {
-                int rangeCount = 1 + random.nextInt(2);
-                List<Range> requestRanges = new ArrayList<>();
-                while (--rangeCount >= 0)
-                {
-                    int j = 1 + random.nextInt(0xffff), i = Math.max(0, j - (1 + random.nextInt(0x1ffe)));
-                    requestRanges.add(IntHashKey.range(forHash(i), forHash(j)));
-                }
-                Ranges ranges = Ranges.of(requestRanges.toArray(new Range[0]));
-                ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, ranges, ranges);
-                ListQuery query = new ListQuery(client, count);
-                ListRequest request = new ListRequest(new Txn.InMemory(ranges, read, query, null), listener);
-                packets.add(new Packet(client, node, count, request));
+                description = "range";
+                txnGenerator = n -> {
+                    int[] prefixes = prefixes(n.topology().current());
+
+                    int rangeCount = 1 + random.nextInt(2);
+                    List<Range> requestRanges = new ArrayList<>();
+                    while (--rangeCount >= 0)
+                        requestRanges.add(nextRange.apply(prefixes));
+                    Ranges ranges = Ranges.of(requestRanges.toArray(EMPTY_RANGES));
+                    ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, ranges, ranges);
+                    ListQuery query = new ListQuery(client, finalCount);
+                    return new Txn.InMemory(ranges, read, query);
+                };
             }
             else
             {
-                boolean isWrite = random.nextBoolean();
-                int readCount = 1 + random.nextInt(2);
-                int writeCount = isWrite ? 1 + random.nextInt(2) : 0;
+                description = "key";
+                txnGenerator = n -> {
+                    int[] prefixes = prefixes(n.topology().current());
 
-                TreeSet<Key> requestKeys = new TreeSet<>();
-                while (readCount-- > 0)
-                    requestKeys.add(randomKey(random, keys, requestKeys));
+                    boolean isWrite = random.nextBoolean();
+                    int readCount = 1 + random.nextInt(2);
+                    int writeCount = isWrite ? 1 + random.nextInt(2) : 0;
 
-                ListUpdate update = isWrite ? new ListUpdate(executor) : null;
-                while (writeCount-- > 0)
-                {
-                    int i = randomKeyIndex(random, keys, update.keySet());
-                    update.put(keys.get(i), ++next[i]);
-                }
+                    TreeSet<Key> requestKeys = new TreeSet<>();
+                    IntHashSet readValues = new IntHashSet();
+                    while (readCount-- > 0)
+                        requestKeys.add(randomKey(random, prefixes, keys, readValues));
 
-                Keys readKeys = new Keys(requestKeys);
-                if (isWrite)
-                    requestKeys.addAll(update.keySet());
-                ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, readKeys, new Keys(requestKeys));
-                ListQuery query = new ListQuery(client, count);
-                ListRequest request = new ListRequest(new Txn.InMemory(new Keys(requestKeys), read, query, update), listener);
-                packets.add(new Packet(client, node, count, request));
+                    ListUpdate update = isWrite ? new ListUpdate(executor) : null;
+                    IntHashSet writeValues = isWrite ? new IntHashSet() : null;
+                    while (writeCount-- > 0)
+                    {
+                        PrefixedIntHashKey.Key key = randomKey(random, prefixes, keys, writeValues);
+                        int i = Arrays.binarySearch(keys, key.key);
+                        int[] keyUpdateCounter = prefixKeyUpdates.computeIfAbsent(key.prefix, ignore -> new int[keys.length]);
+                        update.put(key, ++keyUpdateCounter[i]);
+                    }
+
+                    Keys readKeys = new Keys(requestKeys);
+                    if (isWrite)
+                        requestKeys.addAll(update.keySet());
+                    ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, readKeys, new Keys(requestKeys));
+                    ListQuery query = new ListQuery(client, finalCount);
+                    return new Txn.InMemory(new Keys(requestKeys), read, query, update);
+                };
             }
+            packets.add(new Packet(client, node, count, new ListRequest(description, txnGenerator, listener)));
         }
 
         return packets;
     }
 
-    private static Key randomKey(RandomSource random, List<Key> keys, Set<Key> notIn)
+    private static int[] prefixes(Topology topology)
     {
-        return keys.get(randomKeyIndex(random, keys, notIn));
+        IntHashSet uniq = new IntHashSet();
+        for (Shard shard : topology.shards())
+            uniq.add(((PrefixedIntHashKey) shard.range.start()).prefix);
+        int[] prefixes = new int[uniq.size()];
+        IntHashSet.IntIterator it = uniq.iterator();
+        for (int i = 0; it.hasNext(); i++)
+            prefixes[i] = it.nextValue();
+        Arrays.sort(prefixes);
+        return prefixes;
     }
 
-    private static int randomKeyIndex(RandomSource random, List<Key> keys, Set<Key> notIn)
+    private static Function<int[], Range> randomRanges(RandomSource rs)
     {
-        return randomKeyIndex(random, keys, notIn::contains);
+        int selection = rs.nextInt(0, 2);
+        switch (selection)
+        {
+            case 0: // uniform
+                return (prefixes) -> randomRange(rs, prefixes, () -> rs.nextInt(0, 1 << 13) + 1);
+            case 1: // zipf
+                int domain = HASH_RANGE_END - HASH_RANGE_START + 1;
+                int splitSize = 100;
+                int interval = domain / splitSize;
+                int[] splits = new int[6];
+                for (int i = 0; i < splits.length; i++)
+                    splits[i] = i == 0 ? interval : splits[i - 1] * 2;
+                int[] splitsToPick = splits;
+                int bias = rs.nextInt(0, 3); // small, large, random
+                if (bias != 0)
+                    splitsToPick = Arrays.copyOf(splits, splits.length);
+                if (bias == 1)
+                    Utils.reverse(splitsToPick);
+                else if (bias == 2)
+                    Utils.shuffle(splitsToPick, rs);
+                Gen.IntGen zipf = Gens.pickZipf(splitsToPick);
+                return (prefixes) -> randomRange(rs, prefixes, () -> {
+                    int value = zipf.nextInt(rs);
+                    int idx = Arrays.binarySearch(splits, value);
+                    int min = idx == 0 ? 0 : splits[idx - 1];
+                    return rs.nextInt(min, value) + 1;
+                });
+            default:
+                throw new AssertionError("Unexpected value: " + selection);
+        }
     }
 
-    private static int randomKeyIndex(RandomSource random, List<Key> keys, Predicate<Key> notIn)
+    private static Range randomRange(RandomSource random, int[] prefixes, IntSupplier rangeSizeFn)
     {
-        int i;
-        //noinspection StatementWithEmptyBody
-        while (notIn.test(keys.get(i = random.nextInt(keys.size()))));
-        return i;
+        int prefix = random.pickInt(prefixes);
+        int i = random.nextInt(HASH_RANGE_START, HASH_RANGE_END);
+        int rangeSize = rangeSizeFn.getAsInt();
+        int j = i + rangeSize;
+        if (j > HASH_RANGE_END)
+        {
+            int delta = j - HASH_RANGE_END;
+            j = HASH_RANGE_END;
+            i -= delta;
+            // saftey check, this shouldn't happen unless the configs were changed in an unsafe way
+            if (i < HASH_RANGE_START)
+                i = HASH_RANGE_START;
+        }
+        return range(forHash(prefix, i), forHash(prefix, j));
+    }
+
+    private static PrefixedIntHashKey.Key randomKey(RandomSource random, int[] prefixes, int[] keys, Set<Integer> seen)
+    {
+        int prefix = random.pickInt(prefixes);
+        int key;
+        do
+        {
+            key = random.pickInt(keys);
+        }
+        while (!seen.add(key));
+        return PrefixedIntHashKey.key(prefix, key, hash(key));
+    }
+
+    /**
+     * This class uses a limited range than the default for the following reasons:
+     *
+     * 1) easier to debug smaller numbers
+     * 2) adds hash collisions (multiple keys map to the same hash)
+     */
+    private static int hash(int key)
+    {
+        CRC32 crc32c = new CRC32();
+        crc32c.update(key);
+        crc32c.update(key >> 8);
+        crc32c.update(key >> 16);
+        crc32c.update(key >> 24);
+        return (int) crc32c.getValue() & 0xffff;
     }
 
     @SuppressWarnings("unused")
@@ -199,11 +311,14 @@ public class BurnTest
         List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
         RandomDelayQueue delayQueue = new Factory(random).get();
         PropagatingPendingQueue queue = new PropagatingPendingQueue(failures, delayQueue);
+        long startNanos = System.nanoTime();
+        long startLogicalMillis = queue.nowInMillis();
         RandomSource retryRandom = random.fork();
-        Function<BiConsumer<Timestamp, Ranges>, ListAgent> agentSupplier = onStale -> new ListAgent(1000L, failures::add, retry -> {
+        Consumer<Runnable> retryBootstrap = retry -> {
             long delay = retryRandom.nextInt(1, 15);
-            queue.add((PendingRunnable)retry::run, delay, TimeUnit.SECONDS);
-        }, onStale);
+            queue.add((PendingRunnable) retry::run, delay, TimeUnit.SECONDS);
+        };
+        Function<BiConsumer<Timestamp, Ranges>, ListAgent> agentSupplier = onStale -> new ListAgent(1000L, failures::add, retryBootstrap, onStale);
 
         Supplier<LongSupplier> nowSupplier = () -> {
             RandomSource forked = random.fork();
@@ -217,14 +332,16 @@ public class BurnTest
                     .asLongSupplier(forked);
         };
 
-        Verifier verifier = createVerifier(keyCount);
-        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, null);
-
+        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, new ListAgent(1000L, failures::add, retryBootstrap, (i1, i2) -> {
+            throw new IllegalAccessError("Global executor should enver get a stale event");
+        }));
+        Int2ObjectHashMap<Verifier> validators = new Int2ObjectHashMap<>();
         Function<CommandStore, AsyncExecutor> executor = ignore -> globalExecutor;
 
         MessageListener listener = MessageListener.get();
-
-        Packet[] requests = toArray(generate(random, listener, executor, clients, nodes, keyCount, operations), Packet[]::new);
+        
+        int[] keys = IntStream.range(0, keyCount).toArray();
+        Packet[] requests = toArray(generate(random, listener, executor, clients, nodes, keys, operations), Packet[]::new);
         int[] starts = new int[requests.length];
         Packet[] replies = new Packet[requests.length];
 
@@ -232,6 +349,7 @@ public class BurnTest
         AtomicInteger nacks = new AtomicInteger();
         AtomicInteger lost = new AtomicInteger();
         AtomicInteger truncated = new AtomicInteger();
+        AtomicInteger recovered = new AtomicInteger();
         AtomicInteger failedToCheck = new AtomicInteger();
         AtomicInteger clock = new AtomicInteger();
         AtomicInteger requestIndex = new AtomicInteger();
@@ -246,7 +364,6 @@ public class BurnTest
         // not used for atomicity, just for encapsulation
         AtomicReference<Runnable> onSubmitted = new AtomicReference<>();
         Consumer<Packet> responseSink = packet -> {
-            ListResult reply = (ListResult) packet.message;
             if (replies[(int)packet.replyId] != null)
                 return;
 
@@ -258,10 +375,16 @@ public class BurnTest
                 if (i == requests.length - 1)
                     onSubmitted.get().run();
             }
+            if (packet.message instanceof Reply.FailureReply)
+            {
+                failures.add(new AssertionError("Unexpected failure in list reply", ((Reply.FailureReply) packet.message).failure));
+                return;
+            }
+            ListResult reply = (ListResult) packet.message;
 
             try
             {
-                if (!reply.isSuccess() && reply.fault() == ListResult.Fault.HeartBeat)
+                if (!reply.isSuccess() && reply.status() == ListResult.Status.HeartBeat)
                     return; // interrupted; will fetch our actual reply once rest of simulation is finished (but wanted to send another request to keep correct number in flight)
 
                 int start = starts[(int)packet.replyId];
@@ -271,8 +394,7 @@ public class BurnTest
 
                 if (!reply.isSuccess())
                 {
-
-                    switch (reply.fault())
+                    switch (reply.status())
                     {
                         case Lost:          lost.incrementAndGet();             break;
                         case Invalidated:   nacks.incrementAndGet();            break;
@@ -280,27 +402,42 @@ public class BurnTest
                         case Truncated:     truncated.incrementAndGet();        break;
                         // txn was applied?, but client saw a timeout, so response isn't known
                         case Other:                                             break;
-                        default:            throw new AssertionError("Unexpected fault: " + reply.fault());
+                        default:            throw new AssertionError("Unexpected fault: " + reply.status());
                     }
                     return;
                 }
 
-                acks.incrementAndGet();
-                try (Verifier.Checker check  = verifier.witness(start, end))
+                switch (reply.status())
                 {
-                    for (int i = 0 ; i < reply.read.length ; ++i)
-                    {
-                        Key key = reply.responseKeys.get(i);
-                        int k = key(key);
+                    default: throw new AssertionError("Unhandled status: " + reply.status());
+                    case Applied: acks.incrementAndGet(); break;
+                    case RecoveryApplied: recovered.incrementAndGet(); // NOTE: technically this might have been applied by the coordinator and it simply timed out
+                }
+                // TODO (correctness): when a keyspace is removed, the history/validator isn't cleaned up...
+                // the current logic for add keyspace only knows what is there, so a ABA problem exists where keyspaces
+                // may come back... logically this is a problem as the history doesn't get reset, but practically that
+                // is fine as the backing map and the validator are consistent
+                Int2ObjectHashMap<Verifier.Checker> seen = new Int2ObjectHashMap<>();
+                for (int i = 0 ; i < reply.read.length ; ++i)
+                {
+                    Key key = reply.responseKeys.get(i);
+                    int prefix = prefix(key);
+                    int keyValue = key(key);
+                    int k = Arrays.binarySearch(keys, keyValue);
+                    Verifier verifier = validators.computeIfAbsent(prefix, ignore -> createVerifier(keyCount));
+                    Verifier.Checker check = seen.computeIfAbsent(prefix, ignore -> verifier.witness(start, end));
 
-                        int[] read = reply.read[i];
-                        int write = reply.update == null ? -1 : reply.update.getOrDefault(key, -1);
+                    int[] read = reply.read[i];
+                    int write = reply.update == null ? -1 : reply.update.getOrDefault(key, -1);
 
-                        if (read != null)
-                            check.read(k, read);
-                        if (write >= 0)
-                            check.write(k, write);
-                    }
+                    if (read != null)
+                        check.read(k, read);
+                    if (write >= 0)
+                        check.write(k, write);
+                }
+                for (Verifier.Checker check : seen.values())
+                {
+                    check.close();
                 }
             }
             catch (Throwable t)
@@ -317,9 +454,11 @@ public class BurnTest
                                           queue::checkFailures,
                                           responseSink, random::fork, nowSupplier,
                                           topologyFactory, initialRequests::poll,
-                                          onSubmitted::set
+                                          onSubmitted::set,
+                                          ignore -> {}
             );
-            verifier.close();
+            for (Verifier verifier : validators.values())
+                verifier.close();
         }
         catch (Throwable t)
         {
@@ -331,9 +470,11 @@ public class BurnTest
             throw t;
         }
 
-        logger.info("Received {} acks, {} nacks, {} lost, {} truncated ({} total) to {} operations", acks.get(), nacks.get(), lost.get(), truncated.get(), acks.get() + nacks.get() + lost.get() + truncated.get(), operations);
+        int observedOperations = acks.get() + recovered.get() + nacks.get() + lost.get() + truncated.get();
+        logger.info("Received {} acks, {} recovered, {} nacks, {} lost, {} truncated ({} total) to {} operations", acks.get(), recovered.get(), nacks.get(), lost.get(), truncated.get(), observedOperations, operations);
         logger.info("Message counts: {}", messageStatsMap.entrySet());
-        if (clock.get() != operations * 2)
+        logger.info("Took {} and in logical time of {}", Duration.ofNanos(System.nanoTime() - startNanos), Duration.ofMillis(queue.nowInMillis() - startLogicalMillis));
+        if (clock.get() != operations * 2 || observedOperations != operations)
         {
             StringBuilder sb = new StringBuilder();
             for (int i = 0 ; i < requests.length ; ++i)
@@ -346,7 +487,8 @@ public class BurnTest
                     logger.info(sb.toString());
                 }
             }
-            throw new AssertionError("Incomplete set of responses; clock=" + clock.get() + ", expected operations=" + (operations * 2));
+            if (clock.get() != operations * 2) throw new AssertionError("Incomplete set of responses; clock=" + clock.get() + ", expected operations=" + (operations * 2));
+            else throw new AssertionError("Incomplete set of responses; ack+recovered+other+nacks+lost+truncated=" + observedOperations + ", expected operations=" + (operations * 2));
         }
     }
 
@@ -394,7 +536,7 @@ public class BurnTest
     @Timeout(value = 3, unit = TimeUnit.MINUTES)
     public void testOne()
     {
-        run(ThreadLocalRandom.current().nextLong(), 1000);
+        run(System.nanoTime(), 1000);
     }
 
     private static void run(long seed, int operations)
@@ -415,7 +557,7 @@ public class BurnTest
 
             List<Id> nodes = generateIds(false, random.nextInt(rf, rf * 3));
 
-            burn(random, new TopologyFactory(rf, IntHashKey.ranges(random.nextInt(nodes.size() + 1, nodes.size() * 3))),
+            burn(random, new TopologyFactory(rf, ranges(0, HASH_RANGE_START, HASH_RANGE_END, random.nextInt(Math.max(nodes.size() + 1, rf), nodes.size() * 3))),
                     clients,
                     nodes,
                     5 + random.nextInt(15),
@@ -439,6 +581,11 @@ public class BurnTest
 
     private static int key(Key key)
     {
-        return ((IntHashKey) key).key;
+        return ((PrefixedIntHashKey) key).key;
+    }
+
+    private static int prefix(Key key)
+    {
+        return ((PrefixedIntHashKey) key).prefix;
     }
 }
