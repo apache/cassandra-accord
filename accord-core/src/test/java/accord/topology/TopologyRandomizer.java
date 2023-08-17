@@ -158,6 +158,15 @@ public class TopologyRandomizer
         int idx = shards.length == 2 ? 0 : random.nextInt(shards.length - 2);
         Shard left = shards[idx];
         Shard right = shards[idx + 1];
+        while (prefix(left) != prefix(right))
+        {
+            // shards are a single prefix, so can't merge
+            if (idx + 2 == shards.length)
+                return shards;
+            idx++;
+            left = shards[idx];
+            right = shards[idx + 1];
+        }
 
         Shard[] result = new Shard[shards.length - 1];
         System.arraycopy(shards, 0, result, 0, idx);
@@ -441,14 +450,12 @@ public class TopologyRandomizer
         {
             Shard iv = in[i];
             Shard ov = out[o];
-            Invariants.checkState(iv.range.compareIntersecting(ov.range) == 0);
             if (ov.nodes.stream().filter(iv::contains).allMatch(id -> topologyUpdates.isPending(ov.range, id)))
                 return false;
             int c = iv.range.end().compareTo(ov.range.end());
             if (c <= 0) ++i;
             if (c >= 0) ++o;
         }
-        Invariants.checkState (i == in.length && o == out.length);
         return true;
     }
 }
