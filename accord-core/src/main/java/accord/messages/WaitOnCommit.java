@@ -153,7 +153,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
                 int initialValue = waitingOnUpdater.get(this);
                 if (initialValue == -1)
                 {
-                    logger.error("Had error in WaitOnCommit, but already replied so can't send failure response", failure);
+                    node.agent().onUncaughtException(new IllegalStateException("Had error in WaitOnCommit, but already replied so can't send failure response", failure));
                     break;
                 }
                 if (waitingOnUpdater.compareAndSet(this, initialValue, -1))
