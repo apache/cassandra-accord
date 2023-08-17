@@ -98,7 +98,7 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService impleme
                 // run without setting the result
                 try
                 {
-                    fn.call();
+                    callable.call();
                     long nowMillis = pending.nowInMillis();
                     if (periodMillis > 0)
                     {
@@ -117,7 +117,7 @@ public class SimulatedDelayedExecutorService extends TaskExecutorService impleme
                 }
                 catch (Throwable t)
                 {
-                    setFailure(t);
+                    trySetResult(null, t);
                 }
             }
         }

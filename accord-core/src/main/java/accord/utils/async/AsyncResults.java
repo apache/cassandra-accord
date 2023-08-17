@@ -104,7 +104,7 @@ public class AsyncResults
             }
         }
 
-        boolean trySetResult(V result, Throwable failure)
+        protected boolean trySetResult(V result, Throwable failure)
         {
             return trySetResult(new Result<>(result, failure));
         }
@@ -323,7 +323,7 @@ public class AsyncResults
     @VisibleForImplementation
     public static class RunnableResult<V> extends AbstractResult<V> implements Runnable
     {
-        private final Callable<V> callable;
+        protected final Callable<V> callable;
 
         public RunnableResult(Callable<V> callable)
         {
@@ -333,19 +333,19 @@ public class AsyncResults
         @Override
         public void run()
         {
-            V result = null;
-            boolean success = false;
+            // There are two different type of exceptions: user function throws, listener throws.  To make sure this is clear,
+            // make sure to catch the exception from the user function and set as failed, and let the listener exceptions bubble up.
+            V call;
             try
             {
-                result = callable.call();
-                success = true;
+                call = callable.call();
             }
             catch (Throwable t)
             {
                 trySetResult(null, t);
+                return;
             }
-            if (success)
-                trySetResult(result, null);
+            trySetResult(call, null);
         }
     }
 
