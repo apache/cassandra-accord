@@ -36,6 +36,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -77,7 +78,6 @@ import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 import javax.annotation.Nullable;
 
-import static accord.local.Command.NotDefined.uninitialised;
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.Status.Committed;
@@ -903,31 +903,41 @@ public abstract class InMemoryCommandStore extends CommandStore
     {
         Runnable active = null;
         final Queue<Runnable> queue = new ConcurrentLinkedQueue<>();
+        private final AtomicBoolean running = new AtomicBoolean(false);
 
         public Synchronized(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder)
         {
             super(id, time, agent, store, progressLogFactory, epochUpdateHolder);
         }
 
-        private synchronized void maybeRun()
+        private void maybeRun()
         {
-            if (active != null)
+            if (!running.compareAndSet(false, true))
                 return;
-
-            active = queue.poll();
-            while (active != null)
+            synchronized (this)
             {
-                this.unsafeRunIn(() -> {
-                    try
+                try
+                {
+                    active = queue.poll();
+                    while (active != null)
                     {
-                        active.run();
+                        this.unsafeRunIn(() -> {
+                            try
+                            {
+                                active.run();
+                            }
+                            catch (Throwable t)
+                            {
+                                logger.error("Uncaught exception", t);
+                            }
+                        });
+                        active = queue.poll();
                     }
-                    catch (Throwable t)
-                    {
-                        logger.error("Uncaught exception", t);
-                    }
-                });
-                active = queue.poll();
+                }
+                finally
+                {
+                    running.set(false);
+                }
             }
         }
 
