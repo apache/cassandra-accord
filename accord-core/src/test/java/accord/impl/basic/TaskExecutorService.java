@@ -44,14 +44,19 @@ public abstract class TaskExecutorService extends AbstractExecutorService implem
         @Override
         public void run()
         {
+            T result = null;
+            boolean success = false;
             try
             {
-                setSuccess(fn.call());
+                result = fn.call();
+                success = true;
             }
             catch (Throwable t)
             {
                 setFailure(t);
             }
+            if (success)
+                setSuccess(result);
         }
 
         @Override

@@ -18,15 +18,15 @@
 
 package accord.utils.async;
 
-import accord.api.VisibleForImplementation;
-import accord.utils.Invariants;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+
+import accord.api.VisibleForImplementation;
+import accord.utils.Invariants;
 
 public class AsyncResults
 {
@@ -333,14 +333,19 @@ public class AsyncResults
         @Override
         public void run()
         {
+            V result = null;
+            boolean success = false;
             try
             {
-                trySetResult(callable.call(), null);
+                result = callable.call();
+                success = true;
             }
             catch (Throwable t)
             {
                 trySetResult(null, t);
             }
+            if (success)
+                trySetResult(result, null);
         }
     }
 
