@@ -149,14 +149,17 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
         Ranges unavailable = safeStore.ranges().unsafeToReadAt(executeAt);
 
         txn.read(safeStore, executeAt).begin((next, throwable) -> {
-            // TODO (expected, exceptions): should send exception to client, and consistency handle/propagate locally
-            logger.trace("{}: read failed for {}: {}", txnId, unsafeStore, throwable);
-            synchronized (ReadData.this)
+            if (throwable != null)
             {
-                if (fail == null)
-                    fail = throwable;
-                else
-                    fail.addSuppressed(throwable);
+                // TODO (expected, exceptions): should send exception to client, and consistency handle/propagate locally
+                logger.trace("{}: read failed for {}: {}", txnId, unsafeStore, throwable);
+                synchronized (ReadData.this)
+                {
+                    if (fail == null)
+                        fail = throwable;
+                    else
+                        fail.addSuppressed(throwable);
+                }
             }
             readComplete(unsafeStore, next, unavailable);
         });
