@@ -228,7 +228,8 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
         if (isInvalid)
             return;
 
-        node.reply(replyTo, replyContext, data != null ? new ReadOk(unavailable, data) : null, fail);
+        // data can be null so send the failure response if a failure is present
+        node.reply(replyTo, replyContext, fail == null ? new ReadOk(unavailable, data) : null, fail);
     }
 
     private void removeListener(SafeCommandStore safeStore, TxnId txnId)
