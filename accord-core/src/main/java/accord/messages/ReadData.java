@@ -155,13 +155,12 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
                 logger.trace("{}: read failed for {}: {}", txnId, unsafeStore, throwable);
                 synchronized (ReadData.this)
                 {
-                    if (fail == null)
-                        fail = throwable;
-                    else
-                        fail.addSuppressed(throwable);
+                    node.reply(replyTo, replyContext, null, throwable);
+                    cancel();
                 }
             }
-            readComplete(unsafeStore, next, unavailable);
+            else
+                readComplete(unsafeStore, next, unavailable);
         });
     }
 
