@@ -479,6 +479,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     {
         if (failure != null)
         {
+            agent.onUncaughtException(failure);
             if (send != null)
                 agent().onUncaughtException(new IllegalArgumentException(String.format("fail (%s) and send (%s) are both not null", failure, send)));
             messageSink.replyWithUnknownFailure(replyingToNode, replyContext, failure);
