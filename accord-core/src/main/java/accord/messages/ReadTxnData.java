@@ -233,22 +233,18 @@ public class ReadTxnData extends ReadData implements Command.TransientListener, 
     @Override
     protected void reply(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Throwable fail)
     {
-        if (fail != null)
-        {
-            node.reply(replyTo, replyContext, null, fail);
-            return;
-        }
-
         switch (state)
         {
             case RETURNED:
-                throw new IllegalStateException("ReadOk was sent, yet ack called again");
+                throw new IllegalStateException("ReadOk was sent, yet ack called again", fail);
             case OBSOLETE:
                 logger.debug("After the read completed for txn {}, the result was marked obsolete", txnId);
+                if (fail != null)
+                    node.agent().onUncaughtException(fail);
                 break;
             case PENDING:
                 state = State.RETURNED;
-                node.reply(replyTo, replyContext, new ReadOk(unavailable, data), null);
+                node.reply(replyTo, replyContext, fail == null ? new ReadOk(unavailable, data) : null, fail);
                 break;
             default:
                 throw new AssertionError("Unknown state: " + state);
