@@ -123,7 +123,7 @@ public class Cluster implements Scheduler
         }
 
         @Override
-        public void replyWithFailure(Id replyingToNode, ReplyContext replyContext, Throwable failure)
+        public void replyWithUnknownFailure(Id replyingToNode, ReplyContext replyContext, Throwable failure)
         {
             reply(replyingToNode, replyContext, new FailureReply(failure));
         }

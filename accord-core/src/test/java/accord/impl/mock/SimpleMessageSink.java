@@ -58,7 +58,7 @@ public class SimpleMessageSink implements MessageSink
     }
 
     @Override
-    public void replyWithFailure(Id replyingToNode, ReplyContext replyContext, Throwable failure)
+    public void replyWithUnknownFailure(Id replyingToNode, ReplyContext replyContext, Throwable failure)
     {
         network.reply(node, replyingToNode, Network.getMessageId(replyContext), new FailureReply(failure));
     }
