@@ -52,7 +52,6 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
     transient BitSet waitingOn;
     transient int waitingOnCount;
     transient Ranges unavailable;
-    transient Throwable fail;
 
     public ReadData(Node.Id to, Topologies topologies, TxnId txnId, Participants<?> readScope)
     {
@@ -129,7 +128,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
         // and prevents races where we respond before dispatching all the required reads (if the reads are
         // completing faster than the reads can be setup on all required shards)
         if (-1 == --waitingOnCount)
-            reply(this.unavailable, fail == null ? data : null, fail);
+            reply(this.unavailable, data, null);
     }
 
     protected synchronized void readComplete(CommandStore commandStore, @Nullable Data result, @Nullable Ranges unavailable)
@@ -153,11 +152,8 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.ReadNack>
             {
                 // TODO (expected, exceptions): should send exception to client, and consistency handle/propagate locally
                 logger.trace("{}: read failed for {}: {}", txnId, unsafeStore, throwable);
-                synchronized (ReadData.this)
-                {
-                    node.reply(replyTo, replyContext, null, throwable);
-                    cancel();
-                }
+                node.reply(replyTo, replyContext, null, throwable);
+                cancel();
             }
             else
                 readComplete(unsafeStore, next, unavailable);
