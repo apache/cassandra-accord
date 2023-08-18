@@ -303,6 +303,11 @@ public abstract class CommandStores
         return current.local;
     }
 
+    public DataStore dataStore()
+    {
+        return supplier.store;
+    }
+
     static class TopologyUpdate
     {
         final Snapshot snapshot;

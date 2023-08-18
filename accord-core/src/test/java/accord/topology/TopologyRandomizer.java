@@ -51,6 +51,23 @@ import org.agrona.collections.IntHashSet;
 // TODO (required, testing): add change replication factor
 public class TopologyRandomizer
 {
+    public interface Listener
+    {
+        void onUpdate(Topology topology);
+    }
+
+    public enum Listeners implements Listener
+    {
+        NOOP
+        {
+            @Override
+            public void onUpdate(Topology topology)
+            {
+
+            }
+        }
+    }
+
     private static final Logger logger = LoggerFactory.getLogger(TopologyRandomizer.class);
     private static final AtomicInteger CURRENT_PREFIX = new AtomicInteger(0);
 
@@ -59,8 +76,9 @@ public class TopologyRandomizer
     private final Function<Node.Id, Node> nodeLookup;
     private final Map<Node.Id, Ranges> previouslyReplicated = new HashMap<>();
     private final TopologyUpdates topologyUpdates;
+    private final Listener listener;
 
-    public TopologyRandomizer(Supplier<RandomSource> randomSupplier, Topology initialTopology, TopologyUpdates topologyUpdates, @Nullable Function<Node.Id, Node> nodeLookup)
+    public TopologyRandomizer(Supplier<RandomSource> randomSupplier, Topology initialTopology, TopologyUpdates topologyUpdates, @Nullable Function<Node.Id, Node> nodeLookup, Listener listener)
     {
         this.random = randomSupplier.get();
         this.topologyUpdates = topologyUpdates;
@@ -69,6 +87,7 @@ public class TopologyRandomizer
         for (Node.Id node : initialTopology.nodes())
             previouslyReplicated.put(node, initialTopology.rangesForNode(node));
         this.nodeLookup = nodeLookup;
+        this.listener = listener;
     }
 
     @VisibleForTesting
@@ -78,9 +97,9 @@ public class TopologyRandomizer
         SPLIT(TopologyRandomizer::split),
         MERGE(TopologyRandomizer::merge),
         MEMBERSHIP(TopologyRandomizer::updateMembership),
-        FASTPATH(TopologyRandomizer::updateFastPath),
-        ADD_PREFIX(TopologyRandomizer::addPrefix),
-        REMOVE_PREFIX(TopologyRandomizer::removePrefix);
+        FASTPATH(TopologyRandomizer::updateFastPath);
+//        ADD_PREFIX(TopologyRandomizer::addPrefix),
+//        REMOVE_PREFIX(TopologyRandomizer::removePrefix);
 
         private final BiFunction<Shard[], RandomSource, Shard[]> function;
 
@@ -435,6 +454,7 @@ public class TopologyRandomizer
 
 //        logger.debug("topology update to: {} from: {}", nextTopology, current);
         epochs.add(nextTopology);
+        listener.onUpdate(nextTopology);
 
         if (nodeLookup != null)
         {

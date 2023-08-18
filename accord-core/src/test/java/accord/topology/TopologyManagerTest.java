@@ -406,7 +406,7 @@ public class TopologyManagerTest
         AgentExecutor executor = Mockito.mock(AgentExecutor.class, Mockito.withSettings().defaultAnswer(ignore -> { throw new IllegalStateException("Attempted to perform async operation"); }));
         Mockito.doReturn(new TestAgent.RethrowAgent()).when(executor).agent();
         qt().withExamples(20).check(rs -> {
-            TopologyRandomizer randomizer = new TopologyRandomizer(() -> rs, firstTopology.next(rs), new TopologyUpdates(executor), null);
+            TopologyRandomizer randomizer = new TopologyRandomizer(() -> rs, firstTopology.next(rs), new TopologyUpdates(executor), null, TopologyRandomizer.Listeners.NOOP);
             Iterator<Topology> next = Iterators.limit(new AbstractIterator<Topology>()
             {
                 @Override

@@ -35,6 +35,7 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import com.google.common.collect.Sets;
 import org.junit.jupiter.api.Assertions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,7 +45,6 @@ import accord.api.Scheduler;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
 import accord.impl.CoordinateDurabilityScheduling;
-import accord.impl.IntHashKey;
 import accord.impl.PrefixedIntHashKey;
 import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
@@ -59,11 +59,13 @@ import accord.messages.MessageType;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.messages.SafeCallback;
+import accord.primitives.Ranges;
 import accord.topology.Topology;
 import accord.topology.TopologyRandomizer;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
+import org.agrona.collections.IntHashSet;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static java.util.stream.Collectors.toList;
@@ -228,7 +230,25 @@ public class Cluster implements Scheduler
         {
             Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink);
             TopologyUpdates topologyUpdates = new TopologyUpdates(executor);
-            TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, lookup::get);
+            TopologyRandomizer.Listener schemaApply = new TopologyRandomizer.Listener()
+            {
+                private Topology previous = Topology.EMPTY;
+
+                @Override
+                public void onUpdate(Topology topology)
+                {
+                    for (Node node : lookup.values())
+                    {
+                        ListStore store = (ListStore) node.commandStores().dataStore();
+                        Ranges currentRanges = previous.rangesForNode(node.id());
+                        Ranges updatedRanges = topology.rangesForNode(node.id());
+                        if (currentRanges.equals(updatedRanges))
+                            continue;
+                        store.onRangeUpdate(node, topology.epoch(), updatedRanges);
+                    }
+                }
+            };
+            TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, lookup::get, schemaApply);
             List<CoordinateDurabilityScheduling> durabilityScheduling = new ArrayList<>();
             for (Id id : nodes)
             {
@@ -247,6 +267,8 @@ public class Cluster implements Scheduler
                 durability.setGlobalCycleTime(180, SECONDS);
                 durabilityScheduling.add(durability);
             }
+
+            schemaApply.onUpdate(topology);
 
             // startup
             AsyncResult<?> startup = AsyncChains.reduce(lookup.values().stream().map(Node::start).collect(toList()), (a, b) -> null).beginAsResult();

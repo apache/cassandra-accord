@@ -239,7 +239,7 @@ public class PrefixedIntHashKey implements RoutableKey
     public String toString()
     {
         if (key == Integer.MIN_VALUE && hash(key) != hash) return prefix + "#" + hash;
-        return prefix + ":" + key;
+        return prefix + ":" + key + "#" + hash;
     }
 
     @Override
