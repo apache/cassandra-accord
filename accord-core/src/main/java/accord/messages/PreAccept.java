@@ -20,18 +20,28 @@ package accord.messages;
 
 import java.util.List;
 import java.util.Objects;
-
-import accord.local.*;
-import accord.local.SafeCommandStore.TestKind;
-
-import accord.local.Node.Id;
-import accord.messages.TxnRequest.WithUnsynced;
-import accord.topology.Shard;
-import accord.topology.Topologies;
-
 import javax.annotation.Nullable;
 
-import accord.primitives.*;
+import accord.local.Command;
+import accord.local.Commands;
+import accord.local.Node.Id;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.local.SafeCommandStore.TestKind;
+import accord.messages.TxnRequest.WithUnsynced;
+import accord.primitives.Deps;
+import accord.primitives.EpochSupplier;
+import accord.primitives.FullRoute;
+import accord.primitives.PartialDeps;
+import accord.primitives.PartialRoute;
+import accord.primitives.PartialTxn;
+import accord.primitives.Ranges;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
+import accord.topology.Shard;
+import accord.topology.Topologies;
 
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestTimestamp.STARTED_BEFORE;
@@ -147,8 +157,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
     @Override
     public void accept(PreAcceptReply reply, Throwable failure)
     {
-        // TODO (required, error handling): communicate back the failure
-        node.reply(replyTo, replyContext, reply);
+        node.reply(replyTo, replyContext, reply, failure);
     }
 
     @Override

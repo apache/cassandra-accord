@@ -19,20 +19,36 @@
 package accord.messages;
 
 import java.util.Set;
-
-import accord.local.*;
-import accord.messages.ReadData.ReadNack;
-import accord.messages.ReadData.ReadReply;
-import accord.primitives.*;
-import accord.local.Node.Id;
-import accord.topology.Topologies;
 import javax.annotation.Nullable;
 
-import accord.utils.Invariants;
-
-import accord.topology.Topology;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import accord.local.Commands;
+import accord.local.Node;
+import accord.local.Node.Id;
+import accord.local.PreLoadContext;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.messages.ReadData.ReadNack;
+import accord.messages.ReadData.ReadReply;
+import accord.primitives.Deps;
+import accord.primitives.FullRoute;
+import accord.primitives.Keys;
+import accord.primitives.PartialDeps;
+import accord.primitives.PartialRoute;
+import accord.primitives.PartialTxn;
+import accord.primitives.Participants;
+import accord.primitives.Ranges;
+import accord.primitives.Route;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
+import accord.topology.Topologies;
+import accord.topology.Topology;
+import accord.utils.Invariants;
 
 import static accord.local.Status.Committed;
 import static accord.local.Status.Known.DefinitionOnly;
@@ -177,14 +193,8 @@ public class Commit extends TxnRequest<ReadNack>
     @Override
     public synchronized void accept(ReadNack reply, Throwable failure)
     {
-        if (failure != null)
-        {
-            logger.error("Unhandled exception during commit", failure);
-            node.agent().onUncaughtException(failure);
-            return;
-        }
-        if (reply != null)
-            node.reply(replyTo, replyContext, reply);
+        if (reply != null || failure != null)
+            node.reply(replyTo, replyContext, reply, failure);
         else if (read != null)
             read.process(node, replyTo, replyContext);
         if (defer != null)

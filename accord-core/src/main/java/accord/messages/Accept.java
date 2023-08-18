@@ -18,21 +18,30 @@
 
 package accord.messages;
 
-import accord.local.Commands;
-import accord.local.Commands.AcceptOutcome;
-import accord.local.SafeCommand;
-import accord.local.SafeCommandStore;
-import accord.primitives.*;
-import accord.local.Node.Id;
-import accord.topology.Topologies;
-
-import accord.api.RoutingKey;
-
 import javax.annotation.Nonnull;
-
 import javax.annotation.Nullable;
 
-import static accord.local.Commands.AcceptOutcome.*;
+import accord.api.RoutingKey;
+import accord.local.Commands;
+import accord.local.Commands.AcceptOutcome;
+import accord.local.Node.Id;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.primitives.Ballot;
+import accord.primitives.Deps;
+import accord.primitives.FullRoute;
+import accord.primitives.PartialDeps;
+import accord.primitives.PartialRoute;
+import accord.primitives.Ranges;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.topology.Topologies;
+
+import static accord.local.Commands.AcceptOutcome.Redundant;
+import static accord.local.Commands.AcceptOutcome.RejectedBallot;
+import static accord.local.Commands.AcceptOutcome.Success;
+import static accord.local.Commands.AcceptOutcome.Truncated;
 
 // TODO (low priority, efficiency): use different objects for send and receive, so can be more efficient
 //                                  (e.g. serialize without slicing, and without unnecessary fields)
@@ -118,7 +127,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     @Override
     public void accept(AcceptReply reply, Throwable failure)
     {
-        node.reply(replyTo, replyContext, reply);
+        node.reply(replyTo, replyContext, reply, failure);
     }
 
     @Override

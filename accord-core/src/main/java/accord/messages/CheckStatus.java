@@ -18,6 +18,8 @@
 
 package accord.messages;
 
+import javax.annotation.Nullable;
+
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.coordinate.Infer;
@@ -46,7 +48,6 @@ import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
-import javax.annotation.Nullable;
 
 import static accord.local.Status.Committed;
 import static accord.local.Status.Definition;
@@ -175,8 +176,9 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     @Override
     public void accept(CheckStatusReply ok, Throwable failure)
     {
-        if (ok == null) node.reply(replyTo, replyContext, CheckStatusNack.NotOwned);
-        else node.reply(replyTo, replyContext, ok);
+        if (failure != null) node.reply(replyTo, replyContext, ok, failure);
+        else if (ok == null) node.reply(replyTo, replyContext, CheckStatusNack.NotOwned, null);
+        else node.reply(replyTo, replyContext, ok, null);
     }
 
     private Status invalidIfNotAtLeast(SafeCommandStore safeStore)

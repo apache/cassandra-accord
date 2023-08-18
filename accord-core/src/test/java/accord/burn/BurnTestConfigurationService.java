@@ -18,22 +18,26 @@
 
 package accord.burn;
 
-import accord.api.TestableConfigurationService;
-import accord.local.AgentExecutor;
-import accord.impl.AbstractConfigurationService;
-import accord.primitives.Ranges;
-import accord.utils.RandomSource;
-import accord.local.Node;
-import accord.messages.*;
-import accord.topology.Topology;
-import accord.utils.async.AsyncResults;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.function.Supplier;
+
+import accord.api.TestableConfigurationService;
+import accord.impl.AbstractConfigurationService;
+import accord.local.AgentExecutor;
+import accord.local.Node;
+import accord.messages.Callback;
+import accord.messages.MessageType;
+import accord.messages.Reply;
+import accord.messages.ReplyContext;
+import accord.messages.Request;
+import accord.primitives.Ranges;
+import accord.topology.Topology;
+import accord.utils.RandomSource;
+import accord.utils.async.AsyncResults;
 
 public class BurnTestConfigurationService extends AbstractConfigurationService.Minimal implements TestableConfigurationService
 {
@@ -66,7 +70,7 @@ public class BurnTestConfigurationService extends AbstractConfigurationService.M
         public void process(Node on, Node.Id from, ReplyContext replyContext)
         {
             Topology topology = on.configService().getTopologyForEpoch(epoch);
-            on.reply(from, replyContext, new FetchTopologyReply(topology));
+            on.reply(from, replyContext, new FetchTopologyReply(topology), null);
         }
 
         @Override

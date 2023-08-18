@@ -19,10 +19,17 @@
 package accord.messages;
 
 import accord.api.ProgressLog.ProgressShard;
-import accord.local.*;
+import accord.local.Commands;
 import accord.local.Node.Id;
+import accord.local.PreLoadContext;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.local.Status;
 import accord.local.Status.Durability;
-import accord.primitives.*;
+import accord.primitives.FullRoute;
+import accord.primitives.PartialRoute;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 
@@ -104,14 +111,7 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     @Override
     public void accept(Reply reply, Throwable failure)
     {
-        // TODO: respond with failure
-        if (reply == null)
-        {
-            if (failure == null)
-                throw new IllegalStateException("Processed nothing on this node");
-            throw new IllegalStateException(failure);
-        }
-        node.reply(replyTo, replyContext, reply);
+        node.reply(replyTo, replyContext, reply, failure);
     }
 
     @Override

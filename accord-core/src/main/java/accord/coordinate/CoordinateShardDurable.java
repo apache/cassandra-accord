@@ -77,11 +77,6 @@ public class CoordinateShardDurable extends SettableResult<Void> implements Call
                     tryFailure(new RuntimeException("Unexpected reply"));
                     return;
 
-                case Error:
-                    // TODO (required): error propagation
-                    tryFailure(new RuntimeException("Unknown error"));
-                    return;
-
                 case Invalid:
                     tryFailure(new Invalidated(exclusiveSyncPoint.syncId, exclusiveSyncPoint.homeKey));
                     return;

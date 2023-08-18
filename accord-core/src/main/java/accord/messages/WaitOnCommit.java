@@ -20,16 +20,21 @@ package accord.messages;
 
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
-import accord.local.*;
-import accord.local.Node.Id;
-import accord.primitives.*;
-import accord.utils.MapReduceConsume;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
-
+import accord.local.Command;
+import accord.local.Node;
+import accord.local.Node.Id;
+import accord.local.PreLoadContext;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
+import accord.primitives.Participants;
+import accord.primitives.TxnId;
 import accord.topology.Topology;
+import accord.utils.MapReduceConsume;
+
+import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
 
 public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore, Void>, PreLoadContext, Command.TransientListener
 {
@@ -141,13 +146,30 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
     @Override
     public void accept(Void result, Throwable failure)
     {
-        ack();
+        if (failure != null)
+        {
+            while (true)
+            {
+                int initialValue = waitingOnUpdater.get(this);
+                if (initialValue == -1)
+                {
+                    node.agent().onUncaughtException(new IllegalStateException("Had error in WaitOnCommit, but already replied so can't send failure response", failure));
+                    break;
+                }
+                if (waitingOnUpdater.compareAndSet(this, initialValue, -1))
+                    node.reply(replyTo, replyContext, null, failure);
+            }
+        }
+        else
+        {
+            ack();
+        }
     }
 
     private void ack()
     {
         if (waitingOnUpdater.decrementAndGet(this) == -1)
-            node.reply(replyTo, replyContext, WaitOnCommitOk.INSTANCE);
+            node.reply(replyTo, replyContext, WaitOnCommitOk.INSTANCE, null);
     }
 
     @Override

@@ -18,14 +18,19 @@
 
 package accord.messages;
 
-import accord.local.SafeCommandStore;
-import accord.primitives.*;
-import accord.utils.Invariants;
+import javax.annotation.Nonnull;
 
 import accord.local.Node.Id;
+import accord.local.SafeCommandStore;
+import accord.primitives.FullRoute;
+import accord.primitives.PartialDeps;
+import accord.primitives.PartialRoute;
+import accord.primitives.Ranges;
+import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import accord.topology.Topologies;
-
-import javax.annotation.Nonnull;
+import accord.utils.Invariants;
 
 import static accord.messages.PreAccept.calculatePartialDeps;
 
@@ -78,8 +83,7 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
     @Override
     public void accept(PartialDeps result, Throwable failure)
     {
-        if (result == null) node.agent().onUncaughtException(failure); // TODO (expected): propagate failures to coordinator
-        else node.reply(replyTo, replyContext, new GetDepsOk(result));
+        node.reply(replyTo, replyContext, result != null ? new GetDepsOk(result) : null, failure);
     }
 
     @Override

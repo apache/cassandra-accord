@@ -153,9 +153,7 @@ public class Apply extends TxnRequest<ApplyReply>
     @Override
     public void accept(ApplyReply reply, Throwable failure)
     {
-        if (failure != null)
-            node.agent().onUncaughtException(failure);
-        node.reply(replyTo, replyContext, reply);
+        node.reply(replyTo, replyContext, reply, failure);
     }
 
     @Override

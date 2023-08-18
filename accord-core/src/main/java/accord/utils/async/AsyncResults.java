@@ -18,15 +18,15 @@
 
 package accord.utils.async;
 
-import accord.api.VisibleForImplementation;
-import accord.utils.Invariants;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+
+import accord.api.VisibleForImplementation;
+import accord.utils.Invariants;
 
 public class AsyncResults
 {
@@ -104,7 +104,7 @@ public class AsyncResults
             }
         }
 
-        boolean trySetResult(V result, Throwable failure)
+        protected boolean trySetResult(V result, Throwable failure)
         {
             return trySetResult(new Result<>(result, failure));
         }
@@ -323,7 +323,7 @@ public class AsyncResults
     @VisibleForImplementation
     public static class RunnableResult<V> extends AbstractResult<V> implements Runnable
     {
-        private final Callable<V> callable;
+        protected final Callable<V> callable;
 
         public RunnableResult(Callable<V> callable)
         {
@@ -333,14 +333,19 @@ public class AsyncResults
         @Override
         public void run()
         {
+            // There are two different type of exceptions: user function throws, listener throws.  To make sure this is clear,
+            // make sure to catch the exception from the user function and set as failed, and let the listener exceptions bubble up.
+            V call;
             try
             {
-                trySetResult(callable.call(), null);
+                call = callable.call();
             }
             catch (Throwable t)
             {
                 trySetResult(null, t);
+                return;
             }
+            trySetResult(call, null);
         }
     }
 

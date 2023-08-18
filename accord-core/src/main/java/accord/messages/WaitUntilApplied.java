@@ -193,7 +193,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
             return;
 
         isInvalid = true;
-        node.reply(replyTo, replyContext, Invalid);
+        node.reply(replyTo, replyContext, Invalid, null);
     }
 
     synchronized void sendTruncated()
@@ -202,7 +202,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
             return;
 
         isInvalid = true;
-        node.reply(replyTo, replyContext, Redundant);
+        node.reply(replyTo, replyContext, Redundant, null);
     }
 
     void applied(SafeCommandStore safeStore, SafeCommand safeCommand)
@@ -223,12 +223,13 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
     }
 
     @Override
-    protected void reply(@Nullable Ranges unavailable, @Nullable Data data)
+    protected void reply(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Throwable fail)
     {
         if (isInvalid)
             return;
 
-        node.reply(replyTo, replyContext, new ReadOk(unavailable, data));
+        // data can be null so send the failure response if a failure is present
+        node.reply(replyTo, replyContext, fail == null ? new ReadOk(unavailable, data) : null, fail);
     }
 
     private void removeListener(SafeCommandStore safeStore, TxnId txnId)

@@ -32,26 +32,11 @@ import accord.utils.async.AsyncResults;
 
 public abstract class TaskExecutorService extends AbstractExecutorService implements AgentExecutor
 {
-    public static class Task<T> extends AsyncResults.SettableResult<T> implements Pending, RunnableFuture<T>
+    public static class Task<T> extends AsyncResults.RunnableResult<T> implements Pending, RunnableFuture<T>
     {
-        protected final Callable<T> fn;
-
         public Task(Callable<T> fn)
         {
-            this.fn = fn;
-        }
-
-        @Override
-        public void run()
-        {
-            try
-            {
-                setSuccess(fn.call());
-            }
-            catch (Throwable t)
-            {
-                setFailure(t);
-            }
+            super(fn);
         }
 
         @Override
