@@ -978,6 +978,12 @@ public abstract class Command implements CommonAttributes
             this.appliedOrInvalidated = appliedOrInvalidated;
         }
 
+        public static WaitingOn none(Deps deps)
+        {
+            ImmutableBitSet empty = new ImmutableBitSet(deps.txnIdCount());
+            return new WaitingOn(deps, empty, empty, empty);
+        }
+
         public boolean isWaitingOnCommit()
         {
             return !waitingOnCommit.isEmpty();
