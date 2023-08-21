@@ -79,7 +79,6 @@ import accord.utils.async.AsyncExecutor;
 import accord.verify.StrictSerializabilityVerifier;
 import org.agrona.collections.IntHashSet;
 
-import static accord.impl.IntHashKey.forHash;
 import static accord.utils.Utils.toArray;
 
 public class BurnTest

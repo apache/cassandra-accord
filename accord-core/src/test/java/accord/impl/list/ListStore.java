@@ -32,7 +32,6 @@ import accord.api.DataStore;
 import accord.api.Key;
 import accord.coordinate.CoordinateSyncPoint;
 import accord.coordinate.Invalidated;
-import accord.impl.AbstractFetchCoordinator;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.primitives.Range;
@@ -43,9 +42,7 @@ import accord.primitives.Timestamp;
 import accord.utils.Timestamped;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
-import accord.utils.async.AsyncResult;
 import org.agrona.collections.IntHashSet;
-import org.agrona.collections.Long2LongHashMap;
 import org.agrona.collections.Long2ObjectHashMap;
 
 public class ListStore implements DataStore

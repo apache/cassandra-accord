@@ -35,7 +35,6 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
-import com.google.common.collect.Sets;
 import org.junit.jupiter.api.Assertions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,7 +64,6 @@ import accord.topology.TopologyRandomizer;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
-import org.agrona.collections.IntHashSet;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static java.util.stream.Collectors.toList;

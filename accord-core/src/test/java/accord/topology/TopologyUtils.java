@@ -27,8 +27,6 @@ import accord.primitives.Ranges;
 import accord.primitives.RoutingKeys;
 import accord.primitives.Unseekables;
 import accord.primitives.Unseekables.UnseekablesKind;
-import accord.topology.Shard;
-import accord.topology.Topology;
 import accord.utils.Gens;
 import accord.utils.RandomSource;
 import accord.utils.Utils;
