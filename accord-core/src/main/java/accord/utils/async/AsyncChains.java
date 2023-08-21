@@ -64,7 +64,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         @Override
         public <T> AsyncChain<T> map(Function<? super V, ? extends T> mapper)
         {
-            if (value != null && value.getClass() == FailureHolder.class)
+            if (isFailed())
                 return (AsyncChain<T>) this;
             try
             {
@@ -79,7 +79,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         @Override
         public <T> AsyncChain<T> flatMap(Function<? super V, ? extends AsyncChain<T>> mapper)
         {
-            if (value != null && value.getClass() == FailureHolder.class)
+            if (isFailed())
                 return (AsyncChain<T>) this;
             try
             {
@@ -89,6 +89,37 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
             {
                 return new Immediate<>(t);
             }
+        }
+
+        @Override
+        public AsyncChain<V> recover(Function<? super Throwable, ? extends AsyncChain<V>> mapper)
+        {
+            if (!isFailed())
+                return this;
+
+            Throwable cause = ((FailureHolder) value).cause;
+            try
+            {
+                AsyncChain<V> recover = mapper.apply(cause);
+                return recover == null ? this : recover;
+            }
+            catch (Throwable t)
+            {
+                try
+                {
+                    cause.addSuppressed(t);
+                }
+                catch (Throwable ignore)
+                {
+                    // can't add as suppressed...
+                }
+                return new Immediate<>(cause);
+            }
+        }
+
+        private boolean isFailed()
+        {
+            return value != null && value.getClass() == FailureHolder.class;
         }
 
         @Override
@@ -244,6 +275,51 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         }
     }
 
+    public static abstract class Recover<I> extends Link<I, I> implements Function<Throwable, AsyncChain<I>>
+    {
+        Recover(Head<?> head)
+        {
+            super(head);
+        }
+
+        @Override
+        public void accept(I i, Throwable throwable)
+        {
+            if (throwable == null)
+            {
+                next.accept(i, null);
+                return;
+            }
+            AsyncChain<I> recover = apply(throwable);
+            if (recover == null) next.accept(null, throwable);
+            else                 recover.begin(next);
+        }
+    }
+
+    static class EncapsulatedRecover<I> extends Recover<I>
+    {
+        private final Function<? super Throwable, ? extends AsyncChain<I>> map;
+
+        public EncapsulatedRecover(Head<?> head, Function<? super Throwable, ? extends AsyncChain<I>> function)
+        {
+            super(head);
+            this.map = function;
+        }
+
+        @Override
+        public AsyncChain<I> apply(Throwable throwable)
+        {
+            try
+            {
+                return map.apply(throwable);
+            }
+            catch (Throwable t)
+            {
+                return AsyncChains.failure(t);
+            }
+        }
+    }
+
     // if extending Callback, be sure to invoke super.accept()
     static class Callback<I> extends Link<I, I>
     {
@@ -361,6 +437,12 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
     public <T> AsyncChain<T> flatMap(Function<? super V, ? extends AsyncChain<T>> mapper)
     {
         return add(EncapsulatedFlatMap::new, mapper);
+    }
+
+    @Override
+    public AsyncChain<V> recover(Function<? super Throwable, ? extends AsyncChain<V>> mapper)
+    {
+        return add(EncapsulatedRecover::new, mapper);
     }
 
     @Override

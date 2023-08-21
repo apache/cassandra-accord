@@ -129,6 +129,8 @@ class Bootstrap
                 return;
             }
 
+            // TODO (now, testing): local epoch = 2, global = 4; how do we make sure SyncPoint does not loose epoch?
+
             // we fix here the ranges we use for the synthetic command, even though we may end up only finishing a subset
             // of these ranges as part of this attempt
             Ranges commitRanges = valid;

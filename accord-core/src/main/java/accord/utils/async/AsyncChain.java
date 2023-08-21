@@ -47,6 +47,8 @@ public interface AsyncChain<V>
         return AsyncChains.flatMap(this, mapper, executor);
     }
 
+    AsyncChain<V> recover(Function<? super Throwable, ? extends AsyncChain<V>> mapper);
+
     default AsyncChain<Void> accept(Consumer<? super V> action)
     {
         return map(r -> {

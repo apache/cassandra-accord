@@ -31,6 +31,8 @@ import accord.api.ConfigurationService;
 import accord.api.DataStore;
 import accord.api.Key;
 import accord.coordinate.CoordinateSyncPoint;
+import accord.coordinate.Invalidated;
+import accord.impl.AbstractFetchCoordinator;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.primitives.Range;
@@ -41,6 +43,9 @@ import accord.primitives.Timestamp;
 import accord.utils.Timestamped;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
+import accord.utils.async.AsyncResult;
+import org.agrona.collections.IntHashSet;
+import org.agrona.collections.Long2LongHashMap;
 import org.agrona.collections.Long2ObjectHashMap;
 
 public class ListStore implements DataStore
@@ -104,6 +109,11 @@ public class ListStore implements DataStore
 
     private void checkAccess(Key key)
     {
+        for (Ranges r : addedFromBootstrap.values())
+        {
+            if (r.contains(key))
+                return;
+        }
         if (!ranges.contains(key))
             throw new IllegalStateException(String.format("Attempted to access key %s, which is not in the range %s;\n", key, ranges, findRemovedAt(key)));
     }
@@ -111,6 +121,11 @@ public class ListStore implements DataStore
     private void checkAccess(Range range)
     {
         Ranges singleRanges = Ranges.of(range);
+        for (Ranges r : addedFromBootstrap.values())
+        {
+            if (r.containsAll(singleRanges))
+                return;
+        }
         if (!ranges.containsAll(singleRanges))
             throw new IllegalStateException(String.format("Attempted to access range %s, which is not in the range %s;\n", range, ranges, String.join("\n", findRemovedAt(singleRanges))));
     }
@@ -146,15 +161,36 @@ public class ListStore implements DataStore
         return String.format("Attempted to access range %s, this node never owned that range", ranges);
     }
 
+    private final Long2ObjectHashMap<Ranges> addedFromBootstrap = new Long2ObjectHashMap<>();
+    private final Long2ObjectHashMap<IntHashSet> epochSuccessStores = new Long2ObjectHashMap<>();
+
     @Override
     public FetchResult fetch(Node node, SafeCommandStore safeStore, Ranges ranges, SyncPoint syncPoint, FetchRanges callback)
     {
         if (!ranges.containsAll(ranges))
             throw new IllegalStateException(String.format("Attempted to access ranges %s, which is not in the range %s", ranges, this.ranges));
 
+        long epoch = syncPoint.sourceEpoch();
+        int store = safeStore.commandStore().id();
+
         ListFetchCoordinator coordinator = new ListFetchCoordinator(node, ranges, syncPoint, callback, safeStore.commandStore(), this);
         coordinator.start();
-        return coordinator.result();
+        FetchResult result = coordinator.result();
+        result.addCallback((s, f) -> {
+            if (f == null)
+                return;
+            synchronized (this)
+            {
+                if (!epochSuccessStores.computeIfAbsent(epoch, ignore -> new IntHashSet()).add(store))
+                {
+                    return;
+                }
+                if (!addedFromBootstrap.containsKey(epoch))
+                    throw new IllegalStateException("Unknown epoch " + epoch + " on node " + node);
+                addedFromBootstrap.merge(epoch, ranges, Ranges::with);
+            }
+        });
+        return result;
     }
 
     static Timestamped<int[]> merge(Timestamped<int[]> a, Timestamped<int[]> b)
@@ -179,26 +215,27 @@ public class ListStore implements DataStore
         return true;
     }
 
-    private final Long2ObjectHashMap<Ranges> pendingRanges = new Long2ObjectHashMap<>();
+    private Ranges previousRanges = null;
 
     public synchronized void onRangeUpdate(Node node, long epoch, Ranges updatedRanges)
     {
-        if (ranges == null)
+        if (previousRanges == null)
         {
-            ranges = updatedRanges;
+            previousRanges = ranges = updatedRanges;
             this.epoch = epoch;
         }
         else
         {
-            pendingRanges.put(epoch, updatedRanges);
-
-            Ranges added = updatedRanges.subtract(ranges);
-            Ranges removed = ranges.subtract(updatedRanges);
+            Ranges added = updatedRanges.subtract(previousRanges);
+            Ranges removed = previousRanges.subtract(updatedRanges);
             if (!removed.isEmpty())
                 removedAts.add(new RemovedAt(epoch, removed));
+            if (!added.isEmpty())
+                addedFromBootstrap.put(epoch, Ranges.EMPTY);
 
-            if (!(added.isEmpty() || removed.isEmpty()))
+            if (!added.isEmpty() || !removed.isEmpty())
                 runWhenReady(node, epoch, () -> updateDataWhenEpochReady(node, epoch, updatedRanges, removed));
+            previousRanges = updatedRanges;
         }
     }
 
@@ -210,14 +247,12 @@ public class ListStore implements DataStore
 
     private void updateDataWhenEpochReady(Node node, long epoch, Ranges updatedRanges, Ranges removed)
     {
-        // TODO (now): a store can make progress once that bootstrap completes, so waiting on all causes issues
-        // need to ADD ranges on bootstrap complete
-        // need to REMOVE ranges on hand-rolled sync point
         ConfigurationService.EpochReady ready = node.topology().epochReady(epoch);
         // data/reads should be the same, but just in case wait for both!
-        AsyncChain<?> await = AsyncChains.reduce(ready.data, ready.reads, (a, b) -> null);
+        AsyncChain<Void> await = AsyncChains.reduce(ready.data, ready.reads, (a, b) -> null);
         // when you add you bootstrap, when you remove you only invalidate pending bootstraps (or no-op), so create a sync point to make sure we don't see old things
-        await = await.flatMap(ignore -> CoordinateSyncPoint.exclusive(node, removed));
+        if (!removed.isEmpty())
+            await = AsyncChains.reduce(await, syncPoint(node, removed).map(ignore -> null), (a, b) -> null);
         await.begin((s, f) -> {
             if (f != null)
             {
@@ -234,10 +269,21 @@ public class ListStore implements DataStore
                         NavigableMap<RoutableKey, Timestamped<int[]>> historicData = data.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive());
                         historicData.clear();
                     }
+                    this.addedFromBootstrap.remove(epoch);
                     this.epoch = epoch;
                     this.ranges = updatedRanges;
                 }
             }
         });
+    }
+
+    private static AsyncChain<SyncPoint> syncPoint(Node node, Ranges removed)
+    {
+        return CoordinateSyncPoint.exclusive(node, removed)
+                                  .recover(t -> {
+                                      if (t instanceof Invalidated)
+                                          return syncPoint(node, removed);
+                                      return null;
+                                  });
     }
 }
