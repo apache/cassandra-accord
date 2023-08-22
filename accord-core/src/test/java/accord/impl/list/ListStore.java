@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -167,7 +168,7 @@ public class ListStore implements DataStore
         if (!ranges.containsAll(ranges))
             throw new IllegalStateException(String.format("Attempted to access ranges %s, which is not in the range %s", ranges, this.ranges));
 
-        long epoch = syncPoint.sourceEpoch();
+        // TODO (now): the real epoch=2, txn_id is 4, and sourceEpoch is 4... so can't actually use epoch!
         int store = safeStore.commandStore().id();
 
         ListFetchCoordinator coordinator = new ListFetchCoordinator(node, ranges, syncPoint, callback, safeStore.commandStore(), this);
@@ -178,9 +179,9 @@ public class ListStore implements DataStore
                 return;
             synchronized (this)
             {
-                if (!epochSuccessStores.computeIfAbsent(epoch, ignore -> new IntHashSet()).add(store))
+                for (long epoch : new TreeSet<>(addedFromBootstrap.keySet()))
                 {
-                    return;
+
                 }
                 if (!addedFromBootstrap.containsKey(epoch))
                     throw new IllegalStateException("Unknown epoch " + epoch + " on node " + node);
