@@ -886,7 +886,12 @@ public class Commands
                              safeStore.commandStore().redundantBefore(), safeStore.commandStore().durableBefore());
     }
 
-    public static Cleanup shouldCleanup(TxnId txnId, Status status, Durability durability, EpochSupplier toEpoch, Route<?> route, RedundantBefore redundantBefore, DurableBefore durableBefore)
+    static Cleanup shouldCleanup(TxnId txnId, Status status, Durability durability, EpochSupplier toEpoch, Route<?> route, RedundantBefore redundantBefore, DurableBefore durableBefore)
+    {
+        return shouldCleanup(txnId, status, durability, toEpoch, route, redundantBefore, durableBefore, true);
+    }
+
+    public static Cleanup shouldCleanup(TxnId txnId, Status status, Durability durability, EpochSupplier toEpoch, Route<?> route, RedundantBefore redundantBefore, DurableBefore durableBefore, boolean enforceInvariants)
     {
         if (durableBefore.min(txnId) == Universal)
         {
@@ -895,6 +900,7 @@ public class Commands
             return Cleanup.ERASE;
         }
 
+        // TODO (review): If we always send the full route when will this happen?
         if (!Route.isFullRoute(route))
             return NO;
 
@@ -914,7 +920,7 @@ public class Commands
             case PRE_BOOTSTRAP:
                 return NO;
             case LOCALLY_REDUNDANT:
-                if (status.hasBeen(PreCommitted) && !status.hasBeen(Applied)) // TODO (required): may be stale
+                if (enforceInvariants && status.hasBeen(PreCommitted) && !status.hasBeen(Applied)) // TODO (required): may be stale
                     throw new IllegalStateException("Loading redundant command that has been PreCommitted but not Applied");
         }
 
