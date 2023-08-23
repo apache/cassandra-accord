@@ -242,7 +242,6 @@ public class BurnTest
             {
                 int i = requestIndex.getAndIncrement();
                 starts[i] = clock.incrementAndGet();
-                // TODO (review): why did i add this again?
                 queue.addNoDelay(requests[i]);
                 if (i == requests.length - 1)
                     onSubmitted.get().run();
