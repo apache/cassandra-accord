@@ -23,14 +23,15 @@ import accord.impl.CommandsForKey;
 import accord.primitives.Keys;
 import accord.primitives.Seekables;
 import accord.primitives.TxnId;
+import com.google.common.collect.Iterators;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 import com.google.common.collect.Sets;
 
-import java.util.ArrayList;
+import java.util.AbstractCollection;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.List;
+import java.util.Iterator;
 import java.util.Set;
 import java.util.function.Consumer;
 import javax.annotation.Nullable;
@@ -58,11 +59,22 @@ public interface PreLoadContext
     {
         TxnId primaryTxnId = primaryTxnId();
         Collection<TxnId> additional = additionalTxnIds();
-        List<TxnId> list = new ArrayList<>(primaryTxnId == null ? additional.size() : additional.size() + 1);
-        if (primaryTxnId != null)
-            list.add(primaryTxnId);
-        additional.forEach(list::add);
-        return list.isEmpty() ? Collections.emptySet() : list;
+        if (primaryTxnId == null) return additional;
+        if (additional.isEmpty()) return Collections.singleton(primaryTxnId);
+        return new AbstractCollection<TxnId>()
+        {
+            @Override
+            public Iterator<TxnId> iterator()
+            {
+                return Iterators.concat(Iterators.singletonIterator(primaryTxnId), additional.iterator());
+            }
+
+            @Override
+            public int size()
+            {
+                return 1 + additional.size();
+            }
+        };
     }
 
     @Inline
