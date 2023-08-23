@@ -23,7 +23,6 @@ import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Route;
 import accord.primitives.TxnId;
-import accord.utils.Invariants;
 
 public interface CommonAttributes
 {
@@ -41,9 +40,6 @@ public interface CommonAttributes
 
     class Mutable implements CommonAttributes
     {
-        // TODO review these are global ones are mutable
-        public static final CommonAttributes.Mutable EMPTY_ATTRS = new CommonAttributes.Mutable((TxnId) null);
-        public static final CommonAttributes.Mutable EMPTY_ATTRS_NONE_PARTIAL_DEPS = new Mutable((TxnId) null).partialDeps(PartialDeps.NONE);
         private TxnId txnId;
         private Status.Durability durability;
         private Route<?> route;
@@ -80,7 +76,6 @@ public interface CommonAttributes
 
         public Mutable txnId(TxnId txnId)
         {
-            Invariants.checkState(this != EMPTY_ATTRS && this != EMPTY_ATTRS_NONE_PARTIAL_DEPS, "Don't mutate the global empty instances");
             this.txnId = txnId;
             return this;
         }
@@ -93,7 +88,6 @@ public interface CommonAttributes
 
         public Mutable durability(Status.Durability durability)
         {
-            Invariants.checkState(this != EMPTY_ATTRS && this != EMPTY_ATTRS_NONE_PARTIAL_DEPS, "Don't mutate the global empty instances");
             this.durability = durability;
             return this;
         }
@@ -106,7 +100,6 @@ public interface CommonAttributes
 
         public Mutable route(Route<?> route)
         {
-            Invariants.checkState(this != EMPTY_ATTRS && this != EMPTY_ATTRS_NONE_PARTIAL_DEPS, "Don't mutate the global empty instances");
             this.route = route;
             return this;
         }
@@ -119,7 +112,6 @@ public interface CommonAttributes
 
         public Mutable partialTxn(PartialTxn partialTxn)
         {
-            Invariants.checkState(this != EMPTY_ATTRS && this != EMPTY_ATTRS_NONE_PARTIAL_DEPS, "Don't mutate the global empty instances");
             this.partialTxn = partialTxn;
             return this;
         }
@@ -132,7 +124,6 @@ public interface CommonAttributes
 
         public Mutable partialDeps(PartialDeps partialDeps)
         {
-            Invariants.checkState(this != EMPTY_ATTRS && this != EMPTY_ATTRS_NONE_PARTIAL_DEPS, "Don't mutate the global empty instances");
             this.partialDeps = partialDeps;
             return this;
         }
@@ -149,7 +140,6 @@ public interface CommonAttributes
 
         public Mutable addListener(Command.DurableAndIdempotentListener listener)
         {
-            Invariants.checkState(this != EMPTY_ATTRS && this != EMPTY_ATTRS_NONE_PARTIAL_DEPS, "Don't mutate the global empty instances");
             if (listeners == null)
                 listeners = new Listeners();
             else if (listeners instanceof Listeners.Immutable)
@@ -160,7 +150,6 @@ public interface CommonAttributes
 
         public Mutable removeListener(Command.Listener listener)
         {
-            Invariants.checkState(this != EMPTY_ATTRS && this != EMPTY_ATTRS_NONE_PARTIAL_DEPS, "Don't mutate the global empty instances");
             if (listener == null || listeners.isEmpty())
                 return this;
             if (listeners instanceof Listeners.Immutable)
@@ -172,7 +161,6 @@ public interface CommonAttributes
         @VisibleForImplementation
         public Mutable setListeners(Listeners.Immutable listeners)
         {
-            Invariants.checkState(this != EMPTY_ATTRS && this != EMPTY_ATTRS_NONE_PARTIAL_DEPS, "Don't mutate the global empty instances");
             this.listeners = listeners;
             return this;
         }
