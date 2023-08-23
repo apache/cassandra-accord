@@ -160,7 +160,7 @@ public class ListRequest implements Request
         }
 
         private void checkOnResult(@Nullable RoutingKey homeKey, TxnId txnId, int attempt, Throwable t) {
-            if (attempt == 42)
+            if (attempt == 3)
             {
                 node.agent().onUncaughtException(t);
                 return;
