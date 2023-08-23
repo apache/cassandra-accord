@@ -61,13 +61,13 @@ public class FrequentLargeRange implements LongGen
             this.random = random;
         }
 
-        public Builder raitio(double ratio)
+        public Builder ratio(double ratio)
         {
             this.ratio = ratio;
             return this;
         }
 
-        public Builder raitio(int min, int max)
+        public Builder ratio(int min, int max)
         {
             this.ratio = ratio = random.nextInt(min, max) / 100.0D;
             return this;
@@ -131,7 +131,7 @@ public class FrequentLargeRange implements LongGen
             if (large == null)
                 throw new IllegalStateException("Large range undefined");
             if (ratio == null)
-                raitio(1, 11);
+                ratio(1, 11);
             return new FrequentLargeRange(small, large, ratio);
         }
     }

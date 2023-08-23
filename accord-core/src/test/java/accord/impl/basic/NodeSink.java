@@ -165,7 +165,7 @@ public class NodeSink implements MessageSink
     private LongSupplier defaultJitter()
     {
         return FrequentLargeRange.builder(random)
-                                 .raitio(1, 5)
+                                 .ratio(1, 5)
                                  .small(500, TimeUnit.MICROSECONDS, 5, TimeUnit.MILLISECONDS)
                                  .large(50, TimeUnit.MILLISECONDS, 5, SECONDS)
                                  .build()

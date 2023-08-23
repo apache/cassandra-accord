@@ -204,7 +204,7 @@ public class BurnTest
         Supplier<LongSupplier> nowSupplier = () -> {
             RandomSource forked = random.fork();
             return FrequentLargeRange.builder(forked)
-                                                   .raitio(1, 5)
+                                                   .ratio(1, 5)
                                                    .small(50, 5000, TimeUnit.MICROSECONDS)
                                                    .large(1, 10, TimeUnit.MILLISECONDS)
                                                    .build()
