@@ -85,6 +85,7 @@ public class Cluster implements Scheduler
     final RandomSource randomSource;
     final Function<Id, Node> lookup;
     final PendingQueue pending;
+    final Runnable checkFailures;
     final List<Runnable> onDone = new ArrayList<>();
     final Consumer<Packet> responseSink;
     final Map<Id, NodeSink> sinks = new HashMap<>();
@@ -92,10 +93,11 @@ public class Cluster implements Scheduler
     int recurring;
     Set<Id> partitionSet;
 
-    public Cluster(RandomSource randomSource, Supplier<PendingQueue> queueSupplier, Function<Id, Node> lookup, Consumer<Packet> responseSink)
+    public Cluster(RandomSource randomSource, Supplier<PendingQueue> queueSupplier, Runnable checkFailures, Function<Id, Node> lookup, Consumer<Packet> responseSink)
     {
         this.randomSource = randomSource;
         this.pending = queueSupplier.get();
+        this.checkFailures = checkFailures;
         this.lookup = lookup;
         this.responseSink = responseSink;
         this.partitionSet = new HashSet<>();
@@ -132,7 +134,7 @@ public class Cluster implements Scheduler
 
     public boolean processPending()
     {
-        pending.checkFailures();
+        checkFailures.run();
         if (pending.size() == recurring)
             return false;
 
@@ -141,7 +143,7 @@ public class Cluster implements Scheduler
             return false;
 
         processNext(next);
-        pending.checkFailures();
+        checkFailures.run();
         return true;
     }
 
@@ -208,13 +210,13 @@ public class Cluster implements Scheduler
         run.run();
     }
 
-    public static EnumMap<MessageType, Stats> run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Consumer<Packet> responseSink, AgentExecutor executor, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplierSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, Consumer<Runnable> noMoreWorkSignal)
+    public static EnumMap<MessageType, Stats> run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Runnable checkFailures, Consumer<Packet> responseSink, AgentExecutor executor, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplierSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, Consumer<Runnable> noMoreWorkSignal)
     {
         Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> lookup = new LinkedHashMap<>();
         try
         {
-            Cluster sinks = new Cluster(randomSupplier.get(), queueSupplier, lookup::get, responseSink);
+            Cluster sinks = new Cluster(randomSupplier.get(), queueSupplier, checkFailures, lookup::get, responseSink);
             TopologyUpdates topologyUpdates = new TopologyUpdates(executor);
             TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, lookup::get);
             List<CoordinateDurabilityScheduling> durabilityScheduling = new ArrayList<>();

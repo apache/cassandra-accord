@@ -63,10 +63,8 @@ public class PropagatingPendingQueue implements PendingQueue
         return wrapped.poll();
     }
 
-    @Override
     public void checkFailures()
     {
-        wrapped.checkFailures();
         if (!failures.isEmpty())
         {
             AssertionError assertion = null;

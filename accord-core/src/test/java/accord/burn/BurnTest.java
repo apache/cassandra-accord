@@ -194,7 +194,7 @@ public class BurnTest
     {
         List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
         RandomDelayQueue delayQueue = new Factory(random).get();
-        PendingQueue queue = new PropagatingPendingQueue(failures, delayQueue);
+        PropagatingPendingQueue queue = new PropagatingPendingQueue(failures, delayQueue);
         RandomSource retryRandom = random.fork();
         ListAgent agent = new ListAgent(1000L, failures::add, retry -> {
             long delay = retryRandom.nextInt(1, 15);
@@ -311,7 +311,7 @@ public class BurnTest
         EnumMap<MessageType, Cluster.Stats> messageStatsMap;
         try
         {
-            messageStatsMap = Cluster.run(toArray(nodes, Id[]::new), () -> queue,
+            messageStatsMap = Cluster.run(toArray(nodes, Id[]::new), () -> queue, queue::checkFailures,
                                           responseSink, globalExecutor,
                                           random::fork, nowSupplier,
                                           topologyFactory, initialRequests::poll,
