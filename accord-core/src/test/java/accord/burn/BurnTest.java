@@ -56,7 +56,6 @@ import accord.impl.basic.RandomDelayQueue;
 import accord.impl.basic.RandomDelayQueue.Factory;
 import accord.impl.TopologyFactory;
 import accord.impl.basic.Packet;
-import accord.impl.basic.PendingQueue;
 import accord.impl.basic.SimulatedDelayedExecutorService;
 import accord.impl.list.ListAgent;
 import accord.impl.list.ListQuery;
