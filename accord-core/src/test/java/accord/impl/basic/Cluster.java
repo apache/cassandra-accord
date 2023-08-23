@@ -35,6 +35,7 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import accord.impl.MessageListener;
 import org.junit.jupiter.api.Assertions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -89,13 +90,15 @@ public class Cluster implements Scheduler
     final List<Runnable> onDone = new ArrayList<>();
     final Consumer<Packet> responseSink;
     final Map<Id, NodeSink> sinks = new HashMap<>();
+    final MessageListener messageListener;
     int clock;
     int recurring;
     Set<Id> partitionSet;
 
-    public Cluster(RandomSource randomSource, Supplier<PendingQueue> queueSupplier, Runnable checkFailures, Function<Id, Node> lookup, Consumer<Packet> responseSink)
+    public Cluster(RandomSource randomSource, MessageListener messageListener, Supplier<PendingQueue> queueSupplier, Runnable checkFailures, Function<Id, Node> lookup, Consumer<Packet> responseSink)
     {
         this.randomSource = randomSource;
+        this.messageListener = messageListener;
         this.pending = queueSupplier.get();
         this.checkFailures = checkFailures;
         this.lookup = lookup;
@@ -210,13 +213,13 @@ public class Cluster implements Scheduler
         run.run();
     }
 
-    public static EnumMap<MessageType, Stats> run(Id[] nodes, Supplier<PendingQueue> queueSupplier, Runnable checkFailures, Consumer<Packet> responseSink, AgentExecutor executor, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplierSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, Consumer<Runnable> noMoreWorkSignal)
+    public static EnumMap<MessageType, Stats> run(Id[] nodes, MessageListener messageListener, Supplier<PendingQueue> queueSupplier, Runnable checkFailures, Consumer<Packet> responseSink, AgentExecutor executor, Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplierSupplier, TopologyFactory topologyFactory, Supplier<Packet> in, Consumer<Runnable> noMoreWorkSignal)
     {
         Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> lookup = new LinkedHashMap<>();
         try
         {
-            Cluster sinks = new Cluster(randomSupplier.get(), queueSupplier, checkFailures, lookup::get, responseSink);
+            Cluster sinks = new Cluster(randomSupplier.get(), messageListener, queueSupplier, checkFailures, lookup::get, responseSink);
             TopologyUpdates topologyUpdates = new TopologyUpdates(executor);
             TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, lookup::get);
             List<CoordinateDurabilityScheduling> durabilityScheduling = new ArrayList<>();

@@ -25,8 +25,8 @@ import accord.coordinate.CoordinationFailed;
 import accord.coordinate.Invalidated;
 import accord.coordinate.Truncated;
 import accord.coordinate.Timeout;
+import accord.impl.MessageListener;
 import accord.impl.basic.Cluster;
-import accord.impl.basic.NodeSink;
 import accord.impl.basic.Packet;
 import accord.impl.basic.SimulatedFault;
 import accord.local.Node;
@@ -104,14 +104,16 @@ public class ListRequest implements Request
         final Node node;
         final Id client;
         final ReplyContext replyContext;
+        final MessageListener listener;
         final TxnId id;
         final Txn txn;
 
-        ResultCallback(Node node, Id client, ReplyContext replyContext, TxnId id, Txn txn)
+        ResultCallback(Node node, Id client, ReplyContext replyContext, MessageListener listener, TxnId id, Txn txn)
         {
             this.node = node;
             this.client = client;
             this.replyContext = replyContext;
+            this.listener = listener;
             this.id = id;
             this.txn = txn;
         }
@@ -121,7 +123,7 @@ public class ListRequest implements Request
         {
             if (fail != null)
             {
-                ((NodeSink) node.messageSink()).debugClient(id, fail, NodeSink.ClientAction.FAILURE);
+                listener.onClientAction(MessageListener.ClientAction.FAILURE, node.id(), id, fail);
                 if (fail instanceof CoordinationFailed)
                 {
                     RoutingKey homeKey = ((CoordinationFailed) fail).homeKey();
@@ -147,12 +149,12 @@ public class ListRequest implements Request
             }
             else if (success != null)
             {
-                ((NodeSink) node.messageSink()).debugClient(id, success, NodeSink.ClientAction.SUCCESS);
+                listener.onClientAction(MessageListener.ClientAction.SUCCESS, node.id(), id, success);
                 node.reply(client, replyContext, (ListResult) success, null);
             }
             else
             {
-                ((NodeSink) node.messageSink()).debugClient(id, null, NodeSink.ClientAction.UNKNOWN);
+                listener.onClientAction(MessageListener.ClientAction.UNKNOWN, node.id(), id, null);
                 node.agent().onUncaughtException(new NullPointerException("Success and Failure were both null"));
             }
         }
@@ -204,11 +206,13 @@ public class ListRequest implements Request
     }
 
     public final Txn txn;
+    private final MessageListener listener;
     private TxnId id;
 
-    public ListRequest(Txn txn)
+    public ListRequest(Txn txn, MessageListener listener)
     {
         this.txn = txn;
+        this.listener = listener;
     }
 
     @Override
@@ -217,8 +221,8 @@ public class ListRequest implements Request
         if (id != null)
             throw new IllegalStateException("Called process multiple times");
         id = node.nextTxnId(txn.kind(), txn.keys().domain());
-        ((NodeSink) node.messageSink()).debugClient(id, txn, NodeSink.ClientAction.SUBMIT);
-        node.coordinate(id, txn).addCallback(new ResultCallback(node, client, replyContext, id, txn));
+        listener.onClientAction(MessageListener.ClientAction.SUBMIT, node.id(), id, txn);
+        node.coordinate(id, txn).addCallback(new ResultCallback(node, client, replyContext, listener, id, txn));
     }
 
     @Override

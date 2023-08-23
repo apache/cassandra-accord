@@ -41,6 +41,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import accord.burn.random.FrequentLargeRange;
+import accord.impl.MessageListener;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.slf4j.Logger;
@@ -82,7 +83,7 @@ public class BurnTest
 {
     private static final Logger logger = LoggerFactory.getLogger(BurnTest.class);
 
-    static List<Packet> generate(RandomSource random, Function<? super CommandStore, AsyncExecutor> executor, List<Id> clients, List<Id> nodes, int keyCount, int operations)
+    static List<Packet> generate(RandomSource random, MessageListener listener, Function<? super CommandStore, AsyncExecutor> executor, List<Id> clients, List<Id> nodes, int keyCount, int operations)
     {
         List<Key> keys = new ArrayList<>();
         for (int i = 0 ; i < keyCount ; ++i)
@@ -110,7 +111,7 @@ public class BurnTest
                 Ranges ranges = Ranges.of(requestRanges.toArray(new Range[0]));
                 ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, ranges, ranges);
                 ListQuery query = new ListQuery(client, count);
-                ListRequest request = new ListRequest(new Txn.InMemory(ranges, read, query, null));
+                ListRequest request = new ListRequest(new Txn.InMemory(ranges, read, query, null), listener);
                 packets.add(new Packet(client, node, count, request));
 
 
@@ -137,7 +138,7 @@ public class BurnTest
                     requestKeys.addAll(update.keySet());
                 ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, readKeys, new Keys(requestKeys));
                 ListQuery query = new ListQuery(client, count);
-                ListRequest request = new ListRequest(new Txn.InMemory(new Keys(requestKeys), read, query, update));
+                ListRequest request = new ListRequest(new Txn.InMemory(new Keys(requestKeys), read, query, update), listener);
                 packets.add(new Packet(client, node, count, request));
             }
         }
@@ -216,7 +217,9 @@ public class BurnTest
         SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, agent);
         Function<CommandStore, AsyncExecutor> executor = ignore -> globalExecutor;
 
-        Packet[] requests = toArray(generate(random, executor, clients, nodes, keyCount, operations), Packet[]::new);
+        MessageListener listener = MessageListener.get();
+
+        Packet[] requests = toArray(generate(random, listener, executor, clients, nodes, keyCount, operations), Packet[]::new);
         int[] starts = new int[requests.length];
         Packet[] replies = new Packet[requests.length];
 
@@ -311,7 +314,7 @@ public class BurnTest
         EnumMap<MessageType, Cluster.Stats> messageStatsMap;
         try
         {
-            messageStatsMap = Cluster.run(toArray(nodes, Id[]::new), () -> queue, queue::checkFailures,
+            messageStatsMap = Cluster.run(toArray(nodes, Id[]::new), listener, () -> queue, queue::checkFailures,
                                           responseSink, globalExecutor,
                                           random::fork, nowSupplier,
                                           topologyFactory, initialRequests::poll,
