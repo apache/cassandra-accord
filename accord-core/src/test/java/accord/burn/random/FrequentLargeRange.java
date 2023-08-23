@@ -69,7 +69,7 @@ public class FrequentLargeRange implements LongGen
 
         public Builder ratio(int min, int max)
         {
-            this.ratio = ratio = random.nextInt(min, max) / 100.0D;
+            this.ratio = random.nextInt(min, max) / 100.0D;
             return this;
         }
 
