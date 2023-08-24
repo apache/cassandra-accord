@@ -900,7 +900,6 @@ public class Commands
             return Cleanup.ERASE;
         }
 
-        // TODO (review): If we always send the full route when will this happen?
         if (!Route.isFullRoute(route))
             return NO;
 
