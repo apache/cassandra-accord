@@ -26,36 +26,58 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.burn.TopologyUpdates;
-import accord.impl.IntHashKey;
-import accord.impl.IntHashKey.Hash;
+import accord.impl.PrefixedIntHashKey;
+import accord.impl.PrefixedIntHashKey.Hash;
 import accord.local.Node;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
-import accord.utils.Invariants;
 import accord.utils.RandomSource;
+import org.agrona.collections.IntHashSet;
 
 
 // TODO (required, testing): add change replication factor
 public class TopologyRandomizer
 {
+    public interface Listener
+    {
+        void onUpdate(Topology topology);
+    }
+
+    public enum Listeners implements Listener
+    {
+        NOOP
+        {
+            @Override
+            public void onUpdate(Topology topology)
+            {
+
+            }
+        }
+    }
+
     private static final Logger logger = LoggerFactory.getLogger(TopologyRandomizer.class);
+    private static final AtomicInteger CURRENT_PREFIX = new AtomicInteger(0);
+
     private final RandomSource random;
     private final List<Topology> epochs = new ArrayList<>();
     private final Function<Node.Id, Node> nodeLookup;
     private final Map<Node.Id, Ranges> previouslyReplicated = new HashMap<>();
     private final TopologyUpdates topologyUpdates;
+    private final Listener listener;
 
-    public TopologyRandomizer(Supplier<RandomSource> randomSupplier, Topology initialTopology, TopologyUpdates topologyUpdates, @Nullable Function<Node.Id, Node> nodeLookup)
+    public TopologyRandomizer(Supplier<RandomSource> randomSupplier, Topology initialTopology, TopologyUpdates topologyUpdates, @Nullable Function<Node.Id, Node> nodeLookup, Listener listener)
     {
         this.random = randomSupplier.get();
         this.topologyUpdates = topologyUpdates;
@@ -64,15 +86,19 @@ public class TopologyRandomizer
         for (Node.Id node : initialTopology.nodes())
             previouslyReplicated.put(node, initialTopology.rangesForNode(node));
         this.nodeLookup = nodeLookup;
+        this.listener = listener;
     }
 
-    private enum UpdateType
+    @VisibleForTesting
+    enum UpdateType
     {
 //        BOUNDARY(TopologyRandomizer::updateBoundary),
         SPLIT(TopologyRandomizer::split),
         MERGE(TopologyRandomizer::merge),
         MEMBERSHIP(TopologyRandomizer::updateMembership),
         FASTPATH(TopologyRandomizer::updateFastPath);
+//        ADD_PREFIX(TopologyRandomizer::addPrefix),
+//        REMOVE_PREFIX(TopologyRandomizer::removePrefix);
 
         private final BiFunction<Shard[], RandomSource, Shard[]> function;
 
@@ -97,20 +123,20 @@ public class TopologyRandomizer
     {
         int idx = random.nextInt(shards.length - 1);
         Shard left = shards[idx];
-        IntHashKey.Range leftRange = (IntHashKey.Range) left.range;
+        PrefixedIntHashKey.Range leftRange = (PrefixedIntHashKey.Range) left.range;
         Shard right = shards[idx + 1];
-        IntHashKey.Range rightRange = (IntHashKey.Range) right.range;
-        IntHashKey minBound = (IntHashKey) leftRange.split(2).get(0).end();
-        IntHashKey maxBound = (IntHashKey) rightRange.split(2).get(0).start();
+        PrefixedIntHashKey.Range rightRange = (PrefixedIntHashKey.Range) right.range;
+        PrefixedIntHashKey minBound = (PrefixedIntHashKey) leftRange.split(2).get(0).end();
+        PrefixedIntHashKey maxBound = (PrefixedIntHashKey) rightRange.split(2).get(0).start();
 
         if (minBound.hash == maxBound.hash)
             // no adjustment is possible
             return shards;
 
-        Hash newBound = IntHashKey.forHash(minBound.hash + random.nextInt(maxBound.hash - minBound.hash));
+        Hash newBound = PrefixedIntHashKey.forHash(minBound.prefix, minBound.hash + random.nextInt(maxBound.hash - minBound.hash));
 
-        shards[idx] = new Shard(IntHashKey.range((Hash)leftRange.start(), newBound), left.nodes, left.fastPathElectorate, left.joining);
-        shards[idx+1] = new Shard(IntHashKey.range(newBound, (Hash)rightRange.end()), right.nodes, right.fastPathElectorate, right.joining);
+        shards[idx] = new Shard(PrefixedIntHashKey.range((Hash)leftRange.start(), newBound), left.nodes, left.fastPathElectorate, left.joining);
+        shards[idx+1] = new Shard(PrefixedIntHashKey.range(newBound, (Hash)rightRange.end()), right.nodes, right.fastPathElectorate, right.joining);
 //        logger.debug("Updated boundary on {} & {} {} {} to {} {}", idx, idx + 1, left, right,
 //                     shards[idx].toString(true), shards[idx + 1].toString(true));
 
@@ -123,21 +149,21 @@ public class TopologyRandomizer
             throw new IllegalArgumentException("Unable to split an empty array");
         int idx = shards.length == 1 ? 0 : random.nextInt(shards.length - 1);
         Shard split = shards[idx];
-        IntHashKey.Range splitRange = (IntHashKey.Range) split.range;
-        IntHashKey minBound = (IntHashKey) splitRange.start();
-        IntHashKey maxBound = (IntHashKey) splitRange.end();
+        PrefixedIntHashKey.Range splitRange = (PrefixedIntHashKey.Range) split.range;
+        PrefixedIntHashKey minBound = (PrefixedIntHashKey) splitRange.start();
+        PrefixedIntHashKey maxBound = (PrefixedIntHashKey) splitRange.end();
 
         if (minBound.hash + 1 == maxBound.hash)
             // no split is possible
             return shards;
 
-        Hash newBound = IntHashKey.forHash(minBound.hash + 1 + random.nextInt(maxBound.hash - (1 + minBound.hash)));
+        Hash newBound = PrefixedIntHashKey.forHash(minBound.prefix, minBound.hash + 1 + random.nextInt(maxBound.hash - (1 + minBound.hash)));
 
         Shard[] result = new Shard[shards.length + 1];
         System.arraycopy(shards, 0, result, 0, idx);
         System.arraycopy(shards, idx, result, idx + 1, shards.length - idx);
-        result[idx] = new Shard(IntHashKey.range((Hash)splitRange.start(), newBound), split.nodes, split.fastPathElectorate, split.joining);
-        result[idx+1] = new Shard(IntHashKey.range(newBound, (Hash)splitRange.end()), split.nodes, split.fastPathElectorate, split.joining);
+        result[idx] = new Shard(PrefixedIntHashKey.range((Hash)splitRange.start(), newBound), split.nodes, split.fastPathElectorate, split.joining);
+        result[idx+1] = new Shard(PrefixedIntHashKey.range(newBound, (Hash)splitRange.end()), split.nodes, split.fastPathElectorate, split.joining);
         logger.debug("Split boundary on {} & {} {} to {} {}", idx, idx + 1, split,
                      result[idx].toString(true), result[idx + 1].toString(true));
 
@@ -152,11 +178,20 @@ public class TopologyRandomizer
         int idx = shards.length == 2 ? 0 : random.nextInt(shards.length - 2);
         Shard left = shards[idx];
         Shard right = shards[idx + 1];
+        while (prefix(left) != prefix(right))
+        {
+            // shards are a single prefix, so can't merge
+            if (idx + 2 == shards.length)
+                return shards;
+            idx++;
+            left = shards[idx];
+            right = shards[idx + 1];
+        }
 
         Shard[] result = new Shard[shards.length - 1];
         System.arraycopy(shards, 0, result, 0, idx);
         System.arraycopy(shards, idx + 2, result, idx + 1, shards.length - (idx + 2));
-        Range range = IntHashKey.range((Hash)left.range.start(), (Hash)right.range.end());
+        Range range = PrefixedIntHashKey.range((Hash)left.range.start(), (Hash)right.range.end());
         List<Node.Id> nodes; {
             TreeSet<Node.Id> tmp = new TreeSet<>();
             tmp.addAll(left.nodes);
@@ -256,6 +291,86 @@ public class TopologyRandomizer
         return shards;
     }
 
+    private static Shard[] addPrefix(Shard[] shards, RandomSource random)
+    {
+        // TODO (coverage): add support for bringing prefixes back after removal
+        // In implementations (such as Apache Cassandra) its possible that a range exists, gets removed, then added back (CREATE KEYSPACE, DROP KEYSPACE, CREATE KEYSPACE),
+        // in this case the old prefix should be "cleared".
+        int prefix = CURRENT_PREFIX.incrementAndGet();
+        Set<Node.Id> joining = new HashSet<>();
+        Node.Id[] nodes;
+        {
+            Set<Node.Id> uniq = new HashSet<>();
+            for (Shard shard : shards)
+            {
+                uniq.addAll(shard.nodes);
+                joining.addAll(shard.joining);
+            }
+            Node.Id[] result = uniq.toArray(new Node.Id[uniq.size()]);
+            Arrays.sort(result);
+            nodes = result;
+        }
+        int rf = Math.min(3, nodes.length);
+        List<Shard> result = new ArrayList<>(shards.length + nodes.length);
+        result.addAll(Arrays.asList(shards));
+        Range[] ranges = PrefixedIntHashKey.ranges(prefix, nodes.length);
+        for (int i = 0; i < ranges.length; i++)
+        {
+            Range range = ranges[i];
+            List<Node.Id> replicas = select(nodes, rf, random);
+            Set<Node.Id> fastPath = newFastPath(replicas, random);
+            result.add(new Shard(range, replicas, fastPath, Sets.intersection(joining, new HashSet<>(replicas))));
+        }
+        return result.toArray(new Shard[result.size()]);
+    }
+
+    private static List<Node.Id> select(Node.Id[] nodes, int rf, RandomSource random)
+    {
+        List<Node.Id> result = new ArrayList<>(rf);
+        while (result.size() < rf)
+        {
+            Node.Id id = random.pick(nodes);
+            // TODO (efficiency) : rf is normally 3, so is it worth it to have a set, bitset, or another structure?
+            if (!result.contains(id))
+                result.add(id);
+        }
+        return result;
+    }
+
+    private static Shard[] removePrefix(Shard[] shards, RandomSource random)
+    {
+        int[] prefixes = prefixes(shards);
+        if (prefixes.length <= 1)
+            return shards;
+        int prefix = prefixes[random.nextInt(prefixes.length)];
+        List<Shard> result = new ArrayList<>(shards.length);
+        for (Shard shard : shards)
+        {
+            int shardPrefix = prefix(shard);
+            if (shardPrefix == prefix) continue;
+            result.add(shard);
+        }
+        return result.toArray(result.toArray(new Shard[result.size()]));
+    }
+
+    private static int[] prefixes(Shard[] shards)
+    {
+        IntHashSet prefixes = new IntHashSet();
+        for (Shard shard : shards)
+            prefixes.add(prefix(shard));
+        int[] result = new int[prefixes.size()];
+        IntHashSet.IntIterator it = prefixes.iterator();
+        for (int i = 0; it.hasNext(); i++)
+            result[i] = it.nextValue();
+        Arrays.sort(result);
+        return result;
+    }
+
+    private static int prefix(Shard shard)
+    {
+        return ((PrefixedIntHashKey) shard.range.start()).prefix;
+    }
+
     private static Map<Node.Id, Ranges> getAdditions(Topology current, Topology next)
     {
         Map<Node.Id, Ranges> additions = new HashMap<>();
@@ -338,6 +453,7 @@ public class TopologyRandomizer
 
 //        logger.debug("topology update to: {} from: {}", nextTopology, current);
         epochs.add(nextTopology);
+        listener.onUpdate(nextTopology);
 
         if (nodeLookup != null)
         {
@@ -355,14 +471,12 @@ public class TopologyRandomizer
         {
             Shard iv = in[i];
             Shard ov = out[o];
-            Invariants.checkState(iv.range.compareIntersecting(ov.range) == 0);
             if (ov.nodes.stream().filter(iv::contains).allMatch(id -> topologyUpdates.isPending(ov.range, id)))
                 return false;
             int c = iv.range.end().compareTo(ov.range.end());
             if (c <= 0) ++i;
             if (c >= 0) ++o;
         }
-        Invariants.checkState (i == in.length && o == out.length);
         return true;
     }
 }

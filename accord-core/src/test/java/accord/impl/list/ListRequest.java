@@ -19,6 +19,7 @@
 package accord.impl.list;
 
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 
 import accord.api.Result;
 import accord.api.RoutingKey;
@@ -151,16 +152,20 @@ public class ListRequest implements Request
         }
     }
 
-    public final Txn txn;
+    private final String description;
+    private final Function<Node, Txn> gen;
+    private transient Txn txn;
 
-    public ListRequest(Txn txn)
+    public ListRequest(String description, Function<Node, Txn> gen)
     {
-        this.txn = txn;
+        this.description = description;
+        this.gen = gen;
     }
 
     @Override
     public void process(Node node, Id client, ReplyContext replyContext)
     {
+        txn = gen.apply(node);
         node.coordinate(txn).addCallback(new ResultCallback(node, client, replyContext, txn));
     }
 
@@ -173,7 +178,9 @@ public class ListRequest implements Request
     @Override
     public String toString()
     {
-        return txn.toString();
+        return "ListRequest{" +
+               "description='" + description + '\'' +
+               ", txn=" + txn +
+               '}';
     }
-
 }

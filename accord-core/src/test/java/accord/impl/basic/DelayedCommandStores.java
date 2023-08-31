@@ -21,6 +21,7 @@ package accord.impl.basic;
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.concurrent.Callable;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -36,8 +37,10 @@ import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
 import accord.local.ShardDistributor;
+import accord.utils.Invariants;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 
 public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 {
@@ -104,11 +107,30 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         public <T> AsyncChain<T> submit(Callable<T> fn)
         {
             Task<T> task = new DelayedTask<>(fn);
-            boolean wasEmpty = pending.isEmpty();
-            pending.add(task);
-            if (wasEmpty)
-                runNextTask();
-            return task;
+            if (Invariants.isParanoid())
+            {
+                return AsyncChains.detectLeak(agent::onUncaughtException, () -> {
+                    boolean wasEmpty = pending.isEmpty();
+                    pending.add(task);
+                    if (wasEmpty)
+                        runNextTask();
+                }).flatMap(ignore -> task);
+            }
+            else
+            {
+                return new AsyncChains.Head<T>()
+                {
+                    @Override
+                    protected void start(BiConsumer<? super T, Throwable> callback)
+                    {
+                        boolean wasEmpty = pending.isEmpty();
+                        pending.add(task);
+                        if (wasEmpty)
+                            runNextTask();
+                        task.begin(callback);
+                    }
+                };
+            }
         }
 
         private void runNextTask()
@@ -117,7 +139,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             if (next == null)
                 return;
 
-            next.addCallback(agent()); // used to track unexpected exceptions and notify simulations
+//            next.addCallback(agent()); // used to track unexpected exceptions and notify simulations
             next.addCallback(this::afterExecution);
             executor.execute(next);
         }

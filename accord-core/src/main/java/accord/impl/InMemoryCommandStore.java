@@ -24,6 +24,8 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -34,6 +36,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -75,7 +78,6 @@ import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 import javax.annotation.Nullable;
 
-import static accord.local.Command.NotDefined.uninitialised;
 import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.Status.Committed;
@@ -92,6 +94,11 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     private final TreeMap<TxnId, RangeCommand> rangeCommands = new TreeMap<>();
     private final TreeMap<TxnId, Ranges> historicalRangeCommands = new TreeMap<>();
+    /**
+     * Since this cache is fully in-memory the store does not hit states that most stores will; that data is not in-memory!
+     * To simulate such behaviors, a "cache" is used to state what is in-memory vs what needs to be loaded.
+     */
+    private final Set<Object> cache = new LinkedHashSet<>();
     protected Timestamp maxRedundant = Timestamp.NONE;
 
     private InMemorySafeStore current;
@@ -119,7 +126,7 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     public GlobalCommand ifPresent(TxnId txnId)
     {
-        return commands.get(txnId);
+        return cache.contains(txnId) ? commands.get(txnId) : null;
     }
 
     public GlobalCommand command(TxnId txnId)
@@ -141,7 +148,7 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     public GlobalCommandsForKey ifPresent(Key key)
     {
-        return commandsForKey.get(key);
+        return cache.contains(key) ? commandsForKey.get(key) : null;
     }
 
     public GlobalCommandsForKey commandsForKey(Key key)
@@ -315,7 +322,56 @@ public abstract class InMemoryCommandStore extends CommandStore
                     // load range cfks here
             }
         }
+        maybeUpdateCache(commands, commandsForKeys);
         return createSafeStore(context, ranges, commands, commandsForKeys);
+    }
+
+    private void maybeUpdateCache(Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys)
+    {
+        int cacheSize = this.cache.size();
+        boolean canEvict = true;
+        for (InMemorySafeCommand cmd : commands.values())
+        {
+            if (this.cache.contains(cmd.txnId())) continue;
+            if (canEvict && ++cacheSize > 10)
+            {
+                // need to remove 1 element from the cache!
+                boolean removed = false;
+                Iterator<Object> it = cache.iterator();
+                while (it.hasNext())
+                {
+                    Object next = it.next();
+                    if (commands.containsKey(next) || commandsForKeys.containsKey(next)) continue;
+                    it.remove();
+                    removed = true;
+                    if (--cacheSize == 10)
+                        break;
+                }
+                if (!removed) canEvict = false;
+            }
+            this.cache.add(cmd.txnId());
+        }
+        for (InMemorySafeCommandsForKey cfk : commandsForKeys.values())
+        {
+            if (this.cache.contains(cfk.key())) continue;
+            if (canEvict && ++cacheSize > 10)
+            {
+                // need to remove 1 element from the cache!
+                boolean removed = false;
+                Iterator<Object> it = cache.iterator();
+                while (it.hasNext())
+                {
+                    Object next = it.next();
+                    if (commands.containsKey(next) || commandsForKeys.containsKey(next)) continue;
+                    it.remove();
+                    removed = true;
+                    if (--cacheSize == 10)
+                        break;
+                }
+                if (!removed) canEvict = false;
+            }
+            this.cache.add(cfk.key());
+        }
     }
 
     public SafeCommandStore beginOperation(PreLoadContext context)
@@ -408,63 +464,39 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
     }
 
-    static class CFKEntry extends TxnId
+    enum Loader implements CommandLoader<Command>
     {
-        final boolean uninitialised;
-        public CFKEntry(TxnId copy, boolean uninitialised)
-        {
-            super(copy);
-            this.uninitialised = uninitialised;
-        }
-    }
+        INSTANCE;
 
-    class CFKLoader implements CommandLoader<CFKEntry>
-    {
-        final RoutableKey key;
-        CFKLoader(RoutableKey key)
+        @Override
+        public Command saveForCFK(Command command)
         {
-            this.key = key;
-        }
-
-        private Command loadForCFK(CFKEntry entry)
-        {
-            GlobalCommand globalCommand = ifPresent(entry);
-            if (globalCommand != null)
-                return globalCommand.value();
-            if (entry.uninitialised)
-                return uninitialised(entry);
-            throw new IllegalStateException("Could not find command for CFK for " + entry);
+            return command;
         }
 
         @Override
-        public TxnId txnId(CFKEntry txnId)
+        public TxnId txnId(Command command)
         {
-            return loadForCFK(txnId).txnId();
+            return command.txnId();
         }
 
         @Override
-        public Timestamp executeAt(CFKEntry txnId)
+        public Timestamp executeAt(Command command)
         {
-            return loadForCFK(txnId).executeAt();
+            return command.executeAt();
         }
 
         @Override
-        public SaveStatus saveStatus(CFKEntry txnId)
+        public SaveStatus saveStatus(Command command)
         {
-            return loadForCFK(txnId).saveStatus();
+            return command.saveStatus();
         }
 
         @Override
-        public List<TxnId> depsIds(CFKEntry data)
+        public List<TxnId> depsIds(Command command)
         {
-            PartialDeps deps = loadForCFK(data).partialDeps();
+            PartialDeps deps = command.partialDeps();
             return deps != null ? deps.txnIds() : Collections.emptyList();
-        }
-
-        @Override
-        public CFKEntry saveForCFK(Command command)
-        {
-            return new CFKEntry(command.txnId(), command.saveStatus().isUninitialised());
         }
     }
 
@@ -849,7 +881,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         @Override
         public CommandLoader<?> cfkLoader(RoutableKey key)
         {
-            return commandStore.new CFKLoader(key);
+            return Loader.INSTANCE;
         }
 
         @Override
@@ -871,31 +903,41 @@ public abstract class InMemoryCommandStore extends CommandStore
     {
         Runnable active = null;
         final Queue<Runnable> queue = new ConcurrentLinkedQueue<>();
+        private final AtomicBoolean running = new AtomicBoolean(false);
 
         public Synchronized(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder)
         {
             super(id, time, agent, store, progressLogFactory, epochUpdateHolder);
         }
 
-        private synchronized void maybeRun()
+        private void maybeRun()
         {
-            if (active != null)
+            if (!running.compareAndSet(false, true))
                 return;
-
-            active = queue.poll();
-            while (active != null)
+            synchronized (this)
             {
-                this.unsafeRunIn(() -> {
-                    try
+                try
+                {
+                    active = queue.poll();
+                    while (active != null)
                     {
-                        active.run();
+                        this.unsafeRunIn(() -> {
+                            try
+                            {
+                                active.run();
+                            }
+                            catch (Throwable t)
+                            {
+                                logger.error("Uncaught exception", t);
+                            }
+                        });
+                        active = queue.poll();
                     }
-                    catch (Throwable t)
-                    {
-                        logger.error("Uncaught exception", t);
-                    }
-                });
-                active = queue.poll();
+                }
+                finally
+                {
+                    running.set(false);
+                }
             }
         }
 

@@ -44,7 +44,7 @@ import accord.api.Scheduler;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
 import accord.impl.CoordinateDurabilityScheduling;
-import accord.impl.IntHashKey;
+import accord.impl.PrefixedIntHashKey;
 import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TopologyFactory;
@@ -58,6 +58,7 @@ import accord.messages.MessageType;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.messages.SafeCallback;
+import accord.primitives.Ranges;
 import accord.topology.Topology;
 import accord.topology.TopologyRandomizer;
 import accord.utils.RandomSource;
@@ -227,7 +228,25 @@ public class Cluster implements Scheduler
         {
             Cluster sinks = new Cluster(queueSupplier, lookup::get, responseSink);
             TopologyUpdates topologyUpdates = new TopologyUpdates(executor);
-            TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, lookup::get);
+            TopologyRandomizer.Listener schemaApply = new TopologyRandomizer.Listener()
+            {
+                private Topology previous = Topology.EMPTY;
+
+                @Override
+                public void onUpdate(Topology topology)
+                {
+                    for (Node node : lookup.values())
+                    {
+                        ListStore store = (ListStore) node.commandStores().dataStore();
+                        Ranges currentRanges = previous.rangesForNode(node.id());
+                        Ranges updatedRanges = topology.rangesForNode(node.id());
+                        if (currentRanges.equals(updatedRanges))
+                            continue;
+                        store.onRangeUpdate(node, topology.epoch(), updatedRanges);
+                    }
+                }
+            };
+            TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, lookup::get, schemaApply);
             List<CoordinateDurabilityScheduling> durabilityScheduling = new ArrayList<>();
             for (Id id : nodes)
             {
@@ -235,7 +254,7 @@ public class Cluster implements Scheduler
                 LongSupplier nowSupplier = nowSupplierSupplier.get();
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(id, executor, randomSupplier, topology, lookup::get, topologyUpdates);
                 Node node = new Node(id, messageSink, configService, nowSupplier, NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, nowSupplier),
-                                     () -> new ListStore(id), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
+                                     () -> new ListStore(id), new ShardDistributor.EvenSplit<>(8, ignore -> new PrefixedIntHashKey.Splitter()),
                                      executor.agent(),
                                      randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
                                      SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending));
@@ -246,6 +265,8 @@ public class Cluster implements Scheduler
                 durability.setGlobalCycleTime(180, SECONDS);
                 durabilityScheduling.add(durability);
             }
+
+            schemaApply.onUpdate(topology);
 
             // startup
             AsyncResult<?> startup = AsyncChains.reduce(lookup.values().stream().map(Node::start).collect(toList()), (a, b) -> null).beginAsResult();

@@ -65,18 +65,28 @@ public class ListRead implements Read
     public AsyncChain<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store)
     {
         ListStore s = (ListStore)store;
+        long latestEpoch = commandStore.latestEpoch();
+        Ranges r = commandStore.ranges().currentRanges();
+        Ranges r2 = commandStore.ranges().applyRanges(executeAt);
+        CommandStore cs = commandStore.commandStore();
         return executor.apply(commandStore.commandStore()).submit(() -> {
             ListData result = new ListData();
+            // TODO (now): remove; this is here for debugger access
+            Ranges capture = r;
+            Ranges capture2 = r2;
+            Txn.Kind captureKind = kind;
+            long captureLatestEpoch = latestEpoch;
+            CommandStore capturecs = cs;
             switch (key.domain())
             {
                 default: throw new AssertionError();
                 case Key:
-                    Timestamped<int[]> data = s.get((Key)key);
+                    Timestamped<int[]> data = s.get(executeAt, (Key)key);
                     logger.trace("READ on {} at {} key:{} -> {}", s.node, executeAt, key, data);
                     result.put((Key)key, data);
                     break;
                 case Range:
-                    for (Map.Entry<Key, Timestamped<int[]>> e : s.get((Range)key))
+                    for (Map.Entry<Key, Timestamped<int[]>> e : s.get(executeAt, (Range)key))
                         result.put(e.getKey(), e.getValue());
             }
             return result;
