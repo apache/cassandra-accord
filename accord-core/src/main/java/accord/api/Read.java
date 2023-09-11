@@ -32,4 +32,5 @@ public interface Read
     AsyncChain<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store);
     Read slice(Ranges ranges);
     Read merge(Read other);
+    default boolean isEqualOrFuller(Read other) { return true; }
 }

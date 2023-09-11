@@ -26,6 +26,8 @@ import accord.api.Update;
 
 import java.util.Objects;
 
+//import java.util.Objects;
+
 public interface PartialTxn extends Txn
 {
     // TODO (expected): we no longer need this if everyone has a FullRoute
@@ -57,7 +59,7 @@ public interface PartialTxn extends Txn
         return covering().containsAll(participants);
     }
 
-    boolean covers(PartialTxn txn);
+    boolean isEqualOrFuller(PartialTxn txn);
 
     static PartialTxn merge(@Nullable PartialTxn a, @Nullable PartialTxn b)
     {
@@ -111,15 +113,14 @@ public interface PartialTxn extends Txn
         }
 
         @Override
-        public boolean covers(PartialTxn txn)
+        public boolean isEqualOrFuller(PartialTxn txn)
         {
-            // TODO (now): complete implementation
             return kind() == txn.kind()
                 && covering().containsAll(txn.covering())
                 && keys().containsAll(txn.keys())
-                && read().equals(txn.read()) // TODO
+                && read().isEqualOrFuller(txn.read())
                 && Objects.equals(query(), txn.query())
-                && Objects.equals(update(), txn.update()); // TODO
+                && ((update() == null && txn.update() == null) || (update() != null && txn.update() != null && update().isEqualOrFuller(txn.update())));
         }
 
         @Override

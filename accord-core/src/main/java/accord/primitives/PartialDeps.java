@@ -20,8 +20,6 @@ package accord.primitives;
 
 import accord.utils.Invariants;
 
-import java.util.Objects;
-
 public class PartialDeps extends Deps
 {
     public static final PartialDeps NONE = new PartialDeps(Ranges.EMPTY, KeyDeps.NONE, RangeDeps.NONE);
@@ -61,12 +59,11 @@ public class PartialDeps extends Deps
         return covering.containsAll(participants);
     }
 
-    public boolean covers(PartialDeps that)
+    public boolean isEqualOrFuller(PartialDeps that)
     {
-        // TODO (now): complete the implementation
         return covering.containsAll(that.covering)
-            && keyDeps.equals(that.keyDeps)
-            && Objects.equals(keyDeps, that.keyDeps);
+            && keyDeps.txnIds().containsAll(that.keyDeps.txnIds())
+            && rangeDeps.txnIds().containsAll(that.rangeDeps.txnIds());
     }
 
     public PartialDeps with(PartialDeps that)

@@ -212,7 +212,11 @@ public abstract class Command implements CommonAttributes
         }
     }
 
-    public abstract boolean covers(Command other);
+    /**
+     * @return true if this command is equivalent to {@code other}; it could also be fuller - have some of its
+     *      registers be not sliced, whereas {@code other} may have them sliced
+     */
+    public abstract boolean isEqualOrFuller(Command other);
 
     private abstract static class AbstractCommand extends Command
     {
@@ -258,18 +262,16 @@ public abstract class Command implements CommonAttributes
         }
 
         @Override
-        public boolean covers(Command command)
+        public boolean isEqualOrFuller(Command command)
         {
             if (this == command) return true;
             if (command == null || getClass() != command.getClass()) return false;
-            if (!(txnId().equals(command.txnId())
-                    && saveStatus() == command.saveStatus()
-                    && durability() == command.durability()
-                    && Objects.equals(promised(), command.promised())
-                    && Objects.equals(durableListeners(), command.durableListeners())))
-                return false;
-            return (route() == null && command.route() == null)
-                || (route() != null && command.route() != null && route().covers(command.route()));
+            return txnId().equals(command.txnId())
+                && saveStatus() == command.saveStatus()
+                && durability() == command.durability()
+                && Objects.equals(route(), command.route())
+                && Objects.equals(promised(), command.promised())
+                && durableListeners().containsAll(command.durableListeners());
         }
 
         @Override
@@ -644,15 +646,16 @@ public abstract class Command implements CommonAttributes
                 && Objects.equals(result, that.result);
         }
 
-        public boolean covers(Command c)
+        @Override
+        public boolean isEqualOrFuller(Command c)
         {
             if (this == c) return true;
             if (c == null || getClass() != c.getClass()) return false;
-            if (!super.covers(c)) return false;
+            if (!super.isEqualOrFuller(c)) return false;
             Truncated that = (Truncated) c;
-            return Objects.equals(executeAt, that.executeAt)
-                    && Objects.equals(writes, that.writes)
-                    && Objects.equals(result, that.result);
+            return Objects.equals(executeAt(), that.executeAt())
+                && Objects.equals(writes(), that.writes())
+                && Objects.equals(result(), that.result());
         }
 
         public static Truncated erased(Command command)
@@ -773,16 +776,16 @@ public abstract class Command implements CommonAttributes
         }
 
         @Override
-        public boolean covers(Command c)
+        public boolean isEqualOrFuller(Command c)
         {
             if (this == c) return true;
             if (c == null || getClass() != c.getClass()) return false;
-            if (!super.covers(c)) return false;
+            if (!super.isEqualOrFuller(c)) return false;
             PreAccepted that = (PreAccepted) c;
-            if (!executeAt.equals(that.executeAt) || !partialTxn.covers(that.partialTxn))
+            if (!executeAt().equals(that.executeAt()) || !partialTxn().isEqualOrFuller(that.partialTxn()))
                 return false;
-            return (partialDeps == null && that.partialDeps == null)
-                || (partialDeps != null && that.partialDeps != null && partialDeps.covers(that.partialDeps));
+            return (partialDeps() == null && that.partialDeps() == null)
+                || (partialDeps() != null && that.partialDeps() != null && partialDeps().isEqualOrFuller(that.partialDeps()));
         }
 
         public static PreAccepted preAccepted(CommonAttributes common, Timestamp executeAt, Ballot promised)
@@ -850,13 +853,13 @@ public abstract class Command implements CommonAttributes
         }
 
         @Override
-        public boolean covers(Command c)
+        public boolean isEqualOrFuller(Command c)
         {
             if (this == c) return true;
             if (c == null || getClass() != c.getClass()) return false;
-            if (!super.covers(c)) return false;
+            if (!super.isEqualOrFuller(c)) return false;
             Accepted that = (Accepted) c;
-            return Objects.equals(accepted, that.accepted);
+            return Objects.equals(accepted(), that.accepted());
         }
 
         static Accepted accepted(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted)
@@ -912,13 +915,14 @@ public abstract class Command implements CommonAttributes
         }
 
         @Override
-        public boolean covers(Command c)
+        public boolean isEqualOrFuller(Command c)
         {
             if (this == c) return true;
             if (c == null || getClass() != c.getClass()) return false;
-            if (!super.covers(c)) return false;
+            if (!super.isEqualOrFuller(c)) return false;
             Committed committed = (Committed) c;
-            return Objects.equals(waitingOn, committed.waitingOn);
+            return (waitingOn() == null && committed.waitingOn() == null)
+                || (waitingOn() != null && committed.waitingOn() != null && waitingOn().isEqualOrFuller(committed.waitingOn()));
         }
 
         private static Committed committed(Committed command, CommonAttributes common, Ballot promised, SaveStatus status, WaitingOn waitingOn)
@@ -1001,18 +1005,18 @@ public abstract class Command implements CommonAttributes
             if (!super.equals(o)) return false;
             Executed executed = (Executed) o;
             return Objects.equals(writes, executed.writes)
-                    && Objects.equals(result, executed.result);
+                && Objects.equals(result, executed.result);
         }
 
         @Override
-        public boolean covers(Command c)
+        public boolean isEqualOrFuller(Command c)
         {
             if (this == c) return true;
             if (c == null || getClass() != c.getClass()) return false;
-            if (!super.covers(c)) return false;
+            if (!super.isEqualOrFuller(c)) return false;
             Executed executed = (Executed) c;
-            return Objects.equals(writes, executed.writes)
-                && Objects.equals(result, executed.result);
+            return Objects.equals(writes(), executed.writes())
+                && Objects.equals(result(), executed.result());
         }
 
         public static Executed executed(Executed command, CommonAttributes common, SaveStatus status, Ballot promised, WaitingOn waitingOn)
@@ -1195,6 +1199,12 @@ public abstract class Command implements CommonAttributes
                 && this.waitingOnCommit.equals(other.waitingOnCommit)
                 && this.waitingOnApply.equals(other.waitingOnApply)
                 && this.appliedOrInvalidated.equals(other.appliedOrInvalidated);
+        }
+
+        public boolean isEqualOrFuller(WaitingOn other)
+        {
+            return computeWaitingOnCommit().containsAll(other.computeWaitingOnCommit())
+                && computeWaitingOnApply().containsAll(other.computeWaitingOnApply());
         }
 
         public static class Update

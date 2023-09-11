@@ -319,8 +319,7 @@ public class Propagate implements MapReduceConsume<SafeCommandStore, Void>, Epoc
                 if (!achieved.definition.isKnown())
                     return MessageType.PROPAGATE_OTHER_MSG;
             case PreAccepted:
-                if (Route.isFullRoute(route))
-                    return MessageType.PROPAGATE_PRE_ACCEPT_MSG;
+                return MessageType.PROPAGATE_PRE_ACCEPT_MSG;
             default:
                 return MessageType.PROPAGATE_OTHER_MSG;
         }
@@ -354,5 +353,19 @@ public class Propagate implements MapReduceConsume<SafeCommandStore, Void>, Epoc
                 return;
             case Insufficient: throw new IllegalStateException("Should have enough information");
         }
+    }
+
+    @Override
+    public String toString()
+    {
+        return "Propagate{type:" + type() +
+                ", txnId: " + txnId +
+                ", saveStatus: " + saveStatus +
+                ", deps: " + partialDeps +
+                ", txn: " + partialTxn +
+                ", executeAt: " + executeAt +
+                ", writes:" + writes +
+                ", result:" + result +
+                '}';
     }
 }
