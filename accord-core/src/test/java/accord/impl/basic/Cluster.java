@@ -242,7 +242,7 @@ public class Cluster implements Scheduler
             }
 
             // startup
-            AsyncResult<?> startup = AsyncChains.reduce(lookup.values().stream().map(Node::start).collect(toList()), (a, b) -> null).beginAsResult();
+            AsyncResult<?> startup = AsyncChains.reduce(lookup.values().stream().map(Node::unsafeStart).collect(toList()), (a, b) -> null).beginAsResult();
             while (sinks.processPending());
             Assertions.assertTrue(startup.isDone());
 

@@ -169,8 +169,13 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         configService.registerListener(this);
     }
 
-    // TODO (cleanup, testing): remove, only used by Maelstrom
-    public AsyncResult<Void> start()
+    /**
+     * This starts the node for tests and makes sure that the provided topology is acknowledged correctly.  This method is not
+     * safe for production systems as it doesn't handle restarts and partially acknowledged histories
+     * @return {@link EpochReady#metadata}
+     */
+    @VisibleForTesting
+    public AsyncResult<Void> unsafeStart()
     {
         EpochReady ready = onTopologyUpdateInternal(configService.currentTopology(), false);
         ready.coordination.addCallback(() -> this.topology.onEpochSyncComplete(id, topology.epoch()));
