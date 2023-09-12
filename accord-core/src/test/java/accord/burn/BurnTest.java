@@ -239,7 +239,11 @@ public class BurnTest
 
         // not used for atomicity, just for encapsulation
         AtomicReference<Runnable> onSubmitted = new AtomicReference<>();
-        Runnable maybeTriggerNextRequest = () -> {
+        Consumer<Packet> responseSink = packet -> {
+            ListResult reply = (ListResult) packet.message;
+            if (replies[(int)packet.replyId] != null)
+                return;
+
             if (requestIndex.get() < requests.length)
             {
                 int i = requestIndex.getAndIncrement();
@@ -248,21 +252,11 @@ public class BurnTest
                 if (i == requests.length - 1)
                     onSubmitted.get().run();
             }
-        };
-        Consumer<Packet> responseSink = packet -> {
-            ListResult reply = (ListResult) packet.message;
-            if (!reply.isSuccess() && reply.fault() == ListResult.Fault.HeartBeat)
-            {
-                // when a request failed, this is sent as the result will only be learned once onDone is triggered;
-                // without this logic the sink may stop being called, so the backlog won't be enqueued
-                maybeTriggerNextRequest.run();
-                return;
-            }
-            if (replies[(int)packet.replyId] != null)
-                return;
+
             try
             {
-                maybeTriggerNextRequest.run();
+                if (!reply.isSuccess() && reply.fault() == ListResult.Fault.HeartBeat)
+                    return; // interrupted; will fetch our actual reply once rest of simulation is finished (but wanted to send another request to keep correct number in flight)
 
                 int start = starts[(int)packet.replyId];
                 int end = clock.incrementAndGet();
