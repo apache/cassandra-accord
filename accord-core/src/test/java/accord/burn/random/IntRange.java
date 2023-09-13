@@ -18,9 +18,10 @@
 
 package accord.burn.random;
 
+import accord.utils.Gen;
 import accord.utils.RandomSource;
 
-public class IntRange implements RandomInt
+public class IntRange implements Gen.LongGen
 {
     public final int min, max;
     private final int maxDelta;
@@ -34,7 +35,7 @@ public class IntRange implements RandomInt
     }
 
     @Override
-    public int getInt(RandomSource randomSource)
+    public long nextLong(RandomSource randomSource)
     {
         return min + randomSource.nextInt(maxDelta);
     }

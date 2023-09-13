@@ -170,7 +170,7 @@ public class Gens {
             return RandomSource::nextBoolean;
         }
 
-        public Gen<Boolean> runs(double ratio)
+        public Gen<Boolean> biasedRepeatingRuns(double ratio)
         {
             Invariants.checkArgument(ratio > 0 && ratio <= 1, "Expected %d to be larger than 0 and <= 1", ratio);
             int steps = (int) (1 / ratio);

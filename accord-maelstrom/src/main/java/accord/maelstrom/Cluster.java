@@ -321,7 +321,7 @@ public class Cluster implements Scheduler
                                           SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new));
             }
 
-            AsyncResult<?> startup = AsyncChains.reduce(lookup.values().stream().map(Node::start).collect(toList()), (a, b) -> null).beginAsResult();
+            AsyncResult<?> startup = AsyncChains.reduce(lookup.values().stream().map(Node::unsafeStart).collect(toList()), (a, b) -> null).beginAsResult();
             while (sinks.processPending());
             if (!startup.isDone()) throw new AssertionError();
 

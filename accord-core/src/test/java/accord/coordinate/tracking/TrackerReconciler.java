@@ -101,7 +101,7 @@ public abstract class TrackerReconciler<ST extends ShardTracker, T extends Abstr
     {
         System.out.println("seed: " + seed);
         RandomSource random = new DefaultRandom(seed);
-        SimulatedDelayedExecutorService executor = new SimulatedDelayedExecutorService(new RandomDelayQueue.Factory(random).get(), new TestAgent(), random);
+        SimulatedDelayedExecutorService executor = new SimulatedDelayedExecutorService(new RandomDelayQueue.Factory(random).get(), new TestAgent());
         return topologies(random, executor).map(topologies -> constructor.apply(random, topologies))
                 .collect(Collectors.toList());
     }

@@ -79,7 +79,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     }
 
     @Override
-    public synchronized AcceptReply apply(SafeCommandStore safeStore)
+    public AcceptReply apply(SafeCommandStore safeStore)
     {
         // TODO (now): we previously checked isAffectedByBootstrap(txnId) here and took this branch also, try to remember why
         if (minUnsyncedEpoch < txnId.epoch())

@@ -40,7 +40,10 @@ import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
+import accord.burn.random.FrequentLargeRange;
+import accord.impl.MessageListener;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,7 +56,6 @@ import accord.impl.basic.RandomDelayQueue;
 import accord.impl.basic.RandomDelayQueue.Factory;
 import accord.impl.TopologyFactory;
 import accord.impl.basic.Packet;
-import accord.impl.basic.PendingQueue;
 import accord.impl.basic.SimulatedDelayedExecutorService;
 import accord.impl.list.ListAgent;
 import accord.impl.list.ListQuery;
@@ -80,7 +82,7 @@ public class BurnTest
 {
     private static final Logger logger = LoggerFactory.getLogger(BurnTest.class);
 
-    static List<Packet> generate(RandomSource random, Function<? super CommandStore, AsyncExecutor> executor, List<Id> clients, List<Id> nodes, int keyCount, int operations)
+    static List<Packet> generate(RandomSource random, MessageListener listener, Function<? super CommandStore, AsyncExecutor> executor, List<Id> clients, List<Id> nodes, int keyCount, int operations)
     {
         List<Key> keys = new ArrayList<>();
         for (int i = 0 ; i < keyCount ; ++i)
@@ -108,7 +110,7 @@ public class BurnTest
                 Ranges ranges = Ranges.of(requestRanges.toArray(new Range[0]));
                 ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, ranges, ranges);
                 ListQuery query = new ListQuery(client, count);
-                ListRequest request = new ListRequest(new Txn.InMemory(ranges, read, query, null));
+                ListRequest request = new ListRequest(new Txn.InMemory(ranges, read, query, null), listener);
                 packets.add(new Packet(client, node, count, request));
 
 
@@ -135,7 +137,7 @@ public class BurnTest
                     requestKeys.addAll(update.keySet());
                 ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, readKeys, new Keys(requestKeys));
                 ListQuery query = new ListQuery(client, count);
-                ListRequest request = new ListRequest(new Txn.InMemory(new Keys(requestKeys), read, query, update));
+                ListRequest request = new ListRequest(new Txn.InMemory(new Keys(requestKeys), read, query, update), listener);
                 packets.add(new Packet(client, node, count, request));
             }
         }
@@ -192,7 +194,7 @@ public class BurnTest
     {
         List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
         RandomDelayQueue delayQueue = new Factory(random).get();
-        PendingQueue queue = new PropagatingPendingQueue(failures, delayQueue);
+        PropagatingPendingQueue queue = new PropagatingPendingQueue(failures, delayQueue);
         RandomSource retryRandom = random.fork();
         ListAgent agent = new ListAgent(1000L, failures::add, retry -> {
             long delay = retryRandom.nextInt(1, 15);
@@ -200,16 +202,23 @@ public class BurnTest
         });
 
         Supplier<LongSupplier> nowSupplier = () -> {
-            RandomSource jitter = random.fork();
-            // TODO (expected): jitter should be random walk with intermittent long periods
-            return () -> Math.max(0, delayQueue.nowInMillis() + (jitter.nextInt(10) - 5));
+            RandomSource forked = random.fork();
+            return FrequentLargeRange.builder(forked)
+                                                   .ratio(1, 5)
+                                                   .small(50, 5000, TimeUnit.MICROSECONDS)
+                                                   .large(1, 10, TimeUnit.MILLISECONDS)
+                                                   .build()
+                    .mapAsLong(j -> Math.max(0, queue.nowInMillis() + j))
+                    .asLongSupplier(forked);
         };
 
         StrictSerializabilityVerifier strictSerializable = new StrictSerializabilityVerifier(keyCount);
-        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, agent, random.fork());
+        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, agent);
         Function<CommandStore, AsyncExecutor> executor = ignore -> globalExecutor;
 
-        Packet[] requests = toArray(generate(random, executor, clients, nodes, keyCount, operations), Packet[]::new);
+        MessageListener listener = MessageListener.get();
+
+        Packet[] requests = toArray(generate(random, listener, executor, clients, nodes, keyCount, operations), Packet[]::new);
         int[] starts = new int[requests.length];
         Packet[] replies = new Packet[requests.length];
 
@@ -239,14 +248,14 @@ public class BurnTest
             {
                 int i = requestIndex.getAndIncrement();
                 starts[i] = clock.incrementAndGet();
-                queue.add(requests[i]);
+                queue.addNoDelay(requests[i]);
                 if (i == requests.length - 1)
                     onSubmitted.get().run();
             }
 
             try
             {
-                if (reply.responseKeys == null && reply.read != null && reply.read.length == 0)
+                if (!reply.isSuccess() && reply.fault() == ListResult.Fault.HeartBeat)
                     return; // interrupted; will fetch our actual reply once rest of simulation is finished (but wanted to send another request to keep correct number in flight)
 
                 int start = starts[(int)packet.replyId];
@@ -254,13 +263,19 @@ public class BurnTest
                 logger.debug("{} at [{}, {}]", reply, start, end);
                 replies[(int)packet.replyId] = packet;
 
-                if (reply.responseKeys == null)
+                if (!reply.isSuccess())
                 {
-                    if (reply.read == null) nacks.incrementAndGet();
-                    else if (reply.read.length == 1) lost.incrementAndGet();
-                    else if (reply.read.length == 2) truncated.incrementAndGet();
-                    else if (reply.read.length == 3) failedToCheck.incrementAndGet();
-                    else throw new AssertionError();
+
+                    switch (reply.fault())
+                    {
+                        case Lost:          lost.incrementAndGet();             break;
+                        case Invalidated:   nacks.incrementAndGet();            break;
+                        case Failure:       failedToCheck.incrementAndGet();    break;
+                        case Truncated:     truncated.incrementAndGet();        break;
+                        // txn was applied?, but client saw a timeout, so response isn't known
+                        case Other:                                             break;
+                        default:            throw new AssertionError("Unexpected fault: " + reply.fault());
+                    }
                     return;
                 }
 
@@ -292,7 +307,7 @@ public class BurnTest
         EnumMap<MessageType, Cluster.Stats> messageStatsMap;
         try
         {
-            messageStatsMap = Cluster.run(toArray(nodes, Id[]::new), () -> queue,
+            messageStatsMap = Cluster.run(toArray(nodes, Id[]::new), listener, () -> queue, queue::checkFailures,
                                           responseSink, globalExecutor,
                                           random::fork, nowSupplier,
                                           topologyFactory, initialRequests::poll,
@@ -313,12 +328,18 @@ public class BurnTest
         logger.info("Message counts: {}", messageStatsMap.entrySet());
         if (clock.get() != operations * 2)
         {
+            StringBuilder sb = new StringBuilder();
             for (int i = 0 ; i < requests.length ; ++i)
             {
-                logger.info("{}", requests[i]);
-                logger.info("\t\t" + replies[i]);
+                // since this only happens when operations are lost, only log the ones without a reply to lower the amount of noise
+                if (replies[i] == null)
+                {
+                    sb.setLength(0);
+                    sb.append(requests[i]).append("\n\t\t").append(replies[i]);
+                    logger.info(sb.toString());
+                }
             }
-            throw new AssertionError("Incomplete set of responses");
+            throw new AssertionError("Incomplete set of responses; clock=" + clock.get() + ", expected operations=" + (operations * 2));
         }
     }
 
@@ -355,6 +376,7 @@ public class BurnTest
     }
 
     @Test
+    @Timeout(value = 3, unit = TimeUnit.MINUTES)
     public void testOne()
     {
         run(ThreadLocalRandom.current().nextLong(), 1000);

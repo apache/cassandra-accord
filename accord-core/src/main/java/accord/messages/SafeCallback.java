@@ -55,6 +55,11 @@ public class SafeCallback<T extends Reply>
         failure(to, new Timeout(null, null));
     }
 
+    public void onCallbackFailure(Node.Id to, Throwable t)
+    {
+        safeCall(to, t, Callback::onCallbackFailure);
+    }
+
     private interface SafeCall<T, P>
     {
         void accept(Callback<T> callback, Node.Id id, P param) throws Throwable;

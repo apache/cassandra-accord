@@ -23,12 +23,15 @@ import accord.impl.CommandsForKey;
 import accord.primitives.Keys;
 import accord.primitives.Seekables;
 import accord.primitives.TxnId;
+import com.google.common.collect.Iterators;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 import com.google.common.collect.Sets;
 
+import java.util.AbstractCollection;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.Set;
 import java.util.function.Consumer;
 import javax.annotation.Nullable;
@@ -51,6 +54,28 @@ public interface PreLoadContext
      *  Either way, the information we need in memory is super minimal for secondary transactions.
      */
     default Collection<TxnId> additionalTxnIds() { return Collections.emptyList(); }
+
+    default Collection<TxnId> txnIds()
+    {
+        TxnId primaryTxnId = primaryTxnId();
+        Collection<TxnId> additional = additionalTxnIds();
+        if (primaryTxnId == null) return additional;
+        if (additional.isEmpty()) return Collections.singleton(primaryTxnId);
+        return new AbstractCollection<TxnId>()
+        {
+            @Override
+            public Iterator<TxnId> iterator()
+            {
+                return Iterators.concat(Iterators.singletonIterator(primaryTxnId), additional.iterator());
+            }
+
+            @Override
+            public int size()
+            {
+                return 1 + additional.size();
+            }
+        };
+    }
 
     @Inline
     default void forEachId(Consumer<TxnId> consumer)

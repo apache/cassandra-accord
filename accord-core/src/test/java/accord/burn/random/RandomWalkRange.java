@@ -18,15 +18,16 @@
 
 package accord.burn.random;
 
+import accord.utils.Gen.LongGen;
 import accord.utils.RandomSource;
 
-public class RandomWalkRange implements RandomLong
+public class RandomWalkRange implements LongGen
 {
-    public final int min, max;
-    private final int maxStepSize;
+    public final long min, max;
+    private final long maxStepSize;
     long cur;
 
-    public RandomWalkRange(RandomSource random, int min, int max)
+    public RandomWalkRange(RandomSource random, long min, long max)
     {
         this.min = min;
         this.max = max;
@@ -35,7 +36,7 @@ public class RandomWalkRange implements RandomLong
     }
 
     @Override
-    public long getLong(RandomSource randomSource)
+    public long nextLong(RandomSource randomSource)
     {
         long step = randomSource.nextLong(-maxStepSize, maxStepSize + 1);
         long cur = this.cur;
@@ -44,7 +45,7 @@ public class RandomWalkRange implements RandomLong
         return cur;
     }
 
-    private static int maxStepSize(RandomSource random, int min, int max)
+    private static long maxStepSize(RandomSource random, long min, long max)
     {
         switch (random.nextInt(3))
         {

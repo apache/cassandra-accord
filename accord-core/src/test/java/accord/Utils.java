@@ -152,7 +152,7 @@ public class Utils
                              SizeOfIntersectionSorter.SUPPLIER,
                              SimpleProgressLog::new,
                              InMemoryCommandStores.Synchronized::new);
-        awaitUninterruptibly(node.start());
+        awaitUninterruptibly(node.unsafeStart());
         return node;
     }
 }
