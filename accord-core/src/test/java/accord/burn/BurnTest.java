@@ -42,7 +42,9 @@ import java.util.function.Supplier;
 
 import accord.burn.random.FrequentLargeRange;
 import accord.impl.MessageListener;
+import accord.verify.CompositeVerifier;
 import accord.verify.ElleVerifier;
+import accord.verify.StrictSerializabilityVerifier;
 import accord.verify.Verifier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -346,8 +348,8 @@ public class BurnTest
 
     private static Verifier createVerifier(int keyCount)
     {
-//        return new StrictSerializabilityVerifier(keyCount);
-        return new ElleVerifier();
+        return CompositeVerifier.create(new StrictSerializabilityVerifier(keyCount),
+                                        new ElleVerifier());
     }
 
     public static void main(String[] args)
