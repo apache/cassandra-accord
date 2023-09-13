@@ -238,11 +238,11 @@ public class Cluster implements Scheduler
                                      randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
                                      SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending), localConfig);
                 lookup.put(id, node);
-                CoordinateDurabilityScheduling durability = new CoordinateDurabilityScheduling(node);
-                // TODO (desired): randomise
-                durability.setFrequency(60, SECONDS);
-                durability.setGlobalCycleTime(180, SECONDS);
-                durabilityScheduling.add(durability);
+//                CoordinateDurabilityScheduling durability = new CoordinateDurabilityScheduling(node);
+//                // TODO (desired): randomise
+//                durability.setFrequency(60, SECONDS);
+//                durability.setGlobalCycleTime(180, SECONDS);
+//                durabilityScheduling.add(durability);
             }
 
             // startup
@@ -258,11 +258,11 @@ public class Cluster implements Scheduler
                 sinks.partitionSet = new LinkedHashSet<>(nodesList.subList(0, partitionSize));
             }, 5L, SECONDS);
 
-            Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1, SECONDS);
+//            Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1, SECONDS);
             durabilityScheduling.forEach(CoordinateDurabilityScheduling::start);
 
             noMoreWorkSignal.accept(() -> {
-                reconfigure.cancel();
+//                reconfigure.cancel();
                 durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
             });
 
@@ -273,7 +273,7 @@ public class Cluster implements Scheduler
             while (sinks.processPending());
 
             chaos.cancel();
-            reconfigure.cancel();
+//            reconfigure.cancel();
             durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
             sinks.partitionSet = Collections.emptySet();
 

@@ -32,6 +32,9 @@ import java.util.stream.IntStream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+
 import static java.util.stream.Collectors.joining;
 
 /**
@@ -52,7 +55,7 @@ import static java.util.stream.Collectors.joining;
  * <p>
  * TODO (low priority): find and report a path when we encounter a violation
  */
-public class StrictSerializabilityVerifier
+public class StrictSerializabilityVerifier implements Verifier
 {
     private static final Logger logger = LoggerFactory.getLogger(StrictSerializabilityVerifier.class);
 
@@ -773,6 +776,32 @@ public class StrictSerializabilityVerifier
         Arrays.fill(bufNewPeerSteps, -1);
         Arrays.fill(bufReads, null);
         Arrays.fill(bufUnknownSteps, null);
+    }
+
+    @Override
+    public Checker witness(int start, int end)
+    {
+        begin();
+        return new Checker()
+        {
+            @Override
+            public void read(int index, int[] seq)
+            {
+                witnessRead(index, seq);
+            }
+
+            @Override
+            public void write(int index, int value)
+            {
+                witnessWrite(index, value);
+            }
+
+            @Override
+            public void close()
+            {
+                apply(start, end);
+            }
+        };
     }
 
     /**
