@@ -18,15 +18,13 @@
 
 package accord.primitives;
 
-import javax.annotation.Nullable;
+import java.util.Objects;
 
 import accord.api.Query;
 import accord.api.Read;
 import accord.api.Update;
 
-import java.util.Objects;
-
-//import java.util.Objects;
+import javax.annotation.Nullable;
 
 public interface PartialTxn extends Txn
 {
