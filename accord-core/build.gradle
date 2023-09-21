@@ -41,7 +41,10 @@ dependencies {
     // for some reason this isn't pulled in properly?  Have to be explicit
     testImplementation('spootnik:unilog:0.7.31') {
         exclude group: 'ch.qos.logback'
-        exclude group: 'org.slf4j'
+
+        exclude group: 'org.slf4j', module: 'slf4j-api'
+        exclude group: 'org.slf4j', module: 'log4j-over-slf4j'
+        exclude group: 'org.slf4j', module: 'jcl-over-slf4j'
     }
 }
 
