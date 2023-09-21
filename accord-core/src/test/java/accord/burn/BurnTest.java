@@ -46,6 +46,7 @@ import accord.verify.CompositeVerifier;
 import accord.verify.ElleVerifier;
 import accord.verify.StrictSerializabilityVerifier;
 import accord.verify.Verifier;
+import com.google.common.base.StandardSystemProperty;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.slf4j.Logger;
@@ -349,6 +350,10 @@ public class BurnTest
 
     private static Verifier createVerifier(int keyCount)
     {
+        int jdkVersion = Integer.parseInt(StandardSystemProperty.JAVA_VERSION.value().split("\\.")[0]);
+        if (jdkVersion == 1) // 1.8
+            // Elle only works on JDK 11
+            return new StrictSerializabilityVerifier(keyCount);
         return CompositeVerifier.create(new StrictSerializabilityVerifier(keyCount),
                                         new ElleVerifier());
     }
