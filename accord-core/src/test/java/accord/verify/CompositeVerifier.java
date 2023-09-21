@@ -76,6 +76,6 @@ public class CompositeVerifier implements Verifier
     @Override
     public void close()
     {
-        Verifier.super.close();
+        delegates.forEach(Verifier::close);
     }
 }
