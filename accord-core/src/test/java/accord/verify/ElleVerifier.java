@@ -20,6 +20,7 @@ package accord.verify;
 
 import clojure.java.api.Clojure;
 import clojure.lang.ArraySeq;
+import clojure.lang.IFn;
 import clojure.lang.PersistentArrayMap;
 import clojure.lang.RT;
 
@@ -66,25 +67,25 @@ public class ElleVerifier implements Verifier
     {
         if (events.isEmpty())
             throw new IllegalArgumentException("No events seen");
-        var require = Clojure.var("clojure.core", "require");
+        IFn require = Clojure.var("clojure.core", "require");
         require.invoke(Clojure.read("elle.list-append"));
         require.invoke(Clojure.read("jepsen.history"));
 
-        var check = Clojure.var("elle.list-append", "check");
-        var history = Clojure.var("jepsen.history", "history");
+        IFn check = Clojure.var("elle.list-append", "check");
+        IFn history = Clojure.var("jepsen.history", "history");
 
         String clj = Event.toClojure(events); // TODO (now): can we avoid string and make this cheaper?
-        var result = (PersistentArrayMap) check.invoke(Clojure.read("{:consistency-models [:strict-serializable]}"), history.invoke(Clojure.read(clj)));
+        PersistentArrayMap result = (PersistentArrayMap) check.invoke(Clojure.read("{:consistency-models [:strict-serializable]}"), history.invoke(Clojure.read(clj)));
         Object isValid = result.get(RT.keyword(null, "valid?"));
         if (isValid == Boolean.TRUE)
             return;
         if (isValid == RT.keyword(null, "unknown"))
         {
             // Elle couldn't figure out if the history is bad or not... why?
-            var anomalyTypes = result.get(RT.keyword(null, "anomaly-types"));
+            Object anomalyTypes = result.get(RT.keyword(null, "anomaly-types"));
             if (anomalyTypes != null)
             {
-                var seq = (ArraySeq) anomalyTypes;
+                ArraySeq seq = (ArraySeq) anomalyTypes;
                 if (!seq.isEmpty())
                 {
                     boolean empty = false;

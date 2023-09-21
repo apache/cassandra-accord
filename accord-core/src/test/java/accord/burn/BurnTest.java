@@ -308,7 +308,7 @@ public class BurnTest
         };
 
         EnumMap<MessageType, Cluster.Stats> messageStatsMap;
-        try (verifier)
+        try
         {
             messageStatsMap = Cluster.run(toArray(nodes, Id[]::new), listener, () -> queue, queue::checkFailures,
                                           responseSink, globalExecutor,
@@ -316,6 +316,7 @@ public class BurnTest
                                           topologyFactory, initialRequests::poll,
                                           onSubmitted::set
             );
+            verifier.close();
         }
         catch (Throwable t)
         {
@@ -388,10 +389,7 @@ public class BurnTest
     @Timeout(value = 3, unit = TimeUnit.MINUTES)
     public void testOne()
     {
-//        run(8435044198968628572L, 10);
-        while (true)
-            run(ThreadLocalRandom.current().nextLong(), 1000);
-//        run(ThreadLocalRandom.current().nextLong(), 1000);
+        run(ThreadLocalRandom.current().nextLong(), 1000);
     }
 
     private static void run(long seed, int operations)

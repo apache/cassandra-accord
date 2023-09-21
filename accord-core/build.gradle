@@ -39,7 +39,10 @@ dependencies {
     testImplementation 'org.clojure:clojure:1.11.1'
     testImplementation 'elle:elle:0.1.7'
     // for some reason this isn't pulled in properly?  Have to be explicit
-    testImplementation 'spootnik:unilog:0.7.31'
+    testImplementation('spootnik:unilog:0.7.31') {
+        exclude group: 'ch.qos.logback'
+        exclude group: 'org.slf4j'
+    }
 }
 
 task burn(type: JavaExec) {
