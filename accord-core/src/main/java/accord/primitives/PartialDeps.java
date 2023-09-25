@@ -59,6 +59,13 @@ public class PartialDeps extends Deps
         return covering.containsAll(participants);
     }
 
+    public boolean isEqualOrFuller(PartialDeps that)
+    {
+        return covering.containsAll(that.covering)
+            && keyDeps.txnIds().containsAll(that.keyDeps.txnIds())
+            && rangeDeps.txnIds().containsAll(that.rangeDeps.txnIds());
+    }
+
     public PartialDeps with(PartialDeps that)
     {
         Invariants.checkArgument((this.rangeDeps == null) == (that.rangeDeps == null));
@@ -100,7 +107,7 @@ public class PartialDeps extends Deps
 
     public boolean equals(PartialDeps that)
     {
-        return this.covering.equals(that.covering) && super.equals(that);
+        return that != null && this.covering.equals(that.covering) && super.equals(that);
     }
 
     @Override

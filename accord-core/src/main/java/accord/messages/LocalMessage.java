@@ -15,22 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package accord.messages;
 
-package accord.api;
+import accord.local.Node;
+import accord.local.PreLoadContext;
 
-import accord.local.SafeCommandStore;
-import accord.primitives.*;
-import accord.utils.async.AsyncChain;
-
-
-/**
- * A read to be performed on potentially multiple shards, the inputs of which may be fed to a {@link Query}
- */
-public interface Read
+public interface LocalMessage extends Message, PreLoadContext
 {
-    Seekables<?, ?> keys();
-    AsyncChain<Data> read(Seekable key, Txn.Kind kind, SafeCommandStore commandStore, Timestamp executeAt, DataStore store);
-    Read slice(Ranges ranges);
-    Read merge(Read other);
-    default boolean isEqualOrFuller(Read other) { return true; }
+    interface Handler
+    {
+        void handle(LocalMessage message, Node node);
+    }
+
+    void process(Node node);
 }

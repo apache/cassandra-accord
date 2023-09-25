@@ -15,10 +15,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package accord.messages;
 
-import accord.api.ProgressLog.ProgressShard;
 import accord.local.Commands;
 import accord.local.Node.Id;
 import accord.local.PreLoadContext;
@@ -33,9 +31,6 @@ import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 
-import static accord.api.ProgressLog.ProgressShard.Adhoc;
-import static accord.api.ProgressLog.ProgressShard.Home;
-import static accord.api.ProgressLog.ProgressShard.Local;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.messages.SimpleReply.Ok;
 
@@ -51,7 +46,6 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
 
     public final Timestamp executeAt;
     public final Durability durability;
-    private transient ProgressShard shard;
 
     public InformDurable(Id to, Topologies topologies, FullRoute<?> route, TxnId txnId, Timestamp executeAt, Durability durability)
     {
@@ -79,11 +73,6 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
             for (long epoch = waitForEpoch; progressKey == null && epoch > txnId.epoch() ; --epoch)
                 progressKey = node.trySelectProgressKey(epoch, scope, scope.homeKey());
             Invariants.checkState(progressKey != null);
-            shard = Adhoc;
-        }
-        else
-        {
-            shard = scope.homeKey().equals(progressKey) ? Home : Local;
         }
 
         // TODO (expected, efficiency): do not load from disk to perform this update

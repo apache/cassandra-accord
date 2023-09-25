@@ -54,6 +54,7 @@ import accord.coordinate.MaybeRecover;
 import accord.coordinate.Outcome;
 import accord.coordinate.RecoverWithRoute;
 import accord.messages.Callback;
+import accord.messages.LocalMessage;
 import accord.messages.Reply;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
@@ -134,6 +135,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     private final Id id;
     private final MessageSink messageSink;
+    private final LocalMessage.Handler localMessageHandler;
     private final ConfigurationService configService;
     private final TopologyManager topology;
     private final CommandStores commandStores;
@@ -150,12 +152,14 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     // TODO (expected, liveness): monitor the contents of this collection for stalled coordination, and excise them
     private final Map<TxnId, AsyncResult<? extends Outcome>> coordinating = new ConcurrentHashMap<>();
 
-    public Node(Id id, MessageSink messageSink, ConfigurationService configService, LongSupplier nowSupplier, ToLongFunction<TimeUnit> nowTimeUnit,
+    public Node(Id id, MessageSink messageSink, LocalMessage.Handler localMessageHandler,
+                ConfigurationService configService, LongSupplier nowSupplier, ToLongFunction<TimeUnit> nowTimeUnit,
                 Supplier<DataStore> dataSupplier, ShardDistributor shardDistributor, Agent agent, RandomSource random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
                 Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory)
     {
         this.id = id;
         this.messageSink = messageSink;
+        this.localMessageHandler = localMessageHandler;
         this.configService = configService;
         this.topology = new TopologyManager(topologySorter, id);
         this.nowSupplier = nowSupplier;
@@ -481,6 +485,11 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     public void send(Id to, Request send)
     {
         messageSink.send(to, send);
+    }
+
+    public void localMessage(LocalMessage message)
+    {
+        localMessageHandler.handle(message, this);
     }
 
     public void reply(Id replyingToNode, ReplyContext replyContext, Reply send, Throwable failure)

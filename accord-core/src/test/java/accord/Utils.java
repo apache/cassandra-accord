@@ -38,6 +38,7 @@ import accord.impl.mock.MockStore;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
+import accord.messages.LocalMessage;
 import accord.primitives.Keys;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
@@ -141,6 +142,7 @@ public class Utils
         Scheduler scheduler = new ThreadPoolScheduler();
         Node node = new Node(nodeId,
                              messageSink,
+                             LocalMessage::process,
                              new MockConfigurationService(messageSink, EpochFunction.noop(), topology),
                              clock,
                              NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, clock),

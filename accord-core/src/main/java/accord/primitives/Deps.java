@@ -268,7 +268,7 @@ public class Deps
 
     public boolean equals(Deps that)
     {
-        return this.keyDeps.equals(that.keyDeps) && this.rangeDeps.equals(that.rangeDeps);
+        return that != null && this.keyDeps.equals(that.keyDeps) && this.rangeDeps.equals(that.rangeDeps);
     }
 
     public @Nullable TxnId maxTxnId()

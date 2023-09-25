@@ -18,11 +18,13 @@
 
 package accord.primitives;
 
-import javax.annotation.Nullable;
+import java.util.Objects;
 
 import accord.api.Query;
 import accord.api.Read;
 import accord.api.Update;
+
+import javax.annotation.Nullable;
 
 public interface PartialTxn extends Txn
 {
@@ -54,6 +56,8 @@ public interface PartialTxn extends Txn
         }
         return covering().containsAll(participants);
     }
+
+    boolean isEqualOrFuller(PartialTxn txn);
 
     static PartialTxn merge(@Nullable PartialTxn a, @Nullable PartialTxn b)
     {
@@ -107,6 +111,17 @@ public interface PartialTxn extends Txn
         }
 
         @Override
+        public boolean isEqualOrFuller(PartialTxn txn)
+        {
+            return kind() == txn.kind()
+                && covering().containsAll(txn.covering())
+                && keys().containsAll(txn.keys())
+                && read().isEqualOrFuller(txn.read())
+                && Objects.equals(query(), txn.query())
+                && ((update() == null && txn.update() == null) || (update() != null && txn.update() != null && update().isEqualOrFuller(txn.update())));
+        }
+
+        @Override
         public Txn reconstitute(FullRoute<?> route)
         {
             if (!covers(route) || query() == null)
@@ -127,5 +142,4 @@ public interface PartialTxn extends Txn
             return new PartialTxn.InMemory(covering, kind(), keys(), read(), query(), update());
         }
     }
-
 }

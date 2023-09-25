@@ -15,10 +15,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package accord.messages;
 
 import java.util.Set;
+
 import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
@@ -59,12 +59,13 @@ public class Commit extends TxnRequest<ReadNack>
 
     public static class SerializerSupport
     {
-        public static Commit create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadTxnData read)
+        public static Commit create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Kind kind, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadTxnData read)
         {
-            return new Commit(txnId, scope, waitForEpoch, executeAt, partialTxn, partialDeps, fullRoute, read);
+            return new Commit(kind, txnId, scope, waitForEpoch, executeAt, partialTxn, partialDeps, fullRoute, read);
         }
     }
 
+    public final Kind kind;
     public final Timestamp executeAt;
     public final @Nullable PartialTxn partialTxn;
     public final PartialDeps partialDeps;
@@ -99,6 +100,7 @@ public class Commit extends TxnRequest<ReadNack>
                 partialTxn = txn.slice(extraRanges, coordinateRanges.contains(route.homeKey()));
         }
 
+        this.kind = kind;
         this.executeAt = executeAt;
         this.partialTxn = partialTxn;
         this.partialDeps = deps.slice(scope.covering());
@@ -106,9 +108,10 @@ public class Commit extends TxnRequest<ReadNack>
         this.read = read ? new ReadTxnData(to, topologies, txnId, readScope, executeAt) : null;
     }
 
-    Commit(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadTxnData read)
+    Commit(Kind kind, TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadTxnData read)
     {
         super(txnId, scope, waitForEpoch);
+        this.kind = kind;
         this.executeAt = executeAt;
         this.partialTxn = partialTxn;
         this.partialDeps = partialDeps;
@@ -168,7 +171,7 @@ public class Commit extends TxnRequest<ReadNack>
         Route<?> route = this.route != null ? this.route : scope;
         SafeCommand safeCommand = safeStore.get(txnId, executeAt, route);
 
-        switch (Commands.commit(safeStore, safeCommand, txnId, route != null ? route : scope, progressKey, partialTxn, executeAt, partialDeps))
+        switch (Commands.commit(safeStore, safeCommand, txnId, route, progressKey, partialTxn, executeAt, partialDeps))
         {
             default:
             case Success:
@@ -207,13 +210,19 @@ public class Commit extends TxnRequest<ReadNack>
     @Override
     public MessageType type()
     {
-        return MessageType.COMMIT_REQ;
+        switch (kind)
+        {
+            case Minimal: return MessageType.COMMIT_MINIMAL_REQ;
+            case Maximal: return MessageType.COMMIT_MAXIMAL_REQ;
+            default: throw new IllegalStateException();
+        }
     }
 
     @Override
     public String toString()
     {
-        return "Commit{txnId: " + txnId +
+        return "Commit{kind:" + kind +
+               ", txnId: " + txnId +
                ", executeAt: " + executeAt +
                ", deps: " + partialDeps +
                ", read: " + read +

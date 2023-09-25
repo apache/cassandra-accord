@@ -46,6 +46,7 @@ import accord.local.Node.Id;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
 import accord.messages.Callback;
+import accord.messages.LocalMessage;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.messages.SafeCallback;
@@ -120,6 +121,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         MockConfigurationService configurationService = new MockConfigurationService(messageSink, onFetchTopology, topology);
         Node node = new Node(id,
                              messageSink,
+                             LocalMessage::process,
                              configurationService,
                              nowSupplier,
                              NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, nowSupplier),
