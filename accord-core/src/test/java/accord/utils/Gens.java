@@ -170,10 +170,18 @@ public class Gens {
             return RandomSource::nextBoolean;
         }
 
+        /**
+         * @deprecated Use {@link #biasedRepeatingRuns(double, int)} to better control the max number of runs allowed, small ratios have an issue where they have large runs
+         */
+        @Deprecated
         public Gen<Boolean> biasedRepeatingRuns(double ratio)
         {
+            return biasedRepeatingRuns(ratio, (int) (1 / ratio));
+        }
+
+        public Gen<Boolean> biasedRepeatingRuns(double ratio, int maxRuns)
+        {
             Invariants.checkArgument(ratio > 0 && ratio <= 1, "Expected %d to be larger than 0 and <= 1", ratio);
-            int steps = (int) (1 / ratio);
             double lower = ratio * .8;
             double upper = ratio * 1.2;
             return new Gen<Boolean>() {
@@ -204,7 +212,7 @@ public class Gens {
                     }
                     if (rs.decide(ratio))
                     {
-                        run = rs.nextInt(steps);
+                        run = rs.nextInt(maxRuns);
                         run--;
                         trueCount++;
                         return true;
@@ -281,7 +289,7 @@ public class Gens {
             return pick(values);
         }
     }
-    
+
     public static class StringDSL
     {
         public Gen<String> of(Gen.IntGen sizes, char[] domain)
