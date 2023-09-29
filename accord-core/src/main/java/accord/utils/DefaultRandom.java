@@ -20,25 +20,20 @@ package accord.utils;
 
 import java.util.Random;
 
-public class DefaultRandom extends Random implements RandomSource
+public class DefaultRandom extends WrappedRandomSource
 {
     public DefaultRandom()
     {
+        super(new Random());
     }
 
     public DefaultRandom(long seed)
     {
-        super(seed);
+        super(new Random(seed));
     }
 
     @Override
     public DefaultRandom fork() {
         return new DefaultRandom(nextLong());
-    }
-
-    @Override
-    public Random asJdkRandom()
-    {
-        return this;
     }
 }
