@@ -30,7 +30,7 @@ import java.util.stream.LongStream;
 
 import static accord.utils.Property.qt;
 
-class SegmentedRandomRangeTest
+class FrequentLargeRangeTest
 {
     enum Type
     {
@@ -107,13 +107,13 @@ class SegmentedRandomRangeTest
             int largeRatio = ratio.next(rs);
             return new TestCase(0, ints[0], ints[1], ints[2], largeRatio, typeGen.next(rs));
         };
-        qt().forAll(Gens.random(), test).check(SegmentedRandomRangeTest::test);
+        qt().forAll(Gens.random(), test).check(FrequentLargeRangeTest::test);
     }
 
     private static void test(RandomSource rs, TestCase tc)
     {
         double ratio = tc.ratio();
-        FrequentLargeRange period = new FrequentLargeRange(tc.min(rs), tc.max(rs), ratio);
+        FrequentLargeRange period = new FrequentLargeRange(tc.min(rs), tc.max(rs), ratio, tc.largeRatio);
         int numSamples = 1000;
         int maxResamples = 1000;
 

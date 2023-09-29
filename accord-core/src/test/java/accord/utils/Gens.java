@@ -34,7 +34,6 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-
 public class Gens {
     private Gens() {
     }
@@ -168,15 +167,6 @@ public class Gens {
         public Gen<Boolean> all()
         {
             return RandomSource::nextBoolean;
-        }
-
-        /**
-         * @deprecated Use {@link #biasedRepeatingRuns(double, int)} to better control the max number of runs allowed, small ratios have an issue where they have large runs
-         */
-        @Deprecated
-        public Gen<Boolean> biasedRepeatingRuns(double ratio)
-        {
-            return biasedRepeatingRuns(ratio, (int) (1 / ratio));
         }
 
         public Gen<Boolean> biasedRepeatingRuns(double ratio, int maxRuns)
