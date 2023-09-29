@@ -141,7 +141,7 @@ public class GenTest {
     {
         double ratio = 0.0625;
         int samples = 1000;
-        Gen<Runs> gen = Gens.lists(Gens.bools().biasedRepeatingRuns(ratio)).ofSize(samples).map(Runs::new);
+        Gen<Runs> gen = Gens.lists(Gens.bools().biasedRepeatingRuns(ratio, 15)).ofSize(samples).map(Runs::new);
         qt().forAll(gen).check(runs -> {
             assertThat(IntStream.of(runs.runs).filter(i -> i > 5).toArray()).isNotEmpty();
             assertThat(runs.counts.get(true) / 1000.0).isBetween(ratio * .5, 0.1);

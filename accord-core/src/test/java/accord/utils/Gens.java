@@ -34,7 +34,6 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-
 public class Gens {
     private Gens() {
     }
@@ -170,10 +169,9 @@ public class Gens {
             return RandomSource::nextBoolean;
         }
 
-        public Gen<Boolean> biasedRepeatingRuns(double ratio)
+        public Gen<Boolean> biasedRepeatingRuns(double ratio, int maxRuns)
         {
             Invariants.checkArgument(ratio > 0 && ratio <= 1, "Expected %d to be larger than 0 and <= 1", ratio);
-            int steps = (int) (1 / ratio);
             double lower = ratio * .8;
             double upper = ratio * 1.2;
             return new Gen<Boolean>() {
@@ -204,7 +202,7 @@ public class Gens {
                     }
                     if (rs.decide(ratio))
                     {
-                        run = rs.nextInt(steps);
+                        run = rs.nextInt(maxRuns);
                         run--;
                         trueCount++;
                         return true;
@@ -281,7 +279,7 @@ public class Gens {
             return pick(values);
         }
     }
-    
+
     public static class StringDSL
     {
         public Gen<String> of(Gen.IntGen sizes, char[] domain)

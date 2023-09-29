@@ -179,8 +179,8 @@ public class NodeSink implements MessageSink
 
     private Supplier<Action> actions()
     {
-        Gen<Boolean> drops = Gens.bools().biasedRepeatingRuns(0.01);
-        Gen<Boolean> failures = Gens.bools().biasedRepeatingRuns(0.01);
+        Gen<Boolean> drops = Gens.bools().biasedRepeatingRuns(0.01, random.nextInt(3, 15));
+        Gen<Boolean> failures = Gens.bools().biasedRepeatingRuns(0.01, random.nextInt(3, 15));
         Gen<Action> actionGen = rs -> {
             if (drops.next(rs))
                 return Action.DROP;

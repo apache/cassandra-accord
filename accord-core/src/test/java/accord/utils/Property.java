@@ -18,9 +18,18 @@
 
 package accord.utils;
 
+import accord.utils.async.AsyncChains;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
+
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Objects;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import javax.annotation.Nullable;
 
 public class Property
 {
@@ -30,6 +39,8 @@ public class Property
         protected int examples = 1000;
 
         protected boolean pure = true;
+        @Nullable
+        protected Duration timeout = null;
 
         protected Common() {
         }
@@ -38,6 +49,7 @@ public class Property
             this.seed = other.seed;
             this.examples = other.examples;
             this.pure = other.pure;
+            this.timeout = other.timeout;
         }
 
         public T withSeed(long seed)
@@ -58,6 +70,51 @@ public class Property
         {
             this.pure = pure;
             return (T) this;
+        }
+
+        public T withTimeout(Duration timeout)
+        {
+            this.timeout = timeout;
+            return (T) this;
+        }
+
+        protected void checkWithTimeout(Runnable fn)
+        {
+            AsyncResult.Settable<?> promise = AsyncResults.settable();
+            Thread t = new Thread(() -> {
+                try
+                {
+                    fn.run();
+                    promise.setSuccess(null);
+                }
+                catch (Throwable e)
+                {
+                    promise.setFailure(e);
+                }
+            });
+            t.setName("property with timeout");
+            t.setDaemon(true);
+            try
+            {
+                t.start();
+                AsyncChains.getBlocking(promise, timeout.toNanos(), TimeUnit.NANOSECONDS);
+            }
+            catch (ExecutionException e)
+            {
+                throw new PropertyError(propertyError(this, e.getCause()));
+            }
+            catch (InterruptedException e)
+            {
+                t.interrupt();
+                throw new PropertyError(propertyError(this, e));
+            }
+            catch (TimeoutException e)
+            {
+                t.interrupt();
+                TimeoutException override = new TimeoutException("property test did not complete within " + this.timeout);
+                override.setStackTrace(new StackTraceElement[0]);
+                throw new PropertyError(propertyError(this, override));
+            }
         }
     }
 
@@ -162,6 +219,16 @@ public class Property
 
         public void check(FailingConsumer<T> fn)
         {
+            if (timeout != null)
+            {
+                checkWithTimeout(() -> checkInternal(fn));
+                return;
+            }
+            checkInternal(fn);
+        }
+
+        private void checkInternal(FailingConsumer<T> fn)
+        {
             RandomSource random = new DefaultRandom(seed);
             for (int i = 0; i < examples; i++)
             {
@@ -201,6 +268,16 @@ public class Property
         }
 
         public void check(FailingBiConsumer<A, B> fn)
+        {
+            if (timeout != null)
+            {
+                checkWithTimeout(() -> checkInternal(fn));
+                return;
+            }
+            checkInternal(fn);
+        }
+
+        private void checkInternal(FailingBiConsumer<A, B> fn)
         {
             RandomSource random = new DefaultRandom(seed);
             for (int i = 0; i < examples; i++)
@@ -246,6 +323,16 @@ public class Property
 
         public void check(FailingTriConsumer<A, B, C> fn)
         {
+            if (timeout != null)
+            {
+                checkWithTimeout(() -> checkInternal(fn));
+                return;
+            }
+            checkInternal(fn);
+        }
+
+        private void checkInternal(FailingTriConsumer<A, B, C> fn)
+        {
             RandomSource random = new DefaultRandom(seed);
             for (int i = 0; i < examples; i++)
             {
@@ -270,15 +357,22 @@ public class Property
         }
     }
 
-    private static void checkInterrupted() throws InterruptedException {
+    private static void checkInterrupted() throws InterruptedException
+    {
         if (Thread.currentThread().isInterrupted())
             throw new InterruptedException();
     }
 
     public static class PropertyError extends AssertionError
     {
-        public PropertyError(String message, Throwable cause) {
+        public PropertyError(String message, Throwable cause)
+        {
             super(message, cause);
+        }
+
+        public PropertyError(String message)
+        {
+            super(message);
         }
     }
 

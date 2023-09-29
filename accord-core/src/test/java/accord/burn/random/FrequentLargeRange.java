@@ -31,11 +31,11 @@ public class FrequentLargeRange implements LongGen
     private final LongGen small, large;
     private final Gen<Boolean> runs;
 
-    public FrequentLargeRange(LongGen small, LongGen large, double ratio)
+    public FrequentLargeRange(LongGen small, LongGen large, double ratio, int maxRuns)
     {
         this.small = small;
         this.large = large;
-        this.runs = Gens.bools().biasedRepeatingRuns(ratio);
+        this.runs = Gens.bools().biasedRepeatingRuns(ratio, maxRuns);
     }
 
     @Override
@@ -54,6 +54,7 @@ public class FrequentLargeRange implements LongGen
     {
         private final RandomSource random;
         private Double ratio;
+        private Integer maxRuns;
         private LongGen small, large;
 
         public Builder(RandomSource random)
@@ -70,6 +71,18 @@ public class FrequentLargeRange implements LongGen
         public Builder ratio(int min, int max)
         {
             this.ratio = random.nextInt(min, max) / 100.0D;
+            return this;
+        }
+
+        public Builder maxRuns(int maxRuns)
+        {
+            this.maxRuns = maxRuns;
+            return this;
+        }
+
+        public Builder maxRuns(int min, int max)
+        {
+            this.maxRuns = random.nextInt(min, max);
             return this;
         }
 
@@ -132,7 +145,9 @@ public class FrequentLargeRange implements LongGen
                 throw new IllegalStateException("Large range undefined");
             if (ratio == null)
                 ratio(1, 11);
-            return new FrequentLargeRange(small, large, ratio);
+            if (maxRuns == null)
+                maxRuns(3, 15);
+            return new FrequentLargeRange(small, large, ratio, maxRuns);
         }
     }
 }
