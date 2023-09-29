@@ -248,6 +248,11 @@ public interface RandomSource
         }
     }
 
+    default <T> T pick(T[] array)
+    {
+        return array[nextInt(array.length)];
+    }
+
     default <T> T pick(List<T> values)
     {
         return pick(values, 0, values.size());
