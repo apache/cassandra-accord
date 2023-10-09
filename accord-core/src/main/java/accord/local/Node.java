@@ -49,6 +49,7 @@ import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.api.Scheduler;
 import accord.api.TopologySorter;
+import accord.config.LocalConfig;
 import accord.coordinate.CoordinateTransaction;
 import accord.coordinate.MaybeRecover;
 import accord.coordinate.Outcome;
@@ -145,6 +146,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private final AtomicReference<Timestamp> now;
     private final Agent agent;
     private final RandomSource random;
+    private final LocalConfig localConfig;
 
     // TODO (expected, consider): this really needs to be thought through some more, as it needs to be per-instance in some cases, and per-node in others
     private final Scheduler scheduler;
@@ -155,9 +157,10 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     public Node(Id id, MessageSink messageSink, LocalMessage.Handler localMessageHandler,
                 ConfigurationService configService, LongSupplier nowSupplier, ToLongFunction<TimeUnit> nowTimeUnit,
                 Supplier<DataStore> dataSupplier, ShardDistributor shardDistributor, Agent agent, RandomSource random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
-                Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory)
+                Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory, LocalConfig localConfig)
     {
         this.id = id;
+        this.localConfig = localConfig;
         this.messageSink = messageSink;
         this.localMessageHandler = localMessageHandler;
         this.configService = configService;
@@ -171,6 +174,11 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.commandStores = factory.create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this));
         // TODO review these leak a reference to an object that hasn't finished construction, possibly to other threads
         configService.registerListener(this);
+    }
+
+    public LocalConfig localConfig()
+    {
+        return localConfig;
     }
 
     /**

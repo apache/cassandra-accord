@@ -27,6 +27,7 @@ import com.google.common.collect.Sets;
 
 import accord.api.MessageSink;
 import accord.api.Scheduler;
+import accord.config.LocalConfig;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.IntKey;
 import accord.impl.SimpleProgressLog;
@@ -38,6 +39,7 @@ import accord.impl.mock.MockStore;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
+import accord.config.MutableLocalConfig;
 import accord.messages.LocalMessage;
 import accord.primitives.Keys;
 import accord.primitives.Range;
@@ -140,6 +142,7 @@ public class Utils
     {
         MockStore store = new MockStore();
         Scheduler scheduler = new ThreadPoolScheduler();
+        LocalConfig localConfig = new MutableLocalConfig();
         Node node = new Node(nodeId,
                              messageSink,
                              LocalMessage::process,
@@ -153,7 +156,8 @@ public class Utils
                              scheduler,
                              SizeOfIntersectionSorter.SUPPLIER,
                              SimpleProgressLog::new,
-                             InMemoryCommandStores.Synchronized::new);
+                             InMemoryCommandStores.Synchronized::new,
+                             localConfig);
         awaitUninterruptibly(node.unsafeStart());
         return node;
     }
