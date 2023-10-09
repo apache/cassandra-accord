@@ -32,6 +32,7 @@ import accord.api.ProgressLog;
 import accord.api.RoutingKey;
 import accord.api.Scheduler;
 import accord.api.TestableConfigurationService;
+import accord.config.LocalConfig;
 import accord.impl.InMemoryCommandStore;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.IntKey;
@@ -43,6 +44,7 @@ import accord.impl.mock.MockConfigurationService;
 import accord.impl.mock.MockStore;
 import accord.local.Node.Id;
 import accord.local.SaveStatus.LocalExecution;
+import accord.config.MutableLocalConfig;
 import accord.primitives.FullKeyRoute;
 import accord.primitives.Keys;
 import accord.primitives.Participants;
@@ -109,10 +111,11 @@ public class ImmutableCommandTest
     private static Node createNode(Id id, CommandStoreSupport storeSupport)
     {
         MockCluster.Clock clock = new MockCluster.Clock(100);
+        LocalConfig localConfig = new MutableLocalConfig();
         Node node = new Node(id, null, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
                         clock, NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, clock),
                         () -> storeSupport.data, new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), new TestAgent(), new DefaultRandom(), Scheduler.NEVER_RUN_SCHEDULED,
-                        SizeOfIntersectionSorter.SUPPLIER, ignore -> ignore2 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new);
+                        SizeOfIntersectionSorter.SUPPLIER, ignore -> ignore2 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new, localConfig);
         awaitUninterruptibly(node.unsafeStart());
         node.onTopologyUpdate(storeSupport.local.get(), true);
         return node;

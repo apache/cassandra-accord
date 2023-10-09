@@ -41,6 +41,8 @@ import java.util.function.Supplier;
 
 import accord.api.MessageSink;
 import accord.api.Scheduler;
+import accord.config.LocalConfig;
+import accord.config.MutableLocalConfig;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
@@ -314,12 +316,13 @@ public class Cluster implements Scheduler
             {
                 MessageSink messageSink = sinks.create(node, randomSupplier.get());
                 LongSupplier nowSupplier = nowSupplierSupplier.get();
+                LocalConfig localConfig = new MutableLocalConfig();
                 lookup.put(node, new Node(node, messageSink, LocalMessage::process, new SimpleConfigService(topology),
                                           nowSupplier, NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, nowSupplier),
                                           MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                                           MaelstromAgent.INSTANCE,
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
-                                          SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new));
+                                          SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new, localConfig));
             }
 
             AsyncResult<?> startup = AsyncChains.reduce(lookup.values().stream().map(Node::unsafeStart).collect(toList()), (a, b) -> null).beginAsResult();

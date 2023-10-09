@@ -35,6 +35,7 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import accord.config.LocalConfig;
 import accord.impl.MessageListener;
 import org.junit.jupiter.api.Assertions;
 import org.slf4j.Logger;
@@ -55,6 +56,7 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
+import accord.config.MutableLocalConfig;
 import accord.messages.LocalMessage;
 import accord.messages.MessageType;
 import accord.messages.Message;
@@ -229,11 +231,12 @@ public class Cluster implements Scheduler
                 MessageSink messageSink = sinks.create(id, randomSupplier.get());
                 LongSupplier nowSupplier = nowSupplierSupplier.get();
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(id, executor, randomSupplier, topology, lookup::get, topologyUpdates);
+                LocalConfig localConfig = new MutableLocalConfig();
                 Node node = new Node(id, messageSink, LocalMessage::process, configService, nowSupplier, NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, nowSupplier),
                                      () -> new ListStore(id), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
                                      executor.agent(),
                                      randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
-                                     SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending));
+                                     SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending), localConfig);
                 lookup.put(id, node);
                 CoordinateDurabilityScheduling durability = new CoordinateDurabilityScheduling(node);
                 // TODO (desired): randomise

@@ -32,6 +32,8 @@ import java.util.function.Supplier;
 
 import accord.api.MessageSink;
 import accord.api.Scheduler;
+import accord.config.LocalConfig;
+import accord.config.MutableLocalConfig;
 import accord.coordinate.Timeout;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.SimpleProgressLog;
@@ -173,11 +175,12 @@ public class Main
             MaelstromInit init = (MaelstromInit) packet.body;
             topology = topologyFactory.toTopology(init.cluster);
             sink = new StdoutSink(System::currentTimeMillis, scheduler, start, init.self, out, err);
+            LocalConfig localConfig = new MutableLocalConfig();
             on = new Node(init.self, sink, LocalMessage::process, new SimpleConfigService(topology),
                           System::currentTimeMillis, NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, System::currentTimeMillis),
                           MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                           MaelstromAgent.INSTANCE, new DefaultRandom(), scheduler, SizeOfIntersectionSorter.SUPPLIER,
-                          SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new);
+                          SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new, localConfig);
             awaitUninterruptibly(on.unsafeStart());
             err.println("Initialized node " + init.self);
             err.flush();

@@ -18,6 +18,7 @@
 
 package accord.impl;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -679,7 +680,8 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 return;
 
             isScheduled = true;
-            node.scheduler().once(() -> commandStore.execute(empty(), ignore -> run()).begin(commandStore.agent()), 1L, TimeUnit.SECONDS);
+            Duration delay = node.localConfig().getProgressLogScheduleDelay();
+            node.scheduler().once(() -> commandStore.execute(empty(), ignore -> run()).begin(commandStore.agent()), delay.toNanos(), TimeUnit.NANOSECONDS);
         }
 
         @Override
