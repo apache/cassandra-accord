@@ -50,9 +50,6 @@ import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.utils.Invariants;
 
-import static accord.local.Status.Committed;
-import static accord.local.Status.Known.DefinitionOnly;
-
 public class Commit extends TxnRequest<ReadNack>
 {
     private static final Logger logger = LoggerFactory.getLogger(Commit.class);
@@ -71,8 +68,6 @@ public class Commit extends TxnRequest<ReadNack>
     public final PartialDeps partialDeps;
     public final @Nullable FullRoute<?> route;
     public final ReadTxnData read;
-
-    private transient Defer defer;
 
     public enum Kind { Minimal, Maximal }
 
@@ -177,12 +172,7 @@ public class Commit extends TxnRequest<ReadNack>
             case Success:
             case Redundant:
                 return null;
-
             case Insufficient:
-                Invariants.checkState(!safeCommand.current().known().isDefinitionKnown());
-                if (defer == null)
-                    defer = new Defer(DefinitionOnly, Committed.minKnown, Commit.this);
-                defer.add(safeStore, safeCommand, safeStore.commandStore());
                 return ReadNack.NotCommitted;
         }
     }
@@ -200,11 +190,6 @@ public class Commit extends TxnRequest<ReadNack>
             node.reply(replyTo, replyContext, reply, failure);
         else if (read != null)
             read.process(node, replyTo, replyContext);
-        if (defer != null)
-        {
-            defer.ack();
-            defer = null;
-        }
     }
 
     @Override
