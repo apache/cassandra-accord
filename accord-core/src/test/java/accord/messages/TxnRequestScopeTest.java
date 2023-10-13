@@ -44,9 +44,7 @@ public class TxnRequestScopeTest
         Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
         Topology topology2 = topology(2, shard(range, idList(3, 4, 5), idSet(4, 5)));
 
-        Topologies.Multi topologies = new Topologies.Multi((TopologySorter.StaticSorter)(a, b, s)->0);
-        topologies.add(topology2);
-        topologies.add(topology1);
+        Topologies.Multi topologies = new Topologies.Multi((TopologySorter.StaticSorter)(a, b, s)->0, topology2, topology1);
 
         // 3 remains a member across both topologies, so can process requests without waiting for latest topology data
         Assertions.assertEquals(scope(150), ((PartialKeyRoute)TxnRequest.computeScope(id(3), topologies, route)).toParticipants());
@@ -75,9 +73,7 @@ public class TxnRequestScopeTest
                                       shard(range1, idList(4, 5, 6), idSet(4, 5)),
                                       shard(range2, idList(1, 2, 3), idSet(1, 2)) );
 
-        Topologies.Multi topologies = new Topologies.Multi((TopologySorter.StaticSorter)(a,b,s)->0);
-        topologies.add(topology2);
-        topologies.add(topology1);
+        Topologies.Multi topologies = new Topologies.Multi((TopologySorter.StaticSorter)(a,b,s)->0, topology2, topology1);
 
         Assertions.assertEquals(scope(150, 250), ((PartialKeyRoute)TxnRequest.computeScope(id(1), topologies, route)).toParticipants());
         Assertions.assertEquals(2, TxnRequest.computeWaitForEpoch(id(1), topologies, route));
