@@ -28,7 +28,6 @@ import accord.local.Node.Id;
 import accord.messages.Apply;
 import accord.messages.Apply.ApplyReply;
 import accord.messages.Callback;
-import accord.messages.Commit;
 import accord.messages.InformDurable;
 import accord.primitives.*;
 import accord.topology.Topologies;
@@ -37,7 +36,6 @@ import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.local.Status.Durability.Majority;
 import static accord.messages.Apply.executes;
 import static accord.messages.Apply.participates;
-import static accord.messages.Commit.Kind.Maximal;
 
 public class Persist implements Callback<ApplyReply>
 {
@@ -47,6 +45,8 @@ public class Persist implements Callback<ApplyReply>
     final Txn txn;
     final Timestamp executeAt;
     final Deps deps;
+    final Writes writes;
+    final Result result;
     final QuorumTracker tracker;
     final Set<Id> persistedOn;
     boolean isDone;
@@ -60,7 +60,7 @@ public class Persist implements Callback<ApplyReply>
     public static void persist(Node node, Topologies executes, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         Topologies participates = participates(node, route, txnId, executeAt, executes);
-        Persist persist = new Persist(node, executes, txnId, route, txn, executeAt, deps);
+        Persist persist = new Persist(node, executes, txnId, route, txn, executeAt, deps, writes, result);
         node.send(participates.nodes(), to -> Apply.applyMinimal(to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), persist);
     }
 
@@ -68,7 +68,7 @@ public class Persist implements Callback<ApplyReply>
     {
         Topologies executes = executes(node, route, executeAt);
         Topologies participates = participates(node, route, txnId, executeAt, executes);
-        Persist persist = new Persist(node, participates, txnId, route, txn, executeAt, deps);
+        Persist persist = new Persist(node, participates, txnId, route, txn, executeAt, deps, writes, result);
         node.send(participates.nodes(), to -> Apply.applyMaximal(to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), persist);
     }
 
@@ -76,19 +76,21 @@ public class Persist implements Callback<ApplyReply>
     {
         Topologies executes = executes(node, sendTo, executeAt);
         Topologies participates = participates(node, sendTo, txnId, executeAt, executes);
-        Persist persist = new Persist(node, participates, txnId, route, txn, executeAt, deps);
+        Persist persist = new Persist(node, participates, txnId, route, txn, executeAt, deps, writes, result);
         node.send(participates.nodes(), to -> Apply.applyMaximal(to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), persist);
     }
 
-    private Persist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps)
+    private Persist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         this.node = node;
         this.txnId = txnId;
-        this.txn = txn;
-        this.deps = deps;
         this.route = route;
-        this.tracker = new QuorumTracker(topologies);
+        this.txn = txn;
         this.executeAt = executeAt;
+        this.deps = deps;
+        this.writes = writes;
+        this.result = result;
+        this.tracker = new QuorumTracker(topologies);
         this.persistedOn = new HashSet<>();
     }
 
@@ -112,9 +114,7 @@ public class Persist implements Callback<ApplyReply>
                 }
                 break;
             case Insufficient:
-                Topologies topologies = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
-                // TODO (easy, cleanup): use static method in Commit
-                node.send(from, new Commit(Maximal, from, topologies.forEpoch(txnId.epoch()), topologies, txnId, txn, route, null, executeAt, deps, false));
+                Apply.sendMaximal(node, from, txnId, route, txn, executeAt, deps, writes, result);
         }
     }
 
