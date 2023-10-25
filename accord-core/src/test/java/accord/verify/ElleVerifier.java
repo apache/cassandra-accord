@@ -41,13 +41,13 @@ public class ElleVerifier implements Verifier
             @Override
             public void read(int index, int[] seq)
             {
-                actions.add(new Read(Integer.toString(index), seq));
+                actions.add(new Read(index, seq));
             }
 
             @Override
             public void write(int index, int value)
             {
-                actions.add(new Append(Integer.toString(index), value));
+                actions.add(new Append(index, value));
             }
 
             @Override
@@ -74,8 +74,9 @@ public class ElleVerifier implements Verifier
         IFn check = Clojure.var("elle.list-append", "check");
         IFn history = Clojure.var("jepsen.history", "history");
 
-        String clj = Event.toClojure(events); // TODO (now): can we avoid string and make this cheaper?
-        PersistentArrayMap result = (PersistentArrayMap) check.invoke(Clojure.read("{:consistency-models [:strict-serializable]}"), history.invoke(Clojure.read(clj)));
+        Object clj = Event.toClojure(events);
+        events.clear();
+        PersistentArrayMap result = (PersistentArrayMap) check.invoke(Clojure.read("{:consistency-models [:strict-serializable]}"), history.invoke(clj));
         Object isValid = result.get(RT.keyword(null, "valid?"));
         if (isValid == Boolean.TRUE)
             return;
@@ -110,9 +111,9 @@ public class ElleVerifier implements Verifier
     {
         enum Type {append, r}
         private final Action.Type type;
-        private final String key;
+        private final int key;
 
-        protected Action(Action.Type type, String key)
+        protected Action(Action.Type type, int key)
         {
             this.type = type;
             this.key = key;
@@ -133,7 +134,7 @@ public class ElleVerifier implements Verifier
     {
         private final int[] seq;
 
-        protected Read(String key, int[] seq)
+        protected Read(int key, int[] seq)
         {
             super(Type.r, key);
             this.seq = seq;
@@ -153,7 +154,7 @@ public class ElleVerifier implements Verifier
     {
         private final int value;
 
-        protected Append(String key, int value)
+        protected Append(int key, int value)
         {
             super(Type.append, key);
             this.value = value;
@@ -184,7 +185,7 @@ public class ElleVerifier implements Verifier
             this.time = time;
         }
 
-        static String toClojure(List<Event> events)
+        static Object toClojure(List<Event> events)
         {
             StringBuilder sb = new StringBuilder();
             sb.append('[');
@@ -195,7 +196,8 @@ public class ElleVerifier implements Verifier
                 sb.append("}\n");
             }
             sb.append(']');
-            return sb.toString();
+            // TODO (now): can we avoid string and make this cheaper?
+            return Clojure.read(sb.toString());
         }
 
         final void toClojure(StringBuilder sb)
@@ -221,5 +223,19 @@ public class ElleVerifier implements Verifier
             sb.append("}\n");
             return sb.toString();
         }
+    }
+
+    private static class Clj
+    {
+        private static final IFn require = Clojure.var("clojure.core", "require");
+
+        static
+        {
+            require.invoke(Clojure.read("elle.list-append"));
+            require.invoke(Clojure.read("jepsen.history"));
+        }
+
+        private static final IFn check = Clojure.var("elle.list-append", "check");
+        private static final IFn history = Clojure.var("jepsen.history", "history");
     }
 }
