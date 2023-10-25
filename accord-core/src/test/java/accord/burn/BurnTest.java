@@ -350,9 +350,7 @@ public class BurnTest
 
     private static Verifier createVerifier(int keyCount)
     {
-        int jdkVersion = Integer.parseInt(StandardSystemProperty.JAVA_VERSION.value().split("\\.")[0]);
-        if (jdkVersion == 1 /* 1.8 */ || jdkVersion == 8)
-            // Elle only works on JDK 11
+        if (!ElleVerifier.Support.allowed())
             return new StrictSerializabilityVerifier(keyCount);
         return CompositeVerifier.create(new StrictSerializabilityVerifier(keyCount),
                                         new ElleVerifier());

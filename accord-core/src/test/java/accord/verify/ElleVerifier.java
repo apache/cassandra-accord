@@ -23,12 +23,22 @@ import clojure.lang.ArraySeq;
 import clojure.lang.IFn;
 import clojure.lang.PersistentArrayMap;
 import clojure.lang.RT;
+import com.google.common.base.StandardSystemProperty;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class ElleVerifier implements Verifier
 {
+    public static class Support
+    {
+        public static boolean allowed()
+        {
+            // Elle only works on JDK 11
+            int jdkVersion = Integer.parseInt(StandardSystemProperty.JAVA_VERSION.value().split("\\.")[0]);
+            return !(jdkVersion == 1 /* 1.8 */ || jdkVersion == 8);
+        }
+    }
     // TODO (now): this is very expensive, its going to be 1k events on average and will have the whole read key!
     private final List<Event> events = new ArrayList<>();
 
