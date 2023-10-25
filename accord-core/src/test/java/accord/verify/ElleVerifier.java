@@ -21,12 +21,19 @@ package accord.verify;
 import clojure.java.api.Clojure;
 import clojure.lang.ArraySeq;
 import clojure.lang.IFn;
+import clojure.lang.Keyword;
 import clojure.lang.PersistentArrayMap;
+import clojure.lang.PersistentHashMap;
+import clojure.lang.PersistentList;
 import clojure.lang.RT;
 import com.google.common.base.StandardSystemProperty;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 public class ElleVerifier implements Verifier
 {
@@ -119,7 +126,15 @@ public class ElleVerifier implements Verifier
 
     private static abstract class Action
     {
-        enum Type {append, r}
+        enum Type {append, r;
+
+            final Keyword keyword;
+
+            Type()
+            {
+                keyword = Keyword.intern(null, name());
+            }
+        }
         private final Action.Type type;
         private final int key;
 
@@ -128,6 +143,17 @@ public class ElleVerifier implements Verifier
             this.type = type;
             this.key = key;
         }
+
+        private List<Object> asOp()
+        {
+            List<Object> values = new ArrayList<>(3);
+            values.add(type.keyword);
+            values.add(key);
+            values.add(valuesClojure());
+            return values;
+        }
+
+        protected abstract Object valuesClojure();
 
         final void toClojure(StringBuilder sb)
         {
@@ -151,6 +177,12 @@ public class ElleVerifier implements Verifier
         }
 
         @Override
+        protected Object valuesClojure()
+        {
+            return PersistentList.create(IntStream.of(seq).mapToObj(Integer::valueOf).collect(Collectors.toList()));
+        }
+
+        @Override
         void toClojureWithValues(StringBuilder sb)
         {
             sb.append('[');
@@ -171,6 +203,12 @@ public class ElleVerifier implements Verifier
         }
 
         @Override
+        protected Object valuesClojure()
+        {
+            return value;
+        }
+
+        @Override
         void toClojureWithValues(StringBuilder sb)
         {
             sb.append(value);
@@ -179,7 +217,16 @@ public class ElleVerifier implements Verifier
 
     private static class Event
     {
-        enum Type { ok, fail }
+        enum Type {
+            ok, fail;
+
+            final Keyword keyword;
+
+            Type()
+            {
+                keyword = Keyword.intern(null, name());
+            }
+        }
 
         private final int process;
         private final Event.Type type;
@@ -197,17 +244,31 @@ public class ElleVerifier implements Verifier
 
         static Object toClojure(List<Event> events)
         {
-            StringBuilder sb = new StringBuilder();
-            sb.append('[');
+            List<clojure.lang.Associative> ops = new ArrayList<>(events.size());
             for (Event e : events)
-            {
-                sb.append('{');
-                e.toClojure(sb);
-                sb.append("}\n");
-            }
-            sb.append(']');
-            // TODO (now): can we avoid string and make this cheaper?
-            return Clojure.read(sb.toString());
+                ops.add(e.asOp());
+            return ops;
+//            StringBuilder sb = new StringBuilder();
+//            sb.append('[');
+//            for (Event e : events)
+//            {
+//                sb.append('{');
+//                e.toClojure(sb);
+//                sb.append("}\n");
+//            }
+//            sb.append(']');
+//            // TODO (now): can we avoid string and make this cheaper?
+//            return Clojure.read(sb.toString());
+        }
+
+        private clojure.lang.Associative asOp()
+        {
+            Map<Object, Object> op = new HashMap<>();
+            op.put(Keys.process, process);
+            op.put(Keys.time, time);
+            op.put(Keys.type, type.keyword);
+            op.put(Keys.value, actions.stream().map(a -> a.asOp()).collect(Collectors.toList()));
+            return PersistentHashMap.create(op);
         }
 
         final void toClojure(StringBuilder sb)
@@ -233,6 +294,14 @@ public class ElleVerifier implements Verifier
             sb.append("}\n");
             return sb.toString();
         }
+    }
+
+    private static class Keys
+    {
+        private static Keyword process = Keyword.intern(null, "process");
+        private static Keyword time = Keyword.intern(null, "time");
+        private static Keyword type = Keyword.intern(null, "type");
+        private static Keyword value = Keyword.intern(null, "value");
     }
 
     private static class Clj
