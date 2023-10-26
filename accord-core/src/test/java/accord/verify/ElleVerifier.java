@@ -21,17 +21,23 @@ package accord.verify;
 import clojure.java.api.Clojure;
 import clojure.lang.ArraySeq;
 import clojure.lang.IFn;
+import clojure.lang.IMapEntry;
+import clojure.lang.IPersistentCollection;
+import clojure.lang.IPersistentMap;
+import clojure.lang.ISeq;
+import clojure.lang.IteratorSeq;
 import clojure.lang.Keyword;
 import clojure.lang.PersistentArrayMap;
-import clojure.lang.PersistentHashMap;
 import clojure.lang.PersistentList;
 import clojure.lang.RT;
 import com.google.common.base.StandardSystemProperty;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -74,7 +80,7 @@ public class ElleVerifier implements Verifier
                 // Since StrictSerializabilityVerifier uses indexes and not pk values, it is not possible to find expected keys and putting empty result for them...
                 if (actions.isEmpty())
                     return;
-                events.add(new Event(0, Event.Type.ok, end, actions));
+                events.add(new Event(0, events.size(), Event.Type.ok, end, actions));
             }
         };
     }
@@ -218,7 +224,7 @@ public class ElleVerifier implements Verifier
     private static class Event
     {
         enum Type {
-            ok, fail;
+            ok, fail; // invoke, info
 
             final Keyword keyword;
 
@@ -229,14 +235,16 @@ public class ElleVerifier implements Verifier
         }
 
         private final int process;
+        private final long index;
         private final Event.Type type;
         private final List<Action> actions;
         // value
         private final long time;
 
-        private Event(int process, Event.Type type, long time, List<Action> actions)
+        private Event(int process, int index, Event.Type type, long time, List<Action> actions)
         {
             this.process = process;
+            this.index = index;
             this.type = type;
             this.actions = actions;
             this.time = time;
@@ -261,14 +269,40 @@ public class ElleVerifier implements Verifier
 //            return Clojure.read(sb.toString());
         }
 
-        private clojure.lang.Associative asOp()
+        private clojure.lang.IPersistentMap asOp()
         {
-            Map<Object, Object> op = new HashMap<>();
-            op.put(Keys.process, process);
-            op.put(Keys.time, time);
-            op.put(Keys.type, type.keyword);
-            op.put(Keys.value, actions.stream().map(a -> a.asOp()).collect(Collectors.toList()));
-            return PersistentHashMap.create(op);
+//            Map<Object, Object> op = new HashMap<>();
+//            op.put(Keys.process, process);
+//            op.put(Keys.time, time);
+//            op.put(Keys.type, type.keyword);
+//            op.put(Keys.value, actions.stream().map(a -> a.asOp()).collect(Collectors.toList()));
+//            return PersistentHashMap.create(op);
+            return new EventClj(Keys.eventKeys);
+        }
+
+        private class EventClj extends ObjectPersistentMap
+        {
+            private EventClj(Set<Keyword> keys)
+            {
+                super(keys);
+            }
+
+            @Override
+            protected ObjectPersistentMap create(Set<Keyword> keys)
+            {
+                return new EventClj(keys);
+            }
+
+            @Override
+            public Object valAt(Object key, Object notFound)
+            {
+                if (key == Keys.process) return process;
+                else if (key == Keys.index) return index;
+                else if (key == Keys.time) return time;
+                else if (key == Keys.type) return type.keyword;
+                else if (key == Keys.value) return actions.stream().map(a -> a.asOp()).collect(Collectors.toList());
+                return notFound;
+            }
         }
 
         final void toClojure(StringBuilder sb)
@@ -299,9 +333,12 @@ public class ElleVerifier implements Verifier
     private static class Keys
     {
         private static Keyword process = Keyword.intern(null, "process");
+        private static Keyword index = Keyword.intern(null, "index");
         private static Keyword time = Keyword.intern(null, "time");
         private static Keyword type = Keyword.intern(null, "type");
         private static Keyword value = Keyword.intern(null, "value");
+
+        private static final Set<Keyword> eventKeys = ImmutableSet.of(Keys.process, Keys.index, Keys.time, Keys.type, Keys.value);
     }
 
     private static class Clj
@@ -316,5 +353,92 @@ public class ElleVerifier implements Verifier
 
         private static final IFn check = Clojure.var("elle.list-append", "check");
         private static final IFn history = Clojure.var("jepsen.history", "history");
+    }
+
+    private static abstract class ObjectPersistentMap implements clojure.lang.IPersistentMap
+    {
+        private final Set<Keyword> keys;
+
+        private ObjectPersistentMap(Set<Keyword> keys)
+        {
+            this.keys = keys;
+        }
+
+        protected abstract ObjectPersistentMap create(Set<Keyword> filter);
+
+        @Override
+        public boolean containsKey(Object key)
+        {
+            return keys.contains(key);
+        }
+
+        @Override
+        public IMapEntry entryAt(Object key)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public IPersistentMap assoc(Object key, Object val)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public IPersistentMap assocEx(Object key, Object val)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public IPersistentMap without(Object key)
+        {
+            return create(Sets.filter(keys, k -> !k.equals(key)));
+        }
+
+        @Override
+        public Object valAt(Object key)
+        {
+            return valAt(key, null);
+        }
+
+        @Override
+        public abstract Object valAt(Object key, Object notFound);
+
+        @Override
+        public int count()
+        {
+            return keys.size();
+        }
+
+        @Override
+        public IPersistentCollection cons(Object o)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public IPersistentCollection empty()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean equiv(Object o)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ISeq seq()
+        {
+            return IteratorSeq.create(iterator());
+        }
+
+        @Override
+        public Iterator iterator()
+        {
+            return keys.iterator();
+        }
     }
 }
