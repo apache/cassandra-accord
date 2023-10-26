@@ -53,6 +53,8 @@ public class ElleVerifier implements Verifier
             return !(jdkVersion == 1 /* 1.8 */ || jdkVersion == 8);
         }
     }
+
+    // In order to build the jepsen history, we need the full history... so must buffer everything
     private final List<Event> events = new ArrayList<>();
 
     @Override
@@ -80,6 +82,7 @@ public class ElleVerifier implements Verifier
                 // Since StrictSerializabilityVerifier uses indexes and not pk values, it is not possible to find expected keys and putting empty result for them...
                 if (actions.isEmpty())
                     return;
+                // TODO (coverage): pass client id as process?
                 events.add(new Event(0, Event.Type.ok, end, actions));
             }
         };
@@ -90,23 +93,17 @@ public class ElleVerifier implements Verifier
     {
         if (events.isEmpty())
             throw new IllegalArgumentException("No events seen");
-        IFn require = Clojure.var("clojure.core", "require");
-        require.invoke(Clojure.read("elle.list-append"));
-        require.invoke(Clojure.read("jepsen.history"));
 
-        IFn check = Clojure.var("elle.list-append", "check");
-        IFn history = Clojure.var("jepsen.history", "history");
-
-        Object eventHistory = history.invoke(Event.toClojure(events));
+        Object eventHistory = Clj.history.invoke(Event.toClojure(events));
         events.clear();
-        PersistentArrayMap result = (PersistentArrayMap) check.invoke(Clojure.read("{:consistency-models [:strict-serializable]}"), eventHistory);
-        Object isValid = result.get(RT.keyword(null, "valid?"));
+        PersistentArrayMap result = (PersistentArrayMap) Clj.check.invoke(Clojure.read("{:consistency-models [:strict-serializable]}"), eventHistory);
+        Object isValid = result.get(Keys.valid);
         if (isValid == Boolean.TRUE)
             return;
-        if (isValid == RT.keyword(null, "unknown"))
+        if (isValid == Keys.unknown)
         {
             // Elle couldn't figure out if the history is bad or not... why?
-            Object anomalyTypes = result.get(RT.keyword(null, "anomaly-types"));
+            Object anomalyTypes = result.get(Keys.anomalyTypes);
             if (anomalyTypes != null)
             {
                 ArraySeq seq = (ArraySeq) anomalyTypes;
@@ -115,7 +112,7 @@ public class ElleVerifier implements Verifier
                     boolean empty = false;
                     for (Object type : seq)
                     {
-                        if (type == RT.keyword(null, "empty-transaction-graph"))
+                        if (type == Keys.emptyTransactionGraph)
                         {
                             empty = true;
                             continue; // nothing to see here
@@ -138,7 +135,7 @@ public class ElleVerifier implements Verifier
 
             Type()
             {
-                keyword = Keyword.intern(null, name());
+                keyword = RT.keyword(null, name());
             }
         }
         private final Action.Type type;
@@ -197,7 +194,7 @@ public class ElleVerifier implements Verifier
 
             Type()
             {
-                keyword = Keyword.intern(null, name());
+                keyword = RT.keyword(null, name());
             }
         }
 
@@ -327,21 +324,27 @@ public class ElleVerifier implements Verifier
 
     private static class Keys
     {
-        private static Keyword process = Keyword.intern(null, "process");
-        private static Keyword index = Keyword.intern(null, "index");
-        private static Keyword time = Keyword.intern(null, "time");
-        private static Keyword type = Keyword.intern(null, "type");
-        private static Keyword value = Keyword.intern(null, "value");
+        // event keys
+        private static Keyword process = RT.keyword(null, "process");
+        private static Keyword index = RT.keyword(null, "index");
+        private static Keyword time = RT.keyword(null, "time");
+        private static Keyword type = RT.keyword(null, "type");
+        private static Keyword value = RT.keyword(null, "value");
+
+        // elle check results
+        private static Keyword valid = RT.keyword(null, "valid?");
+        private static Keyword unknown = RT.keyword(null, "unknown");
+        private static Keyword anomalyTypes = RT.keyword(null, "anomaly-types");
+        private static Keyword emptyTransactionGraph = RT.keyword(null, "empty-transaction-graph");
 
         private static final Set<Keyword> eventKeys = ImmutableSet.of(Keys.process, Keys.time, Keys.type, Keys.value);
     }
 
     private static class Clj
     {
-        private static final IFn require = Clojure.var("clojure.core", "require");
-
         static
         {
+            IFn require = Clojure.var("clojure.core", "require");
             require.invoke(Clojure.read("elle.list-append"));
             require.invoke(Clojure.read("jepsen.history"));
         }
