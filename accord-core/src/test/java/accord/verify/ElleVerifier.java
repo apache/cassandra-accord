@@ -96,7 +96,7 @@ public class ElleVerifier implements Verifier
 
         Object eventHistory = Clj.history.invoke(Event.toClojure(events));
         events.clear();
-        PersistentArrayMap result = (PersistentArrayMap) Clj.check.invoke(Clojure.read("{:consistency-models [:strict-serializable]}"), eventHistory);
+        PersistentArrayMap result = (PersistentArrayMap) Clj.check.invoke(Clj.elleListAppendOps, eventHistory);
         Object isValid = result.get(Keys.valid);
         if (isValid == Boolean.TRUE)
             return;
@@ -351,6 +351,7 @@ public class ElleVerifier implements Verifier
 
         private static final IFn check = Clojure.var("elle.list-append", "check");
         private static final IFn history = Clojure.var("jepsen.history", "history");
+        private static final Object elleListAppendOps = Clojure.read("{:consistency-models [:strict-serializable]}");
     }
 
     private static abstract class ObjectPersistentMap implements clojure.lang.IPersistentMap
