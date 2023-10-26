@@ -129,7 +129,9 @@ public class ElleVerifier implements Verifier
 
     private static abstract class Action extends java.util.AbstractList<Object> implements RandomAccess
     {
-        enum Type {append, r;
+        enum Type
+        {
+            append, r;
 
             final Keyword keyword;
 
@@ -154,11 +156,10 @@ public class ElleVerifier implements Verifier
         {
             switch (index)
             {
-                case 0: return type.keyword;
-                case 1: return key;
-                case 2: return value;
-                default:
-                    throw new IndexOutOfBoundsException();
+                case 0:  return type.keyword;
+                case 1:  return key;
+                case 2:  return value;
+                default: throw new IndexOutOfBoundsException();
             }
         }
 
@@ -173,6 +174,7 @@ public class ElleVerifier implements Verifier
     {
         protected Read(int key, int[] seq)
         {
+            // TODO (optimization): rather than vector of boxed int, can we use the interfaces so we can stay primitive array?
             super(Type.r, key, PersistentVector.create(IntStream.of(seq).mapToObj(Integer::valueOf).collect(Collectors.toList())));
         }
     }
@@ -187,7 +189,8 @@ public class ElleVerifier implements Verifier
 
     private static class Event extends ObjectPersistentMap
     {
-        enum Type {
+        enum Type
+        {
             ok, fail; // invoke, info
 
             final Keyword keyword;
@@ -202,7 +205,6 @@ public class ElleVerifier implements Verifier
         private long index = -1;
         private final Event.Type type;
         private final List<Action> actions;
-        // value
         private final long time;
 
         private Event(int process, Event.Type type, long time, List<Action> actions)
@@ -216,42 +218,7 @@ public class ElleVerifier implements Verifier
 
         public static Object toClojure(List<Event> events)
         {
-//            events = events.stream().limit(7).collect(Collectors.toList());
-            boolean useMemoryOptimized = true;
-            if (useMemoryOptimized)
-                return PersistentVector.create(events);
-            StringBuilder sb = new StringBuilder();
-            sb.append('[');
-            for (Event e : events)
-            {
-                sb.append('{');
-                toClojure(sb, e);
-                sb.append("}\n");
-            }
-            sb.append(']');
-            return Clojure.read(sb.toString());
-        }
-
-        private static void toClojure(StringBuilder sb, Event e)
-        {
-            sb.append(":process ").append(e.process).append(",\n");
-            sb.append(":time ").append(e.time).append(",\n");
-            sb.append(":type :").append(e.type.name()).append(",\n");
-            sb.append(":value [");
-            for (Action a : e.actions)
-            {
-                toClojure(sb, a);
-                sb.append(' ');
-            }
-            sb.append(']');
-        }
-
-        private static void toClojure(StringBuilder sb, Action e)
-        {
-            sb.append("[:").append(e.type.name());
-            sb.append(' ').append(e.key).append(' ');
-            sb.append(e.value);
-            sb.append(']');
+            return PersistentVector.create(events);
         }
 
         @Override
@@ -261,13 +228,21 @@ public class ElleVerifier implements Verifier
         }
 
         @Override
+        public boolean containsKey(Object key)
+        {
+            if (key == Keys.index)
+                return index != -1;
+            return super.containsKey(key);
+        }
+
+        @Override
         public Object valAt(Object key, Object notFound)
         {
-            if (key == Keys.process) return process;
-            else if (key == Keys.index) return index == -1 ? notFound : index;
-            else if (key == Keys.time) return time;
-            else if (key == Keys.type) return type.keyword;
-            else if (key == Keys.value) return actions;
+            if      (key == Keys.process) return process;
+            else if (key == Keys.index)   return index == -1 ? notFound : index;
+            else if (key == Keys.time)    return time;
+            else if (key == Keys.type)    return type.keyword;
+            else if (key == Keys.value)   return actions;
             return notFound;
         }
 
@@ -279,14 +254,6 @@ public class ElleVerifier implements Verifier
             else
                 throw new UnsupportedOperationException("Unable to update key " + key);
             return this;
-        }
-
-        @Override
-        public boolean containsKey(Object key)
-        {
-            if (key == Keys.index && index != -1)
-                return true;
-            return super.containsKey(key);
         }
 
         private class EventClj extends ObjectPersistentMap
