@@ -98,8 +98,8 @@ public class ElleVerifier implements Verifier
         IFn history = Clojure.var("jepsen.history", "history");
 
         Object eventHistory = history.invoke(Event.toClojure(events));
-        PersistentArrayMap result = (PersistentArrayMap) check.invoke(Clojure.read("{:consistency-models [:strict-serializable]}"), eventHistory);
         events.clear();
+        PersistentArrayMap result = (PersistentArrayMap) check.invoke(Clojure.read("{:consistency-models [:strict-serializable]}"), eventHistory);
         Object isValid = result.get(RT.keyword(null, "valid?"));
         if (isValid == Boolean.TRUE)
             return;
@@ -219,7 +219,7 @@ public class ElleVerifier implements Verifier
 
         public static Object toClojure(List<Event> events)
         {
-            events = events.stream().limit(7).collect(Collectors.toList());
+//            events = events.stream().limit(7).collect(Collectors.toList());
             boolean useMemoryOptimized = true;
             if (useMemoryOptimized)
                 return PersistentVector.create(events);
