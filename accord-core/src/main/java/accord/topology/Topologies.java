@@ -260,29 +260,25 @@ public interface Topologies extends TopologySorter
         private final List<Topology> topologies;
         private final int maxShardsPerEpoch;
 
-        public Multi(TopologySorter.Supplier sorter, int initialCapacity)
+        public Multi(TopologySorter.Supplier sorter, Topology... topologies)
         {
-            this.topologies = new ArrayList<>(initialCapacity);
-            this.supplier = sorter;
-            this.sorter = sorter.get(this);
+            this(sorter, Arrays.asList(topologies));
+        }
+
+        public Multi(TopologySorter.Supplier sorter, List<Topology> input)
+        {
+            this.topologies = new ArrayList<>(input.size());
+            for (Topology topology : input)
+            {
+                Invariants.checkArgument(topologies.isEmpty() || topology.epoch == topologies.get(topologies.size() - 1).epoch - 1);
+                topologies.add(topology);
+            }
             int maxShardsPerEpoch = 0;
             for (int i = 0 ; i < topologies.size() ; ++i)
                 maxShardsPerEpoch = Math.max(maxShardsPerEpoch, topologies.get(i).size());
             this.maxShardsPerEpoch = maxShardsPerEpoch;
-        }
-
-        public Multi(TopologySorter.Supplier sorter, Topology... topologies)
-        {
-            this(sorter, topologies.length);
-            for (Topology topology : topologies)
-                add(topology);
-        }
-
-        public Multi(TopologySorter.Supplier sorter, List<Topology> topologies)
-        {
-            this(sorter, topologies.size());
-            for (Topology topology : topologies)
-                add(topology);
+            this.supplier = sorter;
+            this.sorter = sorter.get(this);
         }
 
         @Override
@@ -392,12 +388,6 @@ public interface Topologies extends TopologySorter
             return maxShardsPerEpoch;
         }
 
-        public void add(Topology topology)
-        {
-            Invariants.checkArgument(topologies.isEmpty() || topology.epoch == topologies.get(topologies.size() - 1).epoch - 1);
-            topologies.add(topology);
-        }
-
         @Override
         public boolean equals(Object obj)
         {
@@ -420,6 +410,40 @@ public interface Topologies extends TopologySorter
         public int compare(Id node1, Id node2, ShardSelection shards)
         {
             return sorter.compare(node1, node2, shards);
+        }
+    }
+
+    class Builder
+    {
+        private final List<Topology> topologies;
+
+        public Builder(int initialCapacity)
+        {
+            topologies = new ArrayList<>(initialCapacity);
+        }
+
+        public void add(Topology topology)
+        {
+            Invariants.checkArgument(topologies.isEmpty() || topology.epoch == topologies.get(topologies.size() - 1).epoch - 1);
+            topologies.add(topology);
+        }
+
+        public boolean isEmpty()
+        {
+            return topologies.isEmpty();
+        }
+
+        public Topologies build(TopologySorter.Supplier sorter)
+        {
+            switch (topologies.size())
+            {
+                case 0:
+                    throw new IllegalStateException("Unable to build an empty Topologies");
+                case 1:
+                    return new Single(sorter, topologies.get(0));
+                default:
+                    return new Multi(sorter, topologies);
+            }
         }
     }
 }

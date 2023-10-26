@@ -517,7 +517,7 @@ public class TopologyManager
 
         int i = (int)(snapshot.currentEpoch - maxEpoch);
         int maxi = (int)(Math.min(1 + snapshot.currentEpoch - minEpoch, snapshot.epochs.length));
-        Topologies.Multi topologies = new Topologies.Multi(sorter, maxi - i);
+        Topologies.Builder topologies = new Topologies.Builder(maxi - i);
 
         Unseekables<?> remaining = select;
         while (i < maxi)
@@ -528,7 +528,7 @@ public class TopologyManager
         }
 
         if (i == snapshot.epochs.length)
-            return topologies;
+            return topologies.build(sorter);
 
         // include any additional epochs to reach sufficiency
         EpochState prev = snapshot.epochs[maxi - 1];
@@ -538,14 +538,14 @@ public class TopologyManager
             remaining = remaining.subtract(sufficient);
             remaining = remaining.subtract(prev.addedRanges);
             if (remaining.isEmpty())
-                return topologies;
+                return topologies.build(sorter);
 
             EpochState next = snapshot.epochs[i++];
             topologies.add(next.global.forSelection(remaining));
             prev = next;
         } while (i < snapshot.epochs.length);
 
-        return topologies;
+        return topologies.build(sorter);
     }
 
     public Topologies preciseEpochs(Unseekables<?> select, long minEpoch, long maxEpoch)
@@ -556,7 +556,7 @@ public class TopologyManager
             return new Single(sorter, snapshot.get(minEpoch).global.forSelection(select));
 
         int count = (int)(1 + maxEpoch - minEpoch);
-        Topologies.Multi topologies = new Topologies.Multi(sorter, count);
+        Topologies.Builder topologies = new Topologies.Builder(count);
         for (int i = count - 1 ; i >= 0 ; --i)
         {
             EpochState epochState = snapshot.get(minEpoch + i);
@@ -564,10 +564,9 @@ public class TopologyManager
             select = select.subtract(epochState.addedRanges);
         }
 
-        for (int i = count - 1 ; i >= 0 ; --i)
         Invariants.checkState(!topologies.isEmpty(), "Unable to find an epoch that contained %s", select);
 
-        return topologies;
+        return topologies.build(sorter);
     }
 
     public Topologies forEpoch(Unseekables<?> select, long epoch)
