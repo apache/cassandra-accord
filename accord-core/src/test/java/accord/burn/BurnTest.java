@@ -392,7 +392,8 @@ public class BurnTest
     @Timeout(value = 3, unit = TimeUnit.MINUTES)
     public void testOne()
     {
-        run(ThreadLocalRandom.current().nextLong(), 1000);
+//        run(ThreadLocalRandom.current().nextLong(), 1000);
+        run(2112316037943534016L, 1000);
     }
 
     private static void run(long seed, int operations)

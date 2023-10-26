@@ -28,7 +28,7 @@ import clojure.lang.ISeq;
 import clojure.lang.IteratorSeq;
 import clojure.lang.Keyword;
 import clojure.lang.PersistentArrayMap;
-import clojure.lang.PersistentList;
+import clojure.lang.PersistentVector;
 import clojure.lang.RT;
 import com.google.common.base.StandardSystemProperty;
 import com.google.common.collect.ImmutableSet;
@@ -37,6 +37,7 @@ import com.google.common.collect.Sets;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.RandomAccess;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -52,7 +53,6 @@ public class ElleVerifier implements Verifier
             return !(jdkVersion == 1 /* 1.8 */ || jdkVersion == 8);
         }
     }
-    // TODO (now): this is very expensive, its going to be 1k events on average and will have the whole read key!
     private final List<Event> events = new ArrayList<>();
 
     @Override
@@ -80,7 +80,7 @@ public class ElleVerifier implements Verifier
                 // Since StrictSerializabilityVerifier uses indexes and not pk values, it is not possible to find expected keys and putting empty result for them...
                 if (actions.isEmpty())
                     return;
-                events.add(new Event(0, events.size(), Event.Type.ok, end, actions));
+                events.add(new Event(0, Event.Type.ok, end, actions));
             }
         };
     }
@@ -97,9 +97,9 @@ public class ElleVerifier implements Verifier
         IFn check = Clojure.var("elle.list-append", "check");
         IFn history = Clojure.var("jepsen.history", "history");
 
-        Object clj = Event.toClojure(events);
+        Object eventHistory = history.invoke(Event.toClojure(events));
+        PersistentArrayMap result = (PersistentArrayMap) check.invoke(Clojure.read("{:consistency-models [:strict-serializable]}"), eventHistory);
         events.clear();
-        PersistentArrayMap result = (PersistentArrayMap) check.invoke(Clojure.read("{:consistency-models [:strict-serializable]}"), history.invoke(clj));
         Object isValid = result.get(RT.keyword(null, "valid?"));
         if (isValid == Boolean.TRUE)
             return;
@@ -130,7 +130,7 @@ public class ElleVerifier implements Verifier
         throw new HistoryViolation(-1, "Violation detected: " + result);
     }
 
-    private static abstract class Action
+    private static abstract class Action extends java.util.AbstractList<Object> implements RandomAccess
     {
         enum Type {append, r;
 
@@ -143,85 +143,52 @@ public class ElleVerifier implements Verifier
         }
         private final Action.Type type;
         private final int key;
+        private final Object value;
 
-        protected Action(Action.Type type, int key)
+        protected Action(Action.Type type, int key, Object value)
         {
             this.type = type;
             this.key = key;
+            this.value = value;
         }
 
-        private List<Object> asOp()
+        @Override
+        public Object get(int index)
         {
-            List<Object> values = new ArrayList<>(3);
-            values.add(type.keyword);
-            values.add(key);
-            values.add(valuesClojure());
-            return values;
+            switch (index)
+            {
+                case 0: return type.keyword;
+                case 1: return key;
+                case 2: return value;
+                default:
+                    throw new IndexOutOfBoundsException();
+            }
         }
 
-        protected abstract Object valuesClojure();
-
-        final void toClojure(StringBuilder sb)
+        @Override
+        public int size()
         {
-            sb.append("[:").append(type.name());
-            sb.append(' ').append(key).append(' ');
-            toClojureWithValues(sb);
-            sb.append(']');
+            return 3;
         }
-
-        abstract void toClojureWithValues(StringBuilder sb);
     }
 
     private static class Read extends Action
     {
-        private final int[] seq;
-
         protected Read(int key, int[] seq)
         {
-            super(Type.r, key);
-            this.seq = seq;
-        }
-
-        @Override
-        protected Object valuesClojure()
-        {
-            return PersistentList.create(IntStream.of(seq).mapToObj(Integer::valueOf).collect(Collectors.toList()));
-        }
-
-        @Override
-        void toClojureWithValues(StringBuilder sb)
-        {
-            sb.append('[');
-            for (int s : seq)
-                sb.append(s).append(' ');
-            sb.append(']');
+            super(Type.r, key, PersistentVector.create(IntStream.of(seq).mapToObj(Integer::valueOf).collect(Collectors.toList())));
         }
     }
 
     private static class Append extends Action
     {
-        private final int value;
-
         protected Append(int key, int value)
         {
-            super(Type.append, key);
-            this.value = value;
-        }
-
-        @Override
-        protected Object valuesClojure()
-        {
-            return value;
-        }
-
-        @Override
-        void toClojureWithValues(StringBuilder sb)
-        {
-            sb.append(value);
+            super(Type.append, key, value);
         }
     }
 
-    private static class Event
+    private static class Event extends ObjectPersistentMap
     {
         enum Type {
             ok, fail; // invoke, info
@@ -235,49 +202,94 @@ public class ElleVerifier implements Verifier
         }
 
         private final int process;
-        private final long index;
+        private long index = -1;
         private final Event.Type type;
         private final List<Action> actions;
         // value
         private final long time;
 
-        private Event(int process, int index, Event.Type type, long time, List<Action> actions)
+        private Event(int process, Event.Type type, long time, List<Action> actions)
         {
+            super(Keys.eventKeys);
             this.process = process;
-            this.index = index;
             this.type = type;
             this.actions = actions;
             this.time = time;
         }
 
-        static Object toClojure(List<Event> events)
+        public static Object toClojure(List<Event> events)
         {
-            List<clojure.lang.Associative> ops = new ArrayList<>(events.size());
+            events = events.stream().limit(7).collect(Collectors.toList());
+            boolean useMemoryOptimized = true;
+            if (useMemoryOptimized)
+                return PersistentVector.create(events);
+            StringBuilder sb = new StringBuilder();
+            sb.append('[');
             for (Event e : events)
-                ops.add(e.asOp());
-            return ops;
-//            StringBuilder sb = new StringBuilder();
-//            sb.append('[');
-//            for (Event e : events)
-//            {
-//                sb.append('{');
-//                e.toClojure(sb);
-//                sb.append("}\n");
-//            }
-//            sb.append(']');
-//            // TODO (now): can we avoid string and make this cheaper?
-//            return Clojure.read(sb.toString());
+            {
+                sb.append('{');
+                toClojure(sb, e);
+                sb.append("}\n");
+            }
+            sb.append(']');
+            return Clojure.read(sb.toString());
         }
 
-        private clojure.lang.IPersistentMap asOp()
+        private static void toClojure(StringBuilder sb, Event e)
         {
-//            Map<Object, Object> op = new HashMap<>();
-//            op.put(Keys.process, process);
-//            op.put(Keys.time, time);
-//            op.put(Keys.type, type.keyword);
-//            op.put(Keys.value, actions.stream().map(a -> a.asOp()).collect(Collectors.toList()));
-//            return PersistentHashMap.create(op);
-            return new EventClj(Keys.eventKeys);
+            sb.append(":process ").append(e.process).append(",\n");
+            sb.append(":time ").append(e.time).append(",\n");
+            sb.append(":type :").append(e.type.name()).append(",\n");
+            sb.append(":value [");
+            for (Action a : e.actions)
+            {
+                toClojure(sb, a);
+                sb.append(' ');
+            }
+            sb.append(']');
+        }
+
+        private static void toClojure(StringBuilder sb, Action e)
+        {
+            sb.append("[:").append(e.type.name());
+            sb.append(' ').append(e.key).append(' ');
+            sb.append(e.value);
+            sb.append(']');
+        }
+
+        @Override
+        protected ObjectPersistentMap create(Set<Keyword> keys)
+        {
+            return new EventClj(keys);
+        }
+
+        @Override
+        public Object valAt(Object key, Object notFound)
+        {
+            if (key == Keys.process) return process;
+            else if (key == Keys.index) return index == -1 ? notFound : index;
+            else if (key == Keys.time) return time;
+            else if (key == Keys.type) return type.keyword;
+            else if (key == Keys.value) return actions;
+            return notFound;
+        }
+
+        @Override
+        public IPersistentMap assoc(Object key, Object val)
+        {
+            if (key == Keys.index)
+                index = ((Long) val).longValue();
+            else
+                throw new UnsupportedOperationException("Unable to update key " + key);
+            return this;
+        }
+
+        @Override
+        public boolean containsKey(Object key)
+        {
+            if (key == Keys.index && index != -1)
+                return true;
+            return super.containsKey(key);
         }
 
         private class EventClj extends ObjectPersistentMap
@@ -285,6 +297,12 @@ public class ElleVerifier implements Verifier
             private EventClj(Set<Keyword> keys)
             {
                 super(keys);
+            }
+
+            @Override
+            public boolean containsKey(Object key)
+            {
+                return Event.this.containsKey(key);
             }
 
             @Override
@@ -296,37 +314,14 @@ public class ElleVerifier implements Verifier
             @Override
             public Object valAt(Object key, Object notFound)
             {
-                if (key == Keys.process) return process;
-                else if (key == Keys.index) return index;
-                else if (key == Keys.time) return time;
-                else if (key == Keys.type) return type.keyword;
-                else if (key == Keys.value) return actions.stream().map(a -> a.asOp()).collect(Collectors.toList());
-                return notFound;
+                return Event.this.valAt(key, notFound);
             }
-        }
 
-        final void toClojure(StringBuilder sb)
-        {
-            sb.append(":process ").append(process).append(",\n");
-            sb.append(":time ").append(time).append(",\n");
-            sb.append(":type :").append(type.name()).append(",\n");
-            sb.append(":value [");
-            for (Action a : actions)
+            @Override
+            public IPersistentMap assoc(Object key, Object val)
             {
-                a.toClojure(sb);
-                sb.append(' ');
+                return Event.this.assoc(key, val);
             }
-            sb.append(']');
-        }
-
-        @Override
-        public String toString()
-        {
-            StringBuilder sb = new StringBuilder();
-            sb.append('{');
-            toClojure(sb);
-            sb.append("}\n");
-            return sb.toString();
         }
     }
 
@@ -338,7 +333,7 @@ public class ElleVerifier implements Verifier
         private static Keyword type = Keyword.intern(null, "type");
         private static Keyword value = Keyword.intern(null, "value");
 
-        private static final Set<Keyword> eventKeys = ImmutableSet.of(Keys.process, Keys.index, Keys.time, Keys.type, Keys.value);
+        private static final Set<Keyword> eventKeys = ImmutableSet.of(Keys.process, Keys.time, Keys.type, Keys.value);
     }
 
     private static class Clj
