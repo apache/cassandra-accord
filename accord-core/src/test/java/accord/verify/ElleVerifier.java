@@ -256,6 +256,7 @@ public class ElleVerifier implements Verifier
             return this;
         }
 
+        // this type is just to avoid copying the whole event and trick clojure/elle to use a mutable class with immutable APIs...
         private class EventClj extends ObjectPersistentMap
         {
             private EventClj(Set<Keyword> keys)
