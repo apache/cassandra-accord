@@ -119,7 +119,7 @@ public class BurnTest
             {
                 boolean isWrite = random.nextBoolean();
                 int readCount = 1 + random.nextInt(2);
-                int writeCount = isWrite ? random.nextInt(3) : 0;
+                int writeCount = isWrite ? 1 + random.nextInt(2) : 0;
 
                 TreeSet<Key> requestKeys = new TreeSet<>();
                 while (readCount-- > 0)
@@ -400,7 +400,7 @@ public class BurnTest
 
             List<Id> nodes = generateIds(false, random.nextInt(rf, rf * 3));
 
-            burn(random, new TopologyFactory(rf, IntHashKey.ranges(random.nextInt(Math.max(nodes.size() + 1, rf), nodes.size() * 3))),
+            burn(random, new TopologyFactory(rf, IntHashKey.ranges(random.nextInt(nodes.size() + 1, nodes.size() * 3))),
                     clients,
                     nodes,
                     5 + random.nextInt(15),
