@@ -34,7 +34,9 @@ import com.google.common.base.StandardSystemProperty;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.RandomAccess;
@@ -60,19 +62,23 @@ public class ElleVerifier implements Verifier
     @Override
     public Checker witness(int start, int end)
     {
-        List<Action> actions = new ArrayList<>();
+        List<Action> invoked = new ArrayList<>();
+        List<Action> witnessed = new ArrayList<>();
         return new Checker()
         {
             @Override
             public void read(int index, int[] seq)
             {
-                actions.add(new Read(index, seq));
+                invoked.add(new Read(index, null));
+                witnessed.add(new Read(index, seq));
             }
 
             @Override
             public void write(int index, int value)
             {
-                actions.add(new Append(index, value));
+                Append e = new Append(index, value);
+                invoked.add(e);
+                witnessed.add(e);
             }
 
             @Override
@@ -80,10 +86,10 @@ public class ElleVerifier implements Verifier
             {
                 // When a range read is performed, if the result was no matching keys then history isn't clear.
                 // Since StrictSerializabilityVerifier uses indexes and not pk values, it is not possible to find expected keys and putting empty result for them...
-                if (actions.isEmpty())
+                if (witnessed.isEmpty())
                     return;
-                // TODO (coverage): pass client id as process?
-                events.add(new Event(0, Event.Type.ok, end, actions));
+                events.add(new Event(start, Event.Type.invoke, start, invoked));
+                events.add(new Event(start, Event.Type.ok, end, witnessed));
             }
         };
     }
@@ -93,6 +99,8 @@ public class ElleVerifier implements Verifier
     {
         if (events.isEmpty())
             throw new IllegalArgumentException("No events seen");
+        // invoke and ok are mixed together in order, but there could be time gaps, so order based off time...
+        events.sort(Comparator.comparingLong(a -> a.time));
 
         Object eventHistory = Clj.history.invoke(Event.toClojure(events));
         events.clear();
@@ -144,7 +152,7 @@ public class ElleVerifier implements Verifier
         private final int key;
         private final Object value;
 
-        protected Action(Action.Type type, int key, Object value)
+        protected Action(Action.Type type, int key, @Nullable Object value)
         {
             this.type = type;
             this.key = key;
@@ -158,7 +166,12 @@ public class ElleVerifier implements Verifier
             {
                 case 0:  return type.keyword;
                 case 1:  return key;
-                case 2:  return value;
+                case 2:
+                {
+                    if (value == null)
+                        throw new IndexOutOfBoundsException();
+                    return value;
+                }
                 default: throw new IndexOutOfBoundsException();
             }
         }
@@ -166,7 +179,7 @@ public class ElleVerifier implements Verifier
         @Override
         public int size()
         {
-            return 3;
+            return value == null ? 2 : 3;
         }
     }
 
@@ -175,7 +188,7 @@ public class ElleVerifier implements Verifier
         protected Read(int key, int[] seq)
         {
             // TODO (optimization): rather than vector of boxed int, can we use the interfaces so we can stay primitive array?
-            super(Type.r, key, PersistentVector.create(IntStream.of(seq).mapToObj(Integer::valueOf).collect(Collectors.toList())));
+            super(Type.r, key, seq == null ? null : PersistentVector.create(IntStream.of(seq).mapToObj(Integer::valueOf).collect(Collectors.toList())));
         }
     }
 
@@ -191,7 +204,7 @@ public class ElleVerifier implements Verifier
     {
         enum Type
         {
-            ok, fail; // invoke, info
+            invoke, ok, fail; // info
 
             final Keyword keyword;
 

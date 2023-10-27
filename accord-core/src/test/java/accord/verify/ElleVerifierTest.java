@@ -48,7 +48,8 @@ class ElleVerifierTest
 
         ElleVerifier verifier = new ElleVerifier();
 
-        try (Verifier.Checker checker = verifier.witness(0, 63))
+        int id = 0;
+        try (Verifier.Checker checker = verifier.witness(id++, 63))
         {
             checker.read(5, new int[] {});
             checker.write(5, 1);
@@ -56,25 +57,25 @@ class ElleVerifierTest
             checker.write(6, 2);
             checker.read(8, new int[] {});
         }
-        try (Verifier.Checker checker = verifier.witness(2, 75))
+        try (Verifier.Checker checker = verifier.witness(id++, 75))
         {
             checker.read(6, new int[]{2});
         }
-        try (Verifier.Checker checker = verifier.witness(2, 79))
+        try (Verifier.Checker checker = verifier.witness(id++, 79))
         {
             checker.read(5, new int[]{1});
         }
-        try (Verifier.Checker checker = verifier.witness(2, 83))
+        try (Verifier.Checker checker = verifier.witness(id++, 83))
         {
             checker.read(6, new int[]{2});
             checker.read(7, new int[]{});
         }
-        try (Verifier.Checker checker = verifier.witness(2, 92))
+        try (Verifier.Checker checker = verifier.witness(id++, 92))
         {
             checker.read(4, new int[]{});
             checker.write(4, 2);
         }
-        try (Verifier.Checker checker = verifier.witness(2, 94))
+        try (Verifier.Checker checker = verifier.witness(id++, 94))
         {
             checker.read(5, new int[]{1});
             checker.read(4, new int[] {2});
@@ -82,12 +83,28 @@ class ElleVerifierTest
             checker.read(8, new int[] {});
             checker.write(8, 2);
         }
-        try (Verifier.Checker checker = verifier.witness(2, 94))
+        try (Verifier.Checker checker = verifier.witness(id++, 94))
         {
             checker.read(4, new int[]{2, 3});
             checker.read(7, new int[] {});
             checker.write(7, 2);
             checker.read(8, new int[] {2});
+        }
+        verifier.close();
+    }
+
+    @Test
+    void invokeIgnoredWhenNoMutation()
+    {
+        Assumptions.assumeTrue(ElleVerifier.Support.allowed(), "Elle doesn't support JDK 8");
+        ElleVerifier verifier = new ElleVerifier();
+        try (Verifier.Checker checker = verifier.witness(3, 63))
+        {
+            checker.read(6, new int[] {});
+        }
+        try (Verifier.Checker checker = verifier.witness(60, 64))
+        {
+            checker.read(4, new int[] {});
         }
         verifier.close();
     }
