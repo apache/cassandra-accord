@@ -164,15 +164,15 @@ public class ElleVerifier implements Verifier
         {
             switch (index)
             {
-                case 0:  return type.keyword;
-                case 1:  return key;
+                case 0:
+                    return type.keyword;
+                case 1:
+                    return key;
                 case 2:
-                {
-                    if (value == null)
-                        throw new IndexOutOfBoundsException();
-                    return value;
-                }
-                default: throw new IndexOutOfBoundsException();
+                    if (value != null)
+                        return value;
+                default:
+                    throw new IndexOutOfBoundsException();
             }
         }
 
