@@ -94,7 +94,7 @@ class ElleVerifierTest
     }
 
     @Test
-    void invokeIgnoredWhenNoMutation()
+    void readOnly()
     {
         Assumptions.assumeTrue(ElleVerifier.Support.allowed(), "Elle doesn't support JDK 8");
         ElleVerifier verifier = new ElleVerifier();
