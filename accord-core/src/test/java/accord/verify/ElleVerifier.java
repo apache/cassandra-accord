@@ -204,7 +204,7 @@ public class ElleVerifier implements Verifier
     {
         enum Type
         {
-            invoke, ok, fail; // info
+            invoke, ok, fail; // info is left out as burn test does not have access to the original request, so can't populate an "invoke" event
 
             final Keyword keyword;
 
@@ -215,12 +215,12 @@ public class ElleVerifier implements Verifier
         }
 
         private final int process;
-        private long index = -1;
         private final Event.Type type;
         private final List<Action> actions;
         private final long time;
+        private long index = -1;
 
-        private Event(int process, Event.Type type, long time, List<Action> actions)
+        private Event(int process, Type type, long time, List<Action> actions)
         {
             super(Keys.eventKeys);
             this.process = process;
@@ -232,12 +232,6 @@ public class ElleVerifier implements Verifier
         public static Object toClojure(List<Event> events)
         {
             return PersistentVector.create(events);
-        }
-
-        @Override
-        protected ObjectPersistentMap create(Set<Keyword> keys)
-        {
-            return new EventClj(keys);
         }
 
         @Override
@@ -267,39 +261,6 @@ public class ElleVerifier implements Verifier
             else
                 throw new UnsupportedOperationException("Unable to update key " + key);
             return this;
-        }
-
-        // this type is just to avoid copying the whole event and trick clojure/elle to use a mutable class with immutable APIs...
-        private class EventClj extends ObjectPersistentMap
-        {
-            private EventClj(Set<Keyword> keys)
-            {
-                super(keys);
-            }
-
-            @Override
-            public boolean containsKey(Object key)
-            {
-                return Event.this.containsKey(key);
-            }
-
-            @Override
-            protected ObjectPersistentMap create(Set<Keyword> keys)
-            {
-                return new EventClj(keys);
-            }
-
-            @Override
-            public Object valAt(Object key, Object notFound)
-            {
-                return Event.this.valAt(key, notFound);
-            }
-
-            @Override
-            public IPersistentMap assoc(Object key, Object val)
-            {
-                return Event.this.assoc(key, val);
-            }
         }
     }
 
@@ -337,14 +298,12 @@ public class ElleVerifier implements Verifier
 
     private static abstract class ObjectPersistentMap implements clojure.lang.IPersistentMap
     {
-        private final Set<Keyword> keys;
+        private Set<Keyword> keys;
 
         private ObjectPersistentMap(Set<Keyword> keys)
         {
             this.keys = keys;
         }
-
-        protected abstract ObjectPersistentMap create(Set<Keyword> filter);
 
         @Override
         public boolean containsKey(Object key)
@@ -373,7 +332,8 @@ public class ElleVerifier implements Verifier
         @Override
         public IPersistentMap without(Object key)
         {
-            return create(Sets.filter(keys, k -> !k.equals(key)));
+            keys = Sets.filter(keys, k -> !k.equals(key));
+            return this;
         }
 
         @Override
