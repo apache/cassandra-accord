@@ -267,17 +267,17 @@ public class ElleVerifier implements Verifier
     private static class Keys
     {
         // event keys
-        private static Keyword process = RT.keyword(null, "process");
-        private static Keyword index = RT.keyword(null, "index");
-        private static Keyword time = RT.keyword(null, "time");
-        private static Keyword type = RT.keyword(null, "type");
-        private static Keyword value = RT.keyword(null, "value");
+        private final static Keyword process = RT.keyword(null, "process");
+        private final static Keyword index = RT.keyword(null, "index");
+        private final static Keyword time = RT.keyword(null, "time");
+        private final static Keyword type = RT.keyword(null, "type");
+        private final static Keyword value = RT.keyword(null, "value");
 
         // elle check results
-        private static Keyword valid = RT.keyword(null, "valid?");
-        private static Keyword unknown = RT.keyword(null, "unknown");
-        private static Keyword anomalyTypes = RT.keyword(null, "anomaly-types");
-        private static Keyword emptyTransactionGraph = RT.keyword(null, "empty-transaction-graph");
+        private final static Keyword valid = RT.keyword(null, "valid?");
+        private final static Keyword unknown = RT.keyword(null, "unknown");
+        private final static Keyword anomalyTypes = RT.keyword(null, "anomaly-types");
+        private final static Keyword emptyTransactionGraph = RT.keyword(null, "empty-transaction-graph");
 
         private static final Set<Keyword> eventKeys = ImmutableSet.of(Keys.process, Keys.time, Keys.type, Keys.value);
     }
