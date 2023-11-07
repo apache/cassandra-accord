@@ -123,6 +123,7 @@ public class ElleVerifier implements Verifier
                             continue; // nothing to see here
                         throw new AssertionError("Unexpected anomaly type detected: " + type);
                     }
+                    return;  // all good
                 }
             }
         }
