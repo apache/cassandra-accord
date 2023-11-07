@@ -117,18 +117,12 @@ public class ElleVerifier implements Verifier
                 ArraySeq seq = (ArraySeq) anomalyTypes;
                 if (!seq.isEmpty())
                 {
-                    boolean empty = false;
                     for (Object type : seq)
                     {
                         if (type == Keys.emptyTransactionGraph)
-                        {
-                            empty = true;
                             continue; // nothing to see here
-                        }
                         throw new AssertionError("Unexpected anomaly type detected: " + type);
                     }
-                    if (empty)
-                        return; // all good
                 }
             }
         }
