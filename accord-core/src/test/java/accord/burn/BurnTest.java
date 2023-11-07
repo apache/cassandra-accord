@@ -42,6 +42,10 @@ import java.util.function.Supplier;
 
 import accord.burn.random.FrequentLargeRange;
 import accord.impl.MessageListener;
+import accord.verify.CompositeVerifier;
+import accord.verify.ElleVerifier;
+import accord.verify.StrictSerializabilityVerifier;
+import accord.verify.Verifier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.slf4j.Logger;
@@ -73,7 +77,6 @@ import accord.primitives.Txn;
 import accord.utils.DefaultRandom;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncExecutor;
-import accord.verify.StrictSerializabilityVerifier;
 
 import static accord.impl.IntHashKey.forHash;
 import static accord.utils.Utils.toArray;
@@ -212,8 +215,9 @@ public class BurnTest
                     .asLongSupplier(forked);
         };
 
-        StrictSerializabilityVerifier strictSerializable = new StrictSerializabilityVerifier(keyCount);
+        Verifier verifier = createVerifier(keyCount);
         SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, agent);
+
         Function<CommandStore, AsyncExecutor> executor = ignore -> globalExecutor;
 
         MessageListener listener = MessageListener.get();
@@ -280,23 +284,22 @@ public class BurnTest
                 }
 
                 acks.incrementAndGet();
-                strictSerializable.begin();
-
-                for (int i = 0 ; i < reply.read.length ; ++i)
+                try (Verifier.Checker check  = verifier.witness(start, end))
                 {
-                    Key key = reply.responseKeys.get(i);
-                    int k = key(key);
+                    for (int i = 0 ; i < reply.read.length ; ++i)
+                    {
+                        Key key = reply.responseKeys.get(i);
+                        int k = key(key);
 
-                    int[] read = reply.read[i];
-                    int write = reply.update == null ? -1 : reply.update.getOrDefault(key, -1);
+                        int[] read = reply.read[i];
+                        int write = reply.update == null ? -1 : reply.update.getOrDefault(key, -1);
 
-                    if (read != null)
-                        strictSerializable.witnessRead(k, read);
-                    if (write >= 0)
-                        strictSerializable.witnessWrite(k, write);
+                        if (read != null)
+                            check.read(k, read);
+                        if (write >= 0)
+                            check.write(k, write);
+                    }
                 }
-
-                strictSerializable.apply(start, end);
             }
             catch (Throwable t)
             {
@@ -313,6 +316,7 @@ public class BurnTest
                                           topologyFactory, initialRequests::poll,
                                           onSubmitted::set
             );
+            verifier.close();
         }
         catch (Throwable t)
         {
@@ -341,6 +345,14 @@ public class BurnTest
             }
             throw new AssertionError("Incomplete set of responses; clock=" + clock.get() + ", expected operations=" + (operations * 2));
         }
+    }
+
+    private static Verifier createVerifier(int keyCount)
+    {
+        if (!ElleVerifier.Support.allowed())
+            return new StrictSerializabilityVerifier(keyCount);
+        return CompositeVerifier.create(new StrictSerializabilityVerifier(keyCount),
+                                        new ElleVerifier());
     }
 
     public static void main(String[] args)

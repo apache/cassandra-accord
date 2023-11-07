@@ -36,6 +36,16 @@ dependencies {
     implementation 'org.agrona:agrona:1.17.1'
 
     testImplementation group: 'org.assertj', name: 'assertj-core', version: '3.24.2'
+    testImplementation 'org.clojure:clojure:1.11.1'
+    testImplementation 'elle:elle:0.1.7'
+    // for some reason this isn't pulled in properly?  Have to be explicit
+    testImplementation('spootnik:unilog:0.7.31') {
+        exclude group: 'ch.qos.logback'
+
+        exclude group: 'org.slf4j', module: 'slf4j-api'
+        exclude group: 'org.slf4j', module: 'log4j-over-slf4j'
+        exclude group: 'org.slf4j', module: 'jcl-over-slf4j'
+    }
 }
 
 task burn(type: JavaExec) {
