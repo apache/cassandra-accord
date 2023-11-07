@@ -302,6 +302,8 @@ public class ElleVerifier implements Verifier
         @Override
         public boolean containsKey(Object key)
         {
+            if (!(key instanceof Keyword))
+                throw new AssertionError(String.format("Unexpected key %s; type %s", key, key == null ? null : key.getClass()));
             return keys.contains(key);
         }
 
