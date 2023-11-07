@@ -182,7 +182,7 @@ public class ElleVerifier implements Verifier
         protected Read(int key, int[] seq)
         {
             // TODO (optimization): rather than vector of boxed int, can we use the interfaces so we can stay primitive array?
-            super(Type.r, key, seq == null ? null : PersistentVector.create(IntStream.of(seq).mapToObj(Integer::valueOf).collect(Collectors.toList())));
+            super(Type.r, key, seq == null ? null : PersistentVector.create(IntStream.of(seq).boxed().collect(Collectors.toList())));
         }
     }
 
