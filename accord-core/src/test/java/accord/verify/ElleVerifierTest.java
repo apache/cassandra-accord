@@ -18,6 +18,7 @@
 
 package accord.verify;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
@@ -36,7 +37,7 @@ class ElleVerifierTest
 
         try (Verifier.Checker checker = verifier.witness(2, 3))
         {
-            checker.read(0, new int[] {1});
+            checker.read(0, new int[]{1});
         }
         verifier.close();
     }
@@ -51,11 +52,11 @@ class ElleVerifierTest
         int id = 0;
         try (Verifier.Checker checker = verifier.witness(id++, 63))
         {
-            checker.read(5, new int[] {});
+            checker.read(5, new int[]{});
             checker.write(5, 1);
-            checker.read(6, new int[] {});
+            checker.read(6, new int[]{});
             checker.write(6, 2);
-            checker.read(8, new int[] {});
+            checker.read(8, new int[]{});
         }
         try (Verifier.Checker checker = verifier.witness(id++, 75))
         {
@@ -78,17 +79,17 @@ class ElleVerifierTest
         try (Verifier.Checker checker = verifier.witness(id++, 94))
         {
             checker.read(5, new int[]{1});
-            checker.read(4, new int[] {2});
+            checker.read(4, new int[]{2});
             checker.write(4, 3);
-            checker.read(8, new int[] {});
+            checker.read(8, new int[]{});
             checker.write(8, 2);
         }
         try (Verifier.Checker checker = verifier.witness(id++, 94))
         {
             checker.read(4, new int[]{2, 3});
-            checker.read(7, new int[] {});
+            checker.read(7, new int[]{});
             checker.write(7, 2);
-            checker.read(8, new int[] {2});
+            checker.read(8, new int[]{2});
         }
         verifier.close();
     }
@@ -100,12 +101,38 @@ class ElleVerifierTest
         ElleVerifier verifier = new ElleVerifier();
         try (Verifier.Checker checker = verifier.witness(3, 63))
         {
-            checker.read(6, new int[] {});
+            checker.read(6, new int[]{});
         }
         try (Verifier.Checker checker = verifier.witness(60, 64))
         {
-            checker.read(4, new int[] {});
+            checker.read(4, new int[]{});
         }
         verifier.close();
+    }
+
+    @Test
+    void badHistory()
+    {
+        Assumptions.assumeTrue(ElleVerifier.Support.allowed(), "Elle doesn't support JDK 8");
+
+        ElleVerifier verifier = new ElleVerifier();
+        try (Verifier.Checker checker = verifier.witness(0, 1))
+        {
+            checker.write(0, 1);
+        }
+
+        try (Verifier.Checker checker = verifier.witness(2, 3))
+        {
+            checker.read(0, new int[] {1, 2});
+        }
+
+        try (Verifier.Checker checker = verifier.witness(4, 5))
+        {
+            checker.write(0, 2);
+        }
+        Assertions.assertThatThrownBy(() -> verifier.close())
+                .isInstanceOf(HistoryViolation.class)
+                .hasMessageContaining(":anomalies")
+                .hasMessageContaining(":G1c-realtime");
     }
 }
