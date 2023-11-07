@@ -26,6 +26,12 @@ java {
   withSourcesJar()
 }
 
+repositories {
+    mavenCentral()
+    // needed for clojure dependencies
+    maven { url "https://clojars.org/repo" }
+}
+
 dependencies {
     implementation group: "com.google.guava", name: "guava", version: "27.0-jre"
     implementation group: "net.ju-n.compile-command-annotations", name: "compile-command-annotations", version: "1.2.0"
