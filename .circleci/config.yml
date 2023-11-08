@@ -80,8 +80,11 @@ jobs:
             - ~/.gradle
           key: v1-dependencies-{{ checksum "build.gradle" }}-{{ checksum "accord-core/build.gradle" }}-{{ checksum "accord-maelstrom/build.gradle" }}-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}
 
-      # run tests!
-      - run: ./gradlew check
+      - run:
+          name: Run Tests
+          command: ./gradlew check
+          no_output_timeout: 20m
+
       - run:
           name: Save Test Results
           command: |

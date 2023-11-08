@@ -281,6 +281,9 @@ public class ElleVerifier implements Verifier
     {
         static
         {
+            // Needed else elle loads rhizome which then would call java.awt.Toolkit.getDefaultToolkit().getMenuShortcutKeyMask() which fails in CI
+            System.setProperty("java.awt.headless", "true");
+
             IFn require = Clojure.var("clojure.core", "require");
             require.invoke(Clojure.read("elle.list-append"));
             require.invoke(Clojure.read("jepsen.history"));
