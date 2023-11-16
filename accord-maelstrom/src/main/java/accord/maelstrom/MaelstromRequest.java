@@ -47,6 +47,12 @@ public class MaelstromRequest extends Body implements Request
     }
 
     @Override
+    public void preProcess(Node node, Id client, ReplyContext replyContext)
+    {
+        // no-op
+    }
+
+    @Override
     public void process(Node node, Id client, ReplyContext replyContext)
     {
         node.coordinate(txn).addCallback((success, fail) -> {

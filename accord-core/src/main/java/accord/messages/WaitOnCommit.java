@@ -70,11 +70,17 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
     }
 
     @Override
-    public void process(Node node, Id replyToNode, ReplyContext replyContext)
+    public void preProcess(Node node, Id replyToNode, ReplyContext replyContext)
     {
         this.node = node;
         this.replyTo = replyToNode;
         this.replyContext = replyContext;
+    }
+
+    @Override
+    public void process(Node node, Id replyToNode, ReplyContext replyContext)
+    {
+        preProcess(node, replyToNode, replyContext);
         node.mapReduceConsumeLocal(this, scope, txnId.epoch(), txnId.epoch(), this);
     }
 

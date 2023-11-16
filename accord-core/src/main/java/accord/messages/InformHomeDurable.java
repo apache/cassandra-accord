@@ -54,6 +54,12 @@ public class InformHomeDurable implements Request
     }
 
     @Override
+    public void preProcess(Node node, Id replyToNode, ReplyContext replyContext)
+    {
+        // no-op
+    }
+
+    @Override
     public void process(Node node, Id replyToNode, ReplyContext replyContext)
     {
         // TODO (expected, efficiency): do not load txnId first

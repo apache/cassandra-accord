@@ -136,12 +136,18 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
     }
 
     @Override
-    public void process(Node on, Id replyTo, ReplyContext replyContext)
+    public void preProcess(Node on, Id replyTo, ReplyContext replyContext)
     {
         this.node = on;
         this.replyTo = replyTo;
         this.replyContext = replyContext;
         this.progressKey = progressKey(); // TODO (low priority, clarity): not every class that extends TxnRequest needs this set
+    }
+
+    @Override
+    public void process(Node on, Id replyTo, ReplyContext replyContext)
+    {
+        preProcess(on, replyTo, replyContext);
         process();
     }
 

@@ -41,7 +41,6 @@ import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
-import accord.utils.MapReduceConsume;
 
 import javax.annotation.Nullable;
 import java.util.function.BiConsumer;
@@ -54,7 +53,7 @@ import static accord.local.Status.PreApplied;
 import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.primitives.Routables.Slice.Minimal;
 
-public class Propagate implements MapReduceConsume<SafeCommandStore, Void>, EpochSupplier, LocalMessage
+public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
 {
     public static class SerializerSupport
     {
@@ -83,7 +82,13 @@ public class Propagate implements MapReduceConsume<SafeCommandStore, Void>, Epoc
     @Nullable public final Writes writes;
     @Nullable public final Result result;
 
-    transient final BiConsumer<Status.Known, Throwable> callback;
+    protected transient BiConsumer<Status.Known, Throwable> callback;
+
+    @Override
+    public BiConsumer<Status.Known, Throwable> callback()
+    {
+        return callback;
+    }
 
     Propagate(
         TxnId txnId,
@@ -121,6 +126,13 @@ public class Propagate implements MapReduceConsume<SafeCommandStore, Void>, Epoc
         this.writes = writes;
         this.result = result;
         this.callback = callback;
+    }
+
+    @Override
+    public void process(Node on, BiConsumer<Status.Known, Throwable> callback)
+    {
+        this.callback = callback;
+        process(on);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -190,7 +202,7 @@ public class Propagate implements MapReduceConsume<SafeCommandStore, Void>, Epoc
         Propagate propagate =
             new Propagate(txnId, route, full.maxKnowledgeSaveStatus, full.maxSaveStatus, full.durability, full.homeKey, progressKey, achieved, full.map, isTruncated, partialTxn, committedDeps, toEpoch, full.executeAtIfKnown(), full.writes, full.result, callback);
 
-        node.localMessage(propagate);
+        node.localRequest(propagate);
     }
 
     @Override
@@ -210,6 +222,18 @@ public class Propagate implements MapReduceConsume<SafeCommandStore, Void>, Epoc
             return committedDeps.keyDeps.keys();
         else
             return Keys.EMPTY;
+    }
+
+    @Override
+    public void preProcess(Node on, Node.Id from, ReplyContext replyContext)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void process(Node on, Node.Id from, ReplyContext replyContext)
+    {
+        throw new UnsupportedOperationException();
     }
 
     @Override

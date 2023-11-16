@@ -31,49 +31,52 @@ import static accord.messages.MessageType.Kind.LOCAL;
  */
 public class MessageType
 {
-    public static final MessageType SIMPLE_RSP                       = mt(REMOTE, false);
-    public static final MessageType FAILURE_RSP                      = mt(REMOTE, false);
-    public static final MessageType PRE_ACCEPT_REQ                   = mt(REMOTE, true );
-    public static final MessageType PRE_ACCEPT_RSP                   = mt(REMOTE, false);
-    public static final MessageType ACCEPT_REQ                       = mt(REMOTE, true );
-    public static final MessageType ACCEPT_RSP                       = mt(REMOTE, false);
-    public static final MessageType ACCEPT_INVALIDATE_REQ            = mt(REMOTE, true );
-    public static final MessageType GET_DEPS_REQ                     = mt(REMOTE, false);
-    public static final MessageType GET_DEPS_RSP                     = mt(REMOTE, false);
-    public static final MessageType COMMIT_MINIMAL_REQ               = mt(REMOTE, true );
-    public static final MessageType COMMIT_MAXIMAL_REQ               = mt(REMOTE, true );
-    public static final MessageType COMMIT_INVALIDATE_REQ            = mt(REMOTE, true );
-    public static final MessageType APPLY_MINIMAL_REQ                = mt(REMOTE, true );
-    public static final MessageType APPLY_MAXIMAL_REQ                = mt(REMOTE, true );
-    public static final MessageType APPLY_RSP                        = mt(REMOTE, false);
-    public static final MessageType READ_REQ                         = mt(REMOTE, false);
-    public static final MessageType READ_RSP                         = mt(REMOTE, false);
-    public static final MessageType BEGIN_RECOVER_REQ                = mt(REMOTE, true );
-    public static final MessageType BEGIN_RECOVER_RSP                = mt(REMOTE, false);
-    public static final MessageType BEGIN_INVALIDATE_REQ             = mt(REMOTE, true );
-    public static final MessageType BEGIN_INVALIDATE_RSP             = mt(REMOTE, false);
-    public static final MessageType WAIT_ON_COMMIT_REQ               = mt(REMOTE, false);
-    public static final MessageType WAIT_ON_COMMIT_RSP               = mt(REMOTE, false);
-    public static final MessageType WAIT_UNTIL_APPLIED_REQ           = mt(REMOTE, false);
-    public static final MessageType INFORM_OF_TXN_REQ                = mt(REMOTE, true );
-    public static final MessageType INFORM_DURABLE_REQ               = mt(REMOTE, true );
-    public static final MessageType INFORM_HOME_DURABLE_REQ          = mt(REMOTE, true );
-    public static final MessageType CHECK_STATUS_REQ                 = mt(REMOTE, false);
-    public static final MessageType CHECK_STATUS_RSP                 = mt(REMOTE, false);
-    public static final MessageType FETCH_DATA_REQ                   = mt(REMOTE, false);
-    public static final MessageType FETCH_DATA_RSP                   = mt(REMOTE, false);
-    public static final MessageType SET_SHARD_DURABLE_REQ            = mt(REMOTE, true );
-    public static final MessageType SET_GLOBALLY_DURABLE_REQ         = mt(REMOTE, true );
-    public static final MessageType QUERY_DURABLE_BEFORE_REQ         = mt(REMOTE, false);
-    public static final MessageType QUERY_DURABLE_BEFORE_RSP         = mt(REMOTE, false);
-    public static final MessageType APPLY_THEN_WAIT_UNTIL_APPLIED_REQ= mt(REMOTE, true );
+    public static final MessageType SIMPLE_RSP                        = remote("SIMPLE_RSP",                        false);
+    public static final MessageType FAILURE_RSP                       = remote("FAILURE_RSP",                       false);
+    public static final MessageType PRE_ACCEPT_REQ                    = remote("PRE_ACCEPT_REQ",                    true );
+    public static final MessageType PRE_ACCEPT_RSP                    = remote("PRE_ACCEPT_RSP",                    false);
+    public static final MessageType ACCEPT_REQ                        = remote("ACCEPT_REQ",                        true );
+    public static final MessageType ACCEPT_RSP                        = remote("ACCEPT_RSP",                        false);
+    public static final MessageType ACCEPT_INVALIDATE_REQ             = remote("ACCEPT_INVALIDATE_REQ",             true );
+    public static final MessageType GET_DEPS_REQ                      = remote("GET_DEPS_REQ",                      false);
+    public static final MessageType GET_DEPS_RSP                      = remote("GET_DEPS_RSP",                      false);
+    public static final MessageType COMMIT_MINIMAL_REQ                = remote("COMMIT_MINIMAL_REQ",                true );
+    public static final MessageType COMMIT_MAXIMAL_REQ                = remote("COMMIT_MAXIMAL_REQ",                true );
+    public static final MessageType COMMIT_INVALIDATE_REQ             = remote("COMMIT_INVALIDATE_REQ",             true );
+    public static final MessageType APPLY_MINIMAL_REQ                 = remote("APPLY_MINIMAL_REQ",                 true );
+    public static final MessageType APPLY_MAXIMAL_REQ                 = remote("APPLY_MAXIMAL_REQ",                 true );
+    public static final MessageType APPLY_RSP                         = remote("APPLY_RSP",                         false);
+    public static final MessageType READ_REQ                          = remote("READ_REQ",                          false);
+    public static final MessageType READ_RSP                          = remote("READ_RSP",                          false);
+    public static final MessageType BEGIN_RECOVER_REQ                 = remote("BEGIN_RECOVER_REQ",                 true );
+    public static final MessageType BEGIN_RECOVER_RSP                 = remote("BEGIN_RECOVER_RSP",                 false);
+    public static final MessageType BEGIN_INVALIDATE_REQ              = remote("BEGIN_INVALIDATE_REQ",              true );
+    public static final MessageType BEGIN_INVALIDATE_RSP              = remote("BEGIN_INVALIDATE_RSP",              false);
+    public static final MessageType WAIT_ON_COMMIT_REQ                = remote("WAIT_ON_COMMIT_REQ",                false);
+    public static final MessageType WAIT_ON_COMMIT_RSP                = remote("WAIT_ON_COMMIT_RSP",                false);
+    public static final MessageType WAIT_UNTIL_APPLIED_REQ            = remote("WAIT_UNTIL_APPLIED_REQ",            false);
+    public static final MessageType INFORM_OF_TXN_REQ                 = remote("INFORM_OF_TXN_REQ",                 true );
+    public static final MessageType INFORM_DURABLE_REQ                = remote("INFORM_DURABLE_REQ",                true );
+    public static final MessageType INFORM_HOME_DURABLE_REQ           = remote("INFORM_HOME_DURABLE_REQ",           true );
+    public static final MessageType CHECK_STATUS_REQ                  = remote("CHECK_STATUS_REQ",                  false);
+    public static final MessageType CHECK_STATUS_RSP                  = remote("CHECK_STATUS_RSP",                  false);
+    public static final MessageType FETCH_DATA_REQ                    = remote("FETCH_DATA_REQ",                    false);
+    public static final MessageType FETCH_DATA_RSP                    = remote("FETCH_DATA_RSP",                    false);
+    public static final MessageType SET_SHARD_DURABLE_REQ             = remote("SET_SHARD_DURABLE_REQ",             true );
+    public static final MessageType SET_GLOBALLY_DURABLE_REQ          = remote("SET_GLOBALLY_DURABLE_REQ",          true );
+    public static final MessageType QUERY_DURABLE_BEFORE_REQ          = remote("QUERY_DURABLE_BEFORE_REQ",          false);
+    public static final MessageType QUERY_DURABLE_BEFORE_RSP          = remote("QUERY_DURABLE_BEFORE_RSP",          false);
+    public static final MessageType APPLY_THEN_WAIT_UNTIL_APPLIED_REQ = remote("APPLY_THEN_WAIT_UNTIL_APPLIED_REQ", true );
 
-    public static final MessageType PROPAGATE_PRE_ACCEPT_MSG         = mt(LOCAL,  true );
-    public static final MessageType PROPAGATE_COMMIT_MSG             = mt(LOCAL,  true );
-    public static final MessageType PROPAGATE_APPLY_MSG              = mt(LOCAL,  true );
-    public static final MessageType PROPAGATE_OTHER_MSG              = mt(LOCAL,  true );
+    public static final MessageType PROPAGATE_PRE_ACCEPT_MSG          = local("PROPAGATE_PRE_ACCEPT_MSG", true);
+    public static final MessageType PROPAGATE_COMMIT_MSG              = local("PROPAGATE_COMMIT_MSG",     true);
+    public static final MessageType PROPAGATE_APPLY_MSG               = local("PROPAGATE_APPLY_MSG",      true);
+    public static final MessageType PROPAGATE_OTHER_MSG               = local("PROPAGATE_OTHER_MSG",      true);
 
 
+    /**
+     * LOCAL messages are not sent to remote nodes.
+     */
     public enum Kind { LOCAL, REMOTE }
 
     public static final List<MessageType> values;
@@ -98,14 +101,17 @@ public class MessageType
         values = builder.build();
     }
 
-    protected static MessageType mt(Kind kind, boolean hasSideEffects)
+    protected static MessageType local(String name, boolean hasSideEffects)
     {
-        return new MessageType(kind, hasSideEffects);
+        return new MessageType(name, LOCAL, hasSideEffects);
     }
 
-    /**
-     * LOCAL messages are not sent to remote nodes.
-     */
+    protected static MessageType remote(String name, boolean hasSideEffects)
+    {
+        return new MessageType(name, REMOTE, hasSideEffects);
+    }
+
+    private final String name;
     private final Kind kind;
 
     /**
@@ -113,10 +119,22 @@ public class MessageType
      */
     private final boolean hasSideEffects;
 
-    protected MessageType(Kind kind, boolean hasSideEffects)
+    protected MessageType(String name, Kind kind, boolean hasSideEffects)
     {
-        this.hasSideEffects = hasSideEffects;
+        this.name = name;
         this.kind = kind;
+        this.hasSideEffects = hasSideEffects;
+    }
+
+    public String name()
+    {
+        return name;
+    }
+
+    @Override
+    public String toString()
+    {
+        return name();
     }
 
     public boolean isLocal()

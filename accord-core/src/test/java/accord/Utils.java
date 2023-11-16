@@ -30,9 +30,10 @@ import com.google.common.collect.Sets;
 import accord.api.Key;
 import accord.api.MessageSink;
 import accord.api.Scheduler;
+import accord.config.LocalConfig;
+import accord.config.MutableLocalConfig;
 import accord.coordinate.TxnExecute;
 import accord.coordinate.TxnPersist;
-import accord.config.LocalConfig;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.IntKey;
 import accord.impl.SimpleProgressLog;
@@ -48,8 +49,7 @@ import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
 import accord.messages.Apply;
-import accord.config.MutableLocalConfig;
-import accord.messages.LocalMessage;
+import accord.messages.LocalRequest;
 import accord.primitives.Keys;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
@@ -165,7 +165,7 @@ public class Utils
         LocalConfig localConfig = new MutableLocalConfig();
         Node node = new Node(nodeId,
                              messageSink,
-                             LocalMessage::process,
+                             LocalRequest::process,
                              new MockConfigurationService(messageSink, EpochFunction.noop(), topology),
                              clock,
                              NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, clock),
