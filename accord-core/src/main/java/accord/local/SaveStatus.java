@@ -78,7 +78,9 @@ public enum SaveStatus
     TruncatedApplyWithDeps          (Status.Truncated,             Full,    DefinitionErased, ExecuteAtKnown,    DepsKnown,    Outcome.Apply,    CleaningUp),
     TruncatedApplyWithOutcome       (Status.Truncated,             Full,    DefinitionErased, ExecuteAtKnown,    DepsErased,   Outcome.Apply,    CleaningUp),
     TruncatedApply                  (Status.Truncated,             Full,    DefinitionErased, ExecuteAtKnown,    DepsErased,   Outcome.WasApply, CleaningUp),
-    // Expunged means the command is either entirely pre-bootstrap or stale and we don't have enough information to move it through the normal redundant->truncation path (i.e. it might be truncated, it might be applied)
+    // ErasedOrInvalidated means the command is redundant for the shard and data being queried, but no FullRoute is known, so it is not known to be globally Erased
+    ErasedOrInvalidated             (Status.Truncated,             Maybe,   DefinitionUnknown,ExecuteAtUnknown,  DepsUnknown,  Unknown,          CleaningUp),
+    // NOTE: Erased should ONLY be adopted on a replica that knows EVERY shard has successfully applied the transaction at all healthy replicas.
     Erased                          (Status.Truncated,             Maybe,   DefinitionErased, ExecuteAtErased,   DepsErased,   Outcome.Erased,   CleaningUp),
     Invalidated                     (Status.Invalidated,                                                                                         CleaningUp),
     ;
@@ -256,6 +258,13 @@ public enum SaveStatus
                 switch (status)
                 {
                     default: throw new AssertionError("Unexpected status: " + status);
+                    case ErasedOrInvalidated:
+                        if (known.outcome.isInvalidated())
+                            return Invalidated;
+
+                        if (!known.outcome.isOrWasApply() || known.executeAt == ExecuteAtKnown)
+                            return ErasedOrInvalidated;
+
                     case Erased:
                         if (!known.outcome.isOrWasApply() || known.executeAt != ExecuteAtKnown)
                             return Erased;

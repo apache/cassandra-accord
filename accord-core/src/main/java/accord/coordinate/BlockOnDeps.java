@@ -39,6 +39,7 @@ import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
 import static accord.coordinate.tracking.RequestStatus.Failed;
+import static accord.utils.Invariants.illegalState;
 
 /**
  * Block on deps at quorum for a sync point transaction, and then move the transaction to the applied state
@@ -102,16 +103,16 @@ public class BlockOnDeps implements Callback<ReadReply>
         ReadNack nack = (ReadNack) reply;
         switch (nack)
         {
-            default: throw new IllegalStateException();
+            default: throw illegalState();
             case Redundant:
                 // WaitUntilApplied only sends Redundant on truncation which implies durable and applied
                 isDone = true;
                 callback.accept(txn.result(txnId, txnId, null), null);
                 break;
             case NotCommitted:
-                throw new IllegalStateException("Received `NotCommitted` response after sending maximal commit as part of `BlockOnDeps`");
+                throw illegalState("Received `NotCommitted` response after sending maximal commit as part of `BlockOnDeps`");
             case Invalid:
-                onFailure(from, new IllegalStateException("Submitted a read command to a replica that did not own the range"));
+                onFailure(from, illegalState("Submitted a read command to a replica that did not own the range"));
                 break;
         }
     }

@@ -54,7 +54,8 @@ class ProposeAndExecute extends Propose<Result>
     @Override
     void onAccepted()
     {
-        Deps deps = Deps.merge(acceptOks, ok -> ok.deps);
+        // TODO (required): disable merging with original deps by flag, and confirm fault detected
+        Deps deps = this.deps.with(Deps.merge(acceptOks, ok -> ok.deps));
         Execute.execute(node, txnId, txn, route, executeAt, deps, callback);
     }
 }

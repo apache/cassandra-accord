@@ -27,8 +27,10 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static accord.utils.ArrayBuffers.*;
+import static accord.utils.Invariants.illegalState;
 import static accord.utils.SortedArrays.remap;
 import static accord.utils.SortedArrays.remapToSuperset;
+import static java.lang.String.format;
 
 /**
  * Instead of creating a parent object and having generic key/value methods, we introduce a bunch of static helper methods.
@@ -49,6 +51,10 @@ import static accord.utils.SortedArrays.remapToSuperset;
  *       ...
  *   }
  * }
+ *
+ * // TODO (expected, performance): it would be trivial to special-case transactions that intersect on all keys (e.g. by setting the top integer bit, and otherwise propagating the prior limit).
+ *                                  This would also neatly optimise cases where we only have a single key.
+ * // TODO (desired, performance): it would also be simple to bitmask our integers, compressing to e.g. byte or short boundaries as permitted. We could do this for all values, including our offsets header.
  */
 public class RelationMultiMap
 {
@@ -153,11 +159,13 @@ public class RelationMultiMap
             {
                 // TODO (low priority, efficiency): this allocates a significant amount of memory: would be preferable to be able to sort using a pre-defined scratch buffer
                 Arrays.sort(keysToValues, keyOffset, totalCount);
+                int removed = 0;
                 for (int i = keyOffset + 1 ; i < totalCount ; ++i)
                 {
-                    if (keysToValues[i - 1].equals(keysToValues[i]))
-                        throw new IllegalArgumentException("TxnId for " + keys[keyCount - 1] + " are not unique: " + Arrays.asList(keysToValues).subList(keyOffset, totalCount));
+                    if (keysToValues[i - 1].equals(keysToValues[i])) ++removed;
+                    else if (removed > 0) keysToValues[i - removed] = keysToValues[i];
                 }
+                totalCount -= removed;
             }
 
             keyLimits[keyCount - 1] = totalCount;
@@ -812,7 +820,7 @@ public class RelationMultiMap
                 .append(", right[").append(rightKeyIndex).append("] = ").append(rightKeys[rightKeyIndex]).append("\n");
         sb.append("leftKeys = ").append(Arrays.stream(leftKeys, 0, leftKeyLength).map(Object::toString).collect(Collectors.joining())).append('\n');
         sb.append("rightKeys = ").append(Arrays.stream(rightKeys, 0, rightKeyLength).map(Object::toString).collect(Collectors.joining())).append('\n');
-        throw new IllegalStateException(sb.toString());
+        throw illegalState(sb.toString());
     }
 
     static int[] copy(int[] src, int to, int length, IntBuffers bufferManager)
@@ -1052,7 +1060,7 @@ public class RelationMultiMap
                 {
                     K key = keys[i];
                     V value = values[keysToValues[i]];
-                    throw new IllegalStateException(String.format("Duplicate value (%s) found for key %s", value, key));
+                    throw illegalState(format("Duplicate value (%s) found for key %s", value, key));
                 }
                 i++;
             }

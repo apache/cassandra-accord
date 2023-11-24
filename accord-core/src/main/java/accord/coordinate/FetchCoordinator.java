@@ -33,6 +33,7 @@ import accord.utils.Invariants;
 
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.checkArgument;
+import static accord.utils.Invariants.illegalState;
 
 /**
  * This abstract coordinator is to be extended by implementations.
@@ -244,7 +245,7 @@ public abstract class FetchCoordinator
     protected StartingRangeFetch starting(Node.Id to, Ranges ranges)
     {
         if (isDone)
-            throw new IllegalStateException();
+            throw illegalState();
 
         // TODO (required, consider): should we cancel those we have superseded?
         return fetchRanges.starting(ranges);

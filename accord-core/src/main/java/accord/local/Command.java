@@ -53,6 +53,7 @@ import static accord.local.Status.Durability.ShardUniversal;
 import static accord.local.Status.Durability.UniversalOrInvalidated;
 import static accord.local.Status.Invalidated;
 import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
+import static accord.utils.Invariants.illegalState;
 import static accord.utils.SortedArrays.forEachIntersection;
 import static accord.utils.Utils.ensureImmutable;
 import static accord.utils.Utils.ensureMutable;
@@ -182,7 +183,7 @@ public abstract class Command implements CommonAttributes
     {
         if (actual != expected)
         {
-            throw new IllegalStateException(format("Cannot instantiate %s for status %s. %s expected",
+            throw illegalState(format("Cannot instantiate %s for status %s. %s expected",
                                                    actual.getSimpleName(), status, expected.getSimpleName()));
         }
         return status;
@@ -210,7 +211,7 @@ public abstract class Command implements CommonAttributes
             case Truncated:
                 return validateCommandClass(status, Truncated.class, klass);
             default:
-                throw new IllegalStateException("Unhandled status " + status);
+                throw illegalState("Unhandled status " + status);
         }
     }
 
@@ -744,6 +745,11 @@ public abstract class Command implements CommonAttributes
         {
             Durability durability = Durability.mergeAtLeast(command.durability(), UniversalOrInvalidated);
             return erased(command.txnId(), durability, command.route());
+        }
+
+        public static Truncated erasedOrInvalidated(TxnId txnId, Status.Durability durability, Route<?> route)
+        {
+            return validate(new Truncated(txnId, SaveStatus.ErasedOrInvalidated, durability, route, null, EMPTY, null, null));
         }
 
         public static Truncated erased(TxnId txnId, Status.Durability durability, Route<?> route)

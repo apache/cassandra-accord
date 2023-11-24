@@ -81,6 +81,8 @@ import static accord.local.Status.Committed;
 import static accord.local.Status.Truncated;
 import static accord.local.Status.NotDefined;
 import static accord.primitives.Routables.Slice.Minimal;
+import static accord.utils.Invariants.illegalState;
+import static java.lang.String.format;
 
 public abstract class InMemoryCommandStore extends CommandStore
 {
@@ -526,7 +528,7 @@ public abstract class InMemoryCommandStore extends CommandStore
     public SafeCommandStore beginOperation(PreLoadContext context)
     {
         if (current != null)
-            throw new IllegalStateException("Another operation is in progress or it's store was not cleared");
+            throw illegalState("Another operation is in progress or it's store was not cleared");
         current = createSafeStore(context, updateRangesForEpoch());
         return current;
     }
@@ -534,7 +536,7 @@ public abstract class InMemoryCommandStore extends CommandStore
     public void completeOperation(SafeCommandStore store)
     {
         if (store != current)
-            throw new IllegalStateException("This operation has already been cleared");
+            throw illegalState("This operation has already been cleared");
         try
         {
             current.complete();
@@ -638,7 +640,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                 return globalCommand.value();
             if (entry.uninitialised)
                 return uninitialised(entry);
-            throw new IllegalStateException("Could not find command for CFK for " + entry);
+            throw illegalState("Could not find command for CFK for " + entry);
         }
 
         @Override
@@ -1019,7 +1021,8 @@ public abstract class InMemoryCommandStore extends CommandStore
                     // TODO (desired, efficiency): this can be made more efficient by batching by epoch
                     if (rangesForEpoch.coordinates(txnId).contains(key))
                         return; // already coordinates, no need to replicate
-                    if (!rangesForEpoch.allBefore(txnId.epoch()).contains(key))
+                    // TODO (required): check this logic, esp. next line, matches C*
+                    if (!rangesForEpoch.allAfter(txnId.epoch()).contains(key))
                         return;
 
                     CommandsForKeys.registerNotWitnessed(this, key, txnId);
@@ -1036,7 +1039,8 @@ public abstract class InMemoryCommandStore extends CommandStore
                 Ranges ranges = deps.rangeDeps.ranges(txnId);
                 if (rangesForEpoch.coordinates(txnId).intersects(ranges))
                     return; // already coordinates, no need to replicate
-                if (!rangesForEpoch.allBefore(txnId.epoch()).intersects(ranges))
+                // TODO (required): check this logic, esp. next line, matches C*
+                if (!rangesForEpoch.allAfter(txnId.epoch()).intersects(ranges))
                     return;
 
                 historicalRangeCommands.merge(txnId, ranges.slice(allRanges), Ranges::with);
@@ -1319,7 +1323,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         {
             boolean result = queue.add(runnable);
             if (!result)
-                throw new IllegalStateException("could not add item to queue");
+                throw illegalState("could not add item to queue");
             maybeRun();
         }
 
@@ -1399,9 +1403,9 @@ public abstract class InMemoryCommandStore extends CommandStore
             Thread current = Thread.currentThread();
             Thread expected = thread;
             if (expected == null)
-                throw new IllegalStateException(String.format("Command store called from wrong thread; unexpected %s", current));
+                throw illegalState(format("Command store called from wrong thread; unexpected %s", current));
             if (expected != current)
-                throw new IllegalStateException(String.format("Command store called from the wrong thread. Expected %s, got %s", expected, current));
+                throw illegalState(format("Command store called from the wrong thread. Expected %s, got %s", expected, current));
         }
 
         @Override

@@ -46,6 +46,7 @@ import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.primitives.Txn.Kind.LocalOnly;
 import static accord.primitives.Txn.Kind.NoOp;
+import static accord.utils.Invariants.illegalState;
 
 /**
  * Captures state associated with a command store's adoption of a collection of new ranges.
@@ -272,7 +273,7 @@ class Bootstrap
         private synchronized void cancel(SafeToRead state)
         {
             if (state.startedAt != Integer.MAX_VALUE)
-                throw new IllegalStateException("Tried to cancel starting a fetch that had already started");
+                throw illegalState("Tried to cancel starting a fetch that had already started");
             state.startedAt = Integer.MIN_VALUE;
 
             // unlink from other overlaps, and remove ourselves from states collection

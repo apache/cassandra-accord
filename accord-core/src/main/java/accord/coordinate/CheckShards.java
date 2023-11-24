@@ -27,6 +27,8 @@ import accord.messages.CheckStatus.IncludeInfo;
 import accord.primitives.*;
 import accord.topology.Topologies;
 
+import static accord.utils.Invariants.illegalState;
+
 /**
  * A result of null indicates the transaction is globally persistent
  * A result of CheckStatusOk indicates the maximum status found for the transaction, which may be used to assess progress
@@ -102,7 +104,7 @@ public abstract class CheckShards<U extends Unseekables<?>> extends ReadCoordina
             {
                 default: throw new AssertionError(String.format("Unexpected status: %s", reply));
                 case NotOwned:
-                    finishOnFailure(new IllegalStateException("Submitted command to a replica that did not own the range"), true);
+                    finishOnFailure(illegalState("Submitted command to a replica that did not own the range"), true);
                     return Action.Aborted;
             }
         }

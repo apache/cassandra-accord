@@ -35,6 +35,7 @@ import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
+import accord.primitives.Route;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
@@ -44,6 +45,9 @@ import accord.primitives.Unseekables;
 
 import static accord.local.Cleanup.NO;
 import static accord.local.RedundantBefore.PreBootstrapOrStale.FULLY;
+import static accord.local.SaveStatus.Erased;
+import static accord.local.SaveStatus.ErasedOrInvalidated;
+import static accord.primitives.Route.isFullRoute;
 
 /**
  * A CommandStore with exclusive access; a reference to this should not be retained outside of the scope of the method
@@ -90,7 +94,7 @@ public abstract class SafeCommandStore
         if (command.saveStatus().isUninitialised())
         {
             if (commandStore().durableBefore().isUniversal(txnId, unseekable))
-                return new ErasedSafeCommand(txnId);
+                return new ErasedSafeCommand(txnId, ErasedOrInvalidated);
         }
         return maybeTruncate(safeCommand, command, txnId, null);
     }
@@ -124,7 +128,7 @@ public abstract class SafeCommandStore
         if (command.saveStatus().isUninitialised())
         {
             if (Cleanup.isSafeToCleanup(commandStore().durableBefore(), txnId, unseekables))
-                return new ErasedSafeCommand(txnId);
+                return new ErasedSafeCommand(txnId, isFullRoute(unseekables) ? Erased : ErasedOrInvalidated);
         }
         return maybeTruncate(safeCommand, command, toEpoch, unseekables);
     }

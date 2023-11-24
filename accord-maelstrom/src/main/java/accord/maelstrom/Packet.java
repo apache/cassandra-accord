@@ -31,6 +31,8 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 import accord.local.Node.Id;
 
+import static accord.utils.Invariants.illegalState;
+
 public class Packet implements ReplyContext
 {
 
@@ -161,7 +163,7 @@ public class Packet implements ReplyContext
                         break;
                     case "id": in.nextLong(); break;
                     default:
-                        throw new IllegalStateException("Unexpected field " + field);
+                        throw illegalState("Unexpected field " + field);
                 }
             }
             in.endObject();

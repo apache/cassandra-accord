@@ -64,6 +64,7 @@ import static accord.local.Cleanup.ERASE;
 import static accord.local.Cleanup.TRUNCATE;
 import static accord.local.Cleanup.shouldCleanup;
 import static accord.local.Command.Truncated.erased;
+import static accord.local.Command.Truncated.invalidated;
 import static accord.local.Command.Truncated.truncatedApply;
 import static accord.local.Command.Truncated.truncatedApplyWithOutcome;
 import static accord.local.Commands.EnsureAction.Add;
@@ -505,7 +506,7 @@ public class Commands
         switch (updated.status())
         {
             default:
-                throw new IllegalStateException("Unexpected status: " + updated.status());
+                throw illegalState("Unexpected status: " + updated.status());
             case NotDefined:
             case PreAccepted:
             case Accepted:
@@ -667,13 +668,13 @@ public class Commands
                     {
                         Ranges ranges = safeStore.ranges().allAt(command.txnId().epoch());
                         ranges = command.route().slice(ranges, Minimal).participants().toRanges();
-                        safeStore.commandStore().markExclusiveSyncPointApplied(safeStore, command.txnId(), ranges);
+                        safeStore.commandStore().markExclusiveSyncPointLocallyApplied(safeStore, command.txnId(), ranges);
                     }
                     safeStore.notifyListeners(safeCommand);
                     return true;
                 }
             default:
-                throw new IllegalStateException("Unexpected status: " + command.status());
+                throw illegalState("Unexpected status: " + command.status());
         }
     }
 
@@ -772,7 +773,7 @@ public class Commands
         }
         else
         {
-            throw new IllegalStateException("We have a dependency to wait on, but have already finished waiting");
+            throw illegalState("We have a dependency to wait on, but have already finished waiting");
         }
     }
 
@@ -849,8 +850,8 @@ public class Commands
 
             case TRUNCATE:
                 Invariants.checkState(command.saveStatus().compareTo(TruncatedApply) < 0);
-                if (command.hasBeen(PreCommitted)) result = truncatedApply(command, Route.tryCastToFullRoute(maybeFullRoute));
-                else result = command; // do nothing; we don't have enough information
+                if (!command.hasBeen(PreCommitted)) result = invalidated(command);
+                else result = truncatedApply(command, Route.tryCastToFullRoute(maybeFullRoute));
                 break;
 
             case ERASE:
@@ -1319,7 +1320,7 @@ public class Commands
     {
         switch (action)
         {
-            default: throw new IllegalStateException("Unexpected action: " + action);
+            default: throw illegalState("Unexpected action: " + action);
             case Ignore:
                 return true;
 

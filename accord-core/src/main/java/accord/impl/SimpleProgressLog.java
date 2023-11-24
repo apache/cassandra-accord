@@ -73,6 +73,7 @@ import static accord.local.SaveStatus.LocalExecution.NotReady;
 import static accord.local.SaveStatus.LocalExecution.WaitingToApply;
 import static accord.local.Status.Durability.MajorityOrInvalidated;
 import static accord.local.Status.PreApplied;
+import static accord.utils.Invariants.illegalState;
 
 // TODO (desired, consider): consider propagating invalidations in the same way as we do applied
 // TODO (expected): report long-lived recurring transactions / operations
@@ -151,7 +152,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                         case Done:
                             return false;
                         case Investigating:
-                            throw new IllegalStateException("Unexpected progress: " + progress);
+                            throw illegalState("Unexpected progress: " + progress);
                         case Expected:
                             Invariants.paranoid(!isFree());
                             progress = NoProgress;
@@ -237,7 +238,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                         case NotWitnessed: // can't make progress if we haven't witnessed it yet
                         case Committed: // can't make progress if we aren't yet ReadyToExecute
                         case Done: // shouldn't be trying to make progress, as we're done
-                            throw new IllegalStateException("Unexpected status: " + status);
+                            throw illegalState("Unexpected status: " + status);
 
                         case ReadyToExecute:
                             // TODO (expected): we should have already exited this loop if this conditions is true

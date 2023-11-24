@@ -318,11 +318,6 @@ public class Infer
         return InvalidIfNot.NotKnownToBeInvalid;
     }
 
-    public enum YesNoMaybe
-    {
-        No, Maybe, Yes
-    }
-
     public static boolean safeToCleanup(SafeCommandStore safeStore, Command command, Route<?> fetchedWith, @Nullable Timestamp executeAt)
     {
         Invariants.checkArgument(fetchedWith != null || command.route() != null);
@@ -333,7 +328,9 @@ public class Infer
         Route<?> route = command.route();
         if (route == null) route = fetchedWith;
 
-        // TODO (required): is it safe to cleanup without an executeAt?
+        // TODO (required): is it safe to cleanup without an executeAt? We don't know for sure which ranges it might participate in.
+        //    We can infer the upper bound of execution by the "execution" of any ExclusiveSyncPoint used to infer the invalidation.
+        //    We should begin evaluating and tracking this.
         executeAt = command.executeAtIfKnown(Timestamp.nonNullOrMax(executeAt, txnId));
         Ranges coordinateRanges = safeStore.ranges().coordinates(txnId);
         Ranges acceptRanges = executeAt.epoch() == txnId.epoch() ? coordinateRanges : safeStore.ranges().allBetween(txnId, executeAt);

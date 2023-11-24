@@ -89,7 +89,6 @@ public class ListAgent implements Agent
     @Override
     public void onUncaughtException(Throwable t)
     {
-        // TODO (required, testing): ensure reported to runner
         onFailure.accept(t);
     }
 

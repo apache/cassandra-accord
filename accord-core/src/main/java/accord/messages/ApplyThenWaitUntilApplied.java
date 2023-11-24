@@ -35,6 +35,8 @@ import accord.primitives.Seekables;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
 
+import static accord.utils.Invariants.illegalState;
+
 /*
  * Used by local and global inclusive sync points to effect the sync point at each node
  * Combines commit, execute (with nothing really to execute), and apply into one request/response
@@ -86,9 +88,9 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
         switch (applyReply)
         {
             default:
-                throw new IllegalStateException("Unexpected ApplyReply");
+                throw illegalState("Unexpected ApplyReply");
             case Insufficient:
-                throw new IllegalStateException("ApplyThenWaitUntilApplied is always sent with a maximal `Commit` so how can `Apply` have an `Insufficient` result");
+                throw illegalState("ApplyThenWaitUntilApplied is always sent with a maximal `Commit` so how can `Apply` have an `Insufficient` result");
             case Redundant:
             case Applied:
                 // In both cases it's fine to continue to process and return a response saying

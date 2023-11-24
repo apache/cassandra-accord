@@ -65,7 +65,8 @@ public enum RedundantStatus
 
     /**
      * The relevant owned ranges are redundant, meaning any intersecting transaction is known to be either applied or invalidated
-     * via a sync point that has applied locally and on all healthy shards.
+     * via a sync point that has applied locally AND on all healthy shards. Note that this status CANNOT be taken if
+     * we are not ALSO LOCALLY_REDUNDANT, so we can use this to cleanup commands < PreCommitted.
      *
      * Note that this status overrides PRE_BOOTSTRAP_OR_STALE, since it implies the transaction has applied.
      */

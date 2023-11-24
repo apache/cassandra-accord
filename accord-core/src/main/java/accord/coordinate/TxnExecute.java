@@ -44,6 +44,7 @@ import org.agrona.collections.IntHashSet;
 
 import static accord.coordinate.ReadCoordinator.Action.Approve;
 import static accord.coordinate.ReadCoordinator.Action.ApprovePartial;
+import static accord.utils.Invariants.illegalState;
 
 public class TxnExecute extends ReadCoordinator<ReadReply> implements Execute
 {
@@ -119,7 +120,7 @@ public class TxnExecute extends ReadCoordinator<ReadReply> implements Execute
                 // also try sending a read command to another replica, in case they're ready to serve a response
                 return Action.TryAlternative;
             case Invalid:
-                callback.accept(null, new IllegalStateException("Submitted a read command to a replica that did not own the range"));
+                callback.accept(null, illegalState("Submitted a read command to a replica that did not own the range"));
                 return Action.Aborted;
         }
     }

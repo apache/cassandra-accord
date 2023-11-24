@@ -22,8 +22,10 @@ import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.utils.ArrayBuffers;
 import accord.utils.IndexedBiConsumer;
+import accord.utils.IndexedTriConsumer;
 import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.SymmetricComparator;
+import accord.utils.TriFunction;
 
 import java.util.*;
 import java.util.function.BiConsumer;
@@ -32,14 +34,16 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 import static accord.utils.ArrayBuffers.*;
+import static accord.utils.Invariants.illegalState;
 import static accord.utils.RelationMultiMap.*;
 import static accord.utils.SortedArrays.Search.FAST;
 
+// TODO (desired, consider): switch to RoutingKey? Would mean adopting execution dependencies less precisely, but saving ser/deser of large keys
+// TODO (expected): consider which projection we should default to on de/serialise
 /**
  * A collection of dependencies for a transaction, organised by the key the dependency is adopted via.
  * An inverse map from TxnId to Key may also be constructed and stored in this collection.
  */
-// TODO (desired, consider): switch to RoutingKey? Would mean adopting execution dependencies less precisely, but saving ser/deser of large keys
 public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
 {
     public static final KeyDeps NONE = new KeyDeps(Keys.EMPTY, NO_TXNIDS, NO_INTS);
@@ -270,14 +274,19 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
 
     public Keys participatingKeys(TxnId txnId)
     {
-        int txnIdIndex = Arrays.binarySearch(txnIds, txnId);
-        if (txnIdIndex < 0)
+        int txnIdx = Arrays.binarySearch(txnIds, txnId);
+        if (txnIdx < 0)
             return Keys.EMPTY;
 
+        return participatingKeys(txnIdx);
+    }
+
+    public Keys participatingKeys(int txnIdx)
+    {
         int[] txnIdsToKeys = txnIdsToKeys();
 
-        int start = txnIdIndex == 0 ? txnIds.length : txnIdsToKeys[txnIdIndex - 1];
-        int end = txnIdsToKeys[txnIdIndex];
+        int start = txnIdx == 0 ? txnIds.length : txnIdsToKeys[txnIdx - 1];
+        int end = txnIdsToKeys[txnIdx];
         if (start == end)
             return Keys.EMPTY;
 
@@ -292,14 +301,14 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
     {
         int txnIdIndex = Arrays.binarySearch(txnIds, txnId);
         if (txnIdIndex < 0)
-            throw new IllegalStateException("Cannot create a RouteFragment without any keys");
+            throw illegalState("Cannot create a RouteFragment without any keys");
 
         int[] txnIdsToKeys = txnIdsToKeys();
 
         int start = txnIdIndex == 0 ? txnIds.length : txnIdsToKeys[txnIdIndex - 1];
         int end = txnIdsToKeys[txnIdIndex];
         if (start == end)
-            throw new IllegalStateException("Cannot create a RouteFragment without any keys");
+            throw illegalState("Cannot create a RouteFragment without any keys");
 
         RoutingKey[] result = new RoutingKey[end - start];
         result[0] = keys.get(txnIdsToKeys[start]).toUnseekable();
@@ -410,27 +419,55 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
 
     public <P1, P2> void forEach(Ranges ranges, int inclIdx, int exclIdx, P1 p1, P2 p2, IndexedBiConsumer<P1, P2> forEach)
     {
-        int[] keysToTxnIds = keysToTxnIds();
         for (int i = 0; i < ranges.size(); ++i)
+            forEach(ranges.get(i), inclIdx, exclIdx, p1, p2, forEach);
+    }
+
+    public <P1, P2> void forEach(Range range, P1 p1, P2 p2, IndexedBiConsumer<P1, P2> forEach)
+    {
+        forEach(range, 0, keys.size(), p1, p2, forEach);
+    }
+
+    public <P1, P2> void forEach(Range range, int inclKeyIdx, int exclKeyIdx, P1 p1, P2 p2, IndexedBiConsumer<P1, P2> forEach)
+    {
+        forEach(range, inclKeyIdx, exclKeyIdx, forEach, p1, p2, IndexedBiConsumer::accept);
+    }
+
+    public <P1, P2, P3> void forEach(Range range, P1 p1, P2 p2, P3 p3, IndexedTriConsumer<P1, P2, P3> forEach)
+    {
+        forEach(range, 0, keys.size(), p1, p2, p3, forEach);
+    }
+
+    public <P1, P2, P3> void forEach(Range range, int inclKeyIdx, int exclKeyIdx, P1 p1, P2 p2, P3 p3, IndexedTriConsumer<P1, P2, P3> forEach)
+    {
+        int[] keysToTxnIds = keysToTxnIds();
+        int start = keys.indexOf(range.start());
+        if (start < 0) start = -1 - start;
+        else if (!range.startInclusive()) ++start;
+        start = startOffset(start);
+
+        int end = keys.indexOf(range.end());
+        if (end < 0) end = -1 - end;
+        else if (range.endInclusive()) ++end;
+        end = startOffset(end);
+
+        while (start < end)
         {
-            Range range = ranges.get(i);
-            int start = keys.indexOf(range.start());
-            if (start < 0) start = -1 - start;
-            else if (!range.startInclusive()) ++start;
-            start = startOffset(start);
-
-            int end = keys.indexOf(range.end());
-            if (end < 0) end = -1 - end;
-            else if (range.endInclusive()) ++end;
-            end = startOffset(end);
-
-            while (start < end)
-            {
-                int txnIdx = keysToTxnIds[start++];
-                if (txnIdx >= inclIdx && txnIdx < exclIdx)
-                    forEach.accept(p1, p2, txnIdx);
-            }
+            int txnIdx = keysToTxnIds[start++];
+            if (txnIdx >= inclKeyIdx && txnIdx < exclKeyIdx)
+                forEach.accept(p1, p2, p3, txnIdx);
         }
+    }
+
+    public <P1, V> V foldEachKey(int txnIdx, P1 p1, V accumulate, TriFunction<P1, Key, V, V> fold)
+    {
+        int[] txnIdsToKeys = txnIdsToKeys();
+
+        int start = txnIdx == 0 ? txnIds.length : txnIdsToKeys[txnIdx - 1];
+        int end = txnIdsToKeys[txnIdx];
+        for (int i = start; i < end ; ++i)
+            accumulate = fold.apply(p1, keys.get(txnIdsToKeys[i]), accumulate);
+        return accumulate;
     }
 
     public Keys keys()

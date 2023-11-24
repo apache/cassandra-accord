@@ -30,6 +30,8 @@ import accord.messages.Reply;
 import accord.primitives.Seekables;
 import accord.primitives.TxnId;
 
+import static accord.utils.Invariants.illegalState;
+
 public class ListResult implements Result, Reply
 {
     public enum Status

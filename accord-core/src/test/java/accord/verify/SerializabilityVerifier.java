@@ -27,6 +27,8 @@ import java.util.TreeSet;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
+import static accord.utils.Invariants.illegalState;
+
 /**
  * Nomenclature:
  *  register: the values associated with a given key
@@ -445,7 +447,7 @@ public class SerializabilityVerifier
     public void witnessRead(int key, int[] sequence)
     {
         if (bufReads[key] != null)
-            throw new IllegalStateException("Can buffer only one read observation for each key");
+            throw illegalState("Can buffer only one read observation for each key");
         bufReads[key] = sequence;
         // if we have a write, then for causality sequence is implicitly longer by one to include the write
         bufNewPeerSteps[key] = bufWrites[key] >= 0 ? sequence.length + 1 : sequence.length;
@@ -457,7 +459,7 @@ public class SerializabilityVerifier
     public void witnessWrite(int key, int id)
     {
         if (bufWrites[key] >= 0)
-            throw new IllegalStateException("Can buffer only one write observation for each key");
+            throw illegalState("Can buffer only one write observation for each key");
         bufWrites[key] = id;
         if (bufReads[key] != null)
             bufNewPeerSteps[key] = bufReads[key].length;

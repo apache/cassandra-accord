@@ -85,6 +85,12 @@ public class MaybeRecover extends CheckShards<Route<?>>
             {
                 default: throw new AssertionError();
                 case Unknown:
+                    // TODO (required): ErasedOrInvalidated takes Unknown here. This is probably wrong, consider it more carefully.
+                    //     Specifically, we should probably not propose invalidation if it's possible the command has been Erased.
+                    //     We should probably introduce a MaybeErased Outcome.
+                    //     If we only have a partial route, and all end-points we contact are MaybeErased, we are either stale or
+                    //     we have enough local information to know the command's outcome is durable.
+                    //     If any shard is not MaybeErased but is also Unknown, then we are safe to Invalidate.
                     if (known.canProposeInvalidation() && !Route.isFullRoute(full.route))
                     {
                         // for correctness reasons, we have not necessarily preempted the initial pre-accept round and
@@ -116,6 +122,8 @@ public class MaybeRecover extends CheckShards<Route<?>>
                     break;
 
                 case Erased:
+                    // TODO (required): this isn't valid. This is either an invalidated command or we're stale. Most likely the latter.
+                    //   this is because Erased is only permitted to be adopted when every shard has made the command durable.
                     Invariants.checkState(!full.knownFor(route.participants()).isInvalidated());
                     safeEraseAndCallback(node, txnId, someRoute, full.toProgressToken(), callback);
             }

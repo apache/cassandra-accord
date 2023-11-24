@@ -32,6 +32,8 @@ import accord.api.Key;
 import accord.api.Result;
 import accord.primitives.Keys;
 
+import static accord.utils.Invariants.illegalState;
+
 public class MaelstromResult implements Result
 {
     final Node.Id client;
@@ -116,7 +118,7 @@ public class MaelstromResult implements Result
                 String kind = in.nextName();
                 switch (kind)
                 {
-                    default: throw new IllegalStateException("Invalid kind: " + kind);
+                    default: throw illegalState("Invalid kind: " + kind);
                     case "r":
                         in.beginArray();
                         while (in.hasNext())

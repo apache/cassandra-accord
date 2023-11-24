@@ -275,9 +275,6 @@ public enum Status
             switch (outcome)
             {
                 default: throw new AssertionError();
-                case Erased:
-                    return Status.Truncated;
-
                 case Invalidated:
                     return Status.Invalidated;
 
@@ -286,6 +283,7 @@ public enum Status
                     if (executeAt.isDecidedAndKnownToExecute() && definition.isKnown() && deps.hasDecidedDeps())
                         return PreApplied;
 
+                case Erased:
                 case Unknown:
                     if (executeAt.isDecidedAndKnownToExecute() && definition.isKnown() && deps.hasDecidedDeps())
                         return Committed;

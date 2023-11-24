@@ -42,6 +42,8 @@ import org.slf4j.LoggerFactory;
 import accord.api.VisibleForImplementation;
 import accord.utils.Invariants;
 
+import static accord.utils.Invariants.illegalState;
+
 public abstract class AsyncChains<V> implements AsyncChain<V>
 {
     private static final Logger logger = LoggerFactory.getLogger(AsyncChains.class);
@@ -718,7 +720,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         }
         catch (TimeoutException e)
         {
-            throw new IllegalStateException("Should not throw timeout exception e");
+            throw illegalState("Should not throw timeout exception e");
         }
     }
 
@@ -801,7 +803,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         }
         catch (TimeoutException e)
         {
-            throw new IllegalStateException("Should not throw timeout exception e");
+            throw illegalState("Should not throw timeout exception e");
         }
     }
 

@@ -43,6 +43,7 @@ import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
 import static accord.local.Status.Committed;
 import static accord.messages.ReadData.ReadNack.NotCommitted;
 import static accord.messages.ReadData.ReadNack.Redundant;
+import static accord.utils.Invariants.illegalState;
 import static accord.utils.MapReduceConsume.forEach;
 
 public abstract class AbstractExecute extends ReadData implements Command.TransientListener, EpochSupplier
@@ -250,7 +251,7 @@ public abstract class AbstractExecute extends ReadData implements Command.Transi
                 // nothing to see here
                 break;
             case RETURNED:
-                throw new IllegalStateException("ReadOk was sent, yet ack called again");
+                throw illegalState("ReadOk was sent, yet ack called again");
             default:
                 throw new AssertionError("Unknown state: " + state);
         }
@@ -270,7 +271,7 @@ public abstract class AbstractExecute extends ReadData implements Command.Transi
         switch (state)
         {
             case RETURNED:
-                throw new IllegalStateException("ReadOk was sent, yet ack called again");
+                throw illegalState("ReadOk was sent, yet ack called again");
             case OBSOLETE:
                 logger.debug("After the read completed for txn {}, the result was marked obsolete", txnId);
                 if (fail != null)

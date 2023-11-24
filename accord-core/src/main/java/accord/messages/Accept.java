@@ -111,7 +111,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
 
     private PartialDeps calculatePartialDeps(SafeCommandStore safeStore)
     {
-        Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, txnId);
+        Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, executeAt);
         return PreAccept.calculatePartialDeps(safeStore, txnId, keys, EpochSupplier.constant(minUnsyncedEpoch), executeAt, ranges);
     }
 

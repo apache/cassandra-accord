@@ -44,6 +44,7 @@ import static accord.local.PreLoadContext.contextFor;
 import static accord.primitives.Txn.Kind.Kinds.Any;
 import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.checkState;
+import static accord.utils.Invariants.illegalState;
 
 /**
  * Local or global barriers that return a result once all transactions have their side effects visible.
@@ -284,7 +285,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
         @Override
         public BarrierTxn reduce(BarrierTxn o1, BarrierTxn o2)
         {
-            throw new IllegalStateException("Should not be possible to find multiple transactions");
+            throw illegalState("Should not be possible to find multiple transactions");
         }
 
         @Override

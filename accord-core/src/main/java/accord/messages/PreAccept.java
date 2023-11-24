@@ -262,7 +262,12 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
                                 builder.add(testTxnId, keyOrRange, status, testExecuteAt, deps.get());
                                 return in;
                             }, null, builder);
-        return builder.buildPartialDeps(safeStore, ranges);
+        
+        try (Deps.AbstractBuilder<PartialDeps> redundantBuilder = new PartialDeps.Builder(ranges))
+        {
+            PartialDeps redundant = safeStore.commandStore().redundantBefore().collectDeps(keys, redundantBuilder, minEpoch, executeAt).build();
+            return builder.buildPartialDeps(safeStore, ranges).with(redundant);
+        }
     }
 
     /**

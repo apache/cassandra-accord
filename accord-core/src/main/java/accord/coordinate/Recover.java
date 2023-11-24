@@ -63,6 +63,7 @@ import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.local.Status.Committed;
 import static accord.messages.BeginRecovery.RecoverOk.maxAcceptedOrLater;
 import static accord.utils.Invariants.debug;
+import static accord.utils.Invariants.illegalState;
 
 // TODO (low priority, cleanup): rename to Recover (verb); rename Recover message to not clash
 public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throwable>
@@ -237,7 +238,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             Timestamp executeAt = acceptOrCommit.executeAt;
             switch (acceptOrCommit.status)
             {
-                default: throw new IllegalStateException("Unknown status: " + acceptOrCommit.status);
+                default: throw illegalState("Unknown status: " + acceptOrCommit.status);
                 case Truncated:
                     callback.accept(ProgressToken.TRUNCATED, null);
                     return;
@@ -317,7 +318,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
                 case NotDefined:
                 case PreAccepted:
-                    throw new IllegalStateException("Should only be possible to have Accepted or later commands");
+                    throw illegalState("Should only be possible to have Accepted or later commands");
             }
         }
 

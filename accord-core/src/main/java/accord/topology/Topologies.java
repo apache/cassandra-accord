@@ -28,6 +28,8 @@ import accord.utils.Invariants;
 
 import java.util.*;
 
+import static accord.utils.Invariants.illegalState;
+
 // TODO (desired, efficiency/clarity): since Topologies are rarely needed, should optimise API for single topology case
 //  (e.g. at least implementing Topologies by Topology)
 public interface Topologies extends TopologySorter
@@ -438,7 +440,7 @@ public interface Topologies extends TopologySorter
             switch (topologies.size())
             {
                 case 0:
-                    throw new IllegalStateException("Unable to build an empty Topologies");
+                    throw illegalState("Unable to build an empty Topologies");
                 case 1:
                     return new Single(sorter, topologies.get(0));
                 default:

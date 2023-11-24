@@ -31,6 +31,7 @@ import accord.utils.Invariants;
 
 import static accord.primitives.Route.castToFullRoute;
 import static accord.primitives.Route.isFullRoute;
+import static accord.utils.Invariants.illegalState;
 
 /**
  * A result of null indicates the transaction is globally persistent
@@ -96,7 +97,7 @@ public class RecoverWithSomeRoute extends CheckShards<Route<?>> implements BiCon
                     else
                     {
                         if (witnessedByInvalidation != null && witnessedByInvalidation.compareTo(Status.PreAccepted) > 0)
-                            throw new IllegalStateException("We previously invalidated, finding a status that should be recoverable");
+                            throw illegalState("We previously invalidated, finding a status that should be recoverable");
                         Invalidate.invalidate(node, txnId, route, true, callback);
                     }
             }

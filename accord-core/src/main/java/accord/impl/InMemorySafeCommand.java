@@ -26,6 +26,8 @@ import accord.local.Listeners;
 import accord.local.SafeCommand;
 import accord.primitives.TxnId;
 
+import static accord.utils.Invariants.illegalState;
+
 public class InMemorySafeCommand extends SafeCommand implements SafeState<Command>
 {
     private static final Supplier<GlobalCommand> INVALIDATED = () -> null;
@@ -92,7 +94,7 @@ public class InMemorySafeCommand extends SafeCommand implements SafeState<Comman
     private void touch()
     {
         if (invalidated())
-            throw new IllegalStateException("Cannot access invalidated " + this);
+            throw illegalState("Cannot access invalidated " + this);
         if (lazy != null)
         {
             global = lazy.get();

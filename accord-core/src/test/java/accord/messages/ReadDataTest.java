@@ -74,6 +74,7 @@ import org.mockito.stubbing.Answer;
 
 import static accord.Utils.createNode;
 import static accord.Utils.id;
+import static accord.utils.Invariants.illegalState;
 import static accord.utils.Utils.listOf;
 import static accord.utils.async.AsyncChains.getUninterruptibly;
 import static org.mockito.ArgumentMatchers.any;
@@ -109,7 +110,7 @@ class ReadDataTest
             @Override
             public AsyncChain<Data> answer(InvocationOnMock ignore) throws Throwable
             {
-                if (called) throw new IllegalStateException("Multiple calls");
+                if (called) throw illegalState("Multiple calls");
                 return readResult;
             }
         });

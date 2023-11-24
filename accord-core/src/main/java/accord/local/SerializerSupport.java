@@ -50,6 +50,7 @@ import static accord.messages.MessageType.PROPAGATE_COMMIT_MSG;
 import static accord.messages.MessageType.PROPAGATE_PRE_ACCEPT_MSG;
 import static accord.primitives.PartialTxn.merge;
 import static accord.utils.Invariants.checkState;
+import static accord.utils.Invariants.illegalState;
 
 @VisibleForImplementation
 public class SerializerSupport
@@ -203,7 +204,7 @@ public class SerializerSupport
             }
             else
             {
-                throw new IllegalStateException(errorMessage);
+                throw illegalState(errorMessage);
             }
 
             /*
@@ -253,7 +254,7 @@ public class SerializerSupport
         switch (status)
         {
             default:
-                throw new IllegalStateException("Unhandled SaveStatus: " + status);
+                throw illegalState("Unhandled SaveStatus: " + status);
             case TruncatedApplyWithOutcome:
             case TruncatedApplyWithDeps:
                 Set<MessageType> witnessed = messageProvider.test(APPLY_TYPES);
@@ -278,6 +279,8 @@ public class SerializerSupport
                 }
             case TruncatedApply:
                 return Command.Truncated.truncatedApply(attrs, status, executeAt, writes, result);
+            case ErasedOrInvalidated:
+                return Command.Truncated.erasedOrInvalidated(attrs.txnId(), attrs.durability(), attrs.route());
             case Erased:
                 return Command.Truncated.erased(attrs.txnId(), attrs.durability(), attrs.route());
             case Invalidated:

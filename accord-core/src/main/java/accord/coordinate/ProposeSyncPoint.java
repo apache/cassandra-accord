@@ -70,11 +70,13 @@ public class ProposeSyncPoint<S extends Seekables<?, ?>> extends Propose<SyncPoi
     @Override
     void onAccepted()
     {
+        // TODO (required): disable merging with original deps by flag, and confirm fault detected
+        Deps deps = this.deps.with(Deps.merge(acceptOks, ok -> ok.deps));
         if (txnId.rw() == ExclusiveSyncPoint)
         {
             Apply.sendMaximal(node, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null));
             node.configService().reportEpochClosed((Ranges)keysOrRanges, txnId.epoch());
-            callback.accept(new SyncPoint<S>(txnId, deps, keysOrRanges, (FullRangeRoute) route, true), null);
+            callback.accept(new SyncPoint<S>(txnId, deps, keysOrRanges, route, true), null);
         }
         else
         {

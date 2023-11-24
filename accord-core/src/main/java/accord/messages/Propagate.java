@@ -52,6 +52,7 @@ import static accord.local.Status.Phase.Cleanup;
 import static accord.local.Status.PreApplied;
 import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.primitives.Routables.Slice.Minimal;
+import static accord.utils.Invariants.illegalState;
 
 public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
 {
@@ -74,7 +75,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
     // this is a WHOLE NODE measure, so if commit epoch has more ranges we do not count as committed if we can only commit in coordination epoch
     public final Status.Known achieved;
     public final FoundKnownMap known;
-    public final boolean isTruncated;
+    public final boolean isShardTruncated;
     @Nullable public final PartialTxn partialTxn;
     @Nullable public final PartialDeps committedDeps;
     public final long toEpoch;
@@ -100,7 +101,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
         @Nullable RoutingKey progressKey,
         Status.Known achieved,
         FoundKnownMap known,
-        boolean isTruncated,
+        boolean isShardTruncated,
         @Nullable PartialTxn partialTxn,
         @Nullable PartialDeps committedDeps,
         long toEpoch,
@@ -118,7 +119,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
         this.progressKey = progressKey;
         this.achieved = achieved;
         this.known = known;
-        this.isTruncated = isTruncated;
+        this.isShardTruncated = isShardTruncated;
         this.partialTxn = partialTxn;
         this.committedDeps = committedDeps;
         this.toEpoch = toEpoch;
@@ -144,7 +145,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
             return;
         }
 
-        Invariants.checkState(sourceEpoch == txnId.epoch() || (full.executeAt != null && sourceEpoch == full.executeAt.epoch()) || full.maxKnowledgeSaveStatus == SaveStatus.Erased);
+        Invariants.checkState(sourceEpoch == txnId.epoch() || (full.executeAt != null && sourceEpoch == full.executeAt.epoch()) || full.maxKnowledgeSaveStatus == SaveStatus.Erased || full.maxKnowledgeSaveStatus == SaveStatus.ErasedOrInvalidated);
 
         full = full.finish(route, withQuorum);
         route = Invariants.nonNull(full.route);
@@ -189,7 +190,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
             }
         }
 
-        boolean isTruncated = withQuorum == HasQuorum && full.isTruncatedResponse(covering);
+        boolean isShardTruncated = withQuorum == HasQuorum && full.isTruncatedResponse(covering);
 
         PartialTxn partialTxn = full.partialTxn;
         if (achieved.definition.isKnown())
@@ -200,7 +201,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
             committedDeps = full.committedDeps.slice(sliceRanges).reconstitutePartial(covering);
 
         Propagate propagate =
-            new Propagate(txnId, route, full.maxKnowledgeSaveStatus, full.maxSaveStatus, full.durability, full.homeKey, progressKey, achieved, full.map, isTruncated, partialTxn, committedDeps, toEpoch, full.executeAtIfKnown(), full.writes, full.result, callback);
+            new Propagate(txnId, route, full.maxKnowledgeSaveStatus, full.maxSaveStatus, full.durability, full.homeKey, progressKey, achieved, full.map, isShardTruncated, partialTxn, committedDeps, toEpoch, full.executeAtIfKnown(), full.writes, full.result, callback);
 
         node.localRequest(propagate);
     }
@@ -214,14 +215,13 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
     @Override
     public Seekables<?, ?> keys()
     {
-        // TODO (now): this is insufficient, as we may applyOrUpgradeTruncated
-        // since we don't calculateDeps, we might not need to load CFK to register with it
-        if (achieved.definition.isKnown())
+        if (partialTxn != null)
             return partialTxn.keys();
-        else if (achieved.deps.hasProposedOrDecidedDeps())
+
+        if (committedDeps != null)
             return committedDeps.keyDeps.keys();
-        else
-            return Keys.EMPTY;
+
+        return Keys.EMPTY;
     }
 
     @Override
@@ -259,10 +259,9 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
 
         Timestamp executeAtIfKnown = command.executeAtIfKnown(committedExecuteAt);
         Status.Known achieved = this.achieved;
-        if (isTruncated)
+        if (isShardTruncated)
         {
             // TODO (required): do not markShardStale for reads; in general optimise handling of case where we cannot recover a known no-op transaction
-
             achieved = applyOrUpgradeTruncated(safeStore, safeCommand, command, executeAtIfKnown);
             if (achieved == null)
                 return null;
@@ -295,13 +294,13 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
 
         switch (propagate)
         {
-            default: throw new IllegalStateException("Unexpected status: " + propagate);
-            case Truncated: throw new IllegalStateException("Status expected to be handled elsewhere: " + propagate);
+            default: throw illegalState("Unexpected status: " + propagate);
+            case Truncated: throw illegalState("Status expected to be handled elsewhere: " + propagate);
             case Accepted:
             case AcceptedInvalidate:
                 // we never "propagate" accepted statuses as these are essentially votes,
                 // and contribute nothing to our local state machine
-                throw new IllegalStateException("Invalid states to propagate: " + propagate);
+                throw illegalState("Invalid states to propagate: " + propagate);
 
             case Invalidated:
                 Commands.commitInvalidate(safeStore, safeCommand, route);
@@ -406,12 +405,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
             return null;
         }
 
-        // if the command has been truncated globally, then we should expect to apply it
-        // if we cannot obtain enough information from a majority to do so then we have been left behind
-        Status.Known required = PreApplied.minKnown;
-        Status.Known requireExtra = required.subtract(command.known()); // the extra information we need to reach pre-applied
-        Ranges achieveRanges = known.knownFor(requireExtra, ranges); // the ranges for which we can successfully achieve this
-
+        participants = participants.slice(ranges, Minimal);
         if (participants.isEmpty())
         {
             // we only coordinate this transaction, so being unable to retrieve its state does not imply any staleness
@@ -419,6 +413,12 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
             Commands.setTruncatedApply(safeStore, safeCommand, route);
             return null;
         }
+
+        // if the command has been truncated globally, then we should expect to apply it
+        // if we cannot obtain enough information from a majority to do so then we have been left behind
+        Status.Known required = PreApplied.minKnown;
+        Status.Known requireExtra = required.subtract(command.known()); // the extra information we need to reach pre-applied
+        Ranges achieveRanges = known.knownFor(requireExtra, ranges); // the ranges for which we can already successfully achieve this
 
         // any ranges we execute but cannot achieve the pre-applied status for have been left behind and are stale
         Ranges staleRanges = ranges.subtract(achieveRanges);
@@ -470,6 +470,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
     public MessageType type()
     {
         // TODO (now): this logic doesn't work now we permit upgrading; need to pick the maximum *possible* status we might propagate
+        //     might be better to
         switch (achieved.propagatesStatus())
         {
             case Applied:
@@ -499,11 +500,11 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
     {
         switch (outcome)
         {
-            default: throw new IllegalStateException("Unknown outcome: " + outcome);
+            default: throw illegalState("Unknown outcome: " + outcome);
             case Redundant:
             case Success:
                 return;
-            case Insufficient: throw new IllegalStateException("Should have enough information");
+            case Insufficient: throw illegalState("Should have enough information");
         }
     }
 
@@ -511,11 +512,11 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
     {
         switch (outcome)
         {
-            default: throw new IllegalStateException("Unknown outcome: " + outcome);
+            default: throw illegalState("Unknown outcome: " + outcome);
             case Redundant:
             case Success:
                 return;
-            case Insufficient: throw new IllegalStateException("Should have enough information");
+            case Insufficient: throw illegalState("Should have enough information");
         }
     }
 

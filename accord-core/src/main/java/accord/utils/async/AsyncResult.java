@@ -20,6 +20,8 @@ package accord.utils.async;
 
 import java.util.function.BiConsumer;
 
+import static accord.utils.Invariants.illegalState;
+
 /**
  * Handle for async computations that supports multiple listeners and registering
  * listeners after the computation has started
@@ -58,7 +60,7 @@ public interface AsyncResult<V> extends AsyncChain<V>
         default void setSuccess(V value)
         {
             if (!trySuccess(value))
-                throw new IllegalStateException("Result has already been set on " + this);
+                throw illegalState("Result has already been set on " + this);
         }
 
         boolean tryFailure(Throwable throwable);
@@ -67,7 +69,7 @@ public interface AsyncResult<V> extends AsyncChain<V>
         {
             if (!tryFailure(throwable))
             {
-                IllegalStateException e = new IllegalStateException("Result has already been set on " + this);
+                IllegalStateException e = illegalState("Result has already been set on " + this);
                 e.addSuppressed(throwable);
                 throw e;
             }

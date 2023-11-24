@@ -88,6 +88,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     private SearchableRangeList searchable;
     private Ranges covering;
 
+    // TODO (expected): merge by TxnId key, not by range, so that we can merge overlapping ranges for same TxnId
     public static <T1, T2> RangeDeps merge(List<T1> merge, Function<T1, T2> getter1, Function<T2, RangeDeps> getter2)
     {
         try (LinearMerger<Range, TxnId, RangeDeps> linearMerger = new LinearMerger<>(ADAPTER))

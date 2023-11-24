@@ -51,6 +51,7 @@ import static accord.local.Status.Phase;
 import static accord.local.Status.PreAccepted;
 import static accord.local.Status.PreCommitted;
 import static accord.messages.PreAccept.calculatePartialDeps;
+import static accord.utils.Invariants.illegalState;
 
 public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
 {
@@ -97,7 +98,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         switch (Commands.recover(safeStore, safeCommand, txnId, partialTxn, route, progressKey, ballot))
         {
             default:
-                throw new IllegalStateException("Unhandled Outcome");
+                throw illegalState("Unhandled Outcome");
 
             case Redundant:
             case Truncated:
@@ -356,7 +357,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
     {
         try (Deps.Builder builder = Deps.builder())
         {
-            safeStore.mapReduce(keys, ranges, KeyHistory.ALL, startedBefore.rw().witnesses(), STARTED_BEFORE, startedBefore, WITH, startedBefore, Committed, null,
+            safeStore.mapReduce(keys, ranges, KeyHistory.ALL, startedBefore.rw().witnessedBy(), STARTED_BEFORE, startedBefore, WITH, startedBefore, Committed, null,
                                           (p1, keyOrRange, txnId, executeAt, status, deps, prev) -> builder.add(keyOrRange, txnId), null, (Deps.AbstractBuilder<Deps>)builder);
             return builder.build();
         }
@@ -386,7 +387,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
          * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
          * has not witnessed us we can safely invalidate it.
          */
-        return safeStore.mapReduce(keys, ranges, KeyHistory.ALL, startedAfter.rw().witnesses(), EXECUTES_AFTER, startedAfter, WITHOUT, startedAfter, Committed, null,
+        return safeStore.mapReduce(keys, ranges, KeyHistory.ALL, startedAfter.rw().witnessedBy(), EXECUTES_AFTER, startedAfter, WITHOUT, startedAfter, Committed, null,
                                              (p1, keyOrRange, txnId, executeAt, status, deps, prev) -> true, null, false, i -> i);
     }
 }

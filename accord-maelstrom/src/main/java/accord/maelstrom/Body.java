@@ -32,6 +32,7 @@ import accord.local.Node.Id;
 import accord.primitives.Txn;
 import accord.maelstrom.Packet.Type;
 
+import static accord.utils.Invariants.illegalState;
 import static accord.utils.Utils.toArray;
 
 public class Body
@@ -155,7 +156,7 @@ public class Body
                     in.endArray();
                     break;
                 default:
-                    throw new IllegalStateException("Unexpected field " + field);
+                    throw illegalState("Unexpected field " + field);
             }
         }
         in.endObject();

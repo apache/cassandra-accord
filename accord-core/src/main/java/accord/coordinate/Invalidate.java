@@ -47,6 +47,7 @@ import static accord.local.Status.Accepted;
 import static accord.local.Status.PreAccepted;
 import static accord.primitives.ProgressToken.INVALIDATED;
 import static accord.primitives.ProgressToken.TRUNCATED;
+import static accord.utils.Invariants.illegalState;
 
 public class Invalidate implements Callback<InvalidateReply>
 {
@@ -155,7 +156,7 @@ public class Invalidate implements Callback<InvalidateReply>
 
             switch (maxReply.status)
             {
-                default: throw new IllegalStateException();
+                default: throw illegalState();
                 case Truncated:
                     isDone = true;
                     callback.accept(TRUNCATED, null);

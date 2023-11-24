@@ -24,18 +24,22 @@ import accord.local.Listeners;
 import accord.local.SafeCommand;
 import accord.local.SaveStatus;
 import accord.primitives.TxnId;
+import accord.utils.Invariants;
 
 import static accord.local.Listeners.Immutable.EMPTY;
+import static accord.local.SaveStatus.Erased;
+import static accord.local.SaveStatus.ErasedOrInvalidated;
 import static accord.local.Status.Durability.UniversalOrInvalidated;
 
 public class ErasedSafeCommand extends SafeCommand
 {
     final Command erased;
 
-    public ErasedSafeCommand(TxnId txnId)
+    public ErasedSafeCommand(TxnId txnId, SaveStatus saveStatus)
     {
         super(txnId);
-        this.erased = new Command.Truncated(txnId, SaveStatus.Erased, UniversalOrInvalidated, null, null, EMPTY, null, null);
+        Invariants.checkArgument(saveStatus == Erased || saveStatus == ErasedOrInvalidated);
+        this.erased = new Command.Truncated(txnId, saveStatus, UniversalOrInvalidated, null, null, EMPTY, null, null);
     }
 
     @Override

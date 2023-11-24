@@ -29,6 +29,8 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import static accord.utils.Invariants.illegalState;
+
 /**
  * Represents a map of ranges where precisely one value is bound to each point in the continuum of ranges,
  * and a simple function is sufficient to merge values inserted to overlapping ranges.
@@ -419,7 +421,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         if (leftIsInclusive == rightIsInclusive)
             return leftIsInclusive;
         else if (leftIsDecisive && rightIsDecisive)
-            throw new IllegalStateException("Mismatching bound inclusivity/exclusivity");
+            throw illegalState("Mismatching bound inclusivity/exclusivity");
         else if (leftIsDecisive)
             return leftIsInclusive;
         else
