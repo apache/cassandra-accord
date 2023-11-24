@@ -27,6 +27,8 @@ import java.lang.reflect.Array;
 import java.util.Arrays;
 import java.util.function.IntFunction;
 
+import static accord.utils.Invariants.illegalState;
+
 /**
  * A set of utility classes and interfaces for managing a collection of buffers for arrays of certain types.
  *
@@ -569,7 +571,7 @@ public class ArrayBuffers
         public int lengthOfLast(T[] buffer)
         {
             if (length == -1)
-                throw new IllegalStateException("Attempted to get last length but no call to complete called");
+                throw illegalState("Attempted to get last length but no call to complete called");
             return length;
         }
     }

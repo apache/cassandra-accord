@@ -31,19 +31,22 @@ import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.primitives.Txn.Kind;
+import accord.topology.Topologies;
 
 import static accord.utils.Invariants.checkArgument;
 
 public interface Execute
 {
+    enum Path { FAST, SLOW, RECOVER }
+
     interface Factory
     {
-        Execute create(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Participants<?> readScope, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback);
+        Execute create(Node node, Topologies topologies, Path path, TxnId txnId, Txn txn, FullRoute<?> route, Participants<?> readScope, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback);
     }
 
     void start();
 
-    static void execute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
+    static void execute(Node node, Topologies anyTopologies, FullRoute<?> route, Path path, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
     {
         Seekables<?, ?> readKeys = txn.read().keys();
         Participants<?> readScope = readKeys.toParticipants();
@@ -60,11 +63,15 @@ public interface Execute
             {
                 Result result = txn.result(txnId, executeAt, null);
                 Writes writes = txn.execute(txnId, executeAt, null);
-                Persist.persist(node, txnId, route, txn, executeAt, deps, writes, result, callback);
+                anyTopologies = anyTopologies.forEpochs(executeAt.epoch(), executeAt.epoch());
+                Persist.persist(node, anyTopologies, route, txnId, txn, executeAt, deps, writes, result, callback);
             }
             else
             {
-                Execute execute = node.executionFactory().create(node, txnId, txn, route, readScope, executeAt, deps, callback);
+                if (anyTopologies.oldestEpoch() <= txnId.epoch() && anyTopologies.currentEpoch() >= executeAt.epoch()) anyTopologies = anyTopologies.forEpochs(txnId.epoch(), executeAt.epoch());
+                else anyTopologies = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
+
+                Execute execute = node.executionFactory().create(node, anyTopologies, path, txnId, txn, route, readScope, executeAt, deps, callback);
                 execute.start();
             }
         }

@@ -49,6 +49,7 @@ import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_ADJACENT;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.checkArgument;
+import static accord.utils.Invariants.illegalState;
 import static accord.utils.Invariants.nonNull;
 
 /**
@@ -637,7 +638,7 @@ public class TopologyManager
     {
         EpochState epochState = epochs.get(epoch);
         if (epochState == null)
-            throw new IllegalStateException("Unknown epoch " + epoch);
+            throw illegalState("Unknown epoch " + epoch);
         return epochState.local();
     }
 

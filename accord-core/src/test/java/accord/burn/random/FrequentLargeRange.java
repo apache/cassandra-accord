@@ -26,6 +26,8 @@ import accord.utils.RandomSource;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
+import static accord.utils.Invariants.illegalState;
+
 public class FrequentLargeRange implements LongGen
 {
     private final LongGen small, large;
@@ -140,9 +142,9 @@ public class FrequentLargeRange implements LongGen
         public FrequentLargeRange build()
         {
             if (small == null)
-                throw new IllegalStateException("Small range undefined");
+                throw illegalState("Small range undefined");
             if (large == null)
-                throw new IllegalStateException("Large range undefined");
+                throw illegalState("Large range undefined");
             if (ratio == null)
                 ratio(1, 11);
             if (maxRuns == null)

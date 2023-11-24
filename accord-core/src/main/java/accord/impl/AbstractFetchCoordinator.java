@@ -34,7 +34,7 @@ import accord.local.CommandStore;
 import accord.local.Node;
 import accord.messages.Callback;
 import accord.messages.MessageType;
-import accord.messages.ReadData.ReadNack;
+import accord.messages.ReadData.CommitOrReadNack;
 import accord.messages.ReadData.ReadOk;
 import accord.messages.ReadData.ReadReply;
 import accord.messages.WaitAndReadData;
@@ -50,7 +50,7 @@ import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import javax.annotation.Nullable;
 
-import static accord.messages.ReadData.ReadNack.NotCommitted;
+import static accord.messages.ReadData.CommitOrReadNack.Insufficient;
 import static accord.primitives.Routables.Slice.Minimal;
 
 public abstract class AbstractFetchCoordinator extends FetchCoordinator
@@ -142,7 +142,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
             {
                 if (!reply.isOk())
                 {
-                    if (reply == NotCommitted)
+                    if (reply == Insufficient)
                     {
                         CoordinateSyncPoint.sendApply(node, from, syncPoint);
                     }
@@ -150,11 +150,12 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
                     {
                         fail(to, new RuntimeException(reply.toString()));
                         inflight.remove(key).cancel();
-                        switch ((ReadNack) reply)
+                        switch ((CommitOrReadNack) reply)
                         {
                             default: throw new AssertionError("Unhandled enum: " + reply);
                             case Invalid:
                             case Redundant:
+                            case Rejected:
                                 // TODO (expected): stop fetch sync points from garbage collecting too quickly
                                 throw new AssertionError(String.format("Unexpected reply: %s", reply));
                         }

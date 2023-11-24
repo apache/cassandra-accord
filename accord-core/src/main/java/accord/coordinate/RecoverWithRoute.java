@@ -50,6 +50,7 @@ import static accord.primitives.ProgressToken.APPLIED;
 import static accord.primitives.ProgressToken.INVALIDATED;
 import static accord.primitives.ProgressToken.TRUNCATED;
 import static accord.primitives.Route.castToFullRoute;
+import static accord.utils.Invariants.illegalState;
 
 public class RecoverWithRoute extends CheckShards<FullRoute<?>>
 {
@@ -156,7 +157,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                 {
                     // TODO (required): this logic should be put in Infer, alongside any similar inferences in Recover
                     if (witnessedByInvalidation != null && witnessedByInvalidation.compareTo(Status.PreAccepted) > 0)
-                        throw new IllegalStateException("We previously invalidated, finding a status that should be recoverable");
+                        throw illegalState("We previously invalidated, finding a status that should be recoverable");
                     Invalidate.invalidate(node, txnId, route, witnessedByInvalidation != null, callback);
                 }
                 else
@@ -183,9 +184,9 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                             // so that we know to WasApply, but not
                             if (known.executeAt == ExecuteAtKnown && known.deps == DepsKnown && known.outcome == Apply)
                             {
-                                Invariants.checkState(full.committedDeps.covering.containsAll(sendTo));
+                                Invariants.checkState(full.stableDeps.covering.containsAll(sendTo));
                                 Invariants.checkState(full.partialTxn.covering().containsAll(sendTo));
-                                Persist.persistPartialMaximal(node, txnId, sendTo, route, full.partialTxn, full.executeAt, full.committedDeps, full.writes, full.result);
+                                Persist.persistPartialMaximal(node, txnId, sendTo, route, full.partialTxn, full.executeAt, full.stableDeps, full.writes, full.result);
                             }
                             propagate = full;
                         }
@@ -208,7 +209,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                 Txn txn = full.partialTxn.reconstitute(route);
                 if (known.executeAt.isDecidedAndKnownToExecute() && known.deps.hasDecidedDeps() && known.outcome == Apply)
                 {
-                    Deps deps = full.committedDeps.reconstitute(route());
+                    Deps deps = full.stableDeps.reconstitute(route());
                     node.withEpoch(full.executeAt.epoch(), () -> {
                         Persist.persistMaximal(node, txnId, route(), txn, full.executeAt, deps, full.writes, full.result);
                     });
@@ -222,7 +223,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
 
             case Invalidated:
                 if (witnessedByInvalidation != null && witnessedByInvalidation.hasBeen(Status.PreCommitted))
-                    throw new IllegalStateException("We previously invalidated, finding a status that should be recoverable");
+                    throw illegalState("We previously invalidated, finding a status that should be recoverable");
 
                 Propagate.propagate(node, txnId, sourceEpoch, success.withQuorum, route, null, full, (s, f) -> callback.accept(f == null ? INVALIDATED : null, f));
                 break;

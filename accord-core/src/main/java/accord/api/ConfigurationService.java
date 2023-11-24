@@ -112,7 +112,7 @@ public interface ConfigurationService
          * Informs listeners of new topology. This is guaranteed to be called sequentially for each epoch after
          * the initial topology returned by `currentTopology` on startup.
          *
-         * TODO (required): document what this Future represents, or maybe refactor it away - only used for testing
+         * TODO (desired): document what this Future represents, or maybe refactor it away - only used for testing
          */
         AsyncResult<Void> onTopologyUpdate(Topology topology, boolean startSync);
 

@@ -26,6 +26,8 @@ import accord.api.Update;
 
 import javax.annotation.Nullable;
 
+import static accord.utils.Invariants.illegalState;
+
 public interface PartialTxn extends Txn
 {
     // TODO (expected): we no longer need this if everyone has a FullRoute
@@ -125,7 +127,7 @@ public interface PartialTxn extends Txn
         public Txn reconstitute(FullRoute<?> route)
         {
             if (!covers(route) || query() == null)
-                throw new IllegalStateException("Incomplete PartialTxn: " + this + ", route: " + route);
+                throw illegalState("Incomplete PartialTxn: " + this + ", route: " + route);
 
             return new Txn.InMemory(kind(), keys(), read(), query(), update());
         }
@@ -134,7 +136,7 @@ public interface PartialTxn extends Txn
         public PartialTxn reconstitutePartial(Ranges covering)
         {
             if (!covers(covering))
-                throw new IllegalStateException("Incomplete PartialTxn: " + this + ", covering: " + covering);
+                throw illegalState("Incomplete PartialTxn: " + this + ", covering: " + covering);
 
             if (this.covering.containsAll(covering))
                 return this;

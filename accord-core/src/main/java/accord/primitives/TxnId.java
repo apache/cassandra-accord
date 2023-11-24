@@ -89,9 +89,9 @@ public class TxnId extends Timestamp
         return rwOrdinal(flags()) == Read.ordinal();
     }
 
-    public Kind rw()
+    public Kind kind()
     {
-        return rw(flags());
+        return kind(flags());
     }
 
     public Domain domain()
@@ -118,7 +118,7 @@ public class TxnId extends Timestamp
     @Override
     public String toString()
     {
-        return "[" + epoch() + ',' + hlc() + ',' + flags() + '(' + domain().shortName() + rw().shortName() + ')' + ',' + node + ']';
+        return "[" + epoch() + ',' + hlc() + ',' + flags() + '(' + domain().shortName() + kind().shortName() + ')' + ',' + node + ']';
     }
 
     private static int flags(Kind rw, Domain domain)
@@ -136,7 +136,7 @@ public class TxnId extends Timestamp
         return domain.ordinal();
     }
 
-    private static Kind rw(int flags)
+    private static Kind kind(int flags)
     {
         return Kind.ofOrdinal(rwOrdinal(flags));
     }

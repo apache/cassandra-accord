@@ -64,7 +64,7 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
     private CoordinateSyncPoint(Node node, TxnId txnId, Txn txn, FullRoute<?> route, S keysOrRanges, boolean async)
     {
         super(node, txnId, txn, route, node.topology().withOpenEpochs(route, txnId, txnId));
-        checkArgument(txnId.rw() == Kind.SyncPoint || async, "Exclusive sync points only support async application");
+        checkArgument(txnId.kind() == Kind.SyncPoint || async, "Exclusive sync points only support async application");
         this.keysOrRanges = keysOrRanges;
         this.async = async;
     }
@@ -94,12 +94,12 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
 
     private static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> coordinate(Node node, TxnId txnId, S keysOrRanges, boolean async)
     {
-        checkArgument(txnId.rw() == Kind.SyncPoint || txnId.rw() == ExclusiveSyncPoint);
+        checkArgument(txnId.kind() == Kind.SyncPoint || txnId.kind() == ExclusiveSyncPoint);
         FullRoute route = node.computeRoute(txnId, keysOrRanges);
         TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(txnId.epoch()), txnId, route.homeKey(), keysOrRanges);
         if (mismatch != null)
             return AsyncResults.failure(mismatch);
-        CoordinateSyncPoint<S> coordinate = new CoordinateSyncPoint(node, txnId, node.agent().emptyTxn(txnId.rw(), keysOrRanges), route, keysOrRanges, async);
+        CoordinateSyncPoint<S> coordinate = new CoordinateSyncPoint(node, txnId, node.agent().emptyTxn(txnId.kind(), keysOrRanges), route, keysOrRanges, async);
         coordinate.start();
         return coordinate;
     }
@@ -152,7 +152,7 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
             executeAt = txnId;
             // we don't need to fetch deps from Accept replies, so we don't need to contact unsynced epochs
             topologies = node.topology().forEpoch(route, txnId.epoch());
-            if (tracker.hasFastPathAccepted() && txnId.rw() == Kind.SyncPoint)
+            if (tracker.hasFastPathAccepted() && txnId.kind() == Kind.SyncPoint)
                 blockOnDeps(node, txn, txnId, route, keysOrRanges, deps, this, async);
             else
                 ProposeSyncPoint.proposeSyncPoint(node, topologies, Ballot.ZERO, txnId, txn, route, deps, executeAt, this, async, tracker.nodes(), keysOrRanges);
@@ -163,7 +163,7 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
     {
         TxnId txnId = syncPoint.syncId;
         Timestamp executeAt = txnId;
-        Txn txn = node.agent().emptyTxn(txnId.rw(), syncPoint.keysOrRanges);
+        Txn txn = node.agent().emptyTxn(txnId.kind(), syncPoint.keysOrRanges);
         Deps deps = syncPoint.waitFor;
         Apply.sendMaximal(node, to, txnId, syncPoint.route(), txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null));
     }

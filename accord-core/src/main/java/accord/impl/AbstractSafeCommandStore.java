@@ -32,6 +32,9 @@ import accord.local.*;
 import accord.primitives.*;
 import accord.utils.Invariants;
 
+import static accord.utils.Invariants.illegalState;
+import static java.lang.String.format;
+
 public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
                                                TimestampsForKeyType extends SafeTimestampsForKey,
                                                CommandsForKeyType extends SafeCommandsForKey,
@@ -108,7 +111,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
     {
         CommandType command = getCommandInternal(txnId);
         if (command == null)
-            throw new IllegalStateException(String.format("%s was not specified in PreLoadContext", txnId));
+            throw illegalState(format("%s was not specified in PreLoadContext", txnId));
         if (command.isEmpty())
             command.uninitialised();
         return command;

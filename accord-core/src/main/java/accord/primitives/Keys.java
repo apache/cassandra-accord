@@ -104,6 +104,16 @@ public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
         return new Keys(trg);
     }
 
+    public Keys subtract(Range range)
+    {
+        return wrap(subtract(range, keys));
+    }
+
+    public Keys subtract(Ranges ranges)
+    {
+        return wrap(subtract(ranges, keys, Key[]::new));
+    }
+
     public static Keys of(Key key)
     {
         return new Keys(new Key[] { key });

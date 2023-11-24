@@ -38,6 +38,7 @@ import org.assertj.core.api.AbstractThrowableAssert;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
+import static accord.utils.Invariants.illegalState;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class AsyncChainsTest
@@ -155,7 +156,7 @@ public class AsyncChainsTest
                 .map(i -> i + 1)
                 .begin((success, failure) -> {
                     if (failure == null)
-                        throw new IllegalStateException("Should see failure");
+                        throw illegalState("Should see failure");
                 });
 
         AsyncChains.ofRunnable(ignore -> {
@@ -165,7 +166,7 @@ public class AsyncChainsTest
                 .beginAsResult()
                 .addCallback((success, failure) -> {
                     if (failure == null)
-                        throw new IllegalStateException("Expected to fail");
+                        throw illegalState("Expected to fail");
                 });
 
         AsyncChains.<Integer>ofCallable(fn -> fn.run(), () -> {
@@ -173,7 +174,7 @@ public class AsyncChainsTest
                 }).map(i -> i + 1).map(i -> i + 1)
                 .begin((success, failure) -> {
                     if (failure == null)
-                        throw new IllegalStateException("Should see failure");
+                        throw illegalState("Should see failure");
                 });
 
         AsyncChains.ofCallable(fn -> fn.run(), () -> 42
@@ -183,7 +184,7 @@ public class AsyncChainsTest
                 })
                 .begin((success, failure) -> {
                     if (failure == null)
-                        throw new IllegalStateException("Should see failure");
+                        throw illegalState("Should see failure");
                 });
     }
 

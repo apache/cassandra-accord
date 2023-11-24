@@ -95,6 +95,9 @@ import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
+import static accord.utils.Invariants.illegalState;
+import static java.lang.String.format;
+
 public class Node implements ConfigurationService.Listener, NodeTimeService
 {
     private static final Logger logger = LoggerFactory.getLogger(Node.class);
@@ -520,7 +523,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     {
         CommandStore current = CommandStore.maybeCurrent();
         if (current != null && current != executor)
-            throw new IllegalStateException(String.format("Used wrong CommandStore %s; current is %s", executor, current));
+            throw illegalState(format("Used wrong CommandStore %s; current is %s", executor, current));
     }
 
     // send to a specific node
@@ -661,7 +664,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         if (ranges.isEmpty()) // should not really happen, but pick some other replica to serve as home key
             ranges = topology().globalForEpoch(txnId.epoch()).ranges();
         if (ranges.isEmpty())
-            throw new IllegalStateException("Unable to select a HomeKey as the topology does not have any ranges for epoch " + txnId.epoch());
+            throw illegalState("Unable to select a HomeKey as the topology does not have any ranges for epoch " + txnId.epoch());
         Range range = ranges.get(random.nextInt(ranges.size()));
         return range.someIntersectingRoutingKey(null);
     }

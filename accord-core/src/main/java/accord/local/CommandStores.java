@@ -68,6 +68,7 @@ import static accord.local.PreLoadContext.empty;
 import static accord.primitives.EpochSupplier.constant;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.checkArgument;
+import static accord.utils.Invariants.illegalState;
 import static java.util.stream.Collectors.toList;
 
 /**
@@ -250,7 +251,7 @@ public abstract class CommandStores
 
         public @Nonnull Ranges allAfter(long fromInclusive)
         {
-            return allInternal(floorIndex(fromInclusive), ranges.length);
+            return allInternal(Math.max(0, floorIndex(fromInclusive)), ranges.length);
         }
 
         public @Nonnull Ranges allUntil(long toInclusive)
@@ -649,7 +650,7 @@ public abstract class CommandStores
     public CommandStore any()
     {
         ShardHolder[] shards = current.shards;
-        if (shards.length == 0) throw new IllegalStateException("Unable to get CommandStore; non defined");
+        if (shards.length == 0) throw illegalState("Unable to get CommandStore; non defined");
         return shards[supplier.random.nextInt(shards.length)].store;
     }
 

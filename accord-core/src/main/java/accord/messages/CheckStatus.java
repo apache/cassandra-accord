@@ -55,7 +55,6 @@ import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
-import accord.utils.ReducingIntervalMap;
 import accord.utils.ReducingRangeMap;
 
 import javax.annotation.Nonnull;
@@ -63,7 +62,6 @@ import javax.annotation.Nonnull;
 import static accord.coordinate.Infer.InvalidIfNot.NotKnownToBeInvalid;
 import static accord.coordinate.Infer.IsPreempted.NotPreempted;
 import static accord.coordinate.Infer.IsPreempted.Preempted;
-import static accord.local.Status.Committed;
 import static accord.local.Status.Durability;
 import static accord.local.Status.Durability.Local;
 import static accord.local.Status.Durability.Majority;
@@ -72,6 +70,7 @@ import static accord.local.Status.Durability.Universal;
 import static accord.local.Status.Known;
 import static accord.local.Status.KnownDeps.DepsErased;
 import static accord.local.Status.NotDefined;
+import static accord.local.Status.Stable;
 import static accord.local.Status.Truncated;
 import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.messages.TxnRequest.computeScope;
@@ -85,20 +84,22 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
 
     public static class SerializationSupport
     {
-        public static CheckStatusOk createOk(FoundKnownMap map, SaveStatus maxKnowledgeStatus, SaveStatus maxStatus, Ballot promised, Ballot accepted, @Nullable Timestamp executeAt,
-                                             boolean isCoordinating, Durability durability,
+        public static CheckStatusOk createOk(FoundKnownMap map, SaveStatus maxKnowledgeStatus, SaveStatus maxStatus,
+                                             Ballot promised, Ballot maxAcceptedOrCommitted, Ballot acceptedOrCommitted,
+                                             @Nullable Timestamp executeAt, boolean isCoordinating, Durability durability,
                                              @Nullable Route<?> route, @Nullable RoutingKey homeKey)
         {
-            return new CheckStatusOk(map, maxKnowledgeStatus, maxStatus, promised, accepted, executeAt, isCoordinating, durability, route, homeKey);
+            return new CheckStatusOk(map, maxKnowledgeStatus, maxStatus, promised, maxAcceptedOrCommitted, acceptedOrCommitted,
+                                     executeAt, isCoordinating, durability, route, homeKey);
         }
         public static CheckStatusOk createOk(FoundKnownMap map, SaveStatus maxKnowledgeStatus, SaveStatus maxStatus,
-                                             Ballot promised, Ballot accepted, @Nullable Timestamp executeAt,
-                                             boolean isCoordinating, Durability durability,
+                                             Ballot promised, Ballot maxAcceptedOrCommitted, Ballot acceptedOrCommitted,
+                                             @Nullable Timestamp executeAt, boolean isCoordinating, Durability durability,
                                              @Nullable Route<?> route, @Nullable RoutingKey homeKey,
                                              PartialTxn partialTxn, PartialDeps committedDeps, Writes writes, Result result)
         {
-            return new CheckStatusOkFull(map, maxKnowledgeStatus, maxStatus, promised, accepted, executeAt, isCoordinating, durability, route, homeKey,
-                                         partialTxn, committedDeps, writes, result);
+            return new CheckStatusOkFull(map, maxKnowledgeStatus, maxStatus, promised, maxAcceptedOrCommitted, acceptedOrCommitted,
+                                         executeAt, isCoordinating, durability, route, homeKey, partialTxn, committedDeps, writes, result);
         }
     }
 
@@ -294,7 +295,6 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     }
 
     // TODO (expected, consider): build only with keys/ranges found in command stores, not the covering ranges of command stores?
-    //   by including the whole covering ranges we can infer
     public static class FoundKnownMap extends ReducingRangeMap<FoundKnown>
     {
         public static class SerializerSupport
@@ -478,7 +478,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             }, Ranges.EMPTY, i -> false);
         }
 
-        static class Builder extends ReducingIntervalMap.Builder<RoutingKey, FoundKnown, FoundKnownMap>
+        static class Builder extends AbstractBoundariesBuilder<RoutingKey, FoundKnown, FoundKnownMap>
         {
             protected Builder(boolean inclusiveEnds, int capacity)
             {
@@ -497,10 +497,20 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     {
         public final FoundKnownMap map;
         // TODO (required): tighten up constraints here to ensure we only report truncated when the range is Durable
-        // TODO (expected): stop using saveStatus and maxSaveStatus - move to only Known
+        // TODO (expected, cleanup): stop using saveStatus and maxSaveStatus - move to only Known
         //   care needed when merging Accepted and AcceptedInvalidate; might be easier to retain saveStatus only for merging these cases
         public final SaveStatus maxKnowledgeSaveStatus, maxSaveStatus;
-        public final Ballot promised, accepted;
+        public final Ballot maxPromised;
+        public final Ballot acceptedOrCommitted;
+        /**
+         * The maximum accepted or committed ballot.
+         * Note that this is NOT safe to combine with maxSaveStatus or maxKnowledgeSaveStatus.
+         * This is because we might see a higher accepted ballot on one shard, and a lower committed (but therefore higher status)
+         * on another shard, and the combined maxKnowledgeSaveStatus,maxAcceptedOrCommitted will order itself incorrectly
+         * with other commit records that in fact supersede the data we have.
+         */
+        public final Ballot maxAcceptedOrCommitted;
+        // TODO (expected, cleanup): try convert to committedExecuteAt, so null if not 'known'
         public final @Nullable Timestamp executeAt; // not set if invalidating or invalidated
         public final boolean isCoordinating;
         public final Durability durability;
@@ -514,27 +524,28 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
 
         public CheckStatusOk(Ranges ranges, boolean isCoordinating, InvalidIfNot invalidIfNot, Route<?> route, Durability durability, Command command)
         {
-            this(ranges, invalidIfNot, command.saveStatus(), command.promised(), command.accepted(), command.executeAt(),
-                 isCoordinating, durability, route, command.homeKey());
+            this(ranges, invalidIfNot, command.saveStatus(), command.promised(), command.acceptedOrCommitted(), command.acceptedOrCommitted(),
+                 command.executeAt(), isCoordinating, durability, route, command.homeKey());
         }
 
-        private CheckStatusOk(Ranges ranges, InvalidIfNot invalidIfNot, SaveStatus saveStatus, Ballot promised,
-                              Ballot accepted, @Nullable Timestamp executeAt,
+        private CheckStatusOk(Ranges ranges, InvalidIfNot invalidIfNot, SaveStatus saveStatus, Ballot maxPromised,
+                              Ballot maxAcceptedOrCommitted, Ballot acceptedOrCommitted, @Nullable Timestamp executeAt,
                               boolean isCoordinating, Durability durability,
                               @Nullable Route<?> route, @Nullable RoutingKey homeKey)
         {
-            this(FoundKnownMap.create(ranges, saveStatus, invalidIfNot, promised), saveStatus, saveStatus, promised, accepted, executeAt, isCoordinating, durability, route, homeKey);
+            this(FoundKnownMap.create(ranges, saveStatus, invalidIfNot, maxPromised), saveStatus, saveStatus, maxPromised, maxAcceptedOrCommitted, acceptedOrCommitted, executeAt, isCoordinating, durability, route, homeKey);
         }
 
-        private CheckStatusOk(FoundKnownMap map, SaveStatus maxKnowledgeSaveStatus, SaveStatus maxSaveStatus, Ballot promised, Ballot accepted,
+        private CheckStatusOk(FoundKnownMap map, SaveStatus maxKnowledgeSaveStatus, SaveStatus maxSaveStatus, Ballot maxPromised, Ballot maxAcceptedOrCommitted, Ballot acceptedOrCommitted,
                               @Nullable Timestamp executeAt, boolean isCoordinating, Durability durability,
                               @Nullable Route<?> route, @Nullable RoutingKey homeKey)
         {
             this.map = map;
             this.maxSaveStatus = maxSaveStatus;
             this.maxKnowledgeSaveStatus = maxKnowledgeSaveStatus;
-            this.promised = promised;
-            this.accepted = accepted;
+            this.maxPromised = maxPromised;
+            this.maxAcceptedOrCommitted = maxAcceptedOrCommitted;
+            this.acceptedOrCommitted = acceptedOrCommitted;
             this.executeAt = executeAt;
             this.isCoordinating = isCoordinating;
             this.durability = durability;
@@ -545,7 +556,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
         public ProgressToken toProgressToken()
         {
             Status status = maxSaveStatus.status;
-            return new ProgressToken(durability, status, promised, accepted);
+            return new ProgressToken(durability, status, maxPromised, maxAcceptedOrCommitted);
         }
 
         public Timestamp executeAtIfKnown()
@@ -600,8 +611,8 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             Route<?> mergedRoute = Route.merge((Route)this.route, route);
             if (mergedRoute == this.route)
                 return this;
-            return new CheckStatusOk(map, maxKnowledgeSaveStatus, maxSaveStatus, promised, accepted, executeAt,
-                                         isCoordinating, durability, mergedRoute, homeKey);
+            return new CheckStatusOk(map, maxKnowledgeSaveStatus, maxSaveStatus, maxPromised, maxAcceptedOrCommitted, acceptedOrCommitted,
+                                     executeAt, isCoordinating, durability, mergedRoute, homeKey);
         }
 
         public CheckStatusOk merge(@Nonnull Durability durability)
@@ -609,16 +620,16 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             durability = Durability.merge(durability, this.durability);
             if (durability == this.durability)
                 return this;
-            return new CheckStatusOk(map, maxKnowledgeSaveStatus, maxSaveStatus, promised, accepted, executeAt,
-                                         isCoordinating, durability, route, homeKey);
+            return new CheckStatusOk(map, maxKnowledgeSaveStatus, maxSaveStatus, maxPromised, maxAcceptedOrCommitted, acceptedOrCommitted,
+                                     executeAt, isCoordinating, durability, route, homeKey);
         }
 
         CheckStatusOk with(@Nonnull FoundKnownMap newMap)
         {
             if (newMap == this.map)
                 return this;
-            return new CheckStatusOk(newMap, maxKnowledgeSaveStatus, maxSaveStatus, promised, accepted, executeAt,
-                                         isCoordinating, durability, route, homeKey);
+            return new CheckStatusOk(newMap, maxKnowledgeSaveStatus, maxSaveStatus, maxPromised, maxAcceptedOrCommitted, acceptedOrCommitted,
+                                     executeAt, isCoordinating, durability, route, homeKey);
         }
 
         // TODO (required): harden markShardStale against unnecessary actions by utilising inferInvalidated==MAYBE and performing a global query
@@ -653,8 +664,8 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
                    "map:" + map +
                    "maxNotTruncatedSaveStatus:" + maxKnowledgeSaveStatus +
                    "maxSaveStatus:" + maxSaveStatus +
-                   ", promised:" + promised +
-                   ", accepted:" + accepted +
+                   ", promised:" + maxPromised +
+                   ", accepted:" + maxAcceptedOrCommitted +
                    ", executeAt:" + executeAt +
                    ", durability:" + durability +
                    ", isCoordinating:" + isCoordinating +
@@ -685,11 +696,11 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
 
             // then select the max along each criteria, preferring the coordinator
             FoundKnownMap mergeMap = FoundKnownMap.merge(prefer.map, defer.map);
-            CheckStatusOk maxStatus = SaveStatus.max(prefer, prefer.maxKnowledgeSaveStatus, prefer.accepted, defer, defer.maxKnowledgeSaveStatus, defer.accepted, true);
-            SaveStatus mergeMaxKnowledgeStatus = SaveStatus.merge(prefer.maxKnowledgeSaveStatus, prefer.accepted, defer.maxKnowledgeSaveStatus, defer.accepted, true);
-            SaveStatus mergeMaxStatus = SaveStatus.merge(prefer.maxSaveStatus, prefer.accepted, defer.maxSaveStatus, defer.accepted, false);
-            CheckStatusOk maxPromised = prefer.promised.compareTo(defer.promised) >= 0 ? prefer : defer;
-            CheckStatusOk maxAccepted = prefer.accepted.compareTo(defer.accepted) >= 0 ? prefer : defer;
+            CheckStatusOk maxStatus = SaveStatus.max(prefer, prefer.maxKnowledgeSaveStatus, prefer.acceptedOrCommitted, defer, defer.maxKnowledgeSaveStatus, defer.acceptedOrCommitted, true);
+            SaveStatus mergeMaxKnowledgeStatus = SaveStatus.merge(prefer.maxKnowledgeSaveStatus, prefer.acceptedOrCommitted, defer.maxKnowledgeSaveStatus, defer.acceptedOrCommitted, true);
+            SaveStatus mergeMaxStatus = SaveStatus.merge(prefer.maxSaveStatus, prefer.acceptedOrCommitted, defer.maxSaveStatus, defer.acceptedOrCommitted, false);
+            CheckStatusOk maxPromised = prefer.maxPromised.compareTo(defer.maxPromised) >= 0 ? prefer : defer;
+            CheckStatusOk maxAccepted = prefer.maxAcceptedOrCommitted.compareTo(defer.maxAcceptedOrCommitted) >= 0 ? prefer : defer;
             CheckStatusOk maxHomeKey = prefer.homeKey != null || defer.homeKey == null ? prefer : defer;
             CheckStatusOk maxExecuteAt = prefer.maxKnown().executeAt.compareTo(defer.maxKnown().executeAt) >= 0 ? prefer : defer;
             Route<?> mergedRoute = Route.merge(prefer.route, (Route)defer.route);
@@ -709,8 +720,9 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
 
             // otherwise assemble the maximum of each, and propagate isCoordinating from the origin we selected the promise from
             boolean isCoordinating = maxPromised == prefer ? prefer.isCoordinating : defer.isCoordinating;
-            return new CheckStatusOk(mergeMap, mergeMaxKnowledgeStatus, mergeMaxStatus, maxPromised.promised, maxAccepted.accepted, maxExecuteAt.executeAt,
-                                     isCoordinating, mergedDurability, mergedRoute, maxHomeKey.homeKey);
+            return new CheckStatusOk(mergeMap, mergeMaxKnowledgeStatus, mergeMaxStatus,
+                                     maxPromised.maxPromised, maxAccepted.maxAcceptedOrCommitted, maxStatus.acceptedOrCommitted,
+                                     maxExecuteAt.executeAt, isCoordinating, mergedDurability, mergedRoute, maxHomeKey.homeKey);
         }
 
         public Known maxKnown()
@@ -733,7 +745,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     public static class CheckStatusOkFull extends CheckStatusOk
     {
         public final PartialTxn partialTxn;
-        public final PartialDeps committedDeps; // only set if status >= Committed, so safe to merge
+        public final PartialDeps stableDeps; // only set if status >= Committed, so safe to merge
         public final Writes writes;
         public final Result result;
 
@@ -741,18 +753,19 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
         {
             super(ranges, isCoordinating, invalidIfNot, durability, command);
             this.partialTxn = command.partialTxn();
-            this.committedDeps = command.status().compareTo(Committed) >= 0 ? command.partialDeps() : null;
+            this.stableDeps = command.status().compareTo(Stable) >= 0 ? command.partialDeps() : null;
             this.writes = command.writes();
             this.result = command.result();
         }
 
-        protected CheckStatusOkFull(FoundKnownMap map, SaveStatus maxNotTruncatedSaveStatus, SaveStatus maxSaveStatus, Ballot promised, Ballot accepted, Timestamp executeAt,
-                                    boolean isCoordinating, Durability durability, Route<?> route,
-                                    RoutingKey homeKey, PartialTxn partialTxn, PartialDeps committedDeps, Writes writes, Result result)
+        protected CheckStatusOkFull(FoundKnownMap map, SaveStatus maxNotTruncatedSaveStatus, SaveStatus maxSaveStatus, Ballot promised, Ballot maxAcceptedOrCommitted, Ballot acceptedOrCommitted,
+                                    Timestamp executeAt, boolean isCoordinating, Durability durability, Route<?> route,
+                                    RoutingKey homeKey, PartialTxn partialTxn, PartialDeps stableDeps, Writes writes, Result result)
         {
-            super(map, maxNotTruncatedSaveStatus, maxSaveStatus, promised, accepted, executeAt, isCoordinating, durability, route, homeKey);
+            super(map, maxNotTruncatedSaveStatus, maxSaveStatus, promised, maxAcceptedOrCommitted, acceptedOrCommitted,
+                  executeAt, isCoordinating, durability, route, homeKey);
             this.partialTxn = partialTxn;
-            this.committedDeps = committedDeps;
+            this.stableDeps = stableDeps;
             this.writes = writes;
             this.result = result;
         }
@@ -767,8 +780,8 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             Route<?> mergedRoute = Route.merge((Route)this.route, route);
             if (mergedRoute == this.route)
                 return this;
-            return new CheckStatusOkFull(map, maxKnowledgeSaveStatus, maxSaveStatus, promised, accepted, executeAt,
-                                     isCoordinating, durability, mergedRoute, homeKey, partialTxn, committedDeps, writes, result);
+            return new CheckStatusOkFull(map, maxKnowledgeSaveStatus, maxSaveStatus, maxPromised, maxAcceptedOrCommitted, acceptedOrCommitted,
+                                         executeAt, isCoordinating, durability, mergedRoute, homeKey, partialTxn, stableDeps, writes, result);
         }
 
         public CheckStatusOkFull merge(@Nonnull Durability durability)
@@ -776,16 +789,16 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             durability = Durability.merge(durability, this.durability);
             if (durability == this.durability)
                 return this;
-            return new CheckStatusOkFull(map, maxKnowledgeSaveStatus, maxSaveStatus, promised, accepted, executeAt,
-                                     isCoordinating, durability, route, homeKey, partialTxn, committedDeps, writes, result);
+            return new CheckStatusOkFull(map, maxKnowledgeSaveStatus, maxSaveStatus, maxPromised, maxAcceptedOrCommitted, acceptedOrCommitted,
+                                         executeAt, isCoordinating, durability, route, homeKey, partialTxn, stableDeps, writes, result);
         }
 
         CheckStatusOk with(@Nonnull FoundKnownMap newMap)
         {
             if (newMap == this.map)
                 return this;
-            return new CheckStatusOkFull(newMap, maxKnowledgeSaveStatus, maxSaveStatus, promised, accepted, executeAt,
-                                     isCoordinating, durability, route, homeKey, partialTxn, committedDeps, writes, result);
+            return new CheckStatusOkFull(newMap, maxKnowledgeSaveStatus, maxSaveStatus, maxPromised, maxAcceptedOrCommitted, acceptedOrCommitted,
+                                         executeAt, isCoordinating, durability, route, homeKey, partialTxn, stableDeps, writes, result);
         }
 
         /**
@@ -810,21 +823,25 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             CheckStatusOk minSrc = maxSrc == this ? that : this;
             if (!(minSrc instanceof CheckStatusOkFull))
             {
-                return new CheckStatusOkFull(max.map, max.maxKnowledgeSaveStatus, max.maxSaveStatus, max.promised, max.accepted, fullMax.executeAt, max.isCoordinating, max.durability, max.route,
-                                             max.homeKey, fullMax.partialTxn, fullMax.committedDeps, fullMax.writes, fullMax.result);
+                return new CheckStatusOkFull(max.map, max.maxKnowledgeSaveStatus, max.maxSaveStatus,
+                                             max.maxPromised, max.maxAcceptedOrCommitted, max.acceptedOrCommitted,
+                                             fullMax.executeAt, max.isCoordinating, max.durability, max.route,
+                                             max.homeKey, fullMax.partialTxn, fullMax.stableDeps, fullMax.writes, fullMax.result);
             }
 
             CheckStatusOkFull fullMin = (CheckStatusOkFull) minSrc;
 
             PartialTxn partialTxn = PartialTxn.merge(fullMax.partialTxn, fullMin.partialTxn);
             PartialDeps committedDeps;
-            if (fullMax.committedDeps == null) committedDeps = fullMin.committedDeps;
-            else if (fullMin.committedDeps == null) committedDeps = fullMax.committedDeps;
-            else committedDeps = fullMax.committedDeps.with(fullMin.committedDeps);
+            if (fullMax.stableDeps == null) committedDeps = fullMin.stableDeps;
+            else if (fullMin.stableDeps == null) committedDeps = fullMax.stableDeps;
+            else committedDeps = fullMax.stableDeps.with(fullMin.stableDeps);
             Writes writes = (fullMax.writes != null ? fullMax : fullMin).writes;
             Result result = (fullMax.result != null ? fullMax : fullMin).result;
 
-            return new CheckStatusOkFull(max.map, max.maxKnowledgeSaveStatus, max.maxSaveStatus, max.promised, max.accepted, max.executeAt, max.isCoordinating, max.durability, max.route,
+            return new CheckStatusOkFull(max.map, max.maxKnowledgeSaveStatus, max.maxSaveStatus,
+                                         max.maxPromised, max.maxAcceptedOrCommitted, max.acceptedOrCommitted,
+                                         max.executeAt, max.isCoordinating, max.durability, max.route,
                                          max.homeKey, partialTxn, committedDeps, writes, result);
         }
 
@@ -843,7 +860,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
         {
             Known known = super.knownFor(participants);
             Invariants.checkState(!known.hasDefinition() || (partialTxn != null && partialTxn.covering().containsAll(participants)));
-            Invariants.checkState(!known.hasDecidedDeps() || (committedDeps != null && committedDeps.covering.containsAll(participants)));
+            Invariants.checkState(!known.hasDecidedDeps() || (stableDeps != null && stableDeps.covering.containsAll(participants)));
             return known;
         }
 
@@ -853,12 +870,12 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             return "CheckStatusOk{" +
                    "map:" + map +
                    ", maxSaveStatus:" + maxSaveStatus +
-                   ", promised:" + promised +
-                   ", accepted:" + accepted +
+                   ", promised:" + maxPromised +
+                   ", accepted:" + maxAcceptedOrCommitted +
                    ", executeAt:" + executeAt +
                    ", durability:" + durability +
                    ", isCoordinating:" + isCoordinating +
-                   ", deps:" + committedDeps +
+                   ", deps:" + stableDeps +
                    ", writes:" + writes +
                    ", result:" + result +
                    '}';

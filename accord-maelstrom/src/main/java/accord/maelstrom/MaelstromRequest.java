@@ -36,6 +36,8 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
 
+import static accord.utils.Invariants.illegalState;
+
 public class MaelstromRequest extends Body implements Request
 {
     final Txn txn;
@@ -126,7 +128,7 @@ public class MaelstromRequest extends Body implements Request
             Key key = MaelstromKey.readKey(in);
             switch (op)
             {
-                default: throw new IllegalStateException("Invalid op: " + op);
+                default: throw illegalState("Invalid op: " + op);
                 case "r":
                     in.nextNull();
                     buildReadKeys.add(key);

@@ -67,20 +67,23 @@ public enum SaveStatus
     PreCommittedWithAcceptedDeps    (Status.PreCommitted,          Covering, DefinitionUnknown, ExecuteAtKnown,    DepsProposed, Unknown,          LocalExecution.ReadyToExclude),
     PreCommittedWithDefinition      (Status.PreCommitted,          Full,     DefinitionKnown,   ExecuteAtKnown,    DepsUnknown,  Unknown,          LocalExecution.ReadyToExclude),
     PreCommittedWithDefinitionAndAcceptedDeps(Status.PreCommitted, Full,     DefinitionKnown,   ExecuteAtKnown,    DepsProposed, Unknown,          LocalExecution.ReadyToExclude),
-    Committed                       (Status.Committed,                                                                                             LocalExecution.WaitingToExecute),
+    Committed                       (Status.Committed,                                                                                             LocalExecution.ReadyToExclude),
+    Stable                          (Status.Stable,                                                                                                LocalExecution.WaitingToExecute),
     ReadyToExecute                  (Status.ReadyToExecute,                                                                                        LocalExecution.ReadyToExecute),
     PreApplied                      (Status.PreApplied,                                                                                            LocalExecution.WaitingToApply),
     Applying                        (Status.PreApplied,                                                                                            LocalExecution.Applying),
     // similar to Truncated, but doesn't imply we have any global knowledge about application
     Applied                         (Status.Applied,                                                                                               LocalExecution.Applied),
     // TruncatedApplyWithDeps is a state never adopted within a single replica; it is however a useful state we may enter by combining state from multiple replicas
-    // TODO (desired): if we migrate away from SaveStatus in CheckStatusOk towards Known we can remove this TruncatedApplyWithDeps
-    TruncatedApplyWithDeps          (Status.Truncated,             Full,    DefinitionErased, ExecuteAtKnown,    DepsKnown,    Outcome.Apply,    CleaningUp),
-    TruncatedApplyWithOutcome       (Status.Truncated,             Full,    DefinitionErased, ExecuteAtKnown,    DepsErased,   Outcome.Apply,    CleaningUp),
-    TruncatedApply                  (Status.Truncated,             Full,    DefinitionErased, ExecuteAtKnown,    DepsErased,   Outcome.WasApply, CleaningUp),
-    // Expunged means the command is either entirely pre-bootstrap or stale and we don't have enough information to move it through the normal redundant->truncation path (i.e. it might be truncated, it might be applied)
-    Erased                          (Status.Truncated,             Maybe,   DefinitionErased, ExecuteAtErased,   DepsErased,   Outcome.Erased,   CleaningUp),
-    Invalidated                     (Status.Invalidated,                                                                                         CleaningUp),
+    // TODO (expected): TruncatedApplyWithDeps should be redundant now we have migrated away from SaveStatus in CheckStatusOk to Known; remove in isolated commit once stable
+    TruncatedApplyWithDeps          (Status.Truncated,             Full,    DefinitionErased,   ExecuteAtKnown,    DepsKnown,    Outcome.Apply,    CleaningUp),
+    TruncatedApplyWithOutcome       (Status.Truncated,             Full,    DefinitionErased,   ExecuteAtKnown,    DepsErased,   Outcome.Apply,    CleaningUp),
+    TruncatedApply                  (Status.Truncated,             Full,    DefinitionErased,   ExecuteAtKnown,    DepsErased,   Outcome.WasApply, CleaningUp),
+    // ErasedOrInvalidated means the command is redundant for the shard and data being queried, but no FullRoute is known, so it is not known to be globally Erased
+    ErasedOrInvalidated             (Status.Truncated,             Maybe,   DefinitionUnknown,  ExecuteAtUnknown,  DepsUnknown,  Unknown,          CleaningUp),
+    // NOTE: Erased should ONLY be adopted on a replica that knows EVERY shard has successfully applied the transaction at all healthy replicas.
+    Erased                          (Status.Truncated,             Maybe,   DefinitionErased,   ExecuteAtErased,   DepsErased,   Outcome.Erased,   CleaningUp),
+    Invalidated                     (Status.Invalidated,                                                                                           CleaningUp),
     ;
 
     /**
@@ -227,10 +230,14 @@ public enum SaveStatus
                     return known.isDefinitionKnown() ? AcceptedWithDefinition : Accepted;
                 // if the decision is known, we're really PreCommitted
             case PreCommitted:
-                if (known.isDefinitionKnown())
-                    return known.deps == DepsProposed ? PreCommittedWithDefinitionAndAcceptedDeps : PreCommittedWithDefinition;
-                return known.deps == DepsProposed ? PreCommittedWithAcceptedDeps : PreCommitted;
-            case Committed: return Committed;
+                if (!known.isDefinitionKnown() || !known.deps.hasCommittedOrDecidedDeps())
+                {
+                    if (known.isDefinitionKnown())
+                        return known.deps == DepsProposed ? PreCommittedWithDefinitionAndAcceptedDeps : PreCommittedWithDefinition;
+                    return known.deps == DepsProposed ? PreCommittedWithAcceptedDeps : PreCommitted;
+                }
+            case Committed: return known.deps == DepsKnown ? Stable : Committed;
+            case Stable: return Stable;
             case ReadyToExecute: return ReadyToExecute;
             case PreApplied: return PreApplied;
             case Applied: return Applied;
@@ -248,6 +255,9 @@ public enum SaveStatus
             case Accepted:
             case AcceptedInvalidate:
             case PreCommitted:
+            case Committed:
+            case Stable:
+            case ReadyToExecute:
                 if (known.isSatisfiedBy(status.known))
                     return status;
                 return get(status.status, status.known.atLeast(known));
@@ -256,6 +266,13 @@ public enum SaveStatus
                 switch (status)
                 {
                     default: throw new AssertionError("Unexpected status: " + status);
+                    case ErasedOrInvalidated:
+                        if (known.outcome.isInvalidated())
+                            return Invalidated;
+
+                        if (!known.outcome.isOrWasApply() || known.executeAt == ExecuteAtKnown)
+                            return ErasedOrInvalidated;
+
                     case Erased:
                         if (!known.outcome.isOrWasApply() || known.executeAt != ExecuteAtKnown)
                             return Erased;
@@ -280,18 +297,18 @@ public enum SaveStatus
     }
 
     // TODO (expected): tighten up distinction of "preferKnowledge" and its interaction with CheckStatus
-    public static SaveStatus merge(SaveStatus a, Ballot acceptedA, SaveStatus b, Ballot acceptedB, boolean preferKnowledge)
+    public static SaveStatus merge(SaveStatus a, Ballot ballotA, SaveStatus b, Ballot ballotB, boolean preferKnowledge)
     {
         // we first enrich cleanups with the knowledge of the other, to avoid counter-intuitive situations where
         // we might be able to convert a TruncatedWithApply into Applied, but instead select something much earlier
         // such as ReadyToExecute; we then apply the normal max process to the results
         if (a.phase == Phase.Cleanup) a = enrich(a, b.known);
         if (b.phase == Phase.Cleanup) b = enrich(b, a.known);
-        SaveStatus result = max(a, a, acceptedA, b, b, acceptedB, preferKnowledge);
+        SaveStatus result = max(a, a, ballotA, b, b, ballotB, preferKnowledge);
         return enrich(result, (result == a ? b : a).known);
     }
 
-    public static <T> T max(T av, SaveStatus a, Ballot acceptedA, T bv, SaveStatus b, Ballot acceptedB, boolean preferKnowledge)
+    public static <T> T max(T av, SaveStatus a, Ballot ballotA, T bv, SaveStatus b, Ballot ballotB, boolean preferKnowledge)
     {
         if (a == b)
             return av;
@@ -303,8 +320,8 @@ public enum SaveStatus
                    : (preferKnowledge && b.phase == Phase.Cleanup ? av : bv);
         }
 
-        if (a.phase == Phase.Accept)
-            return acceptedA.compareTo(acceptedB) >= 0 ? av : bv;
+        if (a.phase.tieBreakWithBallot)
+            return ballotA.compareTo(ballotB) >= 0 ? av : bv;
 
         if (preferKnowledge && a.lowerHasMoreKnowledge(b))
             return a.compareTo(b) <= 0 ? av : bv;

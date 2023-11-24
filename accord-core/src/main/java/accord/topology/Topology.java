@@ -52,6 +52,7 @@ import org.agrona.collections.IntArrayList;
 
 import javax.annotation.Nullable;
 
+import static accord.utils.Invariants.illegalArgument;
 import static accord.utils.SortedArrays.Search.FLOOR;
 import static accord.utils.SortedArrays.exponentialSearch;
 
@@ -231,7 +232,7 @@ public class Topology
     {
         int i = subsetOfRanges.indexOf(key);
         if (i < 0)
-            throw new IllegalArgumentException("Range not found for " + key);
+            throw illegalArgument("Range not found for " + key);
         return shards[supersetIndexes[i]];
     }
 

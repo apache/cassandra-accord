@@ -32,6 +32,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 import static accord.utils.ArrayBuffers.*;
 import static accord.utils.RelationMultiMap.*;
@@ -88,9 +89,15 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     private SearchableRangeList searchable;
     private Ranges covering;
 
+    public static LinearMerger<Range, TxnId, RangeDeps> newMerger()
+    {
+        return new LinearMerger<>(ADAPTER);
+    }
+
+    // TODO (expected): merge by TxnId key, not by range, so that we can merge overlapping ranges for same TxnId
     public static <T1, T2> RangeDeps merge(List<T1> merge, Function<T1, T2> getter1, Function<T2, RangeDeps> getter2)
     {
-        try (LinearMerger<Range, TxnId, RangeDeps> linearMerger = new LinearMerger<>(ADAPTER))
+        try (LinearMerger<Range, TxnId, RangeDeps> linearMerger = newMerger())
         {
             int mergeIndex = 0, mergeSize = merge.size();
             while (mergeIndex < mergeSize)
@@ -105,6 +112,19 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
 
                 linearMerger.update(deps, deps.ranges, deps.txnIds, deps.rangesToTxnIds);
             }
+
+            return linearMerger.get(RangeDeps::new, NONE);
+        }
+    }
+
+    public static RangeDeps merge(Stream<RangeDeps> merge)
+    {
+        try (LinearMerger<Range, TxnId, RangeDeps> linearMerger = newMerger())
+        {
+            merge.forEach(deps -> {
+                if (!deps.isEmpty())
+                    linearMerger.update(deps, deps.ranges, deps.txnIds, deps.rangesToTxnIds);
+            });
 
             return linearMerger.get(RangeDeps::new, NONE);
         }
@@ -485,6 +505,11 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
         return false;
     }
 
+    public int indexOfStart(RoutableKey key)
+    {
+        return SortedArrays.binarySearch(ranges, 0, ranges.length, key, (k, r) -> k.compareTo(r.start()), CEIL);
+    }
+
     public <P1, V> V foldEachRange(int txnIdx, P1 p1, V accumulate, TriFunction<P1, Range, V, V> fold)
     {
         ensureTxnIdToRange();
@@ -654,6 +679,11 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     public String toString()
     {
         return RelationMultiMap.toSimpleString(ranges, txnIds, rangesToTxnIds);
+    }
+
+    public String toBriefString()
+    {
+        return RelationMultiMap.toBriefString(ranges, txnIds);
     }
 
     @Nonnull

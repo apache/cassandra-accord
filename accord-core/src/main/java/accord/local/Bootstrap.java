@@ -46,6 +46,7 @@ import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.primitives.Txn.Kind.LocalOnly;
 import static accord.primitives.Txn.Kind.NoOp;
+import static accord.utils.Invariants.illegalState;
 
 /**
  * Captures state associated with a command store's adoption of a collection of new ranges.
@@ -133,13 +134,13 @@ class Bootstrap
             Ranges commitRanges = valid;
             store.markBootstrapping(safeStore0, globalSyncId, valid);
             CoordinateSyncPoint.exclusive(node, globalSyncId, commitRanges)
-               // TODO (correcness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
+               // TODO (required, correcness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
                // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
                .flatMap(syncPoint -> node.withEpoch(epoch, () -> store.submit(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.DEPS), safeStore1 -> {
                    if (valid.isEmpty()) // we've lost ownership of the range
                        return AsyncResults.success(Ranges.EMPTY);
 
-                   Commands.commitRecipientLocalSyncPoint(safeStore1, localSyncId, syncPoint, valid);
+                   Commands.stableRecipientLocalSyncPoint(safeStore1, localSyncId, syncPoint, valid);
                    safeStore1.registerHistoricalTransactions(syncPoint.waitFor);
                    return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this);
                })))
@@ -272,7 +273,7 @@ class Bootstrap
         private synchronized void cancel(SafeToRead state)
         {
             if (state.startedAt != Integer.MAX_VALUE)
-                throw new IllegalStateException("Tried to cancel starting a fetch that had already started");
+                throw illegalState("Tried to cancel starting a fetch that had already started");
             state.startedAt = Integer.MIN_VALUE;
 
             // unlink from other overlaps, and remove ourselves from states collection

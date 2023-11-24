@@ -61,7 +61,7 @@ public class CoordinateNoOp extends CoordinatePreAccept<Timestamp>
 
     public static AsyncResult<Timestamp> coordinate(Node node, TxnId txnId, Seekables<?, ?> keysOrRanges)
     {
-        Invariants.checkArgument(txnId.rw() == NoOp);
+        Invariants.checkArgument(txnId.kind() == NoOp);
         FullRoute<?> route = node.computeRoute(txnId, keysOrRanges);
         TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(txnId.epoch()), txnId, route.homeKey(), keysOrRanges);
         if (mismatch != null)

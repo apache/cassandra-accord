@@ -25,6 +25,7 @@ import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.coordinate.CheckShards;
 import accord.coordinate.CoordinationFailed;
+import accord.coordinate.Exhausted;
 import accord.coordinate.Invalidated;
 import accord.coordinate.Truncated;
 import accord.coordinate.Timeout;
@@ -54,6 +55,7 @@ import static accord.local.Status.Phase.Cleanup;
 
 import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
+import static accord.utils.Invariants.illegalState;
 
 public class ListRequest implements Request
 {
@@ -193,7 +195,8 @@ public class ListRequest implements Request
                         node.reply(client, replyContext, ListResult.truncated(client, ((Packet)replyContext).requestId, txnId), null);
                         return;
                     }
-                    if (f instanceof Timeout || f instanceof SimulatedFault) checkOnResult(finalHomeKey, txnId, attempt + 1, f);
+                    // some arbitrarily large limit to attempts
+                    if (attempt < 1000 && (f instanceof Timeout || f instanceof SimulatedFault || f instanceof Exhausted)) checkOnResult(finalHomeKey, txnId, attempt + 1, f);
                     else
                     {
                         node.reply(client, replyContext, ListResult.failure(client, ((Packet)replyContext).requestId, txnId), null);
@@ -248,7 +251,7 @@ public class ListRequest implements Request
     public void process(Node node, Id client, ReplyContext replyContext)
     {
         if (id != null)
-            throw new IllegalStateException("Called process multiple times");
+            throw illegalState("Called process multiple times");
         txn = gen.apply(node);
         id = node.nextTxnId(txn.kind(), txn.keys().domain());
         listener.onClientAction(MessageListener.ClientAction.SUBMIT, node.id(), id, txn);

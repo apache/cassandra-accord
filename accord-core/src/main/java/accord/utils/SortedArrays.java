@@ -32,6 +32,7 @@ import javax.annotation.Nullable;
 
 import static accord.utils.ArrayBuffers.uncached;
 import static accord.utils.Invariants.checkArgument;
+import static accord.utils.Invariants.illegalState;
 import static accord.utils.SortedArrays.Search.FAST;
 
 // TODO (low priority, efficiency): improvements:
@@ -1137,14 +1138,14 @@ public class SortedArrays
                 if (j < 0)
                 {
                     if (i > 0 && src[i] == src[i-1])
-                        throw new IllegalStateException("Unexpected value in source: " + src[i] + " at index " + i + " duplicates index " + (i - 1));
-                    throw new IllegalStateException("Unexpected value in source: " + src[i] + " at index " + i + " does not exist in target array");
+                        throw illegalState("Unexpected value in source: " + src[i] + " at index " + i + " duplicates index " + (i - 1));
+                    throw illegalState("Unexpected value in source: " + src[i] + " at index " + i + " does not exist in target array");
                 }
             }
             result[i++] = j++;
         }
         if (i != srcLength)
-            throw new IllegalStateException("Unexpected value in source: " + src[i] + " at index " + i + " does not exist in target array");
+            throw illegalState("Unexpected value in source: " + src[i] + " at index " + i + " does not exist in target array");
         return result;
     }
 

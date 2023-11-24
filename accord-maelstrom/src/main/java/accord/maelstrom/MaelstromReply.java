@@ -32,6 +32,8 @@ import com.google.gson.stream.JsonWriter;
 import accord.maelstrom.Packet.Type;
 import accord.messages.Reply;
 
+import static accord.utils.Invariants.illegalState;
+
 public class MaelstromReply extends Body implements Reply
 {
     final MaelstromResult result;
@@ -98,7 +100,7 @@ public class MaelstromReply extends Body implements Reply
             Key key = MaelstromKey.readKey(in);
             switch (op)
             {
-                default: throw new IllegalStateException("Invalid op: " + op);
+                default: throw illegalState("Invalid op: " + op);
                 case "r":
                 {
                     Value value = Value.read(in);

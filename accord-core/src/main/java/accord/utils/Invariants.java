@@ -39,14 +39,14 @@ public class Invariants
         return DEBUG;
     }
 
-    public static void illegalState(String msg)
+    public static IllegalStateException illegalState(String msg)
     {
         throw new IllegalStateException(msg);
     }
 
-    private static void illegalState()
+    public static IllegalStateException illegalState()
     {
-        illegalState(null);
+        throw illegalState(null);
     }
 
     public static RuntimeException illegalArgument(String msg)

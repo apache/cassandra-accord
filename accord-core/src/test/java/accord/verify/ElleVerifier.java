@@ -50,6 +50,9 @@ public class ElleVerifier implements Verifier
     {
         public static boolean allowed()
         {
+            if (!Boolean.parseBoolean(System.getProperty("accord.verify.elle", "true")))
+                return false;
+
             // Elle only works on JDK 11
             int jdkVersion = Integer.parseInt(StandardSystemProperty.JAVA_VERSION.value().split("\\.")[0]);
             return !(jdkVersion == 1 /* 1.8 */ || jdkVersion == 8);

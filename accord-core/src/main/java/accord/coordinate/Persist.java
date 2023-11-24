@@ -57,7 +57,7 @@ public abstract class Persist implements Callback<ApplyReply>
     protected final FullRoute<?> route;
     protected final Txn txn;
     protected final Timestamp executeAt;
-    protected final Deps deps;
+    protected final Deps stableDeps;
     protected final Writes writes;
     protected final Result result;
     protected final Topologies topologies;
@@ -65,16 +65,16 @@ public abstract class Persist implements Callback<ApplyReply>
     protected final Set<Id> persistedOn;
     boolean isDone;
 
-    public static void persist(Node node, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, BiConsumer<? super Result, Throwable> clientCallback)
+    public static void persist(Node node, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps stableDeps, Writes writes, Result result, BiConsumer<? super Result, Throwable> clientCallback)
     {
         Topologies executes = executes(node, route, executeAt);
-        persist(node, executes, txnId, route, txn, executeAt, deps, writes, result, clientCallback);
+        persist(node, executes, route, txnId, txn, executeAt, stableDeps, writes, result, clientCallback);
     }
 
-    public static void persist(Node node, Topologies executes, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result, BiConsumer<? super Result, Throwable> clientCallback)
+    public static void persist(Node node, Topologies executes, FullRoute<?> route, TxnId txnId, Txn txn, Timestamp executeAt, Deps stableDeps, Writes writes, Result result, BiConsumer<? super Result, Throwable> clientCallback)
     {
         Topologies participates = participates(node, route, txnId, executeAt, executes);
-        node.persistFactory().create(node, executes, txnId, route, txn, executeAt, deps, writes, result)
+        node.persistFactory().create(node, executes, txnId, route, txn, executeAt, stableDeps, writes, result)
                              .applyMinimal(participates, executes, writes, result, clientCallback);
     }
 
@@ -94,14 +94,14 @@ public abstract class Persist implements Callback<ApplyReply>
         node.send(participates.nodes(), to -> Apply.applyMaximal(Apply.FACTORY, to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), persist);
     }
 
-    protected Persist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    protected Persist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps stableDeps, Writes writes, Result result)
     {
         this.node = node;
         this.txnId = txnId;
         this.route = route;
         this.txn = txn;
         this.executeAt = executeAt;
-        this.deps = deps;
+        this.stableDeps = stableDeps;
         this.writes = writes;
         this.result = result;
         this.topologies = topologies;
@@ -129,7 +129,7 @@ public abstract class Persist implements Callback<ApplyReply>
                 }
                 break;
             case Insufficient:
-                Apply.sendMaximal(node, from, txnId, route, txn, executeAt, deps, writes, result);
+                Apply.sendMaximal(node, from, txnId, route, txn, executeAt, stableDeps, writes, result);
         }
     }
 
@@ -149,12 +149,12 @@ public abstract class Persist implements Callback<ApplyReply>
         registerClientCallback(writes, result, clientCallback);
         // applyMinimal is used for transaction execution by the original coordinator so it's important to use
         // Node's Apply factory in case the factory has to do synchronous Apply.
-        node.send(participates.nodes(), to -> Apply.applyMinimal(node.applyFactory(), to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), this);
+        node.send(participates.nodes(), to -> Apply.applyMinimal(node.applyFactory(), to, participates, executes, txnId, route, txn, executeAt, stableDeps, writes, result), this);
     }
     public void applyMaximal(Topologies participates, Topologies executes, Writes writes, Result result, BiConsumer<? super Result, Throwable> clientCallback)
     {
         registerClientCallback(writes, result, clientCallback);
-        node.send(participates.nodes(), to -> Apply.applyMaximal(Apply.FACTORY, to, participates, executes, txnId, route, txn, executeAt, deps, writes, result), this);
+        node.send(participates.nodes(), to -> Apply.applyMaximal(Apply.FACTORY, to, participates, executes, txnId, route, txn, executeAt, stableDeps, writes, result), this);
     }
 
     public abstract void registerClientCallback(Writes writes, Result result, BiConsumer<? super Result, Throwable> clientCallback);

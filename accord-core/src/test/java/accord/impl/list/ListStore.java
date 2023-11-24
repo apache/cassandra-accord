@@ -485,7 +485,8 @@ public class ListStore implements DataStore
             return coordinate.recover(t -> {
                 // TODO (effecicency): backoff
                 if (t instanceof Timeout ||
-                    t instanceof RuntimeException && "NotCommitted".equals(t.getMessage()) ||
+                    // TODO (expected): why are we not simply handling Insufficient properly?
+                    t instanceof RuntimeException && "Insufficient".equals(t.getMessage()) ||
                     t instanceof SimulatedFault)
                     return coordinate(node, minEpoch, sp);
                 return null;
@@ -501,12 +502,13 @@ public class ListStore implements DataStore
         {
             if (!reply.isOk())
             {
-                ReadData.ReadNack nack = (ReadData.ReadNack) reply;
+                ReadData.CommitOrReadNack nack = (ReadData.CommitOrReadNack) reply;
                 switch (nack)
                 {
                     default: throw new AssertionError("Unhandled: " + reply);
 
-                    case NotCommitted:
+                    case Rejected:
+                    case Insufficient:
                     case Redundant:
                         tryFailure(new RuntimeException(nack.name()));
                         return;

@@ -48,8 +48,8 @@ import accord.burn.TopologyUpdates;
 import accord.burn.random.FrequentLargeRange;
 import accord.config.LocalConfig;
 import accord.config.MutableLocalConfig;
-import accord.coordinate.TxnExecute;
-import accord.coordinate.TxnPersist;
+import accord.coordinate.ExecuteTxn;
+import accord.coordinate.PersistTxn;
 import accord.impl.CoordinateDurabilityScheduling;
 import accord.impl.MessageListener;
 import accord.impl.PrefixedIntHashKey;
@@ -213,7 +213,10 @@ public class Cluster implements Scheduler
                                         : sinks.get(deliver.dst).callbacks.get(deliver.replyId);
 
                 if (callback != null)
-                    callback.success(deliver.src, reply);
+                {
+                    if (reply instanceof Reply.FailureReply) callback.failure(deliver.src, ((Reply.FailureReply) reply).failure);
+                    else callback.success(deliver.src, reply);
+                }
             }
             else on.receive((Request) deliver.message, deliver.src, deliver);
         }
@@ -296,7 +299,7 @@ public class Cluster implements Scheduler
                                      () -> new ListStore(id), new ShardDistributor.EvenSplit<>(8, ignore -> new PrefixedIntHashKey.Splitter()),
                                      nodeExecutor.agent(),
                                      randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
-                                     SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending, isLoadedCheck), TxnExecute.FACTORY, TxnPersist.FACTORY, Apply.FACTORY,
+                                     SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending, isLoadedCheck), ExecuteTxn.FACTORY, PersistTxn.FACTORY, Apply.FACTORY,
                                      localConfig);
                 CoordinateDurabilityScheduling durability = new CoordinateDurabilityScheduling(node);
                 // TODO (desired): randomise

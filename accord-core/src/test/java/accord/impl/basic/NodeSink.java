@@ -122,6 +122,7 @@ public class NodeSink implements MessageSink
                         {
                             try
                             {
+                                // TODO (now): we MUST drop any ACTUAL reply now
                                 callback.failure(to, new SimulatedFault("Simulation Failure; src=" + self + ", to=" + to + ", id=" + id + ", message=" + message));
                             }
                             catch (Throwable t)

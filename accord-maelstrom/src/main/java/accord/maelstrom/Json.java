@@ -35,6 +35,8 @@ import com.google.gson.stream.JsonWriter;
 import accord.local.Node.Id;
 import accord.api.Key;
 
+import static accord.utils.Invariants.illegalState;
+
 public class Json
 {
     public static final Gson GSON;
@@ -268,7 +270,7 @@ public class Json
                 String kind = in.nextName();
                 switch (kind)
                 {
-                    default: throw new IllegalStateException("Invalid kind: " + kind);
+                    default: throw illegalState("Invalid kind: " + kind);
                     case "r":
                         in.beginArray();
                         while (in.hasNext())

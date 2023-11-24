@@ -26,6 +26,8 @@ import accord.api.Scheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static accord.utils.Invariants.illegalState;
+
 public class ThreadPoolScheduler implements Scheduler
 {
     private static final Logger logger = LoggerFactory.getLogger(ThreadPoolScheduler.class);
@@ -91,7 +93,7 @@ public class ThreadPoolScheduler implements Scheduler
         try
         {
             if (!exec.awaitTermination(1L, TimeUnit.MINUTES))
-                throw new IllegalStateException("did not terminate");
+                throw illegalState("did not terminate");
         }
         catch (InterruptedException e)
         {

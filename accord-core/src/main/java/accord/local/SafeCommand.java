@@ -115,9 +115,14 @@ public abstract class SafeCommand
         return update(Command.acceptInvalidated(current(), ballot));
     }
 
-    public Command.Committed commit(CommonAttributes attrs, Timestamp executeAt, Command.WaitingOn waitingOn)
+    public Command.Committed commit(CommonAttributes attrs, Ballot ballot, Timestamp executeAt)
     {
-        return update(Command.commit(current(), attrs, executeAt, waitingOn));
+        return update(Command.commit(current(), attrs, ballot, executeAt));
+    }
+
+    public Command.Committed stable(CommonAttributes attrs, Ballot ballot, Timestamp executeAt, Command.WaitingOn waitingOn)
+    {
+        return update(Command.stable(current(), attrs, ballot, executeAt, waitingOn));
     }
 
     public Truncated commitInvalidated()

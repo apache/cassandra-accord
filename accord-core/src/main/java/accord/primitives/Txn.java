@@ -150,18 +150,6 @@ public interface Txn
             return this == ExclusiveSyncPoint;
         }
 
-        /**
-         * Does the transaction propose dependencies as part of its Accept round, i.e. make durable a set of dependencies
-         *
-         * Note that this it is only possible to do this for transactions whose execution time is not dependent on
-         * others, i.e. where we may safely propose executeAt = txnId regardless of when it is witnessed by
-         * replicas
-         */
-        public boolean proposesDeps()
-        {
-            return this == ExclusiveSyncPoint || this == SyncPoint;
-        }
-
         public static Kind ofOrdinal(int ordinal)
         {
             return VALUES[ordinal];

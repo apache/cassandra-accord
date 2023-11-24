@@ -28,6 +28,7 @@ import java.util.Objects;
 
 import javax.annotation.Nullable;
 
+import static accord.utils.Invariants.illegalState;
 import static accord.utils.SortedArrays.Search.CEIL;
 import static accord.utils.SortedArrays.Search.FAST;
 
@@ -210,7 +211,7 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         if (start.compareTo(end) >= 0)
             throw new IllegalArgumentException(start + " >= " + end);
         if (startInclusive() == endInclusive())
-            throw new IllegalStateException("Range must have one side inclusive, and the other exclusive. Range of different types should not be mixed.");
+            throw illegalState("Range must have one side inclusive, and the other exclusive. Range of different types should not be mixed.");
         this.start = start;
         this.end = end;
     }

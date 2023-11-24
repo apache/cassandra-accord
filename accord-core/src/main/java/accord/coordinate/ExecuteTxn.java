@@ -28,7 +28,7 @@ import accord.api.Result;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Commit;
-import accord.messages.ReadData.ReadNack;
+import accord.messages.ReadData.CommitOrReadNack;
 import accord.messages.ReadData.ReadOk;
 import accord.messages.ReadData.ReadReply;
 import accord.messages.ReadTxnData;
@@ -44,32 +44,40 @@ import org.agrona.collections.IntHashSet;
 
 import static accord.coordinate.ReadCoordinator.Action.Approve;
 import static accord.coordinate.ReadCoordinator.Action.ApprovePartial;
+import static accord.messages.Commit.Kind.StableFastPath;
+import static accord.messages.Commit.Kind.StableSlowPath;
+import static accord.messages.Commit.Kind.StableWithTxnAndDeps;
+import static accord.utils.Invariants.illegalState;
 
-public class TxnExecute extends ReadCoordinator<ReadReply> implements Execute
+public class ExecuteTxn extends ReadCoordinator<ReadReply> implements Execute
 {
-    public static final Execute.Factory FACTORY = TxnExecute::new;
+    public static final Execute.Factory FACTORY = ExecuteTxn::new;
 
     @SuppressWarnings("unused")
-    private static final Logger logger = LoggerFactory.getLogger(TxnExecute.class);
+    private static final Logger logger = LoggerFactory.getLogger(ExecuteTxn.class);
 
+    final Path path;
     final Txn txn;
     final Participants<?> readScope;
     final FullRoute<?> route;
     final Timestamp executeAt;
-    final Deps deps;
-    final Topologies executes;
+    final Deps stableDeps;
+    final Topologies allTopologies;
     final BiConsumer<? super Result, Throwable> callback;
     private Data data;
 
-    private TxnExecute(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Participants<?> readScope, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
+    private ExecuteTxn(Node node, Topologies topologies, Path path, TxnId txnId, Txn txn, FullRoute<?> route, Participants<?> readScope, Timestamp executeAt, Deps stableDeps, BiConsumer<? super Result, Throwable> callback)
     {
-        super(node, node.topology().forEpoch(readScope, executeAt.epoch()), txnId);
+        // we need to send Stable to the origin epoch as well as the execution epoch
+        // TODO (desired): permit slicing Topologies by key (though unnecessary if we eliminate the concept of non-participating home keys)
+        super(node, route.isParticipatingHomeKey() ? topologies : node.topology().preciseEpochs(readScope, txnId.epoch(), executeAt.epoch()), txnId);
+        this.path = path;
         this.txn = txn;
         this.route = route;
+        this.allTopologies = topologies;
         this.readScope = readScope;
         this.executeAt = executeAt;
-        this.deps = deps;
-        this.executes = node.topology().forEpoch(route, executeAt.epoch());
+        this.stableDeps = stableDeps;
         this.callback = callback;
     }
 
@@ -78,7 +86,16 @@ public class TxnExecute extends ReadCoordinator<ReadReply> implements Execute
     {
         IntHashSet readSet = new IntHashSet();
         to.forEach(i -> readSet.add(i.id));
-        Commit.commitMinimalAndRead(node, executes, txnId, txn, route, readScope, executeAt, deps, readSet, this);
+        Commit.Kind kind;
+        switch (path)
+        {
+            default: throw new AssertionError("Unhandled path: " + path);
+            case FAST:    kind = StableFastPath; break;
+            case SLOW:    kind = StableSlowPath; break;
+            case RECOVER: kind = StableWithTxnAndDeps; break;
+        }
+        // we want to send to all topologies, but we only want to track responses from the readScope
+        Commit.stableAndRead(node, allTopologies, kind, txnId, txn, route, readScope, executeAt, stableDeps, readSet, this);
     }
 
     @Override
@@ -106,20 +123,21 @@ public class TxnExecute extends ReadCoordinator<ReadReply> implements Execute
             return ok.unavailable == null ? Approve : ApprovePartial;
         }
 
-        ReadNack nack = (ReadNack) reply;
+        CommitOrReadNack nack = (CommitOrReadNack) reply;
         switch (nack)
         {
             default: throw new IllegalStateException();
             case Redundant:
+            case Rejected:
                 callback.accept(null, new Preempted(txnId, route.homeKey()));
                 return Action.Aborted;
-            case NotCommitted:
+            case Insufficient:
                 // the replica may be missing the original commit, or the additional commit, so send everything
-                Commit.commitMaximal(node, from, txn, txnId, executeAt, route, deps, readScope);
+                Commit.stableMaximal(node, from, txn, txnId, executeAt, route, stableDeps);
                 // also try sending a read command to another replica, in case they're ready to serve a response
                 return Action.TryAlternative;
             case Invalid:
-                callback.accept(null, new IllegalStateException("Submitted a read command to a replica that did not own the range"));
+                callback.accept(null, illegalState("Submitted a read command to a replica that did not own the range"));
                 return Action.Aborted;
         }
     }
@@ -130,7 +148,7 @@ public class TxnExecute extends ReadCoordinator<ReadReply> implements Execute
         if (failure == null)
         {
             Result result = txn.result(txnId, executeAt, data);
-            Persist.persist(node, executes, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, data), result, callback);
+            Persist.persist(node, allTopologies, route, txnId, txn, executeAt, stableDeps, txn.execute(txnId, executeAt, data), result, callback);
         }
         else
         {

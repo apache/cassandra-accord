@@ -34,6 +34,7 @@ import accord.topology.Topologies;
 
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.*;
 import static accord.primitives.Routables.Slice.Minimal;
+import static accord.utils.Invariants.illegalState;
 import static com.google.common.collect.Sets.newHashSetWithExpectedSize;
 
 public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
@@ -200,7 +201,6 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
         }
     }
 
-    // TODO (required): abstract the candidate selection process so the implementation may prioritise based on distance/health etc
     final Set<Id> inflight;    // TODO (easy, efficiency): use Agrona's IntHashSet as soon as Node.Id switches from long to int
     final List<Id> candidates; // TODO (easy, efficiency): use Agrona's IntArrayList as soon as Node.Id switches from long to int
     private Set<Id> slow;      // TODO (easy, efficiency): use Agrona's IntHashSet as soon as Node.Id switches from long to int
@@ -218,7 +218,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
     protected void recordInFlightRead(Id node)
     {
         if (!inflight.add(node))
-            throw new IllegalStateException(node + " already in flight");
+            throw illegalState(node + " already in flight");
 
         recordResponse(this, node, ReadShardTracker::recordInFlightRead, false);
     }
@@ -226,7 +226,7 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
     private boolean receiveResponseIsSlow(Id node)
     {
         if (!inflight.remove(node))
-            throw new IllegalStateException("Nothing in flight for " + node);
+            throw illegalState("Nothing in flight for " + node);
 
         return slow != null && slow.remove(node);
     }

@@ -30,11 +30,11 @@ import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
 
-public class TxnPersist extends Persist
+public class PersistTxn extends Persist
 {
-    public static final Persist.Factory FACTORY = TxnPersist::new;
+    public static final Persist.Factory FACTORY = PersistTxn::new;
 
-    private TxnPersist(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    private PersistTxn(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         super(node, topologies, txnId, route, txn, executeAt, deps, writes, result);
     }

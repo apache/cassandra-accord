@@ -29,7 +29,6 @@ import accord.local.Node.Id;
 import accord.messages.Apply;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
-import accord.primitives.FullRangeRoute;
 import accord.primitives.FullRoute;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
@@ -38,6 +37,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
+import accord.utils.Faults;
 
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 
@@ -70,11 +70,15 @@ public class ProposeSyncPoint<S extends Seekables<?, ?>> extends Propose<SyncPoi
     @Override
     void onAccepted()
     {
-        if (txnId.rw() == ExclusiveSyncPoint)
+        Deps deps = this.deps;
+        if (!Faults.SYNCPOINT_UNMERGED_DEPS)
+            deps = deps.with(Deps.merge(acceptOks, ok -> ok.deps));
+
+        if (txnId.kind() == ExclusiveSyncPoint)
         {
             Apply.sendMaximal(node, txnId, route, txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null));
             node.configService().reportEpochClosed((Ranges)keysOrRanges, txnId.epoch());
-            callback.accept(new SyncPoint<S>(txnId, deps, keysOrRanges, (FullRangeRoute) route, true), null);
+            callback.accept(new SyncPoint<S>(txnId, deps, keysOrRanges, route, true), null);
         }
         else
         {

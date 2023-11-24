@@ -28,7 +28,7 @@ import accord.api.Data;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
-import accord.messages.ReadData.ReadNack;
+import accord.messages.ReadData.CommitOrReadNack;
 import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
@@ -44,7 +44,7 @@ import static accord.messages.TxnRequest.latestRelevantEpochIndex;
 
 // TODO (required, efficiency): dedup - can currently have infinite pending reads that will be executed independently
 // TODO (review) this is really more at its core Execute rather than read because we use it to execute all kinds of things now and we should maybe rename it?
-public abstract class ReadData extends AbstractEpochRequest<ReadNack>
+public abstract class ReadData extends AbstractEpochRequest<CommitOrReadNack>
 {
     private static final Logger logger = LoggerFactory.getLogger(ReadData.class);
 
@@ -123,7 +123,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadNack>
     }
 
     @Override
-    public ReadNack reduce(ReadNack r1, ReadNack r2)
+    public CommitOrReadNack reduce(CommitOrReadNack r1, CommitOrReadNack r2)
     {
         return r1 == null || r2 == null
                 ? r1 == null ? r2 : r1
@@ -131,7 +131,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadNack>
     }
 
     @Override
-    public synchronized void accept(ReadNack reply, Throwable failure)
+    public synchronized void accept(CommitOrReadNack reply, Throwable failure)
     {
         if (reply != null)
         {
@@ -215,14 +215,34 @@ public abstract class ReadData extends AbstractEpochRequest<ReadNack>
         boolean isOk();
     }
 
-    public enum ReadNack implements ReadReply
+    public enum CommitOrReadNack implements ReadReply
     {
-        Invalid, NotCommitted, Redundant;
+        /**
+         * The read is for a point in the past
+         */
+        Invalid("CommitInvalid"),
+
+        /**
+         * The commit has been rejected due to stale ballot.
+         */
+        Rejected("CommitRejected"),
+        /**
+         * Either not committed, or not stable
+         */
+        Insufficient("CommitInsufficient"),
+        Redundant("CommitOrReadRedundant");
+
+        final String fullname;
+
+        CommitOrReadNack(String fullname)
+        {
+            this.fullname = fullname;
+        }
 
         @Override
         public String toString()
         {
-            return "Read" + name();
+            return fullname;
         }
 
         @Override
@@ -240,7 +260,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadNack>
         @Override
         public boolean isFinal()
         {
-            return this != NotCommitted;
+            return this != Insufficient;
         }
     }
 

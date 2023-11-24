@@ -183,9 +183,23 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
         return SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareTo(k), Range::compareTo);
     }
 
-    protected K[] subtract(AbstractRanges ranges, IntFunction<K[]> factory)
+    protected static <K extends RoutableKey> K[] subtract(AbstractRanges ranges, K[] keys, IntFunction<K[]> factory)
     {
         return SortedArrays.subtractWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareTo(k), Range::compareTo);
+    }
+
+    protected static <K extends RoutableKey> K[] subtract(Range range, K[] keys)
+    {
+        boolean isStartInclusive = range.startInclusive();
+        int start = Arrays.binarySearch(keys, 0, keys.length, range.start(), RoutableKey::compareTo);
+        if (start < 0) start = -1 - start;
+        else if (!isStartInclusive) ++start;
+        int end = Arrays.binarySearch(keys, 0, keys.length, range.end(), RoutableKey::compareTo);
+        if (end < 0) end = -1 - end;
+        else if (!isStartInclusive) ++end;
+        if (start >= end)
+            return Arrays.copyOf(keys, 0);
+        return Arrays.copyOfRange(keys, start, end);
     }
 
     protected K[] intersect(AbstractKeys<K> that, ObjectBuffers<K> buffers)

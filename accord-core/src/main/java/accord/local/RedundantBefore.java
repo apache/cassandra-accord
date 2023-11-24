@@ -19,7 +19,6 @@
 package accord.local;
 
 import java.util.Objects;
-import java.util.function.BiFunction;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
@@ -59,7 +58,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
 
     public static class Entry
     {
-        // TODO (desired): we don't need to maintain this now, and can simplify our builder, by migrating to ReducingRangeMap.foldWithBounds
+        // TODO (desired): we don't need to maintain this now, can migrate to ReducingRangeMap.foldWithBounds
         public final Range range;
         public final long startEpoch, endEpoch;
 
@@ -359,15 +358,14 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         for (int i = 0 ; i < ranges.size() ; ++i)
         {
             Range cur = ranges.get(i);
-            builder.append(cur.start(), entry.withRange(cur), (a, b) -> { throw new IllegalStateException(); });
-            builder.append(cur.end(), null, (a, b) -> a); // if we are equal to prev end, take the prev value not zero
+            builder.append(cur.start(), cur.end(), entry.withRange(cur));
         }
         return builder.build();
     }
 
     public static RedundantBefore merge(RedundantBefore a, RedundantBefore b)
     {
-        return ReducingIntervalMap.merge(a, b, RedundantBefore.Entry::reduce, Builder::new);
+        return ReducingIntervalMap.mergeIntervals(a, b, Builder::new);
     }
 
     public RedundantStatus get(TxnId txnId, @Nullable EpochSupplier executeAt, RoutingKey participant)
@@ -434,7 +432,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         return staleRanges;
     }
 
-    static class Builder extends ReducingIntervalMap.Builder<RoutingKey, Entry, RedundantBefore>
+    static class Builder extends AbstractIntervalBuilder<RoutingKey, Entry, RedundantBefore>
     {
         protected Builder(boolean inclusiveEnds, int capacity)
         {
@@ -442,31 +440,26 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         }
 
         @Override
-        protected boolean equals(Entry a, Entry b)
+        protected Entry slice(RoutingKey start, RoutingKey end, Entry v)
         {
-            return a.equalsIgnoreRange(b);
-        }
+            if (v.range.start().equals(start) && v.range.end().equals(end))
+                return v;
 
-        // we maintain the range that an Entry applies to for ease of some other functionality - this logic is applied here in append and above by overriding equals.
-        // entries may be null for ranges we do not have any knowledge for; the final "entry" we append is expected to be null by the ReducingIntervalMap.Builder
-        // TODO (desired): consider migrating to foldlWithBounds
-        @Override
-        public void append(RoutingKey start, @Nullable Entry value, BiFunction<Entry, Entry, Entry> reduce)
-        {
-            if (value != null && value.range.start().compareTo(start) < 0)
-                value = value.withRange(value.range.newRange(start, value.range.end()));
-
-            int tailIdx = values.size() - 1;
-            super.append(start, value, reduce);
-
-            Entry tailValue; // TODO (desired): clean up maintenance of accurate range bounds
-            if (values.size() - 2 == tailIdx && tailIdx >= 0 && (tailValue = values.get(tailIdx)) != null && tailValue.range.end().compareTo(start) > 0)
-                values.set(tailIdx, tailValue.withRange(tailValue.range.newRange(tailValue.range.start(), start)));
+            return new Entry(v.range.newRange(start, end), v.startEpoch, v.endEpoch, v.locallyAppliedOrInvalidatedBefore, v.shardAppliedOrInvalidatedBefore, v.bootstrappedAt, v.staleUntilAtLeast);
         }
 
         @Override
-        protected Entry mergeEqual(Entry a, Entry b)
+        protected Entry reduce(Entry a, Entry b)
         {
+            return Entry.reduce(a, b);
+        }
+
+        @Override
+        protected Entry tryMergeEqual(Entry a, Entry b)
+        {
+            if (!a.equalsIgnoreRange(b))
+                return null;
+
             Invariants.checkState(a.range.compareIntersecting(b.range) == 0 || a.range.end().equals(b.range.start()) || a.range.start().equals(b.range.end()));
             return new Entry(a.range.newRange(
                 a.range.start().compareTo(b.range.start()) <= 0 ? a.range.start() : b.range.start(),

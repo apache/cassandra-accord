@@ -89,7 +89,6 @@ public class ListAgent implements Agent
     @Override
     public void onUncaughtException(Throwable t)
     {
-        // TODO (required, testing): ensure reported to runner
         onFailure.accept(t);
     }
 
@@ -101,7 +100,7 @@ public class ListAgent implements Agent
     @Override
     public boolean isExpired(TxnId initiated, long now)
     {
-        return now - initiated.hlc() >= timeout && !initiated.rw().isSyncPoint();
+        return now - initiated.hlc() >= timeout && !initiated.kind().isSyncPoint();
     }
 
     @Override

@@ -40,9 +40,10 @@ import accord.topology.Topologies;
 
 import static accord.local.SaveStatus.LocalExecution.ReadyToExecute;
 import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
-import static accord.local.Status.Committed;
-import static accord.messages.ReadData.ReadNack.NotCommitted;
-import static accord.messages.ReadData.ReadNack.Redundant;
+import static accord.local.Status.Stable;
+import static accord.messages.ReadData.CommitOrReadNack.Insufficient;
+import static accord.messages.ReadData.CommitOrReadNack.Redundant;
+import static accord.utils.Invariants.illegalState;
 import static accord.utils.MapReduceConsume.forEach;
 
 public abstract class AbstractExecute extends ReadData implements Command.TransientListener, EpochSupplier
@@ -147,6 +148,7 @@ public abstract class AbstractExecute extends ReadData implements Command.Transi
             case AcceptedInvalidate:
             case PreCommitted:
             case Committed:
+            case Stable:
                 return Action.WAIT;
 
             case PreApplied:
@@ -186,13 +188,13 @@ public abstract class AbstractExecute extends ReadData implements Command.Transi
     }
 
     @Override
-    public synchronized ReadNack apply(SafeCommandStore safeStore)
+    public synchronized CommitOrReadNack apply(SafeCommandStore safeStore)
     {
         SafeCommand safeCommand = safeStore.get(txnId, this, readScope);
         return apply(safeStore, safeCommand);
     }
 
-    protected synchronized ReadNack apply(SafeCommandStore safeStore, SafeCommand safeCommand)
+    protected synchronized CommitOrReadNack apply(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
         if (state != State.PENDING)
             return null;
@@ -210,11 +212,11 @@ public abstract class AbstractExecute extends ReadData implements Command.Transi
                 safeCommand.addListener(this);
 
                 safeStore.progressLog().waiting(safeCommand, WaitingToExecute, null, readScope);
-                if (status == Committed) return null;
+                if (status == Stable) return null;
                 else
                 {
                     safeStore.progressLog().waiting(safeCommand, ReadyToExecute, null, readScope);
-                    return NotCommitted;
+                    return Insufficient;
                 }
             case OBSOLETE:
                 state = State.OBSOLETE;
@@ -250,7 +252,7 @@ public abstract class AbstractExecute extends ReadData implements Command.Transi
                 // nothing to see here
                 break;
             case RETURNED:
-                throw new IllegalStateException("ReadOk was sent, yet ack called again");
+                throw illegalState("ReadOk was sent, yet ack called again");
             default:
                 throw new AssertionError("Unknown state: " + state);
         }
@@ -270,7 +272,7 @@ public abstract class AbstractExecute extends ReadData implements Command.Transi
         switch (state)
         {
             case RETURNED:
-                throw new IllegalStateException("ReadOk was sent, yet ack called again");
+                throw illegalState("ReadOk was sent, yet ack called again");
             case OBSOLETE:
                 logger.debug("After the read completed for txn {}, the result was marked obsolete", txnId);
                 if (fail != null)

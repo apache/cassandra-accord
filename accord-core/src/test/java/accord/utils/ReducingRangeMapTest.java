@@ -226,7 +226,7 @@ public class ReducingRangeMapTest
 
             RandomWithCanonical check = new RandomWithCanonical();
             for (RandomWithCanonical add : merge)
-                check = check.merge(add);
+                check = check.merge(random, add);
     //        check.serdeser();
 
             check.validate(random, id);
@@ -306,10 +306,12 @@ public class ReducingRangeMapTest
             return canonical.ceilingEntry(rk).getValue();
         }
 
-        RandomWithCanonical merge(RandomWithCanonical other)
+        RandomWithCanonical merge(Random random, RandomWithCanonical other)
         {
             RandomWithCanonical result = new RandomWithCanonical();
-            result.test = ReducingRangeMap.merge(test, other.test, Timestamp::max);
+            result.test = random.nextBoolean()
+                          ? ReducingRangeMap.merge(test, other.test, Timestamp::max)
+                          : ReducingIntervalMap.mergeIntervals(test, other.test, IntervalBuilder::new);
             result.canonical = new TreeMap<>();
             result.canonical.putAll(canonical);
             RoutingKey prev = null;
@@ -319,6 +321,38 @@ public class ReducingRangeMapTest
                 prev = entry.getKey();
             }
             return result;
+        }
+
+        static class IntervalBuilder extends ReducingIntervalMap.AbstractIntervalBuilder<RoutingKey, Timestamp, ReducingRangeMap<Timestamp>>
+        {
+            protected IntervalBuilder(boolean inclusiveEnds, int capacity)
+            {
+                super(inclusiveEnds, capacity);
+            }
+
+            @Override
+            protected Timestamp slice(RoutingKey start, RoutingKey end, Timestamp value)
+            {
+                return value;
+            }
+
+            @Override
+            protected Timestamp reduce(Timestamp a, Timestamp b)
+            {
+                return Timestamp.max(a, b);
+            }
+
+            @Override
+            protected Timestamp tryMergeEqual(Timestamp a, Timestamp b)
+            {
+                return a;
+            }
+
+            @Override
+            protected ReducingRangeMap<Timestamp> buildInternal()
+            {
+                return new ReducingRangeMap<>(inclusiveEnds, starts.toArray(new RoutingKey[0]), values.toArray(new Timestamp[0]));
+            }
         }
 
 //        void serdeser()

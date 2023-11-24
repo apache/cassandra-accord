@@ -35,9 +35,9 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
 
     public static class SerializerSupport
     {
-        public static <V> ReducingRangeMap<V> create(boolean inclusiveEnds, RoutingKey[] ends, V[] values)
+        public static <V> ReducingRangeMap<V> create(boolean inclusiveEnds, RoutingKey[] starts, V[] values)
         {
-            return new ReducingRangeMap<>(inclusiveEnds, ends, values);
+            return new ReducingRangeMap<>(inclusiveEnds, starts, values);
         }
     }
 
@@ -330,7 +330,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         return ReducingIntervalMap.merge(historyLeft, historyRight, reduce, ReducingRangeMap.Builder::new);
     }
 
-    static class Builder<V> extends ReducingIntervalMap.Builder<RoutingKey, V, ReducingRangeMap<V>>
+    static class Builder<V> extends AbstractBoundariesBuilder<RoutingKey, V, ReducingRangeMap<V>>
     {
         protected Builder(boolean inclusiveEnds, int capacity)
         {

@@ -27,7 +27,6 @@ import accord.local.Command.WaitingOn;
 import accord.local.CommonAttributes.Mutable;
 import accord.messages.Accept;
 import accord.messages.Apply;
-import accord.messages.ApplyThenWaitUntilApplied;
 import accord.messages.BeginRecovery;
 import accord.messages.Commit;
 import accord.messages.MessageType;
@@ -43,13 +42,17 @@ import static accord.messages.MessageType.APPLY_MAXIMAL_REQ;
 import static accord.messages.MessageType.APPLY_MINIMAL_REQ;
 import static accord.messages.MessageType.BEGIN_RECOVER_REQ;
 import static accord.messages.MessageType.COMMIT_MAXIMAL_REQ;
-import static accord.messages.MessageType.COMMIT_MINIMAL_REQ;
+import static accord.messages.MessageType.COMMIT_SLOW_PATH_REQ;
 import static accord.messages.MessageType.PRE_ACCEPT_REQ;
 import static accord.messages.MessageType.PROPAGATE_APPLY_MSG;
-import static accord.messages.MessageType.PROPAGATE_COMMIT_MSG;
+import static accord.messages.MessageType.PROPAGATE_STABLE_MSG;
 import static accord.messages.MessageType.PROPAGATE_PRE_ACCEPT_MSG;
+import static accord.messages.MessageType.STABLE_FAST_PATH_REQ;
+import static accord.messages.MessageType.STABLE_MAXIMAL_REQ;
+import static accord.messages.MessageType.STABLE_SLOW_PATH_REQ;
 import static accord.primitives.PartialTxn.merge;
 import static accord.utils.Invariants.checkState;
+import static accord.utils.Invariants.illegalState;
 
 @VisibleForImplementation
 public class SerializerSupport
@@ -114,132 +117,27 @@ public class SerializerSupport
 
     private static final Set<MessageType> PRE_ACCEPT_COMMIT_TYPES =
         ImmutableSet.of(PRE_ACCEPT_REQ, BEGIN_RECOVER_REQ, PROPAGATE_PRE_ACCEPT_MSG,
-           COMMIT_MINIMAL_REQ, COMMIT_MAXIMAL_REQ, PROPAGATE_COMMIT_MSG);
+                        COMMIT_SLOW_PATH_REQ, COMMIT_MAXIMAL_REQ, STABLE_FAST_PATH_REQ, STABLE_SLOW_PATH_REQ, STABLE_MAXIMAL_REQ, PROPAGATE_STABLE_MSG);
 
     private static Command.Committed committed(Mutable attrs, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
     {
-        Set<MessageType> witnessed = messageProvider.test(PRE_ACCEPT_COMMIT_TYPES);
-
-        PartialTxn txn;
-        PartialDeps deps;
-
-        if (witnessed.contains(COMMIT_MAXIMAL_REQ))
-        {
-            Commit commit = messageProvider.commitMaximal();
-            txn = commit.partialTxn;
-            deps = commit.partialDeps;
-        }
-        else if (witnessed.contains(PROPAGATE_COMMIT_MSG))
-        {
-            Propagate propagate = messageProvider.propagateCommit();
-            txn = propagate.partialTxn;
-            deps = propagate.committedDeps;
-        }
-        else
-        {
-            checkState(witnessed.contains(COMMIT_MINIMAL_REQ));
-            Commit commit = messageProvider.commitMinimal();
-            txn = merge(txnFromPreAcceptOrBeginRecover(witnessed, messageProvider), commit.partialTxn);
-            deps = commit.partialDeps;
-        }
-
-        attrs.partialTxn(txn)
-             .partialDeps(deps);
-
-        return Command.Committed.committed(attrs, status, executeAt, promised, accepted, waitingOnProvider.provide(deps));
+        attrs = extract(status, accepted, messageProvider, (attrs0, txn, deps, i1, i2) -> attrs0.partialTxn(txn).partialDeps(deps), attrs);
+        return Command.Committed.committed(attrs, status, executeAt, promised, accepted, waitingOnProvider.provide(attrs.partialDeps()));
     }
 
     private static final Set<MessageType> PRE_ACCEPT_COMMIT_APPLY_TYPES =
         ImmutableSet.of(PRE_ACCEPT_REQ, BEGIN_RECOVER_REQ, PROPAGATE_PRE_ACCEPT_MSG,
-           COMMIT_MINIMAL_REQ, COMMIT_MAXIMAL_REQ, PROPAGATE_COMMIT_MSG,
-           APPLY_MINIMAL_REQ, APPLY_MAXIMAL_REQ, PROPAGATE_APPLY_MSG);
+                        COMMIT_SLOW_PATH_REQ, COMMIT_MAXIMAL_REQ, PROPAGATE_STABLE_MSG,
+                        APPLY_MINIMAL_REQ, APPLY_MAXIMAL_REQ, PROPAGATE_APPLY_MSG);
 
     private static Command.Executed executed(Mutable attrs, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
     {
-        Set<MessageType> witnessed = messageProvider.test(PRE_ACCEPT_COMMIT_APPLY_TYPES);
+        return extract(status, accepted, messageProvider, (attrs0, txn, deps, writes, result) -> {
+            attrs0.partialTxn(txn)
+                 .partialDeps(deps);
 
-        PartialTxn txn;
-        PartialDeps deps;
-        Writes writes;
-        Result result;
-
-        if (witnessed.contains(APPLY_MAXIMAL_REQ))
-        {
-            Apply apply = messageProvider.applyMaximal();
-            txn = apply.txn;
-            deps = apply.deps;
-            writes = apply.writes;
-            result = apply.result;
-        }
-        else if (witnessed.contains(PROPAGATE_APPLY_MSG))
-        {
-            Propagate propagate = messageProvider.propagateApply();
-            txn = propagate.partialTxn;
-            deps = propagate.committedDeps;
-            writes = propagate.writes;
-            result = propagate.result;
-        }
-        else
-        {
-            boolean haveApplyMinimal = witnessed.contains(APPLY_MINIMAL_REQ);
-            boolean haveCommitMaximal = witnessed.contains(COMMIT_MAXIMAL_REQ);
-
-            Apply apply = null;
-            Commit commit = null;
-            String errorMessage = "Must have either an APPLY_MINIMAL_REQ or a COMMIT_MAXIMAL_REQ containing ApplyThenWaitUntilApplied";
-            if (haveApplyMinimal)
-            {
-                apply = messageProvider.applyMinimal();
-                writes = apply.writes;
-                result = apply.result;
-            }
-            else if (haveCommitMaximal)
-            {
-                commit = messageProvider.commitMaximal();
-                checkState(commit.readData instanceof ApplyThenWaitUntilApplied, errorMessage);
-                ApplyThenWaitUntilApplied applyThenWaitUntilApplied = (ApplyThenWaitUntilApplied)commit.readData;
-                writes = applyThenWaitUntilApplied.writes;
-                result = applyThenWaitUntilApplied.txnResult;
-            }
-            else
-            {
-                throw new IllegalStateException(errorMessage);
-            }
-
-            /*
-             * NOTE: If Commit has been witnessed, we'll extract deps from there;
-             * Apply has an expected TO-DO to stop including deps in such case.
-             */
-            if (haveCommitMaximal)
-            {
-                if (commit == null)
-                    commit = messageProvider.commitMaximal();
-                txn = commit.partialTxn;
-                deps = commit.partialDeps;
-            }
-            else if (witnessed.contains(PROPAGATE_COMMIT_MSG))
-            {
-                Propagate propagateCommit = messageProvider.propagateCommit();
-                txn = propagateCommit.partialTxn;
-                deps = propagateCommit.committedDeps;
-            }
-            else if (witnessed.contains(COMMIT_MINIMAL_REQ))
-            {
-                commit = messageProvider.commitMinimal();
-                txn = merge(apply.txn, merge(commit.partialTxn, txnFromPreAcceptOrBeginRecover(witnessed, messageProvider)));
-                deps = commit.partialDeps;
-            }
-            else
-            {
-                txn = merge(apply.txn, txnFromPreAcceptOrBeginRecover(witnessed, messageProvider));
-                deps = apply.deps;
-            }
-        }
-
-        attrs.partialTxn(txn)
-             .partialDeps(deps);
-
-        return Command.Executed.executed(attrs, status, executeAt, promised, accepted, waitingOnProvider.provide(deps), writes, result);
+            return Command.Executed.executed(attrs, status, executeAt, promised, accepted, waitingOnProvider.provide(deps), writes, result);
+        }, attrs);
     }
 
     private static final Set<MessageType> APPLY_TYPES =
@@ -253,7 +151,7 @@ public class SerializerSupport
         switch (status)
         {
             default:
-                throw new IllegalStateException("Unhandled SaveStatus: " + status);
+                throw illegalState("Unhandled SaveStatus: " + status);
             case TruncatedApplyWithOutcome:
             case TruncatedApplyWithDeps:
                 Set<MessageType> witnessed = messageProvider.test(APPLY_TYPES);
@@ -278,6 +176,8 @@ public class SerializerSupport
                 }
             case TruncatedApply:
                 return Command.Truncated.truncatedApply(attrs, status, executeAt, writes, result);
+            case ErasedOrInvalidated:
+                return Command.Truncated.erasedOrInvalidated(attrs.txnId(), attrs.durability(), attrs.route());
             case Erased:
                 return Command.Truncated.erased(attrs.txnId(), attrs.durability(), attrs.route());
             case Invalidated:
@@ -299,8 +199,19 @@ public class SerializerSupport
         }
     }
 
+    interface WithContents<I, O>
+    {
+        O apply(I in, PartialTxn txn, PartialDeps deps, Writes writes, Result result);
+    }
+
     public static TxnAndDeps extractTxnAndDeps(SaveStatus status, Ballot accepted, MessageProvider messageProvider)
     {
+        return extract(status, accepted, messageProvider, (i1, txn, deps, i2, i3) -> new TxnAndDeps(txn, deps), null);
+    }
+
+    private static <I, O> O extract(SaveStatus status, Ballot accepted, MessageProvider messageProvider, WithContents<I, O> withContents, I param)
+    {
+        // TODO (expected): first check if we have taken the normal path
         Set<MessageType> witnessed;
 
         switch (status.status)
@@ -308,7 +219,8 @@ public class SerializerSupport
             case PreAccepted:
                 witnessed = messageProvider.test(PRE_ACCEPT_TYPES);
                 checkState(!witnessed.isEmpty());
-                return new TxnAndDeps(txnFromPreAcceptOrBeginRecover(witnessed, messageProvider), null);
+                return withContents.apply(param, txnFromPreAcceptOrBeginRecover(witnessed, messageProvider), null, null, null);
+
             case AcceptedInvalidate:
             case Accepted:
             case PreCommitted:
@@ -327,67 +239,92 @@ public class SerializerSupport
                     Accept accept = messageProvider.accept(accepted);
                     deps = accept.partialDeps;
                 }
+                return withContents.apply(param, txn, deps, null, null);
 
-                return new TxnAndDeps(txn, deps);
             case Committed:
+            case Stable:
             case ReadyToExecute:
                 witnessed = messageProvider.test(PRE_ACCEPT_COMMIT_TYPES);
+                if (witnessed.contains(STABLE_MAXIMAL_REQ))
+                {
+                    Commit commit = messageProvider.stableMaximal();
+                    return withContents.apply(param, commit.partialTxn, commit.partialDeps, null, null);
+                }
                 if (witnessed.contains(COMMIT_MAXIMAL_REQ))
                 {
                     Commit commit = messageProvider.commitMaximal();
-                    return new TxnAndDeps(commit.partialTxn, commit.partialDeps);
+                    return withContents.apply(param, commit.partialTxn, commit.partialDeps, null, null);
                 }
-                else if (witnessed.contains(PROPAGATE_COMMIT_MSG))
+                else if (witnessed.contains(PROPAGATE_STABLE_MSG))
                 {
-                    Propagate propagate = messageProvider.propagateCommit();
-                    return new TxnAndDeps(propagate.partialTxn, propagate.committedDeps);
+                    Propagate propagate = messageProvider.propagateStable();
+                    return withContents.apply(param, propagate.partialTxn, propagate.stableDeps, null, null);
+                }
+                else if (witnessed.contains(COMMIT_SLOW_PATH_REQ))
+                {
+                    Commit commit = messageProvider.commitSlowPath();
+                    return withContents.apply(param, merge(txnFromPreAcceptOrBeginRecover(witnessed, messageProvider), commit.partialTxn), commit.partialDeps, null, null);
                 }
                 else
                 {
-                    checkState(witnessed.contains(COMMIT_MINIMAL_REQ));
-                    Commit commit = messageProvider.commitMinimal();
-                    return new TxnAndDeps(merge(txnFromPreAcceptOrBeginRecover(witnessed, messageProvider), commit.partialTxn), commit.partialDeps);
+                    checkState(witnessed.contains(STABLE_FAST_PATH_REQ));
+                    Commit commit = messageProvider.stableFastPath();
+                    return withContents.apply(param, merge(txnFromPreAcceptOrBeginRecover(witnessed, messageProvider), commit.partialTxn), commit.partialDeps, null, null);
                 }
+
             case PreApplied:
             case Applied:
                 witnessed = messageProvider.test(PRE_ACCEPT_COMMIT_APPLY_TYPES);
                 if (witnessed.contains(APPLY_MAXIMAL_REQ))
                 {
                     Apply apply = messageProvider.applyMaximal();
-                    return new TxnAndDeps(apply.txn, apply.deps);
+                    return withContents.apply(param, apply.txn, apply.deps, apply.writes, apply.result);
                 }
                 else if (witnessed.contains(PROPAGATE_APPLY_MSG))
                 {
                     Propagate propagate = messageProvider.propagateApply();
-                    return new TxnAndDeps(propagate.partialTxn, propagate.committedDeps);
-                }
-                else if (witnessed.contains(COMMIT_MAXIMAL_REQ))
-                {
-                    Commit commit = messageProvider.commitMaximal();
-                    return new TxnAndDeps(commit.partialTxn, commit.partialDeps);
-                }
-                else if (witnessed.contains(PROPAGATE_COMMIT_MSG))
-                {
-                    Propagate propagate = messageProvider.propagateCommit();
-                    return new TxnAndDeps(propagate.partialTxn, propagate.committedDeps);
-                }
-                else if (witnessed.contains(COMMIT_MINIMAL_REQ))
-                {
-                    checkState(witnessed.contains(APPLY_MINIMAL_REQ));
-                    Apply apply = messageProvider.applyMinimal();
-                    Commit commit = messageProvider.commitMinimal();
-                    return new TxnAndDeps(merge(apply.txn, merge(commit.partialTxn, txnFromPreAcceptOrBeginRecover(witnessed, messageProvider))), commit.partialDeps);
+                    return withContents.apply(param, propagate.partialTxn, propagate.stableDeps, propagate.writes, propagate.result);
                 }
                 else
                 {
                     checkState(witnessed.contains(APPLY_MINIMAL_REQ));
                     Apply apply = messageProvider.applyMinimal();
-                    return new TxnAndDeps(merge(apply.txn, txnFromPreAcceptOrBeginRecover(witnessed, messageProvider)), apply.deps);
+                    if (witnessed.contains(STABLE_MAXIMAL_REQ))
+                    {
+                        Commit commit = messageProvider.stableMaximal();
+                        return withContents.apply(param, commit.partialTxn, commit.partialDeps, apply.writes, apply.result);
+                    }
+                    else if (witnessed.contains(COMMIT_MAXIMAL_REQ))
+                    {
+                        Commit commit = messageProvider.commitMaximal();
+                        return withContents.apply(param, commit.partialTxn, commit.partialDeps, apply.writes, apply.result);
+                    }
+                    else if (witnessed.contains(PROPAGATE_STABLE_MSG))
+                    {
+                        Propagate propagate = messageProvider.propagateStable();
+                        return withContents.apply(param, propagate.partialTxn, propagate.stableDeps, apply.writes, apply.result);
+                    }
+                    else if (witnessed.contains(COMMIT_SLOW_PATH_REQ))
+                    {
+                        Commit commit = messageProvider.commitSlowPath();
+                        return withContents.apply(param, merge(txnFromPreAcceptOrBeginRecover(witnessed, messageProvider), commit.partialTxn), commit.partialDeps, apply.writes, apply.result);
+                    }
+                    else if (witnessed.contains(STABLE_FAST_PATH_REQ))
+                    {
+                        Commit commit = messageProvider.stableFastPath();
+                        return withContents.apply(param, merge(txnFromPreAcceptOrBeginRecover(witnessed, messageProvider), commit.partialTxn), commit.partialDeps, apply.writes, apply.result);
+                    }
+                    else
+                    {
+                        return withContents.apply(param, merge(apply.txn, txnFromPreAcceptOrBeginRecover(witnessed, messageProvider)), apply.deps, apply.writes, apply.result);
+                    }
                 }
+
             case NotDefined:
             case Truncated:
             case Invalidated:
-                return TxnAndDeps.EMPTY;
+                return withContents.apply(param, null, null, null, null);
+
             default:
                 throw new IllegalStateException();
         }
@@ -424,11 +361,15 @@ public class SerializerSupport
 
         Accept accept(Ballot ballot);
 
-        Commit commitMinimal();
+        Commit commitSlowPath();
 
         Commit commitMaximal();
 
-        Propagate propagateCommit();
+        Commit stableFastPath();
+
+        Commit stableMaximal();
+
+        Propagate propagateStable();
 
         Apply applyMinimal();
 

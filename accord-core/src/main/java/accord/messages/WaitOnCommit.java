@@ -106,6 +106,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
                 break;
 
             case Committed:
+            case Stable:
             case PreApplied:
             case Applied:
             case Invalidated:
@@ -132,6 +133,7 @@ public class WaitOnCommit implements Request, MapReduceConsume<SafeCommandStore,
 
             case PreCommitted:
             case Committed:
+            case Stable:
             case ReadyToExecute:
             case PreApplied:
             case Applied:

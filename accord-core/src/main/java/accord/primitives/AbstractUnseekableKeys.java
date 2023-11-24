@@ -84,7 +84,7 @@ implements Iterable<RoutingKey>, Unseekables<RoutingKey>, Participants<RoutingKe
 
     private Participants<RoutingKey> subtract(AbstractRanges ranges)
     {
-        RoutingKey[] output = subtract(ranges, RoutingKey[]::new);
+        RoutingKey[] output = subtract(ranges, keys, RoutingKey[]::new);
         return output == keys ? this : new RoutingKeys(output);
     }
 

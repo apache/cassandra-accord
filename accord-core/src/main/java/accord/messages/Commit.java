@@ -17,10 +17,8 @@
  */
 package accord.messages;
 
+import java.util.function.BiPredicate;
 import javax.annotation.Nullable;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import accord.local.Commands;
 import accord.local.Node;
@@ -28,8 +26,10 @@ import accord.local.Node.Id;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.messages.ReadData.ReadNack;
+import accord.local.SaveStatus;
+import accord.messages.ReadData.CommitOrReadNack;
 import accord.messages.ReadData.ReadReply;
+import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
 import accord.primitives.Keys;
@@ -50,57 +50,85 @@ import accord.utils.Invariants;
 import accord.utils.TriFunction;
 import org.agrona.collections.IntHashSet;
 
-import static accord.messages.Commit.Kind.Maximal;
+import static accord.local.SaveStatus.Committed;
+import static accord.messages.Commit.Kind.CommitWithTxn;
+import static accord.messages.Commit.Kind.StableWithTxnAndDeps;
+import static accord.messages.Commit.WithDeps.HasDeps;
+import static accord.messages.Commit.WithDeps.NoDeps;
+import static accord.messages.Commit.WithTxn.HasNewlyOwnedTxnRanges;
+import static accord.messages.Commit.WithTxn.HasTxn;
+import static accord.messages.Commit.WithTxn.NoTxn;
 import static accord.utils.Invariants.checkArgument;
 
-public class Commit extends TxnRequest<ReadNack>
+public class Commit extends TxnRequest<CommitOrReadNack>
 {
-    private static final Logger logger = LoggerFactory.getLogger(Commit.class);
-
     public static class SerializerSupport
     {
-        public static Commit create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Kind kind, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
+        public static Commit create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Kind kind, Ballot ballot, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
         {
-            return new Commit(kind, txnId, scope, waitForEpoch, executeAt, partialTxn, partialDeps, fullRoute, readData);
+            return new Commit(kind, txnId, scope, waitForEpoch, ballot, executeAt, partialTxn, partialDeps, fullRoute, readData);
         }
     }
 
     public final Kind kind;
+    public final Ballot ballot;
     public final Timestamp executeAt;
     public final @Nullable PartialTxn partialTxn;
-    public final PartialDeps partialDeps;
+    public final @Nullable PartialDeps partialDeps;
     public final @Nullable FullRoute<?> route;
-    public final ReadData readData;
+    public final @Nullable ReadData readData;
 
-    public enum Kind { Minimal, Maximal }
+    public enum WithTxn  { NoTxn,  HasNewlyOwnedTxnRanges, HasTxn }
+    public enum WithDeps { NoDeps, HasDeps }
+
+    public enum Kind
+    {
+        Commit(              HasNewlyOwnedTxnRanges, HasDeps, Committed),
+        CommitWithTxn(       HasTxn,                 HasDeps, Committed),
+        // We retain HasNewlyOwnedTxnRanges for the later eventuality where we permit fast path decisions if the fast quorum is valid for all topologies and everyone agrees on the execution timestamp.
+        StableFastPath(      HasNewlyOwnedTxnRanges, HasDeps, SaveStatus.Stable),
+        StableSlowPath(      NoTxn,                  NoDeps,  SaveStatus.Stable),
+        StableWithTxnAndDeps(HasTxn,                 HasDeps, SaveStatus.Stable);
+
+        final WithTxn withTxn;
+        final WithDeps withDeps;
+        final SaveStatus saveStatus;
+
+        Kind(WithTxn withTxn, WithDeps withDeps, SaveStatus saveStatus)
+        {
+            this.withTxn = withTxn;
+            this.withDeps = withDeps;
+            this.saveStatus = saveStatus;
+        }
+    }
 
     // TODO (low priority, clarity): cleanup passing of topologies here - maybe fetch them afresh from Node?
     //                               Or perhaps introduce well-named classes to represent different topology combinations
 
-    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, ReadTxnData read)
+    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Ballot ballot, Timestamp executeAt, Deps deps, ReadData read)
     {
-        this(kind, to, coordinateTopology, topologies, txnId, txn, route, executeAt, deps, (u1, u2, u3) -> read);
+        this(kind, to, coordinateTopology, topologies, txnId, txn, route, ballot, executeAt, deps, read == null ? null : (u1, u2, u3) -> read);
     }
 
-    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, @Nullable Participants<?> readScope, Timestamp executeAt, Deps deps, boolean read)
+    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Ballot ballot, Timestamp executeAt, Deps deps, @Nullable Participants<?> readScope)
     {
-        this(kind, to, coordinateTopology, topologies, txnId, txn, route, executeAt, deps, read ? new ReadTxnData(to, topologies, txnId, readScope, executeAt) : null);
+        this(kind, to, coordinateTopology, topologies, txnId, txn, route, ballot, executeAt, deps, readScope != null ? new ReadTxnData(to, topologies, txnId, readScope, executeAt) : null);
     }
 
-    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, TriFunction<Txn, PartialRoute<?>, PartialDeps, ReadData> toExecuteFactory)
+    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Ballot ballot, Timestamp executeAt, Deps deps, TriFunction<Txn, PartialRoute<?>, PartialDeps, ReadData> toExecuteFactory)
     {
         super(to, topologies, route, txnId);
+        this.ballot = ballot;
 
         FullRoute<?> sendRoute = null;
         PartialTxn partialTxn = null;
-        if (kind == Kind.Maximal)
+        if (kind.withTxn == HasTxn)
         {
-//            boolean isHome = coordinateTopology.rangesForNode(to).contains(route.homeKey());
             // TODO (desired): only includeQuery if isHome; this affects state eviction and is low priority given size in C*
             partialTxn = txn.slice(scope.covering(), true);
             sendRoute = route;
         }
-        else if (executeAt.epoch() != txnId.epoch())
+        else if (kind.withTxn == HasNewlyOwnedTxnRanges && executeAt.epoch() != txnId.epoch())
         {
             Ranges coordinateRanges = coordinateTopology.rangesForNode(to);
             Ranges executeRanges = topologies.computeRangesForNode(to);
@@ -114,13 +142,14 @@ public class Commit extends TxnRequest<ReadNack>
         this.partialTxn = partialTxn;
         this.partialDeps = deps.slice(scope.covering());
         this.route = sendRoute;
-        this.readData = toExecuteFactory.apply(partialTxn != null ? partialTxn : txn, scope, partialDeps);
+        this.readData = toExecuteFactory == null ? null : toExecuteFactory.apply(partialTxn != null ? partialTxn : txn, scope, partialDeps);
     }
 
-    protected Commit(Kind kind, TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
+    protected Commit(Kind kind, TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Ballot ballot, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
     {
         super(txnId, scope, waitForEpoch);
         this.kind = kind;
+        this.ballot = ballot;
         this.executeAt = executeAt;
         this.partialTxn = partialTxn;
         this.partialDeps = partialDeps;
@@ -128,34 +157,62 @@ public class Commit extends TxnRequest<ReadNack>
         this.readData = readData;
     }
 
-    // TODO (low priority, clarity): accept Topology not Topologies
-    // TODO (desired, efficiency): do not commit if we're already ready to execute (requires extra info in Accept responses)
-    public static void commitMinimalAndRead(Node node, Topologies executeTopologies, TxnId txnId, Txn txn, FullRoute<?> route, Participants<?> readScope, Timestamp executeAt, Deps deps, IntHashSet readSet, Callback<ReadReply> callback)
+    public static void commitMinimal(Node node, Topologies coordinateEpochOnly, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps unstableDeps, Callback<ReadReply> callback)
     {
-        Topologies allTopologies = executeTopologies;
+        // we want to send to everyone, and we want to include all of the relevant data, but we stabilise on the coordination epoch replica responses
+        Topology coordinates = coordinateEpochOnly.forEpoch(txnId.epoch());
+        Topologies all = coordinateEpochOnly;
         if (txnId.epoch() != executeAt.epoch())
-            allTopologies = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
+            all = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
 
-        Topology executeTopology = executeTopologies.forEpoch(executeAt.epoch());
-        Topology coordinateTopology = allTopologies.forEpoch(txnId.epoch());
-        for (Node.Id to : executeTopology.nodes())
+        send(null, (i1, i2) -> true, null, node, coordinates, coordinates, all, Kind.Commit, ballot,
+             txnId, txn, route, executeAt, unstableDeps, callback);
+    }
+
+    // TODO (desired, efficiency): do not commit if we're already ready to execute (requires extra info in Accept responses)
+    public static void stableAndRead(Node node, Topologies executeEpochOnly, Kind kind, TxnId txnId, Txn txn, FullRoute<?> route, Participants<?> readScope, Timestamp executeAt, Deps stableDeps, IntHashSet readSet, Callback<ReadReply> callback)
+    {
+        Topologies all = executeEpochOnly;
+        if (txnId.epoch() != executeAt.epoch())
+            all = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
+
+        Topology executes = executeEpochOnly.forEpoch(executeAt.epoch());
+        Topology coordinates = all.forEpoch(txnId.epoch());
+
+        send(readSet, (set, id) -> set.contains(id.id), readScope, node, coordinates, executes, all, kind, Ballot.ZERO,
+             txnId, txn, route, executeAt, stableDeps, callback);
+    }
+
+    private static <P> void send(P param, BiPredicate<P, Id> shouldRegisterCallback, @Nullable Participants<?> readScopeIfCallback,
+                                 Node node, Topology coordinates, Topology primary, Topologies all, Kind kind, Ballot ballot,
+                                 TxnId txnId, @Nullable Txn txn, FullRoute<?> route, Timestamp executeAt, @Nullable Deps deps,
+                                 Callback<ReadReply> callback)
+    {
+        for (Node.Id to : primary.nodes())
         {
-            boolean read = readSet.contains(to.id);
-            Commit send = new Commit(Kind.Minimal, to, coordinateTopology, allTopologies, txnId, txn, route, readScope, executeAt, deps, read);
-            if (read) node.send(to, send, callback);
+            boolean registerCallback = shouldRegisterCallback.test(param, to);
+            // if we register a callback, supply the provided readScope (which may be null)
+            Participants<?> readScope = registerCallback ? readScopeIfCallback : null;
+            Commit send = new Commit(kind, to, coordinates, all, txnId, txn, route, ballot, executeAt, deps, readScope);
+            if (registerCallback) node.send(to, send, callback);
             else node.send(to, send);
         }
-        if (coordinateTopology != executeTopology)
+        if (all.size() > 1)
         {
-            for (Node.Id to : allTopologies.nodes())
+            for (Node.Id to : all.nodes())
             {
-                if (!executeTopology.contains(to))
-                    node.send(to, new Commit(Kind.Minimal, to, coordinateTopology, allTopologies, txnId, txn, route, readScope, executeAt, deps, false));
+                if (!primary.contains(to))
+                {
+                    boolean registerCallback = shouldRegisterCallback.test(param, to);
+                    Commit send = new Commit(kind, to, coordinates, all, txnId, txn, route, ballot, executeAt, deps, (ReadTxnData) null);
+                    if (registerCallback) node.send(to, send, callback);
+                    else node.send(to, send);
+                }
             }
         }
     }
 
-    public static void commitMaximalAndBlockOnDeps(Node node, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Deps deps, Callback<ReadReply> callback)
+    public static void stableMaximalAndBlockOnDeps(Node node, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps deps, Callback<ReadReply> callback)
     {
         checkArgument(topologies.size() == 1);
         Topology topology = topologies.get(0);
@@ -167,19 +224,19 @@ public class Commit extends TxnRequest<ReadNack>
             // going back for the Apply in `ApplyThenWaitUntilApplied
             boolean notifyAgent = !to.equals(node.id());
             Commit commit = new Commit(
-                    Kind.Maximal, to, topology, topologies, txnId,
-                    txn, route, txnId, deps,
-                    (maybePartialTransaction, partialRoute, partialDeps) -> new ApplyThenWaitUntilApplied(txnId, partialRoute, partialDeps, maybePartialTransaction.keys().slice(partialDeps.covering), txn.execute(txnId, txnId, null), txn.result(txnId, txnId, null), notifyAgent));
+            CommitWithTxn, to, topology, topologies, txnId,
+            txn, route, Ballot.ZERO, executeAt, deps,
+            (maybePartialTransaction, partialRoute, partialDeps) -> new ApplyThenWaitUntilApplied(txnId, partialRoute, partialDeps, maybePartialTransaction.keys().slice(partialDeps.covering), txn.execute(txnId, txnId, null), txn.result(txnId, txnId, null), notifyAgent));
             node.send(to, commit, callback);
         }
     }
 
-    public static void commitMaximal(Node node, Node.Id to, Txn txn, TxnId txnId, Timestamp executeAt, FullRoute<?> route, Deps deps, Participants<?> readScope)
+    public static void stableMaximal(Node node, Node.Id to, Txn txn, TxnId txnId, Timestamp executeAt, FullRoute<?> route, Deps deps)
     {
         // the replica may be missing the original commit, or the additional commit, so send everything
-        Topologies topology = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
-        Topology coordinateTopology = topology.forEpoch(txnId.epoch());
-        node.send(to, new Commit(Maximal, to, coordinateTopology, topology, txnId, txn, route, readScope, executeAt, deps, false));
+        Topologies topologies = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
+        Topology coordinates = topologies.forEpoch(txnId.epoch());
+        node.send(to, new Commit(StableWithTxnAndDeps, to, coordinates, topologies, txnId, txn, route, Ballot.ZERO, executeAt, deps, (ReadTxnData) null));
     }
 
     @Override
@@ -202,35 +259,39 @@ public class Commit extends TxnRequest<ReadNack>
 
     // TODO (expected, efficiency, clarity): do not guard with synchronized; let mapReduceLocal decide how to enforce mutual exclusivity
     @Override
-    public synchronized ReadNack apply(SafeCommandStore safeStore)
+    public synchronized CommitOrReadNack apply(SafeCommandStore safeStore)
     {
         Route<?> route = this.route != null ? this.route : scope;
         SafeCommand safeCommand = safeStore.get(txnId, executeAt, route);
 
-        switch (Commands.commit(safeStore, safeCommand, txnId, route, progressKey, partialTxn, executeAt, partialDeps))
+        switch (Commands.commit(safeStore, safeCommand, kind.saveStatus, ballot, txnId, route, progressKey, partialTxn, executeAt, partialDeps))
         {
             default:
             case Success:
             case Redundant:
                 return null;
             case Insufficient:
-                return ReadNack.NotCommitted;
+                return CommitOrReadNack.Insufficient;
+            case Rejected:
+                return CommitOrReadNack.Rejected;
         }
     }
 
     @Override
-    public ReadNack reduce(ReadNack r1, ReadNack r2)
+    public CommitOrReadNack reduce(CommitOrReadNack r1, CommitOrReadNack r2)
     {
         return r1 != null ? r1 : r2;
     }
 
     @Override
-    public synchronized void accept(ReadNack reply, Throwable failure)
+    public synchronized void accept(CommitOrReadNack reply, Throwable failure)
     {
         if (reply != null || failure != null)
             node.reply(replyTo, replyContext, reply, failure);
         else if (readData != null)
             readData.process(node, replyTo, replyContext);
+        else if (kind.saveStatus == Committed)
+            node.reply(replyTo, replyContext, new ReadData.ReadOk(null, null), null);
     }
 
     @Override
@@ -238,8 +299,11 @@ public class Commit extends TxnRequest<ReadNack>
     {
         switch (kind)
         {
-            case Minimal: return MessageType.COMMIT_MINIMAL_REQ;
-            case Maximal: return MessageType.COMMIT_MAXIMAL_REQ;
+            case Commit: return MessageType.COMMIT_SLOW_PATH_REQ;
+            case CommitWithTxn: return MessageType.COMMIT_MAXIMAL_REQ;
+            case StableFastPath: return MessageType.STABLE_FAST_PATH_REQ;
+            case StableSlowPath: return MessageType.STABLE_SLOW_PATH_REQ;
+            case StableWithTxnAndDeps: return MessageType.STABLE_MAXIMAL_REQ;
             default: throw new IllegalStateException();
         }
     }
