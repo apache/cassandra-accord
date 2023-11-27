@@ -5,18 +5,32 @@ Distributed consensus protocol for Apache Cassandra. Accord is the first protoco
 Accord Protocol
 ---------------
 Key Features:
-- Leaderless - There is no designated leader node. Any node can coordinate transactions. This removes bottlenecks and improves scalability.
-- Single round-trip commits - Most transactions can commit in a single message round-trip between coordinating node and replicas. This minimizes latency.
-- High contention performance - Special techniques allow it to avoid slowed performance when many transactions conflict.
-- Configurable failure tolerance - The protocol can be dynamically reconfigured to maintain fast performance even after node failures.
-- Strong consistency guarantees - Provides strict serializability, the strongest isolation level. Transactions behave as if they execute one at a time.
-- General purpose transactions - Supports cross-shard multi-statement ACID transactions, not just single partition reads/writes.
+- Leaderless Design: Accord operates without a designated leader node, allowing any node to coordinate transactions. This approach eliminates single points of failure and enhances the system's scalability.
+- Fast Consensus Mechanism: It utilizes a special initial round for faster consensus, enabling most transactions to reach agreement quickly, often within two message round-trips.
+- Efficient Handling of High Contention: Accord's design reduces the incidence of contention by determining a timestamp for each transaction’s execution order. This feature is particularly beneficial in scenarios where many transactions conflict.
+- Partial State-Machine Replication for Scalability: The protocol can be extended to partial state-machine replication (PSMR) scenarios, improving scalability by allowing shards to replicate only a part of the global state-machine.
+- Strong Consistency and Isolation Guarantees: Accord provides optimal baseline characteristics for consistency and isolation, ensuring that conflicting transactions are applied in the same order on all participating replicas.
+- Support for General-Purpose Transactions: The protocol is capable of handling general-purpose transactions that combine cross-shard state, facilitating multi-statement ACID transactions across different partitions.
+- Robust Recovery Mechanism: Accord includes a comprehensive recovery protocol to handle failures effectively. This protocol ensures the continuation and completion of transactions even in the event of coordinator failure.
+- Minimal Latency with Fast-Path Option: For transactions where a fast-path quorum of replicas unanimously accept a proposed timestamp, the decision is made immediately, significantly reducing latency.
+- Dependency and Order Safety: The protocol ensures that all dependencies of a transaction are accounted for before its execution, maintaining strict order safety and atomicity.
 
 At a high level, it works as follows:
-1. A coordinator node is chosen to handle each transaction (typically nearby the client for low latency).
-2. The coordinator gets votes from replica nodes on an execution timestamp and set of conflicts for the transaction.
-3. With enough votes, the transaction can commit in a single round-trip.
-4. The coordinator waits for conflicting transactions, then tells the replicas to execute and persist the changes.
+1. Consensus Phase:
+- Accord assigns each conflicting transaction a unique execution timestamp, forming a total order.
+- Timestamps are tuples of time, sequence, and identifier values. These timestamps are used to assign execution times and impose a total order on conflicting transactions.
+- A transaction coordinator proposes a timestamp for execution. If a fast-path quorum of replicas unanimously accepts this timestamp, it is immediately decided. Otherwise, a slow path using classic Paxos is used to agree on one of the possible timestamps.
+- Execution proceeds after all transactions with earlier timestamps have been committed and executed.
+2. Execution Phase:
+- Once the execution timestamp is decided and logically committed, it is disseminated to all shards.
+- The coordinator sends Read messages to at least one process in each shard to gather responses.
+- Execution awaits the completion of dependencies with lower execution timestamps before computing the transaction result.
+- The result is then applied to all replicas.
+
+Recovery protocol:
+- If a transaction coordinator fails, a weak failure detector invokes a recovery protocol.
+- The recovery protocol contacts a recovery quorum to ensure the transaction is pre-accepted, maintaining the properties of normal execution.
+- For fast-path decisions, the protocol may propose a slow-path solution based on the dependencies of superseding transactions. This ensures that all necessary properties are maintained during the recovery of a transaction.
 
 Code structure
 --------------
