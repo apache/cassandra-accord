@@ -16,14 +16,16 @@
  * limitations under the License.
  */
 
-package accord.impl;
+package accord.api;
 
-import accord.primitives.Timestamp;
+import java.lang.annotation.Documented;
+import java.lang.annotation.Inherited;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 
-public interface CommandTimeseriesHolder
+@Documented
+@Inherited
+@Retention(RetentionPolicy.SOURCE)
+public @interface VisibleForImplementationTesting
 {
-    CommandTimeseries<?> byId();
-    CommandTimeseries<?> byExecuteAt();
-
-    Timestamp max();
 }

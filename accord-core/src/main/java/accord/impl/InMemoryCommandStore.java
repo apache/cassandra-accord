@@ -18,7 +18,6 @@
 
 package accord.impl;
 
-import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -36,12 +35,13 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BiConsumer;
-import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
+import accord.local.*;
+import accord.utils.TriFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,17 +50,7 @@ import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.impl.CommandTimeseries.CommandLoader;
-import accord.local.Command;
-import accord.local.CommandStore;
 import accord.local.CommandStores.RangesForEpoch;
-import accord.local.CommonAttributes;
-import accord.local.Listeners;
-import accord.local.NodeTimeService;
-import accord.local.PreLoadContext;
-import accord.local.SafeCommand;
-import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
-import accord.local.Status;
 import accord.primitives.AbstractKeys;
 import accord.primitives.Deps;
 import accord.primitives.PartialDeps;
@@ -87,6 +77,7 @@ import static accord.local.SaveStatus.Applying;
 import static accord.local.SaveStatus.ReadyToExecute;
 import static accord.local.Status.Committed;
 import static accord.local.Status.Truncated;
+import static accord.local.Status.NotDefined;
 import static accord.primitives.Routables.Slice.Minimal;
 
 public abstract class InMemoryCommandStore extends CommandStore
@@ -96,7 +87,9 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     final NavigableMap<TxnId, GlobalCommand> commands = new TreeMap<>();
     final NavigableMap<Timestamp, GlobalCommand> commandsByExecuteAt = new TreeMap<>();
-    private final NavigableMap<RoutableKey, GlobalCommandsForKey> commandsForKey = new TreeMap<>();
+    private final NavigableMap<RoutableKey, GlobalTimestampsForKey> timestampsForKey = new TreeMap<>();
+    private final NavigableMap<RoutableKey, GlobalCommandsForKey> depsCommandsForKey = new TreeMap<>();
+    private final NavigableMap<RoutableKey, GlobalCommandsForKey> allCommandsForKey = new TreeMap<>();
     // TODO (find library, efficiency): this is obviously super inefficient, need some range map
 
     private final TreeMap<TxnId, RangeCommand> rangeCommands = new TreeMap<>();
@@ -131,7 +124,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         return rangeCommands;
     }
 
-    public GlobalCommand ifPresent(TxnId txnId)
+    public GlobalCommand commandIfPresent(TxnId txnId)
     {
         return commands.get(txnId);
     }
@@ -226,19 +219,44 @@ public abstract class InMemoryCommandStore extends CommandStore
         return commands.containsKey(txnId);
     }
 
-    public GlobalCommandsForKey ifPresent(Key key)
+    public GlobalCommandsForKey depsCommandsForKeyIfPresent(Key key)
     {
-        return commandsForKey.get(key);
+        return depsCommandsForKey.get(key);
     }
 
-    public GlobalCommandsForKey commandsForKey(Key key)
+    public GlobalCommandsForKey depsCommandsForKey(Key key)
     {
-        return commandsForKey.computeIfAbsent(key, GlobalCommandsForKey::new);
+        return depsCommandsForKey.computeIfAbsent(key, GlobalCommandsForKey::new);
     }
 
-    public boolean hasCommandsForKey(Key key)
+    public boolean hasDepsCommandsForKey(Key key)
     {
-        return commandsForKey.containsKey(key);
+        return depsCommandsForKey.containsKey(key);
+    }
+
+    public GlobalCommandsForKey allCommandsForKeyIfPresent(Key key)
+    {
+        return allCommandsForKey.get(key);
+    }
+
+    public GlobalCommandsForKey allCommandsForKey(Key key)
+    {
+        return allCommandsForKey.computeIfAbsent(key, GlobalCommandsForKey::new);
+    }
+
+    public boolean hasAllCommandsForKey(Key key)
+    {
+        return allCommandsForKey.containsKey(key);
+    }
+
+    public GlobalTimestampsForKey timestampsForKey(Key key)
+    {
+        return timestampsForKey.computeIfAbsent(key, GlobalTimestampsForKey::new);
+    }
+
+    public GlobalTimestampsForKey timestampsForKeyIfPresent(Key key)
+    {
+        return timestampsForKey.get(key);
     }
 
     public CommonAttributes register(InMemorySafeStore safeStore, Seekables<?, ?> keysOrRanges, Ranges slice, SafeCommand command, CommonAttributes attrs)
@@ -249,8 +267,7 @@ public abstract class InMemoryCommandStore extends CommandStore
             case Key:
                 CommonAttributes.Mutable mutable = attrs.mutable();
                 forEach(keysOrRanges, slice, key -> {
-                    SafeCommandsForKey cfk = safeStore.commandsForKey(key);
-                    Command.DurableAndIdempotentListener listener = cfk.register(command.current()).asListener();
+                    Command.DurableAndIdempotentListener listener = CommandsForKeys.registerCommand(safeStore, key, command.current());
                     mutable.addListener(listener);
                 });
                 return mutable;
@@ -270,8 +287,7 @@ public abstract class InMemoryCommandStore extends CommandStore
             case Key:
                 CommonAttributes.Mutable mutable = attrs.mutable();
                 forEach(keyOrRange, slice, key -> {
-                    SafeCommandsForKey cfk = safeStore.commandsForKey(key);
-                    Command.DurableAndIdempotentListener listener = cfk.register(command.current()).asListener();
+                    Command.DurableAndIdempotentListener listener = CommandsForKeys.registerCommand(safeStore, key, command.current());
                     mutable.addListener(listener);
                 });
                 return mutable;
@@ -283,7 +299,20 @@ public abstract class InMemoryCommandStore extends CommandStore
         return attrs;
     }
 
-    private <O> O mapReduceForKey(InMemorySafeStore safeStore, Routables<?> keysOrRanges, Ranges slice, BiFunction<CommandsForKey, O, O> map, O accumulate, Predicate<? super O> terminate)
+    private NavigableMap<RoutableKey, GlobalCommandsForKey> globalCommandsMapFor(KeyHistory keyHistory)
+    {
+        switch (keyHistory)
+        {
+            case DEPS:
+                return depsCommandsForKey;
+            case ALL:
+                return allCommandsForKey;
+            default:
+                throw new IllegalStateException(keyHistory + " does not have a commands map");
+        }
+    }
+
+    private <O> O mapReduceForKey(InMemorySafeStore safeStore, Routables<?> keysOrRanges, Ranges slice, KeyHistory keyHistory, TriFunction<TimestampsForKey, CommandsForKey, O, O> map, O accumulate, Predicate<? super O> terminate)
     {
         switch (keysOrRanges.domain()) {
             default:
@@ -293,10 +322,25 @@ public abstract class InMemoryCommandStore extends CommandStore
                 for (Key key : keys)
                 {
                     if (!slice.contains(key)) continue;
-                    SafeCommandsForKey forKey = safeStore.ifLoadedAndInitialised(key);
-                    if (forKey.current() == null)
+                    SafeTimestampsForKey timestamps = safeStore.timestampsIfLoadedAndInitialised(key);
+                    if (timestamps.current() == null)
                         continue;
-                    accumulate = map.apply(forKey.current(), accumulate);
+
+                    CommandsForKey commands = null;
+                    switch (keyHistory)
+                    {
+                        case DEPS:
+                            commands = safeStore.depsCommandsIfLoadedAndInitialised(key).current();
+                            break;
+                        case ALL:
+                            commands = safeStore.allCommandsIfLoadedAndInitialised(key).current();
+                            break;
+                    }
+
+                    if (commands == null && keyHistory != KeyHistory.NONE)
+                        continue;
+
+                    accumulate = map.apply(timestamps.current(), commands, accumulate);
                     if (terminate.test(accumulate))
                         return accumulate;
                 }
@@ -306,11 +350,25 @@ public abstract class InMemoryCommandStore extends CommandStore
                 Ranges sliced = ranges.slice(slice, Minimal);
                 for (Range range : sliced)
                 {
-                    for (GlobalCommandsForKey forKey : commandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive()).values())
+                    NavigableMap<RoutableKey, GlobalCommandsForKey> commandsMap = keyHistory.isNone() ? null : globalCommandsMapFor(keyHistory);
+                    for (Map.Entry<RoutableKey, GlobalTimestampsForKey> entry : timestampsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive()).entrySet())
                     {
-                        if (forKey.value() == null)
+                        RoutableKey key = entry.getKey();
+                        TimestampsForKey timestamps = entry.getValue().value();
+
+                        GlobalCommandsForKey globalCommands = keyHistory.isNone() ? null : commandsMap.get(key);
+                        if (timestamps == null)
+                        {
+                            Invariants.checkState(globalCommands == null || globalCommands.value() == null);
                             continue;
-                        accumulate = map.apply(forKey.value(), accumulate);
+                        }
+
+                        if (globalCommands == null)
+                            continue;
+
+                        CommandsForKey commands = keyHistory.isNone() ? null : Invariants.nonNull(globalCommands.value());
+
+                        accumulate = map.apply(timestamps, commands, accumulate);
                         if (terminate.test(accumulate))
                             return accumulate;
                     }
@@ -331,7 +389,9 @@ public abstract class InMemoryCommandStore extends CommandStore
             case Range:
                 Ranges ranges = (Ranges) keysOrRanges;
                 ranges.slice(slice).forEach(range -> {
-                    commandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive())
+                    depsCommandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive())
+                            .keySet().forEach(forEach);
+                    allCommandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive())
                             .keySet().forEach(forEach);
                 });
         }
@@ -350,7 +410,9 @@ public abstract class InMemoryCommandStore extends CommandStore
             case Range:
                 Range range = (Range) keyOrRange;
                 Ranges.of(range).slice(slice).forEach(r -> {
-                    commandsForKey.subMap(r.start(), r.startInclusive(), r.end(), r.endInclusive())
+                    depsCommandsForKey.subMap(r.start(), r.startInclusive(), r.end(), r.endInclusive())
+                            .keySet().forEach(forEach);
+                    allCommandsForKey.subMap(r.start(), r.startInclusive(), r.end(), r.endInclusive())
                             .keySet().forEach(forEach);
                 });
         }
@@ -382,22 +444,50 @@ public abstract class InMemoryCommandStore extends CommandStore
             }
         });
         ranges.forEach(r -> {
-            commandsForKey.subMap(r.start(), r.startInclusive(), r.end(), r.endInclusive()).values().forEach(forKey -> {
+            depsCommandsForKey.subMap(r.start(), r.startInclusive(), r.end(), r.endInclusive()).values().forEach(forKey -> {
+                if (!forKey.isEmpty())
+                    forKey.value(forKey.value().withoutRedundant(syncId));
+            });
+            allCommandsForKey.subMap(r.start(), r.startInclusive(), r.end(), r.endInclusive()).values().forEach(forKey -> {
                 if (!forKey.isEmpty())
                     forKey.value(forKey.value().withoutRedundant(syncId));
             });
         });
     }
 
-    protected InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys)
+    protected InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges,
+                                                Map<TxnId, InMemorySafeCommand> commands,
+                                                Map<RoutableKey, InMemorySafeTimestampsForKey> timestampsForKey,
+                                                Map<RoutableKey, InMemorySafeCommandsForKey> minimalCommandsForKeys,
+                                                Map<RoutableKey, InMemorySafeCommandsForKey> completeCommandsForKeys)
     {
-        return new InMemorySafeStore(this, ranges, context, commands, commandsForKeys);
+        return new InMemorySafeStore(this, ranges, context, commands, timestampsForKey, minimalCommandsForKeys, completeCommandsForKeys);
+    }
+
+    private void loadCommandsForKey(RoutableKey key,
+                                    KeyHistory keyHistory,
+                                    Map<RoutableKey, InMemorySafeTimestampsForKey> timestampsForKey,
+                                    Map<RoutableKey, InMemorySafeCommandsForKey> minimalCommands,
+                                    Map<RoutableKey, InMemorySafeCommandsForKey> completeCommands)
+    {
+        switch (keyHistory)
+        {
+            case ALL:
+                // loading recovery commands implicitly loads deps
+                completeCommands.put(key, allCommandsForKey((Key) key).createSafeReference());
+            case DEPS:
+                minimalCommands.put(key, depsCommandsForKey((Key) key).createSafeReference());
+                break;
+        }
+        timestampsForKey.put(key, timestampsForKey((Key) key).createSafeReference());
     }
 
     protected final InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges)
     {
         Map<TxnId, InMemorySafeCommand> commands = new HashMap<>();
-        Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys = new HashMap<>();
+        Map<RoutableKey, InMemorySafeCommandsForKey> minimalCommands = new HashMap<>();
+        Map<RoutableKey, InMemorySafeCommandsForKey> completeCommands = new HashMap<>();
+        Map<RoutableKey, InMemorySafeTimestampsForKey> timestampsForKey = new HashMap<>();
 
         context.forEachId(txnId -> commands.put(txnId, lazyReference(txnId)));
 
@@ -407,13 +497,22 @@ public abstract class InMemoryCommandStore extends CommandStore
             {
                 case Key:
                     RoutableKey key = (RoutableKey) seekable;
-                    commandsForKeys.put(key, commandsForKey((Key) key).createSafeReference());
+                    switch (context.keyHistory())
+                    {
+                        case ALL:
+                            // loading recovery commands implicitly loads deps
+                            completeCommands.put(key, allCommandsForKey((Key) key).createSafeReference());
+                        case DEPS:
+                            minimalCommands.put(key, depsCommandsForKey((Key) key).createSafeReference());
+                            break;
+                    }
+                    timestampsForKey.put(key, timestampsForKey((Key) key).createSafeReference());
                     break;
                 case Range:
                     // load range cfks here
             }
         }
-        return createSafeStore(context, ranges, commands, commandsForKeys);
+        return createSafeStore(context, ranges, commands, timestampsForKey, minimalCommands, completeCommands);
     }
 
     public SafeCommandStore beginOperation(PreLoadContext context)
@@ -526,7 +625,7 @@ public abstract class InMemoryCommandStore extends CommandStore
 
         private Command loadForCFK(CFKEntry entry)
         {
-            GlobalCommand globalCommand = ifPresent(entry);
+            GlobalCommand globalCommand = commandIfPresent(entry);
             if (globalCommand != null && globalCommand.value() != null)
                 return globalCommand.value();
             if (entry.uninitialised)
@@ -663,19 +762,45 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
     }
 
-    public static class InMemorySafeStore extends AbstractSafeCommandStore<InMemorySafeCommand, InMemorySafeCommandsForKey>
+    public static class GlobalTimestampsForKey extends GlobalState<TimestampsForKey>
+    {
+        private final Key key;
+
+        public GlobalTimestampsForKey(RoutableKey key)
+        {
+            this.key = (Key) key;
+        }
+
+        public InMemorySafeTimestampsForKey createSafeReference()
+        {
+            return new InMemorySafeTimestampsForKey(key, this);
+        }
+    }
+
+    public static class InMemorySafeStore extends AbstractSafeCommandStore<InMemorySafeCommand, InMemorySafeTimestampsForKey, InMemorySafeCommandsForKey, InMemorySafeCommandsForKeyUpdate>
     {
         private final InMemoryCommandStore commandStore;
         private final Map<TxnId, InMemorySafeCommand> commands;
-        private final Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKey;
+        private final Map<RoutableKey, InMemorySafeTimestampsForKey> timestampsForKey;
+        private final Map<RoutableKey, InMemorySafeCommandsForKey> depsCommandsForKey;
+        private final Map<RoutableKey, InMemorySafeCommandsForKey> allCommandsForKey;
+        private final Map<RoutableKey, InMemorySafeCommandsForKeyUpdate> updatesForKey = new HashMap<>();
         private final RangesForEpoch ranges;
 
-        public InMemorySafeStore(InMemoryCommandStore commandStore, RangesForEpoch ranges, PreLoadContext context, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKey)
+        public InMemorySafeStore(InMemoryCommandStore commandStore,
+                                 RangesForEpoch ranges,
+                                 PreLoadContext context,
+                                 Map<TxnId, InMemorySafeCommand> commands,
+                                 Map<RoutableKey, InMemorySafeTimestampsForKey> timestampsForKey,
+                                 Map<RoutableKey, InMemorySafeCommandsForKey> depsCommandsForKey,
+                                 Map<RoutableKey, InMemorySafeCommandsForKey> allCommandsForKey)
         {
             super(context);
             this.commandStore = commandStore;
             this.commands = commands;
-            this.commandsForKey = commandsForKey;
+            this.depsCommandsForKey = depsCommandsForKey;
+            this.allCommandsForKey = allCommandsForKey;
+            this.timestampsForKey = timestampsForKey;
             this.ranges = Invariants.nonNull(ranges);
         }
 
@@ -692,39 +817,137 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        protected InMemorySafeCommandsForKey getCommandsForKeyInternal(RoutableKey key)
+        protected InMemorySafeTimestampsForKey getTimestampsForKeyInternal(RoutableKey key)
         {
-            return commandsForKey.get(key);
+            return timestampsForKey.get(key);
         }
 
         @Override
-        protected void addCommandsForKeyInternal(InMemorySafeCommandsForKey cfk)
+        protected void addTimestampsForKeyInternal(InMemorySafeTimestampsForKey tfk)
         {
-            commandsForKey.put(cfk.key(), cfk);
+            timestampsForKey.put(tfk.key(), tfk);
+        }
+
+        @Override
+        protected InMemorySafeTimestampsForKey getTimestampsForKeyIfLoaded(RoutableKey key)
+        {
+            if (!commandStore.canExposeUnloaded())
+                return null;
+            GlobalTimestampsForKey global = commandStore.timestampsForKeyIfPresent((Key) key);
+            return global != null ? global.createSafeReference() : null;
         }
 
         @Override
         protected InMemorySafeCommand getIfLoaded(TxnId txnId)
         {
-            InMemorySafeCommand safeCommand = commands.get(txnId);
-            if (safeCommand != null)
-                return safeCommand;
             if (!commandStore.canExposeUnloaded())
                 return null;
-            GlobalCommand global = commandStore.ifPresent(txnId);
+            GlobalCommand global = commandStore.commandIfPresent(txnId);
             return global != null ? global.createSafeReference() : null;
         }
 
         @Override
-        protected InMemorySafeCommandsForKey getIfLoaded(RoutableKey key)
+        protected InMemorySafeCommandsForKey getDepsCommandsForKeyInternal(RoutableKey key)
         {
-            InMemorySafeCommandsForKey safeCommandsForKey = commandsForKey.get((Key) key);
-            if (safeCommandsForKey != null)
-                return safeCommandsForKey;
+            return depsCommandsForKey.get(key);
+        }
+
+        @Override
+        protected void addDepsCommandsForKeyInternal(InMemorySafeCommandsForKey cfk)
+        {
+            depsCommandsForKey.put(cfk.key(), cfk);
+        }
+
+        @Override
+        protected InMemorySafeCommandsForKey getDepsCommandsForKeyIfLoaded(RoutableKey key)
+        {
             if (!commandStore.canExposeUnloaded())
                 return null;
-            GlobalCommandsForKey global = commandStore.ifPresent((Key) key);
+            GlobalCommandsForKey global = commandStore.depsCommandsForKeyIfPresent((Key) key);
             return global != null ? global.createSafeReference() : null;
+        }
+
+        @Override
+        protected InMemorySafeCommandsForKey getAllCommandsForKeyInternal(RoutableKey key)
+        {
+            return allCommandsForKey.get(key);
+        }
+
+        @Override
+        protected void addAllCommandsForKeyInternal(InMemorySafeCommandsForKey cfk)
+        {
+            allCommandsForKey.put(cfk.key(), cfk);
+        }
+
+        @Override
+        protected InMemorySafeCommandsForKey getAllCommandsForKeyIfLoaded(RoutableKey key)
+        {
+            if (!commandStore.canExposeUnloaded())
+                return null;
+            GlobalCommandsForKey global = commandStore.allCommandsForKeyIfPresent((Key) key);
+            return global != null ? global.createSafeReference() : null;
+        }
+
+        @Override
+        protected InMemorySafeCommandsForKeyUpdate getCommandsForKeyUpdateInternal(RoutableKey key)
+        {
+            return updatesForKey.get(key);
+        }
+
+        @Override
+        protected InMemorySafeCommandsForKeyUpdate createCommandsForKeyUpdateInternal(RoutableKey key)
+        {
+            return new InMemorySafeCommandsForKeyUpdate((Key) key, (CommandLoader<CFKEntry>) cfkLoader(key));
+        }
+
+        @Override
+        protected void addCommandsForKeyUpdateInternal(InMemorySafeCommandsForKeyUpdate update)
+        {
+            updatesForKey.put(update.key(), update);
+        }
+
+        private CommandsForKey applyUpdate(CommandsForKey cfk, InMemorySafeCommandsForKeyUpdate update, KeyHistory keyHistory)
+        {
+            switch (keyHistory)
+            {
+                case DEPS:
+                    return update.applyToDeps(cfk);
+                case ALL:
+                    return update.applyToAll(cfk);
+                default:
+                    throw new IllegalArgumentException("Unhandled KeyHistory " + keyHistory);
+            }
+        }
+
+        private void applyCommandForKeyUpdate(InMemorySafeCommandsForKeyUpdate update, KeyHistory kind, Map<RoutableKey, InMemorySafeCommandsForKey> commandsMap, Function<Key, GlobalCommandsForKey> getter)
+        {
+            Key key = update.key();
+            InMemorySafeCommandsForKey safeCFK = commandsMap.get(key);
+            if (safeCFK != null)
+            {
+                if (safeCFK.isEmpty()) safeCFK.initialize(cfkLoader(key));
+                safeCFK.update(applyUpdate(safeCFK.current(), update, kind));
+            }
+            else
+            {
+                GlobalCommandsForKey globalCFK = getter.apply(key);
+                CommandsForKey cfk = globalCFK.value();
+                if (cfk == null)
+                    cfk = new CommandsForKey(key, cfkLoader(key));
+                globalCFK.value(applyUpdate(cfk, update, kind));
+            }
+        }
+
+        private void applyCommandForKeyUpdate(InMemorySafeCommandsForKeyUpdate update)
+        {
+            applyCommandForKeyUpdate(update, KeyHistory.DEPS, depsCommandsForKey, commandStore::depsCommandsForKey);
+            applyCommandForKeyUpdate(update, KeyHistory.ALL, allCommandsForKey, commandStore::allCommandsForKey);
+        }
+
+        @Override
+        protected void applyCommandForKeyUpdates()
+        {
+            updatesForKey.values().forEach(this::applyCommandForKeyUpdate);
         }
 
         @Override
@@ -760,7 +983,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         @Override
         public Timestamp maxConflict(Seekables<?, ?> keysOrRanges, Ranges slice)
         {
-            Timestamp timestamp = commandStore.mapReduceForKey(this, keysOrRanges, slice, (forKey, prev) -> Timestamp.nonNullOrMax(forKey.max(), prev), Timestamp.NONE, Objects::isNull);
+            Timestamp timestamp = commandStore.mapReduceForKey(this, keysOrRanges, slice, KeyHistory.NONE, (timestamps, commands, prev) -> Timestamp.nonNullOrMax(timestamps.max(), prev), Timestamp.NONE, Objects::isNull);
             Seekables<?, ?> sliced = keysOrRanges.slice(slice, Minimal);
             for (RangeCommand command : commandStore.rangeCommands.values())
             {
@@ -784,7 +1007,6 @@ public abstract class InMemoryCommandStore extends CommandStore
             RangesForEpoch rangesForEpoch = commandStore.rangesForEpoch;
             Ranges allRanges = rangesForEpoch.all();
             deps.keyDeps.keys().forEach(allRanges, key -> {
-                SafeCommandsForKey cfk = commandsForKey(key);
                 deps.keyDeps.forEach(key, txnId -> {
                     // TODO (desired, efficiency): this can be made more efficient by batching by epoch
                     if (rangesForEpoch.coordinates(txnId).contains(key))
@@ -792,7 +1014,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                     if (!rangesForEpoch.allBefore(txnId.epoch()).contains(key))
                         return;
 
-                    cfk.registerNotWitnessed(txnId);
+                    CommandsForKeys.registerNotWitnessed(this, key, txnId);
                 });
 
             });
@@ -819,22 +1041,46 @@ public abstract class InMemoryCommandStore extends CommandStore
             return commandStore.time;
         }
 
+        private static class TxnInfo
+        {
+            private final TxnId txnId;
+            private final Timestamp executeAt;
+            private final Status status;
+            private final List<TxnId> deps;
+
+                public TxnInfo(TxnId txnId, Timestamp executeAt, Status status, List<TxnId> deps)
+            {
+                this.txnId = txnId;
+                this.executeAt = executeAt;
+                this.status = status;
+                this.deps = deps;
+            }
+
+                public TxnInfo(Command command)
+            {
+                this.txnId = command.txnId();
+                this.executeAt = command.executeAt();
+                this.status = command.status();
+                PartialDeps deps = command.partialDeps();
+                this.deps = deps != null ? deps.txnIds() : Collections.emptyList();
+            }
+        }
         // TODO (expected): instead of accepting a slice, accept the min/max epoch and let implementation handle it
         @Override
-        public <P1, T> T mapReduce(Seekables<?, ?> keysOrRanges, Ranges slice, Kinds testKind, TestTimestamp testTimestamp, Timestamp timestamp, TestDep testDep, @Nullable TxnId depId, @Nullable Status minStatus, @Nullable Status maxStatus, CommandFunction<P1, T, T> map, P1 p1, T accumulate, Predicate<? super T> terminate)
+        public <P1, T> T mapReduce(Seekables<?, ?> keysOrRanges, Ranges slice, KeyHistory keyHistory, Kinds testKind, TestTimestamp testTimestamp, Timestamp timestamp, TestDep testDep, @Nullable TxnId depId, @Nullable Status minStatus, @Nullable Status maxStatus, CommandFunction<P1, T, T> map, P1 p1, T accumulate, Predicate<? super T> terminate)
         {
-            accumulate = commandStore.mapReduceForKey(this, keysOrRanges, slice, (forKey, prev) -> {
-                CommandTimeseries<?> timeseries;
+            accumulate = commandStore.mapReduceForKey(this, keysOrRanges, slice, keyHistory, (timestamps, commands, prev) -> {
+                CommandTimeseries.TimestampType timestampType;
                 switch (testTimestamp)
                 {
                     default: throw new AssertionError();
                     case STARTED_AFTER:
                     case STARTED_BEFORE:
-                        timeseries = forKey.byId();
+                        timestampType = CommandTimeseries.TimestampType.TXN_ID;
                         break;
                     case EXECUTES_AFTER:
                     case MAY_EXECUTE_BEFORE:
-                        timeseries = forKey.byExecuteAt();
+                        timestampType = CommandTimeseries.TimestampType.EXECUTE_AT;
                 }
                 CommandTimeseries.TestTimestamp remapTestTimestamp;
                 switch (testTimestamp)
@@ -848,7 +1094,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                     case MAY_EXECUTE_BEFORE:
                         remapTestTimestamp = CommandTimeseries.TestTimestamp.BEFORE;
                 }
-                return timeseries.mapReduce(testKind, remapTestTimestamp, timestamp, testDep, depId, minStatus, maxStatus, map, p1, prev, terminate);
+                return commands.commands().mapReduce(testKind, timestampType, remapTestTimestamp, timestamp, testDep, depId, minStatus, maxStatus, map, p1, prev, terminate);
             }, accumulate, terminate);
 
             if (terminate.test(accumulate))
@@ -856,7 +1102,7 @@ public abstract class InMemoryCommandStore extends CommandStore
 
             // TODO (find lib, efficiency): this is super inefficient, need to store Command in something queryable
             Seekables<?, ?> sliced = keysOrRanges.slice(slice, Minimal);
-            Map<Range, List<Map.Entry<TxnId, TimestampAndStatus>>> collect = new TreeMap<>(Range::compare);
+            Map<Range, List<TxnInfo>> collect = new TreeMap<>(Range::compare);
             commandStore.rangeCommands.forEach(((txnId, rangeCommand) -> {
                 Command command = rangeCommand.command.value();
                 // TODO (now): probably this isn't safe - want to ensure we take dependency on any relevant syncId
@@ -916,9 +1162,9 @@ public abstract class InMemoryCommandStore extends CommandStore
 
                 Routables.foldl(rangeCommand.ranges, sliced, (r, in, i) -> {
                     // TODO (easy, efficiency): pass command as a parameter to Fold
-                    List<Map.Entry<TxnId, TimestampAndStatus>> list = in.computeIfAbsent(r, ignore -> new ArrayList<>());
-                    if (list.isEmpty() || !list.get(list.size() - 1).getKey().equals(command.txnId()))
-                        list.add(new AbstractMap.SimpleImmutableEntry<>(command.txnId(), new TimestampAndStatus(command.executeAt(), command.status())));
+                    List<TxnInfo> list = in.computeIfAbsent(r, ignore -> new ArrayList<>());
+                    if (list.isEmpty() || !list.get(list.size() - 1).txnId.equals(command.txnId()))
+                        list.add(new TxnInfo(command));
                     return in;
                 }, collect);
             }));
@@ -947,20 +1193,33 @@ public abstract class InMemoryCommandStore extends CommandStore
 
                     Routables.foldl(ranges, sliced, (r, in, i) -> {
                         // TODO (easy, efficiency): pass command as a parameter to Fold
-                        List<Map.Entry<TxnId, TimestampAndStatus>> list = in.computeIfAbsent(r, ignore -> new ArrayList<>());
-                        if (list.isEmpty() || !list.get(list.size() - 1).getKey().equals(txnId))
-                            list.add(new AbstractMap.SimpleImmutableEntry<>(txnId, new TimestampAndStatus(txnId, Status.NotDefined)));
+                        List<TxnInfo> list = in.computeIfAbsent(r, ignore -> new ArrayList<>());
+                        if (list.isEmpty() || !list.get(list.size() - 1).txnId.equals(txnId))
+                        {
+                            GlobalCommand global = commandStore.commands.get(txnId);
+                            if (global != null && global.value() != null)
+                            {
+                                Command command = global.value();
+                                PartialDeps deps = command.partialDeps();
+                                List<TxnId> depsIds = deps != null ? deps.txnIds() : Collections.emptyList();
+                                list.add(new TxnInfo(txnId, txnId, command.status(), depsIds));
+                            }
+                            else
+                            {
+                                list.add(new TxnInfo(txnId, txnId, NotDefined, Collections.emptyList()));
+                            }
+                        }
                         return in;
                     }, collect);
                 }));
             }
 
-            for (Map.Entry<Range, List<Map.Entry<TxnId, TimestampAndStatus>>> e : collect.entrySet())
+            for (Map.Entry<Range, List<TxnInfo>> e : collect.entrySet())
             {
-                for (Map.Entry<TxnId, TimestampAndStatus> command : e.getValue())
+                for (TxnInfo command : e.getValue())
                 {
                     T initial = accumulate;
-                    accumulate = map.apply(p1, e.getKey(), command.getKey(), command.getValue().timestamp, command.getValue().status, initial);
+                    accumulate = map.apply(p1, e.getKey(), command.txnId, command.executeAt, command.status, () -> command.deps, initial);
                     if (terminate.test(accumulate))
                         return accumulate;
                 }
@@ -1002,7 +1261,10 @@ public abstract class InMemoryCommandStore extends CommandStore
                 }
             });
             commands.values().forEach(SafeState::invalidate);
-            commandsForKey.values().forEach(SafeState::invalidate);
+            timestampsForKey.values().forEach(SafeState::invalidate);
+            depsCommandsForKey.values().forEach(SafeState::invalidate);
+            allCommandsForKey.values().forEach(SafeState::invalidate);
+            updatesForKey.values().forEach(SafeState::invalidate);
         }
 
         @Override
@@ -1169,9 +1431,15 @@ public abstract class InMemoryCommandStore extends CommandStore
     {
         class DebugSafeStore extends InMemorySafeStore
         {
-            public DebugSafeStore(InMemoryCommandStore commandStore, RangesForEpoch ranges, PreLoadContext context, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKey)
+            public DebugSafeStore(InMemoryCommandStore commandStore,
+                                  RangesForEpoch ranges,
+                                  PreLoadContext context,
+                                  Map<TxnId, InMemorySafeCommand> commands,
+                                  Map<RoutableKey, InMemorySafeTimestampsForKey> timestampsForKey,
+                                  Map<RoutableKey, InMemorySafeCommandsForKey> minimalCommandsForKey,
+                                  Map<RoutableKey, InMemorySafeCommandsForKey> completeCommandsForKey)
             {
-                super(commandStore, ranges, context, commands, commandsForKey);
+                super(commandStore, ranges, context, commands, timestampsForKey, minimalCommandsForKey, completeCommandsForKey);
             }
 
             @Override
@@ -1209,11 +1477,10 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        protected InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys)
+        protected InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeTimestampsForKey> timestampsForKeyMap, Map<RoutableKey, InMemorySafeCommandsForKey> minimalCommandsForKeys, Map<RoutableKey, InMemorySafeCommandsForKey> completeCommandsForKeys)
         {
-            return new DebugSafeStore(this, ranges, context, commands, commandsForKeys);
+            return new DebugSafeStore(this, ranges, context, commands, timestampsForKeyMap, minimalCommandsForKeys, completeCommandsForKeys);
         }
-
     }
 
     public static InMemoryCommandStore inMemory(CommandStore unsafeStore)

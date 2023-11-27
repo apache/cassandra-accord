@@ -22,6 +22,7 @@ import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import javax.annotation.Nonnull;
 
+import accord.local.*;
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,14 +30,8 @@ import org.slf4j.LoggerFactory;
 import accord.api.BarrierType;
 import accord.api.Key;
 import accord.api.RoutingKey;
-import accord.local.Command;
-import accord.local.Node;
-import accord.local.PreLoadContext;
-import accord.local.SafeCommand;
-import accord.local.SafeCommandStore;
 import accord.local.SafeCommandStore.TestDep;
 import accord.local.SafeCommandStore.TestTimestamp;
-import accord.local.Status;
 import accord.primitives.Routable.Domain;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
@@ -206,7 +201,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
         ExistingTransactionCheck check = new ExistingTransactionCheck();
         Key k = seekables.get(0).asKey();
         node.commandStores().mapReduceConsume(
-                contextFor(k),
+                contextFor(k, KeyHistory.ALL),
                 k.toUnseekable(),
                 minEpoch,
                 Long.MAX_VALUE,
@@ -256,6 +251,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
             BarrierTxn found = safeStore.mapReduce(
                     seekables,
                     safeStore.ranges().allAfter(minEpoch),
+                    KeyHistory.ALL,
                     // Barriers are trying to establish that committed transactions are applied before the barrier (or in this case just minEpoch)
                     // so all existing transaction types should ensure that at this point. An earlier txnid may have an executeAt that is after
                     // this barrier or the transaction we listen on and that is fine
@@ -266,7 +262,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
                     null,
                     Status.Committed,
                     Status.Applied,
-                    (p1, keyOrRange, txnId, executeAt, status, barrierTxn) -> {
+                    (p1, keyOrRange, txnId, executeAt, status, deps, barrierTxn) -> {
                         if (keyOrRange.domain() == Domain.Key)
                             return new BarrierTxn(txnId, executeAt, status, keyOrRange.asKey());
                         return null;

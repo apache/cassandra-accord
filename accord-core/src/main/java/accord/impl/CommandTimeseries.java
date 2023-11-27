@@ -18,14 +18,15 @@
 
 package accord.impl;
 
-import java.util.List;
-import java.util.NavigableMap;
-import java.util.Objects;
-import java.util.TreeMap;
+import java.util.*;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
 
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedMap;
 
 import accord.api.Key;
@@ -46,12 +47,13 @@ import static accord.utils.Utils.ensureSortedMutable;
 public class CommandTimeseries<D>
 {
     public enum TestTimestamp { BEFORE, AFTER }
+    public enum TimestampType { TXN_ID, EXECUTE_AT }
 
     private final Seekable keyOrRange;
     protected final CommandLoader<D> loader;
     public final ImmutableSortedMap<Timestamp, D> commands;
 
-    public CommandTimeseries(Update<D> builder)
+    public CommandTimeseries(Builder<D> builder)
     {
         this.keyOrRange = builder.keyOrRange;
         this.loader = builder.loader;
@@ -101,12 +103,42 @@ public class CommandTimeseries<D>
 
     public Timestamp maxTimestamp()
     {
-        return commands.isEmpty() ? Timestamp.NONE : commands.keySet().last();
+        if (commands.isEmpty())
+            return Timestamp.NONE;
+        Timestamp result = null;
+        for (D data : commands.values())
+        {
+            if (result == null)
+            {
+                result = Timestamp.max(loader.txnId(data), loader.executeAt(data));
+            }
+            else
+            {
+                result = Timestamp.max(result, loader.txnId(data));
+                result = Timestamp.max(result, loader.executeAt(data));
+            }
+        }
+        return result;
     }
 
     public Timestamp minTimestamp()
     {
-        return commands.isEmpty() ? Timestamp.NONE : commands.keySet().first();
+        if (commands.isEmpty())
+            return Timestamp.NONE;
+        Timestamp result = null;
+        for (D data : commands.values())
+        {
+            if (result == null)
+            {
+                result = Timestamp.min(loader.txnId(data), loader.executeAt(data));
+            }
+            else
+            {
+                result = Timestamp.min(result, loader.txnId(data));
+                result = Timestamp.min(result, loader.executeAt(data));
+            }
+        }
+        return result;
     }
 
     /**
@@ -117,14 +149,31 @@ public class CommandTimeseries<D>
      * <p>
      * TODO (expected, efficiency): TestDep should be asynchronous; data should not be kept memory-resident as only used for recovery
      */
-    public <P1, T> T mapReduce(Kinds testKind, TestTimestamp testTimestamp, Timestamp timestamp,
+    public <P1, T> T mapReduce(Kinds testKind, TimestampType timestampType, TestTimestamp testTimestamp, Timestamp timestamp,
                            SafeCommandStore.TestDep testDep, @Nullable TxnId depId,
                            @Nullable Status minStatus, @Nullable Status maxStatus,
                            SafeCommandStore.CommandFunction<P1, T, T> map, P1 p1, T initialValue, Predicate<? super T> terminatePredicate)
     {
-
-        for (D data : (testTimestamp == TestTimestamp.BEFORE ? commands.headMap(timestamp, false) : commands.tailMap(timestamp, false)).values())
+        Iterable<D> dataIterable;
+        Predicate<Timestamp> executeAtPredicate;
+        if (timestampType == TimestampType.TXN_ID)
         {
+            dataIterable = testTimestamp == TestTimestamp.BEFORE ? commands.headMap(timestamp, false).values() : commands.tailMap(timestamp, false).values();
+            executeAtPredicate = ts -> true;
+        }
+        else
+        {
+            dataIterable = commands.values();
+            executeAtPredicate = testTimestamp == TestTimestamp.BEFORE ? ts -> ts.compareTo(timestamp) < 0 : ts -> ts.compareTo(timestamp) > 0;
+        }
+
+
+        for (D data : dataIterable)
+        {
+            Timestamp executeAt = loader.executeAt(data);
+            if (!executeAtPredicate.test(executeAt))
+                continue;
+
             TxnId txnId = loader.txnId(data);
             if (!testKind.test(txnId.rw())) continue;
             SaveStatus status = loader.saveStatus(data);
@@ -136,8 +185,7 @@ public class CommandTimeseries<D>
             // If we don't have any dependencies, we treat a dependency filter as a mismatch
             if (testDep != ANY_DEPS && (!status.known.deps.hasProposedOrDecidedDeps() || (deps.contains(depId) != (testDep == WITH))))
                 continue;
-            Timestamp executeAt = loader.executeAt(data);
-            initialValue = map.apply(p1, keyOrRange, txnId, executeAt, status.status, initialValue);
+            initialValue = map.apply(p1, keyOrRange, txnId, executeAt, status.status, () -> deps, initialValue);
             if (terminatePredicate.test(initialValue))
                 break;
         }
@@ -161,9 +209,9 @@ public class CommandTimeseries<D>
         return commands.values().stream();
     }
 
-    Update<D> beginUpdate()
+    Builder<D> unbuild()
     {
-        return new Update<>(this);
+        return new Builder<>(this);
     }
 
     public CommandLoader<D> loader()
@@ -191,48 +239,48 @@ public class CommandTimeseries<D>
         }
     }
 
-    public static class Update<D>
+    public static class Builder<D>
     {
         private final Seekable keyOrRange;
         protected CommandLoader<D> loader;
         protected NavigableMap<Timestamp, D> commands;
 
-        public Update(Seekable keyOrRange, CommandLoader<D> loader)
+        public Builder(Seekable keyOrRange, CommandLoader<D> loader)
         {
             this.keyOrRange = keyOrRange;
             this.loader = loader;
             this.commands = new TreeMap<>();
         }
 
-        public Update(CommandTimeseries<D> timeseries)
+        public Builder(CommandTimeseries<D> timeseries)
         {
             this.keyOrRange = timeseries.keyOrRange;
             this.loader = timeseries.loader;
             this.commands = timeseries.commands;
         }
 
-        public Update<D> add(Timestamp timestamp, Command command)
+        public Builder<D> add(Timestamp timestamp, Command command)
         {
             commands = ensureSortedMutable(commands);
             commands.put(timestamp, loader.saveForCFK(command));
             return this;
         }
 
-        public Update<D> add(Timestamp timestamp, D value)
+        public Builder<D> add(Timestamp timestamp, D value)
         {
             commands = ensureSortedMutable(commands);
             commands.put(timestamp, value);
             return this;
         }
 
-        public Update<D> remove(Timestamp timestamp)
+        public Builder<D> remove(Timestamp timestamp)
         {
             commands = ensureSortedMutable(commands);
             commands.remove(timestamp);
             return this;
         }
 
-        public Update<D> removeBefore(Timestamp timestamp)
+        public Builder<D> removeBefore(Timestamp timestamp)
         {
             commands = ensureSortedMutable(commands);
             commands.headMap(timestamp, false).clear();
@@ -242,6 +290,247 @@ public class CommandTimeseries<D>
         public CommandTimeseries<D> build()
         {
             return new CommandTimeseries<>(this);
+        }
+    }
+
+    public interface Update<T extends Timestamp, D>
+    {
+        interface Mutable<T extends Timestamp, D> extends Update<T, D>
+        {
+            void add(T ts, Command command);
+            void remove(T ts);
+        }
+
+        int numWrites();
+        int numDeletes();
+
+        boolean contains(T key);
+
+        default int numChanges()
+        {
+            return numWrites() + numDeletes();
+        }
+
+        default boolean isEmpty()
+        {
+            return numChanges() == 0;
+        }
+
+        void forEachWrite(BiConsumer<T, D> consumer);
+        void forEachDelete(Consumer<T> consumer);
+
+        default  CommandTimeseries<D> apply(CommandTimeseries<D> current)
+        {
+            if (isEmpty())
+                return current;
+
+            CommandTimeseries.Builder<D> builder = current.unbuild();
+            forEachWrite(builder::add);
+            forEachDelete(builder::remove);
+            return builder.build();
+        }
+
+    }
+
+    public static class ImmutableUpdate<T extends Timestamp, D> implements Update<T, D>
+    {
+        private static final ImmutableUpdate<?, ?> EMPTY = new ImmutableUpdate<>(ImmutableMap.of(), ImmutableSet.of());
+
+        public final ImmutableMap<T, D> writes;
+        public final ImmutableSet<T> deletes;
+
+        public ImmutableUpdate(ImmutableMap<T, D> writes, ImmutableSet<T> deletes)
+        {
+            this.writes = writes;
+            this.deletes = deletes;
+        }
+
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            ImmutableUpdate<?, ?> immutable = (ImmutableUpdate<?, ?>) o;
+            return Objects.equals(writes, immutable.writes) && Objects.equals(deletes, immutable.deletes);
+        }
+
+        public int hashCode()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        public String toString()
+        {
+            return "Update.Immutable{" +
+                   "writes=" + writes +
+                   ", deletes=" + deletes +
+                   '}';
+        }
+
+        public static <T extends Timestamp, D> ImmutableUpdate<T, D> empty()
+        {
+            return (ImmutableUpdate<T, D>) EMPTY;
+        }
+
+        @Override
+        public int numWrites()
+        {
+            return writes.size();
+        }
+
+        @Override
+        public void forEachWrite(BiConsumer<T, D> consumer)
+        {
+            writes.forEach(consumer);
+        }
+
+        @Override
+        public int numDeletes()
+        {
+            return deletes.size();
+        }
+
+        @Override
+        public void forEachDelete(Consumer<T> consumer)
+        {
+            deletes.forEach(consumer);
+        }
+
+        public boolean contains(T key)
+        {
+            return writes.containsKey(key) || deletes.contains(key);
+        }
+
+        public ImmutableUpdate<T, D> apply(Update<T, D> next)
+        {
+            if (next.isEmpty())
+                return this;
+
+            Map<T, D> writes = new HashMap<>(this.writes);
+            Set<T> deletes = new HashSet<>(this.deletes);
+
+            next.forEachDelete(k -> {
+                writes.remove(k);
+                deletes.add(k);
+            });
+
+            next.forEachWrite((k, v) -> {
+                writes.put(k , v);
+                deletes.remove(k);
+            });
+
+            return new ImmutableUpdate<>(ImmutableMap.copyOf(writes), ImmutableSet.copyOf(deletes));
+        }
+
+        public MutableUpdate<T, D> toMutable(CommandLoader<D> loader)
+        {
+            return new MutableUpdate<>(loader, new HashMap<>(writes), new HashSet<>(deletes));
+        }
+    }
+
+    public static class MutableUpdate<T extends Timestamp, D> implements Update.Mutable<T, D>
+    {
+        private final CommandLoader<D> loader;
+        private final Map<T, D> writes;
+        private final Set<T> deletes;
+
+        public MutableUpdate(CommandLoader<D> loader, Map<T, D> writes, Set<T> deletes)
+        {
+            this.loader = loader;
+            this.writes = writes;
+            this.deletes = deletes;
+        }
+
+        public MutableUpdate(CommandLoader<D> loader)
+        {
+            this(loader, new HashMap<>(), new HashSet<>());
+        }
+
+        @Override
+        public void add(T ts, Command command)
+        {
+            writes.put(ts, loader.saveForCFK(command));
+            deletes.remove(ts);
+        }
+
+        @Override
+        public void remove(T ts)
+        {
+            deletes.add(ts);
+            writes.remove(ts);
+        }
+
+        @Override
+        public int numWrites()
+        {
+            return writes.size();
+        }
+
+        @Override
+        public void forEachWrite(BiConsumer<T, D> consumer)
+        {
+            writes.forEach(consumer);
+        }
+
+        @Override
+        public int numDeletes()
+        {
+            return deletes.size();
+        }
+
+        @Override
+        public void forEachDelete(Consumer<T> consumer)
+        {
+            deletes.forEach(consumer);
+        }
+
+        public boolean contains(T key)
+        {
+            return writes.containsKey(key) || deletes.contains(key);
+        }
+
+        /**
+         * remove the given key from both the writes and deletes set
+         * @param key
+         */
+        void removeKeyUnsafe(T key)
+        {
+            writes.remove(key);
+            deletes.remove(key);
+        }
+
+        /**
+         * add the given write data directly, without using the command loader
+         * @param key
+         * @param value
+         */
+        void addWriteUnsafe(T key, D value)
+        {
+            writes.put(key, value);
+            deletes.remove(key);
+        }
+
+        /**
+         * if this update has a write or delete for the given key, remove
+         * it from this update and put it in the destination update
+         */
+        boolean transferKeyTo(T key, MutableUpdate<T, D> dst)
+        {
+            if (writes.containsKey(key))
+            {
+                dst.writes.put(key, this.writes.remove(key));
+                return true;
+            }
+            else if (deletes.remove(key))
+            {
+                dst.deletes.add(key);
+                return true;
+            }
+            return false;
+        }
+
+        public ImmutableUpdate<T, D> toImmutable()
+        {
+            return new ImmutableUpdate<>(ImmutableMap.copyOf(writes), ImmutableSet.copyOf(deletes));
         }
     }
 }

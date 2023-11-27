@@ -42,6 +42,7 @@ import javax.annotation.Nullable;
  */
 public interface PreLoadContext
 {
+
     @Nullable TxnId primaryTxnId();
 
     /**
@@ -95,6 +96,8 @@ public interface PreLoadContext
      */
     default Seekables<?, ?> keys() { return Keys.EMPTY; }
 
+    default KeyHistory keyHistory() { return KeyHistory.NONE; }
+
     default boolean isSubsetOf(PreLoadContext superset)
     {
         if (superset.keys().domain() != keys().domain() || !superset.keys().containsAll(keys()))
@@ -125,7 +128,7 @@ public interface PreLoadContext
         }
     }
 
-    static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional, Seekables<?, ?> keys)
+    static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional, Seekables<?, ?> keys, KeyHistory keyHistory)
     {
         return new PreLoadContext()
         {
@@ -140,7 +143,15 @@ public interface PreLoadContext
 
             @Override
             public Seekables<?, ?> keys() { return keys; }
+
+            @Override
+            public KeyHistory keyHistory() { return keyHistory; }
         };
+    }
+
+    static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional, Seekables<?, ?> keys)
+    {
+        return contextFor(primary, additional, keys, KeyHistory.NONE);
     }
 
     static PreLoadContext contextFor(TxnId primary, TxnId additional)
@@ -153,9 +164,14 @@ public interface PreLoadContext
         return contextFor(primary, Collections.singletonList(additional), keys);
     }
 
+    static PreLoadContext contextFor(TxnId txnId, Seekables<?, ?> keysOrRanges, KeyHistory keyHistory)
+    {
+        return contextFor(txnId, Collections.emptyList(), keysOrRanges, keyHistory);
+    }
+
     static PreLoadContext contextFor(TxnId txnId, Seekables<?, ?> keysOrRanges)
     {
-        return contextFor(txnId, Collections.emptyList(), keysOrRanges);
+        return contextFor(txnId, keysOrRanges, KeyHistory.NONE);
     }
 
     static PreLoadContext contextFor(TxnId txnId)
@@ -168,9 +184,14 @@ public interface PreLoadContext
         return contextFor(primary, additional, Keys.EMPTY);
     }
 
+    static PreLoadContext contextFor(Key key, KeyHistory keyHistory)
+    {
+        return contextFor(null, Collections.emptyList(), Keys.of(key), keyHistory);
+    }
+
     static PreLoadContext contextFor(Key key)
     {
-        return contextFor(null, Collections.emptyList(), Keys.of(key));
+        return contextFor(key, KeyHistory.NONE);
     }
 
     static PreLoadContext contextFor(Collection<TxnId> ids, Seekables<?, ?> keys)

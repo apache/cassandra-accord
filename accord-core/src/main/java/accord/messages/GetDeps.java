@@ -20,6 +20,7 @@ package accord.messages;
 
 import javax.annotation.Nonnull;
 
+import accord.local.KeyHistory;
 import accord.local.Node.Id;
 import accord.local.SafeCommandStore;
 import accord.primitives.FullRoute;
@@ -113,6 +114,12 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
     public Seekables<?, ?> keys()
     {
         return keys;
+    }
+
+    @Override
+    public KeyHistory keyHistory()
+    {
+        return KeyHistory.DEPS;
     }
 
     public static class GetDepsOk implements Reply

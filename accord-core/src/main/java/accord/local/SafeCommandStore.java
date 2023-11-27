@@ -19,7 +19,9 @@
 package accord.local;
 
 import java.util.Iterator;
+import java.util.List;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import accord.api.Agent;
 import accord.api.DataStore;
@@ -36,6 +38,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn.Kind.Kinds;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
+
 import javax.annotation.Nullable;
 
 import com.google.common.base.Predicates;
@@ -53,7 +56,7 @@ public abstract class SafeCommandStore
 {
     public interface CommandFunction<P1, I, O>
     {
-        O apply(P1 p1, Seekable keyOrRange, TxnId txnId, Timestamp executeAt, Status status, I in);
+        O apply(P1 p1, Seekable keyOrRange, TxnId txnId, Timestamp executeAt, Status status, Supplier<List<TxnId>> depsSupplier, I in);
     }
 
     public enum TestTimestamp
@@ -92,6 +95,8 @@ public abstract class SafeCommandStore
         }
         return maybeTruncate(safeCommand, command, txnId, null);
     }
+
+    public abstract void removeCommandFromSeekableDeps(Seekable seekable, TxnId txnId, Timestamp executeAt, Status status);
 
     // decidedExecuteAt == null if not yet PreCommitted
 
@@ -158,17 +163,17 @@ public abstract class SafeCommandStore
 
     /**
      * Visits keys first and then ranges, both in ascending order.
-     * Within each key or range visits TxnId in ascending order of queried timestamp.
+     * Within each key or range visits all unevicted txnids needed for the given scope in ascending order of queried timestamp.
      */
-    public <P1, T> T mapReduce(Seekables<?, ?> keys, Ranges slice,
+    public <P1, T> T mapReduce(Seekables<?, ?> keys, Ranges slice, KeyHistory keyHistory,
                                         Kinds testKind, TestTimestamp testTimestamp, Timestamp timestamp,
                                         TestDep testDep, @Nullable TxnId depId, @Nullable Status minStatus, @Nullable Status maxStatus,
                                         CommandFunction<P1, T, T> map, P1 p1, T initialValue)
     {
-        return mapReduce(keys, slice, testKind, testTimestamp, timestamp, testDep, depId, minStatus, maxStatus, map, p1, initialValue, Predicates.alwaysFalse());
+        return mapReduce(keys, slice, keyHistory, testKind, testTimestamp, timestamp, testDep, depId, minStatus, maxStatus, map, p1, initialValue, Predicates.alwaysFalse());
     }
 
-    public abstract <P1, T> T mapReduce(Seekables<?, ?> keys, Ranges slice,
+    public abstract <P1, T> T mapReduce(Seekables<?, ?> keys, Ranges slice, KeyHistory keyHistory,
                                         Kinds testKind, TestTimestamp testTimestamp, Timestamp timestamp,
                                         TestDep testDep, @Nullable TxnId depId, @Nullable Status minStatus, @Nullable Status maxStatus,
                                         CommandFunction<P1, T, T> map, P1 p1, T initialValue, Predicate<? super T> terminate);

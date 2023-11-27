@@ -915,7 +915,7 @@ public class Commands
                              safeStore.commandStore().redundantBefore(), safeStore.commandStore().durableBefore());
     }
 
-    static Cleanup shouldCleanup(TxnId txnId, Status status, Durability durability, EpochSupplier toEpoch, Route<?> route, RedundantBefore redundantBefore, DurableBefore durableBefore)
+    public static Cleanup shouldCleanup(TxnId txnId, Status status, Durability durability, EpochSupplier toEpoch, Route<?> route, RedundantBefore redundantBefore, DurableBefore durableBefore)
     {
         return shouldCleanup(txnId, status, durability, toEpoch, route, redundantBefore, durableBefore, true);
     }
