@@ -18,6 +18,12 @@ At a high level, it works as follows:
 3. With enough votes, the transaction can commit in a single round-trip.
 4. The coordinator waits for conflicting transactions, then tells the replicas to execute and persist the changes.
 
+Code structure
+--------------
+`accord-core` is the implementation of the Accord protocol that is imported in Cassandra. See [cep-15-accord branch](https://github.com/apache/cassandra/tree/cep-15-accord) in Cassandra.
+
+`accord-maelstrom` is a wrapper for running Accord within [Jepsen Maelstrom](https://github.com/jepsen-io/maelstrom) which uses STDIN for ingress and STDOUT for egress. 
+
 Build
 -----
 This repo is used as a submodule for Cassandra, see [C*/CONTRIBUTING.md](https://github.com/apache/cassandra/blob/607302aaa8c1816a75a70173ae39a7d96ce1b18a/CONTRIBUTING.md#working-with-submodules) for instructions on how to include it.
