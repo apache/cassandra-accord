@@ -19,12 +19,13 @@
 package accord.utils;
 
 import java.util.Arrays;
-import java.util.Random;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static accord.utils.RandomTestRunner.test;
 
 public class RandomSourceTest
 {
@@ -33,11 +34,7 @@ public class RandomSourceTest
     @Test
     public void testBiasedInts()
     {
-        RandomSource random = RandomSource.wrap(new Random());
-        long seed = random.nextLong();
-        logger.info("Seed: {}", seed);
-        random.setSeed(seed);
-        testBiasedInts(random, 1000, 100000, 0.01, 0.1);
+        test().check(random -> testBiasedInts(random, 1000, 100000, 0.01, 0.1));
     }
 
     private void testBiasedInts(RandomSource random, int tests, int perTest, double fudge, double perTestFudge)
@@ -54,7 +51,7 @@ public class RandomSourceTest
         overallDrift /= tests;
         Assertions.assertTrue(overallDrift < fudge);
         Assertions.assertTrue(overallDrift > -fudge);
-        System.out.println(overallDrift);
+        logger.info("{}", overallDrift);
     }
 
     private double testOneBiasedInts(RandomSource random, int min, int median, int max, int[] results, double fudge)
@@ -63,9 +60,9 @@ public class RandomSourceTest
             results[i] = random.nextBiasedInt(min, median, max);
 
         Arrays.sort(results);
-        int i = Arrays.binarySearch(results, median);
+        int i = firstBinarySearch(results, median);
         if (i < 0) i = -1 - i;
-        int j = Arrays.binarySearch(results, median + 1);
+        int j = firstBinarySearch(results, median + 1);
         if (j < 0) j = -2 - j;
         else --j;
         i -= results.length/2;
@@ -74,18 +71,14 @@ public class RandomSourceTest
         // find minimum distance of the target median value from the actual median value
         double distance = Math.abs(i) < Math.abs(j) ? i : j;
         double ratio = distance / results.length;
-        Assertions.assertTrue(ratio < fudge);
+        Assertions.assertTrue(ratio < fudge, () -> String.format("ratio (%,2f) >= fudge (%,2f); results.length (%,d)", ratio, fudge, results.length));
         return ratio;
     }
 
     @Test
     public void testBiasedLongs()
     {
-        RandomSource random = RandomSource.wrap(new Random());
-        long seed = random.nextLong();
-        logger.info("Seed: {}", seed);
-        random.setSeed(seed);
-        testBiasedLongs(random, 1000, 100000, 0.01, 0.1);
+        test().check(random -> testBiasedLongs(random, 1000, 100000, 0.01, 0.1));
     }
 
     private void testBiasedLongs(RandomSource random, int tests, int perTest, double fudge, double perTestFudge)
@@ -102,7 +95,7 @@ public class RandomSourceTest
         overallDrift /= tests;
         Assertions.assertTrue(overallDrift < fudge);
         Assertions.assertTrue(overallDrift > -fudge);
-        System.out.println(overallDrift);
+        logger.info("{}", overallDrift);
     }
 
     private double testOneBiasedLongs(RandomSource random, int min, int median, int max, long[] results, double fudge)
@@ -111,18 +104,101 @@ public class RandomSourceTest
             results[i] = random.nextBiasedInt(min, median, max);
 
         Arrays.sort(results);
-        int i = Arrays.binarySearch(results, median);
+        int i = firstBinarySearch(results, median);
         if (i < 0) i = -1 - i;
-        int j = Arrays.binarySearch(results, median + 1);
+        int j = firstBinarySearch(results, median + 1);
         if (j < 0) j = -2 - j;
         else --j;
-        i -= results.length/2;
-        j -= results.length/2;
+        i -= Math.abs(results.length/2);
+        j -= Math.abs(results.length/2);
 
         // find minimum distance of the target median value from the actual median value
-        double distance = Math.abs(i) < Math.abs(j) ? i : j;
+        double distance = Math.min(i, j);
+
         double ratio = distance / results.length;
-        Assertions.assertTrue(ratio < fudge);
-        return ratio;
+        Assertions.assertTrue(ratio < fudge, () -> String.format("ratio (%,2f) >= fudge (%,2f); results.length (%,d)", ratio, fudge, results.length));
+        return distance / results.length;
+    }
+
+    private static int firstBinarySearch(int[] array, int target)
+    {
+        int i = Arrays.binarySearch(array, target);
+        return i > 0 ? ceil(array, target, 0, i) : i;
+    }
+
+    private static int firstBinarySearch(long[] array, long target)
+    {
+        int i = Arrays.binarySearch(array, target);
+        return i > 0 ? ceil(array, target, 0, i) : i;
+    }
+
+    /**
+     * Yields the minimum index in the range <code>a[fromIndex, toIndex)</code> containing a value that is greater than or equal to the provided key.
+     * The method requires (but does not check) that the range is sorted in ascending order; a result of toIndex indicates no value greater than or
+     * equal to the key exists in the range
+     *
+     * @param a list to look in, where this.isOrdered(a) holds
+     * @param key key to find
+     * @param fromIndex first index to look in
+     * @param toIndex first index to exclude from search (i.e. exclusive upper bound)
+     * @return minimum index in the range containing a value that is greater than or equal to the provided key
+     */
+    private static int ceil(final int[] a, final int key, final int fromIndex, final int toIndex)
+    {
+        // This was taken from https://github.com/belliottsmith/jjoost/blob/0b40ae494af408dfecd4527ac9e9d1ec323315e3/jjoost-base/src/org/jjoost/util/order/IntOrder.java#L80
+        int i = fromIndex - 1;
+        int j = toIndex;
+
+        while (i < j - 1)
+        {
+
+            // { a[i] < v ^ a[j] >= v }
+
+            final int m = (i + j) >>> 1;
+            final long v = a[m];
+
+            if (v >= key) j = m;
+            else i = m;
+
+            // { a[m] >= v  =>        a[j] >= v       =>      a[i] < v ^ a[j] >= v }
+            // { a[m] < v   =>        a[i] < v        =>      a[i] < v ^ a[j] >= v }
+
+        }
+        return j;
+    }
+
+    /**
+     * Yields the minimum index in the range <code>a[fromIndex, toIndex)</code> containing a value that is greater than or equal to the provided key.
+     * The method requires (but does not check) that the range is sorted in ascending order; a result of toIndex indicates no value greater than or
+     * equal to the key exists in the range
+     *
+     * @param a list to look in, where this.isOrdered(a) holds
+     * @param key key to find
+     * @param fromIndex first index to look in
+     * @param toIndex first index to exclude from search (i.e. exclusive upper bound)
+     * @return minimum index in the range containing a value that is greater than or equal to the provided key
+     */
+    private static int ceil(final long[] a, final long key, final int fromIndex, final int toIndex)
+    {
+        // This was taken from https://github.com/belliottsmith/jjoost/blob/0b40ae494af408dfecd4527ac9e9d1ec323315e3/jjoost-base/src/org/jjoost/util/order/IntOrder.java#L80
+        int i = fromIndex - 1;
+        int j = toIndex;
+
+        while (i < j - 1)
+        {
+
+            // { a[i] < v ^ a[j] >= v }
+
+            final int m = (i + j) >>> 1;
+            final long v = a[m];
+
+            if (v >= key) j = m;
+            else i = m;
+
+            // { a[m] >= v  =>        a[j] >= v       =>      a[i] < v ^ a[j] >= v }
+            // { a[m] < v   =>        a[i] < v        =>      a[i] < v ^ a[j] >= v }
+
+        }
+        return j;
     }
 }
