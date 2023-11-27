@@ -1,6 +1,22 @@
 Cassandra Accord
-----------------
+================
 Distributed consensus protocol for Apache Cassandra. Accord is the first protocol to achieve the same steady-state performance as leader-based protocols under important conditions such as contention and failure, while delivering the benefits of leaderless approaches to scaling, transaction isolation and geo-distributed client latency. See [the Accord whitepaper](https://cwiki.apache.org/confluence/download/attachments/188744725/Accord.pdf?version=2&modificationDate=1637000779000&api=v2).
+
+Accord Protocol
+---------------
+Key Features:
+- Leaderless - There is no designated leader node. Any node can coordinate transactions. This removes bottlenecks and improves scalability.
+- Single round-trip commits - Most transactions can commit in a single message round-trip between coordinating node and replicas. This minimizes latency.
+- High contention performance - Special techniques allow it to avoid slowed performance when many transactions conflict.
+- Configurable failure tolerance - The protocol can be dynamically reconfigured to maintain fast performance even after node failures.
+- Strong consistency guarantees - Provides strict serializability, the strongest isolation level. Transactions behave as if they execute one at a time.
+- General purpose transactions - Supports cross-shard multi-statement ACID transactions, not just single partition reads/writes.
+
+At a high level, it works as follows:
+1. A coordinator node is chosen to handle each transaction (typically nearby the client for low latency).
+2. The coordinator gets votes from replica nodes on an execution timestamp and set of conflicts for the transaction.
+3. With enough votes, the transaction can commit in a single round-trip.
+4. The coordinator waits for conflicting transactions, then tells the replicas to execute and persist the changes.
 
 Build
 -----
