@@ -83,7 +83,14 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
     public static <S extends Seekables<?, ?>> Barrier<S> barrier(Node node, S keysOrRanges, long minEpoch, BarrierType barrierType)
     {
         Barrier<S> barrier = new Barrier(node, keysOrRanges, minEpoch, barrierType);
-        barrier.start();
+        node.topology().awaitEpoch(minEpoch).begin((ignored, failure) -> {
+            if (failure != null)
+            {
+                barrier.tryFailure(failure);
+                return;
+            }
+            barrier.start();
+        });
         return barrier;
     }
 
