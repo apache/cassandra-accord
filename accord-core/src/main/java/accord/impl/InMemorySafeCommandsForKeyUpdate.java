@@ -20,48 +20,41 @@ package accord.impl;
 
 import accord.api.Key;
 import accord.impl.CommandTimeseries.CommandLoader;
+import accord.impl.InMemoryCommandStore.CFKEntry;
+import accord.utils.Invariants;
 
-public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
+public class InMemorySafeCommandsForKeyUpdate extends SafeCommandsForKey.Update<CommandsForKey.Update, CFKEntry>
 {
-    private final Key key;
+    private static final CommandsForKey.Update VALUE = new CommandsForKey.Update() {};
 
-    public SafeCommandsForKey(Key key)
+    private boolean invalidated = false;
+
+    public InMemorySafeCommandsForKeyUpdate(Key key, CommandLoader<CFKEntry> loader)
     {
-        this.key = key;
+        super(key, loader);
     }
 
-    protected abstract void set(CommandsForKey update);
-
-    public Key key()
+    @Override
+    public void initialize()
     {
-        return key;
+        Invariants.checkState(isEmpty());
     }
 
-    CommandsForKey update(CommandsForKey update)
+    @Override
+    public CommandsForKey.Update current()
     {
-        set(update);
-        return update;
+        return VALUE;
     }
 
-    public CommandsForKey initialize(CommandLoader<?> loader)
+    @Override
+    public void invalidate()
     {
-        return update(new CommandsForKey(key, loader));
+        invalidated = true;
     }
 
-    public static abstract class Update<U extends CommandsForKey.Update, D> extends CommandsForKeyGroupUpdater.Mutable<D> implements SafeState<U>
+    @Override
+    public boolean invalidated()
     {
-        private final Key key;
-
-        public Update(Key key, CommandLoader<D> loader)
-        {
-            super(loader);
-            this.key = key;
-        }
-
-        public Key key()
-        {
-            return key;
-        }
-        public abstract void initialize();
+        return invalidated;
     }
 }

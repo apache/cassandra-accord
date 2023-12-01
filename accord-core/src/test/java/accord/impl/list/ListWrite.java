@@ -23,20 +23,16 @@ import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import accord.primitives.PartialTxn;
+import accord.impl.*;
+import accord.primitives.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.Write;
-import accord.impl.InMemoryCommandStore;
-import accord.impl.InMemorySafeCommandsForKey;
 import accord.local.CommandStore;
 import accord.local.SafeCommandStore;
-import accord.primitives.Seekable;
-import accord.primitives.Timestamp;
-import accord.primitives.Writes;
 import accord.utils.Timestamped;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncExecutor;
@@ -58,8 +54,7 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
         ListStore s = (ListStore) store;
         if (!containsKey(key))
             return Writes.SUCCESS;
-        InMemorySafeCommandsForKey cfk = ((InMemoryCommandStore.InMemorySafeStore) safeStore).commandsForKey((Key) key);
-        cfk.updateLastExecutionTimestamps(safeStore, executeAt, true);
+        CommandsForKeys.updateLastExecutionTimestamps((AbstractSafeCommandStore<?, ?, ?, ?>) safeStore, (RoutableKey) key, executeAt, true);
 
         return executor.apply(safeStore.commandStore()).submit(() -> {
             int[] data = get(key);

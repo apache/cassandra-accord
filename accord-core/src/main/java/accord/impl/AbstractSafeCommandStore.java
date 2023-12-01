@@ -25,22 +25,17 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
+import accord.api.Key;
 import accord.api.VisibleForImplementation;
 import accord.impl.CommandTimeseries.CommandLoader;
-import accord.local.Command;
-import accord.local.CommonAttributes;
-import accord.local.PreLoadContext;
-import accord.local.RedundantBefore;
-import accord.local.SafeCommand;
-import accord.local.SafeCommandStore;
-import accord.primitives.Ranges;
-import accord.primitives.RoutableKey;
-import accord.primitives.Seekable;
-import accord.primitives.Seekables;
-import accord.primitives.TxnId;
+import accord.local.*;
+import accord.primitives.*;
 import accord.utils.Invariants;
 
-public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, CommandsForKeyType extends SafeCommandsForKey> extends SafeCommandStore
+public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
+                                               TimestampsForKeyType extends SafeTimestampsForKey,
+                                               CommandsForKeyType extends SafeCommandsForKey,
+                                               CommandsForKeyUpdateType extends SafeCommandsForKey.Update> extends SafeCommandStore
 {
     private static class PendingRegistration<T>
     {
@@ -65,14 +60,6 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
         this.context = context;
     }
 
-    protected abstract CommandType getCommandInternal(TxnId txnId);
-    protected abstract void addCommandInternal(CommandType command);
-
-    protected abstract CommandsForKeyType getCommandsForKeyInternal(RoutableKey key);
-    protected abstract void addCommandsForKeyInternal(CommandsForKeyType cfk);
-
-    protected abstract CommandType getIfLoaded(TxnId txnId);
-
     private static <K, V> V getIfLoaded(K key, Function<K, V> get, Consumer<V> add, Function<K, V> getIfLoaded)
     {
         V value = get.apply(key);
@@ -85,6 +72,27 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
         add.accept(value);
         return value;
     }
+
+    protected abstract CommandType getCommandInternal(TxnId txnId);
+    protected abstract void addCommandInternal(CommandType command);
+    protected abstract CommandType getIfLoaded(TxnId txnId);
+
+    protected abstract TimestampsForKeyType getTimestampsForKeyInternal(RoutableKey key);
+    protected abstract void addTimestampsForKeyInternal(TimestampsForKeyType cfk);
+    protected abstract TimestampsForKeyType getTimestampsForKeyIfLoaded(RoutableKey key);
+
+    protected abstract CommandLoader<?> cfkLoader(RoutableKey key);
+    protected abstract CommandsForKeyType getDepsCommandsForKeyInternal(RoutableKey key);
+    protected abstract void addDepsCommandsForKeyInternal(CommandsForKeyType cfk);
+    protected abstract CommandsForKeyType getDepsCommandsForKeyIfLoaded(RoutableKey key);
+
+    protected abstract CommandsForKeyType getAllCommandsForKeyInternal(RoutableKey key);
+    protected abstract void addAllCommandsForKeyInternal(CommandsForKeyType cfk);
+    protected abstract CommandsForKeyType getAllCommandsForKeyIfLoaded(RoutableKey key);
+
+    protected abstract CommandsForKeyUpdateType getCommandsForKeyUpdateInternal(RoutableKey key);
+    protected abstract CommandsForKeyUpdateType createCommandsForKeyUpdateInternal(RoutableKey key);
+    protected abstract void addCommandsForKeyUpdateInternal(CommandsForKeyUpdateType update);
 
     @Override
     protected CommandType getInternalIfLoadedAndInitialised(TxnId txnId)
@@ -106,11 +114,22 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
         return command;
     }
 
-    protected abstract CommandLoader<?> cfkLoader(RoutableKey key);
-
-    public CommandsForKeyType ifLoadedAndInitialised(RoutableKey key)
+    private CommandsForKeyType getCommandsIfLoaded(RoutableKey key, KeyHistory keyHistory)
     {
-        CommandsForKeyType cfk = getIfLoaded(key, this::getCommandsForKeyInternal, this::addCommandsForKeyInternal, this::getIfLoaded);
+        switch (keyHistory)
+        {
+            case DEPS:
+                return getIfLoaded(key, this::getDepsCommandsForKeyInternal, this::addDepsCommandsForKeyInternal, this::getDepsCommandsForKeyIfLoaded);
+            case ALL:
+                return getIfLoaded(key, this::getAllCommandsForKeyInternal, this::addAllCommandsForKeyInternal, this::getAllCommandsForKeyIfLoaded);
+            default:
+                throw new IllegalArgumentException("CommandsForKey not available for " + keyHistory);
+        }
+    }
+
+    private CommandsForKeyType commandsIfLoadedAndInitialised(RoutableKey key, KeyHistory keyHistory)
+    {
+        CommandsForKeyType cfk = getCommandsIfLoaded(key, keyHistory);;
         if (cfk == null)
             return null;
         if (cfk.isEmpty())
@@ -126,24 +145,122 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
         return cfk;
     }
 
-    public CommandsForKeyType commandsForKey(RoutableKey key)
+    protected CommandsForKeyType commandsForKey(RoutableKey key, KeyHistory keyHistory)
     {
-        CommandsForKeyType cfk = getCommandsForKeyInternal(key);
+        CommandsForKeyType cfk = getCommandsIfLoaded(key, keyHistory);
         Invariants.checkState(cfk != null, "%s was not specified in PreLoadContext", key);
         if (cfk.isEmpty())
             cfk.initialize(cfkLoader(key));
         return cfk;
     }
 
-    protected abstract CommandsForKeyType getIfLoaded(RoutableKey key);
-
     @VisibleForImplementation
-    public CommandsForKeyType maybeCommandsForKey(RoutableKey key)
+    private CommandsForKeyType maybeCommandsForKey(RoutableKey key, KeyHistory keyHistory)
     {
-        CommandsForKeyType cfk = getIfLoaded(key, this::getCommandsForKeyInternal, this::addCommandsForKeyInternal, this::getIfLoaded);
+        CommandsForKeyType cfk = getCommandsIfLoaded(key, keyHistory);
         if (cfk == null || cfk.isEmpty())
             return null;
         return cfk;
+    }
+
+    public CommandsForKeyType depsCommandsIfLoadedAndInitialised(RoutableKey key)
+    {
+        return commandsIfLoadedAndInitialised(key, KeyHistory.DEPS);
+    }
+
+    public CommandsForKeyType depsCommandsForKey(RoutableKey key)
+    {
+        return commandsForKey(key, KeyHistory.DEPS);
+    }
+
+    @VisibleForImplementation
+    public CommandsForKeyType maybeDepsCommandsForKey(RoutableKey key)
+    {
+        return maybeCommandsForKey(key, KeyHistory.DEPS);
+    }
+
+    public CommandsForKeyType allCommandsIfLoadedAndInitialised(RoutableKey key)
+    {
+        return commandsIfLoadedAndInitialised(key, KeyHistory.ALL);
+    }
+
+    public CommandsForKeyType allCommandsForKey(RoutableKey key)
+    {
+        return commandsForKey(key, KeyHistory.ALL);
+    }
+
+    @VisibleForImplementation
+    public CommandsForKeyType maybeAllCommandsForKey(RoutableKey key)
+    {
+        return maybeCommandsForKey(key, KeyHistory.ALL);
+    }
+
+    public TimestampsForKeyType timestampsIfLoadedAndInitialised(RoutableKey key)
+    {
+        TimestampsForKeyType cfk = getIfLoaded(key, this::getTimestampsForKeyInternal, this::addTimestampsForKeyInternal, this::getTimestampsForKeyIfLoaded);
+        if (cfk == null)
+            return null;
+        if (cfk.isEmpty())
+        {
+            cfk.initialize();
+        }
+        return cfk;
+    }
+
+    public TimestampsForKeyType timestampsForKey(RoutableKey key)
+    {
+        TimestampsForKeyType tfk = getIfLoaded(key, this::getTimestampsForKeyInternal, this::addTimestampsForKeyInternal, this::getTimestampsForKeyIfLoaded);
+        Invariants.checkState(tfk != null, "%s was not specified in PreLoadContext", key);
+        if (tfk.isEmpty())
+            tfk.initialize();
+        return tfk;
+    }
+
+
+    @VisibleForImplementation
+    public TimestampsForKeyType maybeTimestampsForKey(RoutableKey key)
+    {
+        TimestampsForKeyType tfk = getIfLoaded(key, this::getTimestampsForKeyInternal, this::addTimestampsForKeyInternal, this::getTimestampsForKeyIfLoaded);
+        if (tfk == null || tfk.isEmpty())
+            return null;
+        return tfk;
+    }
+
+    public CommandsForKeyUpdateType getOrCreateCommandsForKeyUpdate(RoutableKey key)
+    {
+        CommandsForKeyUpdateType update = getIfLoaded(key, this::getCommandsForKeyUpdateInternal, this::addCommandsForKeyUpdateInternal, this::createCommandsForKeyUpdateInternal);
+        if (update == null)
+        {
+            update = createCommandsForKeyUpdateInternal(key);
+            addCommandsForKeyUpdateInternal(update);
+        }
+
+        if (update.isEmpty())
+            update.initialize();
+
+        return update;
+    }
+
+    @Override
+    public void removeCommandFromSeekableDeps(Seekable seekable, TxnId txnId, Timestamp executeAt, Status status)
+    {
+        // the cfk listener doesn't know if it can remove the given command from the deps set without loading
+        // the deps set, so we don't actually remove it until it becomes applied
+        if (!status.hasBeen(Status.Applied))
+            return;
+
+        switch (seekable.domain())
+        {
+            case Key:
+                Key key = seekable.asKey();
+                CommandsForKeyUpdater.Mutable<?> updater = getOrCreateCommandsForKeyUpdate(key).deps();
+                updater.commands().remove(txnId);
+                break;
+            case Range:
+                break;
+            default:
+                throw new IllegalArgumentException();
+        }
     }
 
     @Override
@@ -195,6 +312,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
     }
 
     protected abstract void invalidateSafeState();
+    protected abstract void applyCommandForKeyUpdates();
 
     public void postExecute()
     {
@@ -205,6 +323,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand, 
             completeRegistrations(attributeUpdates, pendingSeekableRegistrations, this::completeRegistration);
             attributeUpdates.forEach(((txnId, attributes) -> get(txnId).updateAttributes(attributes)));
         }
+        applyCommandForKeyUpdates();
     }
 
     public void complete()

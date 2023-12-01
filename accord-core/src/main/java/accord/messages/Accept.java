@@ -24,6 +24,7 @@ import javax.annotation.Nullable;
 import accord.api.RoutingKey;
 import accord.local.Commands;
 import accord.local.Commands.AcceptOutcome;
+import accord.local.KeyHistory;
 import accord.local.Node.Id;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
@@ -148,6 +149,12 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     public Seekables<?, ?> keys()
     {
         return keys;
+    }
+
+    @Override
+    public KeyHistory keyHistory()
+    {
+        return KeyHistory.DEPS;
     }
 
     @Override

@@ -58,6 +58,11 @@ public class Timestamp implements Comparable<Timestamp>, EpochSupplier
         return new Timestamp(epoch, hlc, flags, node);
     }
 
+    public static Timestamp fromValues(long epoch, long hlc, int flags, int node)
+    {
+        return new Timestamp(epoch, hlc, flags, new Id(node));
+    }
+
     public static Timestamp maxForEpoch(long epoch)
     {
         return new Timestamp(epochMsb(epoch) | 0x7fff, Long.MAX_VALUE, Id.MAX);

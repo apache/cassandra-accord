@@ -20,9 +20,9 @@ package accord.messages;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.function.Function;
 import javax.annotation.Nullable;
 
+import accord.primitives.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,18 +31,9 @@ import accord.local.Commands;
 import accord.local.Node.Id;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
+import accord.impl.DepsBuilder;
+import accord.local.*;
 import accord.messages.TxnRequest.WithUnsynced;
-import accord.primitives.Deps;
-import accord.primitives.EpochSupplier;
-import accord.primitives.FullRoute;
-import accord.primitives.PartialDeps;
-import accord.primitives.PartialRoute;
-import accord.primitives.PartialTxn;
-import accord.primitives.Ranges;
-import accord.primitives.Seekables;
-import accord.primitives.Timestamp;
-import accord.primitives.Txn;
-import accord.primitives.TxnId;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 
@@ -94,6 +85,12 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
     public Seekables<?, ?> keys()
     {
         return partialTxn.keys();
+    }
+
+    @Override
+    public KeyHistory keyHistory()
+    {
+        return KeyHistory.DEPS;
     }
 
     @Override
@@ -255,28 +252,17 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
     static PartialDeps calculatePartialDeps(SafeCommandStore safeStore, TxnId txnId, Seekables<?, ?> keys, EpochSupplier minEpoch, Timestamp executeAt, Ranges ranges)
     {
         // TODO (expected): do not build covering ranges; no longer especially valuable given use of FullRoute
-        return calculateDeps(safeStore, txnId, keys, minEpoch, executeAt, ranges, PartialDeps::builder);
-    }
-
-    private static <T extends Deps> T calculateDeps(SafeCommandStore safeStore, TxnId txnId, Seekables<?, ?> keys, EpochSupplier minEpoch, Timestamp executeAt, Ranges ranges, Function<Ranges, Deps.AbstractBuilder<T>> builderFactory)
-    {
+        DepsBuilder builder = new DepsBuilder(txnId);
         // could use MAY_EXECUTE_BEFORE to prune those we know execute later.
         // NOTE: ExclusiveSyncPoint *relies* on STARTED_BEFORE to ensure it reports a dependency on *every* earlier TxnId that may execute after it.
         //       This is necessary for reporting to a bootstrapping replica which TxnId it must not prune from dependencies
         //       i.e. the source replica reports to the target replica those TxnId that STARTED_BEFORE and EXECUTES_AFTER.
-        try (Deps.AbstractBuilder<T> depBuilder = builderFactory.apply(ranges); Deps.AbstractBuilder<T> redundantBuilder = builderFactory.apply(ranges))
-        {
-            // TODO (expected): this can be neater
-            safeStore.mapReduce(keys, ranges, txnId.rw().witnesses(), STARTED_BEFORE, executeAt, ANY_DEPS, null, null, null,
-                                (txnId0, keyOrRange, testTxnId, testExecuteAt, testStatus, in) -> {
-                                    if (!testTxnId.equals(txnId0))
-                                        in.add(keyOrRange, testTxnId);
-                                    return in;
-                                }, txnId, depBuilder);
-            T deps = depBuilder.build();
-            T redundant = safeStore.commandStore().redundantBefore().collectDeps(keys, redundantBuilder, minEpoch, executeAt).build();
-            return (T)deps.with(redundant);
-        }
+        safeStore.mapReduce(keys, ranges, KeyHistory.DEPS, txnId.rw().witnesses(), STARTED_BEFORE, executeAt, ANY_DEPS, null, null, null,
+                            (p1, keyOrRange, testTxnId, testExecuteAt, status, deps, in) -> {
+                                builder.add(testTxnId, keyOrRange, status, testExecuteAt, deps.get());
+                                return in;
+                            }, null, builder);
+        return builder.buildPartialDeps(safeStore, ranges);
     }
 
     /**

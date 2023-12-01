@@ -312,7 +312,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             this.validForAll = FoundKnown.Nothing;
         }
 
-        private FoundKnownMap(boolean inclusiveEnds, RoutingKey[] starts, FoundKnown[] values)
+        public FoundKnownMap(boolean inclusiveEnds, RoutingKey[] starts, FoundKnown[] values)
         {
             this(inclusiveEnds, starts, values, FoundKnown.Nothing);
         }

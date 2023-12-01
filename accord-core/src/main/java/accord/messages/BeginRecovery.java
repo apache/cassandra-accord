@@ -23,12 +23,8 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import accord.api.Result;
-import accord.local.Command;
-import accord.local.Commands;
+import accord.local.*;
 import accord.local.Node.Id;
-import accord.local.SafeCommand;
-import accord.local.SafeCommandStore;
-import accord.local.Status;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
@@ -213,6 +209,12 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
     }
 
     @Override
+    public KeyHistory keyHistory()
+    {
+        return KeyHistory.ALL;
+    }
+
+    @Override
     public MessageType type()
     {
         return MessageType.BEGIN_RECOVER_REQ;
@@ -340,11 +342,11 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         try (Deps.Builder builder = Deps.builder())
         {
             // any transaction that started
-            safeStore.mapReduce(keys, ranges, startedBefore.rw().witnesses(), STARTED_BEFORE, startedBefore, WITHOUT, startedBefore, Accepted, PreCommitted,
-                    (startedBefore0, keyOrRange, txnId, executeAt, status, prev) -> {
-                        if (executeAt.compareTo(startedBefore0) > 0)
-                            prev.add(keyOrRange, txnId);
-                        return prev;
+            safeStore.mapReduce(keys, ranges, KeyHistory.ALL, startedBefore.rw().witnesses(), STARTED_BEFORE, startedBefore, WITHOUT, startedBefore, Accepted, PreCommitted,
+                                          (startedBefore0, keyOrRange, txnId, executeAt, status, deps, prev) -> {
+                        if (executeAt.compareTo(startedBefore) > 0)
+                            builder.add(keyOrRange, txnId);
+                        return builder;
                     }, startedBefore, builder);
             return builder.build();
         }
@@ -354,8 +356,8 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
     {
         try (Deps.Builder builder = Deps.builder())
         {
-            safeStore.mapReduce(keys, ranges, startedBefore.rw().witnesses(), STARTED_BEFORE, startedBefore, WITH, startedBefore, Committed, null,
-                    (p1, keyOrRange, txnId, executeAt, status, prev) -> prev.add(keyOrRange, txnId), null, (Deps.AbstractBuilder<Deps>)builder);
+            safeStore.mapReduce(keys, ranges, KeyHistory.ALL, startedBefore.rw().witnesses(), STARTED_BEFORE, startedBefore, WITH, startedBefore, Committed, null,
+                                          (p1, keyOrRange, txnId, executeAt, status, deps, prev) -> builder.add(keyOrRange, txnId), null, (Deps.AbstractBuilder<Deps>)builder);
             return builder.build();
         }
     }
@@ -371,8 +373,8 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
          *
          * TODO (required): consider carefully how _adding_ ranges to a CommandStore affects this
          */
-        return safeStore.mapReduce(keys, ranges, startedAfter.rw().witnesses(), STARTED_AFTER, startedAfter, WITHOUT, startedAfter, Accepted, PreCommitted,
-                (p1, keyOrRange, txnId, executeAt, status, prev) -> true, null, false, i -> i);
+        return safeStore.mapReduce(keys, ranges, KeyHistory.ALL, startedAfter.rw().witnesses(), STARTED_AFTER, startedAfter, WITHOUT, startedAfter, Accepted, PreCommitted,
+                                             (p1, keyOrRange, txnId, executeAt, status, deps, prev) -> true, null, false, i -> i);
     }
 
     private static boolean hasCommittedExecutesAfterWithoutWitnessing(SafeCommandStore safeStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
@@ -384,7 +386,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
          * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
          * has not witnessed us we can safely invalidate it.
          */
-        return safeStore.mapReduce(keys, ranges, startedAfter.rw().witnesses(), EXECUTES_AFTER, startedAfter, WITHOUT, startedAfter, Committed, null,
-                (p1, keyOrRange, txnId, executeAt, status, prev) -> true, null, false, i -> i);
+        return safeStore.mapReduce(keys, ranges, KeyHistory.ALL, startedAfter.rw().witnesses(), EXECUTES_AFTER, startedAfter, WITHOUT, startedAfter, Committed, null,
+                                             (p1, keyOrRange, txnId, executeAt, status, deps, prev) -> true, null, false, i -> i);
     }
 }
