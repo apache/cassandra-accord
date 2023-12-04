@@ -19,9 +19,9 @@
 package accord.coordinate;
 
 import java.util.function.BiConsumer;
-
 import javax.annotation.Nullable;
 
+import accord.local.Cleanup;
 import accord.local.Command;
 import accord.local.Commands;
 import accord.local.Node;
@@ -43,8 +43,8 @@ import accord.utils.MapReduceConsume;
 import static accord.coordinate.Infer.InvalidIf.IfPreempted;
 import static accord.coordinate.Infer.InvalidIf.IfQuorum;
 import static accord.coordinate.Infer.InvalidIf.NotKnown;
-import static accord.coordinate.Infer.InvalidIfNot.IfUnknown;
 import static accord.coordinate.Infer.InvalidIfNot.IfUndecided;
+import static accord.coordinate.Infer.InvalidIfNot.IfUnknown;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.local.Status.Durability.Majority;
 import static accord.local.Status.PreApplied;
@@ -312,7 +312,7 @@ public class Infer
                 return IfUndecided;
         }
 
-        if (safeStore.commandStore().durableBefore().isUniversal(txnId, safeStore.ranges().allAt(txnId.epoch())))
+        if (Cleanup.isSafeToCleanup(safeStore.commandStore().durableBefore(), txnId, safeStore.ranges().allAt(txnId.epoch())))
             return IfUndecided;
 
         return InvalidIfNot.NotKnownToBeInvalid;

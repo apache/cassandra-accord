@@ -60,34 +60,28 @@ import static accord.api.ProgressLog.ProgressShard.Local;
 import static accord.api.ProgressLog.ProgressShard.No;
 import static accord.api.ProgressLog.ProgressShard.UnmanagedHome;
 import static accord.api.ProgressLog.ProgressShard.Unsure;
+import static accord.local.Cleanup.ERASE;
+import static accord.local.Cleanup.TRUNCATE;
+import static accord.local.Cleanup.shouldCleanup;
 import static accord.local.Command.Truncated.erased;
 import static accord.local.Command.Truncated.truncatedApply;
 import static accord.local.Command.Truncated.truncatedApplyWithOutcome;
-import static accord.local.Commands.Cleanup.ERASE;
-import static accord.local.Commands.Cleanup.NO;
-import static accord.local.Commands.Cleanup.TRUNCATE;
 import static accord.local.Commands.EnsureAction.Add;
-import static accord.local.Commands.EnsureAction.TryAdd;
 import static accord.local.Commands.EnsureAction.Ignore;
 import static accord.local.Commands.EnsureAction.Set;
+import static accord.local.Commands.EnsureAction.TryAdd;
 import static accord.local.Commands.EnsureAction.TrySet;
-import static accord.local.RedundantBefore.PreBootstrapOrStale.FULLY;
-import static accord.local.RedundantStatus.NOT_OWNED;
 import static accord.local.RedundantStatus.PRE_BOOTSTRAP_OR_STALE;
 import static accord.local.SaveStatus.Applying;
 import static accord.local.SaveStatus.Erased;
 import static accord.local.SaveStatus.LocalExecution.ReadyToExclude;
 import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
 import static accord.local.SaveStatus.TruncatedApply;
-import static accord.local.SaveStatus.TruncatedApplyWithOutcome;
-import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.Accepted;
 import static accord.local.Status.AcceptedInvalidate;
 import static accord.local.Status.Applied;
 import static accord.local.Status.Committed;
 import static accord.local.Status.Durability;
-import static accord.local.Status.Durability.Majority;
-import static accord.local.Status.Durability.Universal;
 import static accord.local.Status.Invalidated;
 import static accord.local.Status.NotDefined;
 import static accord.local.Status.PreAccepted;
@@ -806,21 +800,6 @@ public class Commands
         }
     }
 
-    public enum Cleanup
-    {
-        NO(Uninitialised),
-        TRUNCATE_WITH_OUTCOME(TruncatedApplyWithOutcome),
-        TRUNCATE(TruncatedApply),
-        ERASE(Erased);
-
-        public final SaveStatus appliesIfNot;
-
-        Cleanup(SaveStatus appliesIfNot)
-        {
-            this.appliesIfNot = appliesIfNot;
-        }
-    }
-
     // TODO (now): document and justify all calls
     public static void setTruncatedApply(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
@@ -829,17 +808,20 @@ public class Commands
 
     public static void setTruncatedApply(SafeCommandStore safeStore, SafeCommand safeCommand, Route<?> maybeFullRoute)
     {
-        cleanup(safeStore, safeCommand, maybeFullRoute, TRUNCATE, true);
+        purge(safeStore, safeCommand, maybeFullRoute, TRUNCATE, true);
     }
 
     public static void setErased(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
         Listeners.Immutable durableListeners = safeCommand.current().durableListeners();
-        Command command = cleanup(safeStore, safeCommand, null, ERASE, true);
+        Command command = purge(safeStore, safeCommand, null, ERASE, true);
         safeStore.notifyListeners(safeCommand, command, durableListeners, safeCommand.transientListeners());
     }
 
-    public static Command cleanup(SafeCommandStore safeStore, SafeCommand safeCommand, @Nullable Unseekables<?> maybeFullRoute, Cleanup cleanup, boolean notifyListeners)
+    /**
+     * Purge all or part of the metadata for a Commmand
+     */
+    public static Command purge(SafeCommandStore safeStore, SafeCommand safeCommand, @Nullable Unseekables<?> maybeFullRoute, Cleanup cleanup, boolean notifyListeners)
     {
         Command command = safeCommand.current();
 
@@ -884,96 +866,14 @@ public class Commands
         return result;
     }
 
-    public static boolean cleanup(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, EpochSupplier toEpoch, Unseekables<?> maybeFullRoute)
+    public static boolean maybeCleanup(SafeCommandStore safeStore, SafeCommand safeCommand, Command command, EpochSupplier toEpoch, Unseekables<?> maybeFullRoute)
     {
         Cleanup cleanup = shouldCleanup(safeStore, command, toEpoch, maybeFullRoute);
         if (command.saveStatus().compareTo(cleanup.appliesIfNot) >= 0)
             return false;
 
-        cleanup(safeStore, safeCommand, maybeFullRoute, cleanup, true);
+        purge(safeStore, safeCommand, maybeFullRoute, cleanup, true);
         return true;
-    }
-
-    static Cleanup shouldCleanup(SafeCommandStore safeStore, Command command, EpochSupplier toEpoch, Unseekables<?> maybeFullRoute)
-    {
-        if (command.saveStatus() == Erased)
-            return NO; // once erased we no longer have executeAt, and may consider that a transaction is owned by us that should not be (as its txnId is an earlier epoch than we adopted a range)
-
-        Route<?> route = command.route();
-        if (!Route.isFullRoute(route))
-        {
-            if (command.known().hasFullRoute()) illegalState(command.saveStatus() + " should include full route, but only found " + route);
-            else if (Route.isFullRoute(maybeFullRoute)) route = Route.castToFullRoute(maybeFullRoute);
-            else return Cleanup.NO;
-        }
-
-        Timestamp executeAt = command.executeAt();
-        if (toEpoch == null || (executeAt != null && executeAt.epoch() > toEpoch.epoch()))
-            toEpoch = executeAt;
-
-        return shouldCleanup(command.txnId(), command.status(), command.durability(), toEpoch, route,
-                             safeStore.commandStore().redundantBefore(), safeStore.commandStore().durableBefore());
-    }
-
-    public static Cleanup shouldCleanup(TxnId txnId, Status status, Durability durability, EpochSupplier toEpoch, Route<?> route, RedundantBefore redundantBefore, DurableBefore durableBefore)
-    {
-        return shouldCleanup(txnId, status, durability, toEpoch, route, redundantBefore, durableBefore, true);
-    }
-
-    public static Cleanup shouldCleanup(TxnId txnId, Status status, Durability durability, EpochSupplier toEpoch, Route<?> route, RedundantBefore redundantBefore, DurableBefore durableBefore, boolean enforceInvariants)
-    {
-        if (durableBefore.min(txnId) == Universal)
-        {
-            if (status.hasBeen(PreCommitted) && !status.hasBeen(Applied)) // TODO (expected): may be stale
-                illegalState("Loading universally-durable command that has been PreCommitted but not Applied");
-            return Cleanup.ERASE;
-        }
-
-        if (!Route.isFullRoute(route))
-            return NO;
-
-        // We first check if the command is redundant locally, i.e. whether it has been applied to all non-faulty replicas of the local shard
-        // If not, we don't want to truncate its state else we may make catching up for these other replicas much harder
-        RedundantStatus redundant = redundantBefore.status(txnId, toEpoch, route.participants());
-        switch (redundant)
-        {
-            default: throw new AssertionError();
-            case NOT_OWNED:
-                // TODO (expected): we can impose additional validations here IF we receive an epoch upper bound
-                // TODO (expected): we should be more robust to the presence/absence of executeAt
-                if (route.isParticipatingHomeKey() || redundantBefore.get(txnId, toEpoch, route.homeKey()) == NOT_OWNED)
-                    illegalState("Command " + txnId + " that is being loaded is not owned by this shard on route " + route);
-            case LIVE:
-            case PARTIALLY_PRE_BOOTSTRAP_OR_STALE:
-            case PRE_BOOTSTRAP_OR_STALE:
-            case REDUNDANT_PRE_BOOTSTRAP_OR_STALE:
-            case LOCALLY_REDUNDANT:
-                return NO;
-            case SHARD_REDUNDANT:
-                if (enforceInvariants && status.hasBeen(PreCommitted) && !status.hasBeen(Applied) && redundantBefore.preBootstrapOrStale(txnId, toEpoch, route.participants()) != FULLY)
-                    illegalState("Loading redundant command that has been PreCommitted but not Applied");
-        }
-
-        Durability min = durableBefore.min(txnId, route);
-        switch (min)
-        {
-            default:
-            case Local:
-                throw new AssertionError("Unexpected durability: " + min);
-
-            case NotDurable:
-                if (durability == Majority)
-                    return Cleanup.TRUNCATE;
-                return Cleanup.TRUNCATE_WITH_OUTCOME;
-
-            case MajorityOrInvalidated:
-            case Majority:
-                return Cleanup.TRUNCATE;
-
-            case UniversalOrInvalidated:
-            case Universal:
-                return Cleanup.ERASE;
-        }
     }
 
     // TODO (now): either ignore this message if we don't have a route, or else require FullRoute requiring route, or else require FullRoute
@@ -992,7 +892,7 @@ public class Commands
         attrs = attrs.mutable().durability(durability);
         command = safeCommand.updateAttributes(attrs);
 
-        if (cleanup(safeStore, safeCommand, command, null, route))
+        if (maybeCleanup(safeStore, safeCommand, command, null, route))
             return safeCommand.current();
 
         safeStore.progressLog().durable(command);

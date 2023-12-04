@@ -22,6 +22,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import javax.annotation.Nullable;
+
+import com.google.common.base.Predicates;
 
 import accord.api.Agent;
 import accord.api.DataStore;
@@ -39,11 +42,7 @@ import accord.primitives.Txn.Kind.Kinds;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 
-import javax.annotation.Nullable;
-
-import com.google.common.base.Predicates;
-
-import static accord.local.Commands.Cleanup.NO;
+import static accord.local.Cleanup.NO;
 import static accord.local.RedundantBefore.PreBootstrapOrStale.FULLY;
 
 /**
@@ -124,7 +123,7 @@ public abstract class SafeCommandStore
         Command command = safeCommand.current();
         if (command.saveStatus().isUninitialised())
         {
-            if (commandStore().durableBefore().isUniversal(txnId, unseekables))
+            if (Cleanup.isSafeToCleanup(commandStore().durableBefore(), txnId, unseekables))
                 return new ErasedSafeCommand(txnId);
         }
         return maybeTruncate(safeCommand, command, toEpoch, unseekables);
@@ -132,7 +131,7 @@ public abstract class SafeCommandStore
 
     protected SafeCommand maybeTruncate(SafeCommand safeCommand, Command command, @Nullable EpochSupplier toEpoch, @Nullable Unseekables<?> maybeFullRoute)
     {
-        Commands.cleanup(this, safeCommand, command, toEpoch, maybeFullRoute);
+        Commands.maybeCleanup(this, safeCommand, command, toEpoch, maybeFullRoute);
         return safeCommand;
     }
 
@@ -197,7 +196,7 @@ public abstract class SafeCommandStore
 
     public boolean isTruncated(Command command)
     {
-        return Commands.shouldCleanup(this, command, null, null) != NO;
+        return Cleanup.shouldCleanup(this, command, null, null) != NO;
     }
 
     // if we have to re-bootstrap (due to failed bootstrap or catching up on a range) then we may

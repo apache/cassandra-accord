@@ -191,11 +191,6 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
         return entry == null ? NotDurable : entry.get(txnId);
     }
 
-    public boolean isUniversal(TxnId txnId, Unseekables<?> participants)
-    {
-        return min(txnId, participants) == UniversalOrInvalidated;
-    }
-
     public boolean isUniversal(TxnId txnId, RoutingKey participant)
     {
         return get(txnId, participant) == UniversalOrInvalidated;
