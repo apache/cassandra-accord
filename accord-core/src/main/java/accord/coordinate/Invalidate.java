@@ -174,6 +174,7 @@ public class Invalidate implements Callback<InvalidateReply>
                 case Applied:
                 case PreApplied:
                 case ReadyToExecute:
+                case Stable:
                 case Committed:
                 case PreCommitted:
                     Invariants.checkState(maxReply.status == PreAccepted || !invalidateWith.contains(someRoute.homeKey()) || fullRoute != null);

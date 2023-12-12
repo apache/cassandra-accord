@@ -35,14 +35,12 @@ import accord.coordinate.FetchData;
 import accord.coordinate.Outcome;
 import accord.local.Command;
 import accord.local.CommandStore;
-import accord.local.Commands;
 import accord.local.Node;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.SaveStatus;
 
 import accord.local.SaveStatus.LocalExecution;
-import accord.local.Status;
 import accord.local.Status.Known;
 import accord.primitives.EpochSupplier;
 import accord.primitives.Participants;
@@ -61,7 +59,7 @@ import accord.utils.async.AsyncResult;
 import static accord.api.ProgressLog.ProgressShard.Unsure;
 import static accord.coordinate.InformHomeOfTxn.inform;
 import static accord.impl.SimpleProgressLog.CoordinateStatus.ReadyToExecute;
-import static accord.impl.SimpleProgressLog.CoordinateStatus.Uncommitted;
+import static accord.impl.SimpleProgressLog.CoordinateStatus.NotStable;
 import static accord.impl.SimpleProgressLog.Progress.Done;
 import static accord.impl.SimpleProgressLog.Progress.Expected;
 import static accord.impl.SimpleProgressLog.Progress.Investigating;
@@ -71,7 +69,6 @@ import static accord.local.PreLoadContext.contextFor;
 import static accord.local.PreLoadContext.empty;
 import static accord.local.SaveStatus.LocalExecution.NotReady;
 import static accord.local.SaveStatus.LocalExecution.WaitingToApply;
-import static accord.local.Status.Durability.MajorityOrInvalidated;
 import static accord.local.Status.PreApplied;
 import static accord.utils.Invariants.illegalState;
 
@@ -87,7 +84,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
     enum CoordinateStatus
     {
-        NotWitnessed, Uncommitted, Committed, ReadyToExecute, Done;
+        NotWitnessed, NotStable, Stable, ReadyToExecute, Done;
 
         boolean isAtMostReadyToExecute()
         {
@@ -96,7 +93,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
         boolean isAtLeastCommitted()
         {
-            return compareTo(CoordinateStatus.Committed) >= 0;
+            return compareTo(CoordinateStatus.Stable) >= 0;
         }
     }
 
@@ -202,13 +199,15 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                 void updateMax(Command command)
                 {
-                    token = token.merge(new ProgressToken(command.durability(), command.status(), command.promised(), command.accepted()));
+                    token = token.merge(new ProgressToken(command.durability(), command.status(), command.promised(), command.acceptedOrCommitted()));
                 }
 
                 void updateMax(ProgressToken ok)
                 {
                     // TODO (low priority): perhaps set localProgress back to Waiting if Investigating and we update anything?
                     token = token.merge(ok);
+                    if (token.durability.isDurableOrInvalidated())
+                        durableGlobal();
                 }
 
                 void durableGlobal()
@@ -217,8 +216,8 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     {
                         default: throw new IllegalStateException();
                         case NotWitnessed:
-                        case Uncommitted:
-                        case Committed:
+                        case NotStable:
+                        case Stable:
                         case ReadyToExecute:
                             status = CoordinateStatus.Done;
                             setProgress(Done);
@@ -236,7 +235,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     {
                         default: throw new AssertionError("Unexpected status: " + status);
                         case NotWitnessed: // can't make progress if we haven't witnessed it yet
-                        case Committed: // can't make progress if we aren't yet ReadyToExecute
+                        case Stable: // can't make progress if we aren't yet ReadyToExecute
                         case Done: // shouldn't be trying to make progress, as we're done
                             throw illegalState("Unexpected status: " + status);
 
@@ -250,18 +249,10 @@ public class SimpleProgressLog implements ProgressLog.Factory
                                 return;
                             }
 
-                        case Uncommitted:
+                        case NotStable:
                         {
-                            Invariants.checkState(token.status != Status.Invalidated, "ProgressToken is invalidated, but we have not cleared the ProgressLog");
-                            // TODO (expected): we should have already exited this loop if either of these conditions are true
-                            if (command.durability().isDurableOrInvalidated() || token.durability.isDurableOrInvalidated())
-                            {
-                                if (!command.durability().isDurableOrInvalidated())
-                                    Commands.setDurability(safeStore, safeCommand, MajorityOrInvalidated);
-
-                                durableGlobal();
-                                return;
-                            }
+                            Invariants.checkState(!token.durability.isDurableOrInvalidated(), "ProgressToken is durable invalidated, but we have not cleared the ProgressLog");
+                            Invariants.checkState(!command.durability().isDurableOrInvalidated(), "Command is durable or invalidated, but we have not cleared the ProgressLog");
 
                             Route<?> route = Invariants.nonNull(command.route()).withHomeKey();
                             node.withEpoch(txnId.epoch(), () -> {
@@ -511,7 +502,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
             State state = null;
             assert newStatus.isAtMostReadyToExecute();
             if (newStatus.isAtLeastCommitted())
-                state = recordCommit(command.txnId());
+                state = recordStable(command.txnId());
 
             if (shard.isProgress())
             {
@@ -522,11 +513,11 @@ public class SimpleProgressLog implements ProgressLog.Factory
             }
         }
 
-        State recordCommit(TxnId txnId)
+        State recordStable(TxnId txnId)
         {
             State state = stateMap.get(txnId);
             if (state != null && state.blockingState != null)
-                state.blockingState.record(SaveStatus.Committed.known);
+                state.blockingState.record(SaveStatus.Stable.known);
             return state;
         }
 
@@ -542,7 +533,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
         public void unwitnessed(TxnId txnId, ProgressShard shard)
         {
             if (shard.isHome())
-                ensure(txnId).ensureAtLeast(Uncommitted, Expected);
+                ensure(txnId).ensureAtLeast(NotStable, Expected);
         }
 
         @Override
@@ -553,7 +544,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
             if (shard.isProgress())
             {
                 State state = ensure(command.txnId());
-                if (shard.isHome()) state.ensureAtLeast(command, Uncommitted, Expected);
+                if (shard.isHome()) state.ensureAtLeast(command, NotStable, Expected);
                 else state.touchNonHomeUnsafe();
             }
         }
@@ -561,7 +552,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
         @Override
         public void accepted(Command command, ProgressShard shard)
         {
-            ensureSafeOrAtLeast(command, shard, Uncommitted, Expected);
+            ensureSafeOrAtLeast(command, shard, NotStable, Expected);
         }
 
         @Override
@@ -573,9 +564,9 @@ public class SimpleProgressLog implements ProgressLog.Factory
         }
 
         @Override
-        public void committed(Command command, ProgressShard shard)
+        public void stable(Command command, ProgressShard shard)
         {
-            ensureSafeOrAtLeast(command, shard, CoordinateStatus.Committed, NoneExpected);
+            ensureSafeOrAtLeast(command, shard, CoordinateStatus.Stable, NoneExpected);
         }
 
         @Override
@@ -634,7 +625,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
         @Override
         public void waiting(SafeCommand blockedBy, LocalExecution blockedUntil, Route<?> blockedOnRoute, Participants<?> blockedOnParticipants)
         {
-            if (blockedBy.txnId().rw().isLocal())
+            if (blockedBy.txnId().kind().isLocal())
                 return;
 
             // ensure we have a record to work with later; otherwise may think has been truncated

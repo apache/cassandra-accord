@@ -311,7 +311,8 @@ public interface Topologies extends TopologySorter
                 throw new IndexOutOfBoundsException();
             if (minEpochInclusive == oldestEpoch() && maxEpochInclusive == currentEpoch())
                 return this;
-            return new Multi(supplier, topologies.subList(indexForEpoch(minEpochInclusive), 1 + indexForEpoch(maxEpochInclusive)));
+            // TODO (desired): copy if underlying list is small, or delta is large (or just copy)
+            return new Multi(supplier, topologies.subList(indexForEpoch(maxEpochInclusive), 1 + indexForEpoch(minEpochInclusive)));
         }
 
         @Override

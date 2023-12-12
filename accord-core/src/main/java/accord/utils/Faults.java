@@ -16,32 +16,12 @@
  * limitations under the License.
  */
 
-package accord.primitives;
+package accord.utils;
 
-import accord.api.RoutingKey;
-import accord.primitives.Routable.Domain;
-
-import static accord.primitives.Routables.Slice.Overlapping;
-
-/**
- * Either a Route or a collection of Routable
- */
-public interface Seekables<K extends Seekable, U extends Seekables<K, ?>> extends Routables<K>
+public class Faults
 {
-    @Override
-    default U slice(Ranges ranges) { return slice(ranges, Overlapping); }
-
-    @Override
-    U slice(Ranges ranges, Slice slice);
-    Seekables<K, U> subtract(Ranges ranges);
-    Seekables<K, U> with(U with);
-
-    Participants<?> toParticipants();
-
-    FullRoute<?> toRoute(RoutingKey homeKey);
-    
-    static Seekables<?, ?> of(Seekable seekable)
-    {
-        return seekable.domain() == Domain.Range ? Ranges.of(seekable.asRange()) : Keys.of(seekable.asKey());
-    }
+    public static final boolean TRANSACTION_INSTABILITY = false;
+    public static final boolean SYNCPOINT_INSTABILITY = false;
+    public static final boolean TRANSACTION_UNMERGED_DEPS = false;
+    public static final boolean SYNCPOINT_UNMERGED_DEPS = false;
 }

@@ -66,11 +66,11 @@ public class CoordinateShardDurable extends SettableResult<Void> implements Call
     {
         if (!reply.isOk())
         {
-            switch ((ReadData.ReadNack)reply)
+            switch ((ReadData.CommitOrReadNack)reply)
             {
                 default: throw new AssertionError("Unhandled: " + reply);
 
-                case NotCommitted:
+                case Insufficient:
                     CoordinateSyncPoint.sendApply(node, from, exclusiveSyncPoint);
                     return;
 

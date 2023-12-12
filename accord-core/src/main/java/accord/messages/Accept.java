@@ -105,6 +105,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
                 return new AcceptReply(safeStore.get(txnId, executeAt, scope).current().promised());
             case Success:
                 // TODO (desirable, efficiency): we don't need to calculate deps if executeAt == txnId
+                // TODO (desirable, efficiency): only return delta of sent and calculated deps
                 return new AcceptReply(calculatePartialDeps(safeStore));
         }
     }

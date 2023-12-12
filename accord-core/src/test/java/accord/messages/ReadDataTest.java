@@ -44,11 +44,11 @@ import accord.impl.IntKey;
 import accord.impl.TopologyFactory;
 import accord.impl.mock.MockCluster;
 import accord.local.CheckedCommands;
-import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
+import accord.local.SaveStatus;
 import accord.primitives.Ballot;
 import accord.primitives.FullRoute;
 import accord.primitives.Keys;
@@ -136,7 +136,7 @@ class ReadDataTest
 
             state.apply();
             state.readResult.setSuccess(Mockito.mock(Data.class));
-            Mockito.verify(state.sink).reply(Mockito.eq(state.node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.ReadNack.Redundant));
+            Mockito.verify(state.sink).reply(Mockito.eq(state.node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.CommitOrReadNack.Redundant));
         });
     }
 
@@ -150,7 +150,7 @@ class ReadDataTest
                 CheckedCommands.accept(safe, state.txnId, Ballot.ZERO, state.partialRoute, state.partialTxn.keys(), state.progressKey, state.executeAt, state.deps);
 
                 SafeCommand safeCommand = safe.ifInitialised(state.txnId);
-                safeCommand.commit(safeCommand.current(), state.executeAt, Command.WaitingOn.EMPTY);
+                safeCommand.commit(safeCommand.current(), Ballot.ZERO, state.executeAt);
             })));
 
             ReplyContext replyContext = state.process();
@@ -160,7 +160,7 @@ class ReadDataTest
             state.apply();
             state.readResult.setSuccess(Mockito.mock(Data.class));
 
-            Mockito.verify(state.sink).reply(Mockito.eq(state.node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.ReadNack.Redundant));
+            Mockito.verify(state.sink).reply(Mockito.eq(state.node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.CommitOrReadNack.Redundant));
         });
     }
 
@@ -189,7 +189,7 @@ class ReadDataTest
 
             ReplyContext replyContext = state.process();
 
-            Mockito.verify(state.sink).reply(Mockito.eq(state.node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.ReadNack.Redundant));
+            Mockito.verify(state.sink).reply(Mockito.eq(state.node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.CommitOrReadNack.Redundant));
         });
     }
 
@@ -204,7 +204,7 @@ class ReadDataTest
             })));
             ReplyContext replyContext = state.process();
 
-            Mockito.verify(state.sink).reply(Mockito.eq(state.node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.ReadNack.Redundant));
+            Mockito.verify(state.sink).reply(Mockito.eq(state.node.id()), Mockito.eq(replyContext), Mockito.eq(ReadData.CommitOrReadNack.Redundant));
         });
     }
 
@@ -271,7 +271,7 @@ class ReadDataTest
             check(store.execute(PreLoadContext.contextFor(txnId, keys), safe -> {
                 CheckedCommands.preaccept(safe, txnId, partialTxn, route, progressKey);
                 CheckedCommands.accept(safe, txnId, Ballot.ZERO, partialRoute, partialTxn.keys(), progressKey, executeAt, deps);
-                CheckedCommands.commit(safe, txnId, route, progressKey, partialTxn, executeAt, deps);
+                CheckedCommands.commit(safe, SaveStatus.Stable, Ballot.ZERO, txnId, route, progressKey, partialTxn, executeAt, deps);
             }));
         }
 

@@ -50,10 +50,10 @@ public class CheckedCommands
         if (result != Commands.AcceptOutcome.Success) throw illegalState("Command mutation rejected: " + result);
     }
 
-    public static void commit(SafeCommandStore safeStore, TxnId txnId, Route<?> route, @Nullable RoutingKey progressKey, @Nullable PartialTxn partialTxn, Timestamp executeAt, PartialDeps partialDeps)
+    public static void commit(SafeCommandStore safeStore, SaveStatus saveStatus, Ballot ballot, TxnId txnId, Route<?> route, @Nullable RoutingKey progressKey, @Nullable PartialTxn partialTxn, Timestamp executeAt, PartialDeps partialDeps)
     {
         SafeCommand safeCommand = safeStore.get(txnId, txnId, route);
-        Commands.CommitOutcome result = Commands.commit(safeStore, safeCommand, txnId, route, progressKey, partialTxn, executeAt, partialDeps);
+        Commands.CommitOutcome result = Commands.commit(safeStore, safeCommand, saveStatus, ballot, txnId, route, progressKey, partialTxn, executeAt, partialDeps);
         if (result != Commands.CommitOutcome.Success) throw illegalState("Command mutation rejected: " + result);
     }
 

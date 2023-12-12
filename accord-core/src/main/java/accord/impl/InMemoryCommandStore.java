@@ -77,7 +77,7 @@ import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.SaveStatus.Applying;
 import static accord.local.SaveStatus.ReadyToExecute;
-import static accord.local.Status.Committed;
+import static accord.local.Status.Stable;
 import static accord.local.Status.Truncated;
 import static accord.local.Status.NotDefined;
 import static accord.primitives.Routables.Slice.Minimal;
@@ -188,7 +188,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                             if (intersectingParticipants.isEmpty())
                                 continue;
 
-                            if (!cur.txnId().rw().witnesses().test(prev.txnId().rw()) && !cur.partialDeps().contains(prev.txnId()))
+                            if (!cur.txnId().kind().witnesses().test(prev.txnId().kind()) && !cur.partialDeps().contains(prev.txnId()))
                                 continue;
 
                             Participants<?> depParticipants = cur.partialDeps().participants(prev.txnId());
@@ -360,6 +360,8 @@ public abstract class InMemoryCommandStore extends CommandStore
                 Ranges sliced = ranges.slice(slice, Minimal);
                 for (Range range : sliced)
                 {
+                    // TODO (required): this method should fail if it requires more info than available
+                    // TODO (required): I don't think this can possibly work in C*, as we don't know which timestampsForKey we need
                     NavigableMap<RoutableKey, GlobalCommandsForKey> commandsMap = keyHistory.isNone() ? null : globalCommandsMapFor(keyHistory);
                     for (Map.Entry<RoutableKey, GlobalTimestampsForKey> entry : timestampsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive()).entrySet())
                     {
@@ -373,7 +375,8 @@ public abstract class InMemoryCommandStore extends CommandStore
                             continue;
                         }
 
-                        if (globalCommands == null)
+                        // TODO (required): what if consumer wants timestamps independently? not safe, should declare separately
+                        if (globalCommands == null && !keyHistory.isNone())
                             continue;
 
                         CommandsForKey commands = keyHistory.isNone() ? null : Invariants.nonNull(globalCommands.value());
@@ -1146,7 +1149,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                 if (maxStatus != null && command.status().compareTo(maxStatus) > 0)
                     return;
 
-                if (!testKind.test(command.txnId().rw()))
+                if (!testKind.test(command.txnId().kind()))
                     return;
 
                 if (testDep != ANY_DEPS)
@@ -1197,7 +1200,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                             else break;
                     }
 
-                    if (!testKind.test(txnId.rw()))
+                    if (!testKind.test(txnId.kind()))
                         return;
 
                     if (!ranges.intersects(sliced))
@@ -1557,7 +1560,7 @@ public abstract class InMemoryCommandStore extends CommandStore
             Command command = global.value();
             PartialDeps partialDeps = command.partialDeps();
             List<TxnId> deps = partialDeps != null ? partialDeps.txnIds() : Collections.emptyList();
-            if (command.hasBeen(Committed))
+            if (command.hasBeen(Stable))
             {
                 Command.Committed committed = command.asCommitted();
                 if (level == 0 || verbose || !committed.isWaitingOnDependency())

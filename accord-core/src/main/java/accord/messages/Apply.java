@@ -73,7 +73,7 @@ public class Apply extends TxnRequest<ApplyReply>
     protected Apply(Kind kind, Id to, Topologies participates, Topologies executes, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
     {
         super(to, participates, route, txnId);
-        Invariants.checkState(txnId.rw() != Txn.Kind.Write || writes != null);
+        Invariants.checkState(txnId.kind() != Txn.Kind.Write || writes != null);
         Ranges slice = kind == Kind.Maximal || executes == participates ? scope.covering() : executes.computeRangesForNode(to);
         // TODO (desired): it's wasteful to encode the full set of ranges owned by the recipient node;
         //     often it will be cheaper to include the FullRoute for Deps scope (or come up with some other safety-preserving encoding scheme)
@@ -110,14 +110,14 @@ public class Apply extends TxnRequest<ApplyReply>
         return txnId.epoch() == executeAt.epoch() ? executes : node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
     }
 
-    public static Apply applyMinimal(Factory factory, Id to, Topologies sendTo, Topologies applyTo, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    public static Apply applyMinimal(Factory factory, Id to, Topologies sendTo, Topologies applyTo, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps stableDeps, Writes writes, Result result)
     {
-        return factory.create(Kind.Minimal, to, sendTo, applyTo, txnId, route, txn, executeAt, deps, writes, result);
+        return factory.create(Kind.Minimal, to, sendTo, applyTo, txnId, route, txn, executeAt, stableDeps, writes, result);
     }
 
-    public static Apply applyMaximal(Factory factory, Id to, Topologies participates, Topologies executes, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
+    public static Apply applyMaximal(Factory factory, Id to, Topologies participates, Topologies executes, TxnId txnId, Route<?> route, Txn txn, Timestamp executeAt, Deps stableDeps, Writes writes, Result result)
     {
-        return factory.create(Kind.Maximal, to, participates, executes, txnId, route, txn, executeAt, deps, writes, result);
+        return factory.create(Kind.Maximal, to, participates, executes, txnId, route, txn, executeAt, stableDeps, writes, result);
     }
 
     protected Apply(Kind kind, TxnId txnId, PartialRoute<?> route, long waitForEpoch, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, @Nullable PartialTxn txn, Writes writes, Result result)

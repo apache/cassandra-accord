@@ -29,6 +29,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
+import accord.utils.Faults;
 
 class ProposeAndExecute extends Propose<Result>
 {
@@ -54,8 +55,10 @@ class ProposeAndExecute extends Propose<Result>
     @Override
     void onAccepted()
     {
-        // TODO (required): disable merging with original deps by flag, and confirm fault detected
-        Deps deps = this.deps.with(Deps.merge(acceptOks, ok -> ok.deps));
-        Execute.execute(node, txnId, txn, route, executeAt, deps, callback);
+        Deps deps = this.deps;
+        if (!Faults.TRANSACTION_UNMERGED_DEPS)
+            deps = deps.with(Deps.merge(acceptOks, ok -> ok.deps));
+
+        Stabilise.stabilise(node, acceptTracker.topologies(), route, ballot, txnId, txn, executeAt, deps, callback);
     }
 }

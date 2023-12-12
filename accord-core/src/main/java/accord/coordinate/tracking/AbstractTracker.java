@@ -80,7 +80,7 @@ public abstract class AbstractTracker<ST extends ShardTracker>
         ST apply(int epochIndex, Shard shard);
     }
 
-    final Topologies topologies;
+    protected final Topologies topologies;
     protected final ST[] trackers;
     protected final int maxShardsPerEpoch;
     protected int waitingOnShards;

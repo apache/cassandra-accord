@@ -53,6 +53,7 @@ import static java.util.stream.Collectors.joining;
  * find a path of predecessors that would witness us.
  * <p>
  * TODO (low priority): find and report a path when we encounter a violation
+ * TODO (required): validate we only witness values we may have written (this is a post-processing step to just validate all steps have an associated write that may have succeeded)
  */
 public class StrictSerializabilityVerifier implements Verifier
 {

@@ -45,10 +45,10 @@ import accord.primitives.TxnId;
  *
  *  - Non-home shards may also be informed of transactions that are blocking the progress of other transactions.
  *    If the {@code waitingOn} transaction that is blocking progress is uncommitted it is required that the progress
- *    log invoke {@link accord.coordinate.FetchData#fetch} for the transaction if no {@link #committed} is witnessed.
+ *    log invoke {@link accord.coordinate.FetchData#fetch} for the transaction if no {@link #stable} is witnessed.
  *
  *  - Members of the home shard will be informed of a transaction to monitor by the invocation of {@link #preaccepted} or
- *    {@link #accepted}. If this is not followed closely by {@link #committed}, {@link accord.coordinate.MaybeRecover} should
+ *    {@link #accepted}. If this is not followed closely by {@link #stable}, {@link accord.coordinate.MaybeRecover} should
  *    be invoked.
  *
  *  - Members of the home shard will later be informed that the transaction is {@link #readyToExecute}.
@@ -120,12 +120,12 @@ public interface ProgressLog
     void precommitted(Command command);
 
     /**
-     * Has committed
+     * Has stable dependencies, so should execute soon.
      *
      * A home shard should monitor this transaction for global progress.
      * A non-home shard can safely ignore this transaction, as it has been witnessed by a majority of the home shard.
      */
-    void committed(Command command, ProgressShard shard);
+    void stable(Command command, ProgressShard shard);
 
     /**
      * The transaction is waiting to make progress, as all local dependencies have applied.

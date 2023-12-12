@@ -48,7 +48,9 @@ import accord.local.Node.Id;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
+import accord.local.SaveStatus;
 import accord.messages.ReadData.ReadOk;
+import accord.primitives.Ballot;
 import accord.primitives.FullKeyRoute;
 import accord.primitives.FullRangeRoute;
 import accord.primitives.Keys;
@@ -272,7 +274,7 @@ public class CoordinateTransactionTest
                     PartialDeps.Builder depsBuilder = PartialDeps.builder(store.ranges().currentRanges());
                     depsBuilder.add(key, blockingTxnId);
                     PartialDeps partialDeps = depsBuilder.build();
-                    Commands.commit(store, safeCommand, txnId, route, null, command.partialTxn(), txnId, partialDeps);
+                    Commands.commit(store, safeCommand, SaveStatus.Stable, Ballot.ZERO, txnId, route, null, command.partialTxn(), txnId, partialDeps);
                     Commands.apply(store, safeCommand, txnId, route, null, txnId, partialDeps, command.partialTxn(), txn.execute(txnId, txnId, null), txn.query().compute(txnId, txnId, keys, null, null, null));
                 }));
 

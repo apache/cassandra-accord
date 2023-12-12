@@ -215,7 +215,7 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
         return status == null ? NotDurable : status;
     }
 
-    static class Builder extends ReducingIntervalMap.Builder<RoutingKey, Entry, DurableBefore>
+    static class Builder extends AbstractBoundariesBuilder<RoutingKey, Entry, DurableBefore>
     {
         protected Builder(boolean inclusiveEnds, int capacity)
         {

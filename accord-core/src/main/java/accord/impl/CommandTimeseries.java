@@ -170,17 +170,18 @@ public class CommandTimeseries<D>
 
         for (D data : dataIterable)
         {
-            Timestamp executeAt = loader.executeAt(data);
-            if (!executeAtPredicate.test(executeAt))
-                continue;
-
             TxnId txnId = loader.txnId(data);
-            if (!testKind.test(txnId.rw())) continue;
+            if (!testKind.test(txnId.kind())) continue;
             SaveStatus status = loader.saveStatus(data);
             if (minStatus != null && minStatus.compareTo(status.status) > 0)
                 continue;
             if (maxStatus != null && maxStatus.compareTo(status.status) < 0)
                 continue;
+
+            Timestamp executeAt = loader.executeAt(data);
+            if (!executeAtPredicate.test(executeAt))
+                continue;
+
             List<TxnId> deps = loader.depsIds(data);
             // If we don't have any dependencies, we treat a dependency filter as a mismatch
             if (testDep != ANY_DEPS && (!status.known.deps.hasProposedOrDecidedDeps() || (deps.contains(depId) != (testDep == WITH))))

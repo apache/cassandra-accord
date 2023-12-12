@@ -16,60 +16,32 @@
  * limitations under the License.
  */
 
-package accord.api;
+package accord.coordinate;
 
-import accord.local.Command;
+import java.util.function.BiConsumer;
+
+import accord.api.Result;
+import accord.local.Node;
+import accord.primitives.Ballot;
 import accord.primitives.Deps;
+import accord.primitives.FullRoute;
 import accord.primitives.Timestamp;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.topology.Topologies;
 
-public interface EventsListener
+import static accord.coordinate.Execute.Path.SLOW;
+
+public class StabiliseTxn extends Stabilise
 {
-    default void onCommitted(Command cmd)
+    public StabiliseTxn(Node node, Topologies coordinates, Topologies allTopologies, FullRoute<?> route, TxnId txnId, Ballot ballot, Txn txn, Timestamp executeAt, Deps unstableDeps, BiConsumer<? super Result, Throwable> callback)
     {
+        super(node, coordinates, allTopologies, route, txnId, ballot, txn, executeAt, unstableDeps, callback);
     }
 
-    default void onStable(Command cmd)
+    @Override
+    void onStabilised()
     {
+        Execute.execute(node, allTopologies, route, SLOW, txnId, txn, executeAt, stabiliseDeps, callback);
     }
-
-    default void onExecuted(Command cmd)
-    {
-    }
-
-    default void onApplied(Command cmd, long applyStartTimestamp)
-    {
-    }
-
-    default void onFastPathTaken(TxnId txnId, Deps deps)
-    {
-    }
-
-    default void onSlowPathTaken(TxnId txnId, Deps deps)
-    {
-    }
-
-    default void onRecover(TxnId txnId, Timestamp recoveryTimestamp)
-    {
-    }
-
-    default void onPreempted(TxnId txnId)
-    {
-    }
-
-    default void onTimeout(TxnId txnId)
-    {
-    }
-
-    default void onInvalidated(TxnId txnId)
-    {
-    }
-
-    default void onProgressLogSizeChange(TxnId txnId, int delta)
-    {
-    }
-
-    EventsListener NOOP = new EventsListener()
-    {
-    };
 }

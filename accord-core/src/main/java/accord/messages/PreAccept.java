@@ -26,11 +26,7 @@ import accord.primitives.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import accord.local.Command;
-import accord.local.Commands;
 import accord.local.Node.Id;
-import accord.local.SafeCommand;
-import accord.local.SafeCommandStore;
 import accord.impl.DepsBuilder;
 import accord.local.*;
 import accord.messages.TxnRequest.WithUnsynced;
@@ -105,7 +101,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
         // TODO (required): for recovery we need to update CommandsForKeys et al, even if we don't participate in coordination.
         //      must consider cleanup though. (alternative is to make recovery more complicated)
         Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, txnId);
-        if (txnId.rw() == ExclusiveSyncPoint)
+        if (txnId.kind() == ExclusiveSyncPoint)
             safeStore.commandStore().markExclusiveSyncPoint(safeStore, txnId, ranges);
         return new PreAcceptOk(txnId, txnId, calculatePartialDeps(safeStore, txnId, partialTxn.keys(), EpochSupplier.constant(minUnsyncedEpoch), txnId, ranges));
     }
@@ -257,7 +253,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
         // NOTE: ExclusiveSyncPoint *relies* on STARTED_BEFORE to ensure it reports a dependency on *every* earlier TxnId that may execute after it.
         //       This is necessary for reporting to a bootstrapping replica which TxnId it must not prune from dependencies
         //       i.e. the source replica reports to the target replica those TxnId that STARTED_BEFORE and EXECUTES_AFTER.
-        safeStore.mapReduce(keys, ranges, KeyHistory.DEPS, txnId.rw().witnesses(), STARTED_BEFORE, executeAt, ANY_DEPS, null, null, null,
+        safeStore.mapReduce(keys, ranges, KeyHistory.DEPS, txnId.kind().witnesses(), STARTED_BEFORE, executeAt, ANY_DEPS, null, null, null,
                             (p1, keyOrRange, testTxnId, testExecuteAt, status, deps, in) -> {
                                 builder.add(testTxnId, keyOrRange, status, testExecuteAt, deps.get());
                                 return in;

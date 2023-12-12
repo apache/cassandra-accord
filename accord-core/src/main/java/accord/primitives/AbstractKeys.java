@@ -183,7 +183,7 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
         return SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareTo(k), Range::compareTo);
     }
 
-    protected K[] subtract(AbstractRanges ranges, IntFunction<K[]> factory)
+    protected static <K extends RoutableKey> K[] subtract(AbstractRanges ranges, K[] keys, IntFunction<K[]> factory)
     {
         return SortedArrays.subtractWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareTo(k), Range::compareTo);
     }

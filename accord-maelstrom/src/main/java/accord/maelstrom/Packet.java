@@ -53,7 +53,7 @@ public class Packet implements ReplyContext
         ApplyReply(Apply.ApplyReply.class),
         Read(ReadData.class),
         ReadOk(ReadData.ReadOk.class),
-        ReadNack(ReadData.ReadNack.class),
+        ReadNack(ReadData.CommitOrReadNack.class),
         WaitOnCommit(accord.messages.WaitOnCommit.class),
         WaitOnCommitOk(accord.messages.WaitOnCommit.WaitOnCommitOk.class),
         Recover(BeginRecovery.class),

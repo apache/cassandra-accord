@@ -39,10 +39,10 @@ import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
 import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
-import static accord.local.Status.Committed;
-import static accord.messages.ReadData.ReadNack.Invalid;
-import static accord.messages.ReadData.ReadNack.NotCommitted;
-import static accord.messages.ReadData.ReadNack.Redundant;
+import static accord.local.Status.Stable;
+import static accord.messages.ReadData.CommitOrReadNack.Invalid;
+import static accord.messages.ReadData.CommitOrReadNack.Insufficient;
+import static accord.messages.ReadData.CommitOrReadNack.Redundant;
 import static accord.utils.MapReduceConsume.forEach;
 
 /**
@@ -109,6 +109,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
             case AcceptedInvalidate:
             case PreCommitted:
             case Committed:
+            case Stable:
             case ReadyToExecute:
             case PreApplied:
                 return;
@@ -136,13 +137,13 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
     }
 
     @Override
-    public synchronized ReadNack apply(SafeCommandStore safeStore)
+    public synchronized CommitOrReadNack apply(SafeCommandStore safeStore)
     {
         SafeCommand safeCommand = safeStore.get(txnId, this, readScope);
         return apply(safeStore, safeCommand);
     }
 
-    private ReadNack apply(SafeCommandStore safeStore, SafeCommand safeCommand)
+    private CommitOrReadNack apply(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
         if (isInvalid)
             return null;
@@ -154,19 +155,20 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
         switch (status) {
             default:
                 throw new AssertionError("Unknown status: " + status);
-            case Committed:
             case NotDefined:
             case PreAccepted:
             case Accepted:
             case AcceptedInvalidate:
             case PreCommitted:
+            case Committed:
+            case Stable:
             case ReadyToExecute:
             case PreApplied:
                 waitingOn.set(safeStore.commandStore().id());
                 ++waitingOnCount;
                 safeCommand.addListener(this);
 
-                if (status.compareTo(Committed) >= 0)
+                if (status.compareTo(Stable) >= 0)
                 {
                     safeStore.progressLog().waiting(safeCommand, LocalExecution.Applied, null, readScope);
                     return null;
@@ -174,7 +176,7 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
                 else
                 {
                     safeStore.progressLog().waiting(safeCommand, WaitingToExecute, null, readScope);
-                    return NotCommitted;
+                    return Insufficient;
                 }
 
             case Invalidated:

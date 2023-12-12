@@ -330,7 +330,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         return ReducingIntervalMap.merge(historyLeft, historyRight, reduce, ReducingRangeMap.Builder::new);
     }
 
-    static class Builder<V> extends ReducingIntervalMap.Builder<RoutingKey, V, ReducingRangeMap<V>>
+    static class Builder<V> extends AbstractBoundariesBuilder<RoutingKey, V, ReducingRangeMap<V>>
     {
         protected Builder(boolean inclusiveEnds, int capacity)
         {

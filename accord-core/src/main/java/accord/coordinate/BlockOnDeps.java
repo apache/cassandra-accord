@@ -30,7 +30,7 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Callback;
 import accord.messages.Commit;
-import accord.messages.ReadData.ReadNack;
+import accord.messages.ReadData.CommitOrReadNack;
 import accord.messages.ReadData.ReadReply;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
@@ -67,7 +67,6 @@ public class BlockOnDeps implements Callback<ReadReply>
         this.txn = txn;
         this.route = route;
         this.deps = deps;
-        // Sync points don't propose anything so they can execute at their txnId epoch
         this.blockOn = node.topology().forEpoch(route, txnId.epoch());
         this.tracker = new QuorumTracker(blockOn);
         this.callback = callback;
@@ -81,7 +80,7 @@ public class BlockOnDeps implements Callback<ReadReply>
 
     void start()
     {
-        Commit.commitMaximalAndBlockOnDeps(node, blockOn, txnId, txn, route, deps, this);
+        Commit.stableMaximalAndBlockOnDeps(node, tracker.topologies(), txnId, txn, route, txnId, deps, this);
     }
 
     @Override
@@ -100,7 +99,7 @@ public class BlockOnDeps implements Callback<ReadReply>
             return;
         }
 
-        ReadNack nack = (ReadNack) reply;
+        CommitOrReadNack nack = (CommitOrReadNack) reply;
         switch (nack)
         {
             default: throw illegalState();
@@ -109,8 +108,8 @@ public class BlockOnDeps implements Callback<ReadReply>
                 isDone = true;
                 callback.accept(txn.result(txnId, txnId, null), null);
                 break;
-            case NotCommitted:
-                throw illegalState("Received `NotCommitted` response after sending maximal commit as part of `BlockOnDeps`");
+            case Insufficient:
+                throw illegalState("Received `NotCommitted` response after sending maximal stable as part of `BlockOnDeps`");
             case Invalid:
                 onFailure(from, illegalState("Submitted a read command to a replica that did not own the range"));
                 break;

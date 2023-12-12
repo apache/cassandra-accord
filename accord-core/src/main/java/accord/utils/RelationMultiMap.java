@@ -981,6 +981,29 @@ public class RelationMultiMap
         return builder.toString();
     }
 
+    public static <K, V> String toBriefString(K[] keys, V[] values)
+    {
+        if (keys.length == 0 && values.length == 0)
+            return "{}";
+
+        StringBuilder builder = new StringBuilder("{");
+        for (int k = 0 ; k < keys.length ; ++k)
+        {
+            if (k > 0)
+                builder.append(",");
+            builder.append(keys[k]);
+        }
+        builder.append(":[");
+        for (int v = 0 ; v < values.length ; ++v)
+        {
+            if (v > 0)
+                builder.append(",");
+            builder.append(values[v]);
+        }
+        builder.append("]");
+        return builder.toString();
+    }
+
     public static boolean isEmpty(Object[] keys, int[] keysToValues)
     {
         return keys.length == keysToValues.length;

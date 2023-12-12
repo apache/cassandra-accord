@@ -39,7 +39,7 @@ public class CollectDeps implements Callback<GetDepsOk>
 {
     final Node node;
     final TxnId txnId;
-    final FullRoute<?> route;
+    final Route<?> route;
 
     final Timestamp executeAt;
 

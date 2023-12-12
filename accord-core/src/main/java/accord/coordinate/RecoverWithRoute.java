@@ -184,9 +184,9 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                             // so that we know to WasApply, but not
                             if (known.executeAt == ExecuteAtKnown && known.deps == DepsKnown && known.outcome == Apply)
                             {
-                                Invariants.checkState(full.committedDeps.covering.containsAll(sendTo));
+                                Invariants.checkState(full.stableDeps.covering.containsAll(sendTo));
                                 Invariants.checkState(full.partialTxn.covering().containsAll(sendTo));
-                                Persist.persistPartialMaximal(node, txnId, sendTo, route, full.partialTxn, full.executeAt, full.committedDeps, full.writes, full.result);
+                                Persist.persistPartialMaximal(node, txnId, sendTo, route, full.partialTxn, full.executeAt, full.stableDeps, full.writes, full.result);
                             }
                             propagate = full;
                         }
@@ -209,7 +209,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                 Txn txn = full.partialTxn.reconstitute(route);
                 if (known.executeAt.isDecidedAndKnownToExecute() && known.deps.hasDecidedDeps() && known.outcome == Apply)
                 {
-                    Deps deps = full.committedDeps.reconstitute(route());
+                    Deps deps = full.stableDeps.reconstitute(route());
                     node.withEpoch(full.executeAt.epoch(), () -> {
                         Persist.persistMaximal(node, txnId, route(), txn, full.executeAt, deps, full.writes, full.result);
                     });

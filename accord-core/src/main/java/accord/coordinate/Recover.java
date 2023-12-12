@@ -22,10 +22,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 import accord.api.Result;
 import accord.coordinate.tracking.QuorumTracker;
@@ -43,9 +43,10 @@ import accord.messages.WaitOnCommit.WaitOnCommitOk;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
+import accord.primitives.LatestDeps;
 import accord.primitives.Participants;
 import accord.primitives.ProgressToken;
-import accord.primitives.Ranges;
+import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -55,17 +56,18 @@ import accord.utils.Invariants;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
+import static accord.coordinate.Execute.Path.RECOVER;
 import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAndCallback;
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
 import static accord.coordinate.ProposeAndExecute.proposeAndExecute;
 import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
-import static accord.local.Status.Committed;
 import static accord.messages.BeginRecovery.RecoverOk.maxAcceptedOrLater;
 import static accord.utils.Invariants.debug;
 import static accord.utils.Invariants.illegalState;
 
 // TODO (low priority, cleanup): rename to Recover (verb); rename Recover message to not clash
+// TODO (expected): do not recover transactions that are known to be Stable and waiting to execute.
 public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throwable>
 {
     class AwaitCommit extends AsyncResults.SettableResult<Timestamp> implements Callback<WaitOnCommitOk>
@@ -252,62 +254,40 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 case Applied:
                 case PreApplied:
                 {
-                    Deps committedDeps = tryMergeCommittedDeps();
-                    node.withEpoch(executeAt.epoch(), () -> {
-                        // TODO (required, consider): when writes/result are partially replicated, need to confirm we have quorum of these
-                        if (committedDeps != null) Persist.persistMaximal(node, txnId, route, txn, executeAt, committedDeps, acceptOrCommit.writes, acceptOrCommit.result);
-                        else CollectDeps.withDeps(node, txnId, route, txn.keys(), executeAt, (deps, fail) -> {
-                            if (fail != null) accept(null, fail);
-                            else Persist.persistMaximal(node, txnId, route, txn, executeAt, deps, acceptOrCommit.writes, acceptOrCommit.result);
-                        });
+                    withCommittedDeps(executeAt, stableDeps -> {
+                        // TODO (future development correctness): when writes/result are partially replicated, need to confirm we have quorum of these
+                        Persist.persistMaximal(node, txnId, route, txn, executeAt, stableDeps, acceptOrCommit.writes, acceptOrCommit.result);
                     });
                     accept(acceptOrCommit.result, null);
                     return;
                 }
 
                 case ReadyToExecute:
+                case Stable:
+                {
+                    withCommittedDeps(executeAt, stableDeps -> {
+                        Execute.execute(node, tracker.topologies(), route, RECOVER, txnId, txn, executeAt, stableDeps, this);
+                    });
+                    return;
+                }
+
                 case PreCommitted:
                 case Committed:
                 {
-                    Deps committedDeps = tryMergeCommittedDeps();
-                    node.withEpoch(executeAt.epoch(), () -> {
-                        if (committedDeps != null)
-                        {
-                            Execute.execute(node, txnId, txn, route, executeAt, committedDeps, this);
-                        }
-                        else
-                        {
-                            CollectDeps.withDeps(node, txnId, route, txn.keys(), executeAt, (deps, fail) -> {
-                                if (fail != null) accept(null, fail);
-                                else Execute.execute(node, txnId, txn, route, acceptOrCommit.executeAt, deps, this);
-                            });
-                        }
+                    withCommittedDeps(executeAt, committedDeps -> {
+                        Stabilise.stabilise(node, tracker.topologies(), route, ballot, txnId, txn, executeAt, committedDeps, this);
                     });
                     return;
                 }
 
                 case Accepted:
                 {
-                    // TODO (required): this is broken given feedback from Gotsman, Sutra and Ryabinin. Every transaction proposes deps.
-                    // Today we send Deps for all Accept rounds, however their contract is different for SyncPoint
-                    // and regular transactions. The former require that their deps be durably agreed before they
-                    // proceed, but this is impossible for a regular transaction that may agree a later executeAt
-                    // than proposed. Deps for standard transactions are only used for recovery.
-                    // While we could safely behave identically here for them, we expect to stop sending deps in the
-                    // Accept round for these transactions as it is not necessary for correctness with some modifications
-                    // to recovery.
-                    Deps deps;
-                    if (txnId.rw().proposesDeps()) deps = tryMergeAcceptedDeps();
-                    else deps = mergeDeps();
-
-                    if (deps != null)
-                    {
-                        // TODO (desired, behaviour): if we didn't find Accepted in *every* shard, consider invalidating for consistency of behaviour
-                        propose(acceptOrCommit.executeAt, deps);
-                        return;
-                    }
-
-                    // if we propose deps, and cannot assemble a complete set, then we never reached consensus and can be invalidated
+                    // TODO (desired, behaviour): if we didn't find Accepted in *every* shard, consider invalidating for consistency of behaviour
+                    //     however, note that we may have taken the fast path and recovered, so we can only do this if acceptedOrCommitted=Ballot.ZERO
+                    //     (otherwise recovery was attempted and did not invalidate, so it must have determined it needed to complete)
+                    Deps proposeDeps = LatestDeps.mergeProposal(recoverOks, ok -> ok.deps);
+                    propose(acceptOrCommit.executeAt, proposeDeps);
+                    return;
                 }
 
                 case AcceptedInvalidate:
@@ -322,14 +302,14 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             }
         }
 
-        if (txnId.rw().proposesDeps() || tracker.rejectsFastPath() || recoverOks.stream().anyMatch(ok -> ok.rejectsFastPath))
+        if (tracker.rejectsFastPath() || recoverOks.stream().anyMatch(ok -> ok.rejectsFastPath))
         {
             invalidate();
             return;
         }
 
         // should all be PreAccept
-        Deps deps = mergeDeps();
+        Deps proposeDeps = LatestDeps.mergeProposal(recoverOks, ok -> ok.deps);
         Deps earlierAcceptedNoWitness = Deps.merge(recoverOks, ok -> ok.earlierAcceptedNoWitness);
         Deps earlierCommittedWitness = Deps.merge(recoverOks, ok -> ok.earlierCommittedWitness);
         earlierAcceptedNoWitness = earlierAcceptedNoWitness.without(earlierCommittedWitness::contains);
@@ -350,7 +330,26 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         // TODO (required): if there are epochs before txnId.epoch that haven't propagated their dependencies we potentially have a problem
         //                  as we may propose deps that don't witness a transaction they should witness.
         //                  in this case we should run GetDeps before proposing
-        propose(txnId, deps);
+        propose(txnId, proposeDeps);
+    }
+
+    private void withCommittedDeps(Timestamp executeAt, Consumer<Deps> withDeps)
+    {
+        LatestDeps.MergedCommitResult merged = LatestDeps.mergeCommit(txnId, executeAt, recoverOks, ok -> ok.deps);
+        node.withEpoch(executeAt.epoch(), () -> {
+            Seekables<?, ?> missing = txn.keys().subtract(merged.sufficientFor);
+            if (missing.isEmpty())
+            {
+                withDeps.accept(merged.deps);
+            }
+            else
+            {
+                CollectDeps.withDeps(node, txnId, missing.toRoute(route.homeKey()), missing, executeAt, (extraDeps, fail) -> {
+                    if (fail != null) node.agent().onHandledException(fail);
+                    else withDeps.accept(merged.deps.with(extraDeps));
+                });
+            }
+        });
     }
 
     private void invalidate()
@@ -374,32 +373,6 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
     private void propose(Timestamp executeAt, Deps deps)
     {
         node.withEpoch(executeAt.epoch(), () -> proposeAndExecute(node, ballot, txnId, txn, route, executeAt, deps, this));
-    }
-
-    private Deps mergeDeps()
-    {
-        Ranges ranges = recoverOks.stream().map(r -> r.deps.covering).reduce(Ranges::with).orElseThrow(NoSuchElementException::new);
-        Invariants.checkState(ranges.containsAll(txn.keys()));
-        return Deps.merge(recoverOks, r -> r.deps);
-    }
-
-    private Deps tryMergeAcceptedDeps()
-    {
-        Ranges ranges = recoverOks.stream().map(r -> r.acceptedDeps.covering).reduce(Ranges::with).orElseThrow(NoSuchElementException::new);
-        if (!ranges.containsAll(txn.keys()))
-            return null;
-        return Deps.merge(recoverOks, r -> r.acceptedDeps);
-    }
-
-    private Deps tryMergeCommittedDeps()
-    {
-        Ranges ranges = recoverOks.stream()
-                                  .filter(r -> r.status.hasBeen(Committed))
-                                  .map(r -> r.acceptedDeps.covering)
-                                  .reduce(Ranges::with).orElse(null);
-        if (ranges == null || !ranges.containsAll(txn.keys()))
-            return null;
-        return Deps.merge(recoverOks, r -> r.status.hasBeen(Committed) ? r.acceptedDeps : null);
     }
 
     private void retry()

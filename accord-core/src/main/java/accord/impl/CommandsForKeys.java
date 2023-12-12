@@ -96,6 +96,7 @@ public class CommandsForKeys
             case Applied:
             case PreApplied:
             case Committed:
+            case Stable:
             case ReadyToExecute:
                 update.common().commands().add(command.txnId(), command);
                 break;

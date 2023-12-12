@@ -40,8 +40,11 @@ public class MessageType
     public static final MessageType ACCEPT_INVALIDATE_REQ             = remote("ACCEPT_INVALIDATE_REQ",             true );
     public static final MessageType GET_DEPS_REQ                      = remote("GET_DEPS_REQ",                      false);
     public static final MessageType GET_DEPS_RSP                      = remote("GET_DEPS_RSP",                      false);
-    public static final MessageType COMMIT_MINIMAL_REQ                = remote("COMMIT_MINIMAL_REQ",                true );
+    public static final MessageType COMMIT_SLOW_PATH_REQ              = remote("COMMIT_SLOW_PATH_REQ",              true);
     public static final MessageType COMMIT_MAXIMAL_REQ                = remote("COMMIT_MAXIMAL_REQ",                true );
+    public static final MessageType STABLE_FAST_PATH_REQ              = remote("STABLE_FAST_PATH_REQ",              true);
+    public static final MessageType STABLE_SLOW_PATH_REQ              = remote("STABLE_SLOW_PATH_REQ",              true);
+    public static final MessageType STABLE_MAXIMAL_REQ                = remote("STABLE_MAXIMAL_REQ",                true );
     public static final MessageType COMMIT_INVALIDATE_REQ             = remote("COMMIT_INVALIDATE_REQ",             true );
     public static final MessageType APPLY_MINIMAL_REQ                 = remote("APPLY_MINIMAL_REQ",                 true );
     public static final MessageType APPLY_MAXIMAL_REQ                 = remote("APPLY_MAXIMAL_REQ",                 true );
@@ -69,7 +72,7 @@ public class MessageType
     public static final MessageType APPLY_THEN_WAIT_UNTIL_APPLIED_REQ = remote("APPLY_THEN_WAIT_UNTIL_APPLIED_REQ", true );
 
     public static final MessageType PROPAGATE_PRE_ACCEPT_MSG          = local("PROPAGATE_PRE_ACCEPT_MSG", true);
-    public static final MessageType PROPAGATE_COMMIT_MSG              = local("PROPAGATE_COMMIT_MSG",     true);
+    public static final MessageType PROPAGATE_STABLE_MSG              = local("PROPAGATE_STABLE_MSG",     true);
     public static final MessageType PROPAGATE_APPLY_MSG               = local("PROPAGATE_APPLY_MSG",      true);
     public static final MessageType PROPAGATE_OTHER_MSG               = local("PROPAGATE_OTHER_MSG",      true);
 

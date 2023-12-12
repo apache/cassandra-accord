@@ -43,8 +43,8 @@ import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.config.LocalConfig;
 import accord.config.MutableLocalConfig;
-import accord.coordinate.TxnExecute;
-import accord.coordinate.TxnPersist;
+import accord.coordinate.ExecuteTxn;
+import accord.coordinate.PersistTxn;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
@@ -223,7 +223,10 @@ public class Cluster implements Scheduler
                         Reply reply = (Reply) body;
                         SafeCallback callback = sinks.get(deliver.dest).callbacks.remove(deliver.body.in_reply_to);
                         if (callback != null)
-                            callback.success(deliver.src, reply);
+                        {
+                            if (reply instanceof Reply.FailureReply) callback.failure(deliver.src, ((Reply.FailureReply) reply).failure);
+                            else callback.success(deliver.src, reply);
+                        }
                     }
                     else on.receive((Request) body, deliver.src, deliver);
             }
@@ -325,7 +328,7 @@ public class Cluster implements Scheduler
                                           MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                                           MaelstromAgent.INSTANCE,
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
-                                          SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new, TxnExecute.FACTORY, TxnPersist.FACTORY, Apply.FACTORY,
+                                          SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new, ExecuteTxn.FACTORY, PersistTxn.FACTORY, Apply.FACTORY,
                                           localConfig));
             }
 

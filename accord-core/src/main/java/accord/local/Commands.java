@@ -89,6 +89,7 @@ import static accord.local.Status.PreAccepted;
 import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
 import static accord.local.Status.ReadyToExecute;
+import static accord.local.Status.Stable;
 import static accord.local.Status.Truncated;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Route.isFullRoute;
@@ -302,34 +303,44 @@ public class Commands
         return AcceptOutcome.Success;
     }
 
-    public enum CommitOutcome { Success, Redundant, Insufficient }
+    public enum CommitOutcome { Success, Rejected, Redundant, Insufficient }
 
 
     // relies on mutual exclusion for each key
-    public static CommitOutcome commit(SafeCommandStore safeStore, SafeCommand safeCommand, TxnId txnId, Route<?> route, @Nullable RoutingKey progressKey, @Nullable PartialTxn partialTxn, Timestamp executeAt, PartialDeps partialDeps)
+    public static CommitOutcome commit(SafeCommandStore safeStore, SafeCommand safeCommand, SaveStatus newStatus, Ballot ballot, TxnId txnId, Route<?> route, @Nullable RoutingKey progressKey, @Nullable PartialTxn partialTxn, Timestamp executeAt, PartialDeps partialDeps)
     {
         Command command = safeCommand.current();
+        SaveStatus curStatus = command.saveStatus();
 
-        if (command.hasBeen(PreCommitted))
+        Invariants.checkArgument(newStatus == SaveStatus.Committed || newStatus == SaveStatus.Stable);
+        if (newStatus == SaveStatus.Committed && ballot.compareTo(command.promised()) < 0)
+            return CommitOutcome.Rejected;
+
+        if (curStatus.hasBeen(PreCommitted))
         {
-            if (command.is(Truncated))
+            if (!curStatus.is(Truncated))
             {
-                logger.trace("{}: skipping commit - already truncated ({})", txnId, command.status());
-            }
-            else
-            {
-                logger.trace("{}: skipping commit - already committed ({})", txnId, command.status());
-                if (!executeAt.equals(command.executeAt()) || command.status() == Invalidated)
-                    safeStore.agent().onInconsistentTimestamp(command, (command.status() == Invalidated ? Timestamp.NONE : command.executeAt()), executeAt);
+                if (!executeAt.equals(command.executeAt()) || curStatus.status == Invalidated)
+                    safeStore.agent().onInconsistentTimestamp(command, (curStatus.status == Invalidated ? Timestamp.NONE : command.executeAt()), executeAt);
             }
 
-            if (command.hasBeen(Committed))
+            if (curStatus.compareTo(newStatus) > 0 || curStatus.hasBeen(Stable))
+            {
+                logger.trace("{}: skipping commit - already newer or stable ({})", txnId, command.status());
                 return CommitOutcome.Redundant;
+            }
+
+            if (curStatus == SaveStatus.Committed && newStatus == SaveStatus.Committed)
+            {
+                if (ballot.equals(command.acceptedOrCommitted()))
+                    return CommitOutcome.Redundant;
+
+                Invariants.checkState(ballot.compareTo(command.acceptedOrCommitted()) > 0);
+            }
         }
 
         Ranges coordinateRanges = coordinateRanges(safeStore, txnId);
         Ranges acceptRanges = acceptRanges(safeStore, txnId, executeAt, coordinateRanges);
-
         ProgressShard shard = progressShard(route, progressKey, coordinateRanges);
 
         if (!validate(command.status(), command, coordinateRanges, acceptRanges, shard, route, Add, partialTxn, Add, partialDeps, Set))
@@ -339,13 +350,24 @@ public class Commands
         CommonAttributes attrs = set(safeStore, command, command, coordinateRanges, acceptRanges, shard, route, partialTxn, Add, partialDeps, Set);
 
         logger.trace("{}: committed with executeAt: {}, deps: {}", txnId, executeAt, partialDeps);
-        WaitingOn waitingOn = initialiseWaitingOn(safeStore, txnId, executeAt, attrs.partialDeps(), attrs.route());
-        command = safeCommand.commit(attrs, executeAt, waitingOn);
-        safeStore.progressLog().committed(command, shard);
-        safeStore.agent().metricsEventsListener().onCommitted(command);
+        if (newStatus == SaveStatus.Stable)
+        {
+            WaitingOn waitingOn = initialiseWaitingOn(safeStore, txnId, executeAt, attrs.partialDeps(), attrs.route());
+            command = safeCommand.stable(attrs, Ballot.max(command.acceptedOrCommitted(), ballot), executeAt, waitingOn);
+            safeStore.progressLog().stable(command, shard);
+            safeStore.agent().metricsEventsListener().onStable(command);
+            // TODO (expected, safety): introduce intermediate status to avoid reentry when notifying listeners (which might notify us)
+            maybeExecute(safeStore, safeCommand, true, true);
+        }
+        else
+        {
+            Invariants.checkArgument(command.acceptedOrCommitted().compareTo(ballot) <= 0);
+            command = safeCommand.commit(attrs, ballot, executeAt);
+            safeStore.progressLog().precommitted(command);
+            safeStore.notifyListeners(safeCommand);
+            safeStore.agent().metricsEventsListener().onCommitted(command);
+        }
 
-        // TODO (expected, safety): introduce intermediate status to avoid reentry when notifying listeners (which might notify us)
-        maybeExecute(safeStore, safeCommand, true, true);
         return CommitOutcome.Success;
     }
 
@@ -398,13 +420,13 @@ public class Commands
 
         Ranges coordinateRanges = coordinateRanges(safeStore, localSyncId);
         // TODO (desired, consider): in the case of sync points, the coordinator is unlikely to be a home shard, do we mind this? should document at least
-        Txn emptyTxn = safeStore.agent().emptyTxn(localSyncId.rw(), keys);
+        Txn emptyTxn = safeStore.agent().emptyTxn(localSyncId.kind(), keys);
         ProgressShard progressShard = coordinateRanges.contains(route.homeKey()) ? UnmanagedHome : No;
         PartialDeps none = Deps.NONE.slice(coordinateRanges);
         PartialTxn partialTxn = emptyTxn.slice(coordinateRanges, true);
         Invariants.checkState(validate(command.status(), command, Ranges.EMPTY, coordinateRanges, progressShard, route, Set, partialTxn, Set, none, Set));
         CommonAttributes newAttributes = set(safeStore, command, command, Ranges.EMPTY, coordinateRanges, progressShard, route, partialTxn, Set, none, Set);
-        safeCommand.commit(newAttributes, localSyncId, WaitingOn.EMPTY);
+        safeCommand.stable(newAttributes, Ballot.ZERO, localSyncId, WaitingOn.EMPTY);
         safeStore.notifyListeners(safeCommand);
     }
 
@@ -416,7 +438,7 @@ public class Commands
             return;
 
         // NOTE: if this is ever made a non-empty txn this will introduce a potential bug where the txn is registered against CommandsForKeys
-        Txn emptyTxn = safeStore.agent().emptyTxn(localSyncId.rw(), keys);
+        Txn emptyTxn = safeStore.agent().emptyTxn(localSyncId.kind(), keys);
         safeCommand.preapplied(command, command.executeAt(), command.waitingOn(), emptyTxn.execute(localSyncId, localSyncId, null), emptyTxn.result(localSyncId, localSyncId, null));
         maybeExecute(safeStore, safeCommand, true, false);
     }
@@ -475,7 +497,7 @@ public class Commands
 
         CommonAttributes attrs = set(safeStore, command, command, coordinateRanges, acceptRanges, shard, route, partialTxn, Add, partialDeps, command.hasBeen(Committed) ? TryAdd : TrySet);
 
-        WaitingOn waitingOn = !command.hasBeen(Committed) ? initialiseWaitingOn(safeStore, txnId, executeAt, attrs.partialDeps(), attrs.route()) : command.asCommitted().waitingOn();
+        WaitingOn waitingOn = !command.hasBeen(Stable) ? initialiseWaitingOn(safeStore, txnId, executeAt, attrs.partialDeps(), attrs.route()) : command.asCommitted().waitingOn();
         safeCommand.preapplied(attrs, executeAt, waitingOn, writes, result);
         safeStore.notifyListeners(safeCommand);
         logger.trace("{}: apply, status set to Executed with executeAt: {}, deps: {}", txnId, executeAt, partialDeps);
@@ -515,6 +537,7 @@ public class Commands
 
             case PreCommitted:
             case Committed:
+            case Stable:
             case ReadyToExecute:
             case PreApplied:
             case Applied:
@@ -616,7 +639,7 @@ public class Commands
         if (logger.isTraceEnabled())
             logger.trace("{}: Maybe executing with status {}. Will notify listeners on noop: {}", command.txnId(), command.status(), alwaysNotifyListeners);
 
-        if (command.status() != Committed && command.status() != PreApplied)
+        if (command.status() != Stable && command.status() != PreApplied)
         {
             if (alwaysNotifyListeners)
                 safeStore.notifyListeners(safeCommand);
@@ -638,7 +661,7 @@ public class Commands
 
         switch (command.status())
         {
-            case Committed:
+            case Stable:
                 // TODO (desirable, efficiency): maintain distinct ReadyToRead and ReadyToWrite states
                 command = safeCommand.readyToExecute();
                 logger.trace("{}: set to ReadyToExecute", command.txnId());
@@ -664,7 +687,7 @@ public class Commands
                     //      but: if we later support transitive dependency elision this could be dangerous
                     logger.trace("{}: applying no-op", command.txnId());
                     safeCommand.applied();
-                    if (command.txnId().rw() == ExclusiveSyncPoint)
+                    if (command.txnId().kind() == ExclusiveSyncPoint)
                     {
                         Ranges ranges = safeStore.ranges().allAt(command.txnId().epoch());
                         ranges = command.route().slice(ranges, Minimal).participants().toRanges();
@@ -742,7 +765,7 @@ public class Commands
             dependencySafeCommand.removeListener(new ProxyListener(waitingId));
             return waitingOn.setAppliedOrInvalidated(dependencyId);
         }
-        else if (dependency.executeAt().compareTo(executeWaitingAt) > 0 && !waitingId.rw().awaitsFutureDeps())
+        else if (dependency.executeAt().compareTo(executeWaitingAt) > 0 && !waitingId.kind().awaitsFutureDeps())
         {
             // dependency cannot be a predecessor if it executes later
             logger.trace("{}: {} executes after us. Stop listening and removing from waiting on apply set.", waitingId, dependencyId);
@@ -987,7 +1010,7 @@ public class Commands
 
                 if (prev != null)
                 {
-                    if (cur.isAtLeast(until) || (cur.hasBeen(PreCommitted) && cur.executeAt().compareTo(prev.executeAt()) > 0 && !prev.txnId().rw().awaitsFutureDeps()))
+                    if (cur.isAtLeast(until) || (cur.hasBeen(PreCommitted) && cur.executeAt().compareTo(prev.executeAt()) > 0 && !prev.txnId().kind().awaitsFutureDeps()))
                     {
                         updateDependencyAndMaybeExecute(safeStore, prevSafe, curSafe, false);
                         --depth;
@@ -1002,7 +1025,7 @@ public class Commands
                     break;
                 }
 
-                WaitingOn waitingOn = cur.hasBeen(Committed) ? cur.asCommitted().waitingOn() : WaitingOn.EMPTY;
+                WaitingOn waitingOn = cur.hasBeen(Stable) ? cur.asCommitted().waitingOn() : WaitingOn.EMPTY;
                 TxnId directlyBlockedOnCommit;
                 TxnId directlyBlockedOnApply = waitingOn.nextWaitingOnApply();
                 if (directlyBlockedOnApply != null)
@@ -1019,7 +1042,7 @@ public class Commands
                 }
                 else
                 {
-                    if (cur.hasBeen(Committed))
+                    if (cur.hasBeen(Stable))
                     {
                         if (!cur.is(ReadyToExecute) && cur.saveStatus() != Applying && !cur.asCommitted().isWaitingOnDependency())
                         {
@@ -1212,7 +1235,7 @@ public class Commands
                 if (attrs.partialTxn() != null)
                 {
                     partialTxn = partialTxn.slice(allRanges, shard.isHome());
-                    if (!command.txnId().rw().isLocal())
+                    if (!command.txnId().kind().isLocal())
                     {
                         Invariants.checkState(attrs.partialTxn().covers(existingRanges));
                         Routables.foldl(partialTxn.keys(), additionalRanges, (keyOrRange, p, v, i) -> {
@@ -1227,11 +1250,11 @@ public class Commands
 
             case Set:
             case TrySet:
-                // TODO (expected): only includeQuery if shard.isHome(); this affects state eviction and is low priority given size in C*
+                // TODO (desired): only includeQuery if shard.isHome(); this affects state eviction and is low priority given size in C*
                 attrs = attrs.mutable().partialTxn(partialTxn = partialTxn.slice(allRanges, true));
                 // TODO (expected, efficiency): we may register the same ranges more than once
                 // TODO (desirable, efficiency): no need to register on PreAccept if already Accepted
-                if (!command.txnId().rw().isLocal())
+                if (!command.txnId().kind().isLocal())
                     safeStore.register(partialTxn.keys(), allRanges, command);
                 break;
         }
@@ -1307,7 +1330,7 @@ public class Commands
         if (!validate(ensurePartialTxn, existingRanges, additionalRanges, covers(attrs.partialTxn()), covers(partialTxn), permitStaleMissing, "txn", partialTxn))
             return false;
 
-        Invariants.checkState(partialTxn == null || attrs.txnId().rw().equals(partialTxn.kind()), "Transaction has different kind to its TxnId");
+        Invariants.checkState(partialTxn == null || attrs.txnId().kind().equals(partialTxn.kind()), "Transaction has different kind to its TxnId");
         Invariants.checkState(partialTxn == null || !shard.isHome() || ensurePartialTxn == Ignore || hasQuery(attrs.partialTxn()) || hasQuery(partialTxn), "Home transaction should include query");
 
         return validate(ensurePartialDeps, existingRanges, additionalRanges, covers(attrs.partialDeps()), covers(partialDeps), permitStaleMissing, "deps", partialDeps);

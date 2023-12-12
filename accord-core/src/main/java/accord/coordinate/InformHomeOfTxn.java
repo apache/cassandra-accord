@@ -80,7 +80,6 @@ public class InformHomeOfTxn extends AsyncResults.SettableResult<Void> implement
         if (this.failure == null) this.failure = failure;
         else this.failure.addSuppressed(failure);
 
-        // TODO (required, consider): if we fail and have an incorrect topology, trigger refresh
         if (tracker.onFailure(null) == Fail)
             tryFailure(this.failure);
     }

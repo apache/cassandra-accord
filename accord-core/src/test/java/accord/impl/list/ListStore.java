@@ -501,12 +501,13 @@ public class ListStore implements DataStore
         {
             if (!reply.isOk())
             {
-                ReadData.ReadNack nack = (ReadData.ReadNack) reply;
+                ReadData.CommitOrReadNack nack = (ReadData.CommitOrReadNack) reply;
                 switch (nack)
                 {
                     default: throw new AssertionError("Unhandled: " + reply);
 
-                    case NotCommitted:
+                    case Rejected:
+                    case Insufficient:
                     case Redundant:
                         tryFailure(new RuntimeException(nack.name()));
                         return;

@@ -81,7 +81,7 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     }
 
     @Override
-    public ReadNack apply(SafeCommandStore safeStore)
+    public CommitOrReadNack apply(SafeCommandStore safeStore)
     {
         RoutingKey progressKey = TxnRequest.progressKey(node, txnId.epoch(), txnId, route);
         ApplyReply applyReply = Apply.apply(safeStore, null, txnId, txnId, deps, route, writes, txnResult, progressKey);

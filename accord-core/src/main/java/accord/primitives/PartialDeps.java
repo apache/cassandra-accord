@@ -44,6 +44,7 @@ public class PartialDeps extends Deps
     }
 
     // TODO (expected): we no longer need this if everyone has a FullRoute
+    //      could also retain a simple bitset over the original FullRoute
     public final Ranges covering;
 
     public PartialDeps(Ranges covering, KeyDeps keyDeps, RangeDeps rangeDeps)
@@ -61,6 +62,7 @@ public class PartialDeps extends Deps
 
     public boolean isEqualOrFuller(PartialDeps that)
     {
+        // TODO (required): this is likely not correct: could have all txnIds but be missing some txnId<->key relations
         return covering.containsAll(that.covering)
             && keyDeps.txnIds().containsAll(that.keyDeps.txnIds())
             && rangeDeps.txnIds().containsAll(that.rangeDeps.txnIds());

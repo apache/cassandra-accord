@@ -201,7 +201,6 @@ public class ReadTracker extends AbstractTracker<ReadTracker.ReadShardTracker>
         }
     }
 
-    // TODO (required): abstract the candidate selection process so the implementation may prioritise based on distance/health etc
     final Set<Id> inflight;    // TODO (easy, efficiency): use Agrona's IntHashSet as soon as Node.Id switches from long to int
     final List<Id> candidates; // TODO (easy, efficiency): use Agrona's IntArrayList as soon as Node.Id switches from long to int
     private Set<Id> slow;      // TODO (easy, efficiency): use Agrona's IntHashSet as soon as Node.Id switches from long to int

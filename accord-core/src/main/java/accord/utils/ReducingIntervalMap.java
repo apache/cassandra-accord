@@ -21,10 +21,12 @@ package accord.utils;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -197,6 +199,78 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
     // append the item to the given list, modifying the underlying list
     // if the item makes previoud entries redundant
 
+    protected static <K extends Comparable<? super K>, V, M extends ReducingIntervalMap<K, V>> M mergeIntervals(M historyLeft, M historyRight, IntervalBuilderFactory<K, V, M> factory)
+    {
+        if (historyLeft == null || historyLeft.values.length == 0)
+            return historyRight;
+        if (historyRight == null || historyRight.values.length == 0)
+            return historyLeft;
+
+        boolean inclusiveEnds = inclusiveEnds(historyLeft.inclusiveEnds, historyLeft.size() > 0, historyRight.inclusiveEnds, historyRight.size() > 0);
+        IntervalBuilder<K, V, M> builder = factory.create(inclusiveEnds, historyLeft.size() + historyRight.size());
+
+        ReducingIntervalMap<K, V>.RangeIterator left = historyLeft.rangeIterator();
+        ReducingIntervalMap<K, V>.RangeIterator right = historyRight.rangeIterator();
+
+        K start;
+        {   // first loop over any range only covered by one of the two
+            ReducingIntervalMap<K, V>.RangeIterator first = left.start().compareTo(right.start()) <= 0 ? left : right;
+            ReducingIntervalMap<K, V>.RangeIterator second = first == left ? right : left;
+
+            while (first.hasCurrent() && first.end().compareTo(second.start()) <= 0)
+            {
+                if (first.value() != null)
+                    builder.append(first.start(), first.end(), first.value());
+                first.next();
+            }
+
+            start = second.start();
+            if (first.hasCurrent() && first.start().compareTo(start) < 0) builder.append(first.start(), start, first.value());
+            Invariants.checkState(start.compareTo(second.start()) <= 0);
+        }
+
+        // loop over any range covered by both
+        while (left.hasCurrent() && right.hasCurrent())
+        {
+            int cmp = left.end().compareTo(right.end());
+            K end = (cmp <= 0 ? left : right).end();
+            V value = sliceAndReduce(start, end, left.value(), right.value(), builder);
+            if (cmp <= 0) left.next();
+            if (cmp >= 0) right.next();
+            if (value != null)
+                builder.append(start, end, value);
+            start = end;
+        }
+
+        // finally loop over any remaining range covered by only one
+        ReducingIntervalMap<K, V>.RangeIterator remaining = left.hasCurrent() ? left : right;
+        if (remaining.hasCurrent())
+        {
+            {   // only slice the first one
+                K end = remaining.end();
+                V value = remaining.value();
+                if (value != null)
+                {
+                    value = builder.slice(start, end, value);
+                    builder.append(start, end, value);
+                }
+                start = end;
+                remaining.next();
+            }
+            while (remaining.hasCurrent())
+            {
+                K end = remaining.end();
+                V value = remaining.value();
+                if (value != null)
+                    builder.append(start, end, value);
+                start = end;
+                remaining.next();
+            }
+        }
+
+        return builder.build();
+    }
+
     protected static <K extends Comparable<? super K>, V, M extends ReducingIntervalMap<K, V>> M merge(M historyLeft, M historyRight, BiFunction<V, V, V> reduce, BuilderFactory<K, V, M> factory)
     {
         if (historyLeft == null || historyLeft.values.length == 0)
@@ -205,7 +279,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
             return historyLeft;
 
         boolean inclusiveEnds = inclusiveEnds(historyLeft.inclusiveEnds, historyLeft.size() > 0, historyRight.inclusiveEnds, historyRight.size() > 0);
-        Builder<K, V, M> builder = factory.create(inclusiveEnds, historyLeft.size() + historyRight.size());
+        AbstractBoundariesBuilder<K, V, M> builder = factory.create(inclusiveEnds, historyLeft.size() + historyRight.size());
 
         ReducingIntervalMap<K, V>.RangeIterator left = historyLeft.rangeIterator();
         ReducingIntervalMap<K, V>.RangeIterator right = historyRight.rangeIterator();
@@ -281,6 +355,13 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         return left == null ? right : right == null ? left : reduce.apply(left, right);
     }
 
+    private static <K extends Comparable<? super K>, V> V sliceAndReduce(K start, K end, V left, V right, IntervalBuilder<K, V, ?> builder)
+    {
+        if (left != null) left = builder.slice(start, end, left);
+        if (right != null) right = builder.slice(start, end, right);
+        return left == null ? right : right == null ? left : builder.reduce(left, right);
+    }
+
     RangeIterator intersecting(K start, K end)
     {
         int from = Arrays.binarySearch(starts, start);
@@ -337,30 +418,19 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
 
     protected interface BuilderFactory<K extends Comparable<? super K>, V, M extends ReducingIntervalMap<K, V>>
     {
-        Builder<K, V, M> create(boolean inclusiveEnds, int capacity);
+        AbstractBoundariesBuilder<K, V, M> create(boolean inclusiveEnds, int capacity);
     }
 
-    protected static abstract class Builder<K extends Comparable<? super K>, V, M extends ReducingIntervalMap<K, V>>
+    protected static abstract class AbstractBoundariesBuilder<K extends Comparable<? super K>, V, M extends ReducingIntervalMap<K, V>>
     {
         protected final boolean inclusiveEnds;
         protected final List<K> starts;
         protected final List<V> values;
-
-        protected Builder(boolean inclusiveEnds, int capacity)
+        protected AbstractBoundariesBuilder(boolean inclusiveEnds, int capacity)
         {
             this.inclusiveEnds = inclusiveEnds;
             this.starts = new ArrayList<>(capacity);
             this.values = new ArrayList<>(capacity + 1);
-        }
-
-        protected boolean equals(V a, V b)
-        {
-            return a.equals(b);
-        }
-
-        protected V mergeEqual(V a, V b)
-        {
-            return a;
         }
 
         /**
@@ -385,12 +455,12 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
             {
                 sameAsTailKey = start.equals(starts.get(tailIdx));
                 tailValue = values.get(tailIdx);
-                sameAsTailValue = (value == null ? tailValue == null : tailValue != null && equals(value, tailValue));
+                sameAsTailValue = Objects.equals(value, tailValue);
             }
             if (sameAsTailKey || sameAsTailValue)
             {
                 if (sameAsTailValue)
-                    values.set(tailIdx, value == null ? null : mergeEqual(value, tailValue));
+                    values.set(tailIdx, value == null ? null : tailValue);
                 else
                     values.set(tailIdx, tailValue == null ? value : reduce.apply(tailValue, value));
             }
@@ -416,6 +486,79 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         }
     }
 
+    protected interface IntervalBuilderFactory<K extends Comparable<? super K>, V, M extends ReducingIntervalMap<K, V>>
+    {
+        IntervalBuilder<K, V, M> create(boolean inclusiveEnds, int capacity);
+    }
+
+    protected static abstract class IntervalBuilder<K extends Comparable<? super K>, V, M>
+    {
+        protected abstract V slice(K start, K end, V value);
+        protected abstract V reduce(V a, V b);
+        protected V tryMergeEqual(V a, V b)
+        {
+            return a.equals(b) ? a : null;
+        }
+        public abstract void append(K start, K end, @Nonnull V value);
+        protected abstract M build();
+    }
+
+    protected static abstract class AbstractIntervalBuilder<K extends Comparable<? super K>, V, M> extends IntervalBuilder<K, V, M>
+    {
+        protected final boolean inclusiveEnds;
+        protected final List<K> starts;
+        protected final List<V> values;
+
+        private K prevEnd;
+        protected AbstractIntervalBuilder(boolean inclusiveEnds, int capacity)
+        {
+            this.inclusiveEnds = inclusiveEnds;
+            this.starts = new ArrayList<>(capacity);
+            this.values = new ArrayList<>(capacity + 1);
+        }
+
+        public void append(K start, K end, @Nonnull V value)
+        {
+            if (prevEnd != null)
+            {
+                int c = prevEnd.compareTo(start);
+                Invariants.checkState(c <= 0);
+                if (c < 0)
+                {
+                    starts.add(prevEnd);
+                    values.add(null);
+                }
+            }
+
+            int tailIdx = starts.size() - 1;
+            assert starts.size() == values.size();
+            assert tailIdx < 0 || start.compareTo(starts.get(tailIdx)) >= 0;
+
+            V tailValue;
+            if (tailIdx >= 0 && null != (tailValue = values.get(tailIdx)) && null != (tailValue = tryMergeEqual(tailValue, value)))
+            {
+                values.set(tailIdx, tailValue);
+            }
+            else
+            {
+                starts.add(start);
+                values.add(value);
+            }
+            prevEnd = end;
+        }
+
+        protected abstract M buildInternal();
+
+        public final M build()
+        {
+            if (prevEnd != null)
+            {
+                starts.add(prevEnd);
+                prevEnd = null;
+            }
+            return buildInternal();
+        }
+    }
     static boolean inclusiveEnds(boolean leftIsInclusive, boolean leftIsDecisive, boolean rightIsInclusive, boolean rightIsDecisive)
     {
         if (leftIsInclusive == rightIsInclusive)

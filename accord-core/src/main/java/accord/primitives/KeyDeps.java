@@ -23,6 +23,7 @@ import accord.api.RoutingKey;
 import accord.utils.ArrayBuffers;
 import accord.utils.IndexedBiConsumer;
 import accord.utils.IndexedTriConsumer;
+import accord.utils.RelationMultiMap;
 import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.SymmetricComparator;
 import accord.utils.TriFunction;
@@ -32,6 +33,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 import static accord.utils.ArrayBuffers.*;
 import static accord.utils.Invariants.illegalState;
@@ -103,9 +105,14 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         }
     }
 
+    public static LinearMerger<Key, TxnId, KeyDeps> newMerger()
+    {
+        return new LinearMerger<>(ADAPTER);
+    }
+
     public static <T1, T2> KeyDeps merge(List<T1> merge, Function<T1, T2> getter1, Function<T2, KeyDeps> getter2)
     {
-        try (LinearMerger<Key, TxnId, KeyDeps> linearMerger = new LinearMerger<>(ADAPTER))
+        try (LinearMerger<Key, TxnId, KeyDeps> linearMerger = newMerger())
         {
             int mergeIndex = 0, mergeSize = merge.size();
             while (mergeIndex < mergeSize)
@@ -120,6 +127,19 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
 
                 linearMerger.update(deps, deps.keys.keys, deps.txnIds, deps.keysToTxnIds);
             }
+
+            return linearMerger.get(KeyDeps::new, NONE);
+        }
+    }
+
+    public static KeyDeps merge(Stream<KeyDeps> merge)
+    {
+        try (LinearMerger<Key, TxnId, KeyDeps> linearMerger = newMerger())
+        {
+            merge.forEach(deps -> {
+                if (!deps.isEmpty())
+                    linearMerger.update(deps, deps.keys.keys, deps.txnIds, deps.keysToTxnIds);
+            });
 
             return linearMerger.get(KeyDeps::new, NONE);
         }
@@ -604,6 +624,11 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
     public String toString()
     {
         return toSimpleString(keys.keys, txnIds, keysToTxnIds);
+    }
+
+    public String toBriefString()
+    {
+        return RelationMultiMap.toBriefString(keys.keys, txnIds);
     }
 
     private static final KeyDepsAdapter ADAPTER = new KeyDepsAdapter();

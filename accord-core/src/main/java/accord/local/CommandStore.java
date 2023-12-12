@@ -67,6 +67,7 @@ import accord.primitives.Unseekables;
 import accord.utils.async.AsyncResults;
 
 import static accord.api.ConfigurationService.EpochReady.DONE;
+import static accord.local.KeyHistory.DEPS;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.local.PreLoadContext.empty;
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_ADJACENT;
@@ -288,7 +289,7 @@ public abstract class CommandStore implements AgentExecutor
     public final void markExclusiveSyncPoint(SafeCommandStore safeStore, TxnId txnId, Ranges ranges)
     {
         // TODO (desired): narrow ranges to those that are owned
-        Invariants.checkArgument(txnId.rw() == ExclusiveSyncPoint);
+        Invariants.checkArgument(txnId.kind() == ExclusiveSyncPoint);
         ReducingRangeMap<Timestamp> newRejectBefore = rejectBefore != null ? rejectBefore : new ReducingRangeMap<>();
         newRejectBefore = ReducingRangeMap.add(newRejectBefore, ranges, txnId, Timestamp::max);
         setRejectBefore(newRejectBefore);
@@ -297,7 +298,7 @@ public abstract class CommandStore implements AgentExecutor
     public final void markExclusiveSyncPointLocallyApplied(SafeCommandStore safeStore, TxnId txnId, Ranges ranges)
     {
         // TODO (desired): narrow ranges to those that are owned
-        Invariants.checkArgument(txnId.rw() == ExclusiveSyncPoint);
+        Invariants.checkArgument(txnId.kind() == ExclusiveSyncPoint);
         RedundantBefore newRedundantBefore = RedundantBefore.merge(redundantBefore, RedundantBefore.create(ranges, txnId, TxnId.NONE, TxnId.NONE));
         setRedundantBefore(newRedundantBefore);
     }
@@ -312,12 +313,14 @@ public abstract class CommandStore implements AgentExecutor
         if (isExpired)
             return time.uniqueNow(txnId).asRejected();
 
-        if (txnId.rw() == ExclusiveSyncPoint)
+        if (txnId.kind() == ExclusiveSyncPoint)
         {
             markExclusiveSyncPoint(safeStore, txnId, (Ranges)keys);
             return txnId;
         }
 
+        // TODO (expected): reject if any transaction exists with a higher timestamp OR a higher epoch
+        //   this permits us to agree fast path decisions across epoch changes
         Timestamp maxConflict = safeStore.maxConflict(keys, safeStore.ranges().coordinates(txnId));
         if (permitFastPath && txnId.compareTo(maxConflict) > 0 && txnId.epoch() >= time.epoch())
             return txnId;
@@ -449,7 +452,7 @@ public abstract class CommandStore implements AgentExecutor
             {
                 // TODO (correcness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
                 // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
-                execute(contextFor(null, deps.txnIds(), deps.keyDeps.keys()), safeStore -> {
+                execute(contextFor(null, deps.txnIds(), deps.keyDeps.keys(), DEPS), safeStore -> {
                     safeStore.registerHistoricalTransactions(deps);
                 }).begin((success, fail2) -> {
                     if (fail2 != null) fetchMajorityDeps(coordination, node, epoch, ranges);

@@ -47,8 +47,8 @@ public enum Status
 {
     NotDefined        (None,      Nothing),
     PreAccepted       (PreAccept, DefinitionAndRoute),
-    AcceptedInvalidate(Accept,    Maybe,          DefinitionUnknown, ExecuteAtUnknown,  DepsUnknown,  Unknown), // may or may not have witnessed
-    Accepted          (Accept,    Covering,       DefinitionUnknown, ExecuteAtProposed, DepsProposed, Unknown), // may or may not have witnessed
+    AcceptedInvalidate(Accept,    Maybe,          DefinitionUnknown, ExecuteAtUnknown,  DepsUnknown,     Unknown), // may or may not have witnessed
+    Accepted          (Accept, Covering, DefinitionUnknown, ExecuteAtProposed, DepsProposed, Unknown), // may or may not have witnessed
 
     /**
      * PreCommitted is a peculiar state, half-way between Accepted and Committed.
@@ -75,16 +75,16 @@ public enum Status
      * To solve this problem we simply permit the executeAt we discover for B to be propagated to A* without
      * its dependencies. Though this does complicate the state machine a little.
      */
-    PreCommitted      (Accept,  Maybe, DefinitionUnknown, ExecuteAtKnown,   DepsUnknown, Unknown),
+    PreCommitted      (Accept,  Maybe, DefinitionUnknown, ExecuteAtKnown,   DepsUnknown,  Unknown),
 
-    Committed         (Commit,  Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Unknown),
+    Committed         (Commit, Full, DefinitionKnown, ExecuteAtKnown, DepsCommitted, Unknown),
+    Stable            (Execute, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,    Unknown),
     // TODO (expected): do we need ReadyToExecute here, or can we keep it to SaveStatus only?
-    ReadyToExecute    (Commit,  Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Unknown),
-    // TODO (expected): do we need both PreApplied and Applied here, or can we keep them to SaveStatus only?
-    PreApplied        (Persist, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Outcome.Apply),
-    Applied           (Persist, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,   Outcome.Apply),
-    Truncated         (Cleanup, Maybe, DefinitionErased,  ExecuteAtErased,  DepsErased,  Outcome.Erased),
-    Invalidated       (Persist, Maybe, NoOp,              NoExecuteAt,      NoDeps,      Outcome.Invalidated),
+    ReadyToExecute    (Execute, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,    Unknown),
+    PreApplied        (Persist, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,    Outcome.Apply),
+    Applied           (Persist, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,    Outcome.Apply),
+    Truncated         (Cleanup, Maybe, DefinitionErased,  ExecuteAtErased,  DepsErased,   Outcome.Erased),
+    Invalidated       (Persist, Maybe, NoOp,              NoExecuteAt,      NoDeps,       Outcome.Invalidated),
     ;
 
     /**
@@ -92,13 +92,27 @@ public enum Status
      * None:       the transaction is not currently being processed by us (it may be known to us, but only transitively)
      * PreAccept:  the transaction is being disseminated and is seeking an execution order
      * Accept:     the transaction did not achieve 1RT consensus and is making durable its execution order
-     * Commit:     the transaction's execution order has been durably decided, and is being disseminated
+     * Commit:     the transaction's execution time has been durably decided, and dependencies are being disseminated
+     * Execute:    the transaction's execution dependencies have been durably disseminated, and the transaction is waiting to execute
      * Persist:    the transaction has executed, and its outcome is being persisted
      * Cleanup:    the transaction has completed, and state used for processing it is being reclaimed
      */
     public enum Phase
     {
-        None, PreAccept, Accept, Commit, Persist, Cleanup
+        None(false),
+        PreAccept(false),
+        Accept(true),
+        Commit(true),
+        Execute(false),
+        Persist(false),
+        Cleanup(false);
+
+        public final boolean tieBreakWithBallot;
+
+        Phase(boolean tieBreakWithBallot)
+        {
+            this.tieBreakWithBallot = tieBreakWithBallot;
+        }
     }
 
     /**
@@ -263,7 +277,7 @@ public enum Status
                 case Unknown:
                 case WasApply:
                 case Erased:
-                    return Committed.minKnown;
+                    return Stable.minKnown;
 
                 case Apply:
                     return PreApplied.minKnown;
@@ -286,7 +300,7 @@ public enum Status
                 case Erased:
                 case Unknown:
                     if (executeAt.isDecidedAndKnownToExecute() && definition.isKnown() && deps.hasDecidedDeps())
-                        return Committed;
+                        return Stable;
 
                     if (executeAt.isDecidedAndKnownToExecute())
                         return PreCommitted;
@@ -520,31 +534,47 @@ public enum Status
         /**
          * No decision is known to have been reached
          */
-        DepsUnknown,
+        DepsUnknown(PreAccept),
 
         /**
-         * A decision to execute the transaction is known to have been proposed, and the associated dependencies
-         * for the shard(s) in question are known for the coordination epoch (txnId.epoch) only.
+         * A decision to execute the transaction at a given timestamp is known to have been proposed,
+         * and the associated dependencies for the shard(s) in question are known for the coordination epoch (txnId.epoch) only.
+         *
+         * Proposed means Accepted at some replica, but not necessarily a majority and so not committed
          */
-        DepsProposed,
+        DepsProposed(Accept),
+
+        /**
+         * A decision to execute the transaction at a given timestamp with certain dependencies is known to have been proposed,
+         * and some associated dependencies for the shard(s) in question have been committed.
+         *
+         * However, the dependencies are only known to committed at a replica, not necessarily a majority, i.e. not stable
+         */
+        DepsCommitted(Commit),
 
         /**
          * A decision to execute or invalidate the transaction is known to have been reached, and any associated
          * dependencies for the shard(s) in question have been cleaned up.
          */
-        DepsErased,
+        DepsErased(Cleanup),
 
         /**
          * A decision to execute the transaction is known to have been reached, and the associated dependencies
-         * for the shard(s) in question are known for the coordination and execution epochs.
+         * for the shard(s) in question are known for the coordination and execution epochs, and are stable.
          */
-        DepsKnown,
+        DepsKnown(Execute),
 
         /**
          * A decision to invalidate the transaction is known to have been reached
          */
-        NoDeps
-        ;
+        NoDeps(Persist);
+
+        public final Phase phase;
+
+        KnownDeps(Phase phase)
+        {
+            this.phase = phase;
+        }
 
         public boolean hasProposedDeps()
         {
@@ -563,7 +593,23 @@ public enum Status
 
         public boolean hasProposedOrDecidedDeps()
         {
-            return this == DepsProposed || this == DepsKnown;
+            switch (this)
+            {
+                default: throw new AssertionError("Unhandled KnownDeps: " + this);
+                case DepsCommitted:
+                case DepsProposed:
+                case DepsKnown:
+                    return true;
+                case NoDeps:
+                case DepsErased:
+                case DepsUnknown:
+                    return false;
+            }
+        }
+
+        public boolean hasCommittedOrDecidedDeps()
+        {
+            return this == DepsCommitted || this == DepsKnown;
         }
 
         public KnownDeps atLeast(KnownDeps that)
@@ -815,40 +861,40 @@ public enum Status
         return compareTo(equalOrGreaterThan) >= 0;
     }
 
-    public static <T> T max(List<T> list, Function<T, Status> getStatus, Function<T, Ballot> getAccepted, Predicate<T> filter)
+    public static <T> T max(List<T> list, Function<T, Status> getStatus, Function<T, Ballot> getAcceptedOrCommittedBallot, Predicate<T> filter)
     {
         T max = null;
         Status maxStatus = null;
-        Ballot maxAccepted = null;
+        Ballot maxBallot = null;
         for (T item : list)
         {
             if (!filter.test(item))
                 continue;
 
             Status status = getStatus.apply(item);
-            Ballot accepted = getAccepted.apply(item);
+            Ballot ballot = getAcceptedOrCommittedBallot.apply(item);
             boolean update = max == null
                           || maxStatus.phase.compareTo(status.phase) < 0
-                          || (status.phase == Accept && maxAccepted.compareTo(accepted) < 0)
-                          || status.phase != Accept && maxStatus.phase == status.phase && maxStatus.compareTo(status) > 0;
+                          || (maxStatus.phase.tieBreakWithBallot ? maxStatus.phase == status.phase && maxBallot.compareTo(ballot) < 0
+                                                                 : maxStatus.compareTo(status) < 0);
 
             if (!update)
                 continue;
 
             max = item;
             maxStatus = status;
-            maxAccepted = accepted;
+            maxBallot = ballot;
         }
 
         return max;
     }
 
-    public static <T> T max(T a, Status statusA, Ballot acceptedA, T b, Status statusB, Ballot acceptedB)
+    public static <T> T max(T a, Status statusA, Ballot ballotA, T b, Status statusB, Ballot ballotB)
     {
         int c = statusA.phase.compareTo(statusB.phase);
         if (c > 0) return a;
         if (c < 0) return b;
-        if (statusA.phase != Phase.Accept || acceptedA.compareTo(acceptedB) >= 0)
+        if ((statusA.phase.tieBreakWithBallot ? ballotA.compareTo(ballotB) : statusA.compareTo(statusB)) >= 0)
             return a;
         return b;
     }
