@@ -60,9 +60,9 @@ public class RandomSourceTest
             results[i] = random.nextBiasedInt(min, median, max);
 
         Arrays.sort(results);
-        int i = firstBinarySearch(results, median);
+        int i = ceil(results, median);
         if (i < 0) i = -1 - i;
-        int j = firstBinarySearch(results, median + 1);
+        int j = ceil(results, median + 1);
         if (j < 0) j = -2 - j;
         else --j;
         i -= results.length/2;
@@ -104,9 +104,9 @@ public class RandomSourceTest
             results[i] = random.nextBiasedInt(min, median, max);
 
         Arrays.sort(results);
-        int i = firstBinarySearch(results, median);
+        int i = ceil(results, median);
         if (i < 0) i = -1 - i;
-        int j = firstBinarySearch(results, median + 1);
+        int j = ceil(results, median + 1);
         if (j < 0) j = -2 - j;
         else --j;
         i -= results.length/2;
@@ -120,16 +120,9 @@ public class RandomSourceTest
         return distance / results.length;
     }
 
-    private static int firstBinarySearch(int[] array, int target)
+    private static int ceil(int[] array, int target)
     {
-        int i = Arrays.binarySearch(array, target);
-        return i > 0 ? ceil(array, target, 0, i) : i;
-    }
-
-    private static int firstBinarySearch(long[] array, long target)
-    {
-        int i = Arrays.binarySearch(array, target);
-        return i > 0 ? ceil(array, target, 0, i) : i;
+        return ceil(array, target, 0, array.length);
     }
 
     /**
@@ -165,6 +158,11 @@ public class RandomSourceTest
 
         }
         return j;
+    }
+
+    private static int ceil(long[] array, long target)
+    {
+        return ceil(array, target, 0, array.length);
     }
 
     /**
