@@ -109,8 +109,8 @@ public class RandomSourceTest
         int j = firstBinarySearch(results, median + 1);
         if (j < 0) j = -2 - j;
         else --j;
-        i -= Math.abs(results.length/2);
-        j -= Math.abs(results.length/2);
+        i -= results.length/2;
+        j -= results.length/2;
 
         // find minimum distance of the target median value from the actual median value
         double distance = Math.min(i, j);
