@@ -130,12 +130,12 @@ public class CommandTimeseries<D>
         {
             if (result == null)
             {
-                result = Timestamp.min(loader.txnId(data), loader.executeAt(data));
+                result = Timestamp.nonNullOrMin(loader.txnId(data), loader.executeAt(data));
             }
             else
             {
                 result = Timestamp.min(result, loader.txnId(data));
-                result = Timestamp.min(result, loader.executeAt(data));
+                result = Timestamp.nonNullOrMin(result, loader.executeAt(data));
             }
         }
         return result;

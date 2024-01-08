@@ -29,6 +29,7 @@ import accord.api.RoutingKey;
 import accord.impl.IntHashKey;
 import accord.impl.IntKey;
 import accord.local.Node;
+import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.KeyDeps;
 import accord.primitives.Range;
@@ -55,6 +56,21 @@ public class AccordGens
         return nodes.map(Node.Id::new);
     }
 
+    public static Gen.IntGen flags()
+    {
+        return rs -> rs.nextInt(0, 1 << 16);
+    }
+
+    public static Gen<Timestamp> timestamps()
+    {
+        return timestamps(epochs()::nextLong, rs -> rs.nextLong(0, Long.MAX_VALUE), flags(), RandomSource::nextInt);
+    }
+
+    public static Gen<Timestamp> timestamps(Gen.LongGen epochs, Gen.LongGen hlcs, Gen.IntGen flags, Gen.IntGen nodes)
+    {
+        return rs -> Timestamp.fromValues(epochs.nextLong(rs), hlcs.nextLong(rs), flags.nextInt(rs), new Node.Id(nodes.nextInt(rs)));
+    }
+
     public static Gen<TxnId> txnIds()
     {
         return txnIds(epochs()::nextLong, rs -> rs.nextLong(0, Long.MAX_VALUE), RandomSource::nextInt);
@@ -65,6 +81,16 @@ public class AccordGens
         Gen<Txn.Kind> kinds = Gens.enums().all(Txn.Kind.class);
         Gen<Routable.Domain> domains = Gens.enums().all(Routable.Domain.class);
         return rs -> new TxnId(epochs.nextLong(rs), hlcs.nextLong(rs), kinds.next(rs), domains.next(rs), new Node.Id(nodes.nextInt(rs)));
+    }
+
+    public static Gen<Ballot> ballot()
+    {
+        return ballot(epochs()::nextLong, rs -> rs.nextLong(0, Long.MAX_VALUE), flags(), RandomSource::nextInt);
+    }
+
+    public static Gen<Ballot> ballot(Gen.LongGen epochs, Gen.LongGen hlcs, Gen.IntGen flags, Gen.IntGen nodes)
+    {
+        return rs -> Ballot.fromValues(epochs.nextLong(rs), hlcs.nextLong(rs), flags.nextInt(rs), new Node.Id(nodes.nextInt(rs)));
     }
 
     public static Gen<Key> intKeys()
