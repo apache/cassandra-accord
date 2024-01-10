@@ -93,7 +93,7 @@ public class RandomDelayQueue implements PendingQueue
     long now;
     int seq;
 
-    RandomDelayQueue(RandomSource random)
+    public RandomDelayQueue(RandomSource random)
     {
         this.jitterMillis = FrequentLargeRange.builder(random)
                                               .small(0, 50, TimeUnit.MICROSECONDS)

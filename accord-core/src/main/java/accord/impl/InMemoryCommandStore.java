@@ -40,6 +40,8 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import accord.local.*;
 import accord.utils.TriFunction;
 import org.slf4j.Logger;
@@ -106,6 +108,12 @@ public abstract class InMemoryCommandStore extends CommandStore
     protected boolean canExposeUnloaded()
     {
         return true;
+    }
+
+    @VisibleForTesting
+    public NavigableMap<TxnId, GlobalCommand> unsafeCommands()
+    {
+        return commands;
     }
 
     @Override

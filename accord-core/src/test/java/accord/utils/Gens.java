@@ -19,6 +19,8 @@
 package accord.utils;
 
 import java.lang.reflect.Array;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -33,6 +35,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class Gens {
     private Gens() {
@@ -85,6 +88,31 @@ public class Gens {
                     return w.value;
             }
             return list.get(list.size() - 1).value;
+        };
+    }
+
+    public static Gen.IntGen pickZipf(int[] array)
+    {
+        if (array == null || array.length == 0)
+            throw new IllegalArgumentException("Empty array given");
+        if (array.length == 1)
+            return ignore -> array[0];
+        BigDecimal[] weights = new BigDecimal[array.length];
+        BigDecimal base = BigDecimal.valueOf(Math.pow(2, array.length));
+        weights[0] = base;
+        for (int i = 1; i < array.length; i++)
+            weights[i] = base.divide(BigDecimal.valueOf(i + 1), RoundingMode.UP);
+        BigDecimal totalWeights = Stream.of(weights).reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return rs -> {
+            BigDecimal value = BigDecimal.valueOf(rs.nextDouble()).multiply(totalWeights);
+            for (int i = 0; i < weights.length; i++)
+            {
+                value = value.subtract(weights[i]);
+                if (value.compareTo(BigDecimal.ZERO) <= 0)
+                    return array[i];
+            }
+            return array[array.length - 1];
         };
     }
 

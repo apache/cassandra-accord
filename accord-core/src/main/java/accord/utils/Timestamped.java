@@ -19,6 +19,7 @@
 package accord.utils;
 
 import java.util.function.BiPredicate;
+import java.util.function.Function;
 
 import accord.primitives.Timestamp;
 
@@ -26,11 +27,13 @@ public class Timestamped<T>
 {
     public final Timestamp timestamp;
     public final T data;
+    private final Function<? super T, ? extends String> toString;
 
-    public Timestamped(Timestamp timestamp, T data)
+    public Timestamped(Timestamp timestamp, T data, Function<? super T, ? extends String> toString)
     {
         this.timestamp = timestamp;
         this.data = data;
+        this.toString = toString;
     }
 
     public static <T> Timestamped<T> merge(Timestamped<T> a, Timestamped<T> b)
@@ -68,6 +71,6 @@ public class Timestamped<T>
     @Override
     public String toString()
     {
-        return data.toString();
+        return toString.apply(data);
     }
 }

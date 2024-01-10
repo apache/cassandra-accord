@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package accord.impl;
+package accord.topology;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;

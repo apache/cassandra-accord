@@ -165,6 +165,12 @@ public class AsyncResults
         }
 
         @Override
+        public AsyncChain<V> recover(Function<? super Throwable, ? extends AsyncChain<V>> mapper)
+        {
+            return newChain().recover(mapper);
+        }
+
+        @Override
         public AsyncResult<V> addCallback(BiConsumer<? super V, Throwable> callback)
         {
             Listener<V> listener = null;
@@ -291,6 +297,12 @@ public class AsyncResults
         public <T> AsyncChain<T> flatMap(Function<? super V, ? extends AsyncChain<T>> mapper)
         {
             return newChain().flatMap(mapper);
+        }
+
+        @Override
+        public AsyncChain<V> recover(Function<? super Throwable, ? extends AsyncChain<V>> mapper)
+        {
+            return newChain().recover(mapper);
         }
 
         @Override

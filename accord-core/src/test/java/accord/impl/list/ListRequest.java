@@ -18,6 +18,9 @@
 
 package accord.impl.list;
 
+import java.util.function.BiConsumer;
+import java.util.function.Function;
+
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.coordinate.CheckShards;
@@ -33,6 +36,7 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.SaveStatus;
 import accord.local.Status;
+import accord.messages.CheckStatus;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
 import accord.messages.MessageType;
@@ -44,15 +48,32 @@ import accord.primitives.TxnId;
 
 import javax.annotation.Nullable;
 
+import static accord.impl.list.ListResult.Status.RecoveryApplied;
+import static accord.local.Status.Applied;
 import static accord.local.Status.Phase.Cleanup;
-import java.util.function.BiConsumer;
 
 import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
 
 public class ListRequest implements Request
 {
-    enum Outcome { Invalidated, Lost, Truncated, Other }
+    static class Outcome
+    {
+        enum Kind { Applied, Invalidated, Lost, Truncated, Other }
+
+        static final Outcome Invalidated = new Outcome(Kind.Invalidated, null);
+        static final Outcome Lost = new Outcome(Kind.Lost, null);
+        static final Outcome Truncated = new Outcome(Kind.Truncated, null);
+        static final Outcome Other = new Outcome(Kind.Other, null);
+
+        final Kind kind;
+        final ListResult result;
+        Outcome(Kind kind, ListResult result)
+        {
+            this.kind = kind;
+            this.result = result;
+        }
+    }
 
     static class CheckOnResult extends CheckShards
     {
@@ -89,6 +110,7 @@ public class ListRequest implements Request
             else if (merged.maxKnowledgeSaveStatus.is(Status.Truncated)) callback.accept(Outcome.Truncated, null);
             else if (!merged.maxKnowledgeSaveStatus.hasBeen(PreCommitted) && merged.maxSaveStatus.phase == Cleanup) callback.accept(Outcome.Truncated, null);
             else if (count == nodes().size()) callback.accept(Outcome.Lost, null);
+            else if (merged.maxKnowledgeSaveStatus.hasBeen(Applied)) callback.accept(new Outcome(Outcome.Kind.Applied, (ListResult) ((CheckStatus.CheckStatusOkFull) merged).result), null);
             else callback.accept(Outcome.Other, null);
         }
 
@@ -161,7 +183,7 @@ public class ListRequest implements Request
 
         private void checkOnResult(@Nullable RoutingKey homeKey, TxnId txnId, int attempt, Throwable t) {
             if (homeKey == null)
-                homeKey = node.selectRandomHomeKey(txnId);
+                homeKey = node.computeRoute(txnId, txn.keys()).someParticipatingKey();
             RoutingKey finalHomeKey = homeKey;
             node.commandStores().select(homeKey).execute(() -> CheckOnResult.checkOnResult(node, txnId, finalHomeKey, (s, f) -> {
                 if (f != null)
@@ -179,8 +201,11 @@ public class ListRequest implements Request
                     }
                     return;
                 }
-                switch (s)
+                switch (s.kind)
                 {
+                    case Applied:
+                        node.reply(client, replyContext, new ListResult(RecoveryApplied, client, ((Packet)replyContext).requestId, txnId, s.result.readKeys, s.result.responseKeys, s.result.read, s.result.update), null);
+                        break;
                     case Truncated:
                         node.reply(client, replyContext, ListResult.truncated(client, ((Packet)replyContext).requestId, txnId), null);
                         break;
@@ -200,13 +225,16 @@ public class ListRequest implements Request
         }
     }
 
-    public final Txn txn;
+    private final String description;
+    private final Function<Node, Txn> gen;
     private final MessageListener listener;
-    private TxnId id;
+    private transient Txn txn;
+    private transient TxnId id;
 
-    public ListRequest(Txn txn, MessageListener listener)
+    public ListRequest(String description, Function<Node, Txn> gen, MessageListener listener)
     {
-        this.txn = txn;
+        this.description = description;
+        this.gen = gen;
         this.listener = listener;
     }
 
@@ -215,6 +243,7 @@ public class ListRequest implements Request
     {
         if (id != null)
             throw new IllegalStateException("Called process multiple times");
+        txn = gen.apply(node);
         id = node.nextTxnId(txn.kind(), txn.keys().domain());
         listener.onClientAction(MessageListener.ClientAction.SUBMIT, node.id(), id, txn);
         node.coordinate(id, txn).addCallback(new ResultCallback(node, client, replyContext, listener, id, txn));
@@ -229,7 +258,10 @@ public class ListRequest implements Request
     @Override
     public String toString()
     {
-        return id == null ? txn.toString() : id + " -> " + txn;
+        return "ListRequest{" +
+               "description='" + description + '\'' +
+               ", id=" + id +
+               ", txn=" + txn +
+               '}';
     }
-
 }

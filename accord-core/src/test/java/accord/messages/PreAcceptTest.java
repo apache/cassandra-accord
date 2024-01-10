@@ -18,29 +18,29 @@
 
 package accord.messages;
 
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.function.BiFunction;
 import java.util.stream.Stream;
 
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-
 import accord.api.RoutingKey;
 import accord.impl.AbstractSafeCommandStore;
-import accord.impl.CommandTimeseries;
 import accord.impl.CommandTimeseries.CommandLoader;
+import accord.impl.CommandTimeseries;
 import accord.impl.CommandsForKey;
-import accord.impl.IntKey;
 import accord.impl.IntKey.Raw;
+import accord.impl.IntKey;
 import accord.impl.TopologyFactory;
 import accord.impl.mock.MockCluster.Clock;
 import accord.impl.mock.Network;
 import accord.impl.mock.RecordingMessageSink;
 import accord.local.Command;
 import accord.local.CommandStore;
-import accord.local.Node;
 import accord.local.Node.Id;
+import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.local.Status;
 import accord.primitives.Ballot;
@@ -55,6 +55,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topology;
+import accord.topology.TopologyUtils;
 
 import static accord.Utils.createNode;
 import static accord.Utils.id;
@@ -269,7 +270,7 @@ public class PreAcceptTest
             Keys keys = Keys.of(key);
             CommandStore commandStore = node.unsafeForKey(key);
 
-            configService(node).reportTopology(node.topology().current().withEpoch(2));
+            configService(node).reportTopology(TopologyUtils.withEpoch(node.topology().current(), 2));
             messageSink.clearHistory();
 
             TxnId txnId = clock.idForNode(1, ID2);

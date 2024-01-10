@@ -24,6 +24,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -46,6 +47,10 @@ import accord.utils.IndexedBiFunction;
 import accord.utils.IndexedConsumer;
 import accord.utils.IndexedIntFunction;
 import accord.utils.IndexedTriFunction;
+import accord.utils.Utils;
+import org.agrona.collections.IntArrayList;
+
+import javax.annotation.Nullable;
 
 import static accord.utils.SortedArrays.Search.FLOOR;
 import static accord.utils.SortedArrays.exponentialSearch;
@@ -54,7 +59,7 @@ public class Topology
 {
     public static final long EMPTY_EPOCH = 0;
     private static final int[] EMPTY_SUBSET = new int[0];
-    public static final Topology EMPTY = new Topology(EMPTY_EPOCH, new Shard[0], Ranges.EMPTY, Collections.emptyMap(), Ranges.EMPTY, EMPTY_SUBSET);
+    public static final Topology EMPTY = new Topology(null, EMPTY_EPOCH, new Shard[0], Ranges.EMPTY, Collections.emptyMap(), Ranges.EMPTY, EMPTY_SUBSET);
     final long epoch;
     final Shard[] shards;
     final Ranges ranges;
@@ -69,6 +74,11 @@ public class Topology
      */
     final Ranges subsetOfRanges;
     final int[] supersetIndexes;
+    /**
+     * When the field is {@code null} use {@code this}, else use the value referenced; in most cases using {@link #global()} is best.
+     */
+    @Nullable
+    final Topology global;
 
     static class NodeInfo
     {
@@ -81,6 +91,23 @@ public class Topology
             this.supersetIndexes = supersetIndexes;
         }
 
+        private NodeInfo forSubset(int[] newSubset)
+        {
+            IntArrayList matches = new IntArrayList();
+            List<Range> matchedRanges = new ArrayList<>(newSubset.length);
+            for (int index : newSubset)
+            {
+                int idx = Arrays.binarySearch(supersetIndexes, index);
+                if (idx < 0) continue;
+                // found a match
+                matches.add(index);
+                matchedRanges.add(ranges.get(idx));
+            }
+            Ranges ranges = Ranges.ofSortedAndDeoverlapped(Utils.toArray(matchedRanges, Range[]::new));
+            int[] supersetIndexes = matches.toIntArray();
+            return new NodeInfo(ranges, supersetIndexes);
+        }
+
         @Override
         public String toString()
         {
@@ -90,28 +117,31 @@ public class Topology
 
     public Topology(long epoch, Shard... shards)
     {
+        this.global = null;
         this.epoch = epoch;
         this.ranges = Ranges.ofSortedAndDeoverlapped(Arrays.stream(shards).map(shard -> shard.range).toArray(Range[]::new));
         this.shards = shards;
         this.subsetOfRanges = ranges;
         this.supersetIndexes = IntStream.range(0, shards.length).toArray();
-        this.nodeLookup = new HashMap<>();
-        Map<Id, List<Integer>> build = new HashMap<>();
+        this.nodeLookup = new LinkedHashMap<>();
+        Map<Id, IntArrayList> build = new HashMap<>();
         for (int i = 0 ; i < shards.length ; ++i)
         {
             for (Id node : shards[i].nodes)
-                build.computeIfAbsent(node, ignore -> new ArrayList<>()).add(i);
+                build.computeIfAbsent(node, ignore -> new IntArrayList()).add(i);
         }
-        for (Map.Entry<Id, List<Integer>> e : build.entrySet())
+        for (Map.Entry<Id, IntArrayList> e : build.entrySet())
         {
-            int[] supersetIndexes = e.getValue().stream().mapToInt(i -> i).toArray();
+            int[] supersetIndexes = e.getValue().toIntArray();
             Ranges ranges = this.ranges.select(supersetIndexes);
             nodeLookup.put(e.getKey(), new NodeInfo(ranges, supersetIndexes));
         }
     }
 
-    public Topology(long epoch, Shard[] shards, Ranges ranges, Map<Id, NodeInfo> nodeLookup, Ranges subsetOfRanges, int[] supersetIndexes)
+    @VisibleForTesting
+    Topology(@Nullable Topology global, long epoch, Shard[] shards, Ranges ranges, Map<Id, NodeInfo> nodeLookup, Ranges subsetOfRanges, int[] supersetIndexes)
     {
+        this.global = global;
         this.epoch = epoch;
         this.shards = shards;
         this.ranges = ranges;
@@ -120,10 +150,15 @@ public class Topology
         this.supersetIndexes = supersetIndexes;
     }
 
+    public Topology global()
+    {
+        return global == null ? this : global;
+    }
+
     @Override
     public String toString()
     {
-        return "Topology{" + "epoch=" + epoch + ", " + Arrays.toString(shards) + '}';
+        return "Topology{" + "epoch=" + epoch + ", " + shards() + '}';
     }
 
     @Override
@@ -146,16 +181,15 @@ public class Topology
     @Override
     public int hashCode()
     {
-        int result = Objects.hash(epoch, ranges, subsetOfRanges);
-        result = 31 * result + Arrays.hashCode(shards);
-        result = 31 * result + Arrays.hashCode(supersetIndexes);
+        int result = Objects.hash(epoch);
+        result = 31 * result + shards().hashCode();
         return result;
     }
 
-    public static Topology select(long epoch, Shard[] shards, int[] indexes)
+    private static Topology select(long epoch, Shard[] shards, int[] indexes)
     {
         Shard[] subset = new Shard[indexes.length];
-        for (int i=0; i<indexes.length; i++)
+        for (int i = 0; i < indexes.length; i++)
             subset[i] = shards[indexes[i]];
         return new Topology(epoch, subset);
     }
@@ -163,12 +197,6 @@ public class Topology
     public boolean isSubset()
     {
         return supersetIndexes.length < shards.length;
-    }
-
-    @VisibleForTesting
-    public Topology withEpoch(long epoch)
-    {
-        return new Topology(epoch, shards, ranges, nodeLookup, subsetOfRanges, supersetIndexes);
     }
 
     public long epoch()
@@ -182,9 +210,9 @@ public class Topology
         if (info == null)
             return Topology.EMPTY;
 
-        Map<Id, NodeInfo> lookup = new HashMap<>();
+        Map<Id, NodeInfo> lookup = new LinkedHashMap<>();
         lookup.put(node, info);
-        return new Topology(epoch, shards, ranges, lookup, info.ranges, info.supersetIndexes);
+        return new Topology(global(), epoch, shards, ranges, lookup, info.ranges, info.supersetIndexes);
     }
 
     public Topology trim()
@@ -201,17 +229,15 @@ public class Topology
     // TODO (low priority, efficiency): optimised HomeKey concept containing the Key, Shard and Topology to avoid lookups when topology hasn't changed
     public Shard forKey(RoutingKey key)
     {
-        int i = ranges.indexOf(key);
+        int i = subsetOfRanges.indexOf(key);
         if (i < 0)
             throw new IllegalArgumentException("Range not found for " + key);
-        return shards[i];
+        return shards[supersetIndexes[i]];
     }
 
     public int indexForKey(RoutingKey key)
     {
-        int i = ranges.indexOf(key);
-        if (i < 0) return -1;
-        return Arrays.binarySearch(supersetIndexes, i);
+        return subsetOfRanges.indexOf(key);
     }
 
     @VisibleForTesting
@@ -230,27 +256,33 @@ public class Topology
         return forSubset(subsetFor(select), nodes);
     }
 
-    private Topology forSubset(int[] newSubset)
+    @VisibleForTesting
+    Topology forSubset(int[] newSubset)
     {
         Ranges rangeSubset = ranges.select(newSubset);
 
-        Map<Id, NodeInfo> nodeLookup = new HashMap<>();
+        Map<Id, NodeInfo> nodeLookup = new LinkedHashMap<>();
         for (int shardIndex : newSubset)
         {
             Shard shard = shards[shardIndex];
             for (Id id : shard.nodes)
-                nodeLookup.putIfAbsent(id, this.nodeLookup.get(id));
+                nodeLookup.putIfAbsent(id, this.nodeLookup.get(id).forSubset(newSubset));
         }
-        return new Topology(epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
+        return new Topology(global(), epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
     }
 
-    private Topology forSubset(int[] newSubset, Collection<Id> nodes)
+    @VisibleForTesting
+    Topology forSubset(int[] newSubset, Collection<Id> nodes)
     {
         Ranges rangeSubset = ranges.select(newSubset);
         Map<Id, NodeInfo> nodeLookup = new HashMap<>();
         for (Id id : nodes)
-            nodeLookup.put(id, this.nodeLookup.get(id));
-        return new Topology(epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
+        {
+            NodeInfo info = this.nodeLookup.get(id).forSubset(newSubset);
+            if (info.ranges.isEmpty()) continue;
+            nodeLookup.put(id, info);
+        }
+        return new Topology(global(), epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
     }
 
     private int[] subsetFor(Unseekables<?> select)
@@ -303,7 +335,7 @@ public class Topology
                         break;
 
                     bi = (int)(abi >>> 32);
-                    newSubset[count++] = bi;
+                    newSubset[count++] = this.supersetIndexes[bi];
 
                     ++bi;
                 }
@@ -331,7 +363,7 @@ public class Topology
     public <T> T foldl(Unseekables<?> select, IndexedBiFunction<Shard, T, T> function, T accumulator)
     {
         Unseekables<?> as = select;
-        Ranges bs = ranges;
+        Ranges bs = subsetOfRanges;
         int ai = 0, bi = 0;
 
         while (true)
@@ -343,7 +375,7 @@ public class Topology
             ai = (int)(abi);
             bi = (int)(abi >>> 32);
 
-            accumulator = function.apply(shards[bi], accumulator, bi);
+            accumulator = function.apply(shards[supersetIndexes[bi]], accumulator, bi);
             ++bi;
         }
 
@@ -497,7 +529,7 @@ public class Topology
 
     public Ranges ranges()
     {
-        return ranges;
+        return subsetOfRanges;
     }
 
     public Shard[] unsafeGetShards()

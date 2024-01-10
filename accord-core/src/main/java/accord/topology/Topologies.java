@@ -361,7 +361,7 @@ public interface Topologies extends TopologySorter
         @Override
         public Set<Node.Id> nodes()
         {
-            Set<Node.Id> result = Sets.newHashSetWithExpectedSize(estimateUniqueNodes());
+            Set<Node.Id> result = Sets.newLinkedHashSetWithExpectedSize(estimateUniqueNodes());
             for (int i=0,mi=size(); i<mi; i++)
                 result.addAll(get(i).nodes());
             return result;

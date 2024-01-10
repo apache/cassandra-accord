@@ -18,6 +18,7 @@
 
 package accord.utils;
 
+import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -116,5 +117,35 @@ public class Utils
     public static ImmutableBitSet ensureImmutable(SimpleBitSet set)
     {
         return set instanceof ImmutableBitSet ? (ImmutableBitSet) set : new ImmutableBitSet(set);
+    }
+
+    public static <T> T[] addAll(T[] first, T[] second)
+    {
+        T[] array = (T[]) Array.newInstance(first.getClass().getComponentType(), first.length + second.length);
+        System.arraycopy(first, 0, array, 0, first.length);
+        System.arraycopy(second, 0, array, first.length, second.length);
+        return array;
+    }
+
+    public static void reverse(int[] array)
+    {
+        for (int i = 0; i < array.length / 2; i++)
+        {
+            int tmp = array[i];
+            array[i] = array[array.length- 1 - i];
+            array[array.length - 1 - i] = tmp;
+        }
+    }
+
+    public static void shuffle(int[] array, RandomSource rs)
+    {
+        for (int i = array.length; i > 1; i--)
+        {
+            int j = i - 1;
+            int k = rs.nextInt(j);
+            int tmp = array[j];
+            array[j] = array[k];
+            array[k] = tmp;
+        }
     }
 }

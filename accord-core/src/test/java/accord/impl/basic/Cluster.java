@@ -51,7 +51,7 @@ import accord.coordinate.TxnExecute;
 import accord.coordinate.TxnPersist;
 import accord.burn.random.FrequentLargeRange;
 import accord.impl.CoordinateDurabilityScheduling;
-import accord.impl.IntHashKey;
+import accord.impl.PrefixedIntHashKey;
 import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TopologyFactory;
@@ -259,10 +259,11 @@ public class Cluster implements Scheduler
     }
 
     public static Map<MessageType, Stats> run(Id[] nodes, MessageListener messageListener, Supplier<PendingQueue> queueSupplier,
-                                                  BiFunction<Id, BiConsumer<Timestamp, Ranges>, AgentExecutor> nodeExecutorSupplier,
-                                                  Runnable checkFailures, Consumer<Packet> responseSink,
-                                                  Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplierSupplier,
-                                                  TopologyFactory topologyFactory, Supplier<Packet> in, Consumer<Runnable> noMoreWorkSignal)
+                                              BiFunction<Id, BiConsumer<Timestamp, Ranges>, AgentExecutor> nodeExecutorSupplier,
+                                              Runnable checkFailures, Consumer<Packet> responseSink,
+                                              Supplier<RandomSource> randomSupplier, Supplier<LongSupplier> nowSupplierSupplier,
+                                              TopologyFactory topologyFactory, Supplier<Packet> in, Consumer<Runnable> noMoreWorkSignal,
+                                              Consumer<Map<Id, Node>> readySignal)
     {
         Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> nodeMap = new LinkedHashMap<>();
@@ -272,7 +273,14 @@ public class Cluster implements Scheduler
             RandomSource random = randomSupplier.get();
             Cluster sinks = new Cluster(randomSupplier.get(), messageListener, queueSupplier, checkFailures, nodeMap::get, () -> topologyFactory.rf, responseSink);
             TopologyUpdates topologyUpdates = new TopologyUpdates(executorMap::get);
-            TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, nodeMap::get);
+            TopologyRandomizer.Listener schemaApply = t -> {
+                for (Node node : nodeMap.values())
+                {
+                    ListStore store = (ListStore) node.commandStores().dataStore();
+                    store.onTopologyUpdate(node, t);
+                }
+            };
+            TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, nodeMap::get, schemaApply);
             List<CoordinateDurabilityScheduling> durabilityScheduling = new ArrayList<>();
             for (Id id : nodes)
             {
@@ -285,7 +293,7 @@ public class Cluster implements Scheduler
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(id, nodeExecutor, randomSupplier, topology, nodeMap::get, topologyUpdates);
                 BooleanSupplier isLoadedCheck = random.biasedUniformBools(0.5f);
                 Node node = new Node(id, messageSink, LocalMessage::process, configService, nowSupplier, NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, nowSupplier),
-                                     () -> new ListStore(id), new ShardDistributor.EvenSplit<>(8, ignore -> new IntHashKey.Splitter()),
+                                     () -> new ListStore(id), new ShardDistributor.EvenSplit<>(8, ignore -> new PrefixedIntHashKey.Splitter()),
                                      nodeExecutor.agent(),
                                      randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
                                      SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending, isLoadedCheck), TxnExecute.FACTORY, TxnPersist.FACTORY, Apply.FACTORY,
@@ -316,6 +324,7 @@ public class Cluster implements Scheduler
                 };
             }
             updateDurabilityRate.run();
+            schemaApply.onUpdate(topology);
 
             // startup
             AsyncResult<?> startup = AsyncChains.reduce(nodeMap.values().stream().map(Node::unsafeStart).collect(toList()), (a, b) -> null).beginAsResult();
@@ -336,6 +345,7 @@ public class Cluster implements Scheduler
                 reconfigure.cancel();
                 durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
             });
+            readySignal.accept(nodeMap);
 
             Packet next;
             while ((next = in.get()) != null)
@@ -496,7 +506,7 @@ public class Cluster implements Scheduler
                 case RANDOM_BIDIRECTIONAL:
                 case RANDOM_UNIDIRECTIONAL:
                     boolean bidirectional = kind == RANDOM_BIDIRECTIONAL;
-                    int count = random.nextInt(bidirectional || random.nextBoolean() ? nodesList.size() : (nodesList.size() * nodesList.size())/2);
+                    int count = random.nextInt(bidirectional || random.nextBoolean() ? nodesList.size() : Math.max(1, (nodesList.size() * nodesList.size())/2));
                     return randomOverrides(bidirectional, linkOverride, count, nodesList, random, defaultLinks);
             }
         };

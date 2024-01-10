@@ -276,7 +276,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                                             updateMax(success.asProgressToken());
                                         }
-                                    });
+                                    }).begin(node.agent());
                                 });
 
                                 debugInvestigating = recover;

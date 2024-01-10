@@ -22,7 +22,9 @@ import accord.impl.basic.NodeSink;
 import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.messages.Message;
+import accord.messages.ReadData;
 import accord.messages.Request;
+import accord.messages.SimpleReply;
 import accord.messages.TxnRequest;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -32,7 +34,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
-import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.Set;
@@ -81,7 +84,7 @@ public interface MessageListener
          * When this set is empty all txn events will be logged, but if only specific txn are desired then this filter will limit the logging to just those events
          */
         private static final Set<TxnId> txnIdFilter = ImmutableSet.of();
-        private static final Set<TxnReplyId> txnReplies = new HashSet<>();
+        private static final Map<TxnReplyId, Request> txnReplies = new HashMap<>();
 
         private static int ACTION_SIZE = Stream.of(NodeSink.Action.values()).map(Enum::name).mapToInt(String::length).max().getAsInt();
         private static int CLIENT_ACTION_SIZE = Stream.of(ClientAction.values()).map(Enum::name).mapToInt(String::length).max().getAsInt();
@@ -91,7 +94,15 @@ public interface MessageListener
         public void onMessage(NodeSink.Action action, Node.Id from, Node.Id to, long id, Message message)
         {
             if (txnIdFilter.isEmpty() || containsTxnId(from, to, id, message))
-                logger.debug("Message {}: From {}, To {}, id {}, Message {}", normalize(action), normalize(from), normalize(to), normalizeMessageId(id), message);
+            {
+                Object detailed = message;
+                if (message.getClass() == SimpleReply.class || message.getClass() == ReadData.ReadOk.class)
+                {
+                    Request req = txnReplies.get(new TxnReplyId(to, from, id));
+                    detailed = req != null ? detailed + " to " + req : detailed + " to unknown request";
+                }
+                logger.debug("Message {}: From {}, To {}, id {}, Message {}", normalize(action), normalize(from), normalize(to), normalizeMessageId(id), detailed);
+            }
         }
 
         @Override
@@ -158,13 +169,13 @@ public interface MessageListener
             {
                 if (containsAny((Request) message))
                 {
-                    txnReplies.add(new TxnReplyId(from, to, id));
+                    txnReplies.put(new TxnReplyId(from, to, id), (Request) message);
                     return true;
                 }
                 return false;
             }
             else
-                return txnReplies.contains(new TxnReplyId(to, from, id));
+                return txnReplies.containsKey(new TxnReplyId(to, from, id));
         }
 
         private static boolean containsAny(Request message)

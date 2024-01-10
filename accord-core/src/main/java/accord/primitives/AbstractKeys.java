@@ -57,7 +57,6 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
         return Arrays.equals(keys, that.keys);
     }
 
-    @Override
     public int indexOf(K key)
     {
         return Arrays.binarySearch(keys, key);

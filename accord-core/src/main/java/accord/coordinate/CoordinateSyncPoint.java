@@ -37,8 +37,8 @@ import accord.primitives.Txn;
 import accord.primitives.Txn.Kind;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
-import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 
 import static accord.coordinate.Propose.Invalidate.proposeAndCommitInvalidate;
 import static accord.primitives.Timestamp.mergeMax;
@@ -69,35 +69,36 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
         this.async = async;
     }
 
-    public static <S extends Seekables<?, ?>> AsyncResult<CoordinateSyncPoint<S>> exclusive(Node node, S keysOrRanges)
+    public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> exclusive(Node node, S keysOrRanges)
     {
         return coordinate(node, ExclusiveSyncPoint, keysOrRanges, true);
     }
 
-    public static <S extends Seekables<?, ?>> CoordinateSyncPoint<S> exclusive(Node node, TxnId txnId, S keysOrRanges)
+    public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> exclusive(Node node, TxnId txnId, S keysOrRanges)
     {
         return coordinate(node, txnId, keysOrRanges, true);
     }
 
-    public static <S extends Seekables<?, ?>> AsyncResult<CoordinateSyncPoint<S>> inclusive(Node node, S keysOrRanges, boolean async)
+    public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> inclusive(Node node, S keysOrRanges, boolean async)
     {
         return coordinate(node, Kind.SyncPoint, keysOrRanges, async);
     }
 
-    private static <S extends Seekables<?, ?>> AsyncResult<CoordinateSyncPoint<S>> coordinate(Node node, Kind kind, S keysOrRanges, boolean async)
+    private static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> coordinate(Node node, Kind kind, S keysOrRanges, boolean async)
     {
         checkArgument(kind == Kind.SyncPoint || kind == ExclusiveSyncPoint);
         node.nextTxnId(Kind.SyncPoint, keysOrRanges.domain());
         TxnId txnId = node.nextTxnId(kind, keysOrRanges.domain());
-        return node.withEpoch(txnId.epoch(), () ->
-                AsyncChains.success(coordinate(node, txnId, keysOrRanges, async))
-        ).beginAsResult();
+        return node.withEpoch(txnId.epoch(), () -> coordinate(node, txnId, keysOrRanges, async)).beginAsResult();
     }
 
-    private static <S extends Seekables<?, ?>> CoordinateSyncPoint<S> coordinate(Node node, TxnId txnId, S keysOrRanges, boolean async)
+    private static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> coordinate(Node node, TxnId txnId, S keysOrRanges, boolean async)
     {
         checkArgument(txnId.rw() == Kind.SyncPoint || txnId.rw() == ExclusiveSyncPoint);
         FullRoute route = node.computeRoute(txnId, keysOrRanges);
+        TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(txnId.epoch()), txnId, route.homeKey(), keysOrRanges);
+        if (mismatch != null)
+            return AsyncResults.failure(mismatch);
         CoordinateSyncPoint<S> coordinate = new CoordinateSyncPoint(node, txnId, node.agent().emptyTxn(txnId.rw(), keysOrRanges), route, keysOrRanges, async);
         coordinate.start();
         return coordinate;

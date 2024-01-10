@@ -53,10 +53,14 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
         return SortedArrays.binarySearch(ranges, 0, ranges.length, key, (k, r) -> -r.compareTo(k), FAST);
     }
 
-    @Override
-    public int indexOf(Range find)
+    public int indexOf(Range find, SortedArrays.Search op)
     {
-        return SortedArrays.binarySearch(ranges, 0, ranges.length, find, Range::compareIntersecting, FAST);
+        return SortedArrays.binarySearch(ranges, 0, ranges.length, find, Range::compareIntersecting, op);
+    }
+
+    public int ceilIndexOf(Range find)
+    {
+        return indexOf(find, CEIL);
     }
 
     @Override
@@ -154,7 +158,7 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
 
     public final boolean intersects(Range that)
     {
-        return indexOf(that) >= 0;
+        return indexOf(that, FAST) >= 0;
     }
 
     public boolean intersects(Routable key)

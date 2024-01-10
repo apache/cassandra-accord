@@ -20,26 +20,44 @@ package accord.topology;
 
 import accord.Utils;
 import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.impl.IntKey;
 import accord.impl.TopologyFactory;
 import accord.local.Node;
 import accord.primitives.Range;
 import accord.primitives.Keys;
+import accord.primitives.Ranges;
+import accord.primitives.RoutingKeys;
+import accord.primitives.Unseekables;
+import accord.utils.Gens;
+import accord.utils.RandomSource;
 import com.google.common.collect.Iterables;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.TreeSet;
+import java.util.function.Consumer;
 
-import static accord.impl.IntKey.*;
+import static accord.topology.TopologyUtils.routingKey;
+import static accord.topology.TopologyUtils.routingKeyOutsideRange;
+import static accord.topology.TopologyUtils.withEpoch;
+import static accord.utils.AccordGens.topologys;
+import static org.assertj.core.api.Assertions.assertThat;
+import static accord.utils.ExtendedAssertions.assertThat;
+import static accord.utils.Property.qt;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class TopologyTest
 {
     private static void assertRangeForKey(Topology topology, int key, int start, int end)
     {
-        Key expectedKey = key(key);
-        Shard shard = topology.forKey(routing(key));
-        Range expectedRange = range(start, end);
+        Key expectedKey = IntKey.key(key);
+        Shard shard = topology.forKey(IntKey.routing(key));
+        Range expectedRange = IntKey.range(start, end);
         Assertions.assertTrue(expectedRange.contains(expectedKey));
         Assertions.assertTrue(shard.range.contains(expectedKey));
         Assertions.assertEquals(expectedRange, shard.range);
@@ -75,7 +93,7 @@ public class TopologyTest
     {
         try
         {
-            topology.forKey(routing(key));
+            topology.forKey(IntKey.routing(key));
             Assertions.fail("Expected exception");
         }
         catch (IllegalArgumentException e)
@@ -96,8 +114,117 @@ public class TopologyTest
     }
 
     @Test
-    void forRangesTest()
+    void basic()
     {
+        qt().withExamples(100).forAll(topologys(), Gens.random()).check((topology, rs) -> {
+            assertThat(topology)
+                    .isNotSubset()
+                    .isEqualTo(withEpoch(topology, topology.epoch))
+                    .hasSameHashCodeAs(withEpoch(topology, topology.epoch));
 
+            checkTopology(topology, rs);
+
+            for (int i = 0; i < topology.size(); i++)
+            {
+                Shard shard = topology.get(i);
+                for (boolean withNodes : Arrays.asList(true, false))
+                {
+                    Topology subset = withNodes ?
+                                      topology.forSubset(new int[] {i}, topology.nodes()) : // TODO (correctness): should this drop non-overlapping nodes, or reject?
+                                      topology.forSubset(new int[] {i});
+                    Topology trimmed = subset.trim();
+
+                    assertThat(subset)
+                            .isSubset()
+                            .isEqualTo(trimmed)
+                            .hasSameHashCodeAs(trimmed)
+                            // this is slightly redundant as trimmed model should catch this... it is here in case trim breaks
+                            .hasSize(1)
+                            .isShardsEqualTo(shard)
+                            .isHostsEqualTo(shard.nodes)
+                            .isRangesEqualTo(shard.range);
+
+                    checkTopology(subset, rs);
+                    {
+                        List<Shard> forEachShard = new ArrayList<>(1);
+                        subset.forEach(s -> forEachShard.add(s)); // cant do forEachShard::add due ambiguous signature (multiple matches in topology)
+                        assertThat(forEachShard).isEqualTo(Collections.singletonList(shard));
+                    }
+
+                    Consumer<Unseekables<?>> foldl = unseekables -> assertThat(subset.foldl(unseekables, (s, accum, indexed) -> accum + System.identityHashCode(s), 0))
+                            .isEqualTo(trimmed.foldl(unseekables, (s, accum, indexed) -> accum + System.identityHashCode(s), 0))
+                            .isEqualTo(System.identityHashCode(shard));
+                    Consumer<Unseekables<?>> visitNodeForKeysOnceOrMore = unseekables -> {
+                        List<Node.Id> actual = new ArrayList<>(shard.nodes.size());
+                        subset.visitNodeForKeysOnceOrMore(unseekables, actual::add);
+                        assertThat(actual).isEqualTo(shard.nodes);
+                    };
+                    for (Range range : subset.ranges())
+                    {
+                        for (int j = 0; j < 10; j++)
+                        {
+                            RoutingKey key = routingKey(range, rs);
+                            assertThat(subset.forKey(key)).isEqualTo(shard);
+
+                            RoutingKeys unseekables = RoutingKeys.of(key);
+                            foldl.accept(unseekables);
+                            visitNodeForKeysOnceOrMore.accept(unseekables);
+                        }
+                        Ranges unseekables = Ranges.single(range);
+                        foldl.accept(unseekables);
+                        visitNodeForKeysOnceOrMore.accept(unseekables);
+                    }
+
+                    for (Node.Id node : new TreeSet<>(subset.nodes()))
+                    {
+                        assertThat(subset.forNode(node))
+                                .isEqualTo(trimmed.forNode(node))
+                                .isRangesEqualTo(subset.rangesForNode(node))
+                                .isRangesEqualTo(trimmed.rangesForNode(node));
+                    }
+                }
+            }
+        });
+    }
+
+    private static void checkTopology(Topology topology, RandomSource rs)
+    {
+        for (Node.Id node : topology.nodes())
+        {
+            Topology subset = topology.forNode(node);
+            assertThat(subset).isRangesEqualTo(topology.rangesForNode(node));
+
+            assertThat(topology.mapReduceOn(node, 0, (p1, p2, p3, idx) -> System.identityHashCode(topology.get(idx)), 0, 0, 0, Integer::sum, 0))
+                    .isEqualTo(subset.shards().stream().mapToInt(System::identityHashCode).sum())
+                    .isEqualTo(subset.mapReduceOn(node, 0, (p1, p2, p3, idx) -> System.identityHashCode(subset.get(idx)), 0, 0, 0, Integer::sum, 0))
+                    .isEqualTo(topology.foldlIntOn(node, (p1, accum, idx) -> accum + System.identityHashCode(topology.get(idx)), 0, 0, 0, Integer.MIN_VALUE))
+                    .isEqualTo(subset.foldlIntOn(node, (p1, accum, idx) -> accum + System.identityHashCode(subset.get(idx)), 0, 0, 0, Integer.MIN_VALUE));
+        }
+        for (Range range : topology.ranges())
+        {
+            Topology subset = topology.forSelection(Ranges.single(range));
+            for (int i = 0; i < 10; i++)
+            {
+                RoutingKey key = routingKey(range, rs);
+
+                assertThat(topology.forSelection(RoutingKeys.of(key))).isEqualTo(subset);
+
+                assertThat(topology.forKey(key))
+                        .describedAs("forKey(key) != get(indexForKey(key)) for key %s", key)
+                        .isEqualTo(topology.get(topology.indexForKey(key)))
+                        .describedAs("forKey(key) != forSelection(range).forKey(key): key=%s, range=%s", key, range)
+                        .isEqualTo(subset.forKey(key))
+                        .contains(key);
+            }
+            for (int i = 0; i < 10; i++)
+            {
+                RoutingKey outsideRange = routingKeyOutsideRange(range, rs);
+                if (outsideRange == null) break;
+                assertThatThrownBy(() -> subset.forKey(outsideRange))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessage("Range not found for %s", outsideRange);
+            }
+        }
+        assertThat(topology.forSelection(topology.ranges())).isEqualTo(topology);
     }
 }
