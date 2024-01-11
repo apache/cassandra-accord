@@ -225,11 +225,12 @@ public abstract class Command implements CommonAttributes
         private final TxnId txnId;
         private final SaveStatus status;
         private final Durability durability;
+        @Nullable
         private final Route<?> route;
         private final Ballot promised;
         private final Listeners.Immutable listeners;
 
-        private AbstractCommand(TxnId txnId, SaveStatus status, Durability durability, Route<?> route, Ballot promised, Listeners.Immutable listeners)
+        private AbstractCommand(TxnId txnId, SaveStatus status, Durability durability, @Nullable Route<?> route, Ballot promised, Listeners.Immutable listeners)
         {
             this.txnId = txnId;
             this.status = validateCommandClass(status, getClass());
@@ -418,6 +419,7 @@ public abstract class Command implements CommonAttributes
      *    or any route will do
      */
     @Override
+    @Nullable
     public abstract Route<?> route();
 
     /**
@@ -629,7 +631,7 @@ public abstract class Command implements CommonAttributes
 
     public static final class NotDefined extends AbstractCommand
     {
-        NotDefined(TxnId txnId, SaveStatus status, Durability durability, Route<?> route, Ballot promised, Listeners.Immutable listeners)
+        NotDefined(TxnId txnId, SaveStatus status, Durability durability, @Nullable Route<?> route, Ballot promised, Listeners.Immutable listeners)
         {
             super(txnId, status, durability, route, promised, listeners);
         }
@@ -706,7 +708,7 @@ public abstract class Command implements CommonAttributes
             this.result = result;
         }
 
-        public Truncated(TxnId txnId, SaveStatus saveStatus, Durability durability, Route<?> route, @Nullable Timestamp executeAt, Listeners.Immutable listeners, @Nullable Writes writes, @Nullable Result result)
+        public Truncated(TxnId txnId, SaveStatus saveStatus, Durability durability, @Nullable Route<?> route, @Nullable Timestamp executeAt, Listeners.Immutable listeners, @Nullable Writes writes, @Nullable Result result)
         {
             super(txnId, saveStatus, durability, route, Ballot.MAX, listeners);
             this.executeAt = executeAt;

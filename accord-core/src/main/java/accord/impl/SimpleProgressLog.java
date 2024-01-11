@@ -402,6 +402,8 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 {
                     Command command = safeCommand.current();
                     // make sure a quorum of the home shard is aware of the transaction, so we can rely on it to ensure progress
+                    if (command.route() == null)
+                        throw new AssertionError(String.format("Attempted to inform but route is not known for command %s", command));
                     AsyncChain<Void> inform = inform(node, txnId, command.route());
                     inform.begin((success, fail) -> {
                         commandStore.execute(empty(), ignore -> {
