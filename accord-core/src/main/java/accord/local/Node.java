@@ -706,19 +706,16 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return future;
     }
 
-    public void receive (Request request, Id from, ReplyContext replyContext)
+    public void receive(Request request, Id from, ReplyContext replyContext)
     {
-        long knownEpoch = request.knownEpoch();
-        if (knownEpoch > topology.epoch())
+        long waitForEpoch = request.waitForEpoch();
+        if (waitForEpoch > topology.epoch())
         {
-            configService.fetchTopologyForEpoch(knownEpoch);
-            long waitForEpoch = request.waitForEpoch();
-            if (waitForEpoch > topology.epoch())
-            {
-                topology().awaitEpoch(waitForEpoch).addCallback(() -> receive(request, from, replyContext));
-                return;
-            }
+            configService.fetchTopologyForEpoch(waitForEpoch);
+            topology().awaitEpoch(waitForEpoch).addCallback(() -> receive(request, from, replyContext));
+            return;
         }
+
         Runnable processMsg = () -> {
             try
             {
