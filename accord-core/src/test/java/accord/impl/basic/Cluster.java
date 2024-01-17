@@ -37,8 +37,6 @@ import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
-import accord.config.LocalConfig;
-import accord.impl.MessageListener;
 import org.junit.jupiter.api.Assertions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,25 +45,27 @@ import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
+import accord.burn.random.FrequentLargeRange;
+import accord.config.LocalConfig;
+import accord.config.MutableLocalConfig;
 import accord.coordinate.TxnExecute;
 import accord.coordinate.TxnPersist;
-import accord.burn.random.FrequentLargeRange;
 import accord.impl.CoordinateDurabilityScheduling;
+import accord.impl.MessageListener;
 import accord.impl.PrefixedIntHashKey;
 import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TopologyFactory;
 import accord.impl.list.ListStore;
 import accord.local.AgentExecutor;
-import accord.local.Node;
 import accord.local.Node.Id;
+import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
 import accord.messages.Apply;
-import accord.config.MutableLocalConfig;
-import accord.messages.LocalMessage;
-import accord.messages.MessageType;
+import accord.messages.LocalRequest;
 import accord.messages.Message;
+import accord.messages.MessageType;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.messages.SafeCallback;
@@ -292,7 +292,7 @@ public class Cluster implements Scheduler
                 executorMap.put(id, nodeExecutor);
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(id, nodeExecutor, randomSupplier, topology, nodeMap::get, topologyUpdates);
                 BooleanSupplier isLoadedCheck = random.biasedUniformBools(0.5f);
-                Node node = new Node(id, messageSink, LocalMessage::process, configService, nowSupplier, NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, nowSupplier),
+                Node node = new Node(id, messageSink, LocalRequest::process, configService, nowSupplier, NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, nowSupplier),
                                      () -> new ListStore(id), new ShardDistributor.EvenSplit<>(8, ignore -> new PrefixedIntHashKey.Splitter()),
                                      nodeExecutor.agent(),
                                      randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,

@@ -65,7 +65,7 @@ import accord.coordinate.Persist;
 import accord.coordinate.RecoverWithRoute;
 import accord.messages.Apply;
 import accord.messages.Callback;
-import accord.messages.LocalMessage;
+import accord.messages.LocalRequest;
 import accord.messages.Reply;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
@@ -147,7 +147,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     private final Id id;
     private final MessageSink messageSink;
-    private final LocalMessage.Handler localMessageHandler;
+    private final LocalRequest.Handler localRequestHandler;
     private final ConfigurationService configService;
     private final TopologyManager topology;
     private final CommandStores commandStores;
@@ -168,7 +168,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     // TODO (expected, liveness): monitor the contents of this collection for stalled coordination, and excise them
     private final Map<TxnId, AsyncResult<? extends Outcome>> coordinating = new ConcurrentHashMap<>();
 
-    public Node(Id id, MessageSink messageSink, LocalMessage.Handler localMessageHandler,
+    public Node(Id id, MessageSink messageSink, LocalRequest.Handler localRequestHandler,
                 ConfigurationService configService, LongSupplier nowSupplier, ToLongFunction<TimeUnit> nowTimeUnit,
                 Supplier<DataStore> dataSupplier, ShardDistributor shardDistributor, Agent agent, RandomSource random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
                 Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory, Execute.Factory executionFactory, Persist.Factory persistFactory, Apply.Factory applyFactory,
@@ -177,7 +177,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.id = id;
         this.localConfig = localConfig;
         this.messageSink = messageSink;
-        this.localMessageHandler = localMessageHandler;
+        this.localRequestHandler = localRequestHandler;
         this.configService = configService;
         this.executionFactory = executionFactory;
         this.persistFactory = persistFactory;
@@ -529,9 +529,9 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         messageSink.send(to, send);
     }
 
-    public void localMessage(LocalMessage message)
+    public void localRequest(LocalRequest message)
     {
-        localMessageHandler.handle(message, this);
+        localRequestHandler.handle(message, this);
     }
 
     public void reply(Id replyingToNode, ReplyContext replyContext, Reply send, Throwable failure)
@@ -706,19 +706,16 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return future;
     }
 
-    public void receive (Request request, Id from, ReplyContext replyContext)
+    public void receive(Request request, Id from, ReplyContext replyContext)
     {
-        long knownEpoch = request.knownEpoch();
-        if (knownEpoch > topology.epoch())
+        long waitForEpoch = request.waitForEpoch();
+        if (waitForEpoch > topology.epoch())
         {
-            configService.fetchTopologyForEpoch(knownEpoch);
-            long waitForEpoch = request.waitForEpoch();
-            if (waitForEpoch > topology.epoch())
-            {
-                topology().awaitEpoch(waitForEpoch).addCallback(() -> receive(request, from, replyContext));
-                return;
-            }
+            configService.fetchTopologyForEpoch(waitForEpoch);
+            topology().awaitEpoch(waitForEpoch).addCallback(() -> receive(request, from, replyContext));
+            return;
         }
+
         Runnable processMsg = () -> {
             try
             {

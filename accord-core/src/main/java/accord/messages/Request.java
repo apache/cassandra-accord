@@ -23,7 +23,8 @@ import accord.local.Node.Id;
 
 public interface Request extends Message
 {
-    void process(Node on, Id from, ReplyContext replyContext);
     default long waitForEpoch() { return 0; }
-    default long knownEpoch() { return waitForEpoch(); }
+    void preProcess(Node on, Id from, ReplyContext replyContext);
+    void process(Node on, Id from, ReplyContext replyContext);
+
 }

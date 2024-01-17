@@ -28,7 +28,7 @@ import accord.messages.Request;
 public interface MessageSink
 {
     void send(Id to, Request request);
-    void send(Id to, Request request, AgentExecutor executor, Callback callback);
+    void send(Id to, Request request, AgentExecutor executor, Callback<?> callback);
     void reply(Id replyingToNode, ReplyContext replyContext, Reply reply);
     void replyWithUnknownFailure(Id replyingToNode, ReplyContext replyContext, Throwable failure);
 }

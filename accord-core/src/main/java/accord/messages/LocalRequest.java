@@ -19,13 +19,24 @@ package accord.messages;
 
 import accord.local.Node;
 import accord.local.PreLoadContext;
+import accord.local.SafeCommandStore;
+import accord.utils.MapReduceConsume;
 
-public interface LocalMessage extends Message, PreLoadContext
+import java.util.function.BiConsumer;
+
+public interface LocalRequest<R> extends Request, PreLoadContext, MapReduceConsume<SafeCommandStore, Void>
 {
+    /**
+     * Process the request without executing the callback
+     */
+    void process(Node on);
+
+    void process(Node on, BiConsumer<R, Throwable> callback);
+
+    BiConsumer<R, Throwable> callback();
+
     interface Handler
     {
-        void handle(LocalMessage message, Node node);
+        void handle(LocalRequest<?> message, Node node);
     }
-
-    void process(Node node);
 }

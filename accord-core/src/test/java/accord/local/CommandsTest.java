@@ -102,6 +102,12 @@ class CommandsTest
             cluster(rs::fork, nodes, initialTopology, nodeMap -> new Request()
             {
                 @Override
+                public void preProcess(Node on, Node.Id from, ReplyContext replyContext)
+                {
+                    // no-op
+                }
+
+                @Override
                 public void process(Node node, Node.Id from, ReplyContext replyContext)
                 {
                     Ranges localRange = Ranges.ofSortedAndDeoverlapped(prefix1); // make sure to use the range removed

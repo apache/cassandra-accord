@@ -50,7 +50,7 @@ import accord.local.ShardDistributor;
 import accord.messages.Apply;
 import accord.config.MutableLocalConfig;
 import accord.messages.Callback;
-import accord.messages.LocalMessage;
+import accord.messages.LocalRequest;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.messages.SafeCallback;
@@ -127,7 +127,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         LocalConfig localConfig = new MutableLocalConfig();
         Node node = new Node(id,
                              messageSink,
-                             LocalMessage::process,
+                             LocalRequest::process,
                              configurationService,
                              nowSupplier,
                              NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, nowSupplier),

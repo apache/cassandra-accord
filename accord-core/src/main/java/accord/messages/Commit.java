@@ -324,8 +324,15 @@ public class Commit extends TxnRequest<ReadNack>
         }
 
         @Override
+        public void preProcess(Node on, Id from, ReplyContext replyContext)
+        {
+            // no-op
+        }
+
+        @Override
         public void process(Node node, Id from, ReplyContext replyContext)
         {
+
             node.forEachLocal(this, scope, txnId.epoch(), invalidateUntilEpoch, safeStore -> {
                 // it's fine for this to operate on a non-participating home key, since invalidation is a terminal state,
                 // so it doesn't matter if we resurrect a redundant entry
