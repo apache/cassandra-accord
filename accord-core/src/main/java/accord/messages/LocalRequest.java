@@ -26,6 +26,11 @@ import java.util.function.BiConsumer;
 
 public interface LocalRequest<R> extends Request, PreLoadContext, MapReduceConsume<SafeCommandStore, Void>
 {
+    /**
+     * Process the request without executing the callback
+     */
+    void process(Node on);
+
     void process(Node on, BiConsumer<R, Throwable> callback);
 
     BiConsumer<R, Throwable> callback();

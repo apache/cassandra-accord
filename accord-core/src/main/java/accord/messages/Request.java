@@ -27,11 +27,4 @@ public interface Request extends Message
     void preProcess(Node on, Id from, ReplyContext replyContext);
     void process(Node on, Id from, ReplyContext replyContext);
 
-    /**
-     * Process the request without replying back
-     */
-    default void process(Node on)
-    {
-        throw new UnsupportedOperationException();
-    }
 }
