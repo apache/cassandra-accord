@@ -93,7 +93,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
         // set only if DepsUnknown or DepsProposed
         public final @Nullable Deps localDeps;
 
-        LatestEntry(Status.KnownDeps known, Ballot ballot, Deps coordinatedDeps, Deps localDeps)
+        public LatestEntry(Status.KnownDeps known, Ballot ballot, Deps coordinatedDeps, Deps localDeps)
         {
             super(known, ballot, coordinatedDeps);
             this.localDeps = localDeps;
