@@ -17,7 +17,6 @@
  */
 package accord.messages;
 
-import java.util.Set;
 import java.util.function.BiPredicate;
 import javax.annotation.Nullable;
 
