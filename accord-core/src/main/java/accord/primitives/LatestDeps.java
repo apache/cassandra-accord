@@ -41,6 +41,14 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
 {
     public static final LatestDeps EMPTY = new LatestDeps();
 
+    public static class SerializerSupport
+    {
+        public static <V> LatestDeps create(boolean inclusiveEnds, RoutingKey[] starts, LatestEntry[] values)
+        {
+            return new LatestDeps(inclusiveEnds, starts, values);
+        }
+    }
+
     public static class MergedCommitResult
     {
         public final Deps deps;

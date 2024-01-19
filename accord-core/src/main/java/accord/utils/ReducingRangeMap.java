@@ -35,9 +35,9 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
 
     public static class SerializerSupport
     {
-        public static <V> ReducingRangeMap<V> create(boolean inclusiveEnds, RoutingKey[] ends, V[] values)
+        public static <V> ReducingRangeMap<V> create(boolean inclusiveEnds, RoutingKey[] starts, V[] values)
         {
-            return new ReducingRangeMap<>(inclusiveEnds, ends, values);
+            return new ReducingRangeMap<>(inclusiveEnds, starts, values);
         }
     }
 
