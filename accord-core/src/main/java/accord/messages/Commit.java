@@ -180,7 +180,7 @@ public class Commit extends TxnRequest<CommitOrReadNack>
         Topology executes = executeEpochOnly.forEpoch(executeAt.epoch());
         Topology coordinates = all.forEpoch(txnId.epoch());
 
-        send(readSet, Set::contains, readScope, node, coordinates, executes, all, kind, Ballot.ZERO,
+        send(readSet, (set, id) -> set.contains(id.id), readScope, node, coordinates, executes, all, kind, Ballot.ZERO,
              txnId, txn, route, executeAt, stableDeps, callback);
     }
 
