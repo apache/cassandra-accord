@@ -485,7 +485,8 @@ public class ListStore implements DataStore
             return coordinate.recover(t -> {
                 // TODO (effecicency): backoff
                 if (t instanceof Timeout ||
-                    t instanceof RuntimeException && "NotCommitted".equals(t.getMessage()) ||
+                    // TODO (expected): why are we not simply handling Insufficient properly?
+                    t instanceof RuntimeException && "Insufficient".equals(t.getMessage()) ||
                     t instanceof SimulatedFault)
                     return coordinate(node, minEpoch, sp);
                 return null;
