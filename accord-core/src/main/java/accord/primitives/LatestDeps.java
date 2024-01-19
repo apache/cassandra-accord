@@ -53,11 +53,11 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
         }
     }
 
-    private static class AbstractEntry
+    public static class AbstractEntry
     {
-        final Status.KnownDeps known;
-        final Ballot ballot;
-        final @Nullable Deps coordinatedDeps;
+        public final Status.KnownDeps known;
+        public final Ballot ballot;
+        public final @Nullable Deps coordinatedDeps;
 
         private AbstractEntry(Status.KnownDeps known, Ballot ballot, Deps coordinatedDeps)
         {
@@ -88,10 +88,10 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
         }
     }
 
-    static class LatestEntry extends AbstractEntry
+    public static class LatestEntry extends AbstractEntry
     {
         // set only if DepsUnknown or DepsProposed
-        final @Nullable Deps localDeps;
+        public final @Nullable Deps localDeps;
 
         LatestEntry(Status.KnownDeps known, Ballot ballot, Deps coordinatedDeps, Deps localDeps)
         {
