@@ -106,7 +106,7 @@ public class Commit extends TxnRequest<CommitOrReadNack>
     // TODO (low priority, clarity): cleanup passing of topologies here - maybe fetch them afresh from Node?
     //                               Or perhaps introduce well-named classes to represent different topology combinations
 
-    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Ballot ballot, Timestamp executeAt, Deps deps, ReadTxnData read)
+    public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Ballot ballot, Timestamp executeAt, Deps deps, ReadData read)
     {
         this(kind, to, coordinateTopology, topologies, txnId, txn, route, ballot, executeAt, deps, read == null ? null : (u1, u2, u3) -> read);
     }
