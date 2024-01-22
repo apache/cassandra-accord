@@ -47,8 +47,8 @@ public enum Status
 {
     NotDefined        (None,      Nothing),
     PreAccepted       (PreAccept, DefinitionAndRoute),
-    AcceptedInvalidate(Accept,    Maybe,          DefinitionUnknown, ExecuteAtUnknown,  DepsUnknown,     Unknown), // may or may not have witnessed
-    Accepted          (Accept, Covering, DefinitionUnknown, ExecuteAtProposed, DepsProposed, Unknown), // may or may not have witnessed
+    AcceptedInvalidate(Accept,    Maybe,             DefinitionUnknown, ExecuteAtNotWitnessed, DepsUnknown,     Unknown), // may or may not have witnessed
+    Accepted          (Accept,    Covering,          DefinitionUnknown, ExecuteAtProposed,     DepsProposed, Unknown), // may or may not have witnessed
 
     /**
      * PreCommitted is a peculiar state, half-way between Accepted and Committed.
@@ -77,7 +77,7 @@ public enum Status
      */
     PreCommitted      (Accept,  Maybe, DefinitionUnknown, ExecuteAtKnown,   DepsUnknown,  Unknown),
 
-    Committed         (Commit, Full, DefinitionKnown, ExecuteAtKnown, DepsCommitted, Unknown),
+    Committed         (Commit, Full,   DefinitionKnown,   ExecuteAtKnown,   DepsCommitted, Unknown),
     Stable            (Execute, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,    Unknown),
     // TODO (expected): do we need ReadyToExecute here, or can we keep it to SaveStatus only?
     ReadyToExecute    (Execute, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,    Unknown),
@@ -124,7 +124,7 @@ public enum Status
      */
     public static class Known
     {
-        public static final Known Nothing            = new Known(Maybe, DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Unknown);
+        public static final Known Nothing            = new Known(Maybe, DefinitionUnknown, ExecuteAtNotWitnessed, DepsUnknown, Unknown);
         // TODO (expected): deprecate DefinitionOnly
         public static final Known DefinitionOnly     = new Known(Maybe, DefinitionKnown,   ExecuteAtUnknown, DepsUnknown, Unknown);
         public static final Known DefinitionAndRoute = new Known(Full,  DefinitionKnown,   ExecuteAtUnknown, DepsUnknown, Unknown);
@@ -465,6 +465,11 @@ public enum Status
 
     public enum KnownExecuteAt
     {
+        /**
+         * No decision is known to have been reached. The transaction has not been witnessed so executeAt is null.
+         */
+        ExecuteAtNotWitnessed,
+
         /**
          * No decision is known to have been reached. If executeAt is not null, it represents either when
          * the transaction was witnessed, or some earlier ExecuteAtProposed that was invalidated by AcceptedInvalidate

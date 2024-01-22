@@ -352,8 +352,11 @@ public abstract class Command implements CommonAttributes
                 switch (known.executeAt)
                 {
                     default: throw new AssertionError("Unhandled KnownExecuteAt: " + known.executeAt);
+                    case ExecuteAtNotWitnessed:
+                        Invariants.checkState(executeAt == null);
                     case ExecuteAtErased:
-                    case ExecuteAtUnknown: break;
+                    case ExecuteAtUnknown:
+                        break;
                     case ExecuteAtProposed:
                     case ExecuteAtKnown:
                         Invariants.checkState(executeAt != null && !executeAt.equals(Timestamp.NONE));
@@ -575,9 +578,7 @@ public abstract class Command implements CommonAttributes
     {
         if (status().hasBeen(Status.Truncated))
             return false;
-        boolean result = status().hasBeen(Status.PreAccepted);
-        Invariants.checkState(result == (this instanceof PreAccepted), "Unexpected type: %s, %s", this, this.getClass().getCanonicalName());
-        return result;
+        return status().hasBeen(Status.PreAccepted);
     }
 
     public final PreAccepted asWitnessed()
@@ -587,9 +588,7 @@ public abstract class Command implements CommonAttributes
 
     public final boolean isAccepted()
     {
-        boolean result = status().hasBeen(Status.AcceptedInvalidate);
-        Invariants.checkState(result == (this instanceof Accepted), "Unexpected type: %s, %s", this, this.getClass().getCanonicalName());
-        return result;
+        return status().hasBeen(Status.AcceptedInvalidate);
     }
 
     public final Accepted asAccepted()
@@ -599,9 +598,13 @@ public abstract class Command implements CommonAttributes
 
     public final boolean isCommitted()
     {
-        boolean result = status().hasBeen(Status.Committed);
-        Invariants.checkState(result == (this instanceof Committed), "Unexpected type: %s, %s", this, this.getClass().getCanonicalName());
-        return result;
+        SaveStatus saveStatus = saveStatus();
+        return saveStatus.hasBeen(Status.Committed) && !saveStatus.hasBeen(Invalidated);
+    }
+    public final boolean isStable()
+    {
+        SaveStatus saveStatus = saveStatus();
+        return saveStatus.hasBeen(Status.Stable) && !saveStatus.hasBeen(Invalidated);
     }
 
     public final Committed asCommitted()
@@ -616,9 +619,7 @@ public abstract class Command implements CommonAttributes
 
     public final boolean isTruncated()
     {
-        boolean result = status().hasBeen(Status.Truncated);
-        Invariants.checkState(result == (this instanceof Truncated), "Unexpected type: %s, %s", this, this.getClass().getCanonicalName());
-        return result;
+        return status().hasBeen(Status.Truncated);
     }
 
     public abstract Command updateAttributes(CommonAttributes attrs, Ballot promised);
@@ -1586,8 +1587,7 @@ public abstract class Command implements CommonAttributes
 
     static Command.Accepted acceptInvalidated(Command command, Ballot ballot)
     {
-        Timestamp executeAt = command.isDefined() ? command.asWitnessed().executeAt() : null;
-        return validate(new Command.Accepted(command, SaveStatus.get(Status.AcceptedInvalidate, command.known()), ballot, executeAt, command.partialTxn(), null, ballot));
+        return validate(new Command.Accepted(command, SaveStatus.get(Status.AcceptedInvalidate, command.known()), ballot, command.executeAt(), command.partialTxn(), null, ballot));
     }
 
     static Command.Committed commit(Command command, CommonAttributes attrs, Ballot ballot, Timestamp executeAt)

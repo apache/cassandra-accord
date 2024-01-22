@@ -403,19 +403,19 @@ public class Commands
         return CommitOutcome.Success;
     }
 
-    public static void commitRecipientLocalSyncPoint(SafeCommandStore safeStore, TxnId localSyncId, SyncPoint syncPoint, Seekables<?, ?> keys)
+    public static void stableRecipientLocalSyncPoint(SafeCommandStore safeStore, TxnId localSyncId, SyncPoint syncPoint, Seekables<?, ?> keys)
     {
         SafeCommand safeCommand = safeStore.get(localSyncId);
         Command command = safeCommand.current();
         Invariants.checkState(!command.hasBeen(Committed));
-        commitRecipientLocalSyncPoint(safeStore, localSyncId, keys, syncPoint.route());
+        stableRecipientLocalSyncPoint(safeStore, localSyncId, keys, syncPoint.route());
     }
 
-    private static void commitRecipientLocalSyncPoint(SafeCommandStore safeStore, TxnId localSyncId, Seekables<?, ?> keys, Route<?> route)
+    private static void stableRecipientLocalSyncPoint(SafeCommandStore safeStore, TxnId localSyncId, Seekables<?, ?> keys, Route<?> route)
     {
         SafeCommand safeCommand = safeStore.get(localSyncId);
         Command command = safeCommand.current();
-        if (command.hasBeen(Committed))
+        if (command.hasBeen(Stable))
             return;
 
         Ranges coordinateRanges = coordinateRanges(safeStore, localSyncId);

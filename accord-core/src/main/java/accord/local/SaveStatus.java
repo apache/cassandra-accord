@@ -60,13 +60,13 @@ public enum SaveStatus
     // This means voters recovering an earlier transaction will not consider the record when excluding the possibility of a fast-path commit.
     // This is safe, because any Accept that may override the AcceptedInvalidate will construct new Deps that must now witness the recovering transaction.
     AcceptedInvalidate              (Status.AcceptedInvalidate),
-    AcceptedInvalidateWithDefinition(Status.AcceptedInvalidate,    Full,     DefinitionKnown,   ExecuteAtUnknown,  DepsUnknown,     Unknown),
+    AcceptedInvalidateWithDefinition(Status.AcceptedInvalidate,    Full,     DefinitionKnown,   ExecuteAtUnknown,  DepsUnknown,  Unknown),
     Accepted                        (Status.Accepted),
-    AcceptedWithDefinition          (Status.Accepted, Full, DefinitionKnown, ExecuteAtProposed, DepsProposed, Unknown),
+    AcceptedWithDefinition          (Status.Accepted,              Full,     DefinitionKnown,   ExecuteAtProposed, DepsProposed, Unknown),
     PreCommitted                    (Status.PreCommitted,                                                                                          LocalExecution.ReadyToExclude),
-    PreCommittedWithAcceptedDeps    (Status.PreCommitted, Covering, DefinitionUnknown, ExecuteAtKnown, DepsProposed, Unknown, LocalExecution.ReadyToExclude),
-    PreCommittedWithDefinition      (Status.PreCommitted,          Full,     DefinitionKnown,   ExecuteAtKnown,    DepsUnknown,     Unknown,       LocalExecution.ReadyToExclude),
-    PreCommittedWithDefinitionAndAcceptedDeps(Status.PreCommitted, Full, DefinitionKnown, ExecuteAtKnown, DepsProposed, Unknown, LocalExecution.ReadyToExclude),
+    PreCommittedWithAcceptedDeps    (Status.PreCommitted,          Covering, DefinitionUnknown, ExecuteAtKnown,    DepsProposed, Unknown,          LocalExecution.ReadyToExclude),
+    PreCommittedWithDefinition      (Status.PreCommitted,          Full,     DefinitionKnown,   ExecuteAtKnown,    DepsUnknown,  Unknown,          LocalExecution.ReadyToExclude),
+    PreCommittedWithDefinitionAndAcceptedDeps(Status.PreCommitted, Full,     DefinitionKnown,   ExecuteAtKnown,    DepsProposed, Unknown,          LocalExecution.ReadyToExclude),
     Committed                       (Status.Committed,                                                                                             LocalExecution.WaitingToExecute),
     Stable                          (Status.Stable,                                                                                                LocalExecution.WaitingToExecute),
     ReadyToExecute                  (Status.ReadyToExecute,                                                                                        LocalExecution.ReadyToExecute),
@@ -76,14 +76,14 @@ public enum SaveStatus
     Applied                         (Status.Applied,                                                                                               LocalExecution.Applied),
     // TruncatedApplyWithDeps is a state never adopted within a single replica; it is however a useful state we may enter by combining state from multiple replicas
     // TODO (expected): TruncatedApplyWithDeps should be redundant now we have migrated away from SaveStatus in CheckStatusOk to Known; remove in isolated commit once stable
-    TruncatedApplyWithDeps          (Status.Truncated,             Full,    DefinitionErased, ExecuteAtKnown,    DepsKnown,    Outcome.Apply,    CleaningUp),
-    TruncatedApplyWithOutcome       (Status.Truncated,             Full,    DefinitionErased, ExecuteAtKnown,    DepsErased,   Outcome.Apply,    CleaningUp),
-    TruncatedApply                  (Status.Truncated,             Full,    DefinitionErased, ExecuteAtKnown,    DepsErased,   Outcome.WasApply, CleaningUp),
+    TruncatedApplyWithDeps          (Status.Truncated,             Full,    DefinitionErased,   ExecuteAtKnown,    DepsKnown,    Outcome.Apply,    CleaningUp),
+    TruncatedApplyWithOutcome       (Status.Truncated,             Full,    DefinitionErased,   ExecuteAtKnown,    DepsErased,   Outcome.Apply,    CleaningUp),
+    TruncatedApply                  (Status.Truncated,             Full,    DefinitionErased,   ExecuteAtKnown,    DepsErased,   Outcome.WasApply, CleaningUp),
     // ErasedOrInvalidated means the command is redundant for the shard and data being queried, but no FullRoute is known, so it is not known to be globally Erased
-    ErasedOrInvalidated             (Status.Truncated,             Maybe,   DefinitionUnknown,ExecuteAtUnknown,  DepsUnknown,  Unknown,          CleaningUp),
+    ErasedOrInvalidated             (Status.Truncated,             Maybe,   DefinitionUnknown,  ExecuteAtUnknown,  DepsUnknown,  Unknown,          CleaningUp),
     // NOTE: Erased should ONLY be adopted on a replica that knows EVERY shard has successfully applied the transaction at all healthy replicas.
-    Erased                          (Status.Truncated,             Maybe,   DefinitionErased, ExecuteAtErased,   DepsErased,   Outcome.Erased,   CleaningUp),
-    Invalidated                     (Status.Invalidated,                                                                                         CleaningUp),
+    Erased                          (Status.Truncated,             Maybe,   DefinitionErased,   ExecuteAtErased,   DepsErased,   Outcome.Erased,   CleaningUp),
+    Invalidated                     (Status.Invalidated,                                                                                           CleaningUp),
     ;
 
     /**
