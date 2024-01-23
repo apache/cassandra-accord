@@ -1090,7 +1090,7 @@ public class Commands
                 }
             }
             for (int i = 1 ; i <= depth ; ++i)
-                get(safeStore, i).addListener(get(safeStore, i - 1).current().asListener());
+                initialise(safeStore, i).addListener(get(safeStore, i - 1).current().asListener());
         }
 
         private SafeCommand ifInitialised(SafeCommandStore safeStore, int i)
