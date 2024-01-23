@@ -404,6 +404,22 @@ public abstract class Command implements CommonAttributes
                         break;
                 }
             }
+            switch (validate.saveStatus().execution)
+            {
+                case NotReady:
+                case CleaningUp:
+                    break;
+                case ReadyToExclude:
+                    Invariants.checkState(validate.asCommitted().waitingOn == null);
+                    break;
+                case WaitingToExecute:
+                case ReadyToExecute:
+                case Applied:
+                case Applying:
+                case WaitingToApply:
+                    Invariants.checkState(validate.asCommitted().waitingOn != null);
+                    break;
+            }
             return validate;
         }
     }

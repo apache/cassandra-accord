@@ -67,7 +67,7 @@ public enum SaveStatus
     PreCommittedWithAcceptedDeps    (Status.PreCommitted,          Covering, DefinitionUnknown, ExecuteAtKnown,    DepsProposed, Unknown,          LocalExecution.ReadyToExclude),
     PreCommittedWithDefinition      (Status.PreCommitted,          Full,     DefinitionKnown,   ExecuteAtKnown,    DepsUnknown,  Unknown,          LocalExecution.ReadyToExclude),
     PreCommittedWithDefinitionAndAcceptedDeps(Status.PreCommitted, Full,     DefinitionKnown,   ExecuteAtKnown,    DepsProposed, Unknown,          LocalExecution.ReadyToExclude),
-    Committed                       (Status.Committed,                                                                                             LocalExecution.WaitingToExecute),
+    Committed                       (Status.Committed,                                                                                             LocalExecution.ReadyToExclude),
     Stable                          (Status.Stable,                                                                                                LocalExecution.WaitingToExecute),
     ReadyToExecute                  (Status.ReadyToExecute,                                                                                        LocalExecution.ReadyToExecute),
     PreApplied                      (Status.PreApplied,                                                                                            LocalExecution.WaitingToApply),
