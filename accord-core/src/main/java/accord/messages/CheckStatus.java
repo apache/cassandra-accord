@@ -437,7 +437,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
 
         public Ranges matchingRanges(Predicate<FoundKnown> match)
         {
-            return foldlWithBounds((known, ranges, start, end) -> match.test(known) ? ranges.with(Ranges.of(start.asRange().newRange(start, end))) : ranges, Ranges.EMPTY, i -> false);
+            return foldlWithBounds((known, ranges, start, end) -> match.test(known) ? ranges.with(Ranges.of(start.rangeFactory().newRange(start, end))) : ranges, Ranges.EMPTY, i -> false);
         }
 
         private static FoundKnown reduceInferredOrKnownForWithQuorum(FoundKnown foundKnown, @Nullable FoundKnown prev)
@@ -474,7 +474,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
                 if (!required.isSatisfiedBy(known))
                     return prev;
 
-                return prev.with(Ranges.of(start.asRange().newRange(start, end)));
+                return prev.with(Ranges.of(start.rangeFactory().newRange(start, end)));
             }, Ranges.EMPTY, i -> false);
         }
 

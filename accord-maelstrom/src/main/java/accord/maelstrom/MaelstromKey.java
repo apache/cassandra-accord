@@ -24,6 +24,7 @@ import java.util.Objects;
 import accord.api.RoutingKey;
 
 import accord.local.ShardDistributor;
+import accord.primitives.RangeFactory;
 import accord.primitives.RoutableKey;
 import accord.utils.Invariants;
 import com.google.gson.TypeAdapter;
@@ -148,6 +149,12 @@ public class MaelstromKey implements RoutableKey
         {
             return new Range(new Routing(datum.hashCode() - 1),
                              new Routing(datum.hashCode()));
+        }
+
+        @Override
+        public RangeFactory rangeFactory()
+        {
+            return Range::new;
         }
     }
 

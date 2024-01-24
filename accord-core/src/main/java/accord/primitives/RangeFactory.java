@@ -16,16 +16,11 @@
  * limitations under the License.
  */
 
-package accord.api;
+package accord.primitives;
 
-import accord.primitives.Range;
-import accord.primitives.RangeFactory;
-import accord.primitives.RoutableKey;
-import accord.primitives.Unseekable;
+import accord.api.RoutingKey;
 
-public interface RoutingKey extends Unseekable, RoutableKey
+public interface RangeFactory
 {
-    @Override default RoutingKey toUnseekable() { return this; }
-    Range asRange();
-    RangeFactory rangeFactory();
+    Range newRange(RoutingKey start, RoutingKey end);
 }

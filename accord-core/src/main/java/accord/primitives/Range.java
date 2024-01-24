@@ -35,7 +35,7 @@ import static accord.utils.SortedArrays.Search.FAST;
 /**
  * A range of keys
  */
-public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seekable
+public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seekable, RangeFactory
 {
     public static class EndInclusive extends Range
     {

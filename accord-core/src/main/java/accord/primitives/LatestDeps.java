@@ -134,7 +134,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
             if (!slice) slice = rangeDeps.indexOfStart(start) != -1 || rangeDeps.indexOfStart(end) != -1 - rangeDeps.rangeCount();
             if (!slice) return deps;
 
-            Ranges ranges = Ranges.of(start.asRange().newRange(start, end));
+            Ranges ranges = Ranges.of(start.rangeFactory().newRange(start, end));
             return new Deps(keyDeps.slice(ranges), rangeDeps.slice(ranges));
         }
 
@@ -327,7 +327,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
 
         private <V> Stream<V> stream(TriFunction<Ranges, MergeEntry, BiFunction<Deps, Ranges, V>, Stream<V>> selector, BiFunction<Deps, Ranges, V> getter)
         {
-            Range rangeFactory = starts[0].asRange();
+            RangeFactory rangeFactory = starts[0].rangeFactory();
             return IntStream.range(0, size())
                             .filter(i -> values[i] != null)
                             .mapToObj(i -> selector.apply(Ranges.of(rangeFactory.newRange(starts[i], starts[i+1])), values[i], getter))

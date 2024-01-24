@@ -25,6 +25,7 @@ import javax.annotation.Nonnull;
 
 import accord.api.RoutingKey;
 import accord.local.ShardDistributor;
+import accord.primitives.RangeFactory;
 import accord.primitives.Ranges;
 import accord.primitives.RoutableKey;
 import accord.utils.CRCUtils;
@@ -126,6 +127,12 @@ public class PrefixedIntHashKey implements RoutableKey
         private PrefixedIntRoutingKey(int prefix, int key, boolean isHash)
         {
             super(prefix, key, isHash);
+        }
+
+        @Override
+        public RangeFactory rangeFactory()
+        {
+            return (s, e) -> new Range((PrefixedIntRoutingKey) s, (PrefixedIntRoutingKey) e);
         }
     }
 

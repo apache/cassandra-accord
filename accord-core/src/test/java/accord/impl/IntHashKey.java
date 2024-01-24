@@ -25,6 +25,7 @@ import java.util.zip.CRC32;
 
 import accord.api.RoutingKey;
 import accord.local.ShardDistributor;
+import accord.primitives.RangeFactory;
 import accord.primitives.RoutableKey;
 import accord.primitives.Ranges;
 import accord.primitives.Keys;
@@ -127,6 +128,12 @@ public abstract class IntHashKey implements RoutableKey
         public accord.primitives.Range asRange()
         {
             return new Range(new Hash(hash - 1), new Hash(hash));
+        }
+
+        @Override
+        public RangeFactory rangeFactory()
+        {
+            return (s, e) -> new Range((Hash) s, (Hash) e);
         }
     }
 

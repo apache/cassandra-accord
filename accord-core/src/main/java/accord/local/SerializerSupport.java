@@ -73,6 +73,7 @@ public class SerializerSupport
             case PreCommitted:
                 return accepted(attrs, status, executeAt, promised, accepted, messageProvider);
             case Committed:
+            case Stable:
             case ReadyToExecute:
                 return committed(attrs, status, executeAt, promised, accepted, waitingOnProvider, messageProvider);
             case PreApplied:
