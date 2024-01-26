@@ -211,12 +211,12 @@ public class SerializabilityVerifier
             for (int i = 0, max = Math.min(sequence.length, this.sequence.length) ; i < max ; ++i)
             {
                 if (sequence[i] != this.sequence[i])
-                    throw new HistoryViolation(key, "Inconsistent sequences: " + Arrays.toString(this.sequence) + " vs " + Arrays.toString(sequence));
+                    throw new HistoryViolation("", key, "Inconsistent sequences: " + Arrays.toString(this.sequence) + " vs " + Arrays.toString(sequence));
             }
             if (this.sequence.length > sequence.length)
             {
                 if (maybeWrite >= 0 && maybeWrite != this.sequence[sequence.length])
-                    throw new HistoryViolation(key, "Inconsistent sequences: " + Arrays.toString(this.sequence) + " vs " + Arrays.toString(sequence) + "+" + maybeWrite);
+                    throw new HistoryViolation("", key, "Inconsistent sequences: " + Arrays.toString(this.sequence) + " vs " + Arrays.toString(sequence) + "+" + maybeWrite);
             }
             else
             {
@@ -354,7 +354,7 @@ public class SerializabilityVerifier
         void onChange(Step step)
         {
             if (step.maxPredecessor(key).predecessorStepIndex >= step.ofStepIndex)
-                throw new HistoryViolation(key, "Cycle detected on key " + key + ", step " + step.ofStepIndex + " " + Arrays.toString(Arrays.copyOf(sequence, step.ofStepIndex)));
+                throw new HistoryViolation("", key, "Cycle detected on key " + key + ", step " + step.ofStepIndex + " " + Arrays.toString(Arrays.copyOf(sequence, step.ofStepIndex)));
 
             step.forEach(refresh::add);
             if (step.successor != null)

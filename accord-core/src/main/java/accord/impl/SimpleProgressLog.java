@@ -484,6 +484,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
         State ensure(TxnId txnId)
         {
+            Invariants.checkState(txnId.kind().isGloballyVisible());
             return stateMap.computeIfAbsent(txnId, ignored -> {
                 node.agent().metricsEventsListener().onProgressLogSizeChange(txnId, 1);
                 return new State(txnId);
@@ -625,7 +626,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
         @Override
         public void waiting(SafeCommand blockedBy, LocalExecution blockedUntil, Route<?> blockedOnRoute, Participants<?> blockedOnParticipants)
         {
-            if (blockedBy.txnId().kind().isLocal())
+            if (!blockedBy.txnId().kind().isGloballyVisible())
                 return;
 
             // ensure we have a record to work with later; otherwise may think has been truncated

@@ -37,6 +37,7 @@ import java.util.function.ToLongFunction;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import accord.coordinate.CoordinateEphemeralRead;
 import accord.utils.DeterministicSet;
 import accord.utils.Invariants;
 import com.google.common.annotations.VisibleForTesting;
@@ -599,7 +600,17 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     private AsyncResult<Result> initiateCoordination(TxnId txnId, Txn txn)
     {
-        return CoordinateTransaction.coordinate(this, txnId, txn, computeRoute(txnId, txn.keys()));
+        if (txnId.kind() == Txn.Kind.EphemeralRead)
+        {
+            // TODO (expected): once non-participating home keys are removed, this can be simplified to share computeRoute
+            FullRoute<?> route = txn.keys().toRoute(txn.keys().get(0).someIntersectingRoutingKey(null));
+            return CoordinateEphemeralRead.coordinate(this, route, txnId, txn);
+        }
+        else
+        {
+            FullRoute<?> route = computeRoute(txnId, txn.keys());
+            return CoordinateTransaction.coordinate(this, route, txnId, txn);
+        }
     }
 
     public FullRoute<?> computeRoute(TxnId txnId, Seekables<?, ?> keysOrRanges)

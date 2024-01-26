@@ -20,34 +20,44 @@ package accord.messages;
 
 import accord.local.Node;
 import accord.primitives.Participants;
-import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
+import static accord.local.SaveStatus.ReadyToExecute;
+
 // TODO (required, efficiency): dedup - can currently have infinite pending reads that will be executed independently
-public class ReadTxnData extends AbstractExecute
+public class ReadTxnData extends ReadData
 {
     public static class SerializerSupport
     {
-        public static ReadTxnData create(TxnId txnId, Participants<?> scope, long executeAtEpoch, long waitForEpoch)
+        public static ReadTxnData create(TxnId txnId, Participants<?> scope, long executeAtEpoch)
         {
-            return new ReadTxnData(txnId, scope, executeAtEpoch, waitForEpoch);
+            return new ReadTxnData(txnId, scope, executeAtEpoch);
         }
     }
 
-    public ReadTxnData(Node.Id to, Topologies topologies, TxnId txnId, Participants<?> readScope, Timestamp executeAt)
+    private static final ExecuteOn EXECUTE_ON = new ExecuteOn(ReadyToExecute, ReadyToExecute);
+
+    public ReadTxnData(Node.Id to, Topologies topologies, TxnId txnId, Participants<?> readScope, long executeAtEpoch)
     {
-        super(to, topologies, txnId, readScope, executeAt);
+        super(to, topologies, txnId, readScope, executeAtEpoch);
     }
 
-    public ReadTxnData(TxnId txnId, Participants<?> readScope, long waitForEpoch, long executeAtEpoch)
+    public ReadTxnData(TxnId txnId, Participants<?> readScope, long executeAtEpoch)
     {
-        super(txnId, readScope, waitForEpoch, executeAtEpoch);
+        super(txnId, readScope, executeAtEpoch);
     }
 
-    protected boolean canExecutePreApplied()
+    @Override
+    protected ExecuteOn executeOn()
     {
-        return false;
+        return EXECUTE_ON;
+    }
+
+    @Override
+    public ReadType kind()
+    {
+        return ReadType.readTxnData;
     }
 
     @Override

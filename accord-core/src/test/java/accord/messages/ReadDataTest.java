@@ -301,7 +301,7 @@ class ReadDataTest
         ReplyContext process()
         {
             ReplyContext replyContext = Mockito.mock(ReplyContext.class);
-            ReadData readData = new ReadTxnData(node.id(), TOPOLOGIES, txnId, keys.toParticipants(), txnId);
+            ReadData readData = new ReadTxnData(node.id(), TOPOLOGIES, txnId, keys.toParticipants(), txnId.epoch());
             readData.process(node, node.id(), replyContext);
             return replyContext;
         }

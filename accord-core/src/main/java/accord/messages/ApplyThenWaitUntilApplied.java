@@ -18,6 +18,8 @@
 
 package accord.messages;
 
+import javax.annotation.Nullable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -65,7 +67,7 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
 
     ApplyThenWaitUntilApplied(TxnId txnId, PartialRoute<?> route, PartialDeps deps, Seekables<?, ?> partialTxnKeys, Writes writes, Result txnResult, boolean notifyAgent)
     {
-        super(txnId, partialTxnKeys.toParticipants(), txnId, txnId.epoch());
+        super(txnId, partialTxnKeys.toParticipants(), txnId.epoch());
         this.route = route;
         this.deps = deps;
         this.writes = writes;
@@ -104,16 +106,18 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     protected void readComplete(CommandStore commandStore, Data readResult, Ranges unavailable)
     {
         logger.trace("{}: readComplete ApplyThenWaitUntilApplied", txnId);
+        // TODO (required): why is this submitting to an executor?
         commandStore.execute(PreLoadContext.contextFor(txnId), safeStore -> {
             super.readComplete(commandStore, readResult, unavailable);
         }).begin(node.agent());
     }
 
     @Override
-    protected void onAllReadsComplete()
+    protected void onAllSuccess(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Throwable fail)
     {
         if (notifyAgent)
             node.agent().onLocalBarrier(partialTxnKeys, txnId);
+        super.onAllSuccess(unavailable, data, fail);
     }
 
     @Override

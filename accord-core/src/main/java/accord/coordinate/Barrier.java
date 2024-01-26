@@ -41,7 +41,7 @@ import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
 import static accord.local.PreLoadContext.contextFor;
-import static accord.primitives.Txn.Kind.Kinds.Any;
+import static accord.primitives.Txn.Kind.Kinds.AnyGloballyVisible;
 import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.checkState;
 import static accord.utils.Invariants.illegalState;
@@ -255,7 +255,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
                     // Barriers are trying to establish that committed transactions are applied before the barrier (or in this case just minEpoch)
                     // so all existing transaction types should ensure that at this point. An earlier txnid may have an executeAt that is after
                     // this barrier or the transaction we listen on and that is fine
-                    Any,
+                    AnyGloballyVisible,
                     TestTimestamp.EXECUTES_AFTER,
                     TxnId.minForEpoch(minEpoch),
                     TestDep.ANY_DEPS,

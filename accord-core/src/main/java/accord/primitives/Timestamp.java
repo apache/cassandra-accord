@@ -161,7 +161,7 @@ public class Timestamp implements Comparable<Timestamp>, EpochSupplier
         return minHlc <= hlc() ? this : new Timestamp(epoch(), minHlc, flags(), node);
     }
 
-    public Timestamp withStaleEpoch(long epoch)
+    public Timestamp withEpoch(long epoch)
     {
         return epoch == epoch() ? this : new Timestamp(epoch, hlc(), flags(), node);
     }

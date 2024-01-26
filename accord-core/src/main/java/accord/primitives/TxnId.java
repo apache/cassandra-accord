@@ -104,9 +104,9 @@ public class TxnId extends Timestamp
         return new TxnId(epoch(), hlc(), kind, domain(), node);
     }
 
-    public TxnId withStaleEpoch(long epoch)
+    public TxnId withEpoch(long epoch)
     {
-        return new TxnId(epoch, hlc(), flags(), node);
+        return epoch == epoch() ? this : new TxnId(epoch, hlc(), flags(), node);
     }
 
     @Override

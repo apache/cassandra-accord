@@ -319,6 +319,19 @@ public abstract class CommandStores
 
             return latest == -1 ? null : constant(latest);
         }
+
+        public Ranges removed(long presentIn, long removedByInclusive)
+        {
+            int i = Math.max(1, floorIndex(presentIn));
+            int maxi = Math.max(1, floorIndex(removedByInclusive));
+            Ranges removed = Ranges.EMPTY;
+            while (i < maxi)
+            {
+                removed = removed.with(ranges[i - 1].subtract(ranges[i]));
+                ++i;
+            }
+            return removed;
+        }
     }
 
     static class Snapshot

@@ -37,7 +37,7 @@ import accord.messages.MessageType;
 import accord.messages.ReadData.CommitOrReadNack;
 import accord.messages.ReadData.ReadOk;
 import accord.messages.ReadData.ReadReply;
-import accord.messages.WaitAndReadData;
+import accord.messages.WaitUntilAppliedAndReadData;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Ranges;
@@ -231,7 +231,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         // TODO (required, later): implement abort
     }
 
-    public static class FetchRequest extends WaitAndReadData
+    public static class FetchRequest extends WaitUntilAppliedAndReadData
     {
         public final PartialDeps partialDeps;
         public final boolean collectMaxApplied;
@@ -239,7 +239,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
 
         public FetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn, boolean collectMaxApplied)
         {
-            super(syncId, ranges, syncId, sourceEpoch, partialTxn);
+            super(syncId, ranges, sourceEpoch, partialTxn);
             this.partialDeps = partialDeps;
             this.collectMaxApplied = collectMaxApplied;
         }
@@ -275,7 +275,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         }
 
         @Override
-        protected void reply(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Throwable fail)
+        protected void onAllSuccess(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Throwable fail)
         {
             // TODO (review): If the fetch response actually does some streaming, but we send back the error
             // it is a lot of work and data that might move and be unaccounted for at the coordinator

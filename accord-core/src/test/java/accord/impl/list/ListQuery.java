@@ -60,6 +60,6 @@ public class ListQuery implements Query
             if (i >= 0)
                 values[i] = e.getValue().data;
         }
-        return new ListResult(ListResult.Status.Applied, client, requestId, txnId, read.readKeys, responseKeys, values, (ListUpdate) update);
+        return new ListResult(ListResult.Status.Applied, client, requestId, txnId, read.userReadKeys, responseKeys, values, (ListUpdate) update);
     }
 }

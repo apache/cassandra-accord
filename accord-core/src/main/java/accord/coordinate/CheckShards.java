@@ -26,6 +26,7 @@ import accord.messages.CheckStatus.CheckStatusReply;
 import accord.messages.CheckStatus.IncludeInfo;
 import accord.primitives.*;
 import accord.topology.Topologies;
+import accord.utils.Invariants;
 
 import static accord.utils.Invariants.illegalState;
 
@@ -51,6 +52,7 @@ public abstract class CheckShards<U extends Unseekables<?>> extends ReadCoordina
     protected CheckShards(Node node, TxnId txnId, U route, IncludeInfo includeInfo)
     {
         this(node, txnId, route, txnId.epoch(), includeInfo);
+        Invariants.checkState(txnId.kind().isGloballyVisible());
     }
 
     protected CheckShards(Node node, TxnId txnId, U route, long srcEpoch, IncludeInfo includeInfo)

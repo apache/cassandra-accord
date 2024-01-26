@@ -60,9 +60,9 @@ public class ProposeSyncPoint<S extends Seekables<?, ?>> extends Propose<SyncPoi
         this.keysOrRanges = keysOrRanges;
     }
 
-    public static <S extends Seekables<?, ?>> Propose<SyncPoint<S>> proposeSyncPoint(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Deps deps, Timestamp executeAt, BiConsumer<SyncPoint<S>, Throwable> callback, boolean async, Set<Id> fastPathNodes, S keysOrRanges)
+    public static <S extends Seekables<?, ?>> Propose<SyncPoint<S>> proposeSyncPoint(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Deps deps, BiConsumer<SyncPoint<S>, Throwable> callback, boolean async, Set<Id> fastPathNodes, S keysOrRanges)
     {
-        ProposeSyncPoint proposeSyncPoint = new ProposeSyncPoint(node, topologies, ballot, txnId, txn, route, deps, executeAt, callback, async, fastPathNodes, keysOrRanges);
+        ProposeSyncPoint proposeSyncPoint = new ProposeSyncPoint(node, topologies, ballot, txnId, txn, route, deps, txnId, callback, async, fastPathNodes, keysOrRanges);
         proposeSyncPoint.start();
         return proposeSyncPoint;
     }

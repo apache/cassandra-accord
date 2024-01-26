@@ -120,7 +120,7 @@ class Bootstrap
         void start(SafeCommandStore safeStore0)
         {
             globalSyncId = node.nextTxnId(ExclusiveSyncPoint, Routable.Domain.Range);
-            localSyncId = globalSyncId.as(LocalOnly).withStaleEpoch(epoch);
+            localSyncId = globalSyncId.as(LocalOnly).withEpoch(epoch);
 
             if (!node.topology().hasEpoch(globalSyncId.epoch()))
             {
@@ -135,19 +135,20 @@ class Bootstrap
             store.markBootstrapping(safeStore0, globalSyncId, valid);
             CoordinateSyncPoint.exclusive(node, globalSyncId, commitRanges)
                // TODO (required, correcness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
+               // TODO (required): is localSyncId even being used anymore
                // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
                .flatMap(syncPoint -> node.withEpoch(epoch, () -> store.submit(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.DEPS), safeStore1 -> {
                    if (valid.isEmpty()) // we've lost ownership of the range
                        return AsyncResults.success(Ranges.EMPTY);
 
-                   Commands.stableRecipientLocalSyncPoint(safeStore1, localSyncId, syncPoint, valid);
+                   Commands.createBootstrapCompleteMarkerTransaction(safeStore1, localSyncId, syncPoint, valid);
                    safeStore1.registerHistoricalTransactions(syncPoint.waitFor);
                    return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this);
                })))
                .flatMap(i -> i)
                .flatMap(ranges -> store.execute(contextFor(localSyncId), safeStore -> {
                    if (!ranges.isEmpty())
-                       Commands.applyRecipientLocalSyncPoint(safeStore, localSyncId, ranges);
+                       Commands.markBootstrapComplete(safeStore, localSyncId, ranges);
                }))
                .begin(this);
         }

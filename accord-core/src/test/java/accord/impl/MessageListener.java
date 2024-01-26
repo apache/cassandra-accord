@@ -22,7 +22,7 @@ import accord.impl.basic.NodeSink;
 import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.messages.Message;
-import accord.messages.ReadData;
+import accord.messages.ReadData.ReadOk;
 import accord.messages.Request;
 import accord.messages.SimpleReply;
 import accord.messages.TxnRequest;
@@ -96,7 +96,7 @@ public interface MessageListener
             if (txnIdFilter.isEmpty() || containsTxnId(from, to, id, message))
             {
                 Object detailed = message;
-                if (message.getClass() == SimpleReply.class || message.getClass() == ReadData.ReadOk.class)
+                if (message.getClass() == SimpleReply.class || message.getClass() == ReadOk.class)
                 {
                     Request req = txnReplies.get(new TxnReplyId(to, from, id));
                     detailed = req != null ? detailed + " to " + req : detailed + " to unknown request";

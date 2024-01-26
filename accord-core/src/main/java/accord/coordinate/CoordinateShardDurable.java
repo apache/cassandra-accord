@@ -23,6 +23,7 @@ import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node;
 import accord.messages.Callback;
 import accord.messages.ReadData;
+import accord.messages.ReadData.ReadReply;
 import accord.messages.SetShardDurable;
 import accord.messages.WaitUntilApplied;
 import accord.primitives.Ranges;
@@ -34,7 +35,7 @@ import accord.utils.async.AsyncResults.SettableResult;
 /**
  *
  */
-public class CoordinateShardDurable extends SettableResult<Void> implements Callback<ReadData.ReadReply>
+public class CoordinateShardDurable extends SettableResult<Void> implements Callback<ReadReply>
 {
     final Node node;
     final AppliedTracker tracker;
@@ -58,11 +59,11 @@ public class CoordinateShardDurable extends SettableResult<Void> implements Call
 
     private void start()
     {
-        node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), exclusiveSyncPoint.syncId, exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.syncId), this);
+        node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), exclusiveSyncPoint.syncId, exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.syncId.epoch()), this);
     }
 
     @Override
-    public void onSuccess(Node.Id from, ReadData.ReadReply reply)
+    public void onSuccess(Node.Id from, ReadReply reply)
     {
         if (!reply.isOk())
         {

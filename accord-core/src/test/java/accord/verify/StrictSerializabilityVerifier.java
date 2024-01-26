@@ -279,7 +279,7 @@ public class StrictSerializabilityVerifier implements Verifier
             writtenAfter = Integer.MIN_VALUE;
         }
 
-        boolean witnessedBetween(int start, int end, boolean isWrite)
+        boolean witnessedBetween(int start, int end, boolean isWrite, StrictSerializabilityVerifier verifier)
         {
             boolean updated = false;
             if (start > witnessedUntil)
@@ -301,7 +301,7 @@ public class StrictSerializabilityVerifier implements Verifier
                     // TODO (low priority): double check this will trigger an update of maxPredecessorX properties on each node with us as a maxPredecessor
                 }
                 if (writtenAfter > writtenBefore)
-                    throw new HistoryViolation(ofKey, "Write operation time conflicts with earlier read");
+                    throw new HistoryViolation(verifier.prefix, ofKey, "Write operation time conflicts with earlier read");
             }
             return updated;
         }
@@ -438,7 +438,7 @@ public class StrictSerializabilityVerifier implements Verifier
         boolean receiveUnknownStepPredecessor(UnknownStepHolder unknownStep, StrictSerializabilityVerifier verifier)
         {
             if (unknownStep.step == this)
-                throw new HistoryViolation(ofKey, "Unknown write step on key " + ofKey + " with value " + unknownStep.writeValue + " is reachable from its happens-before relations");
+                throw new HistoryViolation(verifier.prefix, ofKey, "Unknown write step on key " + ofKey + " with value " + unknownStep.writeValue + " is reachable from its happens-before relations");
             if (unknownStepPredecessors == null)
                 unknownStepPredecessors = new LinkedHashMap<>();
             if (unknownStepPredecessors.containsKey(unknownStep.step))
@@ -502,11 +502,11 @@ public class StrictSerializabilityVerifier implements Verifier
             if (updated && byWriteValue.isEmpty())
                 reset();
             else if (updated)
-                recompute();
+                recompute(StrictSerializabilityVerifier.this);
         }
 
         @Override
-        boolean witnessedBetween(int start, int end, boolean isWrite)
+        boolean witnessedBetween(int start, int end, boolean isWrite, StrictSerializabilityVerifier verifier)
         {
             return false;
         }
@@ -538,13 +538,13 @@ public class StrictSerializabilityVerifier implements Verifier
             return false;
         }
 
-        void recompute()
+        void recompute(StrictSerializabilityVerifier verifier)
         {
             writtenBefore = Integer.MAX_VALUE;
             writtenAfter = Integer.MIN_VALUE;
             witnessedUntil = Integer.MIN_VALUE;
             for (UnknownStepHolder deferred : byTimestamp.values())
-                witnessedBetween(deferred.start, deferred.end, true);
+                witnessedBetween(deferred.start, deferred.end, true, verifier);
         }
 
         void register(UnknownStepHolder[] newBlindWrites, int start, int end)
@@ -563,7 +563,7 @@ public class StrictSerializabilityVerifier implements Verifier
             if (byTimestamp.lowerEntry(start) != null)
             {
                 Collection<UnknownStepHolder> notWitnessed = byTimestamp.headMap(start, false).values();
-                throw new HistoryViolation(ofKey, "Writes not witnessed: " + notWitnessed);
+                throw new HistoryViolation(prefix, ofKey, "Writes not witnessed: " + notWitnessed);
             }
         }
 
@@ -602,19 +602,19 @@ public class StrictSerializabilityVerifier implements Verifier
             for (int i = 0, max = Math.min(sequence.length, this.sequence.length) ; i < max ; ++i)
             {
                 if (sequence[i] != this.sequence[i])
-                    throw new HistoryViolation(key, "Inconsistent sequences on " + key + ": " + Arrays.toString(this.sequence) + " vs " + Arrays.toString(sequence));
+                    throw new HistoryViolation(prefix, key, "Inconsistent sequences on " + prefix + ":" + key + ": " + Arrays.toString(this.sequence) + " vs " + Arrays.toString(sequence));
             }
             if (this.sequence.length > sequence.length)
             {
                 if (maybeWrite >= 0 && maybeWrite != this.sequence[sequence.length])
-                    throw new HistoryViolation(key, "Inconsistent sequences on " + key + ": " + Arrays.toString(this.sequence) + " vs " + Arrays.toString(sequence) + "+" + maybeWrite);
+                    throw new HistoryViolation(prefix, key, "Inconsistent sequences on " + prefix + ":" + key + ": " + Arrays.toString(this.sequence) + " vs " + Arrays.toString(sequence) + "+" + maybeWrite);
             }
             else
             {
                 if (maybeWrite >= 0)
                 {
                     if (IntStream.of(sequence).anyMatch(i -> i == maybeWrite))
-                        throw new HistoryViolation(key, "Attempted to write " + maybeWrite + " which is already found in the seq; seq=" + Arrays.toString(sequence));
+                        throw new HistoryViolation(prefix, key, "Attempted to write " + maybeWrite + " on "  + prefix + ":" + key + "which is already found in the seq; seq=" + Arrays.toString(sequence));
                     sequence = Arrays.copyOf(sequence, sequence.length + 1);
                     sequence[sequence.length - 1] = maybeWrite;
                 }
@@ -680,7 +680,7 @@ public class StrictSerializabilityVerifier implements Verifier
             }
             updated = step.updatePeers(newPeerSteps, newBlindWrites);
             updated |= step.updatePredecessorsOfWrite(reads, writes, StrictSerializabilityVerifier.this);
-            updated |= step.witnessedBetween(start, end, writes[key] >= 0);
+            updated |= step.witnessedBetween(start, end, writes[key] >= 0, StrictSerializabilityVerifier.this);
             if (updated)
                 onChange(step);
         }
@@ -706,13 +706,13 @@ public class StrictSerializabilityVerifier implements Verifier
         void onChange(Step step)
         {
             if (step.maxPredecessor(key).predecessorStep != null && step.maxPredecessor(key).predecessorStep.ofStepIndex >= step.ofStepIndex)
-                throw new HistoryViolation(key, "Cycle detected on key " + key + ", step " + step.ofStepIndex + " " + Arrays.toString(Arrays.copyOf(sequence, step.ofStepIndex)));
+                throw new HistoryViolation(prefix, key, "Cycle detected on key " + prefix + ":" + key + ", step " + step.ofStepIndex + " " + Arrays.toString(Arrays.copyOf(sequence, step.ofStepIndex)));
 
             if (step.writtenBefore < step.writtenAfter)
-                throw new HistoryViolation(key, key + ": timestamp inconsistency, step " + step.ofStepIndex);
+                throw new HistoryViolation(prefix, key, prefix + ":" + key + ": timestamp inconsistency, step " + step.ofStepIndex);
 
             if (step.maxPredecessorWrittenAfter > step.writtenBefore)
-                throw new HistoryViolation(key, key + " must have been written prior to its maximum predecessor in real-time order on step " + step.ofStepIndex);
+                throw new HistoryViolation(prefix, key, prefix + ":" + key + " must have been written prior to its maximum predecessor in real-time order on step " + step.ofStepIndex);
 
             // refresh all successors (those where we're their max predecessor)
             step.forEach(refresh::add);
@@ -753,11 +753,13 @@ public class StrictSerializabilityVerifier implements Verifier
     // [key]->the step witnessed with the current transaction (if known)
     final int[] bufNewPeerSteps;
     final UnknownStepHolder[] bufUnknownSteps;
+    final String prefix;
 
     // TODO (desired, testing): verify operations with unknown outcomes are finalised by the first operation that starts after the coordinator abandons the txn
-    public StrictSerializabilityVerifier(int keyCount)
+    public StrictSerializabilityVerifier(String prefix, int keyCount)
     {
         this.keyCount = keyCount;
+        this.prefix = prefix;
         this.bufNewPeerSteps = new int[keyCount];
         this.bufWrites = new int[keyCount];
         this.bufUnknownSteps = new UnknownStepHolder[keyCount];
