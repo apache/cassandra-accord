@@ -72,7 +72,7 @@ public class CoordinateNoOp extends CoordinatePreAccept<Timestamp>
     }
 
     @Override
-    void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> successes)
+    void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> oks)
     {
         if (executeAt.isRejected())
         {
@@ -80,7 +80,7 @@ public class CoordinateNoOp extends CoordinatePreAccept<Timestamp>
         }
         else
         {
-            Deps preacceptDeps = Deps.merge(successes, ok -> ok.deps);
+            Deps preacceptDeps = Deps.merge(oks, ok -> ok.deps);
             new Propose<Timestamp>(node, topologies, Ballot.ZERO, txnId, txn, route, executeAt, preacceptDeps, this)
             {
                 @Override

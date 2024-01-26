@@ -163,7 +163,7 @@ public abstract class CommandStore implements AgentExecutor
      * and creates a global bound before which we know we have complete data from our bootstrap.
      *
      * There's a smearing period during bootstrap where some keys may be ahead of others, for instance,
-     * since we do not create a precise instant in the transaction log for bootstrap so as to avoid impeding execution.
+     * since we do not create a precise instant in the transaction log for bootstrap to avoid impeding execution.
      *
      * We also update safeToRead when we go stale, to remove ranges we may have bootstrapped but that are now known to
      * be incomplete. In this case we permit transactions to execute in any order for the unsafe key ranges.

@@ -48,7 +48,7 @@ public class CollectDeps implements Callback<GetDepsOk>
     private final BiConsumer<Deps, Throwable> callback;
     private boolean isDone;
 
-    CollectDeps(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Seekables<?, ?> keysOrRanges, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
+    CollectDeps(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
     {
         this.node = node;
         this.txnId = txnId;
@@ -62,7 +62,7 @@ public class CollectDeps implements Callback<GetDepsOk>
     public static void withDeps(Node node, TxnId txnId, FullRoute<?> route, Seekables<?, ?> keysOrRanges, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
     {
         Topologies topologies = node.topology().withUnsyncedEpochs(route, txnId, executeAt);
-        CollectDeps collect = new CollectDeps(node, topologies, txnId, route, keysOrRanges, executeAt, callback);
+        CollectDeps collect = new CollectDeps(node, topologies, txnId, route, executeAt, callback);
         CommandStore store = CommandStore.maybeCurrent();
         if (store == null)
             store = node.commandStores().select(route);

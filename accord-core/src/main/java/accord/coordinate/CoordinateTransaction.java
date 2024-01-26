@@ -51,7 +51,7 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
         super(node, txnId, txn, route);
     }
 
-    public static AsyncResult<Result> coordinate(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
+    public static AsyncResult<Result> coordinate(Node node, FullRoute<?> route, TxnId txnId, Txn txn)
     {
         TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(txnId.epoch()), txnId, route.homeKey(), txn.keys());
         if (mismatch != null)
@@ -62,17 +62,17 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
     }
 
     @Override
-    void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> successes)
+    void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> oks)
     {
         if (tracker.hasFastPathAccepted())
         {
-            Deps deps = Deps.merge(successes, ok -> ok.witnessedAt.equals(txnId) ? ok.deps : null);
+            Deps deps = Deps.merge(oks, ok -> ok.witnessedAt.equals(txnId) ? ok.deps : null);
             Execute.execute(node, topologies, route, FAST, txnId, txn, txnId, deps, this);
             node.agent().metricsEventsListener().onFastPathTaken(txnId, deps);
         }
         else
         {
-            Deps deps = Deps.merge(successes, ok -> ok.deps);
+            Deps deps = Deps.merge(oks, ok -> ok.deps);
 
             // TODO (low priority, efficiency): perhaps don't submit Accept immediately if we almost have enough for fast-path,
             //                                  but by sending accept we rule out hybrid fast-path

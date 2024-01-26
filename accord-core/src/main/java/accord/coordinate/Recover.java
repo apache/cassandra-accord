@@ -143,6 +143,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     private Recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
     {
+        Invariants.checkState(txnId.kind().isGloballyVisible());
         // TODO (required, correctness): we may have to contact all epochs to ensure we spot any future transaction that might not have taken us as dependency?
         //    or we need an exclusive sync point covering us and closing out the old epoch before recovering;
         //    or we need to manage dependencies for ranges we don't own in future epochs; this might be simplest

@@ -108,7 +108,7 @@ public class StrictSerializabilityVerifierTest
 
         private void run(Consumer<Runnable> onLast)
         {
-            StrictSerializabilityVerifier verifier = new StrictSerializabilityVerifier(keys);
+            StrictSerializabilityVerifier verifier = new StrictSerializabilityVerifier("", keys);
             for (int i = 0 ; i < observations.size() ; ++i)
             {
                 Observation observation = observations.get(i);
@@ -314,7 +314,7 @@ public class StrictSerializabilityVerifierTest
         if (current != null)
             witnesses.add(current);
 
-        StrictSerializabilityVerifier validator = new StrictSerializabilityVerifier(3);
+        StrictSerializabilityVerifier validator = new StrictSerializabilityVerifier("", 3);
         for (Witness w : witnesses)
             w.process(validator);
     }

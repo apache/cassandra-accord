@@ -322,7 +322,7 @@ public class LinearizabilityVerifier
     {
         for (int i = 0 ; i < params.length ; ++i)
             if (params[i] instanceof int[]) params[i] = Arrays.toString((int[]) params[i]);
-        throw new HistoryViolation(primaryKey, "history violation on " + primaryKey + ": " + String.format(message, params));
+        throw new HistoryViolation("", primaryKey, "history violation on " + primaryKey + ": " + String.format(message, params));
     }
 
     static boolean equal(int[] a, int [] b, int count)

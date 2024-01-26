@@ -20,11 +20,13 @@ package accord.verify;
 
 public class HistoryViolation extends AssertionError
 {
+    final String prefix;
     final int primaryKey;
 
-    public HistoryViolation(int primaryKey, Object detailMessage)
+    public HistoryViolation(String prefix, int primaryKey, Object detailMessage)
     {
         super(detailMessage);
+        this.prefix = prefix;
         this.primaryKey = primaryKey;
     }
 

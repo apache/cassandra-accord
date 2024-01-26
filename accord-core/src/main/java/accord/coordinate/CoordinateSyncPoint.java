@@ -128,34 +128,28 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
     }
 
     @Override
-    void onNewEpoch(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> successes)
+    long executeAtEpoch()
     {
-        // SyncPoint transactions always propose their own txnId as their executeAt, as they are not really executed.
-        // They only create happens-after relationships wrt their dependencies, which represent all transactions
-        // that *may* execute before their txnId, so once these dependencies apply we can say that any action that
-        // awaits these dependencies applies after them. In the case of ExclusiveSyncPoint, we additionally guarantee
-        // that no lower TxnId can later apply.
-        onPreAccepted(topologies, executeAt, successes);
+        return txnId.epoch();
     }
 
     @Override
-    void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> successes)
+    void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> oks)
     {
-        Deps deps = Deps.merge(successes, ok -> ok.deps);
-        Timestamp checkRejected = foldl(successes, (ok, prev) -> mergeMax(ok.witnessedAt, prev), Timestamp.NONE);
+        Deps deps = Deps.merge(oks, ok -> ok.deps);
+        Timestamp checkRejected = foldl(oks, (ok, prev) -> mergeMax(ok.witnessedAt, prev), Timestamp.NONE);
         if (checkRejected.isRejected())
         {
             proposeAndCommitInvalidate(node, Ballot.ZERO, txnId, route.homeKey(), route, checkRejected, this);
         }
         else
         {
-            executeAt = txnId;
             // we don't need to fetch deps from Accept replies, so we don't need to contact unsynced epochs
             topologies = node.topology().forEpoch(route, txnId.epoch());
             if (tracker.hasFastPathAccepted() && txnId.kind() == Kind.SyncPoint)
                 blockOnDeps(node, txn, txnId, route, keysOrRanges, deps, this, async);
             else
-                ProposeSyncPoint.proposeSyncPoint(node, topologies, Ballot.ZERO, txnId, txn, route, deps, executeAt, this, async, tracker.nodes(), keysOrRanges);
+                ProposeSyncPoint.proposeSyncPoint(node, topologies, Ballot.ZERO, txnId, txn, route, deps, this, async, tracker.nodes(), keysOrRanges);
         }
     }
 

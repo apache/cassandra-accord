@@ -45,13 +45,15 @@ public class ListRead implements Read
     private static final Logger logger = LoggerFactory.getLogger(ListRead.class);
 
     private final Function<? super CommandStore, AsyncExecutor> executor;
-    public final Seekables<?, ?> readKeys;
-    public final Seekables<?, ?> keys;
+    private final boolean isEphemeralRead;
+    public final Seekables<?, ?> userReadKeys; // those only to be returned to user
+    public final Seekables<?, ?> keys; // those including necessary for writes
 
-    public ListRead(Function<? super CommandStore, AsyncExecutor> executor, Seekables<?, ?> readKeys, Seekables<?, ?> keys)
+    public ListRead(Function<? super CommandStore, AsyncExecutor> executor, boolean isEphemeralRead, Seekables<?, ?> userReadKeys, Seekables<?, ?> keys)
     {
         this.executor = executor;
-        this.readKeys = readKeys;
+        this.isEphemeralRead = isEphemeralRead;
+        this.userReadKeys = userReadKeys;
         this.keys = keys;
     }
 
@@ -78,7 +80,7 @@ public class ListRead implements Read
             case Key:
                 Timestamped<int[]> data = s.get(unavailable, executeAt, (Key)key);
                 logger.trace("READ on {} at {} key:{} -> {}", s.node, executeAt, key, data);
-                Invariants.checkState(data.timestamp.compareTo(executeAt) < 0,
+                Invariants.checkState(isEphemeralRead || data.timestamp.compareTo(executeAt) < 0,
                                       "Data timestamp %s >= execute at %s", data.timestamp, executeAt);
                 result.put((Key)key, data);
                 break;
@@ -92,13 +94,13 @@ public class ListRead implements Read
     @Override
     public Read slice(Ranges ranges)
     {
-        return new ListRead(executor, readKeys.slice(ranges), keys.slice(ranges));
+        return new ListRead(executor, isEphemeralRead, userReadKeys.slice(ranges), keys.slice(ranges));
     }
 
     @Override
     public Read merge(Read other)
     {
-        return new ListRead(executor, ((Seekables)readKeys).with(((ListRead)other).readKeys), ((Seekables)keys).with(((ListRead)other).keys));
+        return new ListRead(executor, isEphemeralRead, ((Seekables) userReadKeys).with(((ListRead)other).userReadKeys), ((Seekables)keys).with(((ListRead)other).keys));
     }
 
     @Override

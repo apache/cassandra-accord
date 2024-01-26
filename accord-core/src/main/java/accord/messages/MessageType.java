@@ -40,6 +40,8 @@ public class MessageType
     public static final MessageType ACCEPT_INVALIDATE_REQ             = remote("ACCEPT_INVALIDATE_REQ",             true );
     public static final MessageType GET_DEPS_REQ                      = remote("GET_DEPS_REQ",                      false);
     public static final MessageType GET_DEPS_RSP                      = remote("GET_DEPS_RSP",                      false);
+    public static final MessageType GET_EPHEMERAL_READ_DEPS_REQ       = remote("GET_EPHEMERAL_READ_DEPS_REQ",       false);
+    public static final MessageType GET_EPHEMERAL_READ_DEPS_RSP       = remote("GET_EPHEMERAL_READ_DEPS_RSP",       false);
     public static final MessageType COMMIT_SLOW_PATH_REQ              = remote("COMMIT_SLOW_PATH_REQ",              true);
     public static final MessageType COMMIT_MAXIMAL_REQ                = remote("COMMIT_MAXIMAL_REQ",                true );
     public static final MessageType STABLE_FAST_PATH_REQ              = remote("STABLE_FAST_PATH_REQ",              true);
@@ -50,6 +52,7 @@ public class MessageType
     public static final MessageType APPLY_MAXIMAL_REQ                 = remote("APPLY_MAXIMAL_REQ",                 true );
     public static final MessageType APPLY_RSP                         = remote("APPLY_RSP",                         false);
     public static final MessageType READ_REQ                          = remote("READ_REQ",                          false);
+    public static final MessageType READ_EPHEMERAL_REQ                = remote("READ_EPHEMERAL_REQ",                false);
     public static final MessageType READ_RSP                          = remote("READ_RSP",                          false);
     public static final MessageType BEGIN_RECOVER_REQ                 = remote("BEGIN_RECOVER_REQ",                 true );
     public static final MessageType BEGIN_RECOVER_RSP                 = remote("BEGIN_RECOVER_RSP",                 false);

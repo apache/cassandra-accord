@@ -410,7 +410,7 @@ public abstract class Command implements CommonAttributes
                 case CleaningUp:
                     break;
                 case ReadyToExclude:
-                    Invariants.checkState(validate.asCommitted().waitingOn == null);
+                    Invariants.checkState(!validate.saveStatus().hasBeen(Status.Committed) || validate.asCommitted().waitingOn == null);
                     break;
                 case WaitingToExecute:
                 case ReadyToExecute:
@@ -1190,12 +1190,22 @@ public abstract class Command implements CommonAttributes
         // note that transactions default to waitingOnCommit, so presence in the set does not mean the transaction is uncommitted
         public final ImmutableBitSet waitingOnCommit, waitingOnApply, appliedOrInvalidated;
 
+        public WaitingOn(WaitingOn copy)
+        {
+            this(copy.deps, copy.waitingOnCommit, copy.waitingOnApply, copy.appliedOrInvalidated);
+        }
+
         public WaitingOn(Deps deps, ImmutableBitSet waitingOnCommit, ImmutableBitSet waitingOnApply, ImmutableBitSet appliedOrInvalidated)
         {
             this.deps = deps;
             this.waitingOnCommit = waitingOnCommit;
             this.waitingOnApply = waitingOnApply;
             this.appliedOrInvalidated = appliedOrInvalidated;
+        }
+
+        public Timestamp executeAtLeast()
+        {
+            return null;
         }
 
         public static WaitingOn none(Deps deps)
@@ -1316,10 +1326,10 @@ public abstract class Command implements CommonAttributes
         @Override
         public boolean equals(Object other)
         {
-            return other instanceof WaitingOn && this.equals((WaitingOn) other);
+            return other.getClass() == WaitingOn.class && this.equals((WaitingOn) other);
         }
 
-        public boolean equals(WaitingOn other)
+        boolean equals(WaitingOn other)
         {
             return this.deps.equals(other.deps)
                 && this.waitingOnCommit.equals(other.waitingOnCommit)
@@ -1337,6 +1347,7 @@ public abstract class Command implements CommonAttributes
         {
             final Deps deps;
             private SimpleBitSet waitingOnCommit, waitingOnApply, appliedOrInvalidated;
+            private Timestamp executeAtLeast;
 
             public Update(WaitingOn waitingOn)
             {
@@ -1344,6 +1355,8 @@ public abstract class Command implements CommonAttributes
                 this.waitingOnCommit = waitingOn.waitingOnCommit;
                 this.waitingOnApply = waitingOn.waitingOnApply;
                 this.appliedOrInvalidated = waitingOn.appliedOrInvalidated;
+                if (waitingOn.getClass() == WaitingOnWithExecuteAt.class)
+                    executeAtLeast = ((WaitingOnWithExecuteAt) waitingOn).executeAtLeast;
             }
 
             public Update(Committed committed)
@@ -1437,6 +1450,11 @@ public abstract class Command implements CommonAttributes
                     appliedOrInvalidated.set(i);
                 }
                 return true;
+            }
+
+            public void updateExecuteAtLeast(Timestamp executeAtLeast)
+            {
+                this.executeAtLeast = Timestamp.nonNullOrMax(executeAtLeast, this.executeAtLeast);
             }
 
             public boolean removeWaitingOn(TxnId txnId)
@@ -1537,7 +1555,10 @@ public abstract class Command implements CommonAttributes
 
             public WaitingOn build()
             {
-                return new WaitingOn(deps, ensureImmutable(waitingOnCommit), ensureImmutable(waitingOnApply), ensureImmutable(appliedOrInvalidated));
+                WaitingOn result = new WaitingOn(deps, ensureImmutable(waitingOnCommit), ensureImmutable(waitingOnApply), ensureImmutable(appliedOrInvalidated));
+                if (executeAtLeast == null)
+                    return result;
+                return new WaitingOnWithExecuteAt(result, executeAtLeast);
             }
 
             @Override
@@ -1545,6 +1566,33 @@ public abstract class Command implements CommonAttributes
             {
                 return WaitingOn.toString(deps, waitingOnCommit, waitingOnApply);
             }
+        }
+    }
+
+    public static final class WaitingOnWithExecuteAt extends WaitingOn
+    {
+        public final Timestamp executeAtLeast;
+        public WaitingOnWithExecuteAt(WaitingOn waitingOn, Timestamp executeAtLeast)
+        {
+            super(waitingOn);
+            this.executeAtLeast = executeAtLeast;
+        }
+
+        @Override
+        public Timestamp executeAtLeast()
+        {
+            return executeAtLeast;
+        }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            return other.getClass() == WaitingOnWithExecuteAt.class && this.equals((WaitingOnWithExecuteAt) other);
+        }
+
+        boolean equals(WaitingOnWithExecuteAt other)
+        {
+            return super.equals((WaitingOn) other) && executeAtLeast == other.executeAtLeast;
         }
     }
 

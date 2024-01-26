@@ -18,41 +18,34 @@
 
 package accord.messages;
 
-import accord.local.SafeCommand;
-import accord.local.SafeCommandStore;
 import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
-import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
-public abstract class WaitAndReadData extends WaitUntilApplied
+import static accord.local.SaveStatus.Applied;
+
+// TODO (expected): this class is never used directly; merge with FetchData
+public abstract class WaitUntilAppliedAndReadData extends ReadData
 {
+    private static final ExecuteOn EXECUTE_ON = new ExecuteOn(Applied, Applied);
+
     public final PartialTxn read;
 
-    protected WaitAndReadData(TxnId txnId, Participants<?> readScope, Timestamp executeAt, long waitForEpoch, PartialTxn read)
+    protected WaitUntilAppliedAndReadData(TxnId txnId, Participants<?> readScope, long executeAtEpoch, PartialTxn read)
     {
-        super(txnId, readScope, executeAt, waitForEpoch);
+        super(txnId, readScope, executeAtEpoch);
         this.read = read;
     }
 
     @Override
-    void applied(SafeCommandStore safeStore, SafeCommand safeCommand)
+    protected ExecuteOn executeOn()
     {
-        if (isInvalid)
-            return;
-
-        read(safeStore, executeAt, read);
+        return EXECUTE_ON;
     }
 
     @Override
-    protected boolean maybeReadAfterApply(SafeCommandStore safeStore)
+    public ReadType kind()
     {
-        read(safeStore, executeAt, read);
-        return true;
-    }
-
-    @Override
-    protected void cancel()
-    {
+        return ReadType.waitUntilApplied;
     }
 }

@@ -130,7 +130,7 @@ public class ElleVerifier implements Verifier
                 }
             }
         }
-        throw new HistoryViolation(-1, "Violation detected: " + result);
+        throw new HistoryViolation("", -1, "Violation detected: " + result);
     }
 
     private static abstract class Action extends java.util.AbstractList<Object> implements RandomAccess

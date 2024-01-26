@@ -42,6 +42,7 @@ import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.messages.Callback;
 import accord.messages.ReadData;
+import accord.messages.ReadData.ReadReply;
 import accord.messages.WaitUntilApplied;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
@@ -464,7 +465,7 @@ public class ListStore implements DataStore
     }
 
     // TODO (duplication): this is 95% of accord.coordinate.CoordinateShardDurable
-    private static class Await extends AsyncResults.SettableResult<SyncPoint<Ranges>> implements Callback<ReadData.ReadReply>
+    private static class Await extends AsyncResults.SettableResult<SyncPoint<Ranges>> implements Callback<ReadReply>
     {
         private final Node node;
         private final AppliedTracker tracker;
@@ -495,10 +496,10 @@ public class ListStore implements DataStore
 
         private void start()
         {
-            node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), exclusiveSyncPoint.syncId, exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.syncId), this);
+            node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), exclusiveSyncPoint.syncId, exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.syncId.epoch()), this);
         }
         @Override
-        public void onSuccess(Node.Id from, ReadData.ReadReply reply)
+        public void onSuccess(Node.Id from, ReadReply reply)
         {
             if (!reply.isOk())
             {

@@ -148,7 +148,11 @@ public class ListRequest implements Request
             if (fail != null)
             {
                 listener.onClientAction(MessageListener.ClientAction.FAILURE, node.id(), id, fail);
-                if (fail instanceof CoordinationFailed)
+                if (id.kind() == Txn.Kind.EphemeralRead)
+                {
+                    node.reply(client, replyContext, ListResult.lost(client, ((Packet)replyContext).requestId, id), null);
+                }
+                else if (fail instanceof CoordinationFailed)
                 {
                     RoutingKey homeKey = ((CoordinationFailed) fail).homeKey();
                     TxnId txnId = ((CoordinationFailed) fail).txnId();

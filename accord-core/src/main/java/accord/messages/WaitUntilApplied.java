@@ -18,230 +18,53 @@
 
 package accord.messages;
 
-import javax.annotation.Nullable;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.api.Data;
 import accord.local.Command;
 import accord.local.Node;
-import accord.local.PreLoadContext;
-import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus.LocalExecution;
-import accord.local.Status;
-import accord.primitives.EpochSupplier;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
-import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
-import static accord.local.Status.Stable;
-import static accord.messages.ReadData.CommitOrReadNack.Invalid;
-import static accord.messages.ReadData.CommitOrReadNack.Insufficient;
-import static accord.messages.ReadData.CommitOrReadNack.Redundant;
-import static accord.utils.MapReduceConsume.forEach;
+import static accord.local.SaveStatus.Applied;
 
 /**
- * Wait until the dependencies for this transaction are Applied. Does not wait until this transaction is Applied.
+ * Wait until the transaction has been applied locally
  */
-// TODO (required, efficiency): dedup - can currently have infinite pending reads that will be executed independently
-public class WaitUntilApplied extends ReadData implements Command.TransientListener, EpochSupplier
+public class WaitUntilApplied extends ReadData
 {
     private static final Logger logger = LoggerFactory.getLogger(WaitUntilApplied.class);
 
     public static class SerializerSupport
     {
-        public static WaitUntilApplied create(TxnId txnId, Participants<?> scope, Timestamp executeAt, long waitForEpoch)
+        public static WaitUntilApplied create(TxnId txnId, Participants<?> scope, long executeAtEpoch)
         {
-            return new WaitUntilApplied(txnId, scope, executeAt, waitForEpoch);
+            return new WaitUntilApplied(txnId, scope, executeAtEpoch);
         }
     }
 
-    public final Timestamp executeAt;
-    boolean isInvalid;
+    private static final ExecuteOn EXECUTE_ON = new ExecuteOn(Applied, Applied);
+    private long futureEpoch;
 
-    public WaitUntilApplied(Node.Id to, Topologies topologies, TxnId txnId, Participants<?> readScope, Timestamp executeAt)
+    public WaitUntilApplied(Node.Id to, Topologies topologies, TxnId txnId, Participants<?> readScope, long executeAtEpoch)
     {
-        super(to, topologies, txnId, readScope);
-        this.executeAt = executeAt;
+        super(to, topologies, txnId, readScope, executeAtEpoch);
     }
 
-    protected WaitUntilApplied(TxnId txnId, Participants<?> readScope, Timestamp executeAt, long waitForEpoch)
+    protected WaitUntilApplied(TxnId txnId, Participants<?> readScope, long executeAtEpoch)
     {
-        super(txnId, readScope, waitForEpoch);
-        this.executeAt = executeAt;
-    }
-
-    @Override
-    protected long executeAtEpoch()
-    {
-        return executeAt.epoch();
+        super(txnId, readScope, executeAtEpoch);
     }
 
     @Override
-    public long epoch()
+    protected ExecuteOn executeOn()
     {
-        return executeAt.epoch();
-    }
-
-    @Override
-    public PreLoadContext listenerPreLoadContext(TxnId caller)
-    {
-        return PreLoadContext.contextFor(txnId, caller);
-    }
-
-    @Override
-    public synchronized void onChange(SafeCommandStore safeStore, SafeCommand safeCommand)
-    {
-        Command command = safeCommand.current();
-        logger.trace("{}: updating as listener in response to change on {} with status {} ({})",
-                this, command.txnId(), command.status(), command);
-        switch (command.status())
-        {
-            default: throw new AssertionError("Unknown status: " + command.status());
-            case NotDefined:
-            case PreAccepted:
-            case Accepted:
-            case AcceptedInvalidate:
-            case PreCommitted:
-            case Committed:
-            case Stable:
-            case ReadyToExecute:
-            case PreApplied:
-                return;
-
-            case Invalidated:
-                sendInvalidated();
-                return;
-
-            case Truncated:
-                // implies durable and applied
-                sendTruncated();
-                return;
-
-            case Applied:
-        }
-
-        if (safeCommand.removeListener(this))
-            applied(safeStore, safeCommand);
-    }
-
-    @Override
-    protected void process()
-    {
-        super.process();
-    }
-
-    @Override
-    public synchronized CommitOrReadNack apply(SafeCommandStore safeStore)
-    {
-        SafeCommand safeCommand = safeStore.get(txnId, this, readScope);
-        return apply(safeStore, safeCommand);
-    }
-
-    private CommitOrReadNack apply(SafeCommandStore safeStore, SafeCommand safeCommand)
-    {
-        if (isInvalid)
-            return null;
-
-        Command command = safeCommand.current();
-        Status status = command.status();
-
-        logger.trace("{}: setting up read with status {} on {}", txnId, status, safeStore);
-        switch (status) {
-            default:
-                throw new AssertionError("Unknown status: " + status);
-            case NotDefined:
-            case PreAccepted:
-            case Accepted:
-            case AcceptedInvalidate:
-            case PreCommitted:
-            case Committed:
-            case Stable:
-            case ReadyToExecute:
-            case PreApplied:
-                waitingOn.set(safeStore.commandStore().id());
-                ++waitingOnCount;
-                safeCommand.addListener(this);
-
-                if (status.compareTo(Stable) >= 0)
-                {
-                    safeStore.progressLog().waiting(safeCommand, LocalExecution.Applied, null, readScope);
-                    return null;
-                }
-                else
-                {
-                    safeStore.progressLog().waiting(safeCommand, WaitingToExecute, null, readScope);
-                    return Insufficient;
-                }
-
-            case Invalidated:
-                isInvalid = true;
-                return Invalid;
-
-            case Applied:
-            case Truncated:
-                waitingOn.set(safeStore.commandStore().id());
-                ++waitingOnCount;
-                applied(safeStore, safeCommand);
-                return null;
-        }
-    }
-
-    synchronized void sendInvalidated()
-    {
-        if (isInvalid)
-            return;
-
-        isInvalid = true;
-        node.reply(replyTo, replyContext, Invalid, null);
-    }
-
-    synchronized void sendTruncated()
-    {
-        if (isInvalid)
-            return;
-
-        isInvalid = true;
-        node.reply(replyTo, replyContext, Redundant, null);
-    }
-
-    void applied(SafeCommandStore safeStore, SafeCommand safeCommand)
-    {
-        if (isInvalid)
-            return;
-
-        if (!maybeReadAfterApply(safeStore))
-        {
-            Ranges unavailable = safeStore.ranges().unsafeToReadAt(executeAt);
-            readComplete(safeStore.commandStore(), null, unavailable);
-        }
-    }
-
-    protected boolean maybeReadAfterApply(SafeCommandStore safeStore)
-    {
-        return false;
-    }
-
-    @Override
-    protected void reply(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Throwable fail)
-    {
-        if (isInvalid)
-            return;
-
-        // data can be null so send the failure response if a failure is present
-        node.reply(replyTo, replyContext, fail == null ? new ReadOk(unavailable, data) : null, fail);
-    }
-
-    private void removeListener(SafeCommandStore safeStore, TxnId txnId)
-    {
-        SafeCommand safeCommand = safeStore.ifInitialised(txnId);
-        if (safeCommand != null)
-            safeCommand.removeListener(this);
+        return EXECUTE_ON;
     }
 
     @Override
@@ -251,9 +74,19 @@ public class WaitUntilApplied extends ReadData implements Command.TransientListe
     }
 
     @Override
-    protected void cancel()
+    void read(SafeCommandStore safeStore, Command command)
     {
-        node.commandStores().mapReduceConsume(this, waitingOn.stream(), forEach(in -> removeListener(in, txnId), node.agent()));
+        Command.WaitingOn waitingOn = command.asCommitted().waitingOn;
+        Timestamp executeAtLeast = waitingOn.executeAtLeast();
+        if (executeAtLeast != null)
+            this.futureEpoch = Math.max(futureEpoch, executeAtLeast.epoch());
+        onOneSuccess(safeStore.commandStore(), unavailable(safeStore, command));
+    }
+
+    @Override
+    protected ReadOk constructReadOk(Ranges unavailable, Data data)
+    {
+        return new ReadOkWithFutureEpoch(unavailable, data, futureEpoch);
     }
 
     @Override
