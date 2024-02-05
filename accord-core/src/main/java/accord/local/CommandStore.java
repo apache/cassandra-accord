@@ -65,6 +65,8 @@ import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.utils.async.AsyncResults;
 
+import static java.util.concurrent.TimeUnit.MICROSECONDS;
+
 import static accord.api.ConfigurationService.EpochReady.DONE;
 import static accord.local.KeyHistory.COMMANDS;
 import static accord.local.PreLoadContext.contextFor;
@@ -313,8 +315,13 @@ public abstract class CommandStore implements AgentExecutor
      */
     final Timestamp preaccept(TxnId txnId, Seekables<?, ?> keys, SafeCommandStore safeStore, boolean permitFastPath)
     {
+        // TODO (expected): make preAcceptTimeout() be a part of SafeCommandStore, initiated from ExecutionContext;
+        //      preAcceptTimeout can be subject to local configuration changes, which would break determinism of repeated
+        //      message processing, if, say, replayed from a log.
+
         NodeTimeService time = safeStore.time();
-        boolean isExpired = agent().isExpired(txnId, safeStore.time().now());
+
+        boolean isExpired = time.now() - txnId.hlc() >= agent().preAcceptTimeout(MICROSECONDS) && !txnId.kind().isSyncPoint();
         if (rejectBefore != null && !isExpired)
             isExpired = null == rejectBefore.foldl(keys, (rejectIfBefore, test) -> rejectIfBefore.compareTo(test) > 0 ? null : test, txnId, Objects::isNull);
 

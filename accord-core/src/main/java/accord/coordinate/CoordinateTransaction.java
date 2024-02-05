@@ -35,6 +35,8 @@ import accord.primitives.TxnId;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
+import static java.util.concurrent.TimeUnit.MICROSECONDS;
+
 import static accord.coordinate.CoordinationAdapter.Factory.Step.Continue;
 import static accord.coordinate.CoordinationAdapter.Invoke.execute;
 import static accord.coordinate.CoordinationAdapter.Invoke.propose;
@@ -84,7 +86,7 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
             //                                  but by sending accept we rule out hybrid fast-path
             // TODO (low priority, efficiency): if we receive an expired response, perhaps defer to permit at least one other
             //                                  node to respond before invalidating
-            if (executeAt.isRejected() || node.agent().isExpired(txnId, executeAt.hlc()))
+            if (executeAt.isRejected() || executeAt.hlc() - txnId.hlc() >= node.agent().preAcceptTimeout(MICROSECONDS))
             {
                 proposeAndCommitInvalidate(node, Ballot.ZERO, txnId, route.homeKey(), route, executeAt,this);
             }

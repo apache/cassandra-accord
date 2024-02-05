@@ -18,6 +18,7 @@
 
 package accord.api;
 
+import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 
 import accord.local.Command;
@@ -26,7 +27,6 @@ import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
-import accord.primitives.TxnId;
 
 /**
  * Facility for augmenting node behaviour at specific points
@@ -70,7 +70,7 @@ public interface Agent extends UncaughtExceptionListener
 
     void onHandledException(Throwable t);
 
-    boolean isExpired(TxnId initiated, long now);
+    long preAcceptTimeout(TimeUnit timeUnit);
 
     Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges);
 
