@@ -831,6 +831,18 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
         }
     }
 
+    public static <V> V getUnchecked(AsyncChain<V> chain)
+    {
+        try
+        {
+            return getUninterruptibly(chain);
+        }
+        catch (ExecutionException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
     public static void awaitUninterruptibly(AsyncChain<?> chain)
     {
         try
