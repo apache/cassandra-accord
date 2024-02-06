@@ -35,7 +35,11 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.LongStream;
 import java.util.stream.Stream;
+
+import accord.utils.random.Picker;
 
 public class Gens {
     private Gens() {
@@ -49,6 +53,11 @@ public class Gens {
     public static <T> Gen<T> constant(Supplier<T> constant)
     {
         return ignore -> constant.get();
+    }
+
+    public static Gen.IntGen pickInt(int... ts)
+    {
+        return rs -> ts[rs.nextInt(0, ts.length)];
     }
 
     public static <T> Gen<T> pick(T... ts)
@@ -113,6 +122,253 @@ public class Gens {
                     return array[i];
             }
             return array[array.length - 1];
+        };
+    }
+
+    public static Gen.LongGen pickZipf(long[] array)
+    {
+        if (array == null || array.length == 0)
+            throw new IllegalArgumentException("Empty array given");
+        if (array.length == 1)
+            return ignore -> array[0];
+        BigDecimal[] weights = new BigDecimal[array.length];
+        BigDecimal base = BigDecimal.valueOf(Math.pow(2, array.length));
+        weights[0] = base;
+        for (int i = 1; i < array.length; i++)
+            weights[i] = base.divide(BigDecimal.valueOf(i + 1), RoundingMode.UP);
+        BigDecimal totalWeights = Stream.of(weights).reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return rs -> {
+            BigDecimal value = BigDecimal.valueOf(rs.nextDouble()).multiply(totalWeights);
+            for (int i = 0; i < weights.length; i++)
+            {
+                value = value.subtract(weights[i]);
+                if (value.compareTo(BigDecimal.ZERO) <= 0)
+                    return array[i];
+            }
+            return array[array.length - 1];
+        };
+    }
+
+    public static <T> Gen<T> pickZipf(T... array)
+    {
+        return pickZipf(Arrays.asList(array));
+    }
+
+    public static <T> Gen<T> pickZipf(List<T> array)
+    {
+        if (array == null || array.isEmpty())
+            throw new IllegalArgumentException("Empty array given");
+        if (array.size() == 1)
+            return ignore -> array.get(0);
+        BigDecimal[] weights = new BigDecimal[array.size()];
+        BigDecimal base = BigDecimal.valueOf(Math.pow(2, array.size()));
+        weights[0] = base;
+        for (int i = 1; i < array.size(); i++)
+            weights[i] = base.divide(BigDecimal.valueOf(i + 1), RoundingMode.UP);
+        BigDecimal totalWeights = Stream.of(weights).reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return rs -> {
+            BigDecimal value = BigDecimal.valueOf(rs.nextDouble()).multiply(totalWeights);
+            for (int i = 0; i < weights.length; i++)
+            {
+                value = value.subtract(weights[i]);
+                if (value.compareTo(BigDecimal.ZERO) <= 0)
+                    return array.get(i);
+            }
+            return array.get(array.size() - 1);
+        };
+    }
+
+    public static Gen<Gen.IntGen> randomWeights(int[] array)
+    {
+        return rs -> {
+            float[] weights = Picker.randomWeights(rs, array.length);
+            return r -> array[index(r, weights)];
+        };
+    }
+
+    public static Gen<Gen.LongGen> randomWeights(long[] array)
+    {
+        return rs -> {
+            float[] weights = Picker.randomWeights(rs, array.length);
+            return r -> array[index(r, weights)];
+        };
+    }
+
+    public static <T> Gen<Gen<T>> randomWeights(T[] array)
+    {
+        return rs -> {
+            float[] weights = Picker.randomWeights(rs, array.length);
+            return r -> array[index(r, weights)];
+        };
+    }
+
+    public static <T> Gen<Gen<T>> randomWeights(List<T> array)
+    {
+        return rs -> {
+            float[] weights = Picker.randomWeights(rs, array.size());
+            return r -> array.get(index(r, weights));
+        };
+    }
+
+    private static int index(RandomSource rs, float[] weights)
+    {
+        int i = Arrays.binarySearch(weights, rs.nextFloat());
+        if (i < 0) i = -1 - i;
+        return i;
+    }
+
+    public static Gen<Gen.IntGen> mixedDistribution(int minInclusive, int maxExclusive)
+    {
+        int domainSize = (maxExclusive - minInclusive + 1);
+        if (domainSize < 0)
+            throw new IllegalArgumentException("Range is too large; min=" + minInclusive + ", max=" + maxExclusive);
+        int[] array, indexes;
+        if (domainSize > 200) // randomly selected
+        {
+            int numBuckets = 10;
+            int delta = domainSize / numBuckets;
+            array = new int[numBuckets];
+            for (int i = 0; i < numBuckets; i++)
+                array[i] = minInclusive + i * delta;
+            indexes = IntStream.range(0, array.length).toArray();
+        }
+        else
+        {
+            array = IntStream.range(minInclusive, maxExclusive).toArray();
+            indexes = null;
+        }
+        return rs -> {
+            switch (rs.nextInt(0, 4))
+            {
+                case 0: // uniform
+                    return r -> r.nextInt(minInclusive, maxExclusive);
+                case 1: // median biased
+                    int median = rs.nextInt(minInclusive, maxExclusive);
+                    return r -> r.nextBiasedInt(minInclusive, median, maxExclusive);
+                case 2: // zipf
+                    if (indexes == null)
+                        return Gens.pickZipf(rs.nextBoolean() ? reverseAndCopy(array) : array);
+                    return Gens.pickZipf(rs.nextBoolean() ? reverseAndCopy(indexes) : indexes).mapAsInt((r, index) -> {
+                        int start = array[index];
+                        int end = index == array.length - 1 ? maxExclusive : array[index + 1];
+                        return r.nextInt(start, end);
+                    });
+                case 3: // random weight
+                    if (indexes == null)
+                        return randomWeights(array).next(rs);
+                    return randomWeights(indexes).next(rs).mapAsInt((r, index) -> {
+                        int start = array[index];
+                        int end = index == array.length - 1 ? maxExclusive : array[index + 1];
+                        return r.nextInt(start, end);
+                    });
+                default:
+                    throw new AssertionError();
+            }
+        };
+    }
+
+    private static int[] reverseAndCopy(int[] array)
+    {
+        array = Arrays.copyOf(array, array.length);
+        for (int i = 0, mid = array.length / 2, j = array.length - 1; i < mid; i++, j--)
+        {
+            int tmp = array[i];
+            array[i] = array[j];
+            array[j] = tmp;
+        }
+        return array;
+    }
+
+    public static Gen<Gen.LongGen> mixedDistribution(long minInclusive, long maxExclusive)
+    {
+        long domainSize = (maxExclusive - minInclusive + 1);
+        if (domainSize < 0)
+            throw new IllegalArgumentException("Range is too large; min=" + minInclusive + ", max=" + maxExclusive);
+        long[] array;
+        int[] indexes;
+        if (domainSize > 200) // randomly selected
+        {
+            int numBuckets = 10;
+            long delta = domainSize / numBuckets;
+            array = new long[numBuckets];
+            for (int i = 0; i < numBuckets; i++)
+                array[i] = minInclusive + i * delta;
+            indexes = IntStream.range(0, array.length).toArray();
+        }
+        else
+        {
+            array = LongStream.range(minInclusive, maxExclusive).toArray();
+            indexes = null;
+        }
+        return rs -> {
+            switch (rs.nextInt(0, 4))
+            {
+                case 0: // uniform
+                    return r -> r.nextLong(minInclusive, maxExclusive);
+                case 1: // median biased
+                    long median = rs.nextLong(minInclusive, maxExclusive);
+                    return r -> r.nextBiasedLong(minInclusive, median, maxExclusive);
+                case 2: // zipf
+                    if (indexes == null)
+                        return Gens.pickZipf(rs.nextBoolean() ? reverseAndCopy(array) : array);
+                    return Gens.pickZipf(rs.nextBoolean() ? reverseAndCopy(indexes) : indexes).mapAsLong((r, index) -> {
+                        long start = array[index];
+                        long end = index == array.length - 1 ? maxExclusive : array[index + 1];
+                        return r.nextLong(start, end);
+                    });
+                case 3: // random weight
+                    if (indexes == null)
+                        return randomWeights(array).next(rs);
+                    return randomWeights(indexes).next(rs).mapAsLong((r, index) -> {
+                        long start = array[index];
+                        long end = index == array.length - 1 ? maxExclusive : array[index + 1];
+                        return r.nextLong(start, end);
+                    });
+                default:
+                    throw new AssertionError();
+            }
+        };
+    }
+
+    private static long[] reverseAndCopy(long[] array)
+    {
+        array = Arrays.copyOf(array, array.length);
+        for (int i = 0, mid = array.length / 2, j = array.length - 1; i < mid; i++, j--)
+        {
+            long tmp = array[i];
+            array[i] = array[j];
+            array[j] = tmp;
+        }
+        return array;
+    }
+
+    public static <T> Gen<Gen<T>> mixedDistribution(T... list)
+    {
+        return mixedDistribution(Arrays.asList(list));
+    }
+
+    public static <T> Gen<Gen<T>> mixedDistribution(List<T> list)
+    {
+        return rs -> {
+            switch (rs.nextInt(0, 3))
+            {
+                case 0: // uniform
+                    return r -> list.get(rs.nextInt(0, list.size()));
+                case 1: // zipf
+                    List<T> array = list;
+                    if (rs.nextBoolean())
+                    {
+                        array = new ArrayList<>(list);
+                        Collections.reverse(array);
+                    }
+                    return pickZipf(array);
+                case 2: // random weight
+                    return randomWeights(list).next(rs);
+                default:
+                    throw new AssertionError();
+            }
         };
     }
 
@@ -265,6 +521,11 @@ public class Gens {
                 return r -> r.nextInt(min, max);
             return r -> r.nextInt(min, max + 1);
         }
+
+        public Gen<Gen.IntGen> mixedDistribution(int minInclusive, int maxExclusive)
+        {
+            return Gens.mixedDistribution(minInclusive, maxExclusive);
+        }
     }
 
     public static class LongDSL {
@@ -294,6 +555,11 @@ public class Gens {
         public <T extends Enum<T>> Gen<T> all(Class<T> klass)
         {
             return pick(klass.getEnumConstants());
+        }
+
+        public <T extends Enum<T>> Gen<Gen<T>> allMixedDistribution(Class<T> klass)
+        {
+            return mixedDistribution(klass.getEnumConstants());
         }
 
         public <T extends Enum<T>> Gen<T> allWithWeights(Class<T> klass, int... weights)

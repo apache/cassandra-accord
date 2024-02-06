@@ -26,6 +26,18 @@ import accord.utils.RandomSource;
 
 public class Picker
 {
+    public static float[] randomWeights(RandomSource random, int length)
+    {
+        float[] weights = new float[length - 1];
+        float sum = 0;
+        for (int i = 0 ; i < weights.length ; ++i)
+            weights[i] = sum += random.nextFloat();
+        sum += random.nextFloat();
+        for (int i = 0 ; i < weights.length ; ++i)
+            weights[i] /= sum;
+        return weights;
+    }
+
     static abstract class Weighted
     {
         final RandomSource random;
@@ -33,7 +45,7 @@ public class Picker
 
         public Weighted(RandomSource random, int length)
         {
-            this(random, randomWeights(random, length));
+            this(random, Picker.randomWeights(random, length));
         }
 
         public Weighted(RandomSource random, float[] weights)
@@ -42,17 +54,6 @@ public class Picker
             this.weights = weights;
         }
 
-        static float[] randomWeights(RandomSource random, int length)
-        {
-            float[] weights = new float[length - 1];
-            float sum = 0;
-            for (int i = 0 ; i < weights.length ; ++i)
-                weights[i] = sum += random.nextFloat();
-            sum += random.nextFloat();
-            for (int i = 0 ; i < weights.length ; ++i)
-                weights[i] /= sum;
-            return weights;
-        }
 
         static float[] randomWeights(RandomSource random, float[] bias)
         {
@@ -104,7 +105,7 @@ public class Picker
 
         public static <T> WeightedObjectPicker<T> randomWeighted(RandomSource random, T[] values)
         {
-            return new WeightedObjectPicker<>(random, values, randomWeights(random, values.length));
+            return new WeightedObjectPicker<>(random, values, Picker.randomWeights(random, values.length));
         }
 
         public static <T> WeightedObjectPicker<T> randomWeighted(RandomSource random, T[] values, float[] bias)

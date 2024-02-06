@@ -198,7 +198,7 @@ public class Property
         {
             sb.append("Values:\n");
             for (int i = 0; i < values.length; i++)
-                sb.append('\t').append(i).append(" = ").append(normalizeValue(values[i])).append('\n');
+                sb.append('\t').append(i).append(" = ").append(normalizeValue(values[i])).append(": ").append(values[i] == null ? "unknown type" : values[i].getClass().getCanonicalName()).append('\n');
         }
         return sb.toString();
     }
