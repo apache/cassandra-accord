@@ -19,12 +19,7 @@
 package accord.local;
 
 import java.util.Iterator;
-import java.util.List;
-import java.util.function.Predicate;
-import java.util.function.Supplier;
 import javax.annotation.Nullable;
-
-import com.google.common.base.Predicates;
 
 import accord.api.Agent;
 import accord.api.DataStore;
@@ -58,17 +53,17 @@ public abstract class SafeCommandStore
 {
     public interface CommandFunction<P1, I, O>
     {
-        O apply(P1 p1, Seekable keyOrRange, TxnId txnId, Timestamp executeAt, Status status, Supplier<List<TxnId>> depsSupplier, I in);
+        O apply(P1 p1, Seekable keyOrRange, TxnId txnId, Timestamp executeAt, I in);
     }
 
-    public enum TestTimestamp
+    public enum TestStartedAt
     {
         STARTED_BEFORE,
         STARTED_AFTER,
-        MAY_EXECUTE_BEFORE, // started before and uncommitted, or committed and executes before
-        EXECUTES_AFTER
+        ANY
     }
     public enum TestDep { WITH, WITHOUT, ANY_DEPS }
+    public enum TestStatus { ANY_STATUS, IS_PROPOSED, IS_STABLE }
 
     /**
      * If the transaction exists (with some associated data) in the CommandStore, return it. Otherwise return null.
@@ -97,8 +92,6 @@ public abstract class SafeCommandStore
         }
         return maybeTruncate(safeCommand, command, txnId, null);
     }
-
-    public abstract void removeCommandFromSeekableDeps(Seekable seekable, TxnId txnId, Timestamp executeAt, Status status);
 
     // decidedExecuteAt == null if not yet PreCommitted
 
@@ -160,27 +153,45 @@ public abstract class SafeCommandStore
 
     protected abstract SafeCommand getInternal(TxnId txnId);
     protected abstract SafeCommand getInternalIfLoadedAndInitialised(TxnId txnId);
-
     public abstract boolean canExecuteWith(PreLoadContext context);
+
+    protected void update(Command prev, Command updated, @Nullable Seekables<?, ?> keysOrRanges)
+    {
+        SaveStatus oldSaveStatus = prev == null ? SaveStatus.Uninitialised : prev.saveStatus();
+        SaveStatus newSaveStatus = updated.saveStatus();
+        if (keysOrRanges == null && !newSaveStatus.known.definition.isKnown())
+            return;
+
+        if (newSaveStatus.status.equals(oldSaveStatus.status) && oldSaveStatus.known.definition.isKnown())
+            return;
+
+        TxnId txnId = updated.txnId();
+        if (!txnId.kind().isGloballyVisible())
+            return;
+
+//        if (keysOrRanges != null)
+//            keysOrRanges = keysOrRanges.slice(ranges().allBetween(updated.txnId(), updated.executeAt()));
+        commandStore().updateMaxConflicts(prev, updated, keysOrRanges);
+    }
+
+    /**
+     * Visits keys first and then ranges, both in ascending order.
+     * Within each key or range visits all visible txnids needed for the given scope in ascending order of queried timestamp.
+     * TODO (expected): no need for slice in most (all?) cases
+     */
+    public abstract <P1, T> T mapReduceActive(Seekables<?, ?> keys, Ranges slice, @Nullable Timestamp withLowerTxnId, Kinds kinds, CommandFunction<P1, T, T> map, P1 p1, T initialValue);
 
     /**
      * Visits keys first and then ranges, both in ascending order.
      * Within each key or range visits all unevicted txnids needed for the given scope in ascending order of queried timestamp.
      */
-    public <P1, T> T mapReduce(Seekables<?, ?> keys, Ranges slice, KeyHistory keyHistory,
-                                        Kinds testKind, TestTimestamp testTimestamp, Timestamp timestamp,
-                                        TestDep testDep, @Nullable TxnId depId, @Nullable Status minStatus, @Nullable Status maxStatus,
-                                        CommandFunction<P1, T, T> map, P1 p1, T initialValue)
-    {
-        return mapReduce(keys, slice, keyHistory, testKind, testTimestamp, timestamp, testDep, depId, minStatus, maxStatus, map, p1, initialValue, Predicates.alwaysFalse());
-    }
-
-    public abstract <P1, T> T mapReduce(Seekables<?, ?> keys, Ranges slice, KeyHistory keyHistory,
-                                        Kinds testKind, TestTimestamp testTimestamp, Timestamp timestamp,
-                                        TestDep testDep, @Nullable TxnId depId, @Nullable Status minStatus, @Nullable Status maxStatus,
-                                        CommandFunction<P1, T, T> map, P1 p1, T initialValue, Predicate<? super T> terminate);
-    protected abstract void register(Seekables<?, ?> keysOrRanges, Ranges slice, Command command);
-    protected abstract void register(Seekable keyOrRange, Ranges slice, Command command);
+    public abstract <P1, T> T mapReduceFull(Seekables<?, ?> keys, Ranges slice,
+                                            TxnId testTxnId,
+                                            Kinds testKind,
+                                            TestStartedAt testStartedAt,
+                                            TestDep testDep,
+                                            TestStatus testStatus,
+                                            CommandFunction<P1, T, T> map, P1 p1, T initialValue);
 
     public abstract CommandStore commandStore();
     public abstract DataStore dataStore();
@@ -188,14 +199,8 @@ public abstract class SafeCommandStore
     public abstract ProgressLog progressLog();
     public abstract NodeTimeService time();
     public abstract CommandStores.RangesForEpoch ranges();
-    public abstract Timestamp maxConflict(Seekables<?, ?> keys, Ranges slice);
-    public abstract void registerHistoricalTransactions(Deps deps);
-    public abstract void erase(SafeCommand safeCommand);
 
-    public long latestEpoch()
-    {
-        return time().epoch();
-    }
+    public abstract void registerHistoricalTransactions(Deps deps);
 
     public boolean isTruncated(Command command)
     {

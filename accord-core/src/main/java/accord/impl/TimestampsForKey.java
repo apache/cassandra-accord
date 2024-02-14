@@ -24,33 +24,30 @@ import accord.api.Key;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
-public class TimestampsForKey implements DomainTimestamps
+public class TimestampsForKey
 {
     public static final long NO_LAST_EXECUTED_HLC = Long.MIN_VALUE;
 
     public static class SerializerSupport
     {
-        public static <D> TimestampsForKey create(Key key,
-                                                  Timestamp max,
+        public static TimestampsForKey create(Key key,
                                                   Timestamp lastExecutedTimestamp,
                                                   long lastExecutedHlc,
                                                   Timestamp lastWriteTimestamp)
         {
-            return new TimestampsForKey(key, max, lastExecutedTimestamp, lastExecutedHlc, lastWriteTimestamp);
+            return new TimestampsForKey(key, lastExecutedTimestamp, lastExecutedHlc, lastWriteTimestamp);
         }
     }
 
     private final Key key;
-    private final Timestamp max;
     private final Timestamp lastExecutedTimestamp;
     // TODO (desired): we have leaked C* implementation details here
     private final long rawLastExecutedHlc;
     private final Timestamp lastWriteTimestamp;
 
-    public TimestampsForKey(Key key, Timestamp max, Timestamp lastExecutedTimestamp, long rawLastExecutedHlc, Timestamp lastWriteTimestamp)
+    public TimestampsForKey(Key key, Timestamp lastExecutedTimestamp, long rawLastExecutedHlc, Timestamp lastWriteTimestamp)
     {
         this.key = key;
-        this.max = max;
         this.lastExecutedTimestamp = lastExecutedTimestamp;
         this.rawLastExecutedHlc = rawLastExecutedHlc;
         this.lastWriteTimestamp = lastWriteTimestamp;
@@ -59,7 +56,6 @@ public class TimestampsForKey implements DomainTimestamps
     public TimestampsForKey(Key key)
     {
         this.key = key;
-        this.max = Timestamp.NONE;
         this.lastExecutedTimestamp = Timestamp.NONE;
         this.rawLastExecutedHlc = 0;
         this.lastWriteTimestamp = Timestamp.NONE;
@@ -70,7 +66,7 @@ public class TimestampsForKey implements DomainTimestamps
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         TimestampsForKey that = (TimestampsForKey) o;
-        return rawLastExecutedHlc == that.rawLastExecutedHlc && Objects.equals(key, that.key) && Objects.equals(max, that.max) && Objects.equals(lastExecutedTimestamp, that.lastExecutedTimestamp) && Objects.equals(lastWriteTimestamp, that.lastWriteTimestamp);
+        return rawLastExecutedHlc == that.rawLastExecutedHlc && Objects.equals(key, that.key) && Objects.equals(lastExecutedTimestamp, that.lastExecutedTimestamp) && Objects.equals(lastWriteTimestamp, that.lastWriteTimestamp);
     }
 
     public int hashCode()
@@ -81,11 +77,6 @@ public class TimestampsForKey implements DomainTimestamps
     public Key key()
     {
         return key;
-    }
-
-    public Timestamp max()
-    {
-        return max;
     }
 
     public Timestamp lastExecutedTimestamp()
@@ -110,7 +101,7 @@ public class TimestampsForKey implements DomainTimestamps
 
     public TimestampsForKey withoutRedundant(TxnId redundantBefore)
     {
-        return new TimestampsForKey(key, max.compareTo(redundantBefore) < 0 ? Timestamp.NONE : max,
+        return new TimestampsForKey(key,
                                     lastExecutedTimestamp.compareTo(redundantBefore) < 0 ? Timestamp.NONE : lastExecutedTimestamp,
                                     rawLastExecutedHlc < redundantBefore.hlc() ? NO_LAST_EXECUTED_HLC : rawLastExecutedHlc,
                                     lastWriteTimestamp.compareTo(redundantBefore) < 0 ? Timestamp.NONE : lastWriteTimestamp);
@@ -141,7 +132,6 @@ public class TimestampsForKey implements DomainTimestamps
     {
         return "TimestampsForKey@" + System.identityHashCode(this) + '{' +
                "key=" + key +
-               ", max=" + max +
                ", lastExecutedTimestamp=" + lastExecutedTimestamp +
                ", rawLastExecutedHlc=" + rawLastExecutedHlc +
                ", lastWriteTimestamp=" + lastWriteTimestamp +

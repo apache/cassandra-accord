@@ -32,8 +32,7 @@ import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.config.LocalConfig;
 import accord.config.MutableLocalConfig;
-import accord.coordinate.ExecuteTxn;
-import accord.coordinate.PersistTxn;
+import accord.coordinate.CoordinationAdapter;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.IntKey;
 import accord.impl.SimpleProgressLog;
@@ -48,7 +47,6 @@ import accord.impl.mock.MockStore;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
-import accord.messages.Apply;
 import accord.messages.LocalRequest;
 import accord.primitives.Keys;
 import accord.primitives.Range;
@@ -176,7 +174,7 @@ public class Utils
                              scheduler,
                              SizeOfIntersectionSorter.SUPPLIER,
                              SimpleProgressLog::new,
-                             InMemoryCommandStores.Synchronized::new, ExecuteTxn.FACTORY, PersistTxn.FACTORY, Apply.FACTORY,
+                             InMemoryCommandStores.Synchronized::new, new CoordinationAdapter.DefaultFactory(),
                              localConfig);
         awaitUninterruptibly(node.unsafeStart());
         return node;

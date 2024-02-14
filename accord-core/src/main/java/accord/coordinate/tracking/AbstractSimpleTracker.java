@@ -16,11 +16,27 @@
  * limitations under the License.
  */
 
-package accord.impl;
+package accord.coordinate.tracking;
 
-public interface DomainCommands
+import java.util.function.Function;
+import java.util.function.IntFunction;
+
+import accord.local.Node.Id;
+import accord.topology.Shard;
+import accord.topology.Topologies;
+
+public abstract class AbstractSimpleTracker<ST extends ShardTracker> extends AbstractTracker<ST>
 {
-    enum Kind { COORDINATION, RECOVERY }
+    AbstractSimpleTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, Function<Shard, ST> trackerFactory)
+    {
+        super(topologies, arrayFactory, trackerFactory);
+    }
 
-    CommandTimeseries<?> commands();
+    AbstractSimpleTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, ShardFactory<ST> trackerFactory)
+    {
+        super(topologies, arrayFactory, trackerFactory);
+    }
+
+    public abstract RequestStatus recordSuccess(Id from);
+    public abstract RequestStatus recordFailure(Id from);
 }

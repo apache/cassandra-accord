@@ -23,13 +23,9 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.concurrent.ExecutionException;
-import java.util.function.BiFunction;
-import java.util.stream.Stream;
 
 import accord.api.RoutingKey;
 import accord.impl.AbstractSafeCommandStore;
-import accord.impl.CommandTimeseries.CommandLoader;
-import accord.impl.CommandTimeseries;
 import accord.impl.CommandsForKey;
 import accord.impl.IntKey.Raw;
 import accord.impl.IntKey;
@@ -86,11 +82,6 @@ public class PreAcceptTest
         return PreAccept.SerializerSupport.create(txnId, route.slice(FULL_RANGE), txnId.epoch(), txnId.epoch(), false, txnId.epoch(), txn.slice(FULL_RANGE, true), route);
     }
 
-    static <T, D> Stream<T> convert(CommandTimeseries<D> timeseries, BiFunction<CommandLoader<D>, D, T> get)
-    {
-        return timeseries.all().map(d -> get.apply(timeseries.loader(), d));
-    }
-
     @Test
     void initialCommandTest() throws ExecutionException
     {
@@ -103,7 +94,7 @@ public class PreAcceptTest
         {
             Raw key = IntKey.key(10);
             CommandStore commandStore = node.unsafeForKey(key);
-            Assertions.assertFalse(inMemory(commandStore).hasDepsCommandsForKey(key));
+            Assertions.assertFalse(inMemory(commandStore).hasCommandsForKey(key));
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
@@ -112,8 +103,8 @@ public class PreAcceptTest
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
             commandStore.execute(PreLoadContext.contextFor(txnId, txn.keys()), safeStore -> {
-                CommandsForKey cfk = ((AbstractSafeCommandStore) safeStore).depsCommandsForKey(key).current();
-                TxnId commandId = convert(cfk.commands(), CommandLoader::txnId).findFirst().get();
+                CommandsForKey cfk = ((AbstractSafeCommandStore) safeStore).commandsForKey(key).current();
+                TxnId commandId = cfk.findFirst();
                 Command command = safeStore.ifInitialised(commandId).current();
                 Assertions.assertEquals(Status.PreAccepted, command.status());
             });
@@ -140,7 +131,7 @@ public class PreAcceptTest
         {
             Raw key = IntKey.key(10);
             CommandStore commandStore = node.unsafeForKey(key);
-            Assertions.assertFalse(inMemory(commandStore).hasDepsCommandsForKey(key));
+            Assertions.assertFalse(inMemory(commandStore).hasCommandsForKey(key));
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
@@ -163,7 +154,7 @@ public class PreAcceptTest
         {
             Raw key = IntKey.key(10);
             CommandStore commandStore = node.unsafeForKey(key);
-            Assertions.assertFalse(inMemory(commandStore).hasDepsCommandsForKey(key));
+            Assertions.assertFalse(inMemory(commandStore).hasCommandsForKey(key));
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
@@ -281,8 +272,8 @@ public class PreAcceptTest
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
             commandStore.execute(PreLoadContext.contextFor(txnId, txn.keys()), safeStore -> {
-                CommandsForKey cfk = ((AbstractSafeCommandStore) safeStore).depsCommandsForKey(key).current();
-                TxnId commandId = convert(cfk.commands(), CommandLoader::txnId).findFirst().get();
+                CommandsForKey cfk = ((AbstractSafeCommandStore) safeStore).commandsForKey(key).current();
+                TxnId commandId = cfk.findFirst();
                 Command command = safeStore.ifInitialised(commandId).current();
                 Assertions.assertEquals(Status.PreAccepted, command.status());
             });

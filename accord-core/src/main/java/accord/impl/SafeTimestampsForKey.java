@@ -19,10 +19,7 @@
 package accord.impl;
 
 import accord.api.Key;
-import accord.api.VisibleForImplementation;
 import accord.primitives.Timestamp;
-import accord.utils.Invariants;
-import com.google.common.annotations.VisibleForTesting;
 
 public abstract class SafeTimestampsForKey implements SafeState<TimestampsForKey>
 {
@@ -51,35 +48,10 @@ public abstract class SafeTimestampsForKey implements SafeState<TimestampsForKey
         return update(new TimestampsForKey(key));
     }
 
-    @VisibleForTesting
-    @VisibleForImplementation
-    public static Timestamp updateMax(TimestampsForKey tfk, Timestamp timestamp)
-    {
-        Invariants.checkArgument(tfk != null || timestamp != null);
-        if (tfk == null)
-            return timestamp;
-        if (timestamp == null)
-            return tfk.max();
-        return Timestamp.max(tfk.max(), timestamp);
-    }
-
-    @VisibleForTesting
-    @VisibleForImplementation
-    public <D> TimestampsForKey updateMax(Timestamp timestamp)
+    TimestampsForKey updateLastExecutionTimestamps(Timestamp lastExecutedTimestamp, long lastExecutedHlc, Timestamp lastWriteTimestamp)
     {
         TimestampsForKey current = current();
         return update(new TimestampsForKey(current.key(),
-                                           updateMax(current, timestamp),
-                                           current.lastExecutedTimestamp(),
-                                           current.rawLastExecutedHlc(),
-                                           current.lastWriteTimestamp()));
-    }
-
-    <D> TimestampsForKey updateLastExecutionTimestamps(Timestamp lastExecutedTimestamp, long lastExecutedHlc, Timestamp lastWriteTimestamp)
-    {
-        TimestampsForKey current = current();
-        return update(new TimestampsForKey(current.key(),
-                                           current.max(),
                                            lastExecutedTimestamp,
                                            lastExecutedHlc,
                                            lastWriteTimestamp));

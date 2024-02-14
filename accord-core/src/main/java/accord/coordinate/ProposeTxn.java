@@ -31,25 +31,14 @@ import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.Faults;
 
-class ProposeAndExecute extends Propose<Result>
+import static accord.coordinate.CoordinationAdapter.Factory.Step.Continue;
+import static accord.coordinate.CoordinationAdapter.Invoke.stabilise;
+
+class ProposeTxn extends Propose<Result>
 {
-    ProposeAndExecute(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Deps deps, Timestamp executeAt, BiConsumer<Result, Throwable> callback)
+    ProposeTxn(Node node, Topologies topologies, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super Result, Throwable> callback)
     {
         super(node, topologies, ballot, txnId, txn, route, executeAt, deps, callback);
-    }
-
-    public static void proposeAndExecute(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route,
-                                         Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
-    {
-        Topologies topologies = node.topology().withUnsyncedEpochs(route, txnId, executeAt);
-        proposeAndExecute(node, topologies, ballot, txnId, txn, route, executeAt, deps, callback);
-    }
-
-    public static void proposeAndExecute(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route,
-                                         Timestamp executeAt, Deps deps, BiConsumer<Result, Throwable> callback)
-    {
-        ProposeAndExecute propose = new ProposeAndExecute(node, topologies, ballot, txnId, txn, route, deps, executeAt, callback);
-        propose.start();
     }
 
     @Override
@@ -59,6 +48,11 @@ class ProposeAndExecute extends Propose<Result>
         if (!Faults.TRANSACTION_UNMERGED_DEPS)
             deps = deps.with(Deps.merge(acceptOks, ok -> ok.deps));
 
-        Stabilise.stabilise(node, acceptTracker.topologies(), route, ballot, txnId, txn, executeAt, deps, callback);
+        stabilise(adapter(), node, acceptTracker.topologies(), route, ballot, txnId, txn, executeAt, deps, callback);
+    }
+
+    protected CoordinationAdapter<Result> adapter()
+    {
+        return node.coordinationAdapter(txnId, Continue);
     }
 }

@@ -31,6 +31,7 @@ import accord.api.RoutingKey;
 import accord.utils.ArrayBuffers.ObjectBuffers;
 import accord.utils.IndexedFold;
 import accord.utils.IndexedFoldToLong;
+import accord.utils.IndexedTriFold;
 import accord.utils.Invariants;
 import accord.utils.SortedArrays;
 import net.nicoulaj.compilecommand.annotations.Inline;
@@ -231,6 +232,18 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
     public final <V> V foldl(Ranges rs, IndexedFold<? super K, V> fold, V accumulator)
     {
         return Routables.foldl(this, rs, fold, accumulator);
+    }
+
+    @Inline
+    public final long foldl(AbstractKeys<K> intersect, IndexedFoldToLong<K> fold, long param, long accumulator, long terminalValue)
+    {
+        return Routables.foldl(this, intersect, fold, param, accumulator, terminalValue);
+    }
+
+    @Inline
+    public final <P1, P2, V> V foldl(AbstractKeys<K> intersect, IndexedTriFold<P1, P2, K, V> fold, P1 p1, P2 p2, V accumulator)
+    {
+        return Routables.foldl(this, intersect, fold, p1, p2, accumulator, i -> false);
     }
 
     @Inline

@@ -24,8 +24,8 @@ package accord.local;
  */
 public enum KeyHistory
 {
-    DEPS,
-    ALL,
+    TIMESTAMPS,
+    COMMANDS,
     NONE;
 
     public boolean isNone()

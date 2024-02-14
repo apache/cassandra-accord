@@ -28,7 +28,7 @@ import accord.api.DataStore;
 import accord.api.DataStore.FetchRanges;
 import accord.api.DataStore.FetchResult;
 import accord.api.DataStore.StartingRangeFetch;
-import accord.coordinate.CoordinateNoOp;
+import accord.coordinate.FetchMaxConflict;
 import accord.coordinate.CoordinateSyncPoint;
 import accord.primitives.Ranges;
 import accord.primitives.Routable;
@@ -45,7 +45,6 @@ import static accord.local.PreLoadContext.empty;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 import static accord.primitives.Txn.Kind.LocalOnly;
-import static accord.primitives.Txn.Kind.NoOp;
 import static accord.utils.Invariants.illegalState;
 
 /**
@@ -137,7 +136,7 @@ class Bootstrap
                // TODO (required, correcness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
                // TODO (required): is localSyncId even being used anymore
                // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
-               .flatMap(syncPoint -> node.withEpoch(epoch, () -> store.submit(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.DEPS), safeStore1 -> {
+               .flatMap(syncPoint -> node.withEpoch(epoch, () -> store.submit(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.COMMANDS), safeStore1 -> {
                    if (valid.isEmpty()) // we've lost ownership of the range
                        return AsyncResults.success(Ranges.EMPTY);
 
@@ -226,18 +225,14 @@ class Bootstrap
         {
             if (maxApplied == null)
             {
-                TxnId txnId;
                 synchronized (this)
                 {
                     if (state.startedAt == Integer.MAX_VALUE)
                         state.startedAt = logicalClock++;
-                    txnId = node.nextTxnId(NoOp, Routable.Domain.Range);
                 }
                 // TODO (expected): associate callbacks with this CommandStore, to remove synchronization
-                node.withEpoch(txnId.epoch(), () -> {
-                    CoordinateNoOp.coordinate(node, txnId, state.ranges)
-                                  .begin((executeAt, failure) -> safeToReadCallback(state, executeAt, failure));
-                });
+                FetchMaxConflict.fetchMaxConflict(node, state.ranges)
+                                .begin((executeAt, failure) -> safeToReadCallback(state, executeAt, failure));
             }
             else
             {

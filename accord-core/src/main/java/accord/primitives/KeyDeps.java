@@ -515,11 +515,11 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return new SortedArrayList<>(txnIds);
     }
 
-    public List<TxnId> txnIds(Key key)
+    public SortedRelationList<TxnId> txnIds(Key key)
     {
         int keyIndex = keys.indexOf(key);
         if (keyIndex < 0)
-            return Collections.emptyList();
+            return SortedRelationList.EMPTY;
 
         return txnIdsForKeyIndex(keyIndex);
     }

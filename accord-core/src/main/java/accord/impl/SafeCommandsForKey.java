@@ -19,7 +19,8 @@
 package accord.impl;
 
 import accord.api.Key;
-import accord.impl.CommandTimeseries.CommandLoader;
+import accord.local.Command;
+import accord.primitives.TxnId;
 
 public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
 {
@@ -43,25 +44,35 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
         return update;
     }
 
-    public CommandsForKey initialize(CommandLoader<?> loader)
+    CommandsForKey update(Command prev, Command update)
     {
-        return update(new CommandsForKey(key, loader));
+        CommandsForKey current = current();
+        CommandsForKey next = current.update(prev, update);
+        if (next != current)
+            set(next);
+        return next;
     }
 
-    public static abstract class Update<U extends CommandsForKey.Update, D> extends CommandsForKeyGroupUpdater.Mutable<D> implements SafeState<U>
+    CommandsForKey registerHistorical(TxnId txnId)
     {
-        private final Key key;
+        CommandsForKey current = current();
+        CommandsForKey next = current.registerHistorical(txnId);
+        if (next != current)
+            set(next);
+        return next;
+    }
 
-        public Update(Key key, CommandLoader<D> loader)
-        {
-            super(loader);
-            this.key = key;
-        }
+    CommandsForKey updateRedundantBefore(TxnId redundantBefore)
+    {
+        CommandsForKey current = current();
+        CommandsForKey next = current.withoutRedundant(redundantBefore);
+        if (next != current)
+            set(next);
+        return next;
+    }
 
-        public Key key()
-        {
-            return key;
-        }
-        public abstract void initialize();
+    public void initialize()
+    {
+        set(new CommandsForKey(key));
     }
 }

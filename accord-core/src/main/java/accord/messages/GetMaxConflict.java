@@ -21,10 +21,9 @@ package accord.messages;
 import javax.annotation.Nonnull;
 
 import accord.local.KeyHistory;
-import accord.local.Node.Id;
+import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.primitives.FullRoute;
-import accord.primitives.PartialDeps;
 import accord.primitives.PartialRoute;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
@@ -33,32 +32,29 @@ import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 
-import static accord.messages.PreAccept.calculatePartialDeps;
-import static accord.primitives.EpochSupplier.constant;
-
-public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralReadDeps.GetEphemeralReadDepsOk>
+public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMaxConflictOk>
 {
     public static final class SerializationSupport
     {
-        public static GetEphemeralReadDeps create(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, Seekables<?, ?> keys, long executionEpoch)
+        public static GetMaxConflict create(PartialRoute<?> scope, long waitForEpoch, long minEpoch, Seekables<?, ?> keys, long executionEpoch)
         {
-            return new GetEphemeralReadDeps(txnId, scope, waitForEpoch, minEpoch, keys, executionEpoch);
+            return new GetMaxConflict(scope, waitForEpoch, minEpoch, keys, executionEpoch);
         }
     }
 
     public final Seekables<?, ?> keys;
     public final long executionEpoch;
 
-    public GetEphemeralReadDeps(Id to, Topologies topologies, FullRoute<?> route, TxnId txnId, Seekables<?, ?> keys, long executionEpoch)
+    public GetMaxConflict(Node.Id to, Topologies topologies, FullRoute<?> route, Seekables<?, ?> keys, long executionEpoch)
     {
-        super(to, topologies, txnId, route);
+        super(to, topologies, executionEpoch, route);
         this.keys = keys.slice(scope.covering());
         this.executionEpoch = executionEpoch;
     }
 
-    protected GetEphemeralReadDeps(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch,  Seekables<?, ?> keys, long executionEpoch)
+    protected GetMaxConflict(PartialRoute<?> scope, long waitForEpoch, long minEpoch,  Seekables<?, ?> keys, long executionEpoch)
     {
-        super(txnId, scope, waitForEpoch, minEpoch, true);
+        super(TxnId.NONE, scope, waitForEpoch, minEpoch, true);
         this.keys = keys;
         this.executionEpoch = executionEpoch;
     }
@@ -70,22 +66,21 @@ public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralRe
     }
 
     @Override
-    public GetEphemeralReadDepsOk apply(SafeCommandStore safeStore)
+    public GetMaxConflictOk apply(SafeCommandStore safeStore)
     {
         Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, executionEpoch);
-        PartialDeps deps = calculatePartialDeps(safeStore, txnId, keys, constant(minUnsyncedEpoch), Timestamp.MAX, ranges);
-
-        return new GetEphemeralReadDepsOk(deps, Math.max(safeStore.time().epoch(), node.epoch()));
+        Timestamp maxConflict = safeStore.commandStore().maxConflict(keys.slice(ranges));
+        return new GetMaxConflictOk(maxConflict, Math.max(safeStore.time().epoch(), node.epoch()));
     }
 
     @Override
-    public GetEphemeralReadDepsOk reduce(GetEphemeralReadDepsOk reply1, GetEphemeralReadDepsOk reply2)
+    public GetMaxConflictOk reduce(GetMaxConflictOk reply1, GetMaxConflictOk reply2)
     {
-        return new GetEphemeralReadDepsOk(reply1.deps.with(reply2.deps), Math.max(reply1.latestEpoch, reply2.latestEpoch));
+        return new GetMaxConflictOk(Timestamp.max(reply1.maxConflict, reply2.maxConflict), Math.max(reply1.latestEpoch, reply2.latestEpoch));
     }
 
     @Override
-    public void accept(GetEphemeralReadDepsOk result, Throwable failure)
+    public void accept(GetMaxConflictOk result, Throwable failure)
     {
         node.reply(replyTo, replyContext, result, failure);
     }
@@ -99,8 +94,7 @@ public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralRe
     @Override
     public String toString()
     {
-        return "GetEphemeralReadDeps{" +
-               "txnId:" + txnId +
+        return "GetMaxConflict{" +
                ", keys:" + keys +
                '}';
     }
@@ -108,7 +102,7 @@ public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralRe
     @Override
     public TxnId primaryTxnId()
     {
-        return txnId;
+        return null;
     }
 
     @Override
@@ -120,24 +114,24 @@ public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralRe
     @Override
     public KeyHistory keyHistory()
     {
-        return KeyHistory.COMMANDS;
+        return KeyHistory.NONE;
     }
 
-    public static class GetEphemeralReadDepsOk implements Reply
+    public static class GetMaxConflictOk implements Reply
     {
-        public final PartialDeps deps;
+        public final Timestamp maxConflict;
         public final long latestEpoch;
 
-        public GetEphemeralReadDepsOk(@Nonnull PartialDeps deps, long latestEpoch)
+        public GetMaxConflictOk(@Nonnull Timestamp maxConflict, long latestEpoch)
         {
-            this.deps = Invariants.nonNull(deps);
+            this.maxConflict = Invariants.nonNull(maxConflict);
             this.latestEpoch = latestEpoch;
         }
 
         @Override
         public String toString()
         {
-            return "GetEphemeralReadDepsOk" + deps + ',' + latestEpoch + '}';
+            return "GetMaxConflictOk(" + maxConflict + ',' + latestEpoch + '}';
         }
 
         @Override
@@ -147,4 +141,3 @@ public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralRe
         }
     }
 }
-

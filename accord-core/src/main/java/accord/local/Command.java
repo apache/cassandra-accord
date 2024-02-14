@@ -128,12 +128,6 @@ public abstract class Command implements CommonAttributes
         }
     }
 
-    static PreLoadContext contextForCommand(Command command)
-    {
-        Invariants.checkState(command.hasBeen(Status.PreAccepted) && command.partialTxn() != null);
-        return command instanceof PreLoadContext ? (PreLoadContext) command : PreLoadContext.contextFor(command.txnId(), command.partialTxn().keys());
-    }
-
     private static Durability durability(Durability durability, SaveStatus status)
     {
         if (status.compareTo(SaveStatus.PreApplied) >= 0 && !status.hasBeen(Invalidated) && durability == NotDurable)
@@ -174,9 +168,14 @@ public abstract class Command implements CommonAttributes
             return Truncated.invalidated(txnId, durableListeners);
         }
 
-        public static Truncated truncatedApply(CommonAttributes common,SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result)
+        public static Truncated truncatedApply(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result)
         {
             return Truncated.truncatedApply(common, saveStatus, executeAt, writes, result);
+        }
+
+        public static Truncated truncatedApply(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result, Timestamp executesAtLeast)
+        {
+            return Truncated.truncatedApply(common, saveStatus, executeAt, writes, result, executesAtLeast);
         }
     }
 
@@ -190,27 +189,40 @@ public abstract class Command implements CommonAttributes
         return status;
     }
 
-    private static SaveStatus validateCommandClass(SaveStatus status, Class<?> klass)
+    private static SaveStatus validateCommandClass(TxnId txnId, SaveStatus status, Class<?> klass)
     {
-        switch (status.status)
+        switch (status)
         {
+            case Uninitialised:
             case NotDefined:
                 return validateCommandClass(status, NotDefined.class, klass);
             case PreAccepted:
                 return validateCommandClass(status, PreAccepted.class, klass);
-            case AcceptedInvalidate:
             case Accepted:
+            case AcceptedWithDefinition:
+            case AcceptedInvalidate:
+            case AcceptedInvalidateWithDefinition:
             case PreCommitted:
+            case PreCommittedWithAcceptedDeps:
+            case PreCommittedWithDefinition:
+            case PreCommittedWithDefinitionAndAcceptedDeps:
                 return validateCommandClass(status, Accepted.class, klass);
             case Committed:
             case ReadyToExecute:
             case Stable:
                 return validateCommandClass(status, Committed.class, klass);
             case PreApplied:
+            case Applying:
             case Applied:
                 return validateCommandClass(status, Executed.class, klass);
+            case TruncatedApply:
+            case TruncatedApplyWithDeps:
+            case TruncatedApplyWithOutcome:
+                if (txnId.kind().awaitsOnlyDeps())
+                    return validateCommandClass(status, TruncatedAwaitsOnlyDeps.class, klass);
+            case Erased:
+            case ErasedOrInvalidated:
             case Invalidated:
-            case Truncated:
                 return validateCommandClass(status, Truncated.class, klass);
             default:
                 throw illegalState("Unhandled status " + status);
@@ -228,15 +240,14 @@ public abstract class Command implements CommonAttributes
         private final TxnId txnId;
         private final SaveStatus status;
         private final Durability durability;
-        @Nullable
-        private final Route<?> route;
+        private final @Nullable Route<?> route;
         private final Ballot promised;
         private final Listeners.Immutable listeners;
 
         private AbstractCommand(TxnId txnId, SaveStatus status, Durability durability, @Nullable Route<?> route, Ballot promised, Listeners.Immutable listeners)
         {
             this.txnId = txnId;
-            this.status = validateCommandClass(status, getClass());
+            this.status = validateCommandClass(txnId, status, getClass());
             this.durability = durability;
             this.route = route;
             this.promised = promised;
@@ -246,7 +257,7 @@ public abstract class Command implements CommonAttributes
         private AbstractCommand(CommonAttributes common, SaveStatus status, Ballot promised)
         {
             this.txnId = common.txnId();
-            this.status = validateCommandClass(status, getClass());
+            this.status = validateCommandClass(txnId, status, getClass());
             this.durability = common.durability();
             this.route = common.route();
             this.promised = promised;
@@ -352,8 +363,6 @@ public abstract class Command implements CommonAttributes
                 switch (known.executeAt)
                 {
                     default: throw new AssertionError("Unhandled KnownExecuteAt: " + known.executeAt);
-                    case ExecuteAtNotWitnessed:
-                        Invariants.checkState(executeAt == null);
                     case ExecuteAtErased:
                     case ExecuteAtUnknown:
                         break;
@@ -410,7 +419,7 @@ public abstract class Command implements CommonAttributes
                 case CleaningUp:
                     break;
                 case ReadyToExclude:
-                    Invariants.checkState(!validate.saveStatus().hasBeen(Status.Committed) || validate.asCommitted().waitingOn == null);
+                    Invariants.checkState(validate.saveStatus() != SaveStatus.Committed || validate.asCommitted().waitingOn == null);
                     break;
                 case WaitingToExecute:
                 case ReadyToExecute:
@@ -475,6 +484,11 @@ public abstract class Command implements CommonAttributes
     public abstract Listeners.Immutable<DurableAndIdempotentListener> durableListeners();
     public abstract SaveStatus saveStatus();
 
+    /**
+     * Only meaningful when txnId.kind().awaitsOnlyDeps()
+     */
+    public Timestamp executesAtLeast() { return executeAt(); }
+
     static boolean isSameClass(Command command, Class<? extends Command> klass)
     {
         return command.getClass() == klass;
@@ -500,11 +514,6 @@ public abstract class Command implements CommonAttributes
     {
         if (!isSameClass(command, klass))
             throw new IllegalArgumentException(errorMsg + format(" expected %s got %s", klass.getSimpleName(), command.getClass().getSimpleName()));
-    }
-
-    public PreLoadContext contextForSelf()
-    {
-        return contextForCommand(this);
     }
 
     public abstract Timestamp executeAt();
@@ -715,7 +724,7 @@ public abstract class Command implements CommonAttributes
         }
     }
 
-    public static final class Truncated extends AbstractCommand
+    public static class Truncated extends AbstractCommand
     {
         @Nullable final Timestamp executeAt;
         @Nullable final Writes writes;
@@ -787,22 +796,41 @@ public abstract class Command implements CommonAttributes
             Invariants.checkArgument(command.known().executeAt.isDecidedAndKnownToExecute());
             if (route == null) route = Route.castToNonNullFullRoute(command.route());
             Durability durability = Durability.mergeAtLeast(command.durability(), ShardUniversal);
+            if (command.txnId().kind().awaitsOnlyDeps())
+            {
+                Timestamp executesAtLeast = command.hasBeen(Stable) ? command.executesAtLeast() : null;
+                return validate(new TruncatedAwaitsOnlyDeps(command.txnId(), SaveStatus.TruncatedApply, durability, route, command.executeAt(), EMPTY, null, null, executesAtLeast));
+            }
             return validate(new Truncated(command.txnId(), SaveStatus.TruncatedApply, durability, route, command.executeAt(), EMPTY, null, null));
         }
 
         public static Truncated truncatedApplyWithOutcome(Executed command)
         {
             Durability durability = Durability.mergeAtLeast(command.durability(), ShardUniversal);
+            if (command.txnId().kind().awaitsOnlyDeps())
+                return validate(new TruncatedAwaitsOnlyDeps(command.txnId(), SaveStatus.TruncatedApplyWithOutcome, durability, command.route(), command.executeAt(), EMPTY, command.writes, command.result, command.executesAtLeast()));
             return validate(new Truncated(command.txnId(), SaveStatus.TruncatedApplyWithOutcome, durability, command.route(), command.executeAt(), EMPTY, command.writes, command.result));
         }
 
         public static Truncated truncatedApply(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result)
         {
+            Invariants.checkArgument(!common.txnId().kind().awaitsOnlyDeps());
+            Durability durability = checkTruncatedApplyInvariants(common, saveStatus, executeAt);
+            return validate(new Truncated(common.txnId(), saveStatus, durability, common.route(), executeAt, EMPTY, writes, result));
+        }
+
+        public static Truncated truncatedApply(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result, Timestamp dependencyExecutesAt)
+        {
+            Invariants.checkArgument(common.txnId().kind().awaitsOnlyDeps());
+            Durability durability = checkTruncatedApplyInvariants(common, saveStatus, executeAt);
+            return validate(new TruncatedAwaitsOnlyDeps(common.txnId(), saveStatus, durability, common.route(), executeAt, EMPTY, writes, result, dependencyExecutesAt));
+        }
+
+        private static Durability checkTruncatedApplyInvariants(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt)
+        {
             Invariants.checkArgument(executeAt != null);
             Invariants.checkArgument(saveStatus == SaveStatus.TruncatedApply || saveStatus == SaveStatus.TruncatedApplyWithDeps || saveStatus == SaveStatus.TruncatedApplyWithOutcome);
-            // TODO review Is this correctly handling all three versions of truncatedApplyStatus? Should writes be null some of the time?
-            Durability durability = Durability.mergeAtLeast(common.durability(), ShardUniversal);
-            return validate(new Truncated(common.txnId(), saveStatus, durability, common.route(), executeAt, EMPTY, writes, result));
+            return Durability.mergeAtLeast(common.durability(), ShardUniversal);
         }
 
         public static Truncated invalidated(Command command)
@@ -861,6 +889,43 @@ public abstract class Command implements CommonAttributes
             // TODO (now): invoke listeners precisely once when we adopt this state, then we can simply return `this`
             return validate(new Truncated(txnId(), saveStatus(), attrs.durability(), attrs.route(), executeAt, attrs.durableListeners(), writes, result));
         }
+    }
+
+    public static class TruncatedAwaitsOnlyDeps extends Truncated
+    {
+        @Nullable final Timestamp executesAtLeast;
+
+        public TruncatedAwaitsOnlyDeps(CommonAttributes commonAttributes, SaveStatus saveStatus, @Nullable Timestamp executeAt, @Nullable Writes writes, @Nullable Result result, @Nullable Timestamp executesAtLeast)
+        {
+            super(commonAttributes, saveStatus, executeAt, writes, result);
+            this.executesAtLeast = executesAtLeast;
+        }
+
+        public TruncatedAwaitsOnlyDeps(TxnId txnId, SaveStatus saveStatus, Durability durability, @Nullable Route<?> route, @Nullable Timestamp executeAt, Listeners.Immutable listeners, @Nullable Writes writes, @Nullable Result result, @Nullable Timestamp executesAtLeast)
+        {
+            super(txnId, saveStatus, durability, route, executeAt, listeners, writes, result);
+            this.executesAtLeast = executesAtLeast;
+        }
+
+        public Timestamp executesAtLeast()
+        {
+            return executesAtLeast;
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (!super.equals(o)) return false;
+            return Objects.equals(executesAtLeast, ((TruncatedAwaitsOnlyDeps)o).executesAtLeast);
+        }
+
+        @Override
+        public boolean isEqualOrFuller(Command command)
+        {
+            if (!super.isEqualOrFuller(command)) return false;
+            return Objects.equals(executesAtLeast, ((TruncatedAwaitsOnlyDeps)command).executesAtLeast);
+        }
+
     }
 
     public static class PreAccepted extends AbstractCommand
@@ -1027,6 +1092,14 @@ public abstract class Command implements CommonAttributes
             this.waitingOn = waitingOn;
             Invariants.checkState(common.route().kind().isFullRoute(), "Expected a full route but given %s", common.route().kind());
             if (status.hasBeen(Stable)) Invariants.checkState(waitingOn == WaitingOn.EMPTY || waitingOn.deps.equals(common.partialDeps()), "Deps do not match; expected %s == %s", waitingOn.deps, common.partialDeps());
+        }
+
+        @Override
+        public Timestamp executesAtLeast()
+        {
+            if (!txnId().kind().awaitsOnlyDeps()) return executeAt();
+            if (status().hasBeen(Stable)) return waitingOn.executeAtLeast(executeAt());
+            return null;
         }
 
         @Override
@@ -1206,6 +1279,11 @@ public abstract class Command implements CommonAttributes
         public Timestamp executeAtLeast()
         {
             return null;
+        }
+
+        public Timestamp executeAtLeast(Timestamp ifNull)
+        {
+            return ifNull;
         }
 
         public static WaitingOn none(Deps deps)
@@ -1582,6 +1660,12 @@ public abstract class Command implements CommonAttributes
         public Timestamp executeAtLeast()
         {
             return executeAtLeast;
+        }
+
+        @Override
+        public Timestamp executeAtLeast(Timestamp ifNull)
+        {
+            return executeAtLeast != null ? executeAtLeast : ifNull;
         }
 
         @Override

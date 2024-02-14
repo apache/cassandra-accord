@@ -260,7 +260,6 @@ public class Invalidate implements Callback<InvalidateReply>
     {
         // TODO (desired): merge with FetchData.InvalidateOnDone
         // TODO (desired): when sending to network, register a callback for when local application of commitInvalidate message ahs been performed, so no need to special-case
-        // TODO (required, consider): pick a reasonable upper bound, so we don't invalidate into an epoch/commandStore that no longer cares about this command
         node.forEachLocal(contextFor(txnId), commitTo, txnId.epoch(), txnId.epoch(), safeStore -> {
             Commands.commitInvalidate(safeStore, safeStore.get(txnId, txnId, commitTo), commitTo);
         }).begin((s, f) -> {

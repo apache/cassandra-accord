@@ -122,9 +122,9 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
 
     protected abstract void onReadOk(Node.Id from, CommandStore commandStore, Data data, Ranges ranges);
 
-    protected boolean collectMaxApplied()
+    protected FetchRequest newFetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
     {
-        return false;
+        return new FetchRequest(sourceEpoch, syncId, ranges, partialDeps, rangeReadTxn(ranges));
     }
 
     @Override
@@ -135,7 +135,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         Ranges ownedRanges = ownedRangesForNode(to);
         Invariants.checkArgument(ownedRanges.containsAll(ranges), "Got a reply from %s for ranges %s, but owned ranges %s does not contain all the ranges", to, ranges, ownedRanges);
         PartialDeps partialDeps = syncPoint.waitFor.slice(ownedRanges, ranges);
-        node.send(to, new FetchRequest(syncPoint.sourceEpoch(), syncPoint.syncId, ranges, partialDeps, rangeReadTxn(ranges), collectMaxApplied()), new Callback<ReadReply>()
+        node.send(to, newFetchRequest(syncPoint.sourceEpoch(), syncPoint.syncId, ranges, partialDeps, rangeReadTxn(ranges)), new Callback<ReadReply>()
         {
             @Override
             public void onSuccess(Node.Id from, ReadReply reply)
@@ -228,50 +228,24 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
 
     void abort(Ranges abort)
     {
-        // TODO (required, later): implement abort
+        // TODO (expected): implement abort
     }
 
     public static class FetchRequest extends WaitUntilAppliedAndReadData
     {
         public final PartialDeps partialDeps;
-        public final boolean collectMaxApplied;
-        private transient Timestamp maxApplied;
 
-        public FetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn, boolean collectMaxApplied)
+        public FetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
         {
             super(syncId, ranges, sourceEpoch, partialTxn);
             this.partialDeps = partialDeps;
-            this.collectMaxApplied = collectMaxApplied;
         }
 
         @Override
         protected void readComplete(CommandStore commandStore, Data result, Ranges unavailable)
         {
-            Ranges slice = commandStore.unsafeRangesForEpoch().allAt(txnId).subtract(unavailable);
-            if (collectMaxApplied)
-            {
-                commandStore.maxAppliedFor((Ranges)readScope, slice).begin((newMaxApplied, failure) -> {
-                    if (failure != null)
-                    {
-                        commandStore.agent().onUncaughtException(failure);
-                    }
-                    else
-                    {
-                        synchronized (this)
-                        {
-                            if (maxApplied == null) maxApplied = newMaxApplied;
-                            else maxApplied = Timestamp.max(maxApplied, newMaxApplied);
-                            Ranges reportUnavailable = unavailable.slice((Ranges)this.readScope, Minimal);
-                            super.readComplete(commandStore, result, reportUnavailable);
-                        }
-                    }
-                });
-            }
-            else
-            {
-                Ranges reportUnavailable = unavailable.slice((Ranges)this.readScope, Minimal);
-                super.readComplete(commandStore, result, reportUnavailable);
-            }
+            Ranges reportUnavailable = unavailable.slice((Ranges)this.readScope, Minimal);
+            super.readComplete(commandStore, result, reportUnavailable);
         }
 
         @Override
@@ -279,7 +253,12 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         {
             // TODO (review): If the fetch response actually does some streaming, but we send back the error
             // it is a lot of work and data that might move and be unaccounted for at the coordinator
-            node.reply(replyTo, replyContext, fail == null ? new FetchResponse(unavailable, data, maxApplied) : null, fail);
+            node.reply(replyTo, replyContext, fail == null ? new FetchResponse(unavailable, data, maxApplied()) : null, fail);
+        }
+
+        protected Timestamp maxApplied()
+        {
+            return null;
         }
 
         @Override

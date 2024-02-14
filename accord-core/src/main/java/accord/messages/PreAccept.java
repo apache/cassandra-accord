@@ -27,14 +27,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.local.Node.Id;
-import accord.impl.DepsBuilder;
 import accord.local.*;
 import accord.messages.TxnRequest.WithUnsynced;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 
-import static accord.local.SafeCommandStore.TestDep.ANY_DEPS;
-import static accord.local.SafeCommandStore.TestTimestamp.STARTED_BEFORE;
 import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
 
 public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements EpochSupplier
@@ -86,7 +83,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
     @Override
     public KeyHistory keyHistory()
     {
-        return KeyHistory.DEPS;
+        return KeyHistory.COMMANDS;
     }
 
     @Override
@@ -132,7 +129,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
                 // all transactions with lower txnId as expired.
                 Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, txnId);
                 return new PreAcceptOk(txnId, command.executeAt(),
-                                       calculatePartialDeps(safeStore, txnId, partialTxn.keys(), EpochSupplier.constant(minUnsyncedEpoch), txnId, ranges));
+                                       calculatePartialDeps(safeStore, txnId, command.partialTxn().keys(), EpochSupplier.constant(minUnsyncedEpoch), txnId, ranges));
 
             case Truncated:
             case RejectedBallot:
@@ -248,21 +245,22 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
     static PartialDeps calculatePartialDeps(SafeCommandStore safeStore, TxnId txnId, Seekables<?, ?> keys, EpochSupplier minEpoch, Timestamp executeAt, Ranges ranges)
     {
         // TODO (expected): do not build covering ranges; no longer especially valuable given use of FullRoute
-        DepsBuilder builder = new DepsBuilder(txnId);
-        // could use MAY_EXECUTE_BEFORE to prune those we know execute later.
         // NOTE: ExclusiveSyncPoint *relies* on STARTED_BEFORE to ensure it reports a dependency on *every* earlier TxnId that may execute after it.
         //       This is necessary for reporting to a bootstrapping replica which TxnId it must not prune from dependencies
         //       i.e. the source replica reports to the target replica those TxnId that STARTED_BEFORE and EXECUTES_AFTER.
-        safeStore.mapReduce(keys, ranges, KeyHistory.DEPS, txnId.kind().witnesses(), STARTED_BEFORE, executeAt, ANY_DEPS, null, null, null,
-                            (p1, keyOrRange, testTxnId, testExecuteAt, status, deps, in) -> {
-                                builder.add(testTxnId, keyOrRange, status, testExecuteAt, deps.get());
-                                return in;
-                            }, null, builder);
-        
-        try (Deps.AbstractBuilder<PartialDeps> redundantBuilder = new PartialDeps.Builder(ranges))
+        try (Deps.AbstractBuilder<PartialDeps> builder = new PartialDeps.Builder(ranges);
+             Deps.AbstractBuilder<PartialDeps> redundantBuilder = new PartialDeps.Builder(ranges))
         {
+            safeStore.mapReduceActive(keys, ranges, executeAt, txnId.kind().witnesses(),
+                                      (p1, keyOrRange, testTxnId, testExecuteAt, in) -> {
+                                          if (p1 == null || !testTxnId.equals(p1))
+                                              in.add(keyOrRange, testTxnId);
+                                          return in;
+                                      }, executeAt.equals(txnId) ? null : txnId, builder);
+
+            // TODO (required): make sure any sync point is in the past
             PartialDeps redundant = safeStore.commandStore().redundantBefore().collectDeps(keys, redundantBuilder, minEpoch, executeAt).build();
-            return builder.buildPartialDeps(safeStore, ranges).with(redundant);
+            return builder.build().with(redundant);
         }
     }
 

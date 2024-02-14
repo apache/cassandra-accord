@@ -41,11 +41,11 @@ import accord.topology.Topologies;
 
 import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.SafeCommandStore.TestDep.WITHOUT;
-import static accord.local.SafeCommandStore.TestTimestamp.EXECUTES_AFTER;
-import static accord.local.SafeCommandStore.TestTimestamp.STARTED_AFTER;
-import static accord.local.SafeCommandStore.TestTimestamp.STARTED_BEFORE;
-import static accord.local.Status.Accepted;
-import static accord.local.Status.Committed;
+import static accord.local.SafeCommandStore.TestStartedAt.ANY;
+import static accord.local.SafeCommandStore.TestStatus.IS_STABLE;
+import static accord.local.SafeCommandStore.TestStatus.IS_PROPOSED;
+import static accord.local.SafeCommandStore.TestStartedAt.STARTED_AFTER;
+import static accord.local.SafeCommandStore.TestStartedAt.STARTED_BEFORE;
 import static accord.local.Status.Phase;
 import static accord.local.Status.PreAccepted;
 import static accord.local.Status.PreCommitted;
@@ -137,16 +137,16 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
             //    them as a dependency (but we have to make sure we consider dependency rules, so if there's no write and only reads)
             //    we might still have new transactions block our execution.
             Ranges ranges = safeStore.ranges().allAt(txnId);
-            rejectsFastPath = hasAcceptedStartedAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
+            rejectsFastPath = hasAcceptedOrCommittedStartedAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
             if (!rejectsFastPath)
-                rejectsFastPath = hasCommittedExecutesAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
+                rejectsFastPath = hasStableExecutesAfterWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
 
             // TODO (expected, testing): introduce some good unit tests for verifying these two functions in a real repair scenario
             // committed txns with an earlier txnid and have our txnid as a dependency
-            earlierCommittedWitness = committedStartedBeforeAndWitnessed(safeStore, txnId, ranges, partialTxn.keys());
+            earlierCommittedWitness = stableStartedBeforeAndWitnessed(safeStore, txnId, ranges, partialTxn.keys());
 
             // accepted txns with an earlier txnid that don't have our txnid as a dependency
-            earlierAcceptedNoWitness = acceptedStartedBeforeWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
+            earlierAcceptedNoWitness = acceptedOrCommittedStartedBeforeWithoutWitnessing(safeStore, txnId, ranges, partialTxn.keys());
         }
 
         Status status = command.status();
@@ -212,7 +212,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
     @Override
     public KeyHistory keyHistory()
     {
-        return KeyHistory.ALL;
+        return KeyHistory.COMMANDS;
     }
 
     @Override
@@ -326,14 +326,14 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         }
     }
 
-    private static Deps acceptedStartedBeforeWithoutWitnessing(SafeCommandStore safeStore, TxnId startedBefore, Ranges ranges, Seekables<?, ?> keys)
+    private static Deps acceptedOrCommittedStartedBeforeWithoutWitnessing(SafeCommandStore safeStore, TxnId startedBefore, Ranges ranges, Seekables<?, ?> keys)
     {
         try (Deps.Builder builder = Deps.builder())
         {
             // any transaction that started
-            safeStore.mapReduce(keys, ranges, KeyHistory.ALL, startedBefore.kind().witnessedBy(), STARTED_BEFORE, startedBefore, WITHOUT, startedBefore, Accepted, PreCommitted,
-                                          (startedBefore0, keyOrRange, txnId, executeAt, status, deps, prev) -> {
-                        if (executeAt.compareTo(startedBefore) > 0)
+            safeStore.mapReduceFull(keys, ranges, startedBefore, startedBefore.kind().witnessedBy(), STARTED_BEFORE, WITHOUT, IS_PROPOSED,
+                                    (startedBefore0, keyOrRange, txnId, executeAt, prev) -> {
+                        if (executeAt.compareTo(startedBefore0) > 0)
                             builder.add(keyOrRange, txnId);
                         return builder;
                     }, startedBefore, builder);
@@ -341,17 +341,17 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
         }
     }
 
-    private static Deps committedStartedBeforeAndWitnessed(SafeCommandStore safeStore, TxnId startedBefore, Ranges ranges, Seekables<?, ?> keys)
+    private static Deps stableStartedBeforeAndWitnessed(SafeCommandStore safeStore, TxnId startedBefore, Ranges ranges, Seekables<?, ?> keys)
     {
         try (Deps.Builder builder = Deps.builder())
         {
-            safeStore.mapReduce(keys, ranges, KeyHistory.ALL, startedBefore.kind().witnessedBy(), STARTED_BEFORE, startedBefore, WITH, startedBefore, Committed, null,
-                                          (p1, keyOrRange, txnId, executeAt, status, deps, prev) -> builder.add(keyOrRange, txnId), null, (Deps.AbstractBuilder<Deps>)builder);
+            safeStore.mapReduceFull(keys, ranges, startedBefore, startedBefore.kind().witnessedBy(), STARTED_BEFORE, WITH, IS_STABLE,
+                                    (p1, keyOrRange, txnId, executeAt, prev) -> builder.add(keyOrRange, txnId), null, (Deps.AbstractBuilder<Deps>)builder);
             return builder.build();
         }
     }
 
-    private static boolean hasAcceptedStartedAfterWithoutWitnessing(SafeCommandStore safeStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
+    private static boolean hasAcceptedOrCommittedStartedAfterWithoutWitnessing(SafeCommandStore safeStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
     {
         /*
          * The idea here is to discover those transactions that were started after us and have been Accepted
@@ -362,11 +362,11 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
          *
          * TODO (required): consider carefully how _adding_ ranges to a CommandStore affects this
          */
-        return safeStore.mapReduce(keys, ranges, KeyHistory.ALL, startedAfter.kind().witnessedBy(), STARTED_AFTER, startedAfter, WITHOUT, startedAfter, Accepted, PreCommitted,
-                                             (p1, keyOrRange, txnId, executeAt, status, deps, prev) -> true, null, false, i -> i);
+        return safeStore.mapReduceFull(keys, ranges, startedAfter, startedAfter.kind().witnessedBy(), STARTED_AFTER, WITHOUT, IS_PROPOSED,
+                                             (p1, keyOrRange, txnId, executeAt, prev) -> true, null, false);
     }
 
-    private static boolean hasCommittedExecutesAfterWithoutWitnessing(SafeCommandStore safeStore, TxnId startedAfter, Ranges ranges, Seekables<?, ?> keys)
+    private static boolean hasStableExecutesAfterWithoutWitnessing(SafeCommandStore safeStore, TxnId executesAfter, Ranges ranges, Seekables<?, ?> keys)
     {
         /*
          * The idea here is to discover those transactions that have been decided to execute after us
@@ -375,7 +375,7 @@ public class BeginRecovery extends TxnRequest<BeginRecovery.RecoverReply>
          * witnessed us we are safe to propose the pre-accept timestamp regardless, whereas if any transaction
          * has not witnessed us we can safely invalidate it.
          */
-        return safeStore.mapReduce(keys, ranges, KeyHistory.ALL, startedAfter.kind().witnessedBy(), EXECUTES_AFTER, startedAfter, WITHOUT, startedAfter, Committed, null,
-                                             (p1, keyOrRange, txnId, executeAt, status, deps, prev) -> true, null, false, i -> i);
+        return safeStore.mapReduceFull(keys, ranges, executesAfter, executesAfter.kind().witnessedBy(), ANY, WITHOUT, IS_STABLE,
+                                       (p1, keyOrRange, txnId, executeAt, prev) -> true, null, false);
     }
 }

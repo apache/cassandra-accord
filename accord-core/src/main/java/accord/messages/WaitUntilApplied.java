@@ -27,11 +27,11 @@ import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
-import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
 import static accord.local.SaveStatus.Applied;
+import static accord.local.SaveStatus.TruncatedApply;
 
 /**
  * Wait until the transaction has been applied locally
@@ -48,8 +48,8 @@ public class WaitUntilApplied extends ReadData
         }
     }
 
-    private static final ExecuteOn EXECUTE_ON = new ExecuteOn(Applied, Applied);
-    private long futureEpoch;
+    private static final ExecuteOn EXECUTE_ON = new ExecuteOn(Applied, TruncatedApply);
+    private long retryInLaterEpoch;
 
     public WaitUntilApplied(Node.Id to, Topologies topologies, TxnId txnId, Participants<?> readScope, long executeAtEpoch)
     {
@@ -76,17 +76,16 @@ public class WaitUntilApplied extends ReadData
     @Override
     void read(SafeCommandStore safeStore, Command command)
     {
-        Command.WaitingOn waitingOn = command.asCommitted().waitingOn;
-        Timestamp executeAtLeast = waitingOn.executeAtLeast();
-        if (executeAtLeast != null)
-            this.futureEpoch = Math.max(futureEpoch, executeAtLeast.epoch());
+        long retryInLaterEpoch = ReadEphemeralTxnData.retryInLaterEpoch(executeAtEpoch, safeStore, command);
+        if (retryInLaterEpoch > this.retryInLaterEpoch)
+            this.retryInLaterEpoch = retryInLaterEpoch;
         onOneSuccess(safeStore.commandStore(), unavailable(safeStore, command));
     }
 
     @Override
     protected ReadOk constructReadOk(Ranges unavailable, Data data)
     {
-        return new ReadOkWithFutureEpoch(unavailable, data, futureEpoch);
+        return new ReadOkWithFutureEpoch(unavailable, data, retryInLaterEpoch);
     }
 
     @Override

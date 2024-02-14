@@ -32,6 +32,7 @@ import accord.messages.PreAccept.PreAcceptOk;
 import accord.messages.PreAccept.PreAcceptReply;
 import accord.primitives.Ballot;
 import accord.primitives.FullRoute;
+import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -51,6 +52,7 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
 {
     final FastPathTracker tracker;
     private final List<PreAcceptOk> oks;
+    final Txn txn;
 
     CoordinatePreAccept(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
     {
@@ -59,9 +61,10 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
 
     CoordinatePreAccept(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Topologies topologies)
     {
-        super(node, route, txnId, txn);
+        super(node, route, txnId);
         this.tracker = new FastPathTracker(topologies);
         this.oks = new ArrayList<>(topologies.estimateUniqueNodes());
+        this.txn = txn;
     }
 
     void contact(Set<Id> nodes, Topologies topologies, Callback<PreAcceptReply> callback)
@@ -77,6 +80,12 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
     long executeAtEpoch()
     {
         return foldl(oks, (ok, prev) -> ok.witnessedAt.epoch() > prev.epoch() ? ok.witnessedAt : prev, Timestamp.NONE).epoch();
+    }
+
+    @Override
+    Seekables<?, ?> keysOrRanges()
+    {
+        return txn.keys();
     }
 
     @Override

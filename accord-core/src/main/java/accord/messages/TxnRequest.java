@@ -51,20 +51,35 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
             this(to, topologies, txnId, route, latestRelevantEpochIndex(to, topologies, route));
         }
 
-        private WithUnsynced(Id to, Topologies topologies, TxnId txnId, FullRoute<?> route, int startIndex)
+        protected WithUnsynced(Id to, Topologies topologies, TxnId txnId, FullRoute<?> route, int startIndex)
+        {
+            this(to, topologies, txnId, txnId.epoch(), route, startIndex);
+        }
+
+        public WithUnsynced(Id to, Topologies topologies, long epoch, FullRoute<?> route)
+        {
+            this(to, topologies, TxnId.NONE, epoch, route, latestRelevantEpochIndex(to, topologies, route), true);
+        }
+
+        protected WithUnsynced(Id to, Topologies topologies, TxnId txnId, long epoch, FullRoute<?> route, int startIndex)
+        {
+            this(to, topologies, txnId, epoch, route, startIndex, false);
+        }
+
+        protected WithUnsynced(Id to, Topologies topologies, TxnId txnId, long epoch, FullRoute<?> route, int startIndex, boolean doNotComputeProgressKey)
         {
             super(to, topologies, route, txnId, startIndex);
             this.minUnsyncedEpoch = topologies.oldestEpoch();
-            this.doNotComputeProgressKey = doNotComputeProgressKey(topologies, startIndex, txnId, waitForEpoch());
+            this.doNotComputeProgressKey = doNotComputeProgressKey || doNotComputeProgressKey(topologies, startIndex, epoch, waitForEpoch());
 
-            Ranges ranges = topologies.forEpoch(txnId.epoch()).rangesForNode(to);
+            Ranges ranges = topologies.forEpoch(epoch).rangesForNode(to);
             if (doNotComputeProgressKey)
             {
-                Invariants.checkState(!route.intersects(ranges)); // confirm dest is not a replica on txnId.epoch
+                Invariants.checkState(txnId.equals(TxnId.NONE) || !route.intersects(ranges)); // confirm dest is not a replica on txnId.epoch
             }
             else if (Invariants.isParanoid())
             {
-                long progressEpoch = Math.min(waitForEpoch(), txnId.epoch());
+                long progressEpoch = Math.min(waitForEpoch(), epoch);
                 Ranges computesRangesOn = topologies.forEpoch(progressEpoch).rangesForNode(to);
                 if (computesRangesOn == null)
                     Invariants.checkState(!route.intersects(ranges));
@@ -156,8 +171,11 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
         return progressKey(node, waitForEpoch, txnId, scope);
     }
 
-    public static RoutingKey progressKey(Node node, long waitForEpoch, TxnId txnId, PartialRoute<?> scope)
+    public static RoutingKey progressKey(Node node, long waitForEpoch, TxnId txnId, Route<?> scope)
     {
+        if (txnId == null)
+            return null;
+
         // if waitForEpoch < txnId.epoch, then this replica's ownership is unchanged
         long progressEpoch = min(waitForEpoch, txnId.epoch());
         return node.trySelectProgressKey(progressEpoch, scope, scope.homeKey());
@@ -265,7 +283,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
         return scope;
     }
 
-    private static boolean doNotComputeProgressKey(Topologies topologies, int startIndex, TxnId txnId, long waitForEpoch)
+    private static boolean doNotComputeProgressKey(Topologies topologies, int startIndex, long epoch, long waitForEpoch)
     {
         // to understand this calculation we must bear in mind the following:
         //  - startIndex is the "latest relevant" which means we skip over recent epochs where we are not owners at all,
@@ -280,7 +298,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
         // (as it might be done so with stale ring information)
 
         // TODO (low priority, clarity): this would be better defined as "hasProgressKey"
-        return waitForEpoch < txnId.epoch() && startIndex > 0
-                && topologies.get(startIndex).epoch() < txnId.epoch();
+        return waitForEpoch < epoch && startIndex > 0
+                && topologies.get(startIndex).epoch() < epoch;
     }
 }

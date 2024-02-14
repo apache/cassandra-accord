@@ -44,6 +44,7 @@ import accord.impl.IntKey;
 import accord.impl.TopologyFactory;
 import accord.impl.mock.MockCluster;
 import accord.local.CheckedCommands;
+import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.PreLoadContext;
@@ -150,7 +151,7 @@ class ReadDataTest
                 CheckedCommands.accept(safe, state.txnId, Ballot.ZERO, state.partialRoute, state.partialTxn.keys(), state.progressKey, state.executeAt, state.deps);
 
                 SafeCommand safeCommand = safe.ifInitialised(state.txnId);
-                safeCommand.commit(safeCommand.current(), Ballot.ZERO, state.executeAt);
+                safeCommand.stable(safe, safeCommand.current(), Ballot.ZERO, state.executeAt, Command.WaitingOn.EMPTY);
             })));
 
             ReplyContext replyContext = state.process();
@@ -184,7 +185,7 @@ class ReadDataTest
             store = stores.get(1);
             check(store.execute(PreLoadContext.contextFor(state.txnId, state.keys), safe -> {
                 SafeCommand command = safe.get(state.txnId, state.txnId, state.route);
-                command.commitInvalidated();
+                command.commitInvalidated(safe);
             }));
 
             ReplyContext replyContext = state.process();
@@ -200,7 +201,7 @@ class ReadDataTest
             List<CommandStore> stores = stores(state);
             stores.forEach(store -> check(store.execute(PreLoadContext.contextFor(state.txnId, state.keys), safe -> {
                 SafeCommand command = safe.get(state.txnId, state.txnId, state.route);
-                command.commitInvalidated();
+                command.commitInvalidated(safe);
             })));
             ReplyContext replyContext = state.process();
 

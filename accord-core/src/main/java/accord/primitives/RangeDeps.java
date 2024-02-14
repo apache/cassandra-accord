@@ -45,7 +45,10 @@ import static accord.utils.SortedArrays.Search.FAST;
  * <p>The relationship between Range and TxnId is maintained via {@code int[]} utilising {@link RelationMultiMap}
  * functionality.
  *
- * TODO (expected): de-overlap ranges per txnId if possible cheaply, or else reduce use of partial ranges where possible
+ * TODO (required): de-overlap ranges per txnId if possible cheaply, or else reduce use of partial ranges where possible
+ * TODO (required): permit building out-of-order
+ * TODO (required): currently permitting duplicates
+ * TODO (required): randomised testing of all iteration methods (just found a double increment bug)
  */
 public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
 {
@@ -517,7 +520,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
         int start = txnIdx == 0 ? txnIds.length : txnIdsToRanges[txnIdx - 1];
         int end = txnIdsToRanges[txnIdx];
         for (int i = start; i < end ; ++i)
-            accumulate = fold.apply(p1, ranges[txnIdsToRanges[i++]], accumulate);
+            accumulate = fold.apply(p1, ranges[txnIdsToRanges[i]], accumulate);
         return accumulate;
     }
 

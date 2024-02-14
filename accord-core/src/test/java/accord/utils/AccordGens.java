@@ -187,9 +187,14 @@ public class AccordGens
         return prefixedIntHashKey(prefixGen, rs -> rs.nextInt(PrefixedIntHashKey.MIN_KEY, Integer.MAX_VALUE));
     }
 
-    public static Gen<Key> prefixedIntHashKey(Gen.IntGen prefixGen, Gen.IntGen valueGen)
+    public static Gen<Key> prefixedIntHashKey(Gen.IntGen prefixGen, Gen.IntGen keyGen)
     {
-        return rs -> PrefixedIntHashKey.key(prefixGen.nextInt(rs), valueGen.nextInt(rs));
+        return rs -> {
+            int prefix = prefixGen.nextInt(rs);
+            int key = keyGen.nextInt(rs);
+            int hash = PrefixedIntHashKey.hash(key);
+            return PrefixedIntHashKey.key(prefix, key, hash);
+        };
     }
 
     public static Gen<Key> prefixedIntHashKeyInsideRanges(Ranges ranges)
@@ -201,7 +206,7 @@ public class AccordGens
             // end inclusive, so +1 the result to include end and exclude start
             int hash = rs.nextInt(start.hash, end.hash) + 1;
             int key = CRCUtils.reverseCRC32LittleEnding(hash);
-            PrefixedIntHashKey.Key ret = PrefixedIntHashKey.key(start.prefix, key);
+            PrefixedIntHashKey.Key ret = PrefixedIntHashKey.key(start.prefix, key, hash);
             // we have tests to make sure this doesn't fail... just a safety check
             assert ret.hash == hash;
             return ret;

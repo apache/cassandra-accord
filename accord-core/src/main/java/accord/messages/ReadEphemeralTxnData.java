@@ -26,7 +26,6 @@ import accord.local.Node.Id;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.SaveStatus;
-import accord.local.Status;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
 import accord.primitives.PartialDeps;
@@ -105,22 +104,37 @@ public class ReadEphemeralTxnData extends ReadData
     @Override
     void read(SafeCommandStore safeStore, Command command)
     {
-        Command.WaitingOn waitingOn = command.asCommitted().waitingOn;
-        Timestamp executeAtLeast = waitingOn.executeAtLeast();
-        if (executeAtLeast != null && executeAtLeast.epoch() > executeAtEpoch)
+        long retryInLaterEpoch = retryInLaterEpoch(executeAtEpoch, safeStore, command);
+        if (retryInLaterEpoch > 0)
         {
-            long executeAtLeastEpoch = executeAtLeast.epoch();
-            Ranges removed = safeStore.ranges().removed(executeAtEpoch, executeAtLeastEpoch);
-            if (removed.intersects(command.partialTxn().keys()))
-            {
-                Ranges unavailable = unavailable(safeStore, command).with(removed).intersecting(partialTxn.keys());
-                cancel(safeStore);
-                node.reply(replyTo, replyContext, new ReadOkWithFutureEpoch(unavailable, null, executeAtLeastEpoch), null);
-                return;
-            }
+            // TODO (expected): wait for all stores' results and report only the ranges that execute later to be retried
+            cancel(safeStore);
+            node.reply(replyTo, replyContext, new ReadOkWithFutureEpoch(null, null, retryInLaterEpoch), null);
         }
         super.read(safeStore, command);
     }
+
+    static long retryInLaterEpoch(long executeAtEpoch, SafeCommandStore safeStore, Command command)
+    {
+        TxnId txnId = command.txnId();
+        if (!txnId.kind().awaitsOnlyDeps())
+            return 0;
+
+        // TODO (required): should we disambiguate between cases where a truncated command has been executed locally
+        //   versus made redundant by e.g. bootstrap, staleness etc? that *should* be handled by checking
+        //   unavailable ranges
+        Timestamp executesAtLeast = command.executesAtLeast();
+        if (executesAtLeast != null && executesAtLeast.epoch() > executeAtEpoch)
+        {
+            long executeAtLeastEpoch = executesAtLeast.epoch();
+            Ranges removed = safeStore.ranges().removed(executeAtEpoch, executeAtLeastEpoch);
+            if (removed.intersects(command.route()))
+                return executeAtLeastEpoch;
+        }
+
+        return 0;
+    }
+
 
     @Override
     protected ReadOk constructReadOk(Ranges unavailable, Data data)

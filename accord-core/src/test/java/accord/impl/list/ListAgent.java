@@ -108,4 +108,10 @@ public class ListAgent implements Agent
     {
         return new Txn.InMemory(kind, keysOrRanges, new ListRead(identity(), false, Keys.EMPTY, Keys.EMPTY), new ListQuery(NONE, Integer.MIN_VALUE), null);
     }
+
+    public boolean collectMaxApplied()
+    {
+        // TODO (expected): randomise this to exercise both code paths
+        return false;
+    }
 }

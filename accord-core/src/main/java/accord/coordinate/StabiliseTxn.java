@@ -30,18 +30,18 @@ import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
-import static accord.coordinate.Execute.Path.SLOW;
+import static accord.coordinate.CoordinationAdapter.Factory.Step.Continue;
 
-public class StabiliseTxn extends Stabilise
+public class StabiliseTxn extends Stabilise<Result>
 {
-    public StabiliseTxn(Node node, Topologies coordinates, Topologies allTopologies, FullRoute<?> route, TxnId txnId, Ballot ballot, Txn txn, Timestamp executeAt, Deps unstableDeps, BiConsumer<? super Result, Throwable> callback)
+    StabiliseTxn(Node node, Topologies coordinates, Topologies allTopologies, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps unstableDeps, BiConsumer<? super Result, Throwable> callback)
     {
         super(node, coordinates, allTopologies, route, txnId, ballot, txn, executeAt, unstableDeps, callback);
     }
 
     @Override
-    void onStabilised()
+    protected CoordinationAdapter<Result> adapter()
     {
-        Execute.execute(node, allTopologies, route, SLOW, txnId, txn, executeAt, stabiliseDeps, callback);
+        return node.coordinationAdapter(txnId, Continue);
     }
 }

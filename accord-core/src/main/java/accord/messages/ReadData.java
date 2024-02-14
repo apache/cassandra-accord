@@ -267,9 +267,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
 
     static Ranges unavailable(SafeCommandStore safeStore, Command command)
     {
-        Timestamp executeAt = command.executeAt();
-        if (command.txnId().kind().awaitsOnlyDeps())
-            executeAt = Timestamp.nonNullOrMax(executeAt, command.asCommitted().waitingOn.executeAtLeast());
+        Timestamp executeAt = command.executesAtLeast();
         // TODO (required): for awaitsOnlyDeps commands, if we cannot infer an actual executeAtLeast we should confirm no situation where txnId is not an adequately conservative value for unavailable/unsafeToRead
         return safeStore.ranges().unsafeToReadAt(executeAt);
     }
