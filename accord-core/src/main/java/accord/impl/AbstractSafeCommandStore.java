@@ -18,16 +18,14 @@
 
 package accord.impl;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-import accord.api.Key;
+import javax.annotation.Nullable;
+
+import com.google.common.annotations.VisibleForTesting;
+
 import accord.api.VisibleForImplementation;
-import accord.impl.CommandTimeseries.CommandLoader;
 import accord.local.*;
 import accord.primitives.*;
 import accord.utils.Invariants;
@@ -37,26 +35,9 @@ import static java.lang.String.format;
 
 public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
                                                TimestampsForKeyType extends SafeTimestampsForKey,
-                                               CommandsForKeyType extends SafeCommandsForKey,
-                                               CommandsForKeyUpdateType extends SafeCommandsForKey.Update> extends SafeCommandStore
+                                               CommandsForKeyType extends SafeCommandsForKey> extends SafeCommandStore
 {
-    private static class PendingRegistration<T>
-    {
-        final T value;
-        final Ranges slice;
-        final TxnId txnId;
-
-        public PendingRegistration(T value, Ranges slice, TxnId txnId)
-        {
-            this.value = value;
-            this.slice = slice;
-            this.txnId = txnId;
-        }
-    }
     protected final PreLoadContext context;
-
-    private List<PendingRegistration<Seekable>> pendingSeekableRegistrations = null;
-    private List<PendingRegistration<Seekables<?, ?>>> pendingSeekablesRegistrations = null;
 
     public AbstractSafeCommandStore(PreLoadContext context)
     {
@@ -84,18 +65,9 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
     protected abstract void addTimestampsForKeyInternal(TimestampsForKeyType cfk);
     protected abstract TimestampsForKeyType getTimestampsForKeyIfLoaded(RoutableKey key);
 
-    protected abstract CommandLoader<?> cfkLoader(RoutableKey key);
-    protected abstract CommandsForKeyType getDepsCommandsForKeyInternal(RoutableKey key);
-    protected abstract void addDepsCommandsForKeyInternal(CommandsForKeyType cfk);
-    protected abstract CommandsForKeyType getDepsCommandsForKeyIfLoaded(RoutableKey key);
-
-    protected abstract CommandsForKeyType getAllCommandsForKeyInternal(RoutableKey key);
-    protected abstract void addAllCommandsForKeyInternal(CommandsForKeyType cfk);
-    protected abstract CommandsForKeyType getAllCommandsForKeyIfLoaded(RoutableKey key);
-
-    protected abstract CommandsForKeyUpdateType getCommandsForKeyUpdateInternal(RoutableKey key);
-    protected abstract CommandsForKeyUpdateType createCommandsForKeyUpdateInternal(RoutableKey key);
-    protected abstract void addCommandsForKeyUpdateInternal(CommandsForKeyUpdateType update);
+    protected abstract CommandsForKeyType getCommandsForKeyInternal(RoutableKey key);
+    protected abstract void addCommandsForKeyInternal(CommandsForKeyType cfk);
+    protected abstract CommandsForKeyType getCommandsForKeyIfLoaded(RoutableKey key);
 
     @Override
     protected CommandType getInternalIfLoadedAndInitialised(TxnId txnId)
@@ -117,85 +89,42 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
         return command;
     }
 
-    private CommandsForKeyType getCommandsIfLoaded(RoutableKey key, KeyHistory keyHistory)
+    private CommandsForKeyType getCommandsIfLoaded(RoutableKey key)
     {
-        switch (keyHistory)
-        {
-            case DEPS:
-                return getIfLoaded(key, this::getDepsCommandsForKeyInternal, this::addDepsCommandsForKeyInternal, this::getDepsCommandsForKeyIfLoaded);
-            case ALL:
-                return getIfLoaded(key, this::getAllCommandsForKeyInternal, this::addAllCommandsForKeyInternal, this::getAllCommandsForKeyIfLoaded);
-            default:
-                throw new IllegalArgumentException("CommandsForKey not available for " + keyHistory);
-        }
+        return getIfLoaded(key, this::getCommandsForKeyInternal, this::addCommandsForKeyInternal, this::getCommandsForKeyIfLoaded);
     }
 
-    private CommandsForKeyType commandsIfLoadedAndInitialised(RoutableKey key, KeyHistory keyHistory)
+    CommandsForKeyType commandsIfLoadedAndInitialised(RoutableKey key)
     {
-        CommandsForKeyType cfk = getCommandsIfLoaded(key, keyHistory);;
+        CommandsForKeyType cfk = getCommandsIfLoaded(key);
         if (cfk == null)
             return null;
         if (cfk.isEmpty())
-        {
-            cfk.initialize(cfkLoader(key));
-        }
-        else
-        {
-            RedundantBefore.Entry entry = commandStore().redundantBefore().get(key.toUnseekable());
-            if (entry != null && cfk.current().hasRedundant(entry.shardRedundantBefore()))
-                cfk.set(cfk.current().withoutRedundant(entry.shardRedundantBefore()));
-        }
+            cfk.initialize();
+
+        RedundantBefore.Entry entry = commandStore().redundantBefore().get(key.toUnseekable());
+        if (entry != null)
+            cfk.updateRedundantBefore(entry.shardRedundantBefore());
         return cfk;
     }
 
-    protected CommandsForKeyType commandsForKey(RoutableKey key, KeyHistory keyHistory)
+    @VisibleForTesting
+    public CommandsForKeyType commandsForKey(RoutableKey key)
     {
-        CommandsForKeyType cfk = getCommandsIfLoaded(key, keyHistory);
+        CommandsForKeyType cfk = getCommandsIfLoaded(key);
         Invariants.checkState(cfk != null, "%s was not specified in PreLoadContext", key);
         if (cfk.isEmpty())
-            cfk.initialize(cfkLoader(key));
+            cfk.initialize();
         return cfk;
     }
 
     @VisibleForImplementation
-    private CommandsForKeyType maybeCommandsForKey(RoutableKey key, KeyHistory keyHistory)
+    public CommandsForKeyType maybeCommandsForKey(RoutableKey key)
     {
-        CommandsForKeyType cfk = getCommandsIfLoaded(key, keyHistory);
+        CommandsForKeyType cfk = getCommandsIfLoaded(key);
         if (cfk == null || cfk.isEmpty())
             return null;
         return cfk;
-    }
-
-    public CommandsForKeyType depsCommandsIfLoadedAndInitialised(RoutableKey key)
-    {
-        return commandsIfLoadedAndInitialised(key, KeyHistory.DEPS);
-    }
-
-    public CommandsForKeyType depsCommandsForKey(RoutableKey key)
-    {
-        return commandsForKey(key, KeyHistory.DEPS);
-    }
-
-    @VisibleForImplementation
-    public CommandsForKeyType maybeDepsCommandsForKey(RoutableKey key)
-    {
-        return maybeCommandsForKey(key, KeyHistory.DEPS);
-    }
-
-    public CommandsForKeyType allCommandsIfLoadedAndInitialised(RoutableKey key)
-    {
-        return commandsIfLoadedAndInitialised(key, KeyHistory.ALL);
-    }
-
-    public CommandsForKeyType allCommandsForKey(RoutableKey key)
-    {
-        return commandsForKey(key, KeyHistory.ALL);
-    }
-
-    @VisibleForImplementation
-    public CommandsForKeyType maybeAllCommandsForKey(RoutableKey key)
-    {
-        return maybeCommandsForKey(key, KeyHistory.ALL);
     }
 
     public TimestampsForKeyType timestampsIfLoadedAndInitialised(RoutableKey key)
@@ -229,108 +158,59 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
         return tfk;
     }
 
-    public CommandsForKeyUpdateType getOrCreateCommandsForKeyUpdate(RoutableKey key)
-    {
-        CommandsForKeyUpdateType update = getIfLoaded(key, this::getCommandsForKeyUpdateInternal, this::addCommandsForKeyUpdateInternal, this::createCommandsForKeyUpdateInternal);
-        if (update == null)
-        {
-            update = createCommandsForKeyUpdateInternal(key);
-            addCommandsForKeyUpdateInternal(update);
-        }
-
-        if (update.isEmpty())
-            update.initialize();
-
-        return update;
-    }
-
     @Override
-    public void removeCommandFromSeekableDeps(Seekable seekable, TxnId txnId, Timestamp executeAt, Status status)
+    protected void update(Command prev, Command updated, @Nullable Seekables<?, ?> keysOrRanges)
     {
-        // the cfk listener doesn't know if it can remove the given command from the deps set without loading
-        // the deps set, so we don't actually remove it until it becomes applied
-        if (!status.hasBeen(Status.Applied))
+        super.update(prev, updated, keysOrRanges);
+
+        if (!CommandsForKey.needsUpdate(prev, updated))
             return;
 
-        switch (seekable.domain())
-        {
-            case Key:
-                Key key = seekable.asKey();
-                CommandsForKeyUpdater.Mutable<?> updater = getOrCreateCommandsForKeyUpdate(key).deps();
-                updater.commands().remove(txnId);
-                break;
-            case Range:
-                break;
-            default:
-                throw new IllegalArgumentException();
-        }
+        TxnId txnId = updated.txnId();
+        if (!txnId.kind().isGloballyVisible() || !txnId.domain().isKey())
+            return;
+
+        // TODO (required): consider carefully epoch overlaps for dependencies;
+        //      here we're limiting our registration with CFK to the coordination epoch only
+        //      if we permit coordination+execution we have to do a very careful dance (or relax validation)
+        //      because for some keys we can expect e.g. PreAccept and Accept states to have been processed
+        //      and for other keys Committed onwards will appear suddenly (or, if we permit Accept to process
+        //      on its executeAt ranges, it could go either way).
+        Ranges ranges = ranges().allAt(txnId);
+        Keys keys;
+        if (keysOrRanges != null) keys = (Keys) keysOrRanges;
+        else if (updated.known().isDefinitionKnown()) keys = (Keys)updated.partialTxn().keys();
+        else if (prev.known().isDefinitionKnown()) keys = (Keys)prev.partialTxn().keys();
+        else if (updated.saveStatus().is(Status.Invalidated)) return; // TODO (required): we may have transaction registered via Accept, and still want to expunge. we shouldn't special case: should ensure we have everything loaded, or permit asynchronous application
+        else if (updated.saveStatus().is(Status.AcceptedInvalidate)) return; // TODO (required): we may have transaction registered via Accept, and still want to expunge. we shouldn't special case: should ensure we have everything loaded, or permit asynchronous application
+        else throw illegalState("No keys to update CommandsForKey with");
+
+        Routables.foldl(keys, ranges, (self, p, key, u, i) -> {
+            SafeCommandsForKey cfk = self.commandsIfLoadedAndInitialised(key);
+            // TODO (required): we shouldn't special case invalidations or truncations: should ensure we have everything loaded, or permit asynchronous application
+            Invariants.checkState(cfk != null || u.saveStatus().hasBeen(Status.Invalidated) || u.saveStatus().is(Status.AcceptedInvalidate) || u.saveStatus().is(Status.Truncated));
+            if (cfk != null)
+                cfk.update(p, u);
+            return u;
+        }, this, prev, updated, i->false);
     }
 
     @Override
     public boolean canExecuteWith(PreLoadContext context)
     {
+        // TODO (required): check if data is in cache, and if so simply add it to our context
         return context.isSubsetOf(this.context);
     }
 
-    @Override
-    public void register(Seekables<?, ?> keysOrRanges, Ranges slice, Command command)
-    {
-        if (pendingSeekablesRegistrations == null)
-            pendingSeekablesRegistrations = new ArrayList<>();
-        pendingSeekablesRegistrations.add(new PendingRegistration<>(keysOrRanges, slice, command.txnId()));
-    }
-
-    @Override
-    public void register(Seekable keyOrRange, Ranges slice, Command command)
-    {
-        if (pendingSeekableRegistrations == null)
-            pendingSeekableRegistrations = new ArrayList<>();
-        pendingSeekableRegistrations.add(new PendingRegistration<>(keyOrRange, slice, command.txnId()));
-    }
-
-    public abstract CommonAttributes completeRegistration(Seekables<?, ?> keysOrRanges, Ranges slice, CommandType command, CommonAttributes attrs);
-
-    public abstract CommonAttributes completeRegistration(Seekable keyOrRange, Ranges slice, CommandType command, CommonAttributes attrs);
-
-    private interface RegistrationCompleter<T, CommandType extends SafeCommand>
-    {
-        CommonAttributes complete(T value, Ranges ranges, CommandType command, CommonAttributes attrs);
-    }
-
-    private <T> void completeRegistrations(Map<TxnId, CommonAttributes> updates, List<PendingRegistration<T>> pendingRegistrations, RegistrationCompleter<T, CommandType> completer)
-    {
-        if (pendingRegistrations == null)
-            return;
-
-        for (PendingRegistration<T> pendingRegistration : pendingRegistrations)
-        {
-            TxnId txnId = pendingRegistration.txnId;
-            CommandType safeCommand = getInternal(pendingRegistration.txnId);
-            Command command = safeCommand.current();
-            CommonAttributes attrs = updates.getOrDefault(txnId, command);
-            attrs = completer.complete(pendingRegistration.value, pendingRegistration.slice, safeCommand, attrs);
-            if (attrs != command)
-                updates.put(txnId, attrs);
-        }
-    }
-
     protected abstract void invalidateSafeState();
-    protected abstract void applyCommandForKeyUpdates();
 
     public void postExecute()
     {
-        if (pendingSeekableRegistrations != null || pendingSeekablesRegistrations != null)
-        {
-            Map<TxnId, CommonAttributes> attributeUpdates = new HashMap<>();
-            completeRegistrations(attributeUpdates, pendingSeekablesRegistrations, this::completeRegistration);
-            completeRegistrations(attributeUpdates, pendingSeekableRegistrations, this::completeRegistration);
-            attributeUpdates.forEach(((txnId, attributes) -> get(txnId).updateAttributes(attributes)));
-        }
-        applyCommandForKeyUpdates();
     }
 
     public void complete()
     {
+        postExecute();
         invalidateSafeState();
     }
 }

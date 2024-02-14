@@ -21,6 +21,7 @@ package accord.coordinate;
 import java.util.List;
 
 import accord.api.Result;
+import accord.coordinate.CoordinationAdapter.Adapters;
 import accord.messages.PreAccept;
 import accord.topology.Topologies;
 import accord.local.Node;
@@ -34,9 +35,11 @@ import accord.primitives.TxnId;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
-import static accord.coordinate.Execute.Path.FAST;
+import static accord.coordinate.CoordinationAdapter.Factory.Step.Continue;
+import static accord.coordinate.CoordinationAdapter.Invoke.execute;
+import static accord.coordinate.CoordinationAdapter.Invoke.propose;
+import static accord.coordinate.ExecutePath.FAST;
 import static accord.coordinate.Propose.Invalidate.proposeAndCommitInvalidate;
-import static accord.coordinate.ProposeAndExecute.proposeAndExecute;
 
 /**
  * Perform initial rounds of PreAccept and Accept until we have reached agreement about when we should execute.
@@ -46,9 +49,12 @@ import static accord.coordinate.ProposeAndExecute.proposeAndExecute;
  */
 public class CoordinateTransaction extends CoordinatePreAccept<Result>
 {
+    final Txn txn;
+
     private CoordinateTransaction(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
     {
         super(node, txnId, txn, route);
+        this.txn = txn;
     }
 
     public static AsyncResult<Result> coordinate(Node node, FullRoute<?> route, TxnId txnId, Txn txn)
@@ -67,7 +73,7 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
         if (tracker.hasFastPathAccepted())
         {
             Deps deps = Deps.merge(oks, ok -> ok.witnessedAt.equals(txnId) ? ok.deps : null);
-            Execute.execute(node, topologies, route, FAST, txnId, txn, txnId, deps, this);
+            execute(executeAdapter(), node, topologies, route, FAST, txnId, txn, txnId, deps, settingCallback());
             node.agent().metricsEventsListener().onFastPathTaken(txnId, deps);
         }
         else
@@ -87,10 +93,21 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
                 if (PreAccept.rejectExecuteAt(txnId, topologies))
                     proposeAndCommitInvalidate(node, Ballot.ZERO, txnId, route.homeKey(), route, executeAt, this);
                 else
-                    proposeAndExecute(node, topologies, Ballot.ZERO, txnId, txn, route, executeAt, deps, this);
+                    propose(proposeAdapter(), node, topologies, route, Ballot.ZERO, txnId, txn, executeAt, deps, this);
             }
 
             node.agent().metricsEventsListener().onSlowPathTaken(txnId, deps);
         }
+    }
+
+    protected CoordinationAdapter<Result> proposeAdapter()
+    {
+        return Adapters.standard();
+    }
+
+    // TODO (expected): override in C* rather than default to configurability here
+    protected CoordinationAdapter<Result> executeAdapter()
+    {
+        return node.coordinationAdapter(txnId, Continue);
     }
 }

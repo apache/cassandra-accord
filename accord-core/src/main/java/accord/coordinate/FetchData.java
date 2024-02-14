@@ -216,7 +216,10 @@ public class FetchData extends CheckShards<Route<?>>
         else
         {
             if (success == ReadCoordinator.Success.Success)
-                Invariants.checkState(isSufficient(merged), "Status %s is not sufficient", merged);
+            {
+                if (!isSufficient(merged))
+                    Invariants.checkState(isSufficient(merged), "Status %s is not sufficient", merged);
+            }
 
             // TODO (expected): should we automatically trigger a new fetch if we find executeAt but did not request enough information? would be more rob ust
             Propagate.propagate(node, txnId, sourceEpoch, success.withQuorum, route(), target, (CheckStatusOkFull) merged, callback);

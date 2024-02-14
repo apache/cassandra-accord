@@ -30,7 +30,7 @@ import accord.api.Agent;
 import accord.local.CommandStores.RangesForEpoch;
 import accord.primitives.Keys;
 import accord.primitives.Range;
-import accord.primitives.Txn.Kind.Kinds;
+import accord.primitives.Routables;
 import accord.utils.async.AsyncChain;
 
 import accord.api.ConfigurationService.EpochReady;
@@ -67,7 +67,7 @@ import accord.primitives.Unseekables;
 import accord.utils.async.AsyncResults;
 
 import static accord.api.ConfigurationService.EpochReady.DONE;
-import static accord.local.KeyHistory.DEPS;
+import static accord.local.KeyHistory.COMMANDS;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.local.PreLoadContext.empty;
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_ADJACENT;
@@ -149,9 +149,11 @@ public abstract class CommandStore implements AgentExecutor
     // TODO (expected): schedule regular pruning of these collections
     // bootstrapBeganAt and shardDurableAt are both canonical data sets mostly used for debugging / constructing
     private NavigableMap<TxnId, Ranges> bootstrapBeganAt = ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY); // additive (i.e. once inserted, rolled-over until invalidated, and the floor entry contains additions)
+    // TODO (required): updates to these variables should be buffered like with Command updates in SafeCommandStore, to be rolled-back in event of a failure processing the command.
     private RedundantBefore redundantBefore = RedundantBefore.EMPTY;
     // TODO (expected): store this only once per node
     private DurableBefore durableBefore = DurableBefore.EMPTY;
+    private MaxConflicts maxConflicts = MaxConflicts.EMPTY;
     protected RangesForEpoch rangesForEpoch;
 
     // TODO (desired): merge with redundantBefore?
@@ -223,21 +225,6 @@ public abstract class CommandStore implements AgentExecutor
     public abstract <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);
     public abstract void shutdown();
 
-    private static Timestamp maxApplied(SafeCommandStore safeStore, Seekables<?, ?> keysOrRanges, Ranges slice)
-    {
-        return safeStore.mapReduce(keysOrRanges, slice, KeyHistory.NONE, Kinds.Ws,
-                                   SafeCommandStore.TestTimestamp.STARTED_AFTER, Timestamp.NONE,
-                                   SafeCommandStore.TestDep.ANY_DEPS, null,
-                                   Status.PreApplied, Status.Truncated,
-                                   (p1, key, txnId, executeAt, status, deps, max) -> Timestamp.max(max, executeAt),
-                                   null, Timestamp.NONE, Timestamp.MAX::equals);
-    }
-
-    public AsyncChain<Timestamp> maxAppliedFor(Seekables<?, ?> keysOrRanges, Ranges slice)
-    {
-        return submit(PreLoadContext.contextFor(keysOrRanges), safeStore -> maxApplied(safeStore, keysOrRanges, slice));
-    }
-
     // implementations are expected to override this for persistence
     protected void setRejectBefore(ReducingRangeMap<Timestamp> newRejectBefore)
     {
@@ -269,13 +256,26 @@ public abstract class CommandStore implements AgentExecutor
         this.durableBefore = durableBefore;
     }
 
-
     /**
      * To be overridden by implementations, to ensure the new state is persisted.
      */
     protected void setRedundantBefore(RedundantBefore newRedundantBefore)
     {
         this.redundantBefore = newRedundantBefore;
+    }
+
+    /**
+     * To be overridden by implementations, to ensure the new state is persisted.
+     */
+    protected void setMaxConflicts(MaxConflicts maxConflicts)
+    {
+        this.maxConflicts = maxConflicts;
+    }
+
+    protected void updateMaxConflicts(Command prev, Command updated, Seekables<?, ?> keysOrRanges)
+    {
+        if (updated.executeAt() != null && (prev == null || prev.executeAt() == null || prev.executeAt().compareTo(updated.executeAt()) < 0))
+            setMaxConflicts(maxConflicts.update(keysOrRanges != null ? keysOrRanges : updated.partialTxn().keys(), updated.executeAt()));
     }
 
     /**
@@ -303,6 +303,9 @@ public abstract class CommandStore implements AgentExecutor
         setRedundantBefore(newRedundantBefore);
     }
 
+    /**
+     * We expect keys to be sliced to those owned by the replica in the coordination epoch
+     */
     final Timestamp preaccept(TxnId txnId, Seekables<?, ?> keys, SafeCommandStore safeStore, boolean permitFastPath)
     {
         NodeTimeService time = safeStore.time();
@@ -321,11 +324,17 @@ public abstract class CommandStore implements AgentExecutor
 
         // TODO (expected): reject if any transaction exists with a higher timestamp OR a higher epoch
         //   this permits us to agree fast path decisions across epoch changes
-        Timestamp maxConflict = safeStore.maxConflict(keys, safeStore.ranges().coordinates(txnId));
-        if (permitFastPath && txnId.compareTo(maxConflict) > 0 && txnId.epoch() >= time.epoch())
+        // TODO (expected): we should (perhaps) separate conflicts for reads and writes
+        Timestamp minNonConflicting = maxConflicts.get(keys);
+        if (permitFastPath && txnId.compareTo(minNonConflicting) >= 0 && txnId.epoch() >= time.epoch())
             return txnId;
 
-        return time.uniqueNow(maxConflict);
+        return time.uniqueNow(minNonConflicting);
+    }
+
+    public Timestamp maxConflict(Routables<?> keysOrRanges)
+    {
+        return maxConflicts.get(keysOrRanges);
     }
 
     protected void unsafeRunIn(Runnable fn)
@@ -443,6 +452,7 @@ public abstract class CommandStore implements AgentExecutor
         TxnId id = TxnId.fromValues(epoch - 1, 0, node.id());
         Timestamp before = Timestamp.minForEpoch(epoch);
         FullRoute<?> route = node.computeRoute(id, ranges);
+        // TODO (required): we need to ensure anyone we receive a reply from proposes newer timestamps for anything we don't see
         CollectDeps.withDeps(node, id, route, ranges, before, (deps, fail) -> {
             if (fail != null)
             {
@@ -452,7 +462,7 @@ public abstract class CommandStore implements AgentExecutor
             {
                 // TODO (correcness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
                 // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
-                execute(contextFor(null, deps.txnIds(), deps.keyDeps.keys(), DEPS), safeStore -> {
+                execute(contextFor(null, deps.txnIds(), deps.keyDeps.keys(), COMMANDS), safeStore -> {
                     safeStore.registerHistoricalTransactions(deps);
                 }).begin((success, fail2) -> {
                     if (fail2 != null) fetchMajorityDeps(coordination, node, epoch, ranges);

@@ -94,12 +94,17 @@ public interface PreLoadContext
      *  Both can be done without. For range transactions calculateDeps needs to be asynchronous anyway to support
      *  potentially large scans, and for register we do not need to load into memory, we can perform a blind write.
      */
+    // TODO (required): specify epochs for which we should load, so we can narrow to owned keys
     default Seekables<?, ?> keys() { return Keys.EMPTY; }
 
     default KeyHistory keyHistory() { return KeyHistory.NONE; }
 
     default boolean isSubsetOf(PreLoadContext superset)
     {
+        KeyHistory requiredHistory = keyHistory();
+        if (requiredHistory != KeyHistory.NONE && requiredHistory != superset.keyHistory())
+            return false;
+
         if (superset.keys().domain() != keys().domain() || !superset.keys().containsAll(keys()))
             return false;
 

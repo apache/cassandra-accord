@@ -27,6 +27,7 @@ import static java.lang.String.format;
 
 public class Invariants
 {
+    // TODO (now): configure by system parameter and turn off by default
     private static final boolean PARANOID = true;
     private static final boolean DEBUG = true;
 
@@ -41,7 +42,7 @@ public class Invariants
 
     public static IllegalStateException illegalState(String msg)
     {
-        throw new IllegalStateException(msg);
+         throw new IllegalStateException(msg);
     }
 
     public static IllegalStateException illegalState()
@@ -53,7 +54,6 @@ public class Invariants
     {
         throw new IllegalArgumentException(msg);
     }
-
 
     private static void illegalArgument()
     {
@@ -315,7 +315,7 @@ public class Invariants
         }
         catch (ClassCastException e)
         {
-            throw new IllegalArgumentException(format("Unable to cast %s to %s", o, klass.getName()));
+            throw illegalArgument(format("Unable to cast %s to %s", o, klass.getName()));
         }
     }
 

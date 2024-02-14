@@ -43,8 +43,7 @@ import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.config.LocalConfig;
 import accord.config.MutableLocalConfig;
-import accord.coordinate.ExecuteTxn;
-import accord.coordinate.PersistTxn;
+import accord.coordinate.CoordinationAdapter;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
@@ -53,7 +52,6 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
-import accord.messages.Apply;
 import accord.messages.Callback;
 import accord.messages.LocalRequest;
 import accord.messages.Reply;
@@ -328,7 +326,7 @@ public class Cluster implements Scheduler
                                           MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                                           MaelstromAgent.INSTANCE,
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
-                                          SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new, ExecuteTxn.FACTORY, PersistTxn.FACTORY, Apply.FACTORY,
+                                          SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new, new CoordinationAdapter.DefaultFactory(),
                                           localConfig));
             }
 

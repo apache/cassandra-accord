@@ -372,7 +372,7 @@ public class ArrayBuffers
 
         boolean discardInternal(B buffer, int bufferSize, int usedSize, boolean force)
         {
-            if (bufferSize > maxSize)
+            if (bufferSize == 0 || bufferSize > maxSize)
                 return true;
 
             if (bufferSize == usedSize && !force)

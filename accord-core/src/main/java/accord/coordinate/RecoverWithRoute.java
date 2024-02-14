@@ -42,6 +42,8 @@ import accord.topology.Topologies;
 import accord.utils.Invariants;
 import javax.annotation.Nullable;
 
+import static accord.coordinate.CoordinationAdapter.Factory.Step.InitiateRecovery;
+import static accord.coordinate.CoordinationAdapter.Invoke.persist;
 import static accord.local.Status.Durability.Majority;
 import static accord.local.Status.KnownDeps.DepsKnown;
 import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
@@ -186,7 +188,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                             {
                                 Invariants.checkState(full.stableDeps.covering.containsAll(sendTo));
                                 Invariants.checkState(full.partialTxn.covering().containsAll(sendTo));
-                                Persist.persistPartialMaximal(node, txnId, sendTo, route, full.partialTxn, full.executeAt, full.stableDeps, full.writes, full.result);
+                                persist(node.coordinationAdapter(txnId, InitiateRecovery), node, route, sendTo, txnId, full.partialTxn, full.executeAt, full.stableDeps, full.writes, full.result, null);
                             }
                             propagate = full;
                         }
@@ -205,13 +207,12 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                     break;
                 }
 
-                // TODO (required): might not be able to fully recover transaction - may only have enough for local shard
                 Txn txn = full.partialTxn.reconstitute(route);
                 if (known.executeAt.isDecidedAndKnownToExecute() && known.deps.hasDecidedDeps() && known.outcome == Apply)
                 {
                     Deps deps = full.stableDeps.reconstitute(route());
                     node.withEpoch(full.executeAt.epoch(), () -> {
-                        Persist.persistMaximal(node, txnId, route(), txn, full.executeAt, deps, full.writes, full.result);
+                        persist(node.coordinationAdapter(txnId, InitiateRecovery), node, topologies, route(), txnId, txn, full.executeAt, deps, full.writes, full.result, null);
                     });
                     callback.accept(APPLIED, null);
                 }

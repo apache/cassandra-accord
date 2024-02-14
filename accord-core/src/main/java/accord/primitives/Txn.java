@@ -47,9 +47,13 @@ import static accord.primitives.Txn.Kind.Kinds.WsOrSyncPoint;
 
 public interface Txn
 {
+    /**
+     * NOTE: we keep Read/Write adjacent to make it easier to check for non-standard flags in serialization
+     */
     enum Kind
     {
         Read,
+        Write,
 
         /**
          * A non-durable read that cannot be recovered and provides only per-key linearizability guarantees.
@@ -57,16 +61,6 @@ public interface Txn
          * weaker isolation multi-key/range reads for interoperability with weaker isolation systems.
          */
         EphemeralRead,
-
-        Write,
-
-        /**
-         * A pseudo-transaction used only to find an executeAt that is higher than any transaction that could have
-         * reached consensus before it started.
-         *
-         * Invisible to other transactions.
-         */
-        NoOp,
 
         /**
          * A pseudo-transaction whose deps represent the complete set of transactions that may execute before it,
@@ -189,7 +183,18 @@ public interface Txn
 
         public boolean isGloballyVisible()
         {
-            return this != EphemeralRead && this != LocalOnly;
+            switch (this)
+            {
+                default: throw new AssertionError("Unhandled Kind: " + this);
+                case EphemeralRead:
+                case LocalOnly:
+                    return false;
+                case Write:
+                case Read:
+                case ExclusiveSyncPoint:
+                case SyncPoint:
+                    return true;
+            }
         }
 
         public boolean isSyncPoint()
@@ -217,7 +222,6 @@ public interface Txn
                 default: throw new AssertionError();
                 case EphemeralRead:
                 case Read:
-                case NoOp:
                     return Ws;
                 case Write:
                     return RorWs;
@@ -240,14 +244,13 @@ public interface Txn
                     return AnyGloballyVisible;
                 case SyncPoint:
                 case ExclusiveSyncPoint:
-                case NoOp:
                     return SyncPoints;
             }
         }
 
         public char shortName()
         {
-            return toString().charAt(0);
+            return shortName;
         }
     }
 

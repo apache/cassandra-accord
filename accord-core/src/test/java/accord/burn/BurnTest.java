@@ -108,12 +108,12 @@ public class BurnTest
      * Min hash value for the test domain, this value must be respected by the hash function
      * @see {@link BurnTest#hash(int)}
      */
-    private static final int HASH_RANGE_START = 0;
+    public static final int HASH_RANGE_START = 0;
     /**
      * Max hash value for the test domain, this value must be respected by the hash function
      * @see {@link BurnTest#hash(int)}
      */
-    private static final int HASH_RANGE_END = 1 << 16;
+    public static final int HASH_RANGE_END = 1 << 16;
     private static final Range[] EMPTY_RANGES = new Range[0];
 
     static List<Packet> generate(RandomSource random, MessageListener listener, Function<? super CommandStore, AsyncExecutor> executor, List<Id> clients, List<Id> nodes, int[] keys, int operations)

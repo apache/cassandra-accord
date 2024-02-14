@@ -166,7 +166,7 @@ public class TxnId extends Timestamp
         return new TxnId(epochMsb(epoch), 0, Id.NONE);
     }
 
-    private static final Pattern PARSE = Pattern.compile("\\[(?<epoch>[0-9]+),(?<hlc>[0-9]+),(?<flags>[0-9]+),(?<node>[0-9]+)]");
+    private static final Pattern PARSE = Pattern.compile("\\[(?<epoch>[0-9]+),(?<hlc>[0-9]+),(?<flags>[0-9]+)\\([KREWNSXL]\\),(?<node>[0-9]+)]");
     public static TxnId parse(String txnIdString)
     {
         Matcher m = PARSE.matcher(txnIdString);

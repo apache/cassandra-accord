@@ -38,6 +38,8 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import accord.coordinate.CoordinateEphemeralRead;
+import accord.coordinate.CoordinationAdapter;
+import accord.coordinate.CoordinationAdapter.Factory.Step;
 import accord.utils.DeterministicSet;
 import accord.utils.Invariants;
 import com.google.common.annotations.VisibleForTesting;
@@ -59,12 +61,9 @@ import accord.api.TopologySorter;
 import accord.coordinate.Barrier;
 import accord.config.LocalConfig;
 import accord.coordinate.CoordinateTransaction;
-import accord.coordinate.Execute;
 import accord.coordinate.MaybeRecover;
 import accord.coordinate.Outcome;
-import accord.coordinate.Persist;
 import accord.coordinate.RecoverWithRoute;
-import accord.messages.Apply;
 import accord.messages.Callback;
 import accord.messages.LocalRequest;
 import accord.messages.Reply;
@@ -155,9 +154,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private final ConfigurationService configService;
     private final TopologyManager topology;
     private final CommandStores commandStores;
-    private final Execute.Factory executionFactory;
-    private final Persist.Factory persistFactory;
-    private final Apply.Factory applyFactory;
+    private final CoordinationAdapter.Factory coordinationAdapters;
 
     private final LongSupplier nowSupplier;
     private final ToLongFunction<TimeUnit> nowTimeUnit;
@@ -175,7 +172,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     public Node(Id id, MessageSink messageSink, LocalRequest.Handler localRequestHandler,
                 ConfigurationService configService, LongSupplier nowSupplier, ToLongFunction<TimeUnit> nowTimeUnit,
                 Supplier<DataStore> dataSupplier, ShardDistributor shardDistributor, Agent agent, RandomSource random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
-                Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory, Execute.Factory executionFactory, Persist.Factory persistFactory, Apply.Factory applyFactory,
+                Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory, CoordinationAdapter.Factory coordinationAdapters,
                 LocalConfig localConfig)
     {
         this.id = id;
@@ -183,9 +180,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.messageSink = messageSink;
         this.localRequestHandler = localRequestHandler;
         this.configService = configService;
-        this.executionFactory = executionFactory;
-        this.persistFactory = persistFactory;
-        this.applyFactory = applyFactory;
+        this.coordinationAdapters = coordinationAdapters;
         this.topology = new TopologyManager(topologySorter, id);
         this.nowSupplier = nowSupplier;
         this.nowTimeUnit = nowTimeUnit;
@@ -557,6 +552,9 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         messageSink.reply(replyingToNode, replyContext, send);
     }
 
+    /**
+     * TODO (required): Make sure we cannot re-issue the same txnid on startup
+     */
     public TxnId nextTxnId(Txn.Kind rw, Domain domain)
     {
         return new TxnId(uniqueNow(), rw, domain);
@@ -615,16 +613,21 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public FullRoute<?> computeRoute(TxnId txnId, Seekables<?, ?> keysOrRanges)
     {
-        RoutingKey homeKey = trySelectHomeKey(txnId, keysOrRanges);
+        return computeRoute(txnId.epoch(), keysOrRanges);
+    }
+
+    public FullRoute<?> computeRoute(long epoch, Seekables<?, ?> keysOrRanges)
+    {
+        RoutingKey homeKey = trySelectHomeKey(epoch, keysOrRanges);
         if (homeKey == null)
-            homeKey = selectRandomHomeKey(txnId);
+            homeKey = selectRandomHomeKey(epoch);
 
         return keysOrRanges.toRoute(homeKey);
     }
 
-    private @Nullable RoutingKey trySelectHomeKey(TxnId txnId, Seekables<?, ?> keysOrRanges)
+    private @Nullable RoutingKey trySelectHomeKey(long epoch, Seekables<?, ?> keysOrRanges)
     {
-        Ranges owned = topology().localForEpoch(txnId.epoch()).ranges();
+        Ranges owned = topology().localForEpoch(epoch).ranges();
         int i = (int)keysOrRanges.findNextIntersection(0, owned, 0);
         return i >= 0 ? keysOrRanges.get(i).someIntersectingRoutingKey(owned) : null;
     }
@@ -670,12 +673,17 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public RoutingKey selectRandomHomeKey(TxnId txnId)
     {
-        Ranges ranges = topology().localForEpoch(txnId.epoch()).ranges();
+        return selectRandomHomeKey(txnId.epoch());
+    }
+
+    public RoutingKey selectRandomHomeKey(long epoch)
+    {
+        Ranges ranges = topology().localForEpoch(epoch).ranges();
         // TODO (expected): should we try to pick keys in the same Keyspace in C*? Might want to adapt this to an Agent behaviour
         if (ranges.isEmpty()) // should not really happen, but pick some other replica to serve as home key
-            ranges = topology().globalForEpoch(txnId.epoch()).ranges();
+            ranges = topology().globalForEpoch(epoch).ranges();
         if (ranges.isEmpty())
-            throw illegalState("Unable to select a HomeKey as the topology does not have any ranges for epoch " + txnId.epoch());
+            throw illegalState("Unable to select a HomeKey as the topology does not have any ranges for epoch " + epoch);
         Range range = ranges.get(random.nextInt(ranges.size()));
         return range.someIntersectingRoutingKey(null);
     }
@@ -743,19 +751,9 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         scheduler.now(processMsg);
     }
 
-    public Execute.Factory executionFactory()
+    public <R> CoordinationAdapter<R> coordinationAdapter(TxnId txnId, Step step)
     {
-        return executionFactory;
-    }
-
-    public Persist.Factory persistFactory()
-    {
-        return persistFactory;
-    }
-
-    public Apply.Factory applyFactory()
-    {
-        return applyFactory;
+        return coordinationAdapters.get(txnId, step);
     }
 
     public Scheduler scheduler()

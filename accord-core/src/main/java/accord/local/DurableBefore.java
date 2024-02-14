@@ -25,7 +25,6 @@ import javax.annotation.Nullable;
 import accord.api.RoutingKey;
 import accord.local.Status.Durability;
 import accord.primitives.Participants;
-import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
@@ -154,20 +153,7 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
             return DurableBefore.EMPTY;
 
         Entry entry = new Entry(majority, universal);
-        Builder builder = new Builder(ranges.get(0).endInclusive(), ranges.size() * 2);
-        Range prev = null;
-        for (int i = 0 ; i < ranges.size() ; ++i)
-        {
-            Range cur = ranges.get(i);
-            if (prev != null && !prev.end().equals(cur.start()))
-                builder.append(prev.end(), null, (a, b) -> a); // if we are equal to prev end, take the prev value not zero
-            builder.append(cur.start(), entry, (a, b) -> { throw new IllegalStateException(); });
-            prev = cur;
-        }
-        if (prev != null)
-            builder.append(prev.end(), null, (a, b) -> a); // if we are equal to prev end, take the prev value not zero
-
-        return builder.build();
+        return create(ranges, entry, Builder::new);
     }
 
     public static DurableBefore merge(DurableBefore a, DurableBefore b)

@@ -31,6 +31,7 @@ import accord.messages.GetEphemeralReadDeps;
 import accord.messages.GetEphemeralReadDeps.GetEphemeralReadDepsOk;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
+import accord.primitives.Seekables;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
@@ -67,16 +68,25 @@ public class CoordinateEphemeralRead extends AbstractCoordinatePreAccept<Result,
         return coordinate;
     }
 
+    private final Txn txn;
+
     private final QuorumTracker tracker;
     private final List<GetEphemeralReadDepsOk> oks;
     private long executeAtEpoch;
 
     CoordinateEphemeralRead(Node node, Topologies topologies, FullRoute<?> route, TxnId txnId, Txn txn)
     {
-        super(node, route, txnId, txn);
+        super(node, route, txnId);
+        this.txn = txn;
         this.tracker = new QuorumTracker(topologies);
         this.executeAtEpoch = txnId.epoch();
         this.oks = new ArrayList<>(topologies.estimateUniqueNodes());
+    }
+
+    @Override
+    Seekables<?, ?> keysOrRanges()
+    {
+        return txn.keys();
     }
 
     @Override

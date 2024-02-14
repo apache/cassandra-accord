@@ -225,7 +225,8 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
             }
 
             start = second.start();
-            if (first.hasCurrent() && first.start().compareTo(start) < 0) builder.append(first.start(), start, first.value());
+            if (first.hasCurrent() && first.start().compareTo(start) < 0 && first.value() != null)
+                builder.append(first.start(), start, builder.slice(first.start(), start, first.value()));
             Invariants.checkState(start.compareTo(second.start()) <= 0);
         }
 
@@ -304,6 +305,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
         }
 
         // loop over any range covered by both
+        // TODO (expected): optimise merging of very different sized maps (i.e. for inserts)
         while (left.hasCurrent() && right.hasCurrent())
         {
             int cmp = left.end().compareTo(right.end());
@@ -460,9 +462,23 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
             if (sameAsTailKey || sameAsTailValue)
             {
                 if (sameAsTailValue)
+                {
                     values.set(tailIdx, value == null ? null : tailValue);
+                }
+                else if (tailValue != null)
+                {
+                    values.set(tailIdx, reduce.apply(tailValue, value));
+                }
+                else if (tailIdx >= 1 && value.equals(values.get(tailIdx - 1)))
+                {
+                    // just remove the null value and start
+                    values.remove(tailIdx);
+                    starts.remove(tailIdx);
+                }
                 else
-                    values.set(tailIdx, tailValue == null ? value : reduce.apply(tailValue, value));
+                {
+                    values.set(tailIdx, value);
+                }
             }
             else
             {

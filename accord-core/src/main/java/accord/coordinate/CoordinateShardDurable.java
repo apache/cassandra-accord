@@ -19,93 +19,39 @@
 package accord.coordinate;
 
 import accord.coordinate.tracking.AppliedTracker;
-import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node;
 import accord.messages.Callback;
-import accord.messages.ReadData;
 import accord.messages.ReadData.ReadReply;
 import accord.messages.SetShardDurable;
 import accord.messages.WaitUntilApplied;
 import accord.primitives.Ranges;
 import accord.primitives.SyncPoint;
-import accord.topology.Topologies;
 import accord.utils.async.AsyncResult;
-import accord.utils.async.AsyncResults.SettableResult;
 
-/**
- *
- */
-public class CoordinateShardDurable extends SettableResult<Void> implements Callback<ReadReply>
+public class CoordinateShardDurable extends ExecuteSyncPoint<Ranges> implements Callback<ReadReply>
 {
-    final Node node;
-    final AppliedTracker tracker;
-    final SyncPoint<Ranges> exclusiveSyncPoint;
-
     private CoordinateShardDurable(Node node, SyncPoint<Ranges> exclusiveSyncPoint)
     {
-        // TODO (required): this isn't correct, we need to potentially perform a second round if a dependency executes in a future epoch and we have lost ownership of that epoch
-        Topologies topologies = node.topology().forEpoch(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.sourceEpoch());
-        this.node = node;
-        this.tracker = new AppliedTracker(topologies);
-        this.exclusiveSyncPoint = exclusiveSyncPoint;
+        super(node, new AppliedTracker(node.topology().forEpoch(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.sourceEpoch())), exclusiveSyncPoint);
     }
 
-    public static AsyncResult<Void> coordinate(Node node, SyncPoint<Ranges> exclusiveSyncPoint)
+    public static AsyncResult<SyncPoint<Ranges>> coordinate(Node node, SyncPoint<Ranges> exclusiveSyncPoint)
     {
         CoordinateShardDurable coordinate = new CoordinateShardDurable(node, exclusiveSyncPoint);
         coordinate.start();
         return coordinate;
     }
 
-    private void start()
+    protected void start()
     {
-        node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), exclusiveSyncPoint.syncId, exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.syncId.epoch()), this);
+        node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), syncPoint.syncId, syncPoint.keysOrRanges, syncPoint.syncId.epoch()), this);
     }
 
     @Override
-    public void onSuccess(Node.Id from, ReadReply reply)
+    protected void onSuccess()
     {
-        if (!reply.isOk())
-        {
-            switch ((ReadData.CommitOrReadNack)reply)
-            {
-                default: throw new AssertionError("Unhandled: " + reply);
-
-                case Insufficient:
-                    CoordinateSyncPoint.sendApply(node, from, exclusiveSyncPoint);
-                    return;
-
-                case Redundant:
-                    tryFailure(new RuntimeException("Unexpected reply"));
-                    return;
-
-                case Invalid:
-                    tryFailure(new Invalidated(exclusiveSyncPoint.syncId, exclusiveSyncPoint.homeKey));
-                    return;
-            }
-        }
-        else
-        {
-            // TODO (required): we also need to handle ranges not being safe to read
-            if (tracker.recordSuccess(from) == RequestStatus.Success)
-            {
-                node.configService().reportEpochRedundant(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.syncId.epoch());
-                node.send(tracker.nodes(), new SetShardDurable(exclusiveSyncPoint));
-                trySuccess(null);
-            }
-        }
-    }
-
-    @Override
-    public void onFailure(Node.Id from, Throwable failure)
-    {
-        if (tracker.recordFailure(from) == RequestStatus.Failed)
-            tryFailure(new Exhausted(exclusiveSyncPoint.syncId, exclusiveSyncPoint.homeKey));
-    }
-
-    @Override
-    public void onCallbackFailure(Node.Id from, Throwable failure)
-    {
-        tryFailure(failure);
+        node.configService().reportEpochRedundant(syncPoint.keysOrRanges, syncPoint.syncId.epoch());
+        node.send(tracker.nodes(), new SetShardDurable(syncPoint));
+        super.onSuccess();
     }
 }

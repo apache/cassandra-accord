@@ -16,22 +16,26 @@
  * limitations under the License.
  */
 
-package accord.coordinate;
+package accord.impl;
 
-import accord.api.Result;
-import accord.local.Node;
-import accord.primitives.Deps;
-import accord.primitives.FullRoute;
+import accord.local.SafeCommandStore.CommandFunction;
+import accord.local.SafeCommandStore.TestDep;
+import accord.local.SafeCommandStore.TestStartedAt;
+import accord.local.SafeCommandStore.TestStatus;
 import accord.primitives.Timestamp;
-import accord.primitives.Txn;
+import accord.primitives.Txn.Kind.Kinds;
 import accord.primitives.TxnId;
-import accord.primitives.Writes;
-import accord.topology.Topologies;
 
-public class PersistTxn extends Persist
+public interface CommandsSummary
 {
-    public PersistTxn(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result)
-    {
-        super(node, topologies, txnId, route, txn, executeAt, deps, writes, result);
-    }
+    <P1, T> T mapReduceFull(TxnId testTxnId,
+                            Kinds testKind,
+                            TestStartedAt testStartedAt,
+                            TestDep testDep,
+                            TestStatus testStatus,
+                            CommandFunction<P1, T, T> map, P1 p1, T initialValue);
+
+    <P1, T> T mapReduceActive(Timestamp startedBefore,
+                              Kinds testKind,
+                              CommandFunction<P1, T, T> map, P1 p1, T initialValue);
 }

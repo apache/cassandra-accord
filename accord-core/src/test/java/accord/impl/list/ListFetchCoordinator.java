@@ -25,13 +25,17 @@ import java.util.function.Function;
 import accord.api.Data;
 import accord.api.DataStore;
 import accord.impl.AbstractFetchCoordinator;
+import accord.impl.InMemoryCommandStore;
 import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.PreLoadContext;
+import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Ranges;
 import accord.primitives.SyncPoint;
+import accord.primitives.Timestamp;
 import accord.primitives.Txn;
+import accord.primitives.TxnId;
 import accord.utils.Timestamped;
 import accord.utils.async.AsyncResult;
 
@@ -66,4 +70,51 @@ public class ListFetchCoordinator extends AbstractFetchCoordinator
             else fail(from, received, fail);
         }).beginAsResult());
     }
+
+    @Override
+    protected FetchRequest newFetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
+    {
+        if (((ListAgent)node.agent()).collectMaxApplied())
+            return new CollectMaxAppliedFetchRequest(sourceEpoch, syncId, ranges, partialDeps, partialTxn);
+
+        return super.newFetchRequest(sourceEpoch, syncId, ranges, partialDeps, partialTxn);
+    }
+
+    class CollectMaxAppliedFetchRequest extends FetchRequest
+    {
+        private transient Timestamp maxApplied;
+
+        public CollectMaxAppliedFetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
+        {
+            super(sourceEpoch, syncId, ranges, partialDeps, partialTxn);
+        }
+
+        @Override
+        protected void readComplete(CommandStore commandStore, Data result, Ranges unavailable)
+        {
+            Ranges slice = commandStore.unsafeRangesForEpoch().allAt(txnId).subtract(unavailable);
+            ((InMemoryCommandStore)commandStore).maxAppliedFor((Ranges)readScope, slice).begin((newMaxApplied, failure) -> {
+                if (failure != null)
+                {
+                    commandStore.agent().onUncaughtException(failure);
+                }
+                else
+                {
+                    synchronized (this)
+                    {
+                        if (maxApplied == null) maxApplied = newMaxApplied;
+                        else maxApplied = Timestamp.max(maxApplied, newMaxApplied);
+                        super.readComplete(commandStore, result, unavailable);
+                    }
+                }
+            });
+        }
+
+        @Override
+        protected Timestamp maxApplied()
+        {
+            return maxApplied;
+        }
+    }
+
 }

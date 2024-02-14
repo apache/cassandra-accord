@@ -45,6 +45,8 @@ public class PartialDeps extends Deps
 
     // TODO (expected): we no longer need this if everyone has a FullRoute
     //      could also retain a simple bitset over the original FullRoute
+    // TODO (required) remove this and related concepts, as can cause problems with topology changes for a single store
+    //    where the store has some ranges that we participate in, and some we do not; we will not correctly construct covering in some cases
     public final Ranges covering;
 
     public PartialDeps(Ranges covering, KeyDeps keyDeps, RangeDeps rangeDeps)

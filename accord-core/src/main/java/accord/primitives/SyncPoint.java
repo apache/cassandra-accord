@@ -33,9 +33,9 @@ public class SyncPoint<S extends Seekables<?, ?>>
 {
     public static class SerializationSupport
     {
-        public static SyncPoint construct(TxnId syncId, Deps waitFor, Seekables<?,?> keysOrRanges, RoutingKey homeKey, boolean finishedAsync)
+        public static SyncPoint construct(TxnId syncId, Deps waitFor, Seekables<?,?> keysOrRanges, RoutingKey homeKey)
         {
-            return new SyncPoint(syncId, waitFor, keysOrRanges, homeKey, finishedAsync);
+            return new SyncPoint(syncId, waitFor, keysOrRanges, homeKey);
         }
     }
 
@@ -43,25 +43,22 @@ public class SyncPoint<S extends Seekables<?, ?>>
     public final Deps waitFor;
     public final S keysOrRanges;
     public final RoutingKey homeKey;
-    public final boolean finishedAsync;
 
-    public SyncPoint(TxnId syncId, Deps waitFor, S keysOrRanges, FullRoute route, boolean finishedAsync)
+    public SyncPoint(TxnId syncId, Deps waitFor, S keysOrRanges, FullRoute<?> route)
     {
         Invariants.checkArgument(keysOrRanges.toRoute(route.homeKey()).equals(route), "Expected homeKey %s from route %s to be in ranges %s", route.homeKey(), route, keysOrRanges);
         this.syncId = syncId;
         this.waitFor = waitFor;
         this.keysOrRanges = keysOrRanges;
         this.homeKey = route.homeKey();
-        this.finishedAsync = finishedAsync;
     }
 
-    private SyncPoint(TxnId syncId, Deps waitFor, S keysOrRanges, RoutingKey homeKey, boolean finishedAsync)
+    private SyncPoint(TxnId syncId, Deps waitFor, S keysOrRanges, RoutingKey homeKey)
     {
         this.syncId = syncId;
         this.waitFor = waitFor;
         this.keysOrRanges = keysOrRanges;
         this.homeKey = homeKey;
-        this.finishedAsync = finishedAsync;
     }
 
     public FullRoute route()

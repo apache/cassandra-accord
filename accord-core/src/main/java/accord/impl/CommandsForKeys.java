@@ -19,16 +19,13 @@
 package accord.impl;
 
 import accord.api.VisibleForImplementation;
-import accord.local.Command;
 import accord.local.CommandStore;
 import accord.primitives.RoutableKey;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static accord.local.Command.NotDefined.uninitialised;
 
 public class CommandsForKeys
 {
@@ -36,77 +33,10 @@ public class CommandsForKeys
 
     private CommandsForKeys() {}
 
-    @VisibleForTesting
-    @VisibleForImplementation
-    public static TimestampsForKey updateMax(AbstractSafeCommandStore<?,?,?,?> safeStore, RoutableKey key, Timestamp timestamp)
+    public static void registerNotWitnessed(AbstractSafeCommandStore<?,?,?> safeStore, RoutableKey key, TxnId txnId)
     {
-        SafeTimestampsForKey tfk = safeStore.timestampsForKey(key);
-        return tfk.updateMax(timestamp);
-    }
-
-    public static Command.DurableAndIdempotentListener registerCommand(SafeTimestampsForKey timestamps, SafeCommandsForKey.Update<?,?> update, Command command)
-    {
-
-        update.common().commands().add(command.txnId(), command);
-
-        timestamps.updateMax(command.executeAt());
-
-        return new CommandsForKey.Listener(timestamps.key());
-    }
-
-    public static Command.DurableAndIdempotentListener registerCommand(AbstractSafeCommandStore<?,?,?,?> safeStore, RoutableKey key, Command command)
-    {
-        return registerCommand(safeStore.timestampsForKey(key), safeStore.getOrCreateCommandsForKeyUpdate(key), command);
-    }
-
-    public static void registerNotWitnessed(AbstractSafeCommandStore<?,?,?,?> safeStore, RoutableKey key, TxnId txnId)
-    {
-        SafeTimestampsForKey tfk = safeStore.timestampsForKey(key);
-        SafeCommandsForKey cfk = safeStore.depsCommandsForKey(key);
-
-        // FIXME: should be the recovery commands
-        if (cfk.current().commands().commands.containsKey(txnId))
-            return;
-
-        tfk.updateMax(txnId);
-        SafeCommandsForKey.Update<?,?> update = safeStore.getOrCreateCommandsForKeyUpdate(key);
-
-        update.common().commands().add(txnId, uninitialised(txnId));
-    }
-
-    public static void listenerUpdate(AbstractSafeCommandStore<?,?,?,?> safeStore, RoutableKey listenerKey, Command command)
-    {
-        if (logger.isTraceEnabled())
-            logger.trace("[{}]: updating as listener in response to change on {} with status {} ({})",
-                         listenerKey, command.txnId(), command.status(), command);
-
-        SafeTimestampsForKey tfk = safeStore.timestampsForKey(listenerKey);
-        SafeCommandsForKey.Update<?,?> update = safeStore.getOrCreateCommandsForKeyUpdate(listenerKey);
-
-        // add/remove the command on every listener update to avoid
-        // special denormalization handling in Cassandra
-        switch (command.status())
-        {
-            default: throw new AssertionError();
-            case PreAccepted:
-            case NotDefined:
-            case Accepted:
-            case AcceptedInvalidate:
-            case PreCommitted:
-            case Applied:
-            case PreApplied:
-            case Committed:
-            case Stable:
-            case ReadyToExecute:
-                update.common().commands().add(command.txnId(), command);
-                break;
-            case Invalidated:
-                update.common().commands().remove(command.txnId());
-            case Truncated:
-                break;
-        }
-
-        tfk.updateMax(command.executeAt());
+        SafeCommandsForKey cfk = safeStore.commandsForKey(key);
+        cfk.registerHistorical(txnId);
     }
 
     public static TimestampsForKey updateLastExecutionTimestamps(CommandStore commandStore, SafeTimestampsForKey tfk, Timestamp executeAt, boolean isForWriteTxn)
@@ -146,7 +76,7 @@ public class CommandsForKeys
     }
 
     @VisibleForImplementation
-    public static <D> TimestampsForKey updateLastExecutionTimestamps(AbstractSafeCommandStore<?,?,?,?> safeStore, RoutableKey key, Timestamp executeAt, boolean isForWriteTxn)
+    public static <D> TimestampsForKey updateLastExecutionTimestamps(AbstractSafeCommandStore<?,?,?> safeStore, RoutableKey key, Timestamp executeAt, boolean isForWriteTxn)
     {
         return updateLastExecutionTimestamps(safeStore.commandStore(), safeStore.timestampsForKey(key), executeAt, isForWriteTxn);
     }

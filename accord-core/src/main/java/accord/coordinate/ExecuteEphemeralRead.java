@@ -112,6 +112,7 @@ public class ExecuteEphemeralRead extends ReadCoordinator<ReadReply>
             default: throw new IllegalStateException();
             case Redundant:
             case Rejected:
+                // TODO (expected): shouldn't be preemptible (can be made redundant, but should be a special case)
                 callback.accept(null, new Preempted(txnId, route.homeKey()));
                 return Action.Aborted;
             case Insufficient:

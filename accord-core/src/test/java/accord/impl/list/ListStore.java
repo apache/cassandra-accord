@@ -49,13 +49,17 @@ import accord.primitives.Ranges;
 import accord.primitives.RoutableKey;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.utils.Timestamped;
 import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResults;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.LongArrayList;
+
+import static accord.utils.Invariants.illegalState;
 
 public class ListStore implements DataStore
 {
@@ -188,12 +192,24 @@ public class ListStore implements DataStore
 
     private void checkAccess(Timestamp executeAt, Range range)
     {
+        if (executeAt instanceof TxnId)
+        {
+            switch (((TxnId) executeAt).kind())
+            {
+                case EphemeralRead:
+                case ExclusiveSyncPoint:
+                    // TODO (required): introduce some mechanism for EphemeralReads/ExclusiveSyncPoints to abort if local store has been expunged (and check it here)
+                    return; // safe to access later
+            }
+        }
         Ranges singleRanges = Ranges.of(range);
         if (!allowed.containsAll(singleRanges))
-            throw new IllegalStateException(String.format("Attempted to access range %s on node %s, which is not in the range %s;\nexecuteAt = %s\n%s",
-                                                          range, node, allowed,
-                                                          executeAt,
-                                                          history(singleRanges)));
+        {
+            // TODO (required): it is actually safe for a node on an old epoch to still be executing a transaction that has been executed in a later epoch,
+            //   making this check over-enthusiastic.
+            illegalState(String.format("Attempted to access range %s on node %s, which is not in the range %s;\nexecuteAt = %s\n%s",
+                                       range, node, allowed, executeAt, history(singleRanges)));
+        }
     }
 
     private String history(String type, Object key, Predicate<Ranges> test)
@@ -465,6 +481,7 @@ public class ListStore implements DataStore
     }
 
     // TODO (duplication): this is 95% of accord.coordinate.CoordinateShardDurable
+    //   we already report all this information to EpochState; would be better to use that
     private static class Await extends AsyncResults.SettableResult<SyncPoint<Ranges>> implements Callback<ReadReply>
     {
         private final Node node;
@@ -484,12 +501,14 @@ public class ListStore implements DataStore
             Await coordinate = new Await(node, minEpoch, sp);
             coordinate.start();
             return coordinate.recover(t -> {
-                // TODO (effecicency): backoff
                 if (t instanceof Timeout ||
                     // TODO (expected): why are we not simply handling Insufficient properly?
                     t instanceof RuntimeException && "Insufficient".equals(t.getMessage()) ||
                     t instanceof SimulatedFault)
                     return coordinate(node, minEpoch, sp);
+                // cannot loop indefinitely
+                if (t instanceof RuntimeException && "Redundant".equals(t.getMessage()))
+                    return AsyncChains.success(null);
                 return null;
             });
         }

@@ -16,11 +16,9 @@
  * limitations under the License.
  */
 
-package accord.impl;
+package accord.coordinate;
 
-import accord.primitives.Timestamp;
-
-public interface DomainTimestamps
+public enum ExecutePath
 {
-    Timestamp max();
+    FAST, SLOW, RECOVER
 }

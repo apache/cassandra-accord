@@ -42,6 +42,7 @@ import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import org.agrona.collections.IntHashSet;
 
+import static accord.coordinate.CoordinationAdapter.Factory.Step.Continue;
 import static accord.coordinate.ReadCoordinator.Action.Approve;
 import static accord.coordinate.ReadCoordinator.Action.ApprovePartial;
 import static accord.messages.Commit.Kind.StableFastPath;
@@ -49,14 +50,12 @@ import static accord.messages.Commit.Kind.StableSlowPath;
 import static accord.messages.Commit.Kind.StableWithTxnAndDeps;
 import static accord.utils.Invariants.illegalState;
 
-public class ExecuteTxn extends ReadCoordinator<ReadReply> implements Execute
+public class ExecuteTxn extends ReadCoordinator<ReadReply>
 {
-    public static final Execute.Factory FACTORY = ExecuteTxn::new;
-
     @SuppressWarnings("unused")
     private static final Logger logger = LoggerFactory.getLogger(ExecuteTxn.class);
 
-    final Path path;
+    final ExecutePath path;
     final Txn txn;
     final Participants<?> readScope;
     final FullRoute<?> route;
@@ -66,7 +65,7 @@ public class ExecuteTxn extends ReadCoordinator<ReadReply> implements Execute
     final BiConsumer<? super Result, Throwable> callback;
     private Data data;
 
-    private ExecuteTxn(Node node, Topologies topologies, Path path, TxnId txnId, Txn txn, FullRoute<?> route, Participants<?> readScope, Timestamp executeAt, Deps stableDeps, BiConsumer<? super Result, Throwable> callback)
+    ExecuteTxn(Node node, Topologies topologies, FullRoute<?> route, ExecutePath path, TxnId txnId, Txn txn, Participants<?> readScope, Timestamp executeAt, Deps stableDeps, BiConsumer<? super Result, Throwable> callback)
     {
         // we need to send Stable to the origin epoch as well as the execution epoch
         // TODO (desired): permit slicing Topologies by key (though unnecessary if we eliminate the concept of non-participating home keys)
@@ -148,11 +147,16 @@ public class ExecuteTxn extends ReadCoordinator<ReadReply> implements Execute
         if (failure == null)
         {
             Result result = txn.result(txnId, executeAt, data);
-            Persist.persist(node, allTopologies, route, txnId, txn, executeAt, stableDeps, txn.execute(txnId, executeAt, data), result, callback);
+            CoordinationAdapter.Invoke.persist(adapter(), node, allTopologies, route, txnId, txn, executeAt, stableDeps, txn.execute(txnId, executeAt, data), result, callback);
         }
         else
         {
             callback.accept(null, failure);
         }
+    }
+
+    protected CoordinationAdapter<Result> adapter()
+    {
+        return node.coordinationAdapter(txnId, Continue);
     }
 }

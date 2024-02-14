@@ -22,6 +22,7 @@ import accord.messages.BeginRecovery;
 import accord.primitives.Ballot;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.utils.Invariants;
 
 import java.util.List;
 import java.util.Objects;
@@ -47,7 +48,7 @@ public enum Status
 {
     NotDefined        (None,      Nothing),
     PreAccepted       (PreAccept, DefinitionAndRoute),
-    AcceptedInvalidate(Accept,    Maybe,             DefinitionUnknown, ExecuteAtNotWitnessed, DepsUnknown,     Unknown), // may or may not have witnessed
+    AcceptedInvalidate(Accept,    Maybe,             DefinitionUnknown, ExecuteAtUnknown,      DepsUnknown,  Unknown), // may or may not have witnessed
     Accepted          (Accept,    Covering,          DefinitionUnknown, ExecuteAtProposed,     DepsProposed, Unknown), // may or may not have witnessed
 
     /**
@@ -124,7 +125,7 @@ public enum Status
      */
     public static class Known
     {
-        public static final Known Nothing            = new Known(Maybe, DefinitionUnknown, ExecuteAtNotWitnessed, DepsUnknown, Unknown);
+        public static final Known Nothing            = new Known(Maybe, DefinitionUnknown, ExecuteAtUnknown, DepsUnknown, Unknown);
         // TODO (expected): deprecate DefinitionOnly
         public static final Known DefinitionOnly     = new Known(Maybe, DefinitionKnown,   ExecuteAtUnknown, DepsUnknown, Unknown);
         public static final Known DefinitionAndRoute = new Known(Full,  DefinitionKnown,   ExecuteAtUnknown, DepsUnknown, Unknown);
@@ -155,6 +156,7 @@ public enum Status
             this.executeAt = executeAt;
             this.deps = deps;
             this.outcome = outcome;
+            checkInvariants();
         }
 
         public Known atLeast(Known that)
@@ -415,6 +417,13 @@ public enum Status
         {
             return outcome.isInvalidated();
         }
+
+        public void checkInvariants()
+        {
+            if (outcome.isInvalidated()) Invariants.checkState( deps != DepsKnown && executeAt != ExecuteAtKnown);
+            else if (outcome.isOrWasApply()) Invariants.checkState(deps != NoDeps && executeAt != NoExecuteAt);
+            Invariants.checkState(!isDefinitionKnown() || hasFullRoute());
+        }
     }
 
     public enum KnownRoute
@@ -465,11 +474,6 @@ public enum Status
 
     public enum KnownExecuteAt
     {
-        /**
-         * No decision is known to have been reached. The transaction has not been witnessed so executeAt is null.
-         */
-        ExecuteAtNotWitnessed,
-
         /**
          * No decision is known to have been reached. If executeAt is not null, it represents either when
          * the transaction was witnessed, or some earlier ExecuteAtProposed that was invalidated by AcceptedInvalidate

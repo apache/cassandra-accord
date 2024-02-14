@@ -18,7 +18,6 @@
 
 package accord.coordinate;
 
-import java.util.Objects;
 import javax.annotation.Nonnull;
 
 import accord.local.*;
@@ -30,7 +29,7 @@ import accord.api.BarrierType;
 import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.local.SafeCommandStore.TestDep;
-import accord.local.SafeCommandStore.TestTimestamp;
+import accord.local.SafeCommandStore.TestStartedAt;
 import accord.primitives.Routable.Domain;
 import accord.primitives.Seekables;
 import accord.primitives.SyncPoint;
@@ -42,6 +41,7 @@ import accord.utils.async.AsyncResults;
 
 import static accord.local.PreLoadContext.contextFor;
 import static accord.primitives.Txn.Kind.Kinds.AnyGloballyVisible;
+import static accord.local.SafeCommandStore.TestStatus.IS_STABLE;
 import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.checkState;
 import static accord.utils.Invariants.illegalState;
@@ -109,15 +109,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
                     return;
                 }
 
-                if (barrierTxn != null)
-                {
-                    if (barrierTxn.status.equals(Status.Applied))
-                    {
-                        doBarrierSuccess(barrierTxn.executeAt);
-                    }
-                    // A listener was added to the transaction already
-                }
-                else
+                if (barrierTxn == null)
                 {
                     createSyncPoint();
                 }
@@ -143,7 +135,8 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
 
     private void createSyncPoint()
     {
-        coordinateSyncPoint = CoordinateSyncPoint.inclusive(node, seekables, barrierType.async);
+        coordinateSyncPoint = barrierType.async ? CoordinateSyncPoint.inclusive(node, seekables)
+                                                : CoordinateSyncPoint.inclusiveAndAwaitQuorum(node, seekables);
         coordinateSyncPoint.addCallback((syncPoint, syncPointFailure) -> {
             if (syncPointFailure != null)
             {
@@ -153,7 +146,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
 
             // Need to wait for the local transaction to finish since coordinate sync point won't wait on anything
             // if async was requested or there were no deps found
-            if (syncPoint.finishedAsync)
+            if (barrierType.async)
             {
                 TxnId txnId = syncPoint.syncId;
                 long epoch = txnId.epoch();
@@ -201,7 +194,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
         ExistingTransactionCheck check = new ExistingTransactionCheck();
         Key k = seekables.get(0).asKey();
         node.commandStores().mapReduceConsume(
-                contextFor(k, KeyHistory.ALL),
+                contextFor(k, KeyHistory.COMMANDS),
                 k.toUnseekable(),
                 minEpoch,
                 Long.MAX_VALUE,
@@ -217,22 +210,12 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
         @Nonnull
         public final Timestamp executeAt;
         @Nonnull
-        public final Status status;
-        @Nonnull
         public final Key key;
-        public BarrierTxn(@Nonnull TxnId txnId, @Nonnull Timestamp executeAt, @Nonnull Status status, Key key)
+        public BarrierTxn(@Nonnull TxnId txnId, @Nonnull Timestamp executeAt, Key key)
         {
             this.txnId = txnId;
             this.executeAt = executeAt;
-            this.status = status;
             this.key = key;
-        }
-
-        public BarrierTxn max(BarrierTxn other)
-        {
-            if (other == null)
-                return this;
-            return status.compareTo(other.status) >= 0 ? this : other;
         }
     }
 
@@ -248,31 +231,29 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
         @Override
         public BarrierTxn apply(SafeCommandStore safeStore)
         {
-            BarrierTxn found = safeStore.mapReduce(
-                    seekables,
-                    safeStore.ranges().allAfter(minEpoch),
-                    KeyHistory.ALL,
-                    // Barriers are trying to establish that committed transactions are applied before the barrier (or in this case just minEpoch)
-                    // so all existing transaction types should ensure that at this point. An earlier txnid may have an executeAt that is after
-                    // this barrier or the transaction we listen on and that is fine
-                    AnyGloballyVisible,
-                    TestTimestamp.EXECUTES_AFTER,
-                    TxnId.minForEpoch(minEpoch),
-                    TestDep.ANY_DEPS,
-                    null,
-                    Status.Committed,
-                    Status.Applied,
-                    (p1, keyOrRange, txnId, executeAt, status, deps, barrierTxn) -> {
-                        if (keyOrRange.domain() == Domain.Key)
-                            return new BarrierTxn(txnId, executeAt, status, keyOrRange.asKey());
-                        return null;
-                    },
-                    null,
-                    null,
-                    // Take the first one we find, and call it good enough to wait on
-                    Objects::nonNull);
+            // TODO (required): consider these semantics
+            BarrierTxn found = safeStore.mapReduceFull(
+            seekables,
+            safeStore.ranges().allAfter(minEpoch),
+            // Barriers are trying to establish that committed transactions are applied before the barrier (or in this case just minEpoch)
+            // so all existing transaction types should ensure that at this point. An earlier txnid may have an executeAt that is after
+            // this barrier or the transaction we listen on and that is fine
+            TxnId.minForEpoch(minEpoch),
+            AnyGloballyVisible,
+            TestStartedAt.STARTED_AFTER,
+            TestDep.ANY_DEPS,
+            IS_STABLE,
+            (p1, keyOrRange, txnId, executeAt, barrierTxn) -> {
+                if (barrierTxn != null)
+                    return barrierTxn;
+                if (keyOrRange.domain() == Domain.Key)
+                    return new BarrierTxn(txnId, executeAt, keyOrRange.asKey());
+                return null;
+            },
+            null,
+            null);
             // It's not applied so add a listener to find out when it is applied
-            if (found != null && !found.status.equals(Status.Applied))
+            if (found != null)
             {
                 safeStore.commandStore().execute(
                         contextFor(found.txnId),

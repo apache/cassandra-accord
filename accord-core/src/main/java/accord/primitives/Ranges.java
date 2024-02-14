@@ -19,6 +19,9 @@
 package accord.primitives;
 
 import accord.api.RoutingKey;
+import accord.utils.IndexedFoldToLong;
+import accord.utils.IndexedTriFold;
+import net.nicoulaj.compilecommand.annotations.Inline;
 
 import javax.annotation.Nonnull;
 import java.util.ArrayList;
@@ -195,5 +198,17 @@ public class Ranges extends AbstractRanges implements Iterable<Range>, Seekables
         if (falses.isEmpty()) return ImmutableMap.of(Boolean.TRUE, this);
         return ImmutableMap.of(Boolean.TRUE, Ranges.ofSortedAndDeoverlapped(trues.toArray(new Range[0])),
                                Boolean.FALSE, Ranges.ofSortedAndDeoverlapped(falses.toArray(new Range[0])));
+    }
+
+    @Inline
+    public final long foldl(Ranges intersect, IndexedFoldToLong<Range> fold, long param, long accumulator, long terminalValue)
+    {
+        return Routables.foldl(this, intersect, fold, param, accumulator, terminalValue);
+    }
+
+    @Inline
+    public final <P1, P2, V> V foldl(Ranges intersect, IndexedTriFold<P1, P2, Range, V> fold, P1 p1, P2 p2, V accumulator)
+    {
+        return Routables.foldl(this, intersect, fold, p1, p2, accumulator, i -> false);
     }
 }

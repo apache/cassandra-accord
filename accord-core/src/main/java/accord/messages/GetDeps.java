@@ -119,7 +119,7 @@ public class GetDeps extends TxnRequest.WithUnsynced<PartialDeps>
     @Override
     public KeyHistory keyHistory()
     {
-        return KeyHistory.DEPS;
+        return KeyHistory.COMMANDS;
     }
 
     public static class GetDepsOk implements Reply

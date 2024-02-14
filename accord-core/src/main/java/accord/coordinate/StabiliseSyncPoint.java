@@ -20,9 +20,6 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import accord.local.Node;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
@@ -33,26 +30,19 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
-import accord.utils.Faults;
 
-import static accord.coordinate.CoordinationAdapter.Invoke.stabilise;
-
-public class ProposeSyncPoint<S extends Seekables<?, ?>> extends Propose<SyncPoint<S>>
+public class StabiliseSyncPoint<S extends Seekables<?, ?>> extends Stabilise<SyncPoint<S>>
 {
-    @SuppressWarnings("unused")
-    private static final Logger logger = LoggerFactory.getLogger(ProposeSyncPoint.class);
-    private final CoordinationAdapter<SyncPoint<S>> adapter;
-
-    ProposeSyncPoint(CoordinationAdapter<SyncPoint<S>> adapter, Node node, Topologies topologies, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super SyncPoint<S>, Throwable> callback)
+    final CoordinationAdapter<SyncPoint<S>> adapter;
+    StabiliseSyncPoint(CoordinationAdapter<SyncPoint<S>> adapter, Node node, Topologies coordinates, Topologies allTopologies, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps unstableDeps, BiConsumer<? super SyncPoint<S>, Throwable> callback)
     {
-        super(node, topologies, ballot, txnId, txn, route, executeAt, deps, callback);
+        super(node, coordinates, allTopologies, route, txnId, ballot, txn, executeAt, unstableDeps, callback);
         this.adapter = adapter;
     }
 
     @Override
-    void onAccepted()
+    protected CoordinationAdapter<SyncPoint<S>> adapter()
     {
-        Deps deps = Faults.SYNCPOINT_UNMERGED_DEPS ? this.deps : this.deps.with(Deps.merge(acceptOks, ok -> ok.deps));
-        stabilise(adapter, node, acceptTracker.topologies(), route, ballot, txnId, txn, executeAt, deps, callback);
+        return adapter;
     }
 }

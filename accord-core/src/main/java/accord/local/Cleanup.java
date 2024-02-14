@@ -36,6 +36,7 @@ import static accord.local.Status.Durability.Majority;
 import static accord.local.Status.Durability.Universal;
 import static accord.local.Status.Durability.UniversalOrInvalidated;
 import static accord.local.Status.PreCommitted;
+import static accord.primitives.Txn.Kind.EphemeralRead;
 import static accord.utils.Invariants.illegalState;
 
 /**
@@ -100,6 +101,9 @@ public enum Cleanup
 
     public static Cleanup shouldCleanup(TxnId txnId, Status status, Durability durability, EpochSupplier toEpoch, Route<?> route, RedundantBefore redundantBefore, DurableBefore durableBefore, boolean enforceInvariants)
     {
+        if (txnId.kind() == EphemeralRead)
+            return Cleanup.NO; // TODO (required): clean-up based on timeout
+
         if (durableBefore.min(txnId) == Universal)
         {
             if (status.hasBeen(PreCommitted) && !status.hasBeen(Applied)) // TODO (expected): may be stale

@@ -34,7 +34,7 @@ public class TopologyMismatch extends CoordinationFailed
 
     private final EnumSet<Reason> reasons;
 
-    private TopologyMismatch(EnumSet<Reason> reasons, Topology topology, TxnId txnId, @Nullable RoutingKey homeKey, Routables<?> keysOrRanges)
+    private TopologyMismatch(EnumSet<Reason> reasons, Topology topology, @Nullable TxnId txnId, @Nullable RoutingKey homeKey, Routables<?> keysOrRanges)
     {
         super(txnId, homeKey, buildMessage(reasons, topology, homeKey, keysOrRanges));
         this.reasons = reasons;
@@ -72,7 +72,7 @@ public class TopologyMismatch extends CoordinationFailed
     }
 
     @Nullable
-    public static TopologyMismatch checkForMismatch(Topology t, TxnId txnId, RoutingKey homeKey, Routables<?> keysOrRanges)
+    public static TopologyMismatch checkForMismatch(Topology t, @Nullable TxnId txnId, RoutingKey homeKey, Routables<?> keysOrRanges)
     {
         EnumSet<TopologyMismatch.Reason> reasons = null;
         if (!t.ranges().contains(homeKey))

@@ -37,14 +37,12 @@ import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.SaveStatus;
 import accord.local.Status;
-import accord.primitives.AbstractKeys;
 import accord.primitives.Ballot;
 import accord.primitives.EpochSupplier;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialRoute;
 import accord.primitives.PartialTxn;
 import accord.primitives.ProgressToken;
-import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Routables;
 import accord.primitives.Route;
@@ -159,13 +157,13 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
         if (!command.has(Known.DefinitionOnly) && Route.isRoute(query) && safeStore.ranges().allAt(txnId.epoch()).contains(Route.castToRoute(query).homeKey()))
             Commands.informHome(safeStore, safeCommand, Route.castToRoute(query));
 
-        Ranges ranges = safeStore.ranges().allBetween(command.txnId().epoch(), command.executeAtIfKnownOrTxnId().epoch());
-        InvalidIfNot invalidIfNotAtLeast = invalidIfNotAtLeast(safeStore);
+        InvalidIfNot invalidIfNotAtLeast = invalidIfNot(safeStore, command);
         boolean isCoordinating = isCoordinating(node, command);
         Durability durability = command.durability();
         Route<?> route = command.route();
         if (Route.isFullRoute(route))
             durability = Durability.mergeAtLeast(durability, safeStore.commandStore().durableBefore().min(txnId, route));
+        Ranges ranges = safeStore.ranges().allBetween(command.txnId().epoch(), command.executeAtIfKnownOrTxnId().epoch());
 
         switch (includeInfo)
         {
@@ -204,9 +202,11 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
         else node.reply(replyTo, replyContext, ok, null);
     }
 
-    private InvalidIfNot invalidIfNotAtLeast(SafeCommandStore safeStore)
+    private InvalidIfNot invalidIfNot(SafeCommandStore safeStore, Command command)
     {
-        return Infer.invalidIfNotAtLeast(safeStore, txnId, query);
+        if (command.known().isDecidedToExecute())
+            return NotKnownToBeInvalid;
+        return Infer.invalidIfNot(safeStore, txnId, query);
     }
 
     public interface CheckStatusReply extends Reply
@@ -329,33 +329,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             if (keysOrRanges.isEmpty())
                 return new FoundKnownMap();
 
-            switch (keysOrRanges.domain())
-            {
-                default: throw new AssertionError("Unhandled domain type: " + keysOrRanges.domain());
-                case Range:
-                {
-                    Ranges ranges = (Ranges)keysOrRanges;
-                    Builder builder = new Builder(ranges.get(0).endInclusive(), 2 * ranges.size());
-                    for (Range range : ranges)
-                    {
-                        builder.append(range.start(), known, FoundKnown::atLeast);
-                        builder.append(range.end(), null, FoundKnown::atLeast);
-                    }
-                    return builder.build();
-                }
-                case Key:
-                {
-                    AbstractKeys<RoutingKey> keys = (AbstractKeys<RoutingKey>) keysOrRanges;
-                    Builder builder = new Builder(keys.get(0).asRange().endInclusive(), 2 * keys.size());
-                    for (RoutingKey key : keys)
-                    {
-                        Range range = key.asRange();
-                        builder.append(range.start(), known, FoundKnown::atLeast);
-                        builder.append(range.end(), null, FoundKnown::atLeast);
-                    }
-                    return builder.build();
-                }
-            }
+            return create(keysOrRanges, known, Builder::new);
         }
 
         public static FoundKnownMap merge(FoundKnownMap a, FoundKnownMap b)
@@ -428,6 +402,11 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
         public boolean hasTruncated()
         {
             return foldl((known, prev) -> known.isTruncated(), false, i -> i);
+        }
+
+        public boolean hasInvalidated()
+        {
+            return foldl((known, prev) -> known.isInvalidated(), false, i -> i);
         }
 
         public Known knownFor(Routables<?> routables)

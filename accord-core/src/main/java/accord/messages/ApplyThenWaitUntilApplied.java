@@ -27,16 +27,23 @@ import accord.api.Data;
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.local.CommandStore;
+import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
 import accord.messages.Apply.ApplyReply;
+import accord.primitives.Deps;
+import accord.primitives.FullRoute;
 import accord.primitives.PartialDeps;
-import accord.primitives.PartialRoute;
+import accord.primitives.PartialTxn;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
+import accord.topology.Topologies;
 
+import static accord.messages.TxnRequest.computeScope;
 import static accord.utils.Invariants.illegalState;
 
 /*
@@ -52,28 +59,40 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     @SuppressWarnings("unused")
     public static class SerializerSupport
     {
-        public static ApplyThenWaitUntilApplied create(TxnId txnId, PartialRoute<?> route, PartialDeps deps, Seekables<?, ?> partialTxnKeys, Writes writes, Result result, boolean notifyAgent)
+        public static ApplyThenWaitUntilApplied create(TxnId txnId, Participants<?> readScope, long executeAtEpoch, FullRoute<?> route, PartialTxn txn, PartialDeps deps, Writes writes, Result result, Seekables<?, ?> notify)
         {
-            return new ApplyThenWaitUntilApplied(txnId, route, deps, partialTxnKeys, writes, result, notifyAgent);
+            return new ApplyThenWaitUntilApplied(txnId, readScope, executeAtEpoch, route, txn, deps, writes, result, notify);
         }
     }
 
-    public final PartialRoute<?> route;
+    public final FullRoute<?> route;
+    public final PartialTxn txn;
     public final PartialDeps deps;
     public final Writes writes;
-    public final Result txnResult;
-    public final boolean notifyAgent;
-    public final Seekables<?, ?> partialTxnKeys;
+    public final Result result;
+    public final Seekables<?, ?> notify;
 
-    ApplyThenWaitUntilApplied(TxnId txnId, PartialRoute<?> route, PartialDeps deps, Seekables<?, ?> partialTxnKeys, Writes writes, Result txnResult, boolean notifyAgent)
+    public ApplyThenWaitUntilApplied(Node.Id to, Topologies topologies, FullRoute<?> route, TxnId txnId, Txn txn, Deps deps, Participants<?> readScope, long executeAtEpoch, Writes writes, Result result, Seekables<?, ?> notify)
     {
-        super(txnId, partialTxnKeys.toParticipants(), txnId.epoch());
+        super(to, topologies, txnId, readScope, executeAtEpoch);
+        Ranges slice = computeScope(to, topologies, null, 0, (i,r)->r, Ranges::with);
         this.route = route;
+        this.txn = txn.slice(slice, true);
+        this.deps = deps.slice(slice);
+        this.writes = writes;
+        this.result = result;
+        this.notify = notify == null ? null : notify.slice(slice);
+    }
+
+    protected ApplyThenWaitUntilApplied(TxnId txnId, Participants<?> readScope, long executeAtEpoch, FullRoute<?> route, PartialTxn txn, PartialDeps deps, Writes writes, Result result, Seekables<?, ?> notify)
+    {
+        super(txnId, readScope, executeAtEpoch);
+        this.route = route;
+        this.txn = txn;
         this.deps = deps;
         this.writes = writes;
-        this.txnResult = txnResult;
-        this.notifyAgent = notifyAgent;
-        this.partialTxnKeys = partialTxnKeys;
+        this.result = result;
+        this.notify = notify;
     }
 
     @Override
@@ -86,7 +105,7 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     public CommitOrReadNack apply(SafeCommandStore safeStore)
     {
         RoutingKey progressKey = TxnRequest.progressKey(node, txnId.epoch(), txnId, route);
-        ApplyReply applyReply = Apply.apply(safeStore, null, txnId, txnId, deps, route, writes, txnResult, progressKey);
+        ApplyReply applyReply = Apply.apply(safeStore, txn, txnId, txnId, deps, route, writes, result, progressKey);
         switch (applyReply)
         {
             default:
@@ -94,6 +113,7 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
             case Insufficient:
                 throw illegalState("ApplyThenWaitUntilApplied is always sent with a maximal `Commit` so how can `Apply` have an `Insufficient` result");
             case Redundant:
+                // TODO (required): redundant is not necessarily safe for awaitsOnlyDeps commands as might need a future epoch
             case Applied:
                 // In both cases it's fine to continue to process and return a response saying
                 // things were applied
@@ -115,8 +135,9 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     @Override
     protected void onAllSuccess(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Throwable fail)
     {
-        if (notifyAgent)
-            node.agent().onLocalBarrier(partialTxnKeys, txnId);
+        // TODO (expected): don't like the coupling going on here
+        if (notify != null)
+            node.agent().onLocalBarrier(notify, txnId);
         super.onAllSuccess(unavailable, data, fail);
     }
 
@@ -129,7 +150,7 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     @Override
     public String toString()
     {
-        return "WaitForDependenciesThenApply{" +
+        return "ApplyThenWaitUntilApplied{" +
                 "txnId:" + txnId +
                 '}';
     }

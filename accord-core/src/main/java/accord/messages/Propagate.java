@@ -22,6 +22,7 @@ import accord.api.RoutingKey;
 import accord.coordinate.Infer;
 import accord.local.Command;
 import accord.local.Commands;
+import accord.local.KeyHistory;
 import accord.local.Node;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
@@ -220,6 +221,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
     @Override
     public Seekables<?, ?> keys()
     {
+        // TODO (required): these may be insufficient; must make update of CommandsForKey async
         if (partialTxn != null)
             return partialTxn.keys();
 
@@ -227,6 +229,12 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
             return stableDeps.keyDeps.keys();
 
         return Keys.EMPTY;
+    }
+
+    @Override
+    public KeyHistory keyHistory()
+    {
+        return KeyHistory.COMMANDS;
     }
 
     @Override
@@ -267,6 +275,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
         if (isShardTruncated)
         {
             // TODO (required): do not markShardStale for reads; in general optimise handling of case where we cannot recover a known no-op transaction
+            // TODO (required): permit staleness to be gated by some configuration state
             achieved = applyOrUpgradeTruncated(safeStore, safeCommand, command, executeAtIfKnown);
             if (achieved == null)
                 return null;
@@ -408,7 +417,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
         if (ranges.isEmpty())
         {
             // TODO (expected): we might prefer to adopt Redundant status, and permit ourselves to later accept the result of the execution and/or definition
-            Commands.setTruncatedApply(safeStore, safeCommand, route);
+            Commands.setTruncatedApply(safeStore, safeCommand, executeAtIfKnown, route);
             return null;
         }
 
@@ -417,7 +426,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
         {
             // we only coordinate this transaction, so being unable to retrieve its state does not imply any staleness
             // TODO (now): double check this doesn't stop us coordinating the transaction (it shouldn't, as doesn't imply durability)
-            Commands.setTruncatedApply(safeStore, safeCommand, route);
+            Commands.setTruncatedApply(safeStore, safeCommand, executeAtIfKnown, route);
             return null;
         }
 
@@ -443,7 +452,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
             return required;
 
         // TODO (expected): we might prefer to adopt Redundant status, and permit ourselves to later accept the result of the execution and/or definition
-        Commands.setTruncatedApply(safeStore, safeCommand, route);
+        Commands.setTruncatedApply(safeStore, safeCommand, executeAtIfKnown, route);
         return null;
     }
 

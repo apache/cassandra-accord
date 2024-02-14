@@ -155,7 +155,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     @Override
     public KeyHistory keyHistory()
     {
-        return KeyHistory.DEPS;
+        return KeyHistory.COMMANDS;
     }
 
     @Override
@@ -181,6 +181,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
 
         public final AcceptOutcome outcome;
         public final Ballot supersededBy;
+        // TODO (expected): only send back deps that weren't in those we received
         public final @Nullable PartialDeps deps;
 
         private AcceptReply(AcceptOutcome outcome)

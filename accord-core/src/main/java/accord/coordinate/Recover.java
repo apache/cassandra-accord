@@ -28,6 +28,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import accord.api.Result;
+import accord.coordinate.CoordinationAdapter.Invoke;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.coordinate.tracking.RecoveryTracker;
 import accord.local.Node;
@@ -56,10 +57,13 @@ import accord.utils.Invariants;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
-import static accord.coordinate.Execute.Path.RECOVER;
+import static accord.coordinate.CoordinationAdapter.Factory.Step.InitiateRecovery;
+import static accord.coordinate.CoordinationAdapter.Invoke.execute;
+import static accord.coordinate.CoordinationAdapter.Invoke.persist;
+import static accord.coordinate.CoordinationAdapter.Invoke.stabilise;
+import static accord.coordinate.ExecutePath.RECOVER;
 import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAndCallback;
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
-import static accord.coordinate.ProposeAndExecute.proposeAndExecute;
 import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.messages.BeginRecovery.RecoverOk.maxAcceptedOrLater;
@@ -68,6 +72,7 @@ import static accord.utils.Invariants.illegalState;
 
 // TODO (low priority, cleanup): rename to Recover (verb); rename Recover message to not clash
 // TODO (expected): do not recover transactions that are known to be Stable and waiting to execute.
+// TODO (expected): separate out recovery of sync points from standard transactions
 public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throwable>
 {
     class AwaitCommit extends AsyncResults.SettableResult<Timestamp> implements Callback<WaitOnCommitOk>
@@ -128,6 +133,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         return result;
     }
 
+    private final CoordinationAdapter<Result> adapter;
     private final Node node;
     private final Ballot ballot;
     private final TxnId txnId;
@@ -147,6 +153,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         // TODO (required, correctness): we may have to contact all epochs to ensure we spot any future transaction that might not have taken us as dependency?
         //    or we need an exclusive sync point covering us and closing out the old epoch before recovering;
         //    or we need to manage dependencies for ranges we don't own in future epochs; this might be simplest
+        this.adapter = node.coordinationAdapter(txnId, InitiateRecovery);
         this.node = node;
         this.ballot = ballot;
         this.txnId = txnId;
@@ -257,7 +264,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 {
                     withCommittedDeps(executeAt, stableDeps -> {
                         // TODO (future development correctness): when writes/result are partially replicated, need to confirm we have quorum of these
-                        Persist.persistMaximal(node, txnId, route, txn, executeAt, stableDeps, acceptOrCommit.writes, acceptOrCommit.result);
+                        persist(adapter, node, tracker.topologies(), route, txnId, txn, executeAt, stableDeps, acceptOrCommit.writes, acceptOrCommit.result, null);
                     });
                     accept(acceptOrCommit.result, null);
                     return;
@@ -267,7 +274,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 case Stable:
                 {
                     withCommittedDeps(executeAt, stableDeps -> {
-                        Execute.execute(node, tracker.topologies(), route, RECOVER, txnId, txn, executeAt, stableDeps, this);
+                        execute(adapter, node, tracker.topologies(), route, RECOVER, txnId, txn, executeAt, stableDeps, this);
                     });
                     return;
                 }
@@ -276,7 +283,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 case Committed:
                 {
                     withCommittedDeps(executeAt, committedDeps -> {
-                        Stabilise.stabilise(node, tracker.topologies(), route, ballot, txnId, txn, executeAt, committedDeps, this);
+                        stabilise(adapter, node, tracker.topologies(), route, ballot, txnId, txn, executeAt, committedDeps, this);
                     });
                     return;
                 }
@@ -320,7 +327,6 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             // we have to be certain these commands have not successfully committed without witnessing us (thereby
             // ruling out a fast path decision for us and changing our recovery decision).
             // So, we wait for these commands to finish committing before retrying recovery.
-            // TODO (required): check paper: do we assume that witnessing in PreAccept implies witnessing in Accept? Not guaranteed.
             // See whitepaper for more details
             awaitCommits(node, earlierAcceptedNoWitness).addCallback((success, failure) -> {
                 if (failure != null) accept(null, failure);
@@ -373,7 +379,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     private void propose(Timestamp executeAt, Deps deps)
     {
-        node.withEpoch(executeAt.epoch(), () -> proposeAndExecute(node, ballot, txnId, txn, route, executeAt, deps, this));
+        node.withEpoch(executeAt.epoch(), () -> Invoke.propose(adapter, node, route, ballot, txnId, txn, executeAt, deps, this));
     }
 
     private void retry()

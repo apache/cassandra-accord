@@ -33,6 +33,7 @@ import accord.utils.Invariants;
 
 import static accord.utils.Utils.toArray;
 
+// TODO (now): burn test is producing prefix keys over full integer range rather than 16bits
 public class PrefixedIntHashKey implements RoutableKey
 {
     public static final int MIN_KEY = Integer.MIN_VALUE + 1;
@@ -111,11 +112,6 @@ public class PrefixedIntHashKey implements RoutableKey
 
     public static final class Key extends PrefixedIntHashKey implements accord.api.Key
     {
-        private Key(int prefix, int key)
-        {
-            super(prefix, key, false);
-        }
-
         private Key(int prefix, int key, int hash)
         {
             super(prefix, key, hash);
@@ -124,9 +120,9 @@ public class PrefixedIntHashKey implements RoutableKey
 
     public static abstract class PrefixedIntRoutingKey extends PrefixedIntHashKey implements RoutingKey
     {
-        private PrefixedIntRoutingKey(int prefix, int key, boolean isHash)
+        private PrefixedIntRoutingKey(int prefix, int hash)
         {
-            super(prefix, key, isHash);
+            super(prefix, Integer.MIN_VALUE, hash);
         }
 
         @Override
@@ -142,7 +138,7 @@ public class PrefixedIntHashKey implements RoutableKey
 
         private Sentinel(int prefix, boolean isMin)
         {
-            super(prefix, isMin ? Integer.MIN_VALUE : Integer.MAX_VALUE, true);
+            super(prefix, isMin ? Integer.MIN_VALUE : Integer.MAX_VALUE);
             this.isMin = isMin;
         }
 
@@ -157,7 +153,7 @@ public class PrefixedIntHashKey implements RoutableKey
     {
         private Hash(int prefix, int hash)
         {
-            super(prefix, hash, true);
+            super(prefix, hash);
         }
 
         @Override
@@ -212,33 +208,12 @@ public class PrefixedIntHashKey implements RoutableKey
     public final int hash;
     private final boolean isHash;
 
-    private PrefixedIntHashKey(int prefix, int key, boolean isHash)
-    {
-        this.prefix = prefix;
-        this.isHash = isHash;
-        if (isHash)
-        {
-            this.key = Integer.MIN_VALUE;
-            this.hash = key;
-        }
-        else
-        {
-            this.key = key;
-            this.hash = hash(key);
-        }
-    }
-
     private PrefixedIntHashKey(int prefix, int key, int hash)
     {
         this.prefix = prefix;
-        this.isHash = false; // this constructor is only used by Key
+        this.isHash = key == Integer.MIN_VALUE; // this constructor is only used by Key
         this.key = key;
         this.hash = hash;
-    }
-
-    public static Key key(int prefix, int k)
-    {
-        return new Key(prefix, k);
     }
 
     public static Key key(int prefix, int k, int hash)
@@ -305,7 +280,7 @@ public class PrefixedIntHashKey implements RoutableKey
         return Objects.hash(prefix, key, hash);
     }
 
-    static int hash(int key)
+    public static int hash(int key)
     {
         return CRCUtils.crc32LittleEnding(key);
     }

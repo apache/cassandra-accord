@@ -28,6 +28,7 @@ import accord.primitives.EpochSupplier;
 import accord.primitives.Participants;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
+import accord.primitives.RoutableKey;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -43,6 +44,7 @@ import static accord.local.RedundantStatus.LOCALLY_REDUNDANT;
 import static accord.local.RedundantStatus.NOT_OWNED;
 import static accord.local.RedundantStatus.PRE_BOOTSTRAP_OR_STALE;
 import static accord.local.RedundantStatus.SHARD_REDUNDANT;
+import static accord.utils.Invariants.illegalState;
 
 public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
 {
@@ -88,11 +90,6 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         public final @Nonnull TxnId bootstrappedAt;
 
         /**
-         * The maximum of each of locallyAppliedOrInvalidatedBefore, shardAppliedOrInvalidatedBefore and bootstrappedAt.
-         */
-        public final @Nonnull TxnId minConflict;
-
-        /**
          * staleUntilAtLeast provides a minimum TxnId until which we know we will be unable to completely execute
          * transactions locally for the impacted range.
          *
@@ -108,7 +105,6 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
             this.locallyAppliedOrInvalidatedBefore = locallyAppliedOrInvalidatedBefore;
             this.shardAppliedOrInvalidatedBefore = shardAppliedOrInvalidatedBefore;
             this.bootstrappedAt = bootstrappedAt;
-            this.minConflict = Timestamp.max(Timestamp.max(locallyAppliedOrInvalidatedBefore, shardAppliedOrInvalidatedBefore), bootstrappedAt);
             this.staleUntilAtLeast = staleUntilAtLeast;
         }
 
@@ -181,13 +177,6 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
                                          : prev == FULLY          ? PARTIALLY : POST_BOOTSTRAP;
         }
 
-        static Timestamp getAndMergeMinConflict(Entry entry, @Nonnull Timestamp prev)
-        {
-            if (entry == null)
-                return prev;
-            return Timestamp.max(prev, entry.minConflict);
-        }
-
         static <T extends Deps> Deps.AbstractBuilder<T> collectDep(Entry entry, @Nonnull Deps.AbstractBuilder<T> prev, @Nonnull EpochSupplier minEpoch, @Nonnull EpochSupplier executeAt)
         {
             if (entry == null || entry.outOfBounds(minEpoch, executeAt))
@@ -219,6 +208,17 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
                 return executeRanges.subtract(Ranges.of(entry.range));
 
             return executeRanges;
+        }
+
+        static Ranges removeShardRedundant(Entry entry, @Nonnull Ranges notRedundant, TxnId txnId, @Nullable Timestamp executeAt)
+        {
+            if (entry == null || (executeAt == null ? entry.outOfBounds(txnId) : entry.outOfBounds(txnId, executeAt)))
+                return notRedundant;
+
+            if (txnId.compareTo(entry.shardAppliedOrInvalidatedBefore) < 0)
+                return notRedundant.subtract(Ranges.of(entry.range));
+
+            return notRedundant;
         }
 
         RedundantStatus get(TxnId txnId)
@@ -309,6 +309,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
     {
         super(inclusiveEnds, starts, values);
         staleRanges = extractStaleRanges(values);
+        checkParanoid(starts, values);
     }
 
     private static Ranges extractStaleRanges(Entry[] values)
@@ -375,8 +376,17 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         return Entry.get(entry, txnId, executeAt);
     }
 
-    public RedundantStatus status(TxnId txnId, EpochSupplier executeAt, Participants<?> participants)
+    public TxnId redundantBefore(RoutableKey key)
     {
+        Entry entry = get(key);
+        if (entry == null)
+            return TxnId.NONE;
+        return entry.shardAppliedOrInvalidatedBefore;
+    }
+
+    public RedundantStatus status(TxnId txnId, EpochSupplier executeAt, Participants<?> participants)
+    {   // TODO (required): consider how the use of txnId for executeAt affects exclusive sync points for cleanup
+        //    may want to issue synthetic sync points for local evaluation in later epochs
         if (executeAt == null) executeAt = txnId;
         return foldl(participants, Entry::getAndMerge, NOT_OWNED, txnId, executeAt, ignore -> false);
     }
@@ -391,11 +401,6 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         return foldl(participants, Entry::getAndMerge, PreBootstrapOrStale.NOT_OWNED, txnId, executeAt, r -> r == PARTIALLY);
     }
 
-    public Timestamp minConflict(Seekables<?, ?> participants)
-    {
-        return foldl(participants, Entry::getAndMergeMinConflict, Timestamp.NONE, ignore -> false);
-    }
-
     public <T extends Deps> Deps.AbstractBuilder<T> collectDeps(Seekables<?, ?> participants, Deps.AbstractBuilder<T> builder, EpochSupplier minEpoch, EpochSupplier executeAt)
     {
         return foldl(participants, Entry::collectDep, builder, minEpoch, executeAt, ignore -> false);
@@ -404,6 +409,15 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
     public Ranges validateSafeToRead(Timestamp forBootstrapAt, Ranges ranges)
     {
         return foldl(ranges, Entry::validateSafeToRead, ranges, forBootstrapAt, null, r -> false);
+    }
+
+    /**
+     * Subtract any ranges we consider stale or pre-bootstrap
+     */
+    public Ranges removeShardRedundant(TxnId txnId, @Nonnull Timestamp executeAt, Ranges ranges)
+    {
+        Invariants.checkArgument(executeAt != null, "executeAt must not be null");
+        return foldl(ranges, Entry::removeShardRedundant, ranges, txnId, executeAt, r -> false);
     }
 
     /**
@@ -468,9 +482,32 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         }
 
         @Override
+        public void append(RoutingKey start, RoutingKey end, @Nonnull Entry value)
+        {
+            if (value.range.start().compareTo(start) != 0 || value.range.end().compareTo(end) != 0)
+                throw illegalState();
+            super.append(start, end, value);
+        }
+
+        @Override
         protected RedundantBefore buildInternal()
         {
             return new RedundantBefore(inclusiveEnds, starts.toArray(new RoutingKey[0]), values.toArray(new Entry[0]));
+        }
+    }
+
+    private static void checkParanoid(RoutingKey[] starts, Entry[] values)
+    {
+        if (!Invariants.isParanoid())
+            return;
+
+        for (int i = 0 ; i < values.length ; ++i)
+        {
+            if (values[i] != null)
+            {
+                Invariants.checkArgument(starts[i].equals(values[i].range.start()));
+                Invariants.checkArgument(starts[i + 1].equals(values[i].range.end()));
+            }
         }
     }
 }

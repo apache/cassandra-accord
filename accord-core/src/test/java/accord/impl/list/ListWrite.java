@@ -54,7 +54,7 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
         ListStore s = (ListStore) store;
         if (!containsKey(key))
             return Writes.SUCCESS;
-        CommandsForKeys.updateLastExecutionTimestamps((AbstractSafeCommandStore<?, ?, ?, ?>) safeStore, (RoutableKey) key, executeAt, true);
+        CommandsForKeys.updateLastExecutionTimestamps((AbstractSafeCommandStore<?, ?, ?>) safeStore, (RoutableKey) key, executeAt, true);
 
         return executor.apply(safeStore.commandStore()).submit(() -> {
             int[] data = get(key);

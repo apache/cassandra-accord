@@ -23,6 +23,7 @@ import java.util.function.Predicate;
 
 import accord.utils.DeterministicSet;
 
+// TODO (expected): these are immutable collections over sortable keys, so should simply use BTree (or arrays)
 public class Listeners<L extends Command.Listener> extends DeterministicSet<L>
 {
     public static Listeners EMPTY = new Listeners<>();

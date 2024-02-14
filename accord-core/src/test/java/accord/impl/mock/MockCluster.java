@@ -34,8 +34,7 @@ import org.slf4j.LoggerFactory;
 
 import accord.NetworkFilter;
 import accord.api.MessageSink;
-import accord.coordinate.ExecuteTxn;
-import accord.coordinate.PersistTxn;
+import accord.coordinate.CoordinationAdapter;
 import accord.config.LocalConfig;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.IntKey;
@@ -47,7 +46,6 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
-import accord.messages.Apply;
 import accord.config.MutableLocalConfig;
 import accord.messages.Callback;
 import accord.messages.LocalRequest;
@@ -139,9 +137,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
                              SizeOfIntersectionSorter.SUPPLIER,
                              SimpleProgressLog::new,
                              InMemoryCommandStores.SingleThread::new,
-                             ExecuteTxn.FACTORY,
-                             PersistTxn.FACTORY,
-                             Apply.FACTORY,
+                             new CoordinationAdapter.DefaultFactory(),
                              localConfig);
         awaitUninterruptibly(node.unsafeStart());
         node.onTopologyUpdate(topology, true);

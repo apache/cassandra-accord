@@ -23,12 +23,14 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
 
+import javax.annotation.Nullable;
+
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Callback;
 import accord.primitives.FullRoute;
-import accord.primitives.Txn;
+import accord.primitives.Seekables;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
@@ -95,7 +97,6 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
 
     final Node node;
     final TxnId txnId;
-    final Txn txn;
     final FullRoute<?> route;
 
     private Topologies topologies;
@@ -103,16 +104,15 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
     private ExtraEpochs extraEpochs;
     private Map<Id, Object> debug = Invariants.debug() ? new LinkedHashMap<>() : null;
 
-    AbstractCoordinatePreAccept(Node node, FullRoute<?> route, TxnId txnId, Txn txn)
+    AbstractCoordinatePreAccept(Node node, FullRoute<?> route, TxnId txnId)
     {
-        this(node, txnId, txn, route, node.topology().withUnsyncedEpochs(route, txnId, txnId));
+        this(node, route, txnId, node.topology().withUnsyncedEpochs(route, txnId, txnId));
     }
 
-    AbstractCoordinatePreAccept(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Topologies topologies)
+    AbstractCoordinatePreAccept(Node node, FullRoute<?> route, @Nullable TxnId txnId, Topologies topologies)
     {
         this.node = node;
         this.txnId = txnId;
-        this.txn = txn;
         this.route = route;
         this.topologies = topologies;
     }
@@ -122,6 +122,7 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
         contact(topologies.nodes(), topologies, this);
     }
 
+    abstract Seekables<?, ?> keysOrRanges();
     abstract void contact(Set<Id> nodes, Topologies topologies, Callback<R> callback);
     abstract void onSuccessInternal(Id from, R reply);
     /**
@@ -163,7 +164,22 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
     @Override
     public final void setFailure(Throwable failure)
     {
-        Invariants.checkState(!initialRoundIsDone || (extraEpochs != null && !extraEpochs.extraRoundIsDone));
+        super.setFailure(failure);
+        onFailure(failure);
+    }
+
+    @Override
+    public final boolean tryFailure(Throwable failure)
+    {
+        if (!super.tryFailure(failure))
+            return false;
+        onFailure(failure);
+        return true;
+    }
+
+    private void onFailure(Throwable failure)
+    {
+        // we may already be complete, as we may receive a failure from a later phase; but it's fine to redundantly mark done
         initialRoundIsDone = true;
         if (extraEpochs != null)
             extraEpochs.extraRoundIsDone = true;
@@ -178,7 +194,7 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
             else if (failure instanceof Invalidated)
                 node.agent().metricsEventsListener().onInvalidated(txnId);
         }
-        super.setFailure(failure);
+
     }
 
     final void onPreAcceptedOrNewEpoch()
@@ -203,7 +219,7 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
         // TODO (desired, efficiency): check if we have already have a valid quorum for the future epoch
         //  (noting that nodes may have adopted new ranges, in which case they should be discounted, and quorums may have changed shape)
         node.withEpoch(latestEpoch, () -> {
-            TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(latestEpoch), txnId, route.homeKey(), txn.keys());
+            TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(latestEpoch), txnId, route.homeKey(), keysOrRanges());
             if (mismatch != null)
             {
                 initialRoundIsDone = true;
@@ -230,23 +246,7 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
     @Override
     public final void accept(T success, Throwable failure)
     {
-        if (success != null)
-        {
-            trySuccess(success);
-        }
-        else
-        {
-            if (failure instanceof CoordinationFailed)
-            {
-                ((CoordinationFailed) failure).set(txnId, route.homeKey());
-                if (failure instanceof Preempted)
-                    node.agent().metricsEventsListener().onPreempted(txnId);
-                else if (failure instanceof Timeout)
-                    node.agent().metricsEventsListener().onTimeout(txnId);
-                else if (failure instanceof Invalidated)
-                    node.agent().metricsEventsListener().onInvalidated(txnId);
-            }
-            tryFailure(failure);
-        }
+        if (success != null) trySuccess(success);
+        else tryFailure(failure);
     }
 }

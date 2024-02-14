@@ -50,6 +50,9 @@ import accord.utils.Invariants;
 import accord.utils.RandomSource;
 import org.agrona.collections.IntHashSet;
 
+import static accord.burn.BurnTest.HASH_RANGE_END;
+import static accord.burn.BurnTest.HASH_RANGE_START;
+
 
 // TODO (required, testing): add change replication factor
 public class TopologyRandomizer
@@ -348,7 +351,7 @@ public class TopologyRandomizer
         }
         List<Shard> result = new ArrayList<>(shards.length + nodes.length);
         result.addAll(Arrays.asList(shards));
-        Range[] ranges = PrefixedIntHashKey.ranges(prefix, nodes.length);
+        Range[] ranges = PrefixedIntHashKey.ranges(prefix, HASH_RANGE_START, HASH_RANGE_END, nodes.length);
         for (int i = 0; i < ranges.length; i++)
         {
             Range range = ranges[i];

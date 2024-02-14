@@ -20,6 +20,7 @@ package accord.utils;
 import accord.api.RoutingKey;
 import accord.primitives.*;
 
+import java.util.Arrays;
 import java.util.function.BiFunction;
 import java.util.function.Predicate;
 
@@ -297,6 +298,22 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         return accumulator;
     }
 
+    private int find(RoutableKey key)
+    {
+        int idx = Arrays.binarySearch(starts, key);
+        if (idx < 0) idx = -2 - idx;
+        else if (inclusiveEnds) --idx;
+        return idx;
+    }
+
+    public V get(RoutableKey key)
+    {
+        int idx = find(key);
+        if (idx < 0 || idx >= values.length)
+            return null;
+        return values[idx];
+    }
+
     public static <V> ReducingRangeMap<V> create(Ranges ranges, V value)
     {
         if (value == null)
@@ -305,12 +322,86 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         if (ranges.isEmpty())
             return new ReducingRangeMap<>();
 
-        ReducingRangeMap.Builder<V> builder = new ReducingRangeMap.Builder<>(ranges.get(0).endInclusive(), ranges.size() * 2);
-        for (Range range : ranges)
+        return create(ranges, value, ReducingRangeMap.Builder::new);
+    }
+
+    public static <V, M extends ReducingRangeMap<V>> M create(Unseekables<?> keysOrRanges, V value, BuilderFactory<RoutingKey, V, M> builder)
+    {
+        switch (keysOrRanges.domain())
         {
-            builder.append(range.start(), value, (a, b) -> { throw new IllegalStateException(); });
-            builder.append(range.end(), null, (a, b) -> a); // if we are equal to prev end, take the prev value not zero
+            default: throw new AssertionError("Unhandled domain: " + keysOrRanges.domain());
+            case Range: return create((Ranges) keysOrRanges, value, builder);
+            case Key: return create((AbstractUnseekableKeys) keysOrRanges, value, builder);
         }
+    }
+
+    public static <V, M extends ReducingRangeMap<V>> M create(Seekables<?, ?> keysOrRanges, V value, BuilderFactory<RoutingKey, V, M> builder)
+    {
+        switch (keysOrRanges.domain())
+        {
+            default: throw new AssertionError("Unhandled domain: " + keysOrRanges.domain());
+            case Range: return create((Ranges) keysOrRanges, value, builder);
+            case Key: return create((Keys) keysOrRanges, value, builder);
+        }
+    }
+
+    public static <V, M extends ReducingRangeMap<V>> M create(Ranges ranges, V value, BuilderFactory<RoutingKey, V, M> factory)
+    {
+        if (value == null)
+            throw new IllegalArgumentException("value is null");
+
+        AbstractBoundariesBuilder<RoutingKey, V, M> builder = factory.create(ranges.get(0).endInclusive(), ranges.size() * 2);
+        for (Range cur : ranges)
+        {
+            builder.append(cur.start(), value, (a, b) -> { throw new IllegalStateException(); });
+            builder.append(cur.end(), null, (a, b) -> { throw new IllegalStateException(); });
+        }
+
+        return builder.build();
+    }
+
+    public static <V, M extends ReducingRangeMap<V>> M create(AbstractUnseekableKeys keys, V value, BuilderFactory<RoutingKey, V, M> factory)
+    {
+        if (value == null)
+            throw new IllegalArgumentException("value is null");
+
+        AbstractBoundariesBuilder<RoutingKey, V, M> builder = factory.create(keys.get(0).asRange().endInclusive(), keys.size() * 2);
+        for (int i = 0 ; i < keys.size() ; ++i)
+        {
+            Range range = keys.get(i).asRange();
+            builder.append(range.start(), value, (a, b) -> { throw new IllegalStateException(); });
+            builder.append(range.end(), null, (a, b) -> { throw new IllegalStateException(); });
+        }
+
+        return builder.build();
+    }
+
+    public static <V, M extends ReducingRangeMap<V>> M create(Keys keys, V value, BuilderFactory<RoutingKey, V, M> factory)
+    {
+        if (value == null)
+            throw new IllegalArgumentException("value is null");
+
+        RoutingKey prev = keys.get(0).toUnseekable();
+        AbstractBoundariesBuilder<RoutingKey, V, M> builder;
+        {
+            Range range = prev.asRange();
+            builder = factory.create(prev.asRange().endInclusive(), keys.size() * 2);
+            builder.append(range.start(), value, (a, b) -> { throw new IllegalStateException(); });
+            builder.append(range.end(), null, (a, b) -> { throw new IllegalStateException(); });
+        }
+
+        for (int i = 1 ; i < keys.size() ; ++i)
+        {
+            RoutingKey unseekable = keys.get(i).toUnseekable();
+            if (unseekable.equals(prev))
+                continue;
+
+            Range range = unseekable.asRange();
+            builder.append(range.start(), value, (a, b) -> { throw new IllegalStateException(); });
+            builder.append(range.end(), null, (a, b) -> { throw new IllegalStateException(); });
+            prev = unseekable;
+        }
+
         return builder.build();
     }
 

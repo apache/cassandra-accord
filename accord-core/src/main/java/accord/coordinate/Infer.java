@@ -295,7 +295,7 @@ public class Infer
         }
     }
 
-    public static InvalidIfNot invalidIfNotAtLeast(SafeCommandStore safeStore, TxnId txnId, Unseekables<?> query)
+    public static InvalidIfNot invalidIfNot(SafeCommandStore safeStore, TxnId txnId, Unseekables<?> query)
     {
         if (safeStore.commandStore().globalDurability(txnId).compareTo(Majority) >= 0)
         {

@@ -31,11 +31,15 @@ import accord.topology.Topologies;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults.SettableResult;
 
+import static accord.primitives.Routable.Domain.Range;
+import static accord.primitives.Txn.Kind.LocalOnly;
+
 // TODO (expected): this does not need to query every shard; can disseminate globally any sub-range of the ring
 //  (indeed, we could slice both the query and dissemination only so that they always overlap)
 public class CoordinateGloballyDurable extends SettableResult<Void> implements Callback<DurableBeforeReply>
 {
     final Node node;
+    final TxnId txnId; // only used for key into journal
     // TODO (expected): this can be a ReadTracker, we only need one response from each shard
     final QuorumTracker tracker;
     private DurableBefore durableBefore = DurableBefore.EMPTY;
@@ -44,6 +48,7 @@ public class CoordinateGloballyDurable extends SettableResult<Void> implements C
     {
         Topologies topologies = node.topology().preciseEpochs(epoch);
         this.node = node;
+        this.txnId = node.nextTxnId(LocalOnly, Range);
         this.tracker = new QuorumTracker(topologies);
     }
 
@@ -65,8 +70,8 @@ public class CoordinateGloballyDurable extends SettableResult<Void> implements C
         durableBefore = DurableBefore.merge(durableBefore, reply.durableBeforeMap);
         if (tracker.recordSuccess(from) == RequestStatus.Success)
         {
-            if (durableBefore != null && !durableBefore.equals(TxnId.NONE))
-                node.send(tracker.nodes(), new SetGloballyDurable(durableBefore));
+            if (durableBefore != null && durableBefore.size() != 0)
+                node.send(tracker.nodes(), new SetGloballyDurable(txnId, durableBefore));
             trySuccess(null);
         }
     }
