@@ -570,7 +570,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
                     executor.execute(() -> {
                         try
                         {
-                            mapper.apply(v).addCallback(callback);
+                            mapper.apply(v).begin(callback);
                         }
                         catch (Throwable t)
                         {
