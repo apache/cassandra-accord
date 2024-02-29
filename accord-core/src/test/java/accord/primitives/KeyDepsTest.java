@@ -155,7 +155,7 @@ public class KeyDepsTest
     private static List<TxnId> get(accord.primitives.KeyDeps deps, Key key)
     {
         List<TxnId> ids = new ArrayList<>();
-        deps.forEach(key, ids::add);
+        deps.forEach(key, (id, i) -> ids.add(id));
         return ids;
     }
 
@@ -403,7 +403,7 @@ public class KeyDepsTest
             {
                 List<TxnId> canonical = new ArrayList<>(e.getValue());
                 List<TxnId> test = new ArrayList<>();
-                this.test.forEach(e.getKey(), test::add);
+                this.test.forEach(e.getKey(), (id, i) -> test.add(id));
                 Assertions.assertEquals(canonical, test);
             }
 

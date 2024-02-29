@@ -247,6 +247,12 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
     }
 
     @Inline
+    public final <P1, P2, V> V foldl(AbstractRanges intersect, IndexedTriFold<P1, P2, K, V> fold, P1 p1, P2 p2, V accumulator)
+    {
+        return Routables.foldl(this, intersect, fold, p1, p2, accumulator, i -> false);
+    }
+
+    @Inline
     public final void forEach(Ranges rs, Consumer<? super K> forEach)
     {
         Routables.foldl(this, rs, (k, consumer, i) -> { consumer.accept(k); return consumer; }, forEach);

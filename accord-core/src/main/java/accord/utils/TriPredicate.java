@@ -16,41 +16,9 @@
  * limitations under the License.
  */
 
-package accord.impl;
+package accord.utils;
 
-import accord.api.Key;
-import accord.impl.InMemoryCommandStore.GlobalTimestampsForKey;
-
-public class InMemorySafeTimestampsForKey extends SafeTimestampsForKey
+public interface TriPredicate<P1, P2, P3>
 {
-    private boolean invalidated = false;
-    private final GlobalTimestampsForKey global;
-
-    public InMemorySafeTimestampsForKey(Key key, GlobalTimestampsForKey global)
-    {
-        super(key);
-        this.global = global;
-    }
-
-    @Override
-    public TimestampsForKey current()
-    {
-        return global.value();
-    }
-
-    @Override
-    protected void set(TimestampsForKey update)
-    {
-        global.value(update);
-    }
-
-    public void invalidate()
-    {
-        invalidated = true;
-    }
-
-    public boolean invalidated()
-    {
-        return invalidated;
-    }
+    boolean test(P1 p1, P2 p2, P3 p3);
 }

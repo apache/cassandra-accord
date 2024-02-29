@@ -57,7 +57,7 @@ public class AsyncChainCombiner<I> extends AsyncChains.Head<I[]>
         if (current == 0)
             return;
 
-        if (throwable != null && REMAINING.getAndSet(this, 0) != 0)
+        if (throwable != null && REMAINING.getAndSet(this, 0) > 0)
         {
             callback.accept(null, throwable);
             return;

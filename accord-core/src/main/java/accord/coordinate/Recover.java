@@ -270,7 +270,6 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                     return;
                 }
 
-                case ReadyToExecute:
                 case Stable:
                 {
                     withCommittedDeps(executeAt, stableDeps -> {
@@ -374,7 +373,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         Timestamp invalidateUntil = recoverOks.stream().map(ok -> ok.status.hasBeen(Status.Accepted) ? ok.executeAt : ok.txnId).reduce(txnId, Timestamp::max);
         node.withEpoch(invalidateUntil.epoch(), () -> Commit.Invalidate.commitInvalidate(node, txnId, route, invalidateUntil));
         isDone = true;
-        locallyInvalidateAndCallback(node, txnId, route, ProgressToken.INVALIDATED, callback);
+        locallyInvalidateAndCallback(node, txnId, invalidateUntil, route, ProgressToken.INVALIDATED, callback);
     }
 
     private void propose(Timestamp executeAt, Deps deps)

@@ -21,10 +21,9 @@ package accord.impl;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-import javax.annotation.Nullable;
-
 import com.google.common.annotations.VisibleForTesting;
 
+import accord.api.Key;
 import accord.api.VisibleForImplementation;
 import accord.local.*;
 import accord.primitives.*;
@@ -61,19 +60,19 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
     protected abstract void addCommandInternal(CommandType command);
     protected abstract CommandType getIfLoaded(TxnId txnId);
 
-    protected abstract TimestampsForKeyType getTimestampsForKeyInternal(RoutableKey key);
+    protected abstract TimestampsForKeyType getTimestampsForKeyInternal(Key key);
     protected abstract void addTimestampsForKeyInternal(TimestampsForKeyType cfk);
-    protected abstract TimestampsForKeyType getTimestampsForKeyIfLoaded(RoutableKey key);
+    protected abstract TimestampsForKeyType getTimestampsForKeyIfLoaded(Key key);
 
-    protected abstract CommandsForKeyType getCommandsForKeyInternal(RoutableKey key);
+    protected abstract CommandsForKeyType getCommandsForKeyInternal(Key key);
     protected abstract void addCommandsForKeyInternal(CommandsForKeyType cfk);
-    protected abstract CommandsForKeyType getCommandsForKeyIfLoaded(RoutableKey key);
+    protected abstract CommandsForKeyType getCommandsForKeyIfLoaded(Key key);
 
     @Override
     protected CommandType getInternalIfLoadedAndInitialised(TxnId txnId)
     {
         CommandType command = getIfLoaded(txnId, this::getCommandInternal, this::addCommandInternal, this::getIfLoaded);
-        if (command == null || command.isEmpty())
+        if (command == null || command.isUnset())
             return null;
         return command;
     }
@@ -84,115 +83,74 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
         CommandType command = getCommandInternal(txnId);
         if (command == null)
             throw illegalState(format("%s was not specified in PreLoadContext", txnId));
-        if (command.isEmpty())
+        if (command.isUnset())
             command.uninitialised();
         return command;
     }
 
-    private CommandsForKeyType getCommandsIfLoaded(RoutableKey key)
+    private CommandsForKeyType getCommandsIfLoaded(Key key)
     {
         return getIfLoaded(key, this::getCommandsForKeyInternal, this::addCommandsForKeyInternal, this::getCommandsForKeyIfLoaded);
     }
 
-    CommandsForKeyType commandsIfLoadedAndInitialised(RoutableKey key)
+    protected CommandsForKeyType getInternalIfLoadedAndInitialised(Key key)
     {
         CommandsForKeyType cfk = getCommandsIfLoaded(key);
         if (cfk == null)
             return null;
-        if (cfk.isEmpty())
+        if (cfk.isUnset())
             cfk.initialize();
-
-        RedundantBefore.Entry entry = commandStore().redundantBefore().get(key.toUnseekable());
-        if (entry != null)
-            cfk.updateRedundantBefore(entry.shardRedundantBefore());
         return cfk;
     }
 
     @VisibleForTesting
-    public CommandsForKeyType commandsForKey(RoutableKey key)
+    protected CommandsForKeyType getInternal(Key key)
     {
         CommandsForKeyType cfk = getCommandsIfLoaded(key);
         Invariants.checkState(cfk != null, "%s was not specified in PreLoadContext", key);
-        if (cfk.isEmpty())
+        if (cfk.isUnset())
             cfk.initialize();
         return cfk;
     }
 
     @VisibleForImplementation
-    public CommandsForKeyType maybeCommandsForKey(RoutableKey key)
+    public CommandsForKeyType maybeCommandsForKey(Key key)
     {
         CommandsForKeyType cfk = getCommandsIfLoaded(key);
-        if (cfk == null || cfk.isEmpty())
+        if (cfk == null || cfk.isUnset())
             return null;
         return cfk;
     }
 
-    public TimestampsForKeyType timestampsIfLoadedAndInitialised(RoutableKey key)
+    public TimestampsForKeyType timestampsIfLoadedAndInitialised(Key key)
     {
         TimestampsForKeyType cfk = getIfLoaded(key, this::getTimestampsForKeyInternal, this::addTimestampsForKeyInternal, this::getTimestampsForKeyIfLoaded);
         if (cfk == null)
             return null;
-        if (cfk.isEmpty())
+        if (cfk.isUnset())
         {
             cfk.initialize();
         }
         return cfk;
     }
 
-    public TimestampsForKeyType timestampsForKey(RoutableKey key)
+    public TimestampsForKeyType timestampsForKey(Key key)
     {
         TimestampsForKeyType tfk = getIfLoaded(key, this::getTimestampsForKeyInternal, this::addTimestampsForKeyInternal, this::getTimestampsForKeyIfLoaded);
         Invariants.checkState(tfk != null, "%s was not specified in PreLoadContext", key);
-        if (tfk.isEmpty())
+        if (tfk.isUnset())
             tfk.initialize();
         return tfk;
     }
 
 
     @VisibleForImplementation
-    public TimestampsForKeyType maybeTimestampsForKey(RoutableKey key)
+    public TimestampsForKeyType maybeTimestampsForKey(Key key)
     {
         TimestampsForKeyType tfk = getIfLoaded(key, this::getTimestampsForKeyInternal, this::addTimestampsForKeyInternal, this::getTimestampsForKeyIfLoaded);
-        if (tfk == null || tfk.isEmpty())
+        if (tfk == null || tfk.isUnset())
             return null;
         return tfk;
-    }
-
-    @Override
-    protected void update(Command prev, Command updated, @Nullable Seekables<?, ?> keysOrRanges)
-    {
-        super.update(prev, updated, keysOrRanges);
-
-        if (!CommandsForKey.needsUpdate(prev, updated))
-            return;
-
-        TxnId txnId = updated.txnId();
-        if (!txnId.kind().isGloballyVisible() || !txnId.domain().isKey())
-            return;
-
-        // TODO (required): consider carefully epoch overlaps for dependencies;
-        //      here we're limiting our registration with CFK to the coordination epoch only
-        //      if we permit coordination+execution we have to do a very careful dance (or relax validation)
-        //      because for some keys we can expect e.g. PreAccept and Accept states to have been processed
-        //      and for other keys Committed onwards will appear suddenly (or, if we permit Accept to process
-        //      on its executeAt ranges, it could go either way).
-        Ranges ranges = ranges().allAt(txnId);
-        Keys keys;
-        if (keysOrRanges != null) keys = (Keys) keysOrRanges;
-        else if (updated.known().isDefinitionKnown()) keys = (Keys)updated.partialTxn().keys();
-        else if (prev.known().isDefinitionKnown()) keys = (Keys)prev.partialTxn().keys();
-        else if (updated.saveStatus().hasBeen(Status.Truncated)) return; // TODO (required): we may have transaction registered via Accept, and still want to expunge. we shouldn't special case: should ensure we have everything loaded, or permit asynchronous application
-        else if (updated.saveStatus().is(Status.AcceptedInvalidate)) return; // TODO (required): we may have transaction registered via Accept, and still want to expunge. we shouldn't special case: should ensure we have everything loaded, or permit asynchronous application
-        else throw illegalState("No keys to update CommandsForKey with");
-
-        Routables.foldl(keys, ranges, (self, p, key, u, i) -> {
-            SafeCommandsForKey cfk = self.commandsIfLoadedAndInitialised(key);
-            // TODO (required): we shouldn't special case invalidations, truncations or topology changes: should ensure we have everything loaded, or permit asynchronous application
-            Invariants.checkState(cfk != null || u.saveStatus().hasBeen(Status.Truncated) || u.saveStatus().is(Status.AcceptedInvalidate));
-            if (cfk != null)
-                cfk.update(p, u);
-            return u;
-        }, this, prev, updated, i->false);
     }
 
     @Override

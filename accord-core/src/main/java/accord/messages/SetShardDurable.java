@@ -33,7 +33,7 @@ public class SetShardDurable extends AbstractEpochRequest<SimpleReply>
 
     public SetShardDurable(SyncPoint exclusiveSyncPoint)
     {
-        super(null);
+        super(exclusiveSyncPoint.syncId);
         this.exclusiveSyncPoint = exclusiveSyncPoint;
     }
 

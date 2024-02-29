@@ -162,13 +162,6 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
     }
 
     @Override
-    public final void setFailure(Throwable failure)
-    {
-        super.setFailure(failure);
-        onFailure(failure);
-    }
-
-    @Override
     public final boolean tryFailure(Throwable failure)
     {
         if (!super.tryFailure(failure))

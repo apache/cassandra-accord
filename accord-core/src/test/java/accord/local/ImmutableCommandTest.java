@@ -24,6 +24,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+import javax.annotation.Nullable;
+
 import com.google.common.collect.Lists;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -108,6 +110,7 @@ public class ImmutableCommandTest
         @Override public void executed(Command command, ProgressShard shard) {}
         @Override public void durable(Command command) {}
         @Override public void waiting(SafeCommand blockedBy, LocalExecution blockedUntil, Route<?> blockedOnRoute, Participants<?> blockedOnParticipants) {}
+        @Override public void waiting(TxnId blockedBy, LocalExecution blockedUntil, @Nullable Route<?> blockedOnRoute, @Nullable Participants<?> blockedOnParticipants) {}
         @Override public void clear(TxnId txnId) {}
     }
 

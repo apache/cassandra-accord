@@ -35,6 +35,10 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Ordering;
 
+import accord.utils.AsymmetricComparator;
+import accord.utils.SortedArrays;
+
+import static accord.utils.SortedArrays.Search.FAST;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 
@@ -658,6 +662,29 @@ public class BTree
     }
 
     /**
+     * @return the item in the tree that sorts as equal to the search argument, or null if no such item
+     */
+    public static <V, F> V find(Object[] node, AsymmetricComparator<? super F, ? super V> comparator, F find)
+    {
+        while (true)
+        {
+            int keyEnd = getKeyEnd(node);
+            int i = SortedArrays.binarySearch((V[]) node, 0, keyEnd, find, comparator, FAST);
+
+            if (i >= 0)
+                return (V) node[i];
+
+            if (isLeaf(node))
+                return null;
+
+            i = -1 - i;
+            node = (Object[]) node[keyEnd + i];
+        }
+    }
+
+
+
+    /**
      * Modifies the provided btree directly. THIS SHOULD NOT BE USED WITHOUT EXTREME CARE as BTrees are meant to be immutable.
      * Finds and replaces the item provided by index in the tree.
      */
@@ -748,6 +775,57 @@ public class BTree
     }
 
     /**
+     * Honours result semantics of {@link Arrays#binarySearch}, as though it were performed on the tree flattened into an array
+     *
+     * @return index of item in tree, or <tt>(-(<i>insertion point</i>) - 1)</tt> if not present
+     */
+    public static <V, F> int findIndex(Object[] node, AsymmetricComparator<? super F, ? super V> comparator, F find)
+    {
+        int lb = 0;
+        while (true)
+        {
+            int keyEnd = getKeyEnd(node);
+            int i = SortedArrays.binarySearch((V[]) node, 0, keyEnd, find, comparator, FAST);
+            boolean exact = i >= 0;
+
+            if (isLeaf(node))
+                return exact ? lb + i : i - lb;
+
+            if (!exact)
+                i = -1 - i;
+
+            int[] sizeMap = getSizeMap(node);
+            if (exact)
+                return lb + sizeMap[i];
+            else if (i > 0)
+                lb += sizeMap[i - 1] + 1;
+
+            node = (Object[]) node[keyEnd + i];
+        }
+    }
+
+    public static <V, F> int findNodeIndex(Object[] node, AsymmetricComparator<? super F, ? super V> comparator, F find)
+    {
+        int lb = 0;
+        while (true)
+        {
+            if (isLeaf(node))
+                return lb;
+
+            int keyEnd = getBranchKeyEnd(node);
+            int i = SortedArrays.binarySearch((V[]) node, 0, keyEnd, find, comparator, FAST);
+            if (i >= 0)
+                return lb;
+
+            i = -1 - i;
+            if (i > 0)
+                lb += getSizeMap(node)[i - 1] + 1;
+
+            node = (Object[]) node[keyEnd + i];
+        }
+    }
+
+    /**
      * @return the value at the index'th position in the tree, in tree order
      */
     public static <V> V findByIndex(Object[] tree, int index)
@@ -820,6 +898,20 @@ public class BTree
         return i >= 0 ? findByIndex(btree, i) : null;
     }
 
+    public static <F, V> int floorIndex(Object[] btree, AsymmetricComparator<? super F, ? super V> comparator, F find)
+    {
+        int i = findIndex(btree, comparator, find);
+        if (i < 0)
+            i = -2 - i;
+        return i;
+    }
+
+    public static <F, V> V floor(Object[] btree, AsymmetricComparator<? super F, ? super V> comparator, F find)
+    {
+        int i = floorIndex(btree, comparator, find);
+        return i >= 0 ? findByIndex(btree, i) : null;
+    }
+
     public static <V> int higherIndex(Object[] btree, Comparator<? super V> comparator, V find)
     {
         int i = findIndex(btree, comparator, find);
@@ -845,6 +937,20 @@ public class BTree
     }
 
     public static <V> V ceil(Object[] btree, Comparator<? super V> comparator, V find)
+    {
+        int i = ceilIndex(btree, comparator, find);
+        return i < size(btree) ? findByIndex(btree, i) : null;
+    }
+
+    public static <F, V> int ceilIndex(Object[] btree, AsymmetricComparator<? super F, ? super V> comparator, F find)
+    {
+        int i = findIndex(btree, comparator, find);
+        if (i < 0)
+            i = -1 - i;
+        return i;
+    }
+
+    public static <F, V> V ceil(Object[] btree, AsymmetricComparator<? super F, ? super V> comparator, F find)
     {
         int i = ceilIndex(btree, comparator, find);
         return i < size(btree) ? findByIndex(btree, i) : null;
@@ -1763,6 +1869,52 @@ public class BTree
                 applyValue((V) btree[i], function, argument);
         }
     }
+//
+//    /**
+//     * Simple inline-friendly method to walk the btree forwards between two bounds and apply a function
+//     */
+//    public static <P1, P2, A, F, V> A apply(Object[] btree,
+//                                            AsymmetricComparator<? super F, ? super V> comparator, F min, F max,
+//                                            IndexedQuadFunction<P1, P2, V, A, A> function, P1 p1, P2 p2, A accumulate)
+//    {
+//        if (isLeaf(btree))
+//        {
+//            int keyEnd = getKeyEnd(btree);
+//            int minIndex = SortedArrays.binarySearch((V[]) btree, 0, keyEnd, min, comparator, FAST);
+//            if (minIndex < 0) minIndex = -1 - minIndex;
+//            int maxIndex = SortedArrays.binarySearch((V[]) btree, minIndex, keyEnd, max, comparator, FAST);
+//            if (maxIndex < 0) maxIndex = -1 - maxIndex;
+//            for (int i = minIndex; i < maxIndex; i++)
+//                accumulate = function.apply(p1, p2, (V) btree[i], accumulate, i);
+//
+//            return accumulate;
+//        }
+//
+//        int indexOfFirstNode = findNodeIndex(btree, comparator, min);
+//        int indexOfLastNode = findNodeIndex(btree, comparator, max);
+//        int indexOfNextNode = indexOfFirstNode;
+//
+//        while (indexOfNextNode <= indexOfLastNode)
+//        {
+//            Object[] node = getNodeByIndex(btree, indexOfNextNode);
+//            if (indexOfFirstNode == indexOfNextNode)
+//        }
+//
+//        int childOffset = getChildStart(btree);
+//        int limit = btree.length - 1 - childOffset;
+//        int index = 0;
+//        for (int i = 0; i < limit; i++)
+//        {
+//            apply((Object[]) btree[childOffset + i], function, argument);
+//            if (i < childOffset)
+//                accumulate = function.apply(p1, p2, btree[i], accumulate, index + i);
+//        }
+//    }
+//
+//    private static Object[] getNodeByIndex(Object[] tree, int index)
+//    {
+//
+//    }
 
     /**
      * Simple method to walk the btree forwards and apply a function till a stop condition is reached

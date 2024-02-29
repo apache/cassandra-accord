@@ -118,14 +118,14 @@ public class MaybeRecover extends CheckShards<Route<?>>
                     break;
 
                 case Invalidated:
-                    locallyInvalidateAndCallback(node, txnId, someRoute, full.toProgressToken(), callback);
+                    locallyInvalidateAndCallback(node, txnId, txnId, someRoute, full.toProgressToken(), callback);
                     break;
 
                 case Erased:
                     // TODO (required): this isn't valid. This is either an invalidated command or we're stale. Most likely the latter.
                     //   this is because Erased is only permitted to be adopted when every shard has made the command durable.
                     Invariants.checkState(!full.knownFor(route.participants()).isInvalidated());
-                    safeEraseAndCallback(node, txnId, someRoute, full.toProgressToken(), callback);
+                    safeEraseAndCallback(node, txnId, txnId, someRoute, full.toProgressToken(), callback);
             }
         }
     }

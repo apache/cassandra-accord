@@ -22,6 +22,7 @@ import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.utils.ArrayBuffers;
 import accord.utils.IndexedBiConsumer;
+import accord.utils.IndexedConsumer;
 import accord.utils.IndexedTriConsumer;
 import accord.utils.RelationMultiMap;
 import accord.utils.SortedArrays.SortedArrayList;
@@ -36,6 +37,7 @@ import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import static accord.utils.ArrayBuffers.*;
+import static accord.utils.Invariants.illegalArgument;
 import static accord.utils.Invariants.illegalState;
 import static accord.utils.RelationMultiMap.*;
 import static accord.utils.SortedArrays.Search.FAST;
@@ -180,7 +182,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         this.txnIds = txnIds;
         this.keysToTxnIds = keysToTxnIds;
         if (!(keys.isEmpty() || keysToTxnIds[keys.size() - 1] == keysToTxnIds.length))
-            throw new IllegalArgumentException(String.format("Last key (%s) in keyToTxnId does not point (%d) to the end of the array (%d);\nkeyToTxnId=%s", keys.get(keys.size() - 1), keysToTxnIds[keys.size() - 1], keysToTxnIds.length, Arrays.toString(keysToTxnIds)));
+            throw illegalArgument(String.format("Last key (%s) in keyToTxnId does not point (%d) to the end of the array (%d);\nkeyToTxnId=%s", keys.get(keys.size() - 1), keysToTxnIds[keys.size() - 1], keysToTxnIds.length, Arrays.toString(keysToTxnIds)));
         checkValid(keys.keys, txnIds, keysToTxnIds);
     }
 
@@ -424,7 +426,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         }
     }
 
-    public void forEach(Key key, Consumer<TxnId> forEach)
+    public void forEach(Key key, IndexedConsumer<TxnId> forEach)
     {
         int keyIndex = keys.indexOf(key);
         if (keyIndex < 0)
@@ -434,7 +436,10 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         int index = startOffset(keyIndex);
         int end = endOffset(keyIndex);
         while (index < end)
-            forEach.accept(txnIds[keysToTxnIds[index++]]);
+        {
+            int txnIdx = keysToTxnIds[index++];
+            forEach.accept(txnIds[txnIdx], txnIdx);
+        }
     }
 
     public <P1, P2> void forEach(Ranges ranges, int inclIdx, int exclIdx, P1 p1, P2 p2, IndexedBiConsumer<P1, P2> forEach)

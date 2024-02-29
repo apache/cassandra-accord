@@ -427,6 +427,11 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
         return ranges(txnIdx);
     }
 
+    public int indexOf(TxnId txnId)
+    {
+        return Arrays.binarySearch(txnIds, txnId);
+    }
+
     public Ranges ranges(int txnIdx)
     {
         ensureTxnIdToRange();

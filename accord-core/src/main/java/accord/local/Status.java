@@ -80,8 +80,6 @@ public enum Status
 
     Committed         (Commit, Full,   DefinitionKnown,   ExecuteAtKnown,   DepsCommitted, Unknown),
     Stable            (Execute, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,    Unknown),
-    // TODO (expected): do we need ReadyToExecute here, or can we keep it to SaveStatus only?
-    ReadyToExecute    (Execute, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,    Unknown),
     PreApplied        (Persist, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,    Outcome.Apply),
     Applied           (Persist, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,    Outcome.Apply),
     Truncated         (Cleanup, Maybe, DefinitionErased,  ExecuteAtErased,  DepsErased,   Outcome.Erased),

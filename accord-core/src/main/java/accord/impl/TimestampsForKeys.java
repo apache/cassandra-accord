@@ -18,26 +18,20 @@
 
 package accord.impl;
 
+import accord.api.Key;
 import accord.api.VisibleForImplementation;
 import accord.local.CommandStore;
-import accord.primitives.RoutableKey;
 import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 
-public class CommandsForKeys
+public class TimestampsForKeys
 {
-    private static final Logger logger = LoggerFactory.getLogger(CommandsForKeys.class);
+    private static final Logger logger = LoggerFactory.getLogger(TimestampsForKeys.class);
 
-    private CommandsForKeys() {}
-
-    public static void registerNotWitnessed(AbstractSafeCommandStore<?,?,?> safeStore, RoutableKey key, TxnId txnId)
-    {
-        SafeCommandsForKey cfk = safeStore.commandsForKey(key);
-        cfk.registerHistorical(txnId);
-    }
+    private TimestampsForKeys() {}
 
     public static TimestampsForKey updateLastExecutionTimestamps(CommandStore commandStore, SafeTimestampsForKey tfk, Timestamp executeAt, boolean isForWriteTxn)
     {
@@ -76,7 +70,7 @@ public class CommandsForKeys
     }
 
     @VisibleForImplementation
-    public static <D> TimestampsForKey updateLastExecutionTimestamps(AbstractSafeCommandStore<?,?,?> safeStore, RoutableKey key, Timestamp executeAt, boolean isForWriteTxn)
+    public static <D> TimestampsForKey updateLastExecutionTimestamps(AbstractSafeCommandStore<?,?,?> safeStore, Key key, Timestamp executeAt, boolean isForWriteTxn)
     {
         return updateLastExecutionTimestamps(safeStore.commandStore(), safeStore.timestampsForKey(key), executeAt, isForWriteTxn);
     }

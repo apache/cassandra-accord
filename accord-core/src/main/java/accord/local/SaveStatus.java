@@ -69,7 +69,7 @@ public enum SaveStatus
     PreCommittedWithDefinitionAndAcceptedDeps(Status.PreCommitted, Full,     DefinitionKnown,   ExecuteAtKnown,    DepsProposed, Unknown,          LocalExecution.ReadyToExclude),
     Committed                       (Status.Committed,                                                                                             LocalExecution.ReadyToExclude),
     Stable                          (Status.Stable,                                                                                                LocalExecution.WaitingToExecute),
-    ReadyToExecute                  (Status.ReadyToExecute,                                                                                        LocalExecution.ReadyToExecute),
+    ReadyToExecute                  (Status.Stable,                                                                                                LocalExecution.ReadyToExecute),
     PreApplied                      (Status.PreApplied,                                                                                            LocalExecution.WaitingToApply),
     Applying                        (Status.PreApplied,                                                                                            LocalExecution.Applying),
     // similar to Truncated, but doesn't imply we have any global knowledge about application
@@ -95,6 +95,8 @@ public enum SaveStatus
         ReadyToExclude(ExecuteAtOnly),
         WaitingToExecute(Decision),
         ReadyToExecute(Decision),
+        // TODO (expected): we seem to be able to await this when we know there are still local execution dependencies
+        //   we should only request this when we know the transaction can execute locally
         WaitingToApply(Apply),
         Applying(Apply),
         Applied(Apply),
@@ -238,7 +240,6 @@ public enum SaveStatus
                 }
             case Committed: return known.deps == DepsKnown ? Stable : Committed;
             case Stable: return Stable;
-            case ReadyToExecute: return ReadyToExecute;
             case PreApplied: return PreApplied;
             case Applied: return Applied;
             case Invalidated: return Invalidated;
@@ -256,11 +257,11 @@ public enum SaveStatus
             case AcceptedInvalidate:
             case PreCommitted:
             case Committed:
-            case Stable:
-            case ReadyToExecute:
                 if (known.isSatisfiedBy(status.known))
                     return status;
                 return get(status.status, status.known.atLeast(known));
+            case Stable:
+                return status;
 
             case Truncated:
                 switch (status)

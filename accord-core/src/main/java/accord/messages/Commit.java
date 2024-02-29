@@ -51,7 +51,6 @@ import accord.utils.TriFunction;
 import org.agrona.collections.IntHashSet;
 
 import static accord.local.SaveStatus.Committed;
-import static accord.messages.Commit.Kind.CommitWithTxn;
 import static accord.messages.Commit.Kind.StableWithTxnAndDeps;
 import static accord.messages.Commit.WithDeps.HasDeps;
 import static accord.messages.Commit.WithDeps.NoDeps;
@@ -84,8 +83,8 @@ public class Commit extends TxnRequest<CommitOrReadNack>
 
     public enum Kind
     {
-        Commit(              HasNewlyOwnedTxnRanges, HasDeps, Committed),
-        CommitWithTxn(       HasTxn,                 HasDeps, Committed),
+        CommitSlowPath(      HasNewlyOwnedTxnRanges, HasDeps, Committed),
+        CommitWithTxn (      HasTxn,                 HasDeps, Committed),
         // We retain HasNewlyOwnedTxnRanges for the later eventuality where we permit fast path decisions if the fast quorum is valid for all topologies and everyone agrees on the execution timestamp.
         StableFastPath(      HasNewlyOwnedTxnRanges, HasDeps, SaveStatus.Stable),
         StableSlowPath(      NoTxn,                  NoDeps,  SaveStatus.Stable),
@@ -168,7 +167,7 @@ public class Commit extends TxnRequest<CommitOrReadNack>
         if (txnId.epoch() != executeAt.epoch())
             all = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
 
-        send(null, (i1, i2) -> true, null, node, coordinates, coordinates, all, Kind.Commit, ballot,
+        send(null, (i1, i2) -> true, null, node, coordinates, coordinates, all, Kind.CommitSlowPath, ballot,
              txnId, txn, route, executeAt, unstableDeps, callback);
     }
 
@@ -289,7 +288,7 @@ public class Commit extends TxnRequest<CommitOrReadNack>
     {
         switch (kind)
         {
-            case Commit: return MessageType.COMMIT_SLOW_PATH_REQ;
+            case CommitSlowPath: return MessageType.COMMIT_SLOW_PATH_REQ;
             case CommitWithTxn: return MessageType.COMMIT_MAXIMAL_REQ;
             case StableFastPath: return MessageType.STABLE_FAST_PATH_REQ;
             case StableSlowPath: return MessageType.STABLE_SLOW_PATH_REQ;

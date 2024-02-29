@@ -116,6 +116,32 @@ public class SimpleBitSet
         }
     }
 
+    public int getSetBitCount(int from, int to)
+    {
+        Invariants.checkArgument(from <= to, "from > to (%s > %s)", from, to);
+        if (from == to || this.count == 0)
+            return 0;
+
+        int fromIndex = from >>> 6;
+        int toIndex = to >>> 6;
+        if (fromIndex == toIndex)
+        {
+            long mask = (-1L >>> (64 - (to & 63))) & (-1L << (from & 63));
+            return Long.bitCount(bits[fromIndex] & mask);
+        }
+        else
+        {
+            int count = Long.bitCount(bits[fromIndex] & (-1L << (from & 63)));
+            for (int i = fromIndex + 1; i < toIndex ; ++i)
+            {
+                count += 64 - Long.bitCount(bits[i]);
+                bits[i] = -1L;
+            }
+            count += Long.bitCount(bits[toIndex] & -1L >>> (64 - (to & 63)));
+            return count;
+        }
+    }
+
     private void orBitsAtIndex(int index, long setBits)
     {
         long prevBits = bits[index];
@@ -357,6 +383,39 @@ public class SimpleBitSet
                 mask = (1L << bitIndex) - 1;
                 forEach.accept(p1, p2, p3, p4, i * 64 + bitIndex);
             }
+        }
+    }
+
+    public final <P1, P2, P3, P4> void reverseForEach(int from, int to, P1 p1, P2 p2, P3 p3, P4 p4, IndexedQuadConsumer<P1, P2, P3, P4> forEach)
+    {
+        int fromIndex = from >>> 6;
+        int toIndex = to >>> 6;
+
+        if (fromIndex == toIndex)
+        {
+            if (from == to)
+                return;
+
+            long mask = (-1L >>> (64 - (to & 63))) & (-1L << (from & 63));
+            reverseForEach(fromIndex, mask, p1, p2, p3, p4, forEach);
+        }
+        else
+        {
+            reverseForEach(fromIndex, -1L << (from & 63), p1, p2, p3, p4, forEach);
+            for (int i = fromIndex + 1; i < toIndex; ++i)
+                reverseForEach(fromIndex, -1L, p1, p2, p3, p4, forEach);
+            reverseForEach(fromIndex, -1L >>> (64 - (to & 63)), p1, p2, p3, p4, forEach);
+        }
+    }
+
+    private <P1, P2, P3, P4> void reverseForEach(int index, long mask, P1 p1, P2 p2, P3 p3, P4 p4, IndexedQuadConsumer<P1, P2, P3, P4> forEach)
+    {
+        long register;
+        while ((register = (bits[index] & mask)) != 0)
+        {
+            int bitIndex = 63 - Long.numberOfLeadingZeros(register);
+            mask = (1L << bitIndex) - 1;
+            forEach.accept(p1, p2, p3, p4, index * 64 + bitIndex);
         }
     }
 

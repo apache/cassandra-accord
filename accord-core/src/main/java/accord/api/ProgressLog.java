@@ -183,6 +183,31 @@ public interface ProgressLog
     void waiting(SafeCommand blockedBy, LocalExecution blockedUntil, @Nullable Route<?> blockedOnRoute, @Nullable Participants<?> blockedOnParticipants);
 
     /**
+     * The parameter is a command that some other command's execution is most proximally blocked by.
+     * This may be invoked by either the home or non-home command store.
+     * <p>
+     * If invoked by the non-home command store for a {@code blockedBy} transaction that has not yet been committed, this
+     * must eventually trigger contact with the home shard of this {@code blockedBy} transaction in order to check on the
+     * transaction's progress (unless the transaction is committed first). This is to avoid unnecessary additional messages
+     * being exchanged in the common case, where a transaction may be committed successfully to members of its home shard,
+     * but not to all non-home shards. In such a case the transaction may be a false-dependency of another transaction that
+     * needs to perform a read, and all nodes which may do so are waiting for the commit record to arrive.
+     * <p>
+     * If a quorum of the home shard does not know of the transaction, then we can ask the home shard to perform recovery
+     * to either complete or invalidate it, so that we may make progress.
+     * <p>
+     * In all other scenarios, the implementation is free to choose its course of action.
+     *
+     * Either blockedOnRoute or blockedOnParticipants should be non-null.
+     *
+     * @param blockedBy             is the transaction id that is blocking progress
+     * @param blockedUntil          either Committed or Executed; the state we are waiting for
+     * @param blockedOnRoute        the route (if any) we are blocked on execution for
+     * @param blockedOnParticipants the participating keys on which we are blocked for execution
+     */
+    void waiting(TxnId blockedBy, LocalExecution blockedUntil, @Nullable Route<?> blockedOnRoute, @Nullable Participants<?> blockedOnParticipants);
+
+    /**
      * We have finished processing this transaction; ensure its state is cleared
      */
     void clear(TxnId txnId);

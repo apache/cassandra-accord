@@ -414,6 +414,11 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             return validForAll.atLeast(foldlWithDefault(routables, FoundKnownMap::reduceKnownFor, FoundKnown.Nothing, null, i -> false));
         }
 
+        public Known knownForAny()
+        {
+            return validForAll.atLeast(foldl(FoundKnown::atLeast, FoundKnown.Nothing, i -> false));
+        }
+
         public Ranges matchingRanges(Predicate<FoundKnown> match)
         {
             return foldlWithBounds((known, ranges, start, end) -> match.test(known) ? ranges.with(Ranges.of(start.rangeFactory().newRange(start, end))) : ranges, Ranges.EMPTY, i -> false);

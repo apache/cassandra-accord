@@ -25,6 +25,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 
+import static accord.local.RedundantBefore.NO_UPPER_BOUND;
 import static accord.local.RedundantBefore.PreBootstrapOrStale.FULLY;
 import static accord.local.RedundantStatus.NOT_OWNED;
 import static accord.local.SaveStatus.Erased;
@@ -117,14 +118,25 @@ public enum Cleanup
         // We first check if the command is redundant locally, i.e. whether it has been applied to all non-faulty replicas of the local shard
         // If not, we don't want to truncate its state else we may make catching up for these other replicas much harder
         RedundantStatus redundant = redundantBefore.status(txnId, toEpoch, route.participants());
+        if (redundant == NOT_OWNED)
+        {
+            // ONLY upgrade to looking to future if NOT_OWNED, as if we're owned we can safely manage the lifecycle whatever epochs it participated in
+            // however, if this is a vestigial preaccept/accept in an epoch after the execution epoch we may not clean up
+            redundant = redundantBefore.status(txnId, NO_UPPER_BOUND, route.participants());
+            if (redundant == NOT_OWNED)
+            {
+                // TODO (expected): improve handling of epoch bounds
+                //      - we can impose additional validations here IF we receive an epoch upper bound
+                //      - we should be more robust to the presence/absence of executeAt
+                //      - be cognisant of future epochs that participated only for PreAccept/Accept, but where txn was not committed to execute in the epoch (this is why we provide null toEpoch here)
+                if (route.isParticipatingHomeKey() || redundantBefore.get(txnId, NO_UPPER_BOUND, route.homeKey()) == NOT_OWNED)
+                    illegalState("Command " + txnId + " that is being loaded is not owned by this shard on route " + route);
+            }
+        }
         switch (redundant)
         {
             default: throw new AssertionError();
             case NOT_OWNED:
-                // TODO (expected): we can impose additional validations here IF we receive an epoch upper bound
-                // TODO (expected): we should be more robust to the presence/absence of executeAt
-                if (route.isParticipatingHomeKey() || redundantBefore.get(txnId, toEpoch, route.homeKey()) == NOT_OWNED)
-                    illegalState("Command " + txnId + " that is being loaded is not owned by this shard on route " + route);
             case LIVE:
             case PARTIALLY_PRE_BOOTSTRAP_OR_STALE:
             case PRE_BOOTSTRAP_OR_STALE:

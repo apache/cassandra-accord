@@ -111,11 +111,13 @@ public class Utils
 
     public static SimpleBitSet ensureMutable(SimpleBitSet set)
     {
+        if (set == null) return null;
         return set instanceof ImmutableBitSet ? new SimpleBitSet(set) : set;
     }
 
     public static ImmutableBitSet ensureImmutable(SimpleBitSet set)
     {
+        if (set == null) return null;
         return set instanceof ImmutableBitSet ? (ImmutableBitSet) set : new ImmutableBitSet(set);
     }
 

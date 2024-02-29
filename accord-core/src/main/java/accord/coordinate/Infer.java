@@ -31,6 +31,7 @@ import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.Status;
 import accord.local.Status.Known;
+import accord.primitives.EpochSupplier;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Route;
@@ -202,14 +203,18 @@ public class Infer
     {
         final Node node;
         final TxnId txnId;
+        // TODO (expected): more consistent handling of transactions that only MAY intersect a commandStore
+        //  (e.g. dependencies from an earlier epoch that have not yet committed, or commands that are proposed to execute in a later epoch than eventually agreed)
+        final EpochSupplier untilEpoch;
         final Unseekables<?> someUnseekables;
         final T param;
         final BiConsumer<T, Throwable> callback;
 
-        private CleanupAndCallback(Node node, TxnId txnId, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
+        private CleanupAndCallback(Node node, TxnId txnId, EpochSupplier untilEpoch, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
         {
             this.node = node;
             this.txnId = txnId;
+            this.untilEpoch = untilEpoch;
             this.someUnseekables = someUnseekables;
             this.param = param;
             this.callback = callback;
@@ -219,14 +224,14 @@ public class Infer
         {
             PreLoadContext loadContext = contextFor(txnId);
             Unseekables<?> propagateTo = isRoute(someUnseekables) ? castToRoute(someUnseekables).withHomeKey() : someUnseekables;
-            node.mapReduceConsumeLocal(loadContext, propagateTo, txnId.epoch(), txnId.epoch(), this);
+            node.mapReduceConsumeLocal(loadContext, propagateTo, txnId.epoch(), untilEpoch.epoch(), this);
         }
 
         @Override
         public Void apply(SafeCommandStore safeStore)
         {
             // we're applying an invalidation, so the record will not be cleaned up until the whole range is truncated
-            return apply(safeStore, safeStore.get(txnId, txnId, someUnseekables));
+            return apply(safeStore, safeStore.get(txnId, untilEpoch, someUnseekables));
         }
 
         abstract Void apply(SafeCommandStore safeStore, SafeCommand safeCommand);
@@ -246,14 +251,14 @@ public class Infer
 
     static class InvalidateAndCallback<T> extends CleanupAndCallback<T>
     {
-        private InvalidateAndCallback(Node node, TxnId txnId, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
+        private InvalidateAndCallback(Node node, TxnId txnId, EpochSupplier untilEpoch, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
         {
-            super(node, txnId, someUnseekables, param, callback);
+            super(node, txnId, untilEpoch, someUnseekables, param, callback);
         }
 
-        public static <T> void locallyInvalidateAndCallback(Node node, TxnId txnId, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
+        public static <T> void locallyInvalidateAndCallback(Node node, TxnId txnId, EpochSupplier untilEpoch, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
         {
-            new InvalidateAndCallback<T>(node, txnId, someUnseekables, param, callback).start();
+            new InvalidateAndCallback<T>(node, txnId, untilEpoch, someUnseekables, param, callback).start();
         }
 
         @Override
@@ -273,15 +278,15 @@ public class Infer
      */
     static class SafeEraseAndCallback<T> extends CleanupAndCallback<T>
     {
-        private SafeEraseAndCallback(Node node, TxnId txnId, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
+        private SafeEraseAndCallback(Node node, TxnId txnId, EpochSupplier untilEpoch, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
         {
-            super(node, txnId, someUnseekables, param, callback);
+            super(node, txnId, untilEpoch, someUnseekables, param, callback);
         }
 
-        public static <T> void safeEraseAndCallback(Node node, TxnId txnId, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
+        public static <T> void safeEraseAndCallback(Node node, TxnId txnId, EpochSupplier untilEpoch, Unseekables<?> someUnseekables, T param, BiConsumer<T, Throwable> callback)
         {
             if (!Route.isRoute(someUnseekables)) callback.accept(param, null);
-            else new SafeEraseAndCallback<>(node, txnId, someUnseekables, param, callback).start();
+            else new SafeEraseAndCallback<>(node, txnId, untilEpoch, someUnseekables, param, callback).start();
         }
 
         @Override

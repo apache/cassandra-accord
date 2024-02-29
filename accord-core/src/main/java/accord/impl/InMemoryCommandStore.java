@@ -76,6 +76,7 @@ import static accord.local.SafeCommandStore.TestDep.WITH;
 import static accord.local.SafeCommandStore.TestStatus.ANY_STATUS;
 import static accord.local.SafeCommandStore.TestStartedAt.STARTED_BEFORE;
 import static accord.local.SaveStatus.Applying;
+import static accord.local.SaveStatus.Erased;
 import static accord.local.SaveStatus.ReadyToExecute;
 import static accord.local.Status.Applied;
 import static accord.local.Status.Stable;
@@ -253,7 +254,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         return timestampsForKey.get(key);
     }
 
-    private <O> O mapReduceForKey(InMemorySafeStore safeStore, Routables<?> keysOrRanges, Ranges slice, BiFunction<CommandsForKey, O, O> map, O accumulate)
+    private <O> O mapReduceForKey(InMemorySafeStore safeStore, Routables<?> keysOrRanges, Ranges slice, BiFunction<accord.local.CommandsForKey, O, O> map, O accumulate)
     {
         switch (keysOrRanges.domain()) {
             default:
@@ -263,7 +264,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                 for (Key key : keys)
                 {
                     if (!slice.contains(key)) continue;
-                    CommandsForKey commands = safeStore.commandsIfLoadedAndInitialised(key).current();
+                    accord.local.CommandsForKey commands = safeStore.ifLoadedAndInitialised(key).current();
                     if (commands == null)
                         continue;
 
@@ -280,7 +281,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                     for (Map.Entry<RoutableKey, GlobalCommandsForKey> entry : commandsForKey.subMap(range.start(), range.startInclusive(), range.end(), range.endInclusive()).entrySet())
                     {
                         GlobalCommandsForKey globalCommands = entry.getValue();
-                        CommandsForKey commands = globalCommands.value();
+                        accord.local.CommandsForKey commands = globalCommands.value();
                         if (commands == null)
                             continue;
                         accumulate = map.apply(commands, accumulate);
@@ -328,6 +329,20 @@ public abstract class InMemoryCommandStore extends CommandStore
     }
 
     @Override
+    protected void updatedRedundantBefore(SafeCommandStore safeStore, TxnId syncId, Ranges ranges)
+    {
+        ranges.forEach(r -> {
+            commandsForKey.subMap(r.start(), r.startInclusive(), r.end(), r.endInclusive()).forEach((forKey, forValue) -> {
+                if (!forValue.isEmpty())
+                {
+                    SafeCommandsForKey safeCfk = forValue.createSafeReference();
+                    safeCfk.refresh(safeStore);
+                }
+            });
+        });
+    }
+
+    @Override
     public void markShardDurable(SafeCommandStore safeStore, TxnId syncId, Ranges ranges)
     {
         super.markShardDurable(safeStore, syncId, ranges);
@@ -352,13 +367,9 @@ public abstract class InMemoryCommandStore extends CommandStore
                 return true;
             }
         });
-        ranges.forEach(r -> {
-            commandsForKey.subMap(r.start(), r.startInclusive(), r.end(), r.endInclusive()).values().forEach(forKey -> {
-                if (!forKey.isEmpty())
-                    forKey.value(forKey.value().withoutRedundant(syncId));
-            });
-        });
     }
+
+
 
     protected InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges,
                                                 Map<TxnId, InMemorySafeCommand> commands,
@@ -655,7 +666,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        protected InMemorySafeTimestampsForKey getTimestampsForKeyInternal(RoutableKey key)
+        protected InMemorySafeTimestampsForKey getTimestampsForKeyInternal(Key key)
         {
             return timestampsForKey.get(key);
         }
@@ -667,7 +678,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        protected InMemorySafeTimestampsForKey getTimestampsForKeyIfLoaded(RoutableKey key)
+        protected InMemorySafeTimestampsForKey getTimestampsForKeyIfLoaded(Key key)
         {
             if (!commandStore.canExposeUnloaded())
                 return null;
@@ -685,7 +696,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        protected InMemorySafeCommandsForKey getCommandsForKeyInternal(RoutableKey key)
+        protected InMemorySafeCommandsForKey getCommandsForKeyInternal(Key key)
         {
             return commandsForKey.get(key);
         }
@@ -697,7 +708,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        protected InMemorySafeCommandsForKey getCommandsForKeyIfLoaded(RoutableKey key)
+        protected InMemorySafeCommandsForKey getCommandsForKeyIfLoaded(Key key)
         {
             if (!commandStore.canExposeUnloaded())
                 return null;
@@ -706,19 +717,22 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        protected void update(Command prev, Command updated, @Nullable Seekables<?, ?> keysOrRanges)
+        protected void update(Command prev, Command updated)
         {
-            super.update(prev, updated, keysOrRanges);
+            super.update(prev, updated);
 
             TxnId txnId = updated.txnId();
             if (txnId.domain() != Domain.Range)
                 return;
-            if (keysOrRanges == null && !updated.known().isDefinitionKnown())
-                return;
-            if (prev != null && prev.known().isDefinitionKnown())
+
+            // TODO (expected): consider removing if erased
+            if (updated.saveStatus() == Erased)
                 return;
 
-            if (keysOrRanges == null) keysOrRanges = updated.partialTxn().keys();
+            Seekables<?, ?> keysOrRanges = updated.keysOrRanges();
+            if (keysOrRanges == null) keysOrRanges = prev.keysOrRanges();
+            if (keysOrRanges == null)
+                return;
 
             Ranges slice = ranges().allBetween(txnId, updated.executeAtOrTxnId());
             slice = commandStore.redundantBefore().removeShardRedundant(txnId, updated.executeAt(), slice);
@@ -757,14 +771,14 @@ public abstract class InMemoryCommandStore extends CommandStore
             return ranges;
         }
 
-        // TODO (preferable): this can have protected visibility if under CommandStore, and this is perhaps a better place to put it also
+        // TODO (desired): this can have protected visibility if under CommandStore, and this is perhaps a better place to put it also
         @Override
         public void registerHistoricalTransactions(Deps deps)
         {
             RangesForEpoch rangesForEpoch = commandStore.rangesForEpoch;
             Ranges allRanges = rangesForEpoch.all();
             deps.keyDeps.keys().forEach(allRanges, key -> {
-                deps.keyDeps.forEach(key, txnId -> {
+                deps.keyDeps.forEach(key, (txnId, txnIdx) -> {
                     // TODO (desired, efficiency): this can be made more efficient by batching by epoch
                     if (rangesForEpoch.coordinates(txnId).contains(key))
                         return; // already coordinates, no need to replicate
@@ -772,7 +786,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                     if (!rangesForEpoch.allAfter(txnId.epoch()).contains(key))
                         return;
 
-                    CommandsForKeys.registerNotWitnessed(this, key, txnId);
+                    get(key).registerHistorical(this, txnId);
                 });
 
             });
@@ -995,9 +1009,10 @@ public abstract class InMemoryCommandStore extends CommandStore
                     else commandStore.commandsByExecuteAt.put(executeAt, commandStore.command(c.txnId()));
                 }
             });
-            commands.values().forEach(SafeState::invalidate);
-            timestampsForKey.values().forEach(SafeState::invalidate);
-            commandsForKey.values().forEach(SafeState::invalidate);
+
+            commands.values().forEach(InMemorySafeCommand::invalidate);
+            timestampsForKey.values().forEach(InMemorySafeTimestampsForKey::invalidate);
+            commandsForKey.values().forEach(InMemorySafeCommandsForKey::invalidate);
         }
     }
 
@@ -1221,12 +1236,10 @@ public abstract class InMemoryCommandStore extends CommandStore
             return prefix.toString();
         }
 
-        private static String suffix(boolean blockingOnCommit, boolean blockingOnApply)
+        private static String suffix(boolean blocking)
         {
-            if (blockingOnApply)
-                return " <Blocking On Apply>";
-            if (blockingOnCommit)
-                return " <Blocking On Commit>";
+            if (blocking)
+                return " <Blocking>";
             return "";
         }
 
@@ -1240,11 +1253,11 @@ public abstract class InMemoryCommandStore extends CommandStore
             log(prefix, suffix, "{} {}", command.txnId(), command.saveStatus());
         }
 
-        private static void logDependencyGraph(InMemoryCommandStore commandStore, TxnId txnId, Set<TxnId> visited, boolean verbose, int level, boolean blockingOnCommit, boolean blockingOnApply)
+        private static void logDependencyGraph(InMemoryCommandStore commandStore, TxnId txnId, Set<TxnId> visited, boolean verbose, int level, boolean blocking)
         {
             String prefix = prefix(level, verbose);
             boolean previouslyVisited = !visited.add(txnId); // prevents infinite loops if command deps overlap
-            String suffix = suffix(blockingOnCommit, blockingOnApply);
+            String suffix = suffix(blocking);
             if (previouslyVisited) suffix = suffix + " -- PREVIOUSLY VISITED";
             GlobalCommand global = commandStore.commands.get(txnId);
             if (global == null || global.isEmpty())
@@ -1262,17 +1275,14 @@ public abstract class InMemoryCommandStore extends CommandStore
                 if (level == 0 || verbose || !committed.isWaitingOnDependency())
                     log(prefix, suffix, command);
 
-                Set<TxnId> waitingOnCommit = committed.waitingOn.computeWaitingOnCommit();
-                Set<TxnId> waitingOnApply = committed.waitingOn.computeWaitingOnApply();
-
                 if (committed.isWaitingOnDependency() && !previouslyVisited)
-                    deps.forEach(depId -> logDependencyGraph(commandStore, depId, visited, verbose, level+1, waitingOnCommit.contains(depId), waitingOnApply.contains(depId)));
+                    deps.forEach(depId -> logDependencyGraph(commandStore, depId, visited, verbose, level+1, committed.waitingOn.isWaitingOn(depId)));
             }
             else
             {
                 log(prefix, suffix, command);
                 if (!previouslyVisited)
-                    deps.forEach(depId -> logDependencyGraph(commandStore, depId, visited, verbose, level+1, false, false));
+                    deps.forEach(depId -> logDependencyGraph(commandStore, depId, visited, verbose, level+1, false));
             }
         }
 
@@ -1282,7 +1292,7 @@ public abstract class InMemoryCommandStore extends CommandStore
             InMemoryCommandStore inMemoryCommandStore = (InMemoryCommandStore) commandStore;
             logger.info("Node: {}, CommandStore #{}", inMemoryCommandStore.time.id(), commandStore.id());
             Set<TxnId> visited = new HashSet<>();
-            logDependencyGraph(inMemoryCommandStore, txnId, visited, verbose, 0, false, false);
+            logDependencyGraph(inMemoryCommandStore, txnId, visited, verbose, 0, false);
         }
 
         /**

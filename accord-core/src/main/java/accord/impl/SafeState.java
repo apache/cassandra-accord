@@ -24,10 +24,8 @@ package accord.impl;
 public interface SafeState<T>
 {
     T current();
-    void invalidate();
-    boolean invalidated();
 
-    default boolean isEmpty()
+    default boolean isUnset()
     {
         return current() == null;
     }

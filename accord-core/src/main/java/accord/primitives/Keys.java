@@ -109,9 +109,16 @@ public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
         return wrap(subtract(range, keys));
     }
 
+    @Override
     public Keys subtract(Ranges ranges)
     {
         return wrap(subtract(ranges, keys, Key[]::new));
+    }
+
+    @Override
+    public Keys subtract(Keys subtract)
+    {
+        return wrap(SortedArrays.linearSubtract(keys, subtract.keys, Key[]::new));
     }
 
     public static Keys of(Key key)

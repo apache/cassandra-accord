@@ -50,13 +50,16 @@ import java.util.function.BiConsumer;
 import static accord.coordinate.Infer.InvalidIfNot.NotKnownToBeInvalid;
 import static accord.local.RedundantStatus.LOCALLY_REDUNDANT;
 import static accord.local.SaveStatus.Stable;
+import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.NotDefined;
 import static accord.local.Status.Phase.Cleanup;
+import static accord.local.Status.PreAccepted;
 import static accord.local.Status.PreApplied;
 import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.illegalState;
 
+// TODO (required): detect propagate loops where we don't manage to update anything but should
 public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
 {
     public static class SerializerSupport
@@ -82,6 +85,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
     public final boolean isShardTruncated;
     @Nullable public final PartialTxn partialTxn;
     @Nullable public final PartialDeps stableDeps;
+    // TODO (expected): toEpoch may only apply to certain local command stores that have "witnessed the future" - confirm it is fine to use globally or else narrow its scope
     public final long toEpoch;
     @Nullable public final Timestamp committedExecuteAt;
     @Nullable public final Writes writes;
@@ -145,6 +149,11 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
     @SuppressWarnings({"rawtypes", "unchecked"})
     public static void propagate(Node node, TxnId txnId, long sourceEpoch, WithQuorum withQuorum, Route route, @Nullable Status.Known target, CheckStatus.CheckStatusOkFull full, BiConsumer<Status.Known, Throwable> callback)
     {
+        propagate(node, txnId, sourceEpoch, sourceEpoch, withQuorum, route, target, full, callback);
+    }
+
+    public static void propagate(Node node, TxnId txnId, long sourceEpoch, long toEpoch, WithQuorum withQuorum, Route route, @Nullable Status.Known target, CheckStatus.CheckStatusOkFull full, BiConsumer<Status.Known, Throwable> callback)
+    {
         if (full.maxKnowledgeSaveStatus.status == NotDefined && full.maxInvalidIfNot() == NotKnownToBeInvalid)
         {
             callback.accept(Status.Known.Nothing, null);
@@ -156,8 +165,6 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
         full = full.finish(route, withQuorum);
         route = Invariants.nonNull(full.route);
 
-        // TODO (required): permit individual shards that are behind to catch up by themselves
-        long toEpoch = sourceEpoch;
         Ranges sliceRanges = node.topology().localRangesForEpochs(txnId.epoch(), toEpoch);
 
         RoutingKey progressKey = node.trySelectProgressKey(txnId, route);
@@ -330,7 +337,6 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
                 }
 
             case Stable:
-            case ReadyToExecute:
                 confirm(Commands.commit(safeStore, safeCommand, Stable, ballot, txnId, route, progressKey, partialTxn, executeAtIfKnown, stableDeps));
                 break;
 
@@ -370,9 +376,22 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
 
         Ranges ranges = safeStore.ranges().allBetween(txnId.epoch(), (executeAtIfKnown == null ? txnId : executeAtIfKnown).epoch());
         Participants<?> participants = route.participants(ranges, Minimal);
-        Invariants.checkState(!participants.isEmpty()); // we shouldn't be fetching data for transactions we only coordinate
-        boolean isTruncatedForLocalRanges = known.hasTruncated(participants);
+        if (participants.isEmpty())
+        {
+            // we shouldn't be fetching data for transactions we only coordinate
+            // however we might fetch data for ranges we expected to execute (e.g. during accept round) but ended up not executing
+            if (command.additionalKeysOrRanges() == null)
+            {
+                Invariants.checkState(command.saveStatus() == Uninitialised);
+                return null;
+            }
 
+            // TODO (required): if everyone else has truncated, we might not have enough information on any replicas we contact
+            //    in this case we should erase
+            return known.knownForAny();
+        }
+
+        boolean isTruncatedForLocalRanges = known.hasTruncated(participants);
         if (!isTruncatedForLocalRanges)
         {
             // we're truncated *somewhere* but not locally; whether we have the executeAt is immaterial to this calculus,
@@ -465,7 +484,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
         if (!durability.isDurable() || homeKey == null)
             return null;
 
-        Commands.setDurability(safeStore, safeCommand, durability, route, committedExecuteAt);
+        Commands.setDurability(safeStore, safeCommand, durability, route, committedExecuteAt, this);
         return null;
     }
 
@@ -494,7 +513,6 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
                 if (toEpoch >= committedExecuteAt.epoch())
                     return MessageType.PROPAGATE_APPLY_MSG;
             case Committed:
-            case ReadyToExecute:
                 return MessageType.PROPAGATE_STABLE_MSG;
             case PreCommitted:
                 if (!achieved.definition.isKnown())

@@ -23,13 +23,16 @@ import javax.annotation.Nullable;
 
 import accord.api.Agent;
 import accord.api.DataStore;
+import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
 import accord.impl.ErasedSafeCommand;
 import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
+import accord.primitives.Keys;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
+import accord.primitives.Routables;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
@@ -38,6 +41,7 @@ import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 
 import static accord.local.Cleanup.NO;
+import static accord.local.KeyHistory.COMMANDS;
 import static accord.local.RedundantBefore.PreBootstrapOrStale.FULLY;
 import static accord.local.SaveStatus.Erased;
 import static accord.local.SaveStatus.ErasedOrInvalidated;
@@ -151,17 +155,50 @@ public abstract class SafeCommandStore
         return maybeTruncate(safeCommand, safeCommand.current(), null, null);
     }
 
+    protected SafeCommandsForKey maybeTruncate(SafeCommandsForKey safeCfk)
+    {
+        RedundantBefore.Entry entry = commandStore().redundantBefore().get(safeCfk.key().toUnseekable());
+        if (entry != null)
+            safeCfk.updateRedundantBefore(this, entry);
+        return safeCfk;
+    }
+
+    /**
+     * If the transaction is in memory, return it (and make it visible to future invocations of {@code command}, {@code ifPresent} etc).
+     * Otherwise return null.
+     *
+     * This permits efficient operation when a transaction involved in processing another transaction happens to be in memory.
+     */
+    public final SafeCommandsForKey ifLoadedAndInitialised(Key key)
+    {
+        SafeCommandsForKey safeCfk = getInternalIfLoadedAndInitialised(key);
+        if (safeCfk == null)
+            return null;
+        return maybeTruncate(safeCfk);
+    }
+
+    public SafeCommandsForKey get(Key key)
+    {
+        SafeCommandsForKey safeCfk = getInternal(key);
+        return maybeTruncate(safeCfk);
+    }
+
     protected abstract SafeCommand getInternal(TxnId txnId);
     protected abstract SafeCommand getInternalIfLoadedAndInitialised(TxnId txnId);
+    protected abstract SafeCommandsForKey getInternal(Key key);
+    protected abstract SafeCommandsForKey getInternalIfLoadedAndInitialised(Key key);
     public abstract boolean canExecuteWith(PreLoadContext context);
 
-    protected void update(Command prev, Command updated, @Nullable Seekables<?, ?> keysOrRanges)
+    protected void update(Command prev, Command updated)
+    {
+        updateMaxConflicts(prev, updated);
+        updateCommandsForKey(prev, updated);
+    }
+
+    private void updateMaxConflicts(Command prev, Command updated)
     {
         SaveStatus oldSaveStatus = prev == null ? SaveStatus.Uninitialised : prev.saveStatus();
         SaveStatus newSaveStatus = updated.saveStatus();
-        if (keysOrRanges == null && !newSaveStatus.known.definition.isKnown())
-            return;
-
         if (newSaveStatus.status.equals(oldSaveStatus.status) && oldSaveStatus.known.definition.isKnown())
             return;
 
@@ -169,10 +206,65 @@ public abstract class SafeCommandStore
         if (!txnId.kind().isGloballyVisible())
             return;
 
-//        if (keysOrRanges != null)
-//            keysOrRanges = keysOrRanges.slice(ranges().allBetween(updated.txnId(), updated.executeAt()));
-        commandStore().updateMaxConflicts(prev, updated, keysOrRanges);
+        commandStore().updateMaxConflicts(prev, updated);
     }
+
+    private void updateCommandsForKey(Command prev, Command updated)
+    {
+        if (!CommandsForKey.needsUpdate(prev, updated))
+            return;
+
+        TxnId txnId = updated.txnId();
+        Keys keys;
+        if (txnId.domain().isKey() && txnId.kind().isGloballyVisible())
+        {
+            keys = (Keys)updated.keysOrRanges();
+            if (keys == null || updated.hasBeen(Status.Truncated)) keys = (Keys)prev.keysOrRanges();
+            if (keys == null)
+                return;
+
+            PreLoadContext context = PreLoadContext.contextFor(txnId, keys, COMMANDS);
+            // TODO (expected): execute immediately for any keys we already have loaded, and save only those we haven't for later
+            if (canExecuteWith(context))
+            {
+                for (Key key : keys)
+                {
+                    get(key).update(this, prev, updated);
+                }
+            }
+            else
+            {
+                commandStore().execute(context, safeStore -> safeStore.updateCommandsForKey(prev, updated))
+                              .begin(commandStore().agent);
+            }
+        }
+        else
+        {
+            if (!updated.hasBeen(Status.Stable) || prev.hasBeen(Status.Stable) || updated.hasBeen(Status.Truncated))
+                return;
+
+            keys = updated.asCommitted().waitingOn.keys;
+            // TODO (required): consider how execution works for transactions that await future deps and where the command store inherits additional keys in execution epoch
+            Ranges ranges = ranges().allAt(updated.executeAt());
+            PreLoadContext context = PreLoadContext.contextFor(txnId, keys);
+            // TODO (expected): execute immediately for any keys we already have loaded, and save only those we haven't for later
+            if (canExecuteWith(context))
+            {
+                Routables.foldl(keys, ranges, (self, t, key, o, i) -> {
+                    self.get(key).registerUnmanaged(self, self.get(t));
+                    return null;
+                }, this, txnId, null, i->false);
+            }
+            else
+            {
+                commandStore().execute(context, safeStore -> safeStore.updateCommandsForKey(prev, updated))
+                              .begin(commandStore().agent);
+            }
+
+        }
+    }
+
+
 
     /**
      * Visits keys first and then ranges, both in ascending order.

@@ -51,7 +51,7 @@ import static accord.utils.Functions.foldl;
 abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, PreAcceptReply>
 {
     final FastPathTracker tracker;
-    private final List<PreAcceptOk> oks;
+    private final List<PreAcceptOk> oks; // TODO (expected): this can be cleared after preaccept
     final Txn txn;
 
     CoordinatePreAccept(Node node, TxnId txnId, Txn txn, FullRoute<?> route)

@@ -25,8 +25,6 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 
 import accord.api.RoutingKey;
-import accord.impl.AbstractSafeCommandStore;
-import accord.impl.CommandsForKey;
 import accord.impl.IntKey.Raw;
 import accord.impl.IntKey;
 import accord.impl.TopologyFactory;
@@ -34,6 +32,7 @@ import accord.impl.mock.MockCluster.Clock;
 import accord.impl.mock.Network;
 import accord.impl.mock.RecordingMessageSink;
 import accord.local.Command;
+import accord.local.CommandsForKey;
 import accord.local.CommandStore;
 import accord.local.Node.Id;
 import accord.local.Node;
@@ -103,7 +102,7 @@ public class PreAcceptTest
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
             commandStore.execute(PreLoadContext.contextFor(txnId, txn.keys()), safeStore -> {
-                CommandsForKey cfk = ((AbstractSafeCommandStore) safeStore).commandsForKey(key).current();
+                CommandsForKey cfk = safeStore.get(key).current();
                 TxnId commandId = cfk.findFirst();
                 Command command = safeStore.ifInitialised(commandId).current();
                 Assertions.assertEquals(Status.PreAccepted, command.status());
@@ -272,7 +271,7 @@ public class PreAcceptTest
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
             commandStore.execute(PreLoadContext.contextFor(txnId, txn.keys()), safeStore -> {
-                CommandsForKey cfk = ((AbstractSafeCommandStore) safeStore).commandsForKey(key).current();
+                CommandsForKey cfk = safeStore.get(key).current();
                 TxnId commandId = cfk.findFirst();
                 Command command = safeStore.ifInitialised(commandId).current();
                 Assertions.assertEquals(Status.PreAccepted, command.status());

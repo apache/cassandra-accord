@@ -48,6 +48,8 @@ import static accord.utils.Invariants.illegalState;
 
 public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
 {
+    public static final EpochSupplier NO_UPPER_BOUND = () -> Long.MAX_VALUE;
+
     public static class SerializerSupport
     {
         public static RedundantBefore create(boolean inclusiveEnds, RoutingKey[] ends, Entry[] values)
@@ -62,6 +64,7 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
     {
         // TODO (desired): we don't need to maintain this now, can migrate to ReducingRangeMap.foldWithBounds
         public final Range range;
+        // start inclusive, end exclusive
         public final long startEpoch, endEpoch;
 
         /**
@@ -145,8 +148,6 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
             // TODO (desired): revisit later as semantics here evolve
             if (bootstrappedAt.compareTo(locallyAppliedOrInvalidatedBefore) >= 0)
                 locallyAppliedOrInvalidatedBefore = TxnId.NONE;
-            if (bootstrappedAt.compareTo(shardAppliedOrInvalidatedBefore) >= 0)
-                shardAppliedOrInvalidatedBefore = TxnId.NONE;
             if (staleUntilAtLeast != null && bootstrappedAt.compareTo(staleUntilAtLeast) >= 0)
                 staleUntilAtLeast = null;
 
@@ -246,6 +247,11 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         public final TxnId shardRedundantBefore()
         {
             return shardAppliedOrInvalidatedBefore;
+        }
+
+        public final TxnId locallyRedundantBefore()
+        {
+            return locallyAppliedOrInvalidatedBefore;
         }
 
         // TODO (required, consider): this admits the range of epochs that cross the two timestamps, which matches our
@@ -376,12 +382,20 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         return Entry.get(entry, txnId, executeAt);
     }
 
-    public TxnId redundantBefore(RoutableKey key)
+    public TxnId shardRedundantBefore(RoutableKey key)
     {
         Entry entry = get(key);
         if (entry == null)
             return TxnId.NONE;
         return entry.shardAppliedOrInvalidatedBefore;
+    }
+
+    public TxnId locallyRedundantBefore(RoutableKey key)
+    {
+        Entry entry = get(key);
+        if (entry == null)
+            return TxnId.NONE;
+        return entry.locallyAppliedOrInvalidatedBefore;
     }
 
     public RedundantStatus status(TxnId txnId, EpochSupplier executeAt, Participants<?> participants)

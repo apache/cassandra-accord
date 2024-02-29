@@ -20,6 +20,8 @@ package accord.impl;
 
 import accord.api.Key;
 import accord.impl.InMemoryCommandStore.GlobalCommandsForKey;
+import accord.local.CommandsForKey;
+import accord.local.SafeCommandsForKey;
 
 public class InMemorySafeCommandsForKey extends SafeCommandsForKey
 {
@@ -33,7 +35,7 @@ public class InMemorySafeCommandsForKey extends SafeCommandsForKey
     }
 
     @Override
-    public CommandsForKey current()
+    public accord.local.CommandsForKey current()
     {
         return global.value();
     }
@@ -44,13 +46,11 @@ public class InMemorySafeCommandsForKey extends SafeCommandsForKey
         global.value(update);
     }
 
-    @Override
     public void invalidate()
     {
         invalidated = true;
     }
 
-    @Override
     public boolean invalidated()
     {
         return invalidated;

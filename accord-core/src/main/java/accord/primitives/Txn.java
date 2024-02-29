@@ -40,10 +40,10 @@ import java.util.function.Predicate;
 
 import static accord.primitives.Txn.Kind.Kinds.AnyGloballyVisible;
 import static accord.primitives.Txn.Kind.Kinds.Nothing;
-import static accord.primitives.Txn.Kind.Kinds.RorWs;
+import static accord.primitives.Txn.Kind.Kinds.RsOrWs;
 import static accord.primitives.Txn.Kind.Kinds.SyncPoints;
 import static accord.primitives.Txn.Kind.Kinds.Ws;
-import static accord.primitives.Txn.Kind.Kinds.WsOrSyncPoint;
+import static accord.primitives.Txn.Kind.Kinds.WsOrSyncPoints;
 
 public interface Txn
 {
@@ -102,6 +102,8 @@ public interface Txn
          *
          * Invisible to other transactions.
          */
+        // TODO (expected): introduce a special kind of visible ExclusiveSyncPoint that creates a precise moment,
+        //    and is therefore visible to all transactions.
         ExclusiveSyncPoint('X'),
 
         /**
@@ -128,8 +130,9 @@ public interface Txn
             /**
              * Any DURABLE read or write. This does not witness EphemeralReads.
              */
-            RorWs,
-            WsOrSyncPoint,
+            RsOrWs,
+
+            WsOrSyncPoints,
             SyncPoints,
             AnyGloballyVisible;
 
@@ -140,9 +143,9 @@ public interface Txn
                 {
                     default: throw new AssertionError();
                     case AnyGloballyVisible: return kind.isGloballyVisible();
-                    case WsOrSyncPoint: return kind == Write || kind == Kind.SyncPoint || kind == ExclusiveSyncPoint;
+                    case WsOrSyncPoints: return kind == Write || kind == Kind.SyncPoint || kind == ExclusiveSyncPoint;
                     case SyncPoints: return kind == Kind.SyncPoint || kind == ExclusiveSyncPoint;
-                    case RorWs: return kind == Read || kind == Write;
+                    case RsOrWs: return kind == Read || kind == Write;
                     case Ws: return kind == Write;
                     case Nothing: return false; // TODO (expected, consider): throw exception? we shouldn't ever be presented the option to test even.
                 }
@@ -224,11 +227,21 @@ public interface Txn
                 case Read:
                     return Ws;
                 case Write:
-                    return RorWs;
+                    return RsOrWs;
                 case SyncPoint:
                 case ExclusiveSyncPoint:
                     return AnyGloballyVisible;
             }
+        }
+
+        public boolean witnesses(TxnId txnId)
+        {
+            return witnesses(txnId.kind());
+        }
+
+        public boolean witnesses(Kind kind)
+        {
+            return witnesses().test(kind);
         }
 
         public Kinds witnessedBy()
@@ -239,7 +252,7 @@ public interface Txn
                 case EphemeralRead:
                     return Nothing;
                 case Read:
-                    return WsOrSyncPoint;
+                    return WsOrSyncPoints;
                 case Write:
                     return AnyGloballyVisible;
                 case SyncPoint:

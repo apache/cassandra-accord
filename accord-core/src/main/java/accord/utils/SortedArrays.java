@@ -21,6 +21,7 @@ package accord.utils;
 import java.util.AbstractList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.function.IntBinaryOperator;
 import java.util.function.IntFunction;
 import java.util.stream.StreamSupport;
 
@@ -145,17 +146,22 @@ public class SortedArrays
 
     public static <T> T[] linearUnion(T[] left, int leftLength, T[] right, int rightLength, AsymmetricComparator<? super T, ? super T> comparator, ObjectBuffers<T> buffers)
     {
-        int leftIdx = 0;
-        int rightIdx = 0;
+        return linearUnion(left, 0, leftLength, right, 0, rightLength, comparator, buffers);
+    }
+
+    public static <T> T[] linearUnion(T[] left, int leftStart, int leftEnd, T[] right, int rightStart, int rightEnd, AsymmetricComparator<? super T, ? super T> comparator, ObjectBuffers<T> buffers)
+    {
+        int leftIdx = leftStart;
+        int rightIdx = rightStart;
 
         T[] result = null;
         int resultSize = 0;
 
         // first, pick the superset candidate and merge the two until we find the first missing item
         // if none found, return the superset candidate
-        if (leftLength >= rightLength)
+        if (leftEnd - leftIdx >= rightEnd - rightIdx)
         {
-            while (leftIdx < leftLength && rightIdx < rightLength)
+            while (leftIdx < leftEnd && rightIdx < rightEnd)
             {
                 T leftKey = left[leftIdx];
                 T rightKey = right[rightIdx];
@@ -168,9 +174,9 @@ public class SortedArrays
                 }
                 else
                 {
-                    resultSize = leftIdx;
-                    result = buffers.get(resultSize + (leftLength - leftIdx) + (rightLength - (rightIdx - 1)));
-                    System.arraycopy(left, 0, result, 0, resultSize);
+                    resultSize = leftIdx - leftStart;
+                    result = buffers.get(resultSize + (leftEnd - leftIdx) + (rightEnd - (rightIdx - 1)));
+                    System.arraycopy(left, leftStart, result, 0, resultSize);
                     result[resultSize++] = right[rightIdx++];
                     break;
                 }
@@ -178,17 +184,23 @@ public class SortedArrays
 
             if (result == null)
             {
-                if (rightIdx == rightLength) // all elements matched, so can return the other array
-                    return buffers.completeWithExisting(left, leftLength);
+                if (rightIdx == rightEnd) // all elements matched, so can return the other array
+                {
+                    if (leftStart == 0)
+                        return buffers.completeWithExisting(left, leftEnd);
+                    result = buffers.get(leftEnd - leftStart);
+                    System.arraycopy(left, leftStart, result, 0, leftEnd - leftStart);
+                    return result;
+                }
                 // no elements matched or only a subset matched
-                result = buffers.get(leftLength + (rightLength - rightIdx));
-                resultSize = leftIdx;
-                System.arraycopy(left, 0, result, 0, resultSize);
+                result = buffers.get((leftEnd - leftStart) + (rightEnd - rightIdx));
+                resultSize = leftIdx - leftStart;
+                System.arraycopy(left, leftStart, result, 0, resultSize);
             }
         }
         else
         {
-            while (leftIdx < leftLength && rightIdx < rightLength)
+            while (leftIdx < leftEnd && rightIdx < rightEnd)
             {
                 T leftKey = left[leftIdx];
                 T rightKey = right[rightIdx];
@@ -201,9 +213,9 @@ public class SortedArrays
                 }
                 else
                 {
-                    resultSize = rightIdx;
-                    result = buffers.get(resultSize + (leftLength - (leftIdx - 1)) + (rightLength - rightIdx));
-                    System.arraycopy(right, 0, result, 0, resultSize);
+                    resultSize = rightIdx - rightStart;
+                    result = buffers.get(resultSize + (leftEnd - (leftIdx - 1)) + (rightEnd - rightIdx));
+                    System.arraycopy(right, rightStart, result, 0, resultSize);
                     result[resultSize++] = left[leftIdx++];
                     break;
                 }
@@ -211,18 +223,24 @@ public class SortedArrays
 
             if (result == null)
             {
-                if (leftIdx == leftLength) // all elements matched, so can return the other array
-                    return buffers.completeWithExisting(right, rightLength);
+                if (leftIdx == leftEnd) // all elements matched, so can return the other array
+                {
+                    if (rightStart == 0)
+                        return buffers.completeWithExisting(right, rightEnd);
+                    result = buffers.get(rightEnd - rightStart);
+                    System.arraycopy(right, rightStart, result, 0, rightEnd - rightStart);
+                    return result;
+                }
                 // no elements matched or only a subset matched
-                result = buffers.get(rightLength + (leftLength - leftIdx));
-                resultSize = rightIdx;
-                System.arraycopy(right, 0, result, 0, resultSize);
+                result = buffers.get((rightEnd - rightStart) + (leftEnd - leftIdx));
+                resultSize = rightIdx - rightStart;
+                System.arraycopy(right, rightStart, result, 0, resultSize);
             }
         }
 
         try
         {
-            while (leftIdx < leftLength && rightIdx < rightLength)
+            while (leftIdx < leftEnd && rightIdx < rightEnd)
             {
                 T leftKey = left[leftIdx];
                 T rightKey = right[rightIdx];
@@ -248,10 +266,10 @@ public class SortedArrays
                 result[resultSize++] = minKey;
             }
 
-            while (leftIdx < leftLength)
+            while (leftIdx < leftEnd)
                 result[resultSize++] = left[leftIdx++];
 
-            while (rightIdx < rightLength)
+            while (rightIdx < rightEnd)
                 result[resultSize++] = right[rightIdx++];
 
             return buffers.complete(result, resultSize);
@@ -592,63 +610,63 @@ public class SortedArrays
      * TODO (expected): use cachedBuffers
      */
     @SuppressWarnings("unused") // was used until recently, might be used again?
-    public static <T extends Comparable<? super T>> T[] linearSubtract(T[] left, T[] right, IntFunction<T[]> allocate)
+    public static <T extends Comparable<? super T>> T[] linearSubtract(T[] keep, T[] subtract, IntFunction<T[]> allocate)
     {
-        int rightIdx = 0;
-        int leftIdx = 0;
+        int subtractIdx = 0;
+        int keepIdx = 0;
 
         T[] result = null;
         int resultSize = 0;
 
-        while (leftIdx < left.length && rightIdx < right.length)
+        while (keepIdx < keep.length && subtractIdx < subtract.length)
         {
-            T leftKey = left[leftIdx];
-            T rightKey = right[rightIdx];
-            int cmp = leftKey == rightKey ? 0 : leftKey.compareTo(rightKey);
+            T keepKey = keep[keepIdx];
+            T subtractKey = subtract[subtractIdx];
+            int cmp = keepKey == subtractKey ? 0 : keepKey.compareTo(subtractKey);
 
             if (cmp == 0)
             {
-                resultSize = leftIdx++;
-                ++rightIdx;
-                result = allocate.apply(resultSize + left.length - leftIdx);
-                System.arraycopy(left, 0, result, 0, resultSize);
+                resultSize = keepIdx++;
+                ++subtractIdx;
+                result = allocate.apply(resultSize + keep.length - keepIdx);
+                System.arraycopy(keep, 0, result, 0, resultSize);
                 break;
             }
             else if (cmp < 0)
             {
-                ++leftIdx;
+                ++keepIdx;
             }
             else
             {
-                ++rightIdx;
+                ++subtractIdx;
             }
         }
 
         if (result == null)
-            return left;
+            return keep;
 
-        while (leftIdx < left.length && rightIdx < right.length)
+        while (keepIdx < keep.length && subtractIdx < subtract.length)
         {
-            T leftKey = left[leftIdx];
-            T rightKey = right[rightIdx];
+            T leftKey = keep[keepIdx];
+            T rightKey = subtract[subtractIdx];
             int cmp = leftKey == rightKey ? 0 : leftKey.compareTo(rightKey);
 
             if (cmp > 0)
             {
-                result[resultSize++] = left[leftIdx++];
+                result[resultSize++] = keep[keepIdx++];
             }
             else if (cmp < 0)
             {
-                ++rightIdx;
+                ++subtractIdx;
             }
             else
             {
-                ++leftIdx;
-                ++rightIdx;
+                ++keepIdx;
+                ++subtractIdx;
             }
         }
-        while (leftIdx < left.length)
-            result[resultSize++] = left[leftIdx++];
+        while (keepIdx < keep.length)
+            result[resultSize++] = keep[keepIdx++];
 
         if (resultSize < result.length)
             result = Arrays.copyOf(result, resultSize);
@@ -1008,6 +1026,61 @@ public class SortedArrays
         return found >= 0 ? found : -1 - to;
     }
 
+    public interface IndirectComparator<T1, T2>
+    {
+        int compare(T1 t1, T2 t2, int t2Index);
+    }
+
+    /**
+     * Given a sorted array and an item to locate, use binarySearch to find a position in the array containing the item,
+     * or if not present an index relative to the item's position were it to be inserted.
+     *
+     * If multiple entries match, return either:
+     *  FAST: the first we encounter
+     *  FLOOR: the highest matching array index
+     *  CEIL: the lowest matching array index
+     *
+     * If no entries match, similar to Arrays.binarySearch return either:
+     *  FAST, CEIL: the entry following {@code find}, i.e. -1 - insertPos (== Arrays.binarySearch)
+     *  FLOOR:      the entry preceding {@code find}, i.e. -2 - insertPos
+     */
+    @Inline
+    public static <T1, T2> int binarySearchIndirect(int[] indices, int from, int to, T1 find, T2 findIn, IndirectComparator<T1, T2> comparator, Search op)
+    {
+        int found = -1;
+        while (from < to)
+        {
+            int i = (from + to) >>> 1;
+            int c = comparator.compare(find, findIn, indices[i]);
+            if (c < 0)
+            {
+                to = i;
+            }
+            else if (c > 0)
+            {
+                from = i + 1;
+            }
+            else
+            {
+                switch (op)
+                {
+                    default: throw new IllegalStateException();
+                    case FAST:
+                        return i;
+
+                    case CEIL:
+                        to = found = i;
+                        break;
+
+                    case FLOOR:
+                        found = i;
+                        from = i + 1;
+                }
+            }
+        }
+        return found >= 0 ? found : -1 - to;
+    }
+
     /**
      * Given two sorted arrays where an item in each array may match multiple in the other, find the next
      * index in each array containing an equal item.
@@ -1277,5 +1350,93 @@ public class SortedArrays
             return sorted;
 
         return Arrays.copyOf(sorted, sorted.length - removed);
+    }
+
+    public static void heapSort(int[] values, IntBinaryOperator comparator)
+    {
+        if (values.length <= 2)
+        {
+            if (values.length == 2 && comparator.applyAsInt(values[0], values[1]) > 0)
+                swap(values, 0, 1);
+            return;
+        }
+
+        int size = values.length;
+        int i = parentIndex(size - 1);
+        while (i >= 0)
+            siftDown(values, i--, size, comparator);
+
+        i = size;
+        while (--i > 0)
+        {
+            swap(values, 0, i);
+            siftDown(values, 0, i, comparator);
+        }
+    }
+
+    private static void siftDown(int[] values, int index, int size, IntBinaryOperator comparator)
+    {
+        // find the leaf index we would insert max element into
+        int i = findMaxLeaf(values, index, size, comparator);
+        // then find the parent of that leaf that is less than the element we want to insert
+        int value = values[index];
+        while (i > index)
+        {
+            int p = parentIndex(i);
+            if (comparator.applyAsInt(value, values[p]) < 0)
+                break;
+            i = p;
+        }
+        if (i > index)
+        {
+            do
+            {
+                int t = values[i];
+                values[i] = value;
+                value = t;
+                i = parentIndex(i);
+            }
+            while (i > index);
+
+            values[index] = value;
+        }
+    }
+
+    private static int findMaxLeaf(int[] values, int index, int size, IntBinaryOperator comparator)
+    {
+        while (true)
+        {
+            int ri = rightChildIndex(index);
+            if (ri >= size) break;
+            int li = leftChildIndex(index);
+            if (comparator.applyAsInt(values[li], values[ri]) > 0)
+                index = li;
+        }
+        int li = leftChildIndex(index);
+        if (li < size)
+            index = li;
+        return index;
+    }
+
+    private static int leftChildIndex(int i)
+    {
+        return 2*i+1;
+    }
+
+    private static int rightChildIndex(int i)
+    {
+        return 2*i+2;
+    }
+
+    private static int parentIndex(int i)
+    {
+        return (i-1)/2;
+    }
+
+    private static void swap(int[] values, int i, int j)
+    {
+        int t = values[i];
+        values[i] = values[j];
+        values[j] = t;
     }
 }

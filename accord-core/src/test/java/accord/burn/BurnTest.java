@@ -98,6 +98,7 @@ import static accord.impl.PrefixedIntHashKey.forHash;
 import static accord.impl.PrefixedIntHashKey.range;
 import static accord.impl.PrefixedIntHashKey.ranges;
 import static accord.primitives.Txn.Kind.EphemeralRead;
+import static accord.utils.Invariants.illegalArgument;
 import static accord.utils.Utils.toArray;
 
 public class BurnTest
@@ -508,17 +509,21 @@ public class BurnTest
         int operations = 1000;
         Long overrideSeed = null;
         LongSupplier seedGenerator = ThreadLocalRandom.current()::nextLong;
+        boolean hasOverriddenSeed = false;
         for (int i = 0 ; i < args.length ; i += 2)
         {
             switch (args[i])
             {
-                default: throw new IllegalArgumentException("Invalid option: " + args[i]);
+                default: throw illegalArgument("Invalid option: " + args[i]);
                 case "-c":
                     count = Integer.parseInt(args[i + 1]);
+                    if (hasOverriddenSeed)
+                        throw illegalArgument("Cannot override both seed (-s) and number of seeds to run (-c)");
                     overrideSeed = null;
                     break;
                 case "-s":
                     overrideSeed = Long.parseLong(args[i + 1]);
+                    hasOverriddenSeed = true;
                     count = 1;
                     break;
                 case "-o":
@@ -538,7 +543,7 @@ public class BurnTest
     @Timeout(value = 3, unit = TimeUnit.MINUTES)
     public void testOne()
     {
-        run(System.nanoTime(), 1000);
+        run(1L, 1000);
     }
 
     private static void run(long seed, int operations)

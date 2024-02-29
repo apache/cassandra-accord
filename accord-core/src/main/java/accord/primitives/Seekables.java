@@ -34,6 +34,7 @@ public interface Seekables<K extends Seekable, U extends Seekables<K, ?>> extend
     @Override
     U slice(Ranges ranges, Slice slice);
     Seekables<K, U> subtract(Ranges ranges);
+    Seekables<K, U> subtract(U without);
     Seekables<K, U> with(U with);
 
     Participants<?> toParticipants();

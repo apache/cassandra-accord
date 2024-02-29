@@ -18,10 +18,13 @@
 
 package accord.local;
 
+import javax.annotation.Nullable;
+
 import accord.api.VisibleForImplementation;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Route;
+import accord.primitives.Seekables;
 import accord.primitives.TxnId;
 
 public interface CommonAttributes
@@ -30,6 +33,7 @@ public interface CommonAttributes
     Status.Durability durability();
     Route<?> route();
     PartialTxn partialTxn();
+    @Nullable Seekables<?, ?> additionalKeysOrRanges();
     PartialDeps partialDeps();
     Listeners.Immutable durableListeners();
 
@@ -45,6 +49,7 @@ public interface CommonAttributes
         private Route<?> route;
         private PartialTxn partialTxn;
         private PartialDeps partialDeps;
+        private Seekables<?, ?> additionalKeysOrRanges;
         private Listeners listeners;
 
         public Mutable(TxnId txnId)
@@ -59,6 +64,7 @@ public interface CommonAttributes
             this.route = attributes.route();
             this.partialTxn = attributes.partialTxn();
             this.partialDeps = attributes.partialDeps();
+            this.additionalKeysOrRanges = attributes.additionalKeysOrRanges();
             this.listeners = attributes.durableListeners();
         }
 
@@ -112,7 +118,21 @@ public interface CommonAttributes
 
         public Mutable partialTxn(PartialTxn partialTxn)
         {
+            PartialTxn prev = this.partialTxn;
             this.partialTxn = partialTxn;
+            if (prev != null || additionalKeysOrRanges != null)
+            {
+                Seekables<?, ?> removed = prev == null ? null : ((Seekables) prev.keys()).subtract(partialTxn.keys());
+                if (prev != null && !removed.isEmpty())
+                {
+                    if (additionalKeysOrRanges == null) additionalKeysOrRanges = removed;
+                    else additionalKeysOrRanges = ((Seekables)additionalKeysOrRanges).subtract(partialTxn.keys()).with(removed);
+                }
+                else if (additionalKeysOrRanges != null)
+                {
+                    additionalKeysOrRanges = ((Seekables)additionalKeysOrRanges).subtract(partialTxn.keys());
+                }
+            }
             return this;
         }
 
@@ -127,6 +147,18 @@ public interface CommonAttributes
             this.partialDeps = partialDeps;
             return this;
         }
+
+        public Seekables<?, ?> additionalKeysOrRanges()
+        {
+            return additionalKeysOrRanges;
+        }
+
+        public Mutable additionalKeysOrRanges(Seekables<?, ?> additionalKeysOrRanges)
+        {
+            this.additionalKeysOrRanges = additionalKeysOrRanges;
+            return this;
+        }
+
 
         @Override
         public Listeners.Immutable durableListeners()

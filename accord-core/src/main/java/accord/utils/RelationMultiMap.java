@@ -434,6 +434,11 @@ public class RelationMultiMap
             return ids[startIndex + index];
         }
 
+        public T getForValueIndex(int valueIndex)
+        {
+            return values[valueIndex];
+        }
+
         @Override
         public int size()
         {

@@ -180,8 +180,6 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 CoordinateStatus status = CoordinateStatus.NotWitnessed;
                 ProgressToken token = ProgressToken.NONE;
 
-                Object debugInvestigating;
-
                 void ensureAtLeast(Command command, CoordinateStatus newStatus, Progress newProgress)
                 {
                     ensureAtLeast(newStatus, newProgress);
@@ -270,8 +268,6 @@ public class SimpleProgressLog implements ProgressLog.Factory
                                         }
                                     }).begin(node.agent());
                                 });
-
-                                debugInvestigating = recover;
                             });
                         }
                     }
@@ -290,8 +286,6 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                 Route<?> route;
                 Participants<?> participants;
-
-                Object debugInvestigating;
 
                 @SuppressWarnings({"unchecked", "rawtypes"})
                 void recordBlocking(LocalExecution blockedUntil, @Nullable Route<?> route, @Nullable Participants<?> participants)
@@ -345,12 +339,13 @@ public class SimpleProgressLog implements ProgressLog.Factory
                                 return;
 
                             setProgress(Expected);
+                            // TODO (required): we might not be in the coordinating OR execution epochs if an accept round contacted us but recovery did not (quite hard to achieve)
                             Invariants.checkState(fail != null || !blockedUntil.isSatisfiedBy(success.propagates()));
                         }).begin(commandStore.agent());
                     };
 
                     node.withEpoch(blockedUntil.fetchEpoch(txnId, executeAt), () -> {
-                        debugInvestigating = FetchData.fetch(blockedUntil.requires, node, txnId, fetchKeys, forLocalEpoch, executeAt, callback);
+                        FetchData.fetch(blockedUntil.requires, node, txnId, fetchKeys, forLocalEpoch, executeAt, callback);
                     });
                 }
 
@@ -360,13 +355,6 @@ public class SimpleProgressLog implements ProgressLog.Factory
                     Route<?> route = Route.merge(command.route(), (Route)this.route);
                     if (route != null) route = route.withHomeKey();
                     return Unseekables.merge(route == null ? null : route.withHomeKey(), (Unseekables)participants);
-                }
-
-                @SuppressWarnings({"unchecked", "rawtypes"})
-                private Participants<?> maxParticipants(Command command)
-                {
-                    Route<?> route = Route.merge(command.route(), (Route)this.route);
-                    return Participants.merge(route == null ? null : route.participants(), (Participants) participants);
                 }
 
                 @Override
@@ -630,6 +618,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 return;
 
             // ensure we have a record to work with later; otherwise may think has been truncated
+            // TODO (expected): we shouldn't rely on this anymore
             blockedBy.initialise();
             if (blockedBy.current().has(blockedUntil.requires))
                 return;
@@ -642,6 +631,15 @@ public class SimpleProgressLog implements ProgressLog.Factory
             // TODO (desirable, efficiency): if we are co-located with the home shard, don't need to do anything unless we're in a
             //                               later topology that wasn't covered by its coordination
             ensure(blockedBy.txnId()).recordBlocking(blockedBy.txnId(), blockedUntil, blockedOnRoute, blockedOnParticipants);
+        }
+
+        @Override
+        public void waiting(TxnId blockedBy, LocalExecution blockedUntil, @Nullable Route<?> blockedOnRoute, @Nullable Participants<?> blockedOnParticipants)
+        {
+            if (!blockedBy.kind().isGloballyVisible())
+                return;
+
+            ensure(blockedBy).recordBlocking(blockedBy, blockedUntil, blockedOnRoute, blockedOnParticipants);
         }
 
         @Override
@@ -696,7 +694,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
             }
             catch (Throwable t)
             {
-                t.printStackTrace();
+                node.agent().onUncaughtException(t);
             }
             finally
             {
