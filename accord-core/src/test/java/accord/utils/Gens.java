@@ -499,6 +499,28 @@ public class Gens {
                 }
             };
         }
+
+        public Gen<Gen<Boolean>> mixedDistribution()
+        {
+            return rs -> {
+                int selection = rs.nextInt(0, 4);
+                switch (selection)
+                {
+                    case 0: // uniform 50/50
+                        return r -> r.nextBoolean();
+                    case 1: // variable frequency
+                        var freq = rs.nextFloat();
+                        return r -> r.decide(freq);
+                    case 2: // fixed result
+                        boolean result = rs.nextBoolean();
+                        return ignore -> result;
+                    case 3: // biased repeating runs
+                        return biasedRepeatingRuns(rs.nextDouble(), rs.nextInt(1, 100));
+                    default:
+                        throw new IllegalStateException("Unexpected int for bool selection: " + selection);
+                }
+            };
+        }
     }
 
     public static class IntDSL
