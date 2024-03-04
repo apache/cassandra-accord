@@ -33,12 +33,6 @@ public class SearchableRangeListBuilder extends CheckpointIntervalArrayBuilder<R
     public static final Accessor<Range[], Range, RoutableKey> RANGE_ACCESSOR = new Accessor<>()
     {
         @Override
-        public boolean endInclusive(Range[] ranges)
-        {
-            return ranges[0].endInclusive();
-        }
-
-        @Override
         public int size(Range[] ranges)
         {
             return ranges.length;

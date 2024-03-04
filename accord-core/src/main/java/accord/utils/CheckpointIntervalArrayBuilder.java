@@ -69,7 +69,6 @@ public class CheckpointIntervalArrayBuilder<Ranges, Range, RoutingKey>
 
     public interface Accessor<Ranges, Range, RoutingKey>
     {
-        boolean endInclusive(Ranges ranges);
         int size(Ranges ranges);
         Range get(Ranges ranges, int index);
         RoutingKey start(Ranges ranges, int index);
