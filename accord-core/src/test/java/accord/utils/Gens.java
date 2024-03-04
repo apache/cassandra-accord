@@ -352,11 +352,14 @@ public class Gens {
     public static <T> Gen<Gen<T>> mixedDistribution(List<T> list)
     {
         return rs -> {
-            switch (rs.nextInt(0, 3))
+            switch (rs.nextInt(0, 4))
             {
                 case 0: // uniform
                     return r -> list.get(rs.nextInt(0, list.size()));
-                case 1: // zipf
+                case 1: // median biased
+                    int median = rs.nextInt(0, list.size());
+                    return r -> list.get(r.nextBiasedInt(0, median, list.size()));
+                case 2: // zipf
                     List<T> array = list;
                     if (rs.nextBoolean())
                     {
@@ -364,7 +367,7 @@ public class Gens {
                         Collections.reverse(array);
                     }
                     return pickZipf(array);
-                case 2: // random weight
+                case 3: // random weight
                     return randomWeights(list).next(rs);
                 default:
                     throw new AssertionError();
