@@ -395,11 +395,17 @@ public class Property
 
     public static class StatefulBuilder extends Common<StatefulBuilder>
     {
-        protected int steps = 100;
+        protected int steps = 1000;
 
         public StatefulBuilder()
         {
-            examples = 100;
+            examples = 500;
+        }
+
+        public StatefulBuilder withSteps(int steps)
+        {
+            this.steps = steps;
+            return this;
         }
 
         @SuppressWarnings("rawtypes")
