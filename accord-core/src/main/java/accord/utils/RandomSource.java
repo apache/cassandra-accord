@@ -286,7 +286,7 @@ public interface RandomSource
         return array[nextInt(offset, offset + length)];
     }
 
-    default <T extends Comparable<T>> T pick(Set<T> set)
+    default <T extends Comparable<? super T>> T pick(Set<T> set)
     {
         List<T> values = new ArrayList<>(set);
         // Non-ordered sets may have different iteration order on different environments, which would make a seed produce different histories!
