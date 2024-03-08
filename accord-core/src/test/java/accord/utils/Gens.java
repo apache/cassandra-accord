@@ -65,6 +65,12 @@ public class Gens {
         return rs -> rs.pick(gens).next(rs);
     }
 
+    public static <T> Gen<T> oneOf(Map<Gen<T>, Integer> values)
+    {
+        Gen<Gen<T>> gen = pick(values);
+        return rs -> gen.next(rs).next(rs);
+    }
+
     public static Gen.IntGen pickInt(int... ts)
     {
         return rs -> ts[rs.nextInt(0, ts.length)];
