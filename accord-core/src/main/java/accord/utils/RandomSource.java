@@ -29,6 +29,8 @@ import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import com.google.common.collect.Iterables;
+
 import accord.utils.random.Picker;
 
 // TODO (expected): merge with C* RandomSource
@@ -284,6 +286,12 @@ public interface RandomSource
         if (length == 1)
             return array[offset];
         return array[nextInt(offset, offset + length)];
+    }
+
+    default <T> T pick(NavigableSet<T> set)
+    {
+        int offset = nextInt(0, set.size());
+        return Iterables.get(set, offset);
     }
 
     default <T extends Comparable<? super T>> T pick(Set<T> set)
