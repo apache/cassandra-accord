@@ -55,6 +55,16 @@ public class Gens {
         return ignore -> constant.get();
     }
 
+    public static <T> Gen<T> oneOf(Gen<T>... gens)
+    {
+        return oneOf(Arrays.asList(gens));
+    }
+
+    public static <T> Gen<T> oneOf(List<Gen<T>> gens)
+    {
+        return rs -> rs.pick(gens).next(rs);
+    }
+
     public static Gen.IntGen pickInt(int... ts)
     {
         return rs -> ts[rs.nextInt(0, ts.length)];

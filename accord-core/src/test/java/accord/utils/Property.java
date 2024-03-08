@@ -23,12 +23,16 @@ import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 public class Property
@@ -168,7 +172,10 @@ public class Property
         }
         try
         {
-            return value.toString();
+            String result = value.toString();
+            if (result != null && result.length() > 100 && value instanceof Collection)
+                result = ((Collection<?>) value).stream().map(o -> "\n\t     " + o).collect(Collectors.joining(",", "[", "]"));
+            return result;
         }
         catch (Throwable t)
         {
@@ -379,5 +386,111 @@ public class Property
     public static ForBuilder qt()
     {
         return new ForBuilder();
+    }
+
+    public static StatefulBuilder stateful()
+    {
+        return new StatefulBuilder();
+    }
+
+    public static class StatefulBuilder extends Common<StatefulBuilder>
+    {
+        protected int steps = 100;
+
+        public StatefulBuilder()
+        {
+            examples = 100;
+        }
+
+        @SuppressWarnings("rawtypes")
+        public <State, SystemUnderTest> void check(Commands<State, SystemUnderTest> commands)
+        {
+            RandomSource rs = new DefaultRandom(seed);
+            for (int i = 0; i < examples; i++)
+            {
+                State state = null;
+                List<String> history = new ArrayList<>();
+                try
+                {
+                    checkInterrupted();
+
+                    state = commands.genInitialState().next(rs);
+                    SystemUnderTest sut = commands.createSut(state);
+
+                    try
+                    {
+                        for (int j = 0; j < steps; j++)
+                        {
+                            Gen<Command<State, SystemUnderTest, ?>> cmdGen = commands.commands(state);
+                            Command cmd = cmdGen.next(rs);
+                            for (int a = 0; cmd.checkPreconditions(state) != PreCheckResult.Ok && a < 42; a++)
+                            {
+                                if (a == 41)
+                                    throw new IllegalArgumentException("Unable to find next command");
+                                cmd = cmdGen.next(rs);
+                            }
+                            history.add(cmd.detailed(state));
+                            Object stateResult = cmd.apply(state);
+                            cmd.checkPostconditions(state, stateResult,
+                                                    sut, cmd.run(sut));
+                        }
+                    }
+                    finally
+                    {
+                        commands.destroySut(sut);
+                        commands.destroyState(state);
+                    }
+                }
+                catch (Throwable t)
+                {
+                    throw new PropertyError(propertyError(this, t, state, history), t);
+                }
+                if (pure)
+                {
+                    seed = rs.nextLong();
+                    rs.setSeed(seed);
+                }
+            }
+        }
+    }
+
+    public enum PreCheckResult { Ok, Ignore }
+    public interface Command<State, SystemUnderTest, Result>
+    {
+        default PreCheckResult checkPreconditions(State state) {return PreCheckResult.Ok;}
+        Result apply(State state);
+        Result run(SystemUnderTest sut);
+        default void checkPostconditions(State state, Result expected,
+                                         SystemUnderTest sut, Result actual) {}
+        default String detailed(State state) {return this.toString();}
+    }
+
+    public interface UnitCommand<State, SystemUnderTest> extends Command<State, SystemUnderTest, Void>
+    {
+        void applyUnit(State state);
+        void runUnit(SystemUnderTest sut);
+
+        @Override
+        default Void apply(State state)
+        {
+            applyUnit(state);
+            return null;
+        }
+
+        @Override
+        default Void run(SystemUnderTest sut)
+        {
+            runUnit(sut);
+            return null;
+        }
+    }
+
+    public interface Commands<State, SystemUnderTest>
+    {
+        Gen<State> genInitialState();
+        SystemUnderTest createSut(State state);
+        default void destroyState(State state) {}
+        default void destroySut(SystemUnderTest sut) {}
+        Gen<Command<State, SystemUnderTest, ?>> commands(State state);
     }
 }
