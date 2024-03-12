@@ -415,7 +415,7 @@ public class Property
             for (int i = 0; i < examples; i++)
             {
                 State state = null;
-                List<String> history = new ArrayList<>();
+                List<String> history = new ArrayList<>(steps);
                 try
                 {
                     checkInterrupted();
