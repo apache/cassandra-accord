@@ -464,27 +464,27 @@ public class Property
     public interface Command<State, SystemUnderTest, Result>
     {
         default PreCheckResult checkPreconditions(State state) {return PreCheckResult.Ok;}
-        Result apply(State state);
-        Result run(SystemUnderTest sut);
+        Result apply(State state) throws Throwable;
+        Result run(SystemUnderTest sut) throws Throwable;
         default void checkPostconditions(State state, Result expected,
-                                         SystemUnderTest sut, Result actual) {}
+                                         SystemUnderTest sut, Result actual) throws Throwable {}
         default String detailed(State state) {return this.toString();}
     }
 
     public interface UnitCommand<State, SystemUnderTest> extends Command<State, SystemUnderTest, Void>
     {
-        void applyUnit(State state);
-        void runUnit(SystemUnderTest sut);
+        void applyUnit(State state) throws Throwable;
+        void runUnit(SystemUnderTest sut) throws Throwable;
 
         @Override
-        default Void apply(State state)
+        default Void apply(State state) throws Throwable
         {
             applyUnit(state);
             return null;
         }
 
         @Override
-        default Void run(SystemUnderTest sut)
+        default Void run(SystemUnderTest sut) throws Throwable
         {
             runUnit(sut);
             return null;
@@ -493,10 +493,10 @@ public class Property
 
     public interface Commands<State, SystemUnderTest>
     {
-        Gen<State> genInitialState();
-        SystemUnderTest createSut(State state);
-        default void destroyState(State state) {}
-        default void destroySut(SystemUnderTest sut) {}
-        Gen<Command<State, SystemUnderTest, ?>> commands(State state);
+        Gen<State> genInitialState() throws Throwable;
+        SystemUnderTest createSut(State state) throws Throwable;
+        default void destroyState(State state) throws Throwable {}
+        default void destroySut(SystemUnderTest sut) throws Throwable {}
+        Gen<Command<State, SystemUnderTest, ?>> commands(State state) throws Throwable;
     }
 }
