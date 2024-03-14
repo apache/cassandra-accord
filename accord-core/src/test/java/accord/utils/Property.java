@@ -183,7 +183,7 @@ public class Property
         }
     }
 
-    private static String propertyError(Common<?> input, Throwable cause, Object... values)
+    private static StringBuilder propertyErrorCommon(Common<?> input, Throwable cause)
     {
         StringBuilder sb = new StringBuilder();
         // return "Seed=" + seed + "\nExamples=" + examples;
@@ -201,12 +201,30 @@ public class Property
                 msg = cause.getClass().getCanonicalName();
             sb.append(msg).append('\n');
         }
+        return sb;
+    }
+
+    private static String propertyError(Common<?> input, Throwable cause, Object... values)
+    {
+        StringBuilder sb = propertyErrorCommon(input, cause);
         if (values != null)
         {
             sb.append("Values:\n");
             for (int i = 0; i < values.length; i++)
                 sb.append('\t').append(i).append(" = ").append(normalizeValue(values[i])).append(": ").append(values[i] == null ? "unknown type" : values[i].getClass().getCanonicalName()).append('\n');
         }
+        return sb.toString();
+    }
+
+    private static String statefulPropertyError(StatefulBuilder input, Throwable cause, Object state, List<String> history)
+    {
+        StringBuilder sb = propertyErrorCommon(input, cause);
+        sb.append("Steps: ").append(input.steps).append('\n');
+        sb.append("Values:\n");
+        sb.append("\tState: ").append(state).append(": ").append(state == null ? "unknown type" : state.getClass().getCanonicalName()).append('\n');
+        sb.append("\tHistory:").append('\n');
+        for (var event : history)
+            sb.append("\t\t").append(event).append('\n');
         return sb.toString();
     }
 
@@ -449,7 +467,7 @@ public class Property
                 }
                 catch (Throwable t)
                 {
-                    throw new PropertyError(propertyError(this, t, state, history), t);
+                    throw new PropertyError(statefulPropertyError(this, t, state, history), t);
                 }
                 if (pure)
                 {
