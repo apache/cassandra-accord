@@ -99,6 +99,21 @@ public interface Gen<A> {
         return Stream.generate(() -> next(rs));
     }
 
+    interface Int2IntMapFunction
+    {
+        int applyAsInt(RandomSource rs, int value);
+    }
+
+    interface Int2LongMapFunction
+    {
+        long applyAsLong(RandomSource rs, int value);
+    }
+
+    interface Long2LongMapFunction
+    {
+        long applyAsLong(RandomSource rs, long value);
+    }
+
     interface IntGen extends Gen<Integer>
     {
         int nextInt(RandomSource random);
@@ -112,6 +127,16 @@ public interface Gen<A> {
         default IntGen mapAsInt(IntUnaryOperator fn)
         {
             return r -> fn.applyAsInt(nextInt(r));
+        }
+
+        default IntGen mapAsInt(Int2IntMapFunction fn)
+        {
+            return r -> fn.applyAsInt(r, nextInt(r));
+        }
+
+        default LongGen mapAsLong(Int2LongMapFunction fn)
+        {
+            return r -> fn.applyAsLong(r, nextInt(r));
         }
 
         default Gen.IntGen filterAsInt(IntPredicate fn)
@@ -157,6 +182,11 @@ public interface Gen<A> {
         default LongGen mapAsLong(LongUnaryOperator fn)
         {
             return r -> fn.applyAsLong(nextLong(r));
+        }
+
+        default LongGen mapAsLong(Long2LongMapFunction fn)
+        {
+            return r -> fn.applyAsLong(r, nextLong(r));
         }
 
         default Gen.LongGen filterAsLong(LongPredicate fn)
