@@ -1698,7 +1698,6 @@ public class CommandsForKey implements CommandsSummary
         if (o == null || getClass() != o.getClass()) return false;
         CommandsForKey that = (CommandsForKey) o;
         return Objects.equals(key, that.key)
-               && Objects.equals(redundantBefore, that.redundantBefore)
                && Arrays.equals(txns, that.txns);
     }
 
