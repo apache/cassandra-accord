@@ -29,6 +29,8 @@ import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import com.google.common.collect.Iterables;
+
 import accord.utils.random.Picker;
 
 // TODO (expected): merge with C* RandomSource
@@ -286,7 +288,13 @@ public interface RandomSource
         return array[nextInt(offset, offset + length)];
     }
 
-    default <T extends Comparable<T>> T pick(Set<T> set)
+    default <T> T pick(NavigableSet<T> set)
+    {
+        int offset = nextInt(0, set.size());
+        return Iterables.get(set, offset);
+    }
+
+    default <T extends Comparable<? super T>> T pick(Set<T> set)
     {
         List<T> values = new ArrayList<>(set);
         // Non-ordered sets may have different iteration order on different environments, which would make a seed produce different histories!

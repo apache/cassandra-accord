@@ -23,12 +23,16 @@ import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 public class Property
@@ -75,6 +79,7 @@ public class Property
         public T withTimeout(Duration timeout)
         {
             this.timeout = timeout;
+            this.pure = false;
             return (T) this;
         }
 
@@ -168,7 +173,10 @@ public class Property
         }
         try
         {
-            return value.toString();
+            String result = value.toString();
+            if (result != null && result.length() > 100 && value instanceof Collection)
+                result = ((Collection<?>) value).stream().map(o -> "\n\t     " + o).collect(Collectors.joining(",", "[", "]"));
+            return result;
         }
         catch (Throwable t)
         {
@@ -176,7 +184,7 @@ public class Property
         }
     }
 
-    private static String propertyError(Common<?> input, Throwable cause, Object... values)
+    private static StringBuilder propertyErrorCommon(Common<?> input, Throwable cause)
     {
         StringBuilder sb = new StringBuilder();
         // return "Seed=" + seed + "\nExamples=" + examples;
@@ -194,12 +202,30 @@ public class Property
                 msg = cause.getClass().getCanonicalName();
             sb.append(msg).append('\n');
         }
+        return sb;
+    }
+
+    private static String propertyError(Common<?> input, Throwable cause, Object... values)
+    {
+        StringBuilder sb = propertyErrorCommon(input, cause);
         if (values != null)
         {
             sb.append("Values:\n");
             for (int i = 0; i < values.length; i++)
-                sb.append('\t').append(i).append(" = ").append(normalizeValue(values[i])).append('\n');
+                sb.append('\t').append(i).append(" = ").append(normalizeValue(values[i])).append(": ").append(values[i] == null ? "unknown type" : values[i].getClass().getCanonicalName()).append('\n');
         }
+        return sb.toString();
+    }
+
+    private static String statefulPropertyError(StatefulBuilder input, Throwable cause, Object state, List<String> history)
+    {
+        StringBuilder sb = propertyErrorCommon(input, cause);
+        sb.append("Steps: ").append(input.steps).append('\n');
+        sb.append("Values:\n");
+        sb.append("\tState: ").append(state).append(": ").append(state == null ? "unknown type" : state.getClass().getCanonicalName()).append('\n');
+        sb.append("\tHistory:").append('\n');
+        for (var event : history)
+            sb.append("\t\t").append(event).append('\n');
         return sb.toString();
     }
 
@@ -379,5 +405,117 @@ public class Property
     public static ForBuilder qt()
     {
         return new ForBuilder();
+    }
+
+    public static StatefulBuilder stateful()
+    {
+        return new StatefulBuilder();
+    }
+
+    public static class StatefulBuilder extends Common<StatefulBuilder>
+    {
+        protected int steps = 1000;
+
+        public StatefulBuilder()
+        {
+            examples = 500;
+        }
+
+        public StatefulBuilder withSteps(int steps)
+        {
+            this.steps = steps;
+            return this;
+        }
+
+        @SuppressWarnings("rawtypes")
+        public <State, SystemUnderTest> void check(Commands<State, SystemUnderTest> commands)
+        {
+            RandomSource rs = new DefaultRandom(seed);
+            for (int i = 0; i < examples; i++)
+            {
+                State state = null;
+                List<String> history = new ArrayList<>(steps);
+                try
+                {
+                    checkInterrupted();
+
+                    state = commands.genInitialState().next(rs);
+                    SystemUnderTest sut = commands.createSut(state);
+
+                    try
+                    {
+                        for (int j = 0; j < steps; j++)
+                        {
+                            Gen<Command<State, SystemUnderTest, ?>> cmdGen = commands.commands(state);
+                            Command cmd = cmdGen.next(rs);
+                            for (int a = 0; cmd.checkPreconditions(state) != PreCheckResult.Ok && a < 42; a++)
+                            {
+                                if (a == 41)
+                                    throw new IllegalArgumentException("Unable to find next command");
+                                cmd = cmdGen.next(rs);
+                            }
+                            history.add(cmd.detailed(state));
+                            Object stateResult = cmd.apply(state);
+                            cmd.checkPostconditions(state, stateResult,
+                                                    sut, cmd.run(sut));
+                        }
+                    }
+                    finally
+                    {
+                        commands.destroySut(sut);
+                        commands.destroyState(state);
+                    }
+                }
+                catch (Throwable t)
+                {
+                    throw new PropertyError(statefulPropertyError(this, t, state, history), t);
+                }
+                if (pure)
+                {
+                    seed = rs.nextLong();
+                    rs.setSeed(seed);
+                }
+            }
+        }
+    }
+
+    public enum PreCheckResult { Ok, Ignore }
+    public interface Command<State, SystemUnderTest, Result>
+    {
+        default PreCheckResult checkPreconditions(State state) {return PreCheckResult.Ok;}
+        Result apply(State state) throws Throwable;
+        Result run(SystemUnderTest sut) throws Throwable;
+        default void checkPostconditions(State state, Result expected,
+                                         SystemUnderTest sut, Result actual) throws Throwable {}
+        default String detailed(State state) {return this.toString();}
+    }
+
+    public interface UnitCommand<State, SystemUnderTest> extends Command<State, SystemUnderTest, Void>
+    {
+        void applyUnit(State state) throws Throwable;
+        void runUnit(SystemUnderTest sut) throws Throwable;
+
+        @Override
+        default Void apply(State state) throws Throwable
+        {
+            applyUnit(state);
+            return null;
+        }
+
+        @Override
+        default Void run(SystemUnderTest sut) throws Throwable
+        {
+            runUnit(sut);
+            return null;
+        }
+    }
+
+    public interface Commands<State, SystemUnderTest>
+    {
+        Gen<State> genInitialState() throws Throwable;
+        SystemUnderTest createSut(State state) throws Throwable;
+        default void destroyState(State state) throws Throwable {}
+        default void destroySut(SystemUnderTest sut) throws Throwable {}
+        Gen<Command<State, SystemUnderTest, ?>> commands(State state) throws Throwable;
     }
 }
