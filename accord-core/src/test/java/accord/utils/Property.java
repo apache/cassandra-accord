@@ -79,6 +79,7 @@ public class Property
         public T withTimeout(Duration timeout)
         {
             this.timeout = timeout;
+            this.pure = false;
             return (T) this;
         }
 
