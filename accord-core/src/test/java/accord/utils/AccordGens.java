@@ -403,9 +403,10 @@ public class AccordGens
         return rs -> {
             if (rs.decide(emptyProb)) return RangeDeps.NONE;
             RangeDeps.Builder builder = RangeDeps.builder();
-            for (int i = 0, numKeys = rs.nextInt(1, 10); i < numKeys; i++)
+            List<? extends Range> uniqRanges = Gens.lists(rangeGen).uniqueBestEffort().ofSize(rs.nextInt(1, 10)).next(rs);
+            for (Range range : uniqRanges)
             {
-                builder.nextKey(rangeGen.next(rs));
+                builder.nextKey(range);
                 for (int j = 0, numTxn = rs.nextInt(1, 10); j < numTxn; j++)
                     builder.add(idGen.next(rs));
             }
