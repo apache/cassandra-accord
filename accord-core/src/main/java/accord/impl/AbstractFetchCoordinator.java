@@ -23,6 +23,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import accord.local.SafeCommandStore;
+import accord.messages.ReadData;
+import accord.utils.async.AsyncChain;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,7 +40,6 @@ import accord.messages.MessageType;
 import accord.messages.ReadData.CommitOrReadNack;
 import accord.messages.ReadData.ReadOk;
 import accord.messages.ReadData.ReadReply;
-import accord.messages.WaitUntilAppliedAndReadData;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Ranges;
@@ -50,6 +52,7 @@ import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import javax.annotation.Nullable;
 
+import static accord.local.SaveStatus.Applied;
 import static accord.messages.ReadData.CommitOrReadNack.Insufficient;
 import static accord.primitives.Routables.Slice.Minimal;
 
@@ -231,14 +234,35 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         // TODO (expected): implement abort
     }
 
-    public static class FetchRequest extends WaitUntilAppliedAndReadData
+    public static class FetchRequest extends ReadData
     {
+        private static final ExecuteOn EXECUTE_ON = new ExecuteOn(Applied, Applied);
+        public final PartialTxn read;
+
         public final PartialDeps partialDeps;
 
         public FetchRequest(long sourceEpoch, TxnId syncId, Ranges ranges, PartialDeps partialDeps, PartialTxn partialTxn)
         {
-            super(syncId, ranges, sourceEpoch, partialTxn);
+            super(syncId, ranges, sourceEpoch);
+            this.read = partialTxn;
             this.partialDeps = partialDeps;
+        }
+
+        @Override
+        protected ExecuteOn executeOn()
+        {
+            return EXECUTE_ON;
+        }
+
+        @Override
+        public ReadType kind()
+        {
+            return ReadType.waitUntilApplied;
+        }
+
+        @Override
+        protected AsyncChain<Data> beginRead(SafeCommandStore safeStore, Timestamp executeAt, PartialTxn txn, Ranges unavailable) {
+            return read.read(safeStore, executeAt, unavailable);
         }
 
         @Override

@@ -40,9 +40,14 @@ public class Invariants
         return DEBUG;
     }
 
+    public static IllegalStateException createIllegalState(String msg)
+    {
+        return new IllegalStateException(msg);
+    }
+
     public static IllegalStateException illegalState(String msg)
     {
-         throw new IllegalStateException(msg);
+         throw createIllegalState(msg);
     }
 
     public static IllegalStateException illegalState()

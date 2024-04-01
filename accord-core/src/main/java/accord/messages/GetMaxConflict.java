@@ -88,7 +88,7 @@ public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMa
     @Override
     public MessageType type()
     {
-        return MessageType.GET_EPHEMERAL_READ_DEPS_REQ;
+        return MessageType.GET_MAX_CONFLICT_REQ;
     }
 
     @Override
@@ -137,7 +137,7 @@ public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMa
         @Override
         public MessageType type()
         {
-            return MessageType.GET_EPHEMERAL_READ_DEPS_RSP;
+            return MessageType.GET_MAX_CONFLICT_RSP;
         }
     }
 }

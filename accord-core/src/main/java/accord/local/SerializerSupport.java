@@ -95,7 +95,7 @@ public class SerializerSupport
     private static Command.PreAccepted preAccepted(RangesForEpoch rangesForEpoch, Mutable attrs, Timestamp executeAt, Ballot promised, MessageProvider messageProvider)
     {
         Set<MessageType> witnessed = messageProvider.test(PRE_ACCEPT_TYPES);
-        checkState(!witnessed.isEmpty());
+        checkState(!witnessed.isEmpty(), "PreAccepted message types not witnessed; witnessed is ", new LoggedMessageProvider(messageProvider));
         attrs.partialTxn(txnFromPreAcceptOrBeginRecover(rangesForEpoch, witnessed, messageProvider));
         return Command.PreAccepted.preAccepted(attrs, executeAt, promised);
     }
@@ -225,7 +225,7 @@ public class SerializerSupport
         {
             case PreAccepted:
                 witnessed = messageProvider.test(PRE_ACCEPT_TYPES);
-                checkState(!witnessed.isEmpty());
+                checkState(!witnessed.isEmpty(), "Unable to find PreAccept types; witnessed %s", new LoggedMessageProvider(messageProvider));
                 return withContents.apply(param, txnFromPreAcceptOrBeginRecover(rangesForEpoch, witnessed, messageProvider), null, null, null);
 
             case AcceptedInvalidate:
@@ -237,7 +237,7 @@ public class SerializerSupport
                 if (status.known.isDefinitionKnown())
                 {
                     witnessed = messageProvider.test(PRE_ACCEPT_TYPES);
-                    checkState(!witnessed.isEmpty());
+                    checkState(!witnessed.isEmpty(), "Unable to find PreAccept types; witnessed %s", new LoggedMessageProvider(messageProvider));
                     txn = txnFromPreAcceptOrBeginRecover(rangesForEpoch, witnessed, messageProvider);
                 }
 
@@ -258,7 +258,7 @@ public class SerializerSupport
                 }
                 else
                 {
-                    Invariants.checkState(witnessed.contains(COMMIT_SLOW_PATH_REQ));
+                    Invariants.checkState(witnessed.contains(COMMIT_SLOW_PATH_REQ), "Unable to find COMMIT_SLOW_PATH_REQ; witnessed %s", new LoggedMessageProvider(messageProvider));
                     commit = messageProvider.commitSlowPath();
                 }
 
@@ -284,14 +284,14 @@ public class SerializerSupport
                 }
                 else
                 {
-                    checkState(witnessed.contains(STABLE_SLOW_PATH_REQ));
+                    checkState(witnessed.contains(STABLE_SLOW_PATH_REQ), "Unable to find STABLE_SLOW_PATH_REQ; witnessed %s", new LoggedMessageProvider(messageProvider));
                     if (witnessed.contains(COMMIT_SLOW_PATH_REQ))
                     {
                         commit = messageProvider.commitSlowPath();
                     }
                     else
                     {
-                        checkState(witnessed.contains(COMMIT_MAXIMAL_REQ));
+                        checkState(witnessed.contains(COMMIT_MAXIMAL_REQ), "Unable to find COMMIT_MAXIMAL_REQ; witnessed %s", new LoggedMessageProvider(messageProvider));
                         commit = messageProvider.commitMaximal();
                     }
                 }
@@ -316,7 +316,7 @@ public class SerializerSupport
                 }
                 else
                 {
-                    checkState(witnessed.contains(APPLY_MINIMAL_REQ));
+                    checkState(witnessed.contains(APPLY_MINIMAL_REQ), "Unable to find APPLY_MINIMAL_REQ; witnessed %s", new LoggedMessageProvider(messageProvider));
                     Apply apply = messageProvider.applyMinimal();
                     Commit commit;
                     if (witnessed.contains(STABLE_MAXIMAL_REQ))
@@ -338,7 +338,7 @@ public class SerializerSupport
                     }
                     else
                     {
-                        throw illegalState("Invalid state: insufficient stable or commit messages found to reconstruct PreApplied or greater SaveStatus");
+                        throw illegalState("Invalid state: insufficient stable or commit messages found to reconstruct PreApplied or greater SaveStatus; witnessed " + witnessed);
                     }
 
                     return sliceAndApply(rangesForEpoch, messageProvider, witnessed, commit, withContents, param, apply.writes, apply.result);
@@ -422,6 +422,7 @@ public class SerializerSupport
     public interface MessageProvider
     {
         Set<MessageType> test(Set<MessageType> messages);
+        Set<MessageType> all();
 
         PreAccept preAccept();
 
@@ -446,5 +447,21 @@ public class SerializerSupport
         Apply applyMaximal();
 
         Propagate propagateApply();
+    }
+
+    private static class LoggedMessageProvider
+    {
+        private final MessageProvider messageProvider;
+
+        private LoggedMessageProvider(MessageProvider messageProvider)
+        {
+            this.messageProvider = messageProvider;
+        }
+
+        @Override
+        public String toString()
+        {
+            return messageProvider.all().toString();
+        }
     }
 }

@@ -85,7 +85,7 @@ public class FetchMaxConflict extends AbstractCoordinatePreAccept<Timestamp, Get
     @Override
     void contact(Set<Node.Id> nodes, Topologies topologies, Callback<GetMaxConflictOk> callback)
     {
-        node.send(nodes, to -> new GetMaxConflict(to, topologies, route, keysOrRanges, executionEpoch));
+        node.send(nodes, to -> new GetMaxConflict(to, topologies, route, keysOrRanges, executionEpoch), callback);
     }
 
     @Override

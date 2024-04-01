@@ -45,6 +45,8 @@ import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
+import javax.annotation.Nullable;
+
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_ADJACENT;
 import static accord.primitives.Routables.Slice.Minimal;
@@ -344,6 +346,7 @@ public class TopologyManager
             return pending.get(idx);
         }
 
+        @Nullable
         private EpochState get(long epoch)
         {
             int index = indexOf(epoch);
@@ -587,7 +590,9 @@ public class TopologyManager
     {
         Epochs snapshot = epochs;
 
-        TopologyMismatch tm = TopologyMismatch.checkForMismatch(snapshot.get(maxEpoch).global(), select);
+        EpochState maxState = snapshot.get(maxEpoch);
+        Invariants.checkState(maxState != null, "Unable to find epoch %d; known epochs are %d -> %d", maxEpoch, snapshot.minEpoch(), snapshot.currentEpoch);
+        TopologyMismatch tm = TopologyMismatch.checkForMismatch(maxState.global(), select);
         if (tm != null)
             throw tm;
 

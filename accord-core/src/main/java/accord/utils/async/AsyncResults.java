@@ -28,6 +28,7 @@ import java.util.function.Function;
 import accord.api.VisibleForImplementation;
 import accord.utils.Invariants;
 
+import static accord.utils.Invariants.createIllegalState;
 import static accord.utils.Invariants.illegalState;
 
 public class AsyncResults
@@ -95,7 +96,7 @@ public class AsyncResults
             }
             if (failures != null)
             {
-                IllegalStateException f = illegalState("Callbacks threw");
+                IllegalStateException f = createIllegalState("Callbacks threw");
                 failures.forEach(f::addSuppressed);
                 throw f;
             }
@@ -147,7 +148,7 @@ public class AsyncResults
         {
             if (!trySetResult(result, failure))
             {
-                IllegalStateException f = illegalState("Result has already been set on " + this);
+                IllegalStateException f = createIllegalState("Result has already been set on " + this);
                 if (failure != null)
                     f.addSuppressed(failure);
                 throw f;
@@ -226,7 +227,7 @@ public class AsyncResults
         {
             Result<V> result = getResult();
             if (result.failure == null)
-                throw illegalState("Result succeeded");
+                illegalState("Result succeeded");
             return result.failure;
         }
 

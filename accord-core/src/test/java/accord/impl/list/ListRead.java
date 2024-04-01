@@ -78,6 +78,8 @@ public class ListRead implements Read
         {
             default: throw new AssertionError();
             case Key:
+                if (!keys.contains((Key)key))
+                    throw new IllegalArgumentException("Attempted to read key " + key + " which is outside of the expected range " + keys);
                 Timestamped<int[]> data = s.get(unavailable, executeAt, (Key)key);
                 logger.trace("READ on {} at {} key:{} -> {}", s.node, executeAt, key, data);
                 Invariants.checkState(isEphemeralRead || data.timestamp.compareTo(executeAt) < 0,
@@ -85,6 +87,8 @@ public class ListRead implements Read
                 result.put((Key)key, data);
                 break;
             case Range:
+                if (!keys.containsAll(Ranges.single((Range)key)))
+                    throw new IllegalArgumentException("Attempted to read range " + key + " which is outside of the expected range " + keys);
                 for (Map.Entry<Key, Timestamped<int[]>> e : s.get(unavailable, executeAt, (Range)key))
                     result.put(e.getKey(), e.getValue());
         }
