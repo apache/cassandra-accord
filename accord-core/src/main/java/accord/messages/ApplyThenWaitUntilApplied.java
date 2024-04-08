@@ -38,6 +38,7 @@ import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
+import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
@@ -59,12 +60,13 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     @SuppressWarnings("unused")
     public static class SerializerSupport
     {
-        public static ApplyThenWaitUntilApplied create(TxnId txnId, Participants<?> readScope, long executeAtEpoch, FullRoute<?> route, PartialTxn txn, PartialDeps deps, Writes writes, Result result, Seekables<?, ?> notify)
+        public static ApplyThenWaitUntilApplied create(TxnId txnId, Participants<?> readScope, long executeAtEpoch, Timestamp executeAt, FullRoute<?> route, PartialTxn txn, PartialDeps deps, Writes writes, Result result, Seekables<?, ?> notify)
         {
-            return new ApplyThenWaitUntilApplied(txnId, readScope, executeAtEpoch, route, txn, deps, writes, result, notify);
+            return new ApplyThenWaitUntilApplied(txnId, readScope, executeAtEpoch, executeAt, route, txn, deps, writes, result, notify);
         }
     }
 
+    public final Timestamp executeAt;
     public final FullRoute<?> route;
     public final PartialTxn txn;
     public final PartialDeps deps;
@@ -72,9 +74,10 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     public final Result result;
     public final Seekables<?, ?> notify;
 
-    public ApplyThenWaitUntilApplied(Node.Id to, Topologies topologies, FullRoute<?> route, TxnId txnId, Txn txn, Deps deps, Participants<?> readScope, long executeAtEpoch, Writes writes, Result result, Seekables<?, ?> notify)
+    public ApplyThenWaitUntilApplied(Node.Id to, Topologies topologies, Timestamp executeAt, FullRoute<?> route, TxnId txnId, Txn txn, Deps deps, Participants<?> readScope, long executeAtEpoch, Writes writes, Result result, Seekables<?, ?> notify)
     {
         super(to, topologies, txnId, readScope, executeAtEpoch);
+        this.executeAt = executeAt;
         Ranges slice = computeScope(to, topologies, null, 0, (i,r)->r, Ranges::with);
         this.route = route;
         this.txn = txn.slice(slice, true);
@@ -84,9 +87,10 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
         this.notify = notify == null ? null : notify.slice(slice);
     }
 
-    protected ApplyThenWaitUntilApplied(TxnId txnId, Participants<?> readScope, long executeAtEpoch, FullRoute<?> route, PartialTxn txn, PartialDeps deps, Writes writes, Result result, Seekables<?, ?> notify)
+    protected ApplyThenWaitUntilApplied(TxnId txnId, Participants<?> readScope, long executeAtEpoch, Timestamp executeAt, FullRoute<?> route, PartialTxn txn, PartialDeps deps, Writes writes, Result result, Seekables<?, ?> notify)
     {
         super(txnId, readScope, executeAtEpoch);
+        this.executeAt = executeAt;
         this.route = route;
         this.txn = txn;
         this.deps = deps;
@@ -105,7 +109,7 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     public CommitOrReadNack apply(SafeCommandStore safeStore)
     {
         RoutingKey progressKey = TxnRequest.progressKey(node, txnId.epoch(), txnId, route);
-        ApplyReply applyReply = Apply.apply(safeStore, txn, txnId, txnId, deps, route, writes, result, progressKey);
+        ApplyReply applyReply = Apply.apply(safeStore, txn, txnId, executeAt, deps, route, writes, result, progressKey);
         switch (applyReply)
         {
             default:

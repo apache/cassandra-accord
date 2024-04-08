@@ -18,6 +18,7 @@
 
 package accord.coordinate;
 
+import java.util.function.BiFunction;
 import javax.annotation.Nonnull;
 
 import accord.local.*;
@@ -71,8 +72,11 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
     @VisibleForTesting
     ExistingTransactionCheck existingTransactionCheck;
 
-    Barrier(Node node, S keysOrRanges, long minEpoch, BarrierType barrierType)
+    private final BiFunction<Node, S, AsyncResult<SyncPoint<S>>> syncPoint;
+
+    Barrier(Node node, S keysOrRanges, long minEpoch, BarrierType barrierType, BiFunction<Node, S, AsyncResult<SyncPoint<S>>> syncPoint)
     {
+        this.syncPoint = syncPoint;
         checkArgument(keysOrRanges.domain() == Domain.Key || barrierType.global, "Ranges are only supported with global barriers");
         checkArgument(keysOrRanges.size() == 1 || barrierType.global, "Only a single key is supported with local barriers");
         this.node = node;
@@ -81,9 +85,25 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
         this.barrierType = barrierType;
     }
 
-    public static <S extends Seekables<?, ?>> Barrier<S> barrier(Node node, S keysOrRanges, long minEpoch, BarrierType barrierType)
+
+    /**
+     * Trigger one of several different kinds of barrier transactions on a key or range with different properties. Barriers ensure that all prior transactions
+     * have their side effects visible up to some point.
+     *
+     * Local barriers will look for a local transaction that was applied in minEpoch or later and returns when one exists or completes.
+     * It may, but it is not guaranteed to, trigger a global barrier transaction that effects the barrier at all replicas.
+     *
+     * A global barrier is guaranteed to create a distributed barrier transaction, and if it is synchronous will not return until the
+     * transaction has applied at a quorum globally (meaning all dependencies and their side effects are already visible). If it is asynchronous
+     * it will return once the barrier has been applied locally.
+     *
+     * Ranges are only supported for global barriers.
+     *
+     * Returns the Timestamp the barrier actually ended up occurring at. Keep in mind for local barriers it doesn't mean a new transaction was created.
+     */
+    public static <S extends Seekables<?, ?>> Barrier<S> barrier(Node node, S keysOrRanges, long minEpoch, BarrierType barrierType, BiFunction<Node, S, AsyncResult<SyncPoint<S>>> syncPoint)
     {
-        Barrier<S> barrier = new Barrier(node, keysOrRanges, minEpoch, barrierType);
+        Barrier<S> barrier = new Barrier(node, keysOrRanges, minEpoch, barrierType, syncPoint);
         node.topology().awaitEpoch(minEpoch).begin((ignored, failure) -> {
             if (failure != null)
             {
@@ -93,6 +113,11 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
             barrier.start();
         });
         return barrier;
+    }
+
+    public static <S extends Seekables<?, ?>> Barrier<S> barrier(Node node, S keysOrRanges, long minEpoch, BarrierType barrierType)
+    {
+        return barrier(node, keysOrRanges, minEpoch, barrierType, barrierType.async ? CoordinateSyncPoint::inclusive : CoordinateSyncPoint::inclusiveAndAwaitQuorum);
     }
 
     private void start()
@@ -135,8 +160,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
 
     private void createSyncPoint()
     {
-        coordinateSyncPoint = barrierType.async ? CoordinateSyncPoint.inclusive(node, seekables)
-                                                : CoordinateSyncPoint.inclusiveAndAwaitQuorum(node, seekables);
+        coordinateSyncPoint = syncPoint.apply(node, seekables);
         coordinateSyncPoint.addCallback((syncPoint, syncPointFailure) -> {
             if (syncPointFailure != null)
             {

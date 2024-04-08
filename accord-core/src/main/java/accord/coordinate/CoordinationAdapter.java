@@ -23,7 +23,7 @@ import java.util.function.BiConsumer;
 import javax.annotation.Nullable;
 
 import accord.api.Result;
-import accord.coordinate.ExecuteSyncPoint.ExecuteAtQuorum;
+import accord.coordinate.ExecuteSyncPoint.ExecuteBlocking;
 import accord.local.Node;
 import accord.messages.Apply;
 import accord.primitives.Ballot;
@@ -201,7 +201,7 @@ public interface CoordinationAdapter<R>
             }
         }
 
-        static abstract class AbstractSyncPointAdapter<S extends Seekables<?, ?>> implements CoordinationAdapter<SyncPoint<S>>
+        public static abstract class AbstractSyncPointAdapter<S extends Seekables<?, ?>> implements CoordinationAdapter<SyncPoint<S>>
         {
             void invokeSuccess(Node node, FullRoute<?> route, TxnId txnId, Txn txn, Deps deps, BiConsumer<? super SyncPoint<S>, Throwable> callback)
             {
@@ -268,7 +268,7 @@ public interface CoordinationAdapter<R>
             @Override
             public void execute(Node node, Topologies all, FullRoute<?> route, ExecutePath path, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super SyncPoint<S>, Throwable> callback)
             {
-                ExecuteAtQuorum<S> execute = new ExecuteAtQuorum<S>(node, all, new SyncPoint<>(txnId, deps, (S)txn.keys(), route));
+                ExecuteBlocking<S> execute = ExecuteBlocking.atQuorum(node, all, new SyncPoint<>(txnId, deps, (S)txn.keys(), route), executeAt);
                 execute.addCallback(callback);
                 execute.start();
             }

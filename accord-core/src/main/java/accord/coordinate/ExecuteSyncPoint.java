@@ -30,6 +30,7 @@ import accord.messages.ReadData.ReadReply;
 import accord.primitives.Participants;
 import accord.primitives.Seekables;
 import accord.primitives.SyncPoint;
+import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
@@ -39,15 +40,22 @@ public abstract class ExecuteSyncPoint<S extends Seekables<?, ?>> extends Settab
 {
     public static class SyncPointErased extends Throwable {}
 
-    public static class ExecuteAtQuorum<S extends Seekables<?, ?>> extends ExecuteSyncPoint<S>
+    public static class ExecuteBlocking<S extends Seekables<?, ?>> extends ExecuteSyncPoint<S>
     {
-        ExecuteAtQuorum(Node node, Topologies topologies, SyncPoint<S> syncPoint)
+        private final Timestamp executeAt;
+        public ExecuteBlocking(Node node, AbstractSimpleTracker<?> tracker, SyncPoint<S> syncPoint, Timestamp executeAt)
         {
-            super(node, new QuorumTracker(topologies), syncPoint);
+            super(node, tracker, syncPoint);
+            this.executeAt = executeAt;
+        }
+
+        public static <S extends Seekables<?, ?>> ExecuteBlocking<S> atQuorum(Node node, Topologies topologies, SyncPoint<S> syncPoint, Timestamp executeAt)
+        {
+            return  new ExecuteBlocking<>(node, new QuorumTracker(topologies), syncPoint, executeAt);
         }
 
         @Override
-        protected void start()
+        public void start()
         {
             Txn txn = node.agent().emptyTxn(syncPoint.syncId.kind(), syncPoint.keysOrRanges);
             Writes writes = txn.execute(syncPoint.syncId, syncPoint.syncId, null);
@@ -55,7 +63,7 @@ public abstract class ExecuteSyncPoint<S extends Seekables<?, ?>> extends Settab
             node.send(tracker.topologies().nodes(), to -> {
                 Seekables<?, ?> notify = to.equals(node.id()) ? null : syncPoint.keysOrRanges;
                 Participants<?> participants = syncPoint.keysOrRanges.toParticipants();
-                return new ApplyThenWaitUntilApplied(to, tracker.topologies(), syncPoint.route(), syncPoint.syncId, txn, syncPoint.waitFor, participants, syncPoint.syncId.epoch(), writes, result, notify);
+                return new ApplyThenWaitUntilApplied(to, tracker.topologies(), executeAt, syncPoint.route(), syncPoint.syncId, txn, syncPoint.waitFor, participants, syncPoint.syncId.epoch(), writes, result, notify);
             }, this);
         }
     }

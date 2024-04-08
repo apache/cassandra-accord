@@ -88,7 +88,7 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
         return coordinate(node, Kind.SyncPoint, keysOrRanges, Adapters.inclusiveSyncPointBlocking());
     }
 
-    private static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> coordinate(Node node, Kind kind, S keysOrRanges, CoordinationAdapter<SyncPoint<S>> adapter)
+    public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> coordinate(Node node, Kind kind, S keysOrRanges, CoordinationAdapter<SyncPoint<S>> adapter)
     {
         checkArgument(kind == Kind.SyncPoint || kind == ExclusiveSyncPoint);
         TxnId txnId = node.nextTxnId(kind, keysOrRanges.domain());
