@@ -85,11 +85,12 @@ public abstract class AbstractTracker<ST extends ShardTracker>
     protected final int maxShardsPerEpoch;
     protected int waitingOnShards;
 
-    AbstractTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, Function<Shard, ST> trackerFactory)
+    public AbstractTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, Function<Shard, ST> trackerFactory)
     {
         this(topologies, arrayFactory, (ignore, shard) -> trackerFactory.apply(shard));
     }
-    AbstractTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, ShardFactory<ST> trackerFactory)
+
+    public AbstractTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, ShardFactory<ST> trackerFactory)
     {
         Invariants.checkArgument(topologies.totalShards() > 0);
         int topologyCount = topologies.size();
@@ -126,13 +127,13 @@ public abstract class AbstractTracker<ST extends ShardTracker>
 
     protected RequestStatus trySendMore() { throw new UnsupportedOperationException(); }
 
-    <T extends AbstractTracker<ST>, P>
+    protected <T extends AbstractTracker<ST>, P>
     RequestStatus recordResponse(T self, Id node, BiFunction<? super ST, P, ? extends ShardOutcome<? super T>> function, P param)
     {
         return recordResponse(self, node, function, param, topologies.size());
     }
 
-    <T extends AbstractTracker<ST>, P>
+    protected <T extends AbstractTracker<ST>, P>
     RequestStatus recordResponse(T self, Id node, BiFunction<? super ST, P, ? extends ShardOutcome<? super T>> function, P param, int topologyLimit)
     {
         Invariants.checkState(self == this); // we just accept self as parameter for type safety

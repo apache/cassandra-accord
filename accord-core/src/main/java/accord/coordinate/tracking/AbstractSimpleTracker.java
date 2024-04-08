@@ -27,12 +27,12 @@ import accord.topology.Topologies;
 
 public abstract class AbstractSimpleTracker<ST extends ShardTracker> extends AbstractTracker<ST>
 {
-    AbstractSimpleTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, Function<Shard, ST> trackerFactory)
+    public AbstractSimpleTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, Function<Shard, ST> trackerFactory)
     {
         super(topologies, arrayFactory, trackerFactory);
     }
 
-    AbstractSimpleTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, ShardFactory<ST> trackerFactory)
+    public AbstractSimpleTracker(Topologies topologies, IntFunction<ST[]> arrayFactory, ShardFactory<ST> trackerFactory)
     {
         super(topologies, arrayFactory, trackerFactory);
     }
