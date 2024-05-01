@@ -96,6 +96,7 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
     }
 
     final Node node;
+    @Nullable
     final TxnId txnId;
     final FullRoute<?> route;
 
@@ -219,7 +220,7 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
                 onNewEpochTopologyMismatch(mismatch);
                 return;
             }
-            topologies = node.topology().withUnsyncedEpochs(route, txnId.epoch(), latestEpoch);
+            topologies = node.topology().withUnsyncedEpochs(route, txnId == null ? executeAtEpoch() : txnId.epoch(), latestEpoch);
             boolean equivalent = topologies.oldestEpoch() <= prevTopologies.currentEpoch();
             for (long epoch = topologies.currentEpoch() ; equivalent && epoch > prevTopologies.currentEpoch() ; --epoch)
                 equivalent = topologies.forEpoch(epoch).shards().equals(prevTopologies.current().shards());

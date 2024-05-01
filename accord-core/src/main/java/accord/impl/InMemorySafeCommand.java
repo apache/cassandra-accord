@@ -20,6 +20,8 @@ package accord.impl;
 
 import java.util.function.Supplier;
 
+import javax.annotation.Nullable;
+
 import accord.impl.InMemoryCommandStore.GlobalCommand;
 import accord.local.Command;
 import accord.local.Listeners;
@@ -105,6 +107,12 @@ public class InMemorySafeCommand extends SafeCommand implements SafeState<Comman
     GlobalCommand global()
     {
         touch();
+        return global;
+    }
+
+    @Nullable
+    GlobalCommand unsafeGlobal()
+    {
         return global;
     }
 }

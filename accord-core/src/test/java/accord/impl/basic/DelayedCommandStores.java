@@ -33,12 +33,14 @@ import accord.impl.InMemoryCommandStore;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.PrefixedIntHashKey;
 import accord.impl.basic.TaskExecutorService.Task;
+import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
+import accord.local.SerializerSupport;
 import accord.local.ShardDistributor;
 import accord.primitives.Range;
 import accord.topology.Topology;
@@ -49,15 +51,15 @@ import accord.utils.async.AsyncChains;
 
 public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 {
-    private DelayedCommandStores(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, SimulatedDelayedExecutorService executorService, BooleanSupplier isLoadedCheck)
+    private DelayedCommandStores(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, SimulatedDelayedExecutorService executorService, BooleanSupplier isLoadedCheck, Journal journal)
     {
-        super(time, agent, store, random, shardDistributor, progressLogFactory, DelayedCommandStore.factory(executorService, isLoadedCheck));
+        super(time, agent, store, random, shardDistributor, progressLogFactory, DelayedCommandStore.factory(executorService, isLoadedCheck, journal));
     }
 
-    public static CommandStores.Factory factory(PendingQueue pending, BooleanSupplier isLoadedCheck)
+    public static CommandStores.Factory factory(PendingQueue pending, BooleanSupplier isLoadedCheck, Journal journal)
     {
         return (time, agent, store, random, shardDistributor, progressLogFactory) ->
-               new DelayedCommandStores(time, agent, store, random, shardDistributor, progressLogFactory, new SimulatedDelayedExecutorService(pending, agent), isLoadedCheck);
+               new DelayedCommandStores(time, agent, store, random, shardDistributor, progressLogFactory, new SimulatedDelayedExecutorService(pending, agent), isLoadedCheck, journal);
     }
 
     @Override
@@ -101,12 +103,25 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         private final SimulatedDelayedExecutorService executor;
         private final Queue<Task<?>> pending = new LinkedList<>();
         private final BooleanSupplier isLoadedCheck;
+        private final Journal journal;
 
-        public DelayedCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder, SimulatedDelayedExecutorService executor, BooleanSupplier isLoadedCheck)
+        public DelayedCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder, SimulatedDelayedExecutorService executor, BooleanSupplier isLoadedCheck, Journal journal)
         {
             super(id, time, agent, store, progressLogFactory, epochUpdateHolder);
             this.executor = executor;
             this.isLoadedCheck = isLoadedCheck;
+            this.journal = journal;
+        }
+
+        @Override
+        protected void validateRead(Command current)
+        {
+            Command.WaitingOn waitingOn = null;
+            if (current.isStable() && !current.isTruncated())
+                waitingOn = current.asCommitted().waitingOn;
+            SerializerSupport.MessageProvider messages = journal.makeMessageProvider(current.txnId());
+            Command.WaitingOn finalWaitingOn = waitingOn;
+            SerializerSupport.reconstruct(unsafeRangesForEpoch(), current.mutable(), current.saveStatus(), current.executeAt(), current.promised(), current.acceptedOrCommitted(), ignore -> finalWaitingOn, messages);
         }
 
         @Override
@@ -115,9 +130,9 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             return isLoadedCheck.getAsBoolean();
         }
 
-        private static CommandStore.Factory factory(SimulatedDelayedExecutorService executor, BooleanSupplier isLoadedCheck)
+        private static CommandStore.Factory factory(SimulatedDelayedExecutorService executor, BooleanSupplier isLoadedCheck, Journal journal)
         {
-            return (id, time, agent, store, progressLogFactory, rangesForEpoch) -> new DelayedCommandStore(id, time, agent, store, progressLogFactory, rangesForEpoch, executor, isLoadedCheck);
+            return (id, time, agent, store, progressLogFactory, rangesForEpoch) -> new DelayedCommandStore(id, time, agent, store, progressLogFactory, rangesForEpoch, executor, isLoadedCheck, journal);
         }
 
         @Override

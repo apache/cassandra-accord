@@ -127,6 +127,7 @@ public class Cluster implements Scheduler
     final RandomSource random;
     final LinkConfig linkConfig;
     final Function<Id, Node> lookup;
+    final Function<Id, Journal> journalLookup;
     final PendingQueue pending;
     final Runnable checkFailures;
     final List<Runnable> onDone = new ArrayList<>();
@@ -137,13 +138,14 @@ public class Cluster implements Scheduler
     int recurring;
     BiFunction<Id, Id, Link> links;
 
-    public Cluster(RandomSource random, MessageListener messageListener, Supplier<PendingQueue> queueSupplier, Runnable checkFailures, Function<Id, Node> lookup, IntSupplier rf, Consumer<Packet> responseSink)
+    public Cluster(RandomSource random, MessageListener messageListener, Supplier<PendingQueue> queueSupplier, Runnable checkFailures, Function<Id, Node> lookup, Function<Id, Journal> journalLookup, IntSupplier rf, Consumer<Packet> responseSink)
     {
         this.random = random;
         this.messageListener = messageListener;
         this.pending = queueSupplier.get();
         this.checkFailures = checkFailures;
         this.lookup = lookup;
+        this.journalLookup = journalLookup;
         this.responseSink = responseSink;
         this.linkConfig = defaultLinkConfig(random, rf);
         this.links = linkConfig.defaultLinks;
@@ -216,7 +218,8 @@ public class Cluster implements Scheduler
                     else callback.success(deliver.src, reply);
                 }
             }
-            else on.receive((Request) deliver.message, deliver.src, deliver);
+            else journalLookup.apply(deliver.dst).handle((Request) deliver.message, deliver.src, deliver);
+//            else on.receive((Request) deliver.message, deliver.src, deliver);
         }
         else
         {
@@ -269,10 +272,11 @@ public class Cluster implements Scheduler
         Topology topology = topologyFactory.toTopology(nodes);
         Map<Id, Node> nodeMap = new LinkedHashMap<>();
         Map<Id, AgentExecutor> executorMap = new LinkedHashMap<>();
+        Map<Id, Journal> journalMap = new LinkedHashMap<>();
         try
         {
             RandomSource random = randomSupplier.get();
-            Cluster sinks = new Cluster(randomSupplier.get(), messageListener, queueSupplier, checkFailures, nodeMap::get, () -> topologyFactory.rf, responseSink);
+            Cluster sinks = new Cluster(randomSupplier.get(), messageListener, queueSupplier, checkFailures, nodeMap::get, journalMap::get, () -> topologyFactory.rf, responseSink);
             TopologyUpdates topologyUpdates = new TopologyUpdates(executorMap::get);
             TopologyRandomizer.Listener schemaApply = t -> {
                 for (Node node : nodeMap.values())
@@ -291,13 +295,15 @@ public class Cluster implements Scheduler
                 BiConsumer<Timestamp, Ranges> onStale = (sinceAtLeast, ranges) -> configRandomizer.onStale(id, sinceAtLeast, ranges);
                 AgentExecutor nodeExecutor = nodeExecutorSupplier.apply(id, onStale);
                 executorMap.put(id, nodeExecutor);
+                Journal journal = new Journal();
+                journalMap.put(id, journal);
                 BurnTestConfigurationService configService = new BurnTestConfigurationService(id, nodeExecutor, randomSupplier, topology, nodeMap::get, topologyUpdates);
                 BooleanSupplier isLoadedCheck = random.biasedUniformBools(0.5f);
-                Node node = new Node(id, messageSink, LocalRequest::process, configService, nowSupplier, NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, nowSupplier),
+                Node node = new Node(id, messageSink, journal, configService, nowSupplier, NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, nowSupplier),
                                      () -> new ListStore(id), new ShardDistributor.EvenSplit<>(8, ignore -> new PrefixedIntHashKey.Splitter()),
                                      nodeExecutor.agent(),
                                      randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,
-                                     SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending, isLoadedCheck), new CoordinationAdapter.DefaultFactory(),
+                                     SimpleProgressLog::new, DelayedCommandStores.factory(sinks.pending, isLoadedCheck, journal), new CoordinationAdapter.DefaultFactory(),
                                      localConfig);
                 CoordinateDurabilityScheduling durability = new CoordinateDurabilityScheduling(node);
                 // TODO (desired): randomise
@@ -328,6 +334,7 @@ public class Cluster implements Scheduler
             schemaApply.onUpdate(topology);
 
             // startup
+            journalMap.entrySet().forEach(e -> e.getValue().start(nodeMap.get(e.getKey())));
             AsyncResult<?> startup = AsyncChains.reduce(nodeMap.values().stream().map(Node::unsafeStart).collect(toList()), (a, b) -> null).beginAsResult();
             while (sinks.processPending());
             Assertions.assertTrue(startup.isDone());
@@ -379,6 +386,7 @@ public class Cluster implements Scheduler
         }
         finally
         {
+            journalMap.values().forEach(Journal::shutdown);
             nodeMap.values().forEach(Node::shutdown);
         }
     }
