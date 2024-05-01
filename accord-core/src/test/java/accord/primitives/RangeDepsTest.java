@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import java.util.*;
 
 import static accord.primitives.Txn.Kind.Write;
+import static org.assertj.core.api.Assertions.assertThat;
 
 public class RangeDepsTest
 {
@@ -96,8 +97,12 @@ public class RangeDepsTest
 
         Set<TxnId> testOverlaps(Range range)
         {
+            List<TxnId> uniq = new ArrayList<>();
+            test.forEachUniqueTxnId(range, uniq::add);
             Set<TxnId> set = new TreeSet<>();
-            test.forEachUniqueTxnId(range, set::add);
+            test.forEach(range, set::add);
+            assertThat(uniq).doesNotHaveDuplicates()
+                            .containsExactlyInAnyOrderElementsOf(set);
             return set;
         }
 
@@ -114,8 +119,12 @@ public class RangeDepsTest
 
         Set<TxnId> testOverlaps(RoutableKey key)
         {
+            List<TxnId> uniq = new ArrayList<>();
+            test.forEachUniqueTxnId(key, uniq::add);
             Set<TxnId> set = new TreeSet<>();
-            test.forEachUniqueTxnId(key, set::add);
+            test.forEach(key, set::add);
+            assertThat(uniq).doesNotHaveDuplicates()
+                            .containsExactlyInAnyOrderElementsOf(set);
             return set;
         }
 

@@ -149,6 +149,11 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
         this.txnIdsToRanges = txnIdsToRanges;
     }
 
+    public void forEach(RoutableKey key, Consumer<TxnId> forEach)
+    {
+        forEach(key, Consumer::accept, forEach, 0, null);
+    }
+
     @Inline
     public <P1, P2, P3, P4> int forEach(RoutableKey key, IndexedQuadConsumer<P1, P2, P3, P4> forEachScanOrCheckpoint, IndexedRangeQuadConsumer<P1, P2, P3, P4> forEachRange, P1 p1, P2 p2, P3 p3, P4 p4, int minIndex)
     {
@@ -270,7 +275,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
      */
     public void forEach(Range range, Consumer<TxnId> forEach)
     {
-        forEach(range, forEach, 0, null);
+        forEach(range, Consumer::accept, forEach, 0, null);
     }
 
     /**
