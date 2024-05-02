@@ -22,10 +22,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
@@ -51,7 +49,6 @@ import accord.primitives.TxnId;
 import accord.utils.Invariants;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.collections.LongArrayList;
-import org.agrona.collections.ObjectHashSet;
 import org.apache.cassandra.concurrent.ManyToOneConcurrentLinkedQueue;
 
 import static accord.messages.MessageType.ACCEPT_INVALIDATE_REQ;
@@ -111,7 +108,7 @@ public class Journal implements LocalRequest.Handler, Runnable
     private final ManyToOneConcurrentLinkedQueue<RequestContext> unframedRequests = new ManyToOneConcurrentLinkedQueue<>();
     private final LongArrayList waitForEpochs = new LongArrayList();
     private final Long2ObjectHashMap<ArrayList<RequestContext>> delayedRequests = new Long2ObjectHashMap<>();
-    private final Map<Key, Message> writes = new HashMap<>();
+    private final Map<TxnId, Map<MessageType, Message>> writes = new HashMap<>();
     private Node node;
     
     public void start(Node node)
@@ -154,13 +151,12 @@ public class Journal implements LocalRequest.Handler, Runnable
         TxnIdProvider provider = typeToProvider.get(type);
         Invariants.nonNull(provider, "Unknown type %s: %s", type, request);
         TxnId txnId = provider.txnId(request);
-        Key key = new Key(txnId, type);
-        writes.put(key, request);
+        writes.computeIfAbsent(txnId, ignore -> new HashMap<>()).put(type, request);
     }
 
     public SerializerSupport.MessageProvider makeMessageProvider(TxnId txnId)
     {
-        return new MessageProvider(txnId, writes);
+        return new MessageProvider(txnId, writes.getOrDefault(txnId, Map.of()));
     }
 
     @Override
@@ -246,48 +242,12 @@ public class Journal implements LocalRequest.Handler, Runnable
         }
     }
 
-    private static class Key
-    {
-        final TxnId txnId;
-        final MessageType type;
-
-        private Key(TxnId txnId, MessageType type)
-        {
-            this.txnId = txnId;
-            this.type = type;
-        }
-
-        @Override
-        public boolean equals(Object o)
-        {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            Key key = (Key) o;
-            return Objects.equals(txnId, key.txnId) && Objects.equals(type, key.type);
-        }
-
-        @Override
-        public int hashCode()
-        {
-            return Objects.hash(txnId, type);
-        }
-
-        @Override
-        public String toString()
-        {
-            return "{" +
-                   "txnId=" + txnId +
-                   ", type=" + type +
-                   '}';
-        }
-    }
-
     public static class MessageProvider implements SerializerSupport.MessageProvider
     {
         public final TxnId txnId;
-        private final Map<Key, Message> writes;
+        private final Map<MessageType, Message> writes;
 
-        public MessageProvider(TxnId txnId, Map<Key, Message> writes)
+        public MessageProvider(TxnId txnId, Map<MessageType, Message> writes)
         {
             this.txnId = txnId;
             this.writes = writes;
@@ -296,24 +256,26 @@ public class Journal implements LocalRequest.Handler, Runnable
         @Override
         public Set<MessageType> test(Set<MessageType> messages)
         {
-            Set<Key> keys = new ObjectHashSet<>(messages.size() + 1, 0.9f);
-            for (MessageType msg : messages)
-                keys.add(new Key(txnId, msg));
-            Set<Key> presentKeys = Sets.intersection(writes.keySet(), keys);
-            Set<MessageType> presentMessages = new ObjectHashSet<>(presentKeys.size() + 1, 0.9f);
-            for (Key key : presentKeys)
-                presentMessages.add(key.type);
-            return presentMessages;
+            return Sets.intersection(writes.keySet(), messages);
+//            Set<Key> keys = new ObjectHashSet<>(messages.size() + 1, 0.9f);
+//            for (MessageType msg : messages)
+//                keys.add(new Key(txnId, msg));
+//            Set<Key> presentKeys = Sets.intersection(writes.keySet(), keys);
+//            Set<MessageType> presentMessages = new ObjectHashSet<>(presentKeys.size() + 1, 0.9f);
+//            for (Key key : presentKeys)
+//                presentMessages.add(key.type);
+//            return presentMessages;
         }
 
         @Override
         public Set<MessageType> all()
         {
-            Set<Key> presentKeys = writes.keySet().stream().filter(k -> k.txnId.equals(txnId)).collect(Collectors.toSet());
-            Set<MessageType> presentMessages = new ObjectHashSet<>(presentKeys.size() + 1, 0.9f);
-            for (Key key : presentKeys)
-                presentMessages.add(key.type);
-            return presentMessages;
+            return writes.keySet();
+//            Set<Key> presentKeys = writes.keySet().stream().filter(k -> k.txnId.equals(txnId)).collect(Collectors.toSet());
+//            Set<MessageType> presentMessages = new ObjectHashSet<>(presentKeys.size() + 1, 0.9f);
+//            for (Key key : presentKeys)
+//                presentMessages.add(key.type);
+//            return presentMessages;
         }
 
         public Map<MessageType, Message> allMessages()
@@ -325,14 +287,9 @@ public class Journal implements LocalRequest.Handler, Runnable
             return map;
         }
 
-        private <T extends Message> T get(Key key)
-        {
-            return (T) writes.get(key);
-        }
-
         public  <T extends Message> T get(MessageType type)
         {
-            return get(new Key(txnId, type));
+            return (T) writes.get(type);
         }
 
         @Override
