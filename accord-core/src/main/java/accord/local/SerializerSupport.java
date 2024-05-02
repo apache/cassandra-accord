@@ -68,7 +68,9 @@ public class SerializerSupport
         switch (status.status)
         {
             case NotDefined:
-                return Command.NotDefined.notDefined(attrs, promised);
+                return status == SaveStatus.Uninitialised ?
+                       Command.NotDefined.uninitialised(attrs.txnId())
+                       : Command.NotDefined.notDefined(attrs, promised);
             case PreAccepted:
                 return preAccepted(rangesForEpoch, attrs, executeAt, promised, messageProvider);
             case AcceptedInvalidate:
@@ -339,6 +341,10 @@ public class SerializerSupport
                         Propagate propagate = messageProvider.propagateStable();
                         return withContents.apply(param, propagate.partialTxn, propagate.stableDeps, apply.writes, apply.result);
                     }
+                    else if (witnessed.contains(COMMIT_MAXIMAL_REQ))
+                    {
+                        commit = messageProvider.commitMaximal();
+                    }
                     else if (witnessed.contains(COMMIT_SLOW_PATH_REQ))
                     {
                         commit = messageProvider.commitSlowPath();
@@ -346,6 +352,11 @@ public class SerializerSupport
                     else if (witnessed.contains(STABLE_FAST_PATH_REQ))
                     {
                         commit = messageProvider.stableFastPath();
+                    }
+                    else if (witnessed.contains(PRE_ACCEPT_REQ) || witnessed.contains(BEGIN_RECOVER_REQ) || witnessed.contains(PROPAGATE_PRE_ACCEPT_MSG))
+                    {
+                        PartialTxn txn = txnFromPreAcceptOrBeginRecover(rangesForEpoch, witnessed, messageProvider);
+                        return withContents.apply(param, txn, apply.deps.slice(rangesForEpoch.allBetween(apply.txnId.epoch(), apply.executeAt.epoch())), apply.writes, apply.result);
                     }
                     else
                     {
