@@ -513,6 +513,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
                 if (toEpoch >= committedExecuteAt.epoch())
                     return MessageType.PROPAGATE_APPLY_MSG;
             case Committed:
+            case Stable:
                 return MessageType.PROPAGATE_STABLE_MSG;
             case PreCommitted:
                 if (!achieved.definition.isKnown())
