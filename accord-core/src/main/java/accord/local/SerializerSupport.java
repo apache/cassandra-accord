@@ -68,9 +68,8 @@ public class SerializerSupport
         switch (status.status)
         {
             case NotDefined:
-                return status == SaveStatus.Uninitialised ?
-                       Command.NotDefined.uninitialised(attrs.txnId())
-                       : Command.NotDefined.notDefined(attrs, promised);
+                return status == SaveStatus.Uninitialised ? Command.NotDefined.uninitialised(attrs.txnId())
+                                                          : Command.NotDefined.notDefined(attrs, promised);
             case PreAccepted:
                 return preAccepted(rangesForEpoch, attrs, executeAt, promised, messageProvider);
             case AcceptedInvalidate:
