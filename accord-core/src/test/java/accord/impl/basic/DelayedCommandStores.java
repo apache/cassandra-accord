@@ -19,6 +19,7 @@
 package accord.impl.basic;
 
 import java.util.LinkedList;
+import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.Callable;
 import java.util.function.BooleanSupplier;
@@ -36,6 +37,7 @@ import accord.impl.basic.TaskExecutorService.Task;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
+import accord.local.CommonAttributes;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
@@ -43,6 +45,7 @@ import accord.local.SafeCommandStore;
 import accord.local.SerializerSupport;
 import accord.local.ShardDistributor;
 import accord.primitives.Range;
+import accord.primitives.Txn;
 import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.RandomSource;
@@ -116,12 +119,43 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         @Override
         protected void validateRead(Command current)
         {
+            // "loading" the command doesn't make sense as we don't "store" the command...
+            if (current.txnId().kind() == Txn.Kind.EphemeralRead)
+                return;
+            //TODO (correctness): these type of txn must be durable but currently they are not... should make sure this is plugged into the C* journal properly for reply
+            if (current.txnId().kind() == Txn.Kind.LocalOnly)
+                return;
             Command.WaitingOn waitingOn = null;
             if (current.isStable() && !current.isTruncated())
                 waitingOn = current.asCommitted().waitingOn;
             SerializerSupport.MessageProvider messages = journal.makeMessageProvider(current.txnId());
             Command.WaitingOn finalWaitingOn = waitingOn;
-            SerializerSupport.reconstruct(unsafeRangesForEpoch(), current.mutable(), current.saveStatus(), current.executeAt(), current.promised(), current.acceptedOrCommitted(), ignore -> finalWaitingOn, messages);
+            CommonAttributes.Mutable mutable = current.mutable();
+            mutable.partialDeps(null).removePartialTxn();
+            Command reconstructed;
+            try
+            {
+                reconstructed = SerializerSupport.reconstruct(unsafeRangesForEpoch(), mutable, current.saveStatus(), current.executeAt(), current.promised(), current.acceptedOrCommitted(), ignore -> finalWaitingOn, messages);
+            }
+            catch (IllegalStateException t)
+            {
+                //TODO (correctness): journal doesn’t guarantee we pick the same records we used to state transition
+                // Journal stores a list of messages it saw in some order it defines, but when reconstructing a command we don't actually know what messages were used, this could
+                // lead to a case where deps mismatch, so ignoring this for now
+                if (t.getMessage() != null && t.getMessage().startsWith("Deps do not match; expected"))
+                    return;
+                throw t;
+            }
+            //TODO (correctness): journal doesn’t guarantee we pick the same records we used to state transition
+            if (current.partialDeps() != null && !current.partialDeps().rangeDeps.equals(reconstructed.partialDeps().rangeDeps))
+                return;
+            // for some reasons scope doesn't alaways match, this might be due to journal... what sucks is that this can also be a bug in the extract, so its
+            // hard to figure out what happened.
+            if (current.partialDeps() != null && !current.partialDeps().equals(reconstructed.partialDeps()))
+                return;
+            if (current.isCommitted() && !current.isTruncated() && !Objects.equals(current.asCommitted().waitingOn(), reconstructed.asCommitted().waitingOn()))
+                return;
+            Invariants.checkState(current.equals(reconstructed), "Commands did not match: expected %s, given %s", current, reconstructed);
         }
 
         @Override

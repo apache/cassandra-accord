@@ -19,6 +19,7 @@
 package accord.impl.list;
 
 import java.util.Arrays;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -111,6 +112,21 @@ public class ListResult implements Result, Reply
     public Status status()
     {
         return status;
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        ListResult that = (ListResult) o;
+        return requestId == that.requestId && Objects.equals(client, that.client) && Objects.equals(txnId, that.txnId) && Objects.equals(readKeys, that.readKeys) && Objects.equals(responseKeys, that.responseKeys) && Arrays.equals(read, that.read) && Objects.equals(update, that.update) && status == that.status;
+    }
+
+    @Override
+    public int hashCode()
+    {
+        throw new UnsupportedOperationException();
     }
 
     @Override

@@ -136,6 +136,12 @@ public interface CommonAttributes
             return this;
         }
 
+        public Mutable removePartialTxn()
+        {
+            this.partialTxn = null;
+            return this;
+        }
+
         @Override
         public PartialDeps partialDeps()
         {
