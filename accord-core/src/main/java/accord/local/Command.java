@@ -840,15 +840,18 @@ public abstract class Command implements CommonAttributes
 
         public static Truncated truncatedApply(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result)
         {
-            // TODO (now) !!! uncomment and fix
-//            Invariants.checkArgument(!common.txnId().kind().awaitsOnlyDeps());
+            Invariants.checkArgument(!common.txnId().kind().awaitsOnlyDeps());
             Durability durability = checkTruncatedApplyInvariants(common, saveStatus, executeAt);
             return validate(new Truncated(common.txnId(), saveStatus, durability, common.route(), executeAt, EMPTY, writes, result));
         }
 
-        public static Truncated truncatedApply(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result, Timestamp dependencyExecutesAt)
+        public static Truncated truncatedApply(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result, @Nullable Timestamp dependencyExecutesAt)
         {
-            Invariants.checkArgument(common.txnId().kind().awaitsOnlyDeps());
+            if (!common.txnId().kind().awaitsOnlyDeps())
+            {
+                Invariants.checkState(dependencyExecutesAt == null);
+                return truncatedApply(common, saveStatus, executeAt, writes, result);
+            }
             Durability durability = checkTruncatedApplyInvariants(common, saveStatus, executeAt);
             return validate(new TruncatedAwaitsOnlyDeps(common.txnId(), saveStatus, durability, common.route(), executeAt, EMPTY, writes, result, dependencyExecutesAt));
         }
@@ -926,6 +929,10 @@ public abstract class Command implements CommonAttributes
 
     public static class TruncatedAwaitsOnlyDeps extends Truncated
     {
+        /**
+         * TODO (desired): Ideally we would not store this differently than we do for earlier states (where we encode in WaitingOn), but we also
+         *  don't want to waste the space and complexity budget in earlier phases. Consider how to improve.
+         */
         @Nullable final Timestamp executesAtLeast;
 
         public TruncatedAwaitsOnlyDeps(CommonAttributes commonAttributes, SaveStatus saveStatus, @Nullable Timestamp executeAt, @Nullable Writes writes, @Nullable Result result, @Nullable Timestamp executesAtLeast)

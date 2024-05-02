@@ -135,7 +135,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             Command reconstructed;
             try
             {
-                reconstructed = SerializerSupport.reconstruct(unsafeRangesForEpoch(), mutable, current.saveStatus(), current.executeAt(), current.promised(), current.acceptedOrCommitted(), ignore -> finalWaitingOn, messages);
+                reconstructed = SerializerSupport.reconstruct(unsafeRangesForEpoch(), mutable, current.saveStatus(), current.executeAt(), current.txnId().kind().awaitsOnlyDeps() ? current.executesAtLeast() : null, current.promised(), current.acceptedOrCommitted(), ignore -> finalWaitingOn, messages);
             }
             catch (IllegalStateException t)
             {

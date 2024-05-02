@@ -19,6 +19,8 @@ package accord.local;
 
 import java.util.Set;
 
+import javax.annotation.Nullable;
+
 import com.google.common.collect.ImmutableSet;
 
 import accord.api.Result;
@@ -63,7 +65,7 @@ public class SerializerSupport
     /**
      * Reconstructs Command from register values and protocol messages.
      */
-    public static Command reconstruct(RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
+    public static Command reconstruct(RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, @Nullable Timestamp executesAtLeast, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
     {
         switch (status.status)
         {
@@ -84,7 +86,7 @@ public class SerializerSupport
                 return executed(rangesForEpoch, attrs, status, executeAt, promised, accepted, waitingOnProvider, messageProvider);
             case Truncated:
             case Invalidated:
-                return truncated(attrs, status, executeAt, messageProvider);
+                return truncated(attrs, status, executeAt, executesAtLeast, messageProvider);
             default:
                 throw new IllegalStateException();
         }
@@ -150,7 +152,7 @@ public class SerializerSupport
     private static final Set<MessageType> APPLY_TYPES =
             ImmutableSet.of(APPLY_MINIMAL_REQ, APPLY_MAXIMAL_REQ, PROPAGATE_APPLY_MSG);
 
-    private static Command.Truncated truncated(Mutable attrs, SaveStatus status, Timestamp executeAt, MessageProvider messageProvider)
+    private static Command.Truncated truncated(Mutable attrs, SaveStatus status, Timestamp executeAt, @Nullable Timestamp executesAtLeast, MessageProvider messageProvider)
     {
         Writes writes = null;
         Result result = null;
@@ -182,7 +184,7 @@ public class SerializerSupport
                     result = propagate.result;
                 }
             case TruncatedApply:
-                return Command.Truncated.truncatedApply(attrs, status, executeAt, writes, result);
+                return Command.Truncated.truncatedApply(attrs, status, executeAt, writes, result, executesAtLeast);
             case ErasedOrInvalidated:
                 return Command.Truncated.erasedOrInvalidated(attrs.txnId(), attrs.durability(), attrs.route());
             case Erased:
