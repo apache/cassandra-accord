@@ -418,8 +418,8 @@ public abstract class Command implements CommonAttributes
                 {
                     default: throw new AssertionError("Unhandled Outcome: " + known.outcome);
                     case Apply:
-                        Invariants.checkState(writes != null);
-                        Invariants.checkState(result != null);
+                        Invariants.checkState(writes != null, "Writes is null");
+                        Invariants.checkState(result != null, "Result is null");
                         break;
                     case Invalidated:
                         Invariants.checkState(validate.durability().isMaybeInvalidated());
@@ -427,8 +427,8 @@ public abstract class Command implements CommonAttributes
                         Invariants.checkState(validate.durability() != Local);
                     case Erased:
                     case WasApply:
-                        Invariants.checkState(writes == null);
-                        Invariants.checkState(result == null);
+                        Invariants.checkState(writes == null, "Writes exist");
+                        Invariants.checkState(result == null, "Results exist");
                         break;
                 }
             }
@@ -963,7 +963,7 @@ public abstract class Command implements CommonAttributes
 
     public static class PreAccepted extends AbstractCommand
     {
-        private final Timestamp executeAt;
+        private final @Nullable Timestamp executeAt;
         private final PartialTxn partialTxn;
         private final @Nullable PartialDeps partialDeps;
 
@@ -993,7 +993,7 @@ public abstract class Command implements CommonAttributes
             if (o == null || getClass() != o.getClass()) return false;
             if (!super.equals(o)) return false;
             PreAccepted that = (PreAccepted) o;
-            return executeAt.equals(that.executeAt)
+            return Objects.equals(executeAt, that.executeAt)
                     && Objects.equals(partialTxn, that.partialTxn)
                     && Objects.equals(partialDeps, that.partialDeps);
         }
