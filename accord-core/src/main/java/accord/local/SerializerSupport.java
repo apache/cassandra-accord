@@ -297,9 +297,10 @@ public class SerializerSupport
                     }
                     else if (witnessed.contains(PRE_ACCEPT_REQ) || witnessed.contains(BEGIN_RECOVER_REQ) || witnessed.contains(PROPAGATE_PRE_ACCEPT_MSG))
                     {
-                        PartialTxn txn = txnFromPreAcceptOrBeginRecover(rangesForEpoch, witnessed, messageProvider);
                         Commit slowPath = messageProvider.stableSlowPath();
-                        PartialDeps deps = slowPath.partialDeps.slice(rangesForEpoch.allBetween(slowPath.txnId.epoch(), slowPath.executeAt.epoch()));
+                        Ranges ranges = rangesForEpoch.allBetween(slowPath.txnId.epoch(), slowPath.executeAt.epoch());
+                        PartialTxn txn = txnFromPreAcceptOrBeginRecover(rangesForEpoch, witnessed, messageProvider).slice(ranges, true);
+                        PartialDeps deps = slowPath.partialDeps.slice(ranges);
                         return withContents.apply(param, txn, deps, null, null);
                     }
                     else
@@ -338,7 +339,8 @@ public class SerializerSupport
                     else if (witnessed.contains(PROPAGATE_STABLE_MSG))
                     {
                         Propagate propagate = messageProvider.propagateStable();
-                        return withContents.apply(param, propagate.partialTxn, propagate.stableDeps, apply.writes, apply.result);
+                        var ranges = propagate.committedExecuteAt == null ? rangesForEpoch.allAt(propagate.txnId) : rangesForEpoch.allBetween(propagate.txnId, propagate.committedExecuteAt);
+                        return withContents.apply(param, propagate.partialTxn.slice(ranges, true), propagate.stableDeps.slice(ranges), apply.writes, apply.result);
                     }
                     else if (witnessed.contains(COMMIT_MAXIMAL_REQ))
                     {
@@ -355,7 +357,8 @@ public class SerializerSupport
                     else if (witnessed.contains(PRE_ACCEPT_REQ) || witnessed.contains(BEGIN_RECOVER_REQ) || witnessed.contains(PROPAGATE_PRE_ACCEPT_MSG))
                     {
                         PartialTxn txn = txnFromPreAcceptOrBeginRecover(rangesForEpoch, witnessed, messageProvider);
-                        return withContents.apply(param, txn, apply.deps.slice(rangesForEpoch.allBetween(apply.txnId.epoch(), apply.executeAt.epoch())), apply.writes, apply.result);
+                        Ranges ranges = rangesForEpoch.allBetween(apply.txnId.epoch(), apply.executeAt.epoch());
+                        return withContents.apply(param, txn.slice(ranges, true), apply.deps.slice(ranges), apply.writes, apply.result);
                     }
                     else
                     {
