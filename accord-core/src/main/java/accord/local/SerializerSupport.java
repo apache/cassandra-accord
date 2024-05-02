@@ -297,7 +297,8 @@ public class SerializerSupport
                     else if (witnessed.contains(PRE_ACCEPT_REQ) || witnessed.contains(BEGIN_RECOVER_REQ) || witnessed.contains(PROPAGATE_PRE_ACCEPT_MSG))
                     {
                         PartialTxn txn = txnFromPreAcceptOrBeginRecover(rangesForEpoch, witnessed, messageProvider);
-                        PartialDeps deps = messageProvider.stableSlowPath().partialDeps;
+                        Commit slowPath = messageProvider.stableSlowPath();
+                        PartialDeps deps = slowPath.partialDeps.slice(rangesForEpoch.allBetween(slowPath.txnId.epoch(), slowPath.executeAt.epoch()));
                         return withContents.apply(param, txn, deps, null, null);
                     }
                     else
