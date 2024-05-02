@@ -48,8 +48,8 @@ import static accord.messages.MessageType.COMMIT_MAXIMAL_REQ;
 import static accord.messages.MessageType.COMMIT_SLOW_PATH_REQ;
 import static accord.messages.MessageType.PRE_ACCEPT_REQ;
 import static accord.messages.MessageType.PROPAGATE_APPLY_MSG;
-import static accord.messages.MessageType.PROPAGATE_STABLE_MSG;
 import static accord.messages.MessageType.PROPAGATE_PRE_ACCEPT_MSG;
+import static accord.messages.MessageType.PROPAGATE_STABLE_MSG;
 import static accord.messages.MessageType.STABLE_FAST_PATH_REQ;
 import static accord.messages.MessageType.STABLE_MAXIMAL_REQ;
 import static accord.messages.MessageType.STABLE_SLOW_PATH_REQ;
@@ -231,6 +231,7 @@ public class SerializerSupport
             case AcceptedInvalidate:
             case Accepted:
             case PreCommitted:
+            {
                 PartialTxn txn = null;
                 PartialDeps deps = null;
 
@@ -247,7 +248,7 @@ public class SerializerSupport
                     deps = slicePartialDeps(rangesForEpoch, accept);
                 }
                 return withContents.apply(param, txn, deps, null, null);
-
+            }
             case Committed:
             {
                 witnessed = messageProvider.test(PRE_ACCEPT_COMMIT_TYPES);
@@ -285,14 +286,23 @@ public class SerializerSupport
                 else
                 {
                     checkState(witnessed.contains(STABLE_SLOW_PATH_REQ), "Unable to find STABLE_SLOW_PATH_REQ; witnessed %s", new LoggedMessageProvider(messageProvider));
-                    if (witnessed.contains(COMMIT_SLOW_PATH_REQ))
+                    if (witnessed.contains(COMMIT_MAXIMAL_REQ))
+                    {
+                        commit = messageProvider.commitMaximal();
+                    }
+                    else if (witnessed.contains(COMMIT_SLOW_PATH_REQ))
                     {
                         commit = messageProvider.commitSlowPath();
                     }
+                    else if (witnessed.contains(PRE_ACCEPT_REQ) || witnessed.contains(BEGIN_RECOVER_REQ) || witnessed.contains(PROPAGATE_PRE_ACCEPT_MSG))
+                    {
+                        PartialTxn txn = txnFromPreAcceptOrBeginRecover(rangesForEpoch, witnessed, messageProvider);
+                        PartialDeps deps = messageProvider.stableSlowPath().partialDeps;
+                        return withContents.apply(param, txn, deps, null, null);
+                    }
                     else
                     {
-                        checkState(witnessed.contains(COMMIT_MAXIMAL_REQ), "Unable to find COMMIT_MAXIMAL_REQ; witnessed %s", new LoggedMessageProvider(messageProvider));
-                        commit = messageProvider.commitMaximal();
+                        throw illegalState("Unable to find COMMIT_SLOW_PATH_REQ; witnessed %s", new LoggedMessageProvider(messageProvider));
                     }
                 }
 
@@ -437,6 +447,7 @@ public class SerializerSupport
         Commit commitMaximal();
 
         Commit stableFastPath();
+        Commit stableSlowPath();
 
         Commit stableMaximal();
 

@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 
 import accord.local.Node;
@@ -159,113 +160,7 @@ public class Journal implements LocalRequest.Handler, Runnable
 
     public SerializerSupport.MessageProvider makeMessageProvider(TxnId txnId)
     {
-        return new SerializerSupport.MessageProvider()
-        {
-            @Override
-            public Set<MessageType> test(Set<MessageType> messages)
-            {
-                Set<Key> keys = new ObjectHashSet<>(messages.size() + 1, 0.9f);
-                for (MessageType msg : messages)
-                    keys.add(new Key(txnId, msg));
-                Set<Key> presentKeys = Sets.intersection(writes.keySet(), keys);
-                Set<MessageType> presentMessages = new ObjectHashSet<>(presentKeys.size() + 1, 0.9f);
-                for (Key key : presentKeys)
-                    presentMessages.add(key.type);
-                return presentMessages;
-            }
-
-            @Override
-            public Set<MessageType> all()
-            {
-                Set<Key> presentKeys = writes.keySet().stream().filter(k -> k.txnId.equals(txnId)).collect(Collectors.toSet());
-                Set<MessageType> presentMessages = new ObjectHashSet<>(presentKeys.size() + 1, 0.9f);
-                for (Key key : presentKeys)
-                    presentMessages.add(key.type);
-                return presentMessages;
-            }
-
-            private <T extends Message> T get(Key key)
-            {
-                return (T) writes.get(key);
-            }
-
-            private <T extends Message> T get(MessageType type)
-            {
-                return get(new Key(txnId, type));
-            }
-
-            @Override
-            public PreAccept preAccept()
-            {
-                return get(PRE_ACCEPT_REQ);
-            }
-
-            @Override
-            public BeginRecovery beginRecover()
-            {
-                return get(BEGIN_RECOVER_REQ);
-            }
-
-            @Override
-            public Propagate propagatePreAccept()
-            {
-                return get(PROPAGATE_PRE_ACCEPT_MSG);
-            }
-
-            @Override
-            public Accept accept(Ballot ballot)
-            {
-                return get(ACCEPT_REQ);
-            }
-
-            @Override
-            public Commit commitSlowPath()
-            {
-                return get(COMMIT_SLOW_PATH_REQ);
-            }
-
-            @Override
-            public Commit commitMaximal()
-            {
-                return get(COMMIT_MAXIMAL_REQ);
-            }
-
-            @Override
-            public Commit stableFastPath()
-            {
-                return get(STABLE_FAST_PATH_REQ);
-            }
-
-            @Override
-            public Commit stableMaximal()
-            {
-                return get(STABLE_MAXIMAL_REQ);
-            }
-
-            @Override
-            public Propagate propagateStable()
-            {
-                return get(PROPAGATE_STABLE_MSG);
-            }
-
-            @Override
-            public Apply applyMinimal()
-            {
-                return get(APPLY_MINIMAL_REQ);
-            }
-
-            @Override
-            public Apply applyMaximal()
-            {
-                return get(APPLY_MAXIMAL_REQ);
-            }
-
-            @Override
-            public Propagate propagateApply()
-            {
-                return get(PROPAGATE_APPLY_MSG);
-            }
-        };
+        return new MessageProvider(txnId, writes);
     }
 
     @Override
@@ -384,6 +279,138 @@ public class Journal implements LocalRequest.Handler, Runnable
                    "txnId=" + txnId +
                    ", type=" + type +
                    '}';
+        }
+    }
+
+    public static class MessageProvider implements SerializerSupport.MessageProvider
+    {
+        public final TxnId txnId;
+        private final Map<Key, Message> writes;
+
+        public MessageProvider(TxnId txnId, Map<Key, Message> writes)
+        {
+            this.txnId = txnId;
+            this.writes = writes;
+        }
+
+        @Override
+        public Set<MessageType> test(Set<MessageType> messages)
+        {
+            Set<Key> keys = new ObjectHashSet<>(messages.size() + 1, 0.9f);
+            for (MessageType msg : messages)
+                keys.add(new Key(txnId, msg));
+            Set<Key> presentKeys = Sets.intersection(writes.keySet(), keys);
+            Set<MessageType> presentMessages = new ObjectHashSet<>(presentKeys.size() + 1, 0.9f);
+            for (Key key : presentKeys)
+                presentMessages.add(key.type);
+            return presentMessages;
+        }
+
+        @Override
+        public Set<MessageType> all()
+        {
+            Set<Key> presentKeys = writes.keySet().stream().filter(k -> k.txnId.equals(txnId)).collect(Collectors.toSet());
+            Set<MessageType> presentMessages = new ObjectHashSet<>(presentKeys.size() + 1, 0.9f);
+            for (Key key : presentKeys)
+                presentMessages.add(key.type);
+            return presentMessages;
+        }
+
+        public Map<MessageType, Message> allMessages()
+        {
+            var all = all();
+            Map<MessageType, Message> map = Maps.newHashMapWithExpectedSize(all.size());
+            for (MessageType messageType : all)
+                map.put(messageType, get(messageType));
+            return map;
+        }
+
+        private <T extends Message> T get(Key key)
+        {
+            return (T) writes.get(key);
+        }
+
+        public  <T extends Message> T get(MessageType type)
+        {
+            return get(new Key(txnId, type));
+        }
+
+        @Override
+        public PreAccept preAccept()
+        {
+            return get(PRE_ACCEPT_REQ);
+        }
+
+        @Override
+        public BeginRecovery beginRecover()
+        {
+            return get(BEGIN_RECOVER_REQ);
+        }
+
+        @Override
+        public Propagate propagatePreAccept()
+        {
+            return get(PROPAGATE_PRE_ACCEPT_MSG);
+        }
+
+        @Override
+        public Accept accept(Ballot ballot)
+        {
+            return get(ACCEPT_REQ);
+        }
+
+        @Override
+        public Commit commitSlowPath()
+        {
+            return get(COMMIT_SLOW_PATH_REQ);
+        }
+
+        @Override
+        public Commit commitMaximal()
+        {
+            return get(COMMIT_MAXIMAL_REQ);
+        }
+
+        @Override
+        public Commit stableFastPath()
+        {
+            return get(STABLE_FAST_PATH_REQ);
+        }
+
+        @Override
+        public Commit stableSlowPath()
+        {
+            return get(STABLE_SLOW_PATH_REQ);
+        }
+
+        @Override
+        public Commit stableMaximal()
+        {
+            return get(STABLE_MAXIMAL_REQ);
+        }
+
+        @Override
+        public Propagate propagateStable()
+        {
+            return get(PROPAGATE_STABLE_MSG);
+        }
+
+        @Override
+        public Apply applyMinimal()
+        {
+            return get(APPLY_MINIMAL_REQ);
+        }
+
+        @Override
+        public Apply applyMaximal()
+        {
+            return get(APPLY_MAXIMAL_REQ);
+        }
+
+        @Override
+        public Propagate propagateApply()
+        {
+            return get(PROPAGATE_APPLY_MSG);
         }
     }
 }
