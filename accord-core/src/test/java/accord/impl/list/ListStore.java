@@ -47,6 +47,7 @@ import accord.messages.WaitUntilApplied;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.RoutableKey;
+import accord.primitives.Seekable;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -255,6 +256,16 @@ public class ListStore implements DataStore
     private static String format(SyncPoint sp)
     {
         return String.format("(%s -> %s)", sp.syncId, sp.keysOrRanges);
+    }
+
+    public String historySeekable(Seekable o)
+    {
+        switch (o.domain())
+        {
+            case Key: return history(o.asKey());
+            case Range: return history(Ranges.single(o.asRange()));
+            default: throw new IllegalArgumentException("Unknown domain: " + o.domain() + ", input=" + o);
+        }
     }
 
     private String history(Ranges ranges)

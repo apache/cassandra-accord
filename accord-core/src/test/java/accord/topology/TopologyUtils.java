@@ -36,6 +36,13 @@ import accord.utils.WrapAroundSet;
 import javax.annotation.Nullable;
 import java.util.*;
 
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.LinkedHashMultimap;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.PeekingIterator;
+import com.google.common.collect.Sets;
+
 import static accord.utils.Utils.toArray;
 
 public class TopologyUtils
@@ -187,5 +194,97 @@ public class TopologyUtils
                     selected.add(ranges.get(rs.nextInt(ranges.size()))); // TODO sub-ranges
                 return Ranges.ofSortedAndDeoverlapped(Utils.toArray(new ArrayList<>(selected), Range[]::new));
         }
+    }
+
+    public static String diff(Topology left, Topology right)
+    {
+        // topology is just range -> (nodes, fast path, joining)
+        // what is in left that isn't in right?
+        Iterator<Shard> outter = left.shards().iterator();
+        PeekingIterator<Shard> inner = Iterators.peekingIterator(right.shards().iterator());
+        // ranges in left
+        // ranges in right
+        // intersects...
+        Set<Range> leftRanges = new LinkedHashSet<>();
+        Set<Range> rightRanges = new LinkedHashSet<>();
+//        Set<Range> splitRanges = new LinkedHashSet<>();
+        Multimap<Range, Range> splitRanges = LinkedHashMultimap.create();
+        Map<Range, Map<String, Map<String, ?>>> eqRanges = new LinkedHashMap<>();
+        for (int i = 0; outter.hasNext(); i++)
+        {
+            Shard next = outter.next();
+            if (!inner.hasNext()) {
+                leftRanges.add(next.range);
+                continue;
+            }
+            Shard other = inner.peek();
+            if (next.equals(other))
+            {
+                inner.next();
+                continue;
+            }
+            // why are they different?
+            if (next.range.compareIntersecting(other.range) == 0)
+            {
+                // shards intersect
+                if (next.range.equals(other.range))
+                {
+                    // ranges are equal, but their nodes differ
+                    ImmutableMap.Builder<String, Map<String, ?>> builder = ImmutableMap.builder();
+                    Map<String, Set<Node.Id>> nodes = diff(new HashSet<>(next.nodes), new HashSet<>(other.nodes));
+                    if (!nodes.isEmpty())
+                        builder.put("nodes", nodes);
+                    Map<String, Set<Node.Id>> fastPathElectorate = diff(next.fastPathElectorate, other.fastPathElectorate);
+                    if (!fastPathElectorate.isEmpty())
+                        builder.put("fastPathElectorate", fastPathElectorate);
+                    Map<String, Set<Node.Id>> joining = diff(next.joining, other.joining);
+                    if (!joining.isEmpty())
+                        builder.put("joining", joining);
+                    eqRanges.put(next.range, builder.build());
+                }
+                else
+                {
+                    splitRanges.put(next.range, other.range);
+                }
+                if (next.range.end().compareTo(other.range.end()) >= 0)
+                    inner.next();
+            }
+            else if (next.range.compare(other.range) < 0)
+            {
+                leftRanges.add(next.range);
+            }
+            else
+            {
+                rightRanges.add(inner.next().range);
+            }
+        }
+        while (inner.hasNext())
+            rightRanges.add(inner.next().range);
+        Map<String, Object> details = new LinkedHashMap<>();
+//        StringBuilder sb = new StringBuilder();
+        if (!leftRanges.isEmpty())
+            details.put("Left Ranges: ", leftRanges);
+        if (!rightRanges.isEmpty())
+            details.put("Right Ranges: ", rightRanges);
+        if (!splitRanges.isEmpty())
+            details.put("Split Ranges: ", splitRanges);
+        if (!eqRanges.isEmpty())
+            details.put("Eq Ranges: ", eqRanges);
+//        return sb.toString();
+        return details.toString();
+    }
+
+    private static <E> Map<String, Set<E>> diff(Set<E> left, Set<E> right)
+    {
+        Sets.SetView<E> rightMissing = Sets.difference(left, right);
+        Sets.SetView<E> leftMissing = Sets.difference(right, left);
+        if (rightMissing.isEmpty() && leftMissing.isEmpty())
+            return Collections.emptyMap();
+        ImmutableMap.Builder<String, Set<E>> builder = ImmutableMap.builder();
+        if (!rightMissing.isEmpty())
+            builder.put("left", rightMissing);
+        if (!leftMissing.isEmpty())
+            builder.put("right", leftMissing);
+        return builder.build();
     }
 }

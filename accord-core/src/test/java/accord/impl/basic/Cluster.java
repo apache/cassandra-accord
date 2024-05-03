@@ -284,6 +284,7 @@ public class Cluster implements Scheduler
                     ListStore store = (ListStore) node.commandStores().dataStore();
                     store.onTopologyUpdate(node, t);
                 }
+                messageListener.onTopologyChange(t);
             };
             TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, nodeMap::get, schemaApply);
             List<CoordinateDurabilityScheduling> durabilityScheduling = new ArrayList<>();
