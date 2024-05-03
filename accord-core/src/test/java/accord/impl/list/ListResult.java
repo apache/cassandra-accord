@@ -120,7 +120,26 @@ public class ListResult implements Result, Reply
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         ListResult that = (ListResult) o;
-        return requestId == that.requestId && Objects.equals(client, that.client) && Objects.equals(txnId, that.txnId) && Objects.equals(readKeys, that.readKeys) && Objects.equals(responseKeys, that.responseKeys) && Arrays.equals(read, that.read) && Objects.equals(update, that.update) && status == that.status;
+        return requestId == that.requestId
+               && Objects.equals(client, that.client)
+               && Objects.equals(txnId, that.txnId)
+               && Objects.equals(readKeys, that.readKeys)
+               && Objects.equals(responseKeys, that.responseKeys)
+               && equals(read, that.read)
+               && Objects.equals(update, that.update)
+               && status == that.status;
+    }
+
+    private static boolean equals(int[][] a, int[][] b)
+    {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        if (a.length != b.length) return false;
+        for (int i = 0; i < a.length; i++)
+        {
+            if (!Arrays.equals(a[i], b[i])) return false;
+        }
+        return true;
     }
 
     @Override
