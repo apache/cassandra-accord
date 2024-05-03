@@ -218,7 +218,6 @@ public class Cluster implements Scheduler
                 }
             }
             else journalLookup.apply(deliver.dst).handle((Request) deliver.message, deliver.src, deliver);
-//            else on.receive((Request) deliver.message, deliver.src, deliver);
         }
         else
         {
