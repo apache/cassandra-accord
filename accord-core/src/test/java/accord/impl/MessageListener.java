@@ -29,7 +29,6 @@ import accord.messages.TxnRequest;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topology;
-import accord.topology.TopologyUtils;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
