@@ -55,7 +55,6 @@ import accord.verify.ElleVerifier;
 import accord.verify.StrictSerializabilityVerifier;
 import accord.verify.Verifier;
 
-import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.slf4j.Logger;
@@ -541,14 +540,10 @@ public class BurnTest
         }
     }
 
-//    @Test
-//    @Timeout(value = 3, unit = TimeUnit.MINUTES)
-    @RepeatedTest(Integer.MAX_VALUE)
+    @Test
+    @Timeout(value = 3, unit = TimeUnit.MINUTES)
     public void testOne()
     {
-        run(143609061819333L, 1000); // Unable to find COMMIT_MAXIMAL_REQ; witnessed {PRE_ACCEPT_REQ, ACCEPT_REQ, STABLE_SLOW_PATH_REQ}
-        run(143610404897000L, 1000); // NPE in accord.local.CommonAttributes$Mutable.partialTxn(CommonAttributes.java:125); extra seeds: 143610965450208
-        run(143610760559166L, 1000); // Invalid state: insufficient stable or commit messages found to reconstruct PreApplied or greater SaveStatus; witnessed {APPLY_MINIMAL_REQ, PRE_ACCEPT_REQ}
         run(System.nanoTime(), 1000);
     }
 
