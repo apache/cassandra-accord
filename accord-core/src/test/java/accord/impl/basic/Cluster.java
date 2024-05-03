@@ -61,7 +61,6 @@ import accord.local.Node.Id;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
-import accord.messages.LocalRequest;
 import accord.messages.Message;
 import accord.messages.MessageType;
 import accord.messages.Reply;

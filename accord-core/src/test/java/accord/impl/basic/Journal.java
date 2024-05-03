@@ -18,10 +18,12 @@
 
 package accord.impl.basic;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -49,7 +51,6 @@ import accord.primitives.TxnId;
 import accord.utils.Invariants;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.collections.LongArrayList;
-import org.apache.cassandra.concurrent.ManyToOneConcurrentLinkedQueue;
 
 import static accord.messages.MessageType.ACCEPT_INVALIDATE_REQ;
 import static accord.messages.MessageType.ACCEPT_REQ;
@@ -105,7 +106,7 @@ public class Journal implements LocalRequest.Handler, Runnable
                                                                                       .put(PROPAGATE_OTHER_MSG, LOCAL)
                                                                                       .build();
 
-    private final ManyToOneConcurrentLinkedQueue<RequestContext> unframedRequests = new ManyToOneConcurrentLinkedQueue<>();
+    private final Queue<RequestContext> unframedRequests = new ArrayDeque<>();
     private final LongArrayList waitForEpochs = new LongArrayList();
     private final Long2ObjectHashMap<ArrayList<RequestContext>> delayedRequests = new Long2ObjectHashMap<>();
     private final Map<TxnId, Map<MessageType, Message>> writes = new HashMap<>();
