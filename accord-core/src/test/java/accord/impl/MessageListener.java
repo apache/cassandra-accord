@@ -133,9 +133,7 @@ public interface MessageListener
         public void onTopologyChange(Topology topology)
         {
             if (previous != null)
-            {
-                logger.debug("Topology Change {} -> {}: {}", previous.epoch(), topology.epoch(), TopologyUtils.diff(previous, topology));
-            }
+                logger.debug("Topology Change {} -> {}", previous.epoch(), topology.epoch());
             previous = topology;
         }
 
