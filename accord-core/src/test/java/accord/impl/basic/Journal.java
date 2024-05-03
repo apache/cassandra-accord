@@ -258,25 +258,12 @@ public class Journal implements LocalRequest.Handler, Runnable
         public Set<MessageType> test(Set<MessageType> messages)
         {
             return Sets.intersection(writes.keySet(), messages);
-//            Set<Key> keys = new ObjectHashSet<>(messages.size() + 1, 0.9f);
-//            for (MessageType msg : messages)
-//                keys.add(new Key(txnId, msg));
-//            Set<Key> presentKeys = Sets.intersection(writes.keySet(), keys);
-//            Set<MessageType> presentMessages = new ObjectHashSet<>(presentKeys.size() + 1, 0.9f);
-//            for (Key key : presentKeys)
-//                presentMessages.add(key.type);
-//            return presentMessages;
         }
 
         @Override
         public Set<MessageType> all()
         {
             return writes.keySet();
-//            Set<Key> presentKeys = writes.keySet().stream().filter(k -> k.txnId.equals(txnId)).collect(Collectors.toSet());
-//            Set<MessageType> presentMessages = new ObjectHashSet<>(presentKeys.size() + 1, 0.9f);
-//            for (Key key : presentKeys)
-//                presentMessages.add(key.type);
-//            return presentMessages;
         }
 
         public Map<MessageType, Message> allMessages()
