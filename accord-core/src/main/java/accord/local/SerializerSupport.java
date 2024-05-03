@@ -329,9 +329,8 @@ public class SerializerSupport
                     Propagate propagate = messageProvider.propagateApply();
                     return sliceAndApply(rangesForEpoch, propagate, withContents, param, propagate.writes, propagate.result);
                 }
-                else
+                else if (witnessed.contains(APPLY_MINIMAL_REQ))
                 {
-                    checkState(witnessed.contains(APPLY_MINIMAL_REQ), "Unable to find APPLY_MINIMAL_REQ; witnessed %s", new LoggedMessageProvider(messageProvider));
                     Apply apply = messageProvider.applyMinimal();
                     Commit commit;
                     if (witnessed.contains(STABLE_MAXIMAL_REQ))
@@ -368,6 +367,20 @@ public class SerializerSupport
                     }
 
                     return sliceAndApply(rangesForEpoch, messageProvider, witnessed, commit, withContents, param, apply.writes, apply.result);
+                }
+                else if (witnessed.contains(PROPAGATE_PRE_ACCEPT_MSG))
+                {
+                    // once propgate runs locally it merges the local state with the remote state, which may make this go from PRE_ACCEPT to PRE_APPLIED!
+                    Propagate propagate = messageProvider.propagatePreAccept();
+                    Invariants.nonNull(propagate.partialTxn, "Unable to find partialTxn; witnessed %s", new LoggedMessageProvider(messageProvider));
+                    Invariants.nonNull(propagate.stableDeps, "Unable to find stableDeps; witnessed %s", new LoggedMessageProvider(messageProvider));
+
+                    var ranges = propagate.committedExecuteAt == null ? rangesForEpoch.allAt(propagate.txnId) : rangesForEpoch.allBetween(propagate.txnId, propagate.committedExecuteAt);
+                    return withContents.apply(param, propagate.partialTxn.slice(ranges, true), propagate.stableDeps.slice(ranges), propagate.writes, propagate.result);
+                }
+                else
+                {
+                    throw illegalState("Unable to find messages that lead to PreApplied state; witnessed %s", new LoggedMessageProvider(messageProvider));
                 }
             }
 
