@@ -31,6 +31,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 
+import accord.impl.MessageListener;
 import accord.local.Node;
 import accord.local.SerializerSupport;
 import accord.messages.AbstractEpochRequest;
@@ -110,8 +111,14 @@ public class Journal implements LocalRequest.Handler, Runnable
     private final LongArrayList waitForEpochs = new LongArrayList();
     private final Long2ObjectHashMap<ArrayList<RequestContext>> delayedRequests = new Long2ObjectHashMap<>();
     private final Map<TxnId, Map<MessageType, Message>> writes = new HashMap<>();
+    private final MessageListener messageListener;
     private Node node;
-    
+
+    public Journal(MessageListener messageListener)
+    {
+        this.messageListener = messageListener;
+    }
+
     public void start(Node node)
     {
         this.node = node;
@@ -126,6 +133,7 @@ public class Journal implements LocalRequest.Handler, Runnable
     @Override
     public void handle(LocalRequest<?> message, Node node)
     {
+        messageListener.onMessage(NodeSink.Action.DELIVER, node.id(), node.id(), -1, message);
         if (message.type().hasSideEffects())
         {
             // enqueue
