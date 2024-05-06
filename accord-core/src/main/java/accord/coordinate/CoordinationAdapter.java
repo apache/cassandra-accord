@@ -91,6 +91,11 @@ public interface CoordinationAdapter<R>
 
         public static <R> void stabilise(CoordinationAdapter<R> adapter, Node node, Topologies any, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback)
         {
+            if (!node.topology().hasEpoch(executeAt.epoch()))
+            {
+                node.withEpoch(executeAt.epoch(), () -> stabilise(adapter, node, any, route, ballot, txnId, txn, executeAt, deps, callback));
+                return;
+            }
             Topologies coordinates = any.forEpochs(txnId.epoch(), txnId.epoch());
             Topologies all;
             if (txnId.epoch() == executeAt.epoch()) all = coordinates;
