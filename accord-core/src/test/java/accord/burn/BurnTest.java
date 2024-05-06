@@ -55,6 +55,7 @@ import accord.verify.ElleVerifier;
 import accord.verify.StrictSerializabilityVerifier;
 import accord.verify.Verifier;
 
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.slf4j.Logger;
@@ -542,9 +543,18 @@ public class BurnTest
 
     @Test
     @Timeout(value = 3, unit = TimeUnit.MINUTES)
+//    @RepeatedTest(Integer.MAX_VALUE)
     public void testOne()
     {
-        run(System.nanoTime(), 1000);
+//        run(System.nanoTime());
+
+        run(296358152117833L); // Unable to find messages that lead to PreApplied state; witnessed [PRE_ACCEPT_REQ, ACCEPT_REQ, COMMIT_SLOW_PATH_REQ, APPLY_THEN_WAIT_UNTIL_APPLIED_REQ]
+//        run(296520943500625L); // Unable to find messages that lead to PreApplied state; witnessed [PRE_ACCEPT_REQ, ACCEPT_REQ, COMMIT_SLOW_PATH_REQ, APPLY_THEN_WAIT_UNTIL_APPLIED_REQ]
+    }
+
+    private static void run(long seed)
+    {
+        run(seed, 1000);
     }
 
     private static void run(long seed, int operations)

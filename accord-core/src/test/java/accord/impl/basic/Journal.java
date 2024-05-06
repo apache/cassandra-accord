@@ -39,6 +39,7 @@ import accord.local.SerializerSupport;
 import accord.messages.AbstractEpochRequest;
 import accord.messages.Accept;
 import accord.messages.Apply;
+import accord.messages.ApplyThenWaitUntilApplied;
 import accord.messages.BeginRecovery;
 import accord.messages.Commit;
 import accord.messages.LocalRequest;
@@ -418,6 +419,12 @@ public class Journal implements LocalRequest.Handler, Runnable
         public Propagate propagateOther()
         {
             return get(PROPAGATE_OTHER_MSG);
+        }
+
+        @Override
+        public ApplyThenWaitUntilApplied applyThenWaitUntilApplied()
+        {
+            return get(APPLY_THEN_WAIT_UNTIL_APPLIED_REQ);
         }
     }
 }

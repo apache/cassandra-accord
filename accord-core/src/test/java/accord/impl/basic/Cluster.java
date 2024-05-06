@@ -41,6 +41,7 @@ import org.junit.jupiter.api.Assertions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import accord.api.BarrierType;
 import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.burn.BurnTestConfigurationService;
@@ -48,7 +49,12 @@ import accord.burn.TopologyUpdates;
 import accord.burn.random.FrequentLargeRange;
 import accord.config.LocalConfig;
 import accord.config.MutableLocalConfig;
+import accord.coordinate.Barrier;
 import accord.coordinate.CoordinationAdapter;
+import accord.coordinate.Exhausted;
+import accord.coordinate.Invalidated;
+import accord.coordinate.Preempted;
+import accord.coordinate.Timeout;
 import accord.impl.CoordinateDurabilityScheduling;
 import accord.impl.MessageListener;
 import accord.impl.PrefixedIntHashKey;
@@ -66,10 +72,13 @@ import accord.messages.MessageType;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.messages.SafeCallback;
+import accord.primitives.Keys;
 import accord.primitives.Ranges;
+import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.topology.Topology;
 import accord.topology.TopologyRandomizer;
+import accord.utils.Invariants;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncResult;
@@ -78,6 +87,7 @@ import static accord.impl.basic.Cluster.OverrideLinksKind.NONE;
 import static accord.impl.basic.Cluster.OverrideLinksKind.RANDOM_BIDIRECTIONAL;
 import static accord.impl.basic.NodeSink.Action.DELIVER;
 import static accord.impl.basic.NodeSink.Action.DROP;
+import static accord.utils.AccordGens.keysInsideRanges;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -286,6 +296,7 @@ public class Cluster implements Scheduler
             };
             TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, nodeMap::get, schemaApply);
             List<CoordinateDurabilityScheduling> durabilityScheduling = new ArrayList<>();
+            List<BarrierScheduler> barrierScheduling = new ArrayList<>();
             for (Id id : nodes)
             {
                 MessageSink messageSink = sinks.create(id, randomSupplier.get());
@@ -311,6 +322,7 @@ public class Cluster implements Scheduler
                 durabilityScheduling.add(durability);
                 nodeMap.put(id, node);
                 durabilityScheduling.add(new CoordinateDurabilityScheduling(node));
+                barrierScheduling.add(new BarrierScheduler(node, randomSupplier.get()));
             }
 
             Runnable updateDurabilityRate;
@@ -347,10 +359,12 @@ public class Cluster implements Scheduler
 
             Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1, SECONDS);
             durabilityScheduling.forEach(CoordinateDurabilityScheduling::start);
+            barrierScheduling.forEach(BarrierScheduler::start);
 
             noMoreWorkSignal.accept(() -> {
                 reconfigure.cancel();
                 durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
+                barrierScheduling.forEach(BarrierScheduler::close);
             });
             readySignal.accept(nodeMap);
 
@@ -363,6 +377,7 @@ public class Cluster implements Scheduler
             chaos.cancel();
             reconfigure.cancel();
             durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
+            barrierScheduling.forEach(BarrierScheduler::close);
             sinks.links = sinks.linkConfig.defaultLinks;
 
             // give progress log et al a chance to finish
@@ -387,6 +402,64 @@ public class Cluster implements Scheduler
         {
             journalMap.values().forEach(Journal::shutdown);
             nodeMap.values().forEach(Node::shutdown);
+        }
+    }
+
+    private static class BarrierScheduler implements AutoCloseable, Runnable
+    {
+        private final Node node;
+        private final RandomSource rs;
+        private Scheduled scheduled;
+
+        private BarrierScheduler(Node node, RandomSource rs)
+        {
+            this.node = node;
+            this.rs = rs;
+        }
+
+        public void start()
+        {
+            Invariants.checkState(scheduled == null, "Start already called...");
+            this.scheduled = node.scheduler().recurring(this, 1, SECONDS);
+        }
+
+        @Override
+        public void close()
+        {
+            if (scheduled != null)
+            {
+                scheduled.cancel();
+                scheduled = null;
+            }
+        }
+
+        @Override
+        public void run()
+        {
+            Topology current = node.topology().current();
+            BarrierType type = rs.pick(BarrierType.values());
+            Ranges ranges = current.rangesForNode(node.id());
+            if (type == BarrierType.local)
+            {
+                run(node, Keys.of(keysInsideRanges(ranges).next(rs)), current.epoch(), type);
+            }
+            else
+            {
+                run(node, ranges, current.epoch(), type);
+            }
+        }
+
+        private <S extends Seekables<?, ?>> void run(Node node, S keysOrRanges, long epoch, BarrierType type)
+        {
+            Barrier.barrier(node, keysOrRanges, epoch, type).begin((s, f) -> {
+                if (f != null)
+                {
+                    // ignore specific errors
+                    if (f instanceof Invalidated || f instanceof Timeout || f instanceof Preempted || f instanceof Exhausted)
+                        return;
+                    node.agent().onUncaughtException(f);
+                }
+            });
         }
     }
 

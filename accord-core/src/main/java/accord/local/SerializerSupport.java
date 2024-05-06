@@ -30,6 +30,7 @@ import accord.local.CommandStores.RangesForEpoch;
 import accord.local.CommonAttributes.Mutable;
 import accord.messages.Accept;
 import accord.messages.Apply;
+import accord.messages.ApplyThenWaitUntilApplied;
 import accord.messages.BeginRecovery;
 import accord.messages.Commit;
 import accord.messages.MessageType;
@@ -45,6 +46,7 @@ import accord.utils.Invariants;
 
 import static accord.messages.MessageType.APPLY_MAXIMAL_REQ;
 import static accord.messages.MessageType.APPLY_MINIMAL_REQ;
+import static accord.messages.MessageType.APPLY_THEN_WAIT_UNTIL_APPLIED_REQ;
 import static accord.messages.MessageType.BEGIN_RECOVER_REQ;
 import static accord.messages.MessageType.COMMIT_MAXIMAL_REQ;
 import static accord.messages.MessageType.COMMIT_SLOW_PATH_REQ;
@@ -138,7 +140,7 @@ public class SerializerSupport
     private static final Set<MessageType> PRE_ACCEPT_COMMIT_APPLY_TYPES =
         ImmutableSet.of(PRE_ACCEPT_REQ, BEGIN_RECOVER_REQ, PROPAGATE_PRE_ACCEPT_MSG,
                         COMMIT_SLOW_PATH_REQ, COMMIT_MAXIMAL_REQ, STABLE_MAXIMAL_REQ, STABLE_FAST_PATH_REQ, PROPAGATE_STABLE_MSG,
-                        APPLY_MINIMAL_REQ, APPLY_MAXIMAL_REQ, PROPAGATE_APPLY_MSG,
+                        APPLY_MINIMAL_REQ, APPLY_MAXIMAL_REQ, PROPAGATE_APPLY_MSG, APPLY_THEN_WAIT_UNTIL_APPLIED_REQ,
                         PROPAGATE_OTHER_MSG);
 
     private static Command.Executed executed(RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
@@ -326,6 +328,12 @@ public class SerializerSupport
                     Ranges ranges = rangesForEpoch.allBetween(apply.txnId.epoch(), apply.executeAt.epoch());
                     return withContents.apply(param, apply.txn.slice(ranges, true), apply.deps.slice(ranges), apply.writes, apply.result);
                 }
+                else if (witnessed.contains(APPLY_THEN_WAIT_UNTIL_APPLIED_REQ))
+                {
+                    ApplyThenWaitUntilApplied apply = messageProvider.applyThenWaitUntilApplied();
+                    Ranges ranges = rangesForEpoch.allBetween(apply.txnId.epoch(), apply.executeAt.epoch());
+                    return withContents.apply(param, apply.txn.slice(ranges, true), apply.deps.slice(ranges), apply.writes, apply.result);
+                }
                 else if (witnessed.contains(APPLY_MINIMAL_REQ))
                 {
                     Apply apply = messageProvider.applyMinimal();
@@ -510,6 +518,8 @@ public class SerializerSupport
         Propagate propagateApply();
 
         Propagate propagateOther();
+
+        ApplyThenWaitUntilApplied applyThenWaitUntilApplied();
     }
 
     private static class LoggedMessageProvider

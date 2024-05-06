@@ -213,6 +213,17 @@ public class AccordGens
         };
     }
 
+    public static Gen<Key> keysInsideRanges(Ranges ranges)
+    {
+        Invariants.checkArgument(!ranges.isEmpty(), "Ranges empty");
+        RoutingKey sample = ranges.get(0).end();
+        if (sample instanceof PrefixedIntHashKey)
+            return prefixedIntHashKeyInsideRanges(ranges);
+        if (sample instanceof IntKey.Routing)
+            return intKeysInsideRanges(ranges);
+        throw new IllegalArgumentException("Unsupported key type " + sample.getClass() + "; supported = PrefixedIntHashKey, IntKey");
+    }
+
     public static Gen<KeyDeps> keyDeps(Gen<? extends Key> keyGen)
     {
         return keyDeps(keyGen, txnIds());
