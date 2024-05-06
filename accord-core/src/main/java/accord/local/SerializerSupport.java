@@ -464,6 +464,8 @@ public class SerializerSupport
                 PartialTxn preAcceptedPartialTxn = txnFromPreAcceptOrBeginRecover(rangesForEpoch, witnessed, messageProvider);
                 if (partialTxn == null || partialTxn.keys().size() == 0) partialTxn = preAcceptedPartialTxn;
                 else partialTxn = merge(preAcceptedPartialTxn, partialTxn);
+                if (partialTxn == null && witnessed.contains(COMMIT_MAXIMAL_REQ))
+                    partialTxn = messageProvider.commitMaximal().partialTxn;
             case StableWithTxnAndDeps:
             case CommitWithTxn:
         }
