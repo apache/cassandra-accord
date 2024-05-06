@@ -20,7 +20,9 @@ package accord.impl.basic;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
@@ -160,12 +162,58 @@ public class Journal implements LocalRequest.Handler, Runnable
         TxnIdProvider provider = typeToProvider.get(type);
         Invariants.nonNull(provider, "Unknown type %s: %s", type, request);
         TxnId txnId = provider.txnId(request);
-        writes.computeIfAbsent(txnId, ignore -> new HashMap<>()).put(type, request);
+        writes.computeIfAbsent(txnId, ignore -> new Testing()).put(type, request);
     }
 
     public SerializerSupport.MessageProvider makeMessageProvider(TxnId txnId)
     {
         return new MessageProvider(txnId, writes.getOrDefault(txnId, Map.of()));
+    }
+
+    private static class Testing extends LinkedHashMap<MessageType, Message>
+    {
+        public Map<MessageType, List<Message>> history()
+        {
+            LinkedHashMap<MessageType, List<Message>> history = new LinkedHashMap<>();
+            for (MessageType k : keySet())
+            {
+                Object current = super.get(k);
+                history.put(k, current instanceof List ? (List<Message>) current : Collections.singletonList((Message) current));
+            }
+            return history;
+        }
+
+        @Override
+        public Message get(Object key)
+        {
+            Object current = super.get(key);
+            if (current == null || current instanceof Message)
+                return (Message) current;
+            List<Message> messages = (List<Message>) current;
+            return messages.get(messages.size() - 1);
+        }
+
+        @Override
+        public Message put(MessageType key, Message value)
+        {
+            Object current = super.get(key);
+            if (current == null)
+                return super.put(key, value);
+            else if (current instanceof List)
+            {
+                List<Message> list = (List<Message>) current;
+                list.add(value);
+                return list.get(list.size() - 2);
+            }
+            else
+            {
+                List<Message> messages = new ArrayList<>();
+                messages.add((Message) current);
+                messages.add(value);
+                super.put(key, value);
+                return (Message) current;
+            }
+        }
     }
 
     @Override
@@ -364,6 +412,12 @@ public class Journal implements LocalRequest.Handler, Runnable
         public Propagate propagateApply()
         {
             return get(PROPAGATE_APPLY_MSG);
+        }
+
+        @Override
+        public Propagate propagateOther()
+        {
+            return get(PROPAGATE_OTHER_MSG);
         }
     }
 }
