@@ -50,6 +50,7 @@ import static accord.messages.MessageType.COMMIT_MAXIMAL_REQ;
 import static accord.messages.MessageType.COMMIT_SLOW_PATH_REQ;
 import static accord.messages.MessageType.PRE_ACCEPT_REQ;
 import static accord.messages.MessageType.PROPAGATE_APPLY_MSG;
+import static accord.messages.MessageType.PROPAGATE_OTHER_MSG;
 import static accord.messages.MessageType.PROPAGATE_PRE_ACCEPT_MSG;
 import static accord.messages.MessageType.PROPAGATE_STABLE_MSG;
 import static accord.messages.MessageType.STABLE_FAST_PATH_REQ;
@@ -137,7 +138,8 @@ public class SerializerSupport
     private static final Set<MessageType> PRE_ACCEPT_COMMIT_APPLY_TYPES =
         ImmutableSet.of(PRE_ACCEPT_REQ, BEGIN_RECOVER_REQ, PROPAGATE_PRE_ACCEPT_MSG,
                         COMMIT_SLOW_PATH_REQ, COMMIT_MAXIMAL_REQ, STABLE_MAXIMAL_REQ, STABLE_FAST_PATH_REQ, PROPAGATE_STABLE_MSG,
-                        APPLY_MINIMAL_REQ, APPLY_MAXIMAL_REQ, PROPAGATE_APPLY_MSG);
+                        APPLY_MINIMAL_REQ, APPLY_MAXIMAL_REQ, PROPAGATE_APPLY_MSG,
+                        PROPAGATE_OTHER_MSG);
 
     private static Command.Executed executed(RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
     {
@@ -324,11 +326,6 @@ public class SerializerSupport
                     Ranges ranges = rangesForEpoch.allBetween(apply.txnId.epoch(), apply.executeAt.epoch());
                     return withContents.apply(param, apply.txn.slice(ranges, true), apply.deps.slice(ranges), apply.writes, apply.result);
                 }
-                else if (witnessed.contains(PROPAGATE_APPLY_MSG))
-                {
-                    Propagate propagate = messageProvider.propagateApply();
-                    return sliceAndApply(rangesForEpoch, propagate, withContents, param, propagate.writes, propagate.result);
-                }
                 else if (witnessed.contains(APPLY_MINIMAL_REQ))
                 {
                     Apply apply = messageProvider.applyMinimal();
@@ -340,6 +337,12 @@ public class SerializerSupport
                     else if (witnessed.contains(PROPAGATE_STABLE_MSG))
                     {
                         Propagate propagate = messageProvider.propagateStable();
+                        var ranges = propagate.committedExecuteAt == null ? rangesForEpoch.allAt(propagate.txnId) : rangesForEpoch.allBetween(propagate.txnId, propagate.committedExecuteAt);
+                        return withContents.apply(param, propagate.partialTxn.slice(ranges, true), propagate.stableDeps.slice(ranges), apply.writes, apply.result);
+                    }
+                    else if (witnessed.contains(PROPAGATE_APPLY_MSG))
+                    {
+                        Propagate propagate = messageProvider.propagateApply();
                         var ranges = propagate.committedExecuteAt == null ? rangesForEpoch.allAt(propagate.txnId) : rangesForEpoch.allBetween(propagate.txnId, propagate.committedExecuteAt);
                         return withContents.apply(param, propagate.partialTxn.slice(ranges, true), propagate.stableDeps.slice(ranges), apply.writes, apply.result);
                     }
@@ -368,6 +371,13 @@ public class SerializerSupport
 
                     return sliceAndApply(rangesForEpoch, messageProvider, witnessed, commit, withContents, param, apply.writes, apply.result);
                 }
+                else if (witnessed.contains(PROPAGATE_APPLY_MSG))
+                {
+                    Propagate propagate = messageProvider.propagateApply();
+                    Invariants.nonNull(propagate.partialTxn, "Unable to find partialTxn; witnessed %s", new LoggedMessageProvider(messageProvider));
+                    Invariants.nonNull(propagate.stableDeps, "Unable to find stableDeps; witnessed %s", new LoggedMessageProvider(messageProvider));
+                    return sliceAndApply(rangesForEpoch, propagate, withContents, param, propagate.writes, propagate.result);
+                }
                 else if (witnessed.contains(PROPAGATE_PRE_ACCEPT_MSG))
                 {
                     // once propgate runs locally it merges the local state with the remote state, which may make this go from PRE_ACCEPT to PRE_APPLIED!
@@ -377,6 +387,15 @@ public class SerializerSupport
 
                     var ranges = propagate.committedExecuteAt == null ? rangesForEpoch.allAt(propagate.txnId) : rangesForEpoch.allBetween(propagate.txnId, propagate.committedExecuteAt);
                     return withContents.apply(param, propagate.partialTxn.slice(ranges, true), propagate.stableDeps.slice(ranges), propagate.writes, propagate.result);
+                }
+                else if (witnessed.contains(PROPAGATE_OTHER_MSG))
+                {
+                    // the txn/deps may have been erased, won't always be here...
+                    Propagate propagate = messageProvider.propagateOther();
+                    var ranges = propagate.committedExecuteAt == null ? rangesForEpoch.allAt(propagate.txnId) : rangesForEpoch.allBetween(propagate.txnId, propagate.committedExecuteAt);
+                    PartialTxn txn = propagate.partialTxn == null ? null : propagate.partialTxn.slice(ranges, true);
+                    PartialDeps deps = propagate.stableDeps == null ? null : propagate.stableDeps.slice(ranges);
+                    return withContents.apply(param, txn, deps, propagate.writes, propagate.result);
                 }
                 else
                 {
@@ -487,6 +506,8 @@ public class SerializerSupport
         Apply applyMaximal();
 
         Propagate propagateApply();
+
+        Propagate propagateOther();
     }
 
     private static class LoggedMessageProvider
