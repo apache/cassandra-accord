@@ -390,7 +390,7 @@ public class Commands
 
         Ranges coordinateRanges = coordinateRanges(safeStore, localSyncId);
         // TODO (desired, consider): in the case of sync points, the coordinator is unlikely to be a home shard, do we mind this? should document at least
-        Txn emptyTxn = safeStore.agent().emptyTxn(localSyncId.kind(), keys);
+        Txn emptyTxn = safeStore.agent().emptySystemTxn(localSyncId.kind(), keys);
         PartialDeps none = Deps.NONE.intersecting(route);
         PartialTxn partialTxn = emptyTxn.slice(coordinateRanges, true);
         Invariants.checkState(validate(SaveStatus.Stable, command, coordinateRanges, route, partialTxn, none, null));
@@ -425,7 +425,7 @@ public class Commands
             return;
 
         // NOTE: if this is ever made a non-empty txn this will introduce a potential bug where the txn is registered against CommandsForKeys
-        Txn emptyTxn = safeStore.agent().emptyTxn(localSyncId.kind(), keys);
+        Txn emptyTxn = safeStore.agent().emptySystemTxn(localSyncId.kind(), keys);
         safeCommand.preapplied(safeStore, command, command.executeAt(), command.waitingOn(), emptyTxn.execute(localSyncId, localSyncId, null), emptyTxn.result(localSyncId, localSyncId, null));
         maybeExecute(safeStore, safeCommand, true, false);
     }

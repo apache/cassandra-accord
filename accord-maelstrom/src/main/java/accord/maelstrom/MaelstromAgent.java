@@ -28,10 +28,9 @@ import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 
+import static accord.utils.Invariants.checkState;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
-
-import static accord.utils.Invariants.checkState;
 
 public class MaelstromAgent implements Agent
 {
@@ -98,7 +97,7 @@ public class MaelstromAgent implements Agent
     }
 
     @Override
-    public Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
+    public Txn emptySystemTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
     {
         return new Txn.InMemory(kind, keysOrRanges, new MaelstromRead(Keys.EMPTY, Keys.EMPTY), new MaelstromQuery(Node.Id.NONE, -1), null);
     }

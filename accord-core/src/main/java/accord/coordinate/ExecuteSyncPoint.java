@@ -57,7 +57,7 @@ public abstract class ExecuteSyncPoint<S extends Seekables<?, ?>> extends Settab
         @Override
         public void start()
         {
-            Txn txn = node.agent().emptyTxn(syncPoint.syncId.kind(), syncPoint.keysOrRanges);
+            Txn txn = node.agent().emptySystemTxn(syncPoint.syncId.kind(), syncPoint.keysOrRanges);
             Writes writes = txn.execute(syncPoint.syncId, syncPoint.syncId, null);
             Result result = txn.result(syncPoint.syncId, syncPoint.syncId, null);
             node.send(tracker.topologies().nodes(), to -> {

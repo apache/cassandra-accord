@@ -35,7 +35,6 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.function.ToLongFunction;
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
@@ -58,6 +57,7 @@ import accord.coordinate.CoordinateEphemeralRead;
 import accord.coordinate.CoordinateTransaction;
 import accord.coordinate.CoordinationAdapter;
 import accord.coordinate.CoordinationAdapter.Factory.Step;
+import accord.coordinate.CoordinationFailed;
 import accord.coordinate.MaybeRecover;
 import accord.coordinate.Outcome;
 import accord.coordinate.RecoverWithRoute;
@@ -157,7 +157,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private final CoordinationAdapter.Factory coordinationAdapters;
 
     private final LongSupplier nowSupplier;
-    private final ToLongFunction<TimeUnit> nowTimeUnit;
+    private final ToLongFunction<TimeUnit> elapsed;
     private final AtomicReference<Timestamp> now;
     private final Agent agent;
     private final RandomSource random;
@@ -170,7 +170,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private final Map<TxnId, AsyncResult<? extends Outcome>> coordinating = new ConcurrentHashMap<>();
 
     public Node(Id id, MessageSink messageSink, LocalRequest.Handler localRequestHandler,
-                ConfigurationService configService, LongSupplier nowSupplier, ToLongFunction<TimeUnit> nowTimeUnit,
+                ConfigurationService configService, LongSupplier nowSupplier, ToLongFunction<TimeUnit> elapsed,
                 Supplier<DataStore> dataSupplier, ShardDistributor shardDistributor, Agent agent, RandomSource random, Scheduler scheduler, TopologySorter.Supplier topologySorter,
                 Function<Node, ProgressLog.Factory> progressLogFactory, CommandStores.Factory factory, CoordinationAdapter.Factory coordinationAdapters,
                 LocalConfig localConfig)
@@ -181,9 +181,10 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.localRequestHandler = localRequestHandler;
         this.configService = configService;
         this.coordinationAdapters = coordinationAdapters;
-        this.topology = new TopologyManager(topologySorter, id);
+        this.topology = new TopologyManager(topologySorter, agent, id, scheduler, elapsed, localConfig);
+        topology.scheduleTopologyUpdateWatchdog();
         this.nowSupplier = nowSupplier;
-        this.nowTimeUnit = nowTimeUnit;
+        this.elapsed = elapsed;
         this.now = new AtomicReference<>(Timestamp.fromValues(topology.epoch(), nowSupplier.getAsLong(), id));
         this.agent = agent;
         this.random = random;
@@ -285,31 +286,24 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         topology.onEpochRedundant(ranges, epoch);
     }
 
-    public AsyncChain<?> awaitEpoch(long epoch)
-    {
-        if (topology.hasEpoch(epoch))
-            return AsyncResults.SUCCESS_VOID;
-        configService.fetchTopologyForEpoch(epoch);
-        return topology.awaitEpoch(epoch);
-    }
-
-    public AsyncChain<?> awaitEpoch(@Nullable EpochSupplier epochSupplier)
+    public void withEpoch(EpochSupplier epochSupplier, BiConsumer<Void, Throwable> callback)
     {
         if (epochSupplier == null)
-            return AsyncResults.SUCCESS_VOID;
-        return awaitEpoch(epochSupplier.epoch());
+            callback.accept(null, null);
+        else
+            withEpoch(epochSupplier.epoch(), callback);
     }
 
-    public void withEpoch(long epoch, Runnable runnable)
+    public void withEpoch(long epoch, BiConsumer<Void, Throwable> callback)
     {
         if (topology.hasEpoch(epoch))
         {
-            runnable.run();
+            callback.accept(null, null);
         }
         else
         {
             configService.fetchTopologyForEpoch(epoch);
-            topology.awaitEpoch(epoch).addCallback(runnable).begin(agent);
+            topology.awaitEpoch(epoch).begin(callback);
         }
     }
 
@@ -327,14 +321,6 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         }
     }
 
-    @Inline
-    public <T> AsyncChain<T> withEpoch(@Nullable EpochSupplier epochSupplier, Supplier<? extends AsyncChain<T>> supplier)
-    {
-        if (epochSupplier == null)
-            return supplier.get();
-        return withEpoch(epochSupplier.epoch(), supplier);
-    }
-
     public TopologyManager topology()
     {
         return topology;
@@ -343,6 +329,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     public void shutdown()
     {
         commandStores.shutdown();
+        topology.shutdown();
     }
 
     public Timestamp uniqueNow()
@@ -373,9 +360,9 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     }
 
     @Override
-    public long unix(TimeUnit timeUnit)
+    public long elapsed(TimeUnit timeUnit)
     {
-        return nowTimeUnit.applyAsLong(timeUnit);
+        return elapsed.applyAsLong(timeUnit);
     }
 
     private static Timestamp nowAtLeast(Timestamp current, Timestamp proposed)
@@ -721,7 +708,12 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         if (waitForEpoch > topology.epoch())
         {
             configService.fetchTopologyForEpoch(waitForEpoch);
-            topology().awaitEpoch(waitForEpoch).addCallback(() -> receive(request, from, replyContext));
+            topology().awaitEpoch(waitForEpoch).addCallback((ignored, failure) -> {
+                if (failure != null)
+                    agent().onUncaughtException(CoordinationFailed.wrap(failure));
+                else
+                    receive(request, from, replyContext);
+            });
             return;
         }
 

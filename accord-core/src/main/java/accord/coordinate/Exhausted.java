@@ -18,10 +18,12 @@
 
 package accord.coordinate;
 
+import javax.annotation.Nullable;
+
 import accord.api.RoutingKey;
 import accord.primitives.TxnId;
 
-import javax.annotation.Nullable;
+import static accord.utils.Invariants.checkState;
 
 /**
  * Thrown when a transaction exceeds its specified timeout for obtaining a result for a client
@@ -36,5 +38,17 @@ public class Exhausted extends CoordinationFailed
     public Exhausted(TxnId txnId, @Nullable RoutingKey homeKey, String message)
     {
         super(txnId, homeKey, message);
+    }
+
+    protected Exhausted(TxnId txnId, @Nullable RoutingKey homeKey, Exhausted cause)
+    {
+        super(txnId, homeKey, cause);
+    }
+
+    @Override
+    public Exhausted wrap()
+    {
+        checkState(this.getClass() == Exhausted.class);
+        return new Exhausted(txnId(), homeKey(), this);
     }
 }

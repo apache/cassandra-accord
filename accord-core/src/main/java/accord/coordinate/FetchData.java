@@ -18,6 +18,7 @@
 package accord.coordinate;
 
 import java.util.function.BiConsumer;
+import javax.annotation.Nullable;
 
 import accord.local.Node;
 import accord.local.Status;
@@ -25,10 +26,15 @@ import accord.local.Status.Known;
 import accord.messages.CheckStatus;
 import accord.messages.CheckStatus.CheckStatusOkFull;
 import accord.messages.Propagate;
-import accord.primitives.*;
+import accord.primitives.EpochSupplier;
+import accord.primitives.FullRoute;
+import accord.primitives.PartialRoute;
+import accord.primitives.Ranges;
+import accord.primitives.Route;
+import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.utils.Invariants;
-
-import javax.annotation.Nullable;
 
 import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAndCallback;
 import static accord.primitives.Route.castToRoute;
@@ -42,40 +48,45 @@ import static accord.primitives.Route.isRoute;
  */
 public class FetchData extends CheckShards<Route<?>>
 {
-    public static Object fetch(Known fetch, Node node, TxnId txnId, Unseekables<?> someUnseekables, BiConsumer<? super Known, Throwable> callback)
+    public static void fetch(Known fetch, Node node, TxnId txnId, Unseekables<?> someUnseekables, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super Known, Throwable> callback)
     {
-        return fetch(fetch, node, txnId, someUnseekables, null, null, callback);
+        if (someUnseekables.kind().isRoute()) fetch(fetch, node, txnId, castToRoute(someUnseekables), forLocalEpoch, executeAt, callback);
+        else fetchViaSomeRoute(fetch, node, txnId, someUnseekables, forLocalEpoch, executeAt, callback);
     }
 
-    public static Object fetch(Known fetch, Node node, TxnId txnId, Unseekables<?> someUnseekables, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super Known, Throwable> callback)
-    {
-        if (someUnseekables.kind().isRoute()) return fetch(fetch, node, txnId, castToRoute(someUnseekables), forLocalEpoch, executeAt, callback);
-        else return fetchViaSomeRoute(fetch, node, txnId, someUnseekables, forLocalEpoch, executeAt, callback);
-    }
-
-    public static Object fetch(Known fetch, Node node, TxnId txnId, Route<?> route, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super Known, Throwable> callback)
+    public static void fetch(Known fetch, Node node, TxnId txnId, Route<?> route, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super Known, Throwable> callback)
     {
         long srcEpoch = fetch.fetchEpoch(txnId, executeAt);
         if (!node.topology().hasEpoch(srcEpoch))
-            return node.topology().awaitEpoch(srcEpoch).map(ignore -> fetch(fetch, node, txnId, route, forLocalEpoch, executeAt, callback)).beginAsResult();
+        {
+            node.withEpoch(srcEpoch, (ignore, withEpochFailure) -> {
+                if (withEpochFailure != null)
+                {
+                    callback.accept(null, CoordinationFailed.wrap(withEpochFailure));
+                    return;
+                }
+                fetch(fetch, node, txnId, route, forLocalEpoch, executeAt, callback);
+            });
+            return;
+        }
 
         Invariants.checkArgument(node.topology().hasEpoch(srcEpoch), "Unknown epoch %d, latest known is %d", srcEpoch, node.epoch());
         long toEpoch = Math.max(srcEpoch, forLocalEpoch == null ? 0 : forLocalEpoch.epoch());
         Ranges ranges = node.topology().localRangesForEpochs(txnId.epoch(), toEpoch);
         if (!Route.isFullRoute(route))
         {
-            return fetchWithIncompleteRoute(fetch, node, txnId, route, forLocalEpoch, executeAt, callback);
+            fetchWithIncompleteRoute(fetch, node, txnId, route, forLocalEpoch, executeAt, callback);
         }
         else
         {
-            return fetchInternal(ranges, fetch, node, txnId, route.slice(ranges), executeAt, toEpoch, callback);
+            fetchInternal(ranges, fetch, node, txnId, route.slice(ranges), executeAt, toEpoch, callback);
         }
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static Object fetchViaSomeRoute(Known fetch, Node node, TxnId txnId, Unseekables<?> someUnseekables, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super Known, Throwable> callback)
+    private static void fetchViaSomeRoute(Known fetch, Node node, TxnId txnId, Unseekables<?> someUnseekables, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super Known, Throwable> callback)
     {
-        return FindSomeRoute.findSomeRoute(node, txnId, someUnseekables, (foundRoute, fail) -> {
+        FindSomeRoute.findSomeRoute(node, txnId, someUnseekables, (foundRoute, fail) -> {
             if (fail != null) callback.accept(null, fail);
             else if (foundRoute.route == null)
             {
@@ -129,32 +140,37 @@ public class FetchData extends CheckShards<Route<?>>
         }
     }
 
-    private static Object fetchWithIncompleteRoute(Known fetch, Node node, TxnId txnId, Route<?> someRoute, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super Known, Throwable> callback)
+    private static void fetchWithIncompleteRoute(Known fetch, Node node, TxnId txnId, Route<?> someRoute, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super Known, Throwable> callback)
     {
         long srcEpoch = fetch.fetchEpoch(txnId, executeAt);
         Invariants.checkArgument(node.topology().hasEpoch(srcEpoch), "Unknown epoch %d, latest known is %d", srcEpoch, node.epoch());
-        return FindRoute.findRoute(node, txnId, someRoute.withHomeKey(), (foundRoute, fail) -> {
+        FindRoute.findRoute(node, txnId, someRoute.withHomeKey(), (foundRoute, fail) -> {
             if (fail != null) callback.accept(null, fail);
             else if (foundRoute == null) fetchViaSomeRoute(fetch, node, txnId, someRoute, forLocalEpoch, executeAt, callback);
             else fetch(fetch, node, txnId, foundRoute.route, forLocalEpoch, foundRoute.executeAt, callback);
         });
     }
 
-    public static Object fetch(Known fetch, Node node, TxnId txnId, FullRoute<?> route, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super Known, Throwable> callback)
+    public static void fetch(Known fetch, Node node, TxnId txnId, FullRoute<?> route, @Nullable EpochSupplier forLocalEpoch, @Nullable Timestamp executeAt, BiConsumer<? super Known, Throwable> callback)
     {
-        return node.awaitEpoch(executeAt).map(ignore -> {
+        node.withEpoch(executeAt, (ignore, withEpochFailure) -> {
+            if (withEpochFailure != null)
+            {
+                callback.accept(null, CoordinationFailed.wrap(withEpochFailure));
+                return;
+            }
             long toEpoch = Math.max(fetch.fetchEpoch(txnId, executeAt), forLocalEpoch == null ? 0 : forLocalEpoch.epoch());
             Ranges ranges = node.topology().localRangesForEpochs(txnId.epoch(), toEpoch);
-            return fetchInternal(ranges, fetch, node, txnId, route.slice(ranges), executeAt, toEpoch, callback);
-        }).beginAsResult();
+            fetchInternal(ranges, fetch, node, txnId, route.slice(ranges), executeAt, toEpoch, callback);
+        });
     }
 
-    private static Object fetchInternal(Ranges ranges, Known target, Node node, TxnId txnId, PartialRoute<?> route, @Nullable Timestamp executeAt, long forLocalEpoch, BiConsumer<? super Known, Throwable> callback)
+    private static void fetchInternal(Ranges ranges, Known target, Node node, TxnId txnId, PartialRoute<?> route, @Nullable Timestamp executeAt, long forLocalEpoch, BiConsumer<? super Known, Throwable> callback)
     {
         long srcEpoch = target.fetchEpoch(txnId, executeAt);
         Invariants.checkArgument(node.topology().hasEpoch(srcEpoch), "Unknown epoch %d, latest known is %d", srcEpoch, node.epoch());
         PartialRoute<?> fetch = route.slice(ranges);
-        return fetchData(target, node, txnId, fetch, srcEpoch, forLocalEpoch, (sufficientFor, fail) -> {
+        fetchData(target, node, txnId, fetch, srcEpoch, forLocalEpoch, (sufficientFor, fail) -> {
             if (fail != null) callback.accept(null, fail);
             else callback.accept(sufficientFor, null);
         });

@@ -322,7 +322,7 @@ public class Cluster implements Scheduler
                 LongSupplier nowSupplier = nowSupplierSupplier.get();
                 LocalConfig localConfig = new MutableLocalConfig();
                 lookup.put(node, new Node(node, messageSink, LocalRequest::simpleHandler, new SimpleConfigService(topology),
-                                          nowSupplier, NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, nowSupplier),
+                                          nowSupplier, NodeTimeService.elapsedWrapperFromNonMonotonicSource(TimeUnit.MICROSECONDS, nowSupplier),
                                           MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                                           MaelstromAgent.INSTANCE,
                                           randomSupplier.get(), sinks, SizeOfIntersectionSorter.SUPPLIER,

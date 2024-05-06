@@ -33,6 +33,7 @@ import accord.api.Scheduler;
 import accord.coordinate.CoordinateGloballyDurable;
 import accord.coordinate.CoordinateShardDurable;
 import accord.coordinate.CoordinateSyncPoint;
+import accord.coordinate.CoordinationFailed;
 import accord.coordinate.ExecuteSyncPoint.SyncPointErased;
 import accord.local.Node;
 import accord.local.ShardDistributor;
@@ -110,7 +111,7 @@ public class CoordinateDurabilityScheduling
      * with a target gap between invocations of globalCycleTimeMicros
      *
      * This is done by nodes taking turns for each scheduled attempt that is due by calculating what # attempt is
-     * next for the current node ordinal in the cluster and time since the unix epoch and attempting to invoke then. If all goes
+     * next for the current node ordinal in the cluster and time since the elapsed epoch and attempting to invoke then. If all goes
      * well they end up doing it periodically in a timely fashion with the target gap achieved.
      *
      * TODO (desired): run this more often, but for less than the whole cluster, patterned in such a way as to ensure rapid cross-pollination
@@ -161,7 +162,7 @@ public class CoordinateDurabilityScheduling
     public synchronized void start()
     {
         Invariants.checkState(!stop); // cannot currently restart safely
-        long nowMicros = node.unix(MICROSECONDS);
+        long nowMicros = node.elapsed(MICROSECONDS);
         prevShardSyncTimeMicros = nowMicros;
         setNextGlobalSyncTime(nowMicros);
         scheduled = node.scheduler().recurring(this::run, frequencyMicros, MICROSECONDS);
@@ -187,7 +188,7 @@ public class CoordinateDurabilityScheduling
         if (currentGlobalTopology == null || currentGlobalTopology.size() == 0)
             return;
 
-        long nowMicros = node.unix(MICROSECONDS);
+        long nowMicros = node.elapsed(MICROSECONDS);
         if (nextGlobalSyncTimeMicros <= nowMicros)
         {
             startGlobalSync();
@@ -214,7 +215,14 @@ public class CoordinateDurabilityScheduling
     private void startShardSync(Ranges ranges)
     {
         TxnId at = node.nextTxnId(ExclusiveSyncPoint, Domain.Range);
-        node.scheduler().once(() -> node.withEpoch(at.epoch(), () -> {
+        node.scheduler().once(() -> node.withEpoch(at.epoch(), (ignored, withEpochFailure) -> {
+                           if (withEpochFailure != null)
+                           {
+                               Throwable wrapped = CoordinationFailed.wrap(withEpochFailure);
+                               logger.trace("Exception waiting for epoch before coordinating exclusive sync point for local shard durability, epoch " + at.epoch(), wrapped);
+                               node.agent().onUncaughtException(wrapped);
+                               return;
+                           }
                            CoordinateSyncPoint.exclusive(node, at, ranges)
                                .addCallback((success, fail) -> {
                                    if (fail != null) logger.trace("Exception coordinating exclusive sync point for local shard durability of {}", ranges, fail);
@@ -310,7 +318,7 @@ public class CoordinateDurabilityScheduling
     }
 
     /**
-     * Based on the current unix time (simulated or otherwise) calculate the wait time in microseconds until the next turn of this
+     * Based on the current elapsed time (simulated or otherwise) calculate the wait time in microseconds until the next turn of this
      * node for some activity with a target gap between nodes doing the activity.
      *
      * This is done by taking the index of the node in the current topology and the total number of nodes

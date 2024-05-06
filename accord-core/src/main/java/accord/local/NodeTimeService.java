@@ -22,8 +22,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
 import java.util.function.ToLongFunction;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import accord.primitives.Timestamp;
-import accord.utils.Invariants;
 
 public interface NodeTimeService
 {
@@ -36,18 +37,53 @@ public interface NodeTimeService
     long now();
 
     /**
-     * Return the current time since the Unix epoch in the specified time unit. May still be simulated time and not
-     * real time.
+     * Return the current time since some arbitrary epoch in the specified time unit. May still be simulated time and not
+     * real time. The time returned by this will be monotonic.
      */
-    long unix(TimeUnit unit);
+    long elapsed(TimeUnit unit);
 
     Timestamp uniqueNow(Timestamp atLeast);
 
-    static ToLongFunction<TimeUnit> unixWrapper(TimeUnit sourceUnit, LongSupplier nowSupplier)
+    static ToLongFunction<TimeUnit> elapsedWrapperFromMonotonicSource(TimeUnit sourceUnit, LongSupplier monotonicNowSupplier)
     {
-        return resultUnit -> {
-            Invariants.checkArgument(resultUnit != TimeUnit.NANOSECONDS, "Nanoseconds since epoch doesn't fit in a long");
-            return resultUnit.convert(nowSupplier.getAsLong(), sourceUnit);
-        };
+        return resultUnit ->  resultUnit.convert(monotonicNowSupplier.getAsLong(), sourceUnit);
     }
+
+    /**
+     * Allow time progression to be controlled using a potentially non-monotonic time source for testing with simulated
+     * time sources. This is not designed to be fast and real usage should be with a monotonic time source.
+     */
+    @VisibleForTesting
+    static ToLongFunction<TimeUnit> elapsedWrapperFromNonMonotonicSource(TimeUnit sourceUnit, LongSupplier nonMonotonicNowSupplier)
+    {
+        return elapsedWrapperFromMonotonicSource(sourceUnit, new MonotonicWrapper(nonMonotonicNowSupplier));
+    }
+
+    class MonotonicWrapper implements LongSupplier
+    {
+       private final LongSupplier nowSupplier;
+       private long lastNow = Long.MIN_VALUE;
+       private long delta = 0;
+
+       // Use an arbitrary epoch
+       private long epoch = Long.MAX_VALUE / 4;
+
+       private MonotonicWrapper(LongSupplier nowSupplier)
+       {
+           this.nowSupplier = nowSupplier;
+       }
+
+       @Override
+       public synchronized long getAsLong()
+       {
+           // Only use now as a source of forward progression
+           long now = nowSupplier.getAsLong();
+           // If it moves backwards, remember how far backwards and always add that
+           if (now < lastNow)
+               delta = lastNow - now;
+           lastNow = now;
+
+           return now + delta + epoch;
+       }
+    };
 }

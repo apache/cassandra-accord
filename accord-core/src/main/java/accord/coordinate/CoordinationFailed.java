@@ -26,10 +26,11 @@ import accord.primitives.TxnId;
 /**
  * Thrown when a transaction exceeds its specified timeout for obtaining a result for a client
  */
-public class CoordinationFailed extends RuntimeException
+public abstract class CoordinationFailed extends RuntimeException
 {
     private @Nullable TxnId txnId;
     private @Nullable RoutingKey homeKey;
+
     public CoordinationFailed(@Nullable TxnId txnId, @Nullable RoutingKey homeKey)
     {
         this.txnId = txnId;
@@ -39,6 +40,13 @@ public class CoordinationFailed extends RuntimeException
     public CoordinationFailed(@Nullable TxnId txnId, @Nullable RoutingKey homeKey, String message)
     {
         super(message);
+        this.txnId = txnId;
+        this.homeKey = homeKey;
+    }
+
+    protected CoordinationFailed(@Nullable TxnId txnId, @Nullable RoutingKey homeKey, CoordinationFailed cause)
+    {
+        super(cause);
         this.txnId = txnId;
         this.homeKey = homeKey;
     }
@@ -60,5 +68,41 @@ public class CoordinationFailed extends RuntimeException
     public @Nullable RoutingKey homeKey()
     {
         return homeKey;
+    }
+
+    /**
+     * Wrap the exception without changing the type so asynchronous callbacks can add their own stack
+     */
+    public abstract CoordinationFailed wrap();
+
+    public static Throwable wrap(Throwable t)
+    {
+        if (t instanceof CoordinationFailed)
+        {
+            CoordinationFailed wrapped = ((CoordinationFailed)t).wrap();
+            if (wrapped.getClass() != t.getClass())
+            {
+                IllegalStateException ise = new IllegalStateException("Wrapping should not change type");
+                ise.addSuppressed(t);
+                throw ise;
+            }
+            return wrapped;
+        }
+        else if (t instanceof AssertionError)
+        {
+            return new AssertionError(t);
+        }
+        else if (t instanceof OutOfMemoryError)
+        {
+            return t;
+        }
+        else if (t instanceof Error)
+        {
+            return new Error(t);
+        }
+        else
+        {
+            return new RuntimeException(t);
+        }
     }
 }

@@ -102,7 +102,7 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
         TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(txnId.epoch()), txnId, route.homeKey(), keysOrRanges);
         if (mismatch != null)
             return AsyncResults.failure(mismatch);
-        CoordinateSyncPoint<S> coordinate = new CoordinateSyncPoint<>(node, txnId, node.agent().emptyTxn(txnId.kind(), keysOrRanges), route, adapter);
+        CoordinateSyncPoint<S> coordinate = new CoordinateSyncPoint<>(node, txnId, node.agent().emptySystemTxn(txnId.kind(), keysOrRanges), route, adapter);
         coordinate.start();
         return coordinate;
     }
@@ -138,7 +138,7 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
     {
         TxnId txnId = syncPoint.syncId;
         Timestamp executeAt = txnId;
-        Txn txn = node.agent().emptyTxn(txnId.kind(), syncPoint.keysOrRanges);
+        Txn txn = node.agent().emptySystemTxn(txnId.kind(), syncPoint.keysOrRanges);
         Deps deps = syncPoint.waitFor;
         Apply.sendMaximal(node, to, txnId, syncPoint.route(), txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null));
     }

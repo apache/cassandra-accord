@@ -178,7 +178,7 @@ public class Main
             sink = new StdoutSink(System::currentTimeMillis, scheduler, start, init.self, out, err);
             LocalConfig localConfig = new MutableLocalConfig();
             on = new Node(init.self, sink, LocalRequest::simpleHandler, new SimpleConfigService(topology),
-                          System::currentTimeMillis, NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, System::currentTimeMillis),
+                          System::currentTimeMillis, NodeTimeService.elapsedWrapperFromNonMonotonicSource(TimeUnit.MILLISECONDS, System::currentTimeMillis),
                           MaelstromStore::new, new ShardDistributor.EvenSplit(8, ignore -> new MaelstromKey.Splitter()),
                           MaelstromAgent.INSTANCE, new DefaultRandom(), scheduler, SizeOfIntersectionSorter.SUPPLIER,
                           SimpleProgressLog::new, InMemoryCommandStores.SingleThread::new, new CoordinationAdapter.DefaultFactory(),

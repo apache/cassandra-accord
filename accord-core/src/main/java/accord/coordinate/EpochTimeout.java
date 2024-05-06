@@ -18,33 +18,28 @@
 
 package accord.coordinate;
 
-import javax.annotation.Nullable;
-
-import accord.api.RoutingKey;
-import accord.primitives.TxnId;
-
 import static accord.utils.Invariants.checkState;
 
-/**
- * Thrown when a coordinator is preempted by another recovery
- * coordinator intending to complete the transaction
- */
-public class Preempted extends CoordinationFailed
+public class EpochTimeout extends Timeout
 {
-    public Preempted(TxnId txnId, @Nullable RoutingKey homeKey)
+    public final long epoch;
+
+    public EpochTimeout(long epoch)
     {
-        super(txnId, homeKey);
+        super(null, null);
+        this.epoch = epoch;
     }
 
-    private Preempted(TxnId txnId, @Nullable RoutingKey homeKey, Preempted cause)
+    private EpochTimeout(long epoch, EpochTimeout cause)
     {
-        super(txnId, homeKey, cause);
+        super(null, null, cause);
+        this.epoch = epoch;
     }
 
     @Override
-    public Preempted wrap()
+    public EpochTimeout wrap()
     {
-        checkState(this.getClass() == Preempted.class);
-        return new Preempted(txnId(), homeKey(), this);
+        checkState(this.getClass() == EpochTimeout.class);
+        return new EpochTimeout(epoch, this);
     }
 }

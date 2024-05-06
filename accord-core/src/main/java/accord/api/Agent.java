@@ -18,6 +18,8 @@
 
 package accord.api;
 
+import javax.annotation.Nonnull;
+
 import accord.local.Command;
 import accord.local.Node;
 import accord.primitives.Ranges;
@@ -25,7 +27,6 @@ import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
-import javax.annotation.Nonnull;
 
 /**
  * Facility for augmenting node behaviour at specific points
@@ -90,7 +91,10 @@ public interface Agent extends UncaughtExceptionListener
      */
     int cfkPruneInterval();
 
-    Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges);
+    /**
+     * Create an empty transaction that Accord can use for its own internal transactions.
+     */
+    Txn emptySystemTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges);
 
     default EventsListener metricsEventsListener()
     {

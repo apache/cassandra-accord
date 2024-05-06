@@ -23,6 +23,8 @@ import javax.annotation.Nullable;
 import accord.api.RoutingKey;
 import accord.primitives.TxnId;
 
+import static accord.utils.Invariants.checkState;
+
 /**
  * Thrown when a transaction's state has been truncated prior to the completion of some operation upon it
  */
@@ -36,5 +38,17 @@ public class Truncated extends CoordinationFailed
     public Truncated(TxnId txnId, @Nullable RoutingKey homeKey, String message)
     {
         super(txnId, homeKey, message);
+    }
+
+    private Truncated(TxnId txnId, @Nullable RoutingKey homeKey, Truncated cause)
+    {
+        super(txnId, homeKey, cause);
+    }
+
+    @Override
+    public Truncated wrap()
+    {
+        checkState(this.getClass() == Truncated.class);
+        return new Truncated(txnId(), homeKey(), this);
     }
 }

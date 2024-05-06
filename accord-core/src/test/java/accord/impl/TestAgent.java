@@ -21,6 +21,7 @@ package accord.impl;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import javax.annotation.Nonnull;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,7 +37,6 @@ import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
-import javax.annotation.Nonnull;
 
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
@@ -133,7 +133,7 @@ public class TestAgent implements Agent
     }
 
     @Override
-    public Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
+    public Txn emptySystemTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
     {
         return new Txn.InMemory(kind, keysOrRanges, MockStore.read(Keys.EMPTY), MockStore.QUERY, null);
     }

@@ -19,6 +19,7 @@
 package accord.coordinate;
 
 import java.util.function.BiConsumer;
+import javax.annotation.Nullable;
 
 import accord.local.Node;
 import accord.local.Node.Id;
@@ -40,7 +41,6 @@ import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
-import javax.annotation.Nullable;
 
 import static accord.coordinate.CoordinationAdapter.Factory.Step.InitiateRecovery;
 import static accord.coordinate.CoordinationAdapter.Invoke.persist;
@@ -211,7 +211,12 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                 if (known.executeAt.isDecidedAndKnownToExecute() && known.deps.hasDecidedDeps() && known.outcome == Apply)
                 {
                     Deps deps = full.stableDeps.reconstitute(route());
-                    node.withEpoch(full.executeAt.epoch(), () -> {
+                    node.withEpoch(full.executeAt.epoch(), (ignored, withEpochFailure) -> {
+                        if (withEpochFailure != null)
+                        {
+                            node.agent().onUncaughtException(CoordinationFailed.wrap(withEpochFailure));
+                            return;
+                        }
                         persist(node.coordinationAdapter(txnId, InitiateRecovery), node, topologies, route(), txnId, txn, full.executeAt, deps, full.writes, full.result, null);
                     });
                     callback.accept(APPLIED, null);

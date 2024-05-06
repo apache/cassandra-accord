@@ -18,10 +18,12 @@
 
 package accord.coordinate;
 
+import javax.annotation.Nullable;
+
 import accord.api.RoutingKey;
 import accord.primitives.TxnId;
 
-import javax.annotation.Nullable;
+import static accord.utils.Invariants.checkState;
 
 /**
  * Thrown when a transaction has been invalidated
@@ -31,5 +33,17 @@ public class Invalidated extends CoordinationFailed
     public Invalidated(TxnId txnId, @Nullable RoutingKey homeKey)
     {
         super(txnId, homeKey);
+    }
+
+    private Invalidated(TxnId txnId, @Nullable RoutingKey homeKey, Invalidated cause)
+    {
+        super(txnId, homeKey, cause);
+    }
+
+    @Override
+    public Invalidated wrap()
+    {
+        checkState(this.getClass() == Invalidated.class);
+        return new Invalidated(txnId(), homeKey(), this);
     }
 }

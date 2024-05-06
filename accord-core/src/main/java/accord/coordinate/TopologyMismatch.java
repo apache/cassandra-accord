@@ -19,7 +19,6 @@
 package accord.coordinate;
 
 import java.util.EnumSet;
-
 import javax.annotation.Nullable;
 
 import accord.api.RoutingKey;
@@ -27,6 +26,8 @@ import accord.primitives.Routables;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.topology.Topology;
+
+import static accord.utils.Invariants.checkState;
 
 public class TopologyMismatch extends CoordinationFailed
 {
@@ -44,6 +45,19 @@ public class TopologyMismatch extends CoordinationFailed
     {
         super(null, null, buildMessage(t, select));
         this.reasons = reasons;
+    }
+
+    private TopologyMismatch(EnumSet<Reason> reasons, TxnId txnId, @Nullable RoutingKey homeKey, TopologyMismatch cause)
+    {
+        super(txnId, homeKey, cause);
+        this.reasons = reasons;
+    }
+
+    @Override
+    public TopologyMismatch wrap()
+    {
+        checkState(this.getClass() == TopologyMismatch.class);
+        return new TopologyMismatch(reasons, txnId(), homeKey(), this);
     }
 
     private static String buildMessage(EnumSet<Reason> reason, Topology topology, RoutingKey homeKey, Routables<?> keysOrRanges)

@@ -19,6 +19,7 @@
 package accord.coordinate;
 
 import java.util.function.BiConsumer;
+import javax.annotation.Nullable;
 
 import accord.api.Result;
 import accord.coordinate.ExecuteSyncPoint.ExecuteBlocking;
@@ -37,7 +38,6 @@ import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.utils.Faults;
-import javax.annotation.Nullable;
 
 import static accord.coordinate.ExecutePath.FAST;
 import static accord.coordinate.ExecutePath.SLOW;
@@ -92,7 +92,12 @@ public interface CoordinationAdapter<R>
         {
             if (!node.topology().hasEpoch(executeAt.epoch()))
             {
-                node.withEpoch(executeAt.epoch(), () -> stabilise(adapter, node, any, route, ballot, txnId, txn, executeAt, deps, callback));
+                node.withEpoch(executeAt.epoch(), (ignore, withEpochFailure) -> {
+                    if (withEpochFailure != null)
+                        callback.accept(null, CoordinationFailed.wrap(withEpochFailure));
+                    else
+                        stabilise(adapter, node, any, route, ballot, txnId, txn, executeAt, deps, callback);
+                });
                 return;
             }
             Topologies coordinates = any.forEpochs(txnId.epoch(), txnId.epoch());

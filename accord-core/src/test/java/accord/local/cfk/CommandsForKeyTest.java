@@ -28,12 +28,10 @@ import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 import java.util.function.Function;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.junit.jupiter.api.Test;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1027,7 +1025,7 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
+        public Txn emptySystemTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
         {
             throw new UnsupportedOperationException();
         }

@@ -119,7 +119,7 @@ public class ImmutableCommandTest
         MockCluster.Clock clock = new MockCluster.Clock(100);
         LocalConfig localConfig = new MutableLocalConfig();
         Node node = new Node(id, null, null, new MockConfigurationService(null, (epoch, service) -> { }, storeSupport.local.get()),
-                             clock, NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, clock),
+                             clock, NodeTimeService.elapsedWrapperFromNonMonotonicSource(TimeUnit.MICROSECONDS, clock),
                              () -> storeSupport.data, new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()), new TestAgent(), new DefaultRandom(), Scheduler.NEVER_RUN_SCHEDULED,
                              SizeOfIntersectionSorter.SUPPLIER, ignore -> ignore2 -> new NoOpProgressLog(), InMemoryCommandStores.Synchronized::new,
                              new CoordinationAdapter.DefaultFactory(),

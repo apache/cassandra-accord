@@ -31,6 +31,7 @@ import com.google.common.collect.Sets;
 import accord.api.Key;
 import accord.api.MessageSink;
 import accord.api.Scheduler;
+import accord.api.TopologySorter;
 import accord.config.LocalConfig;
 import accord.config.MutableLocalConfig;
 import accord.coordinate.CoordinationAdapter;
@@ -57,6 +58,7 @@ import accord.primitives.Txn;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.topology.Topology;
+import accord.topology.TopologyManager;
 import accord.utils.DefaultRandom;
 import accord.utils.EpochFunction;
 import accord.utils.Invariants;
@@ -170,7 +172,7 @@ public class Utils
                              LocalRequest::simpleHandler,
                              new MockConfigurationService(messageSink, EpochFunction.noop(), topology),
                              clock,
-                             NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, clock),
+                             NodeTimeService.elapsedWrapperFromNonMonotonicSource(TimeUnit.MICROSECONDS, clock),
                              () -> store,
                              new ShardDistributor.EvenSplit(8, ignore -> new IntKey.Splitter()),
                              new TestAgent(),
@@ -197,5 +199,10 @@ public class Utils
                   .atMost(timeoutInSeconds, TimeUnit.SECONDS)
                   .ignoreExceptions()
                   .untilAsserted(runnable);
+    }
+
+    public static TopologyManager testTopologyManager(TopologySorter.Supplier sorter, Id node)
+    {
+        return new TopologyManager(sorter, new TestAgent.RethrowAgent(), node, Scheduler.NEVER_RUN_SCHEDULED, NodeTimeService.elapsedWrapperFromNonMonotonicSource(TimeUnit.MILLISECONDS, () -> 0), LocalConfig.DEFAULT);
     }
 }

@@ -29,6 +29,7 @@ import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -45,13 +46,10 @@ import accord.utils.IndexedConsumer;
 import accord.utils.IndexedIntFunction;
 import accord.utils.IndexedTriFunction;
 import accord.utils.SimpleBitSet;
-import accord.utils.SortedArrays;
 import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.Utils;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.IntArrayList;
-
-import javax.annotation.Nullable;
 
 import static accord.utils.Invariants.illegalArgument;
 import static accord.utils.SortedArrays.Search.FLOOR;

@@ -152,7 +152,12 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
     void onPreAccepted(Topologies topologies)
     {
         Timestamp executeAt = foldl(oks, (ok, prev) -> mergeMax(ok.witnessedAt, prev), Timestamp.NONE);
-        node.withEpoch(executeAt.epoch(), () -> onPreAccepted(topologies, executeAt, oks));
+        node.withEpoch(executeAt.epoch(), (ignored, withEpochFailure) -> {
+            if (withEpochFailure != null)
+                tryFailure(CoordinationFailed.wrap(withEpochFailure));
+            else
+                onPreAccepted(topologies, executeAt, oks);
+        });
     }
 
     abstract void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> oks);

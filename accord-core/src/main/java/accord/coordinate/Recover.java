@@ -25,7 +25,6 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import accord.api.Result;
@@ -252,7 +251,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         RecoverOk acceptOrCommit = maxAccepted(recoverOkList);
         RecoverOk acceptOrCommitNotTruncated = acceptOrCommit == null || acceptOrCommit.status != Status.Truncated
                                                ? acceptOrCommit : maxAcceptedNotTruncated(recoverOkList);
-        
+
         if (acceptOrCommitNotTruncated != null)
         {
             Timestamp executeAt = acceptOrCommitNotTruncated.executeAt;
@@ -269,9 +268,17 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 case Applied:
                 case PreApplied:
                 {
-                    withCommittedDeps(executeAt, stableDeps -> {
+                    withCommittedDeps(executeAt, (stableDeps, withEpochFailure) -> {
+                        if (withEpochFailure != null)
+                        {
+                            node.agent().onUncaughtException(CoordinationFailed.wrap(withEpochFailure));
+                            return;
+                        }
                         // TODO (future development correctness): when writes/result are partially replicated, need to confirm we have quorum of these
-                        persist(adapter, node, tracker.topologies(), route, txnId, txn, executeAt, stableDeps, acceptOrCommitNotTruncated.writes, acceptOrCommitNotTruncated.result, null);
+                        persist(adapter, node, tracker.topologies(), route, txnId, txn, executeAt, stableDeps, acceptOrCommitNotTruncated.writes, acceptOrCommitNotTruncated.result, (ignored, failure) -> {
+                            if (failure != null)
+                                node.agent().onUncaughtException(CoordinationFailed.wrap(withEpochFailure));
+                        });
                     });
                     accept(acceptOrCommitNotTruncated.result, null);
                     return;
@@ -279,7 +286,12 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
                 case Stable:
                 {
-                    withCommittedDeps(executeAt, stableDeps -> {
+                    withCommittedDeps(executeAt, (stableDeps, withEpochFailure) -> {
+                        if (withEpochFailure != null)
+                        {
+                            node.agent().onUncaughtException(CoordinationFailed.wrap(withEpochFailure));
+                            return;
+                        }
                         execute(adapter, node, tracker.topologies(), route, RECOVER, txnId, txn, executeAt, stableDeps, this);
                     });
                     return;
@@ -288,7 +300,12 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 case PreCommitted:
                 case Committed:
                 {
-                    withCommittedDeps(executeAt, committedDeps -> {
+                    withCommittedDeps(executeAt, (committedDeps, withEpochFailure) -> {
+                        if (withEpochFailure != null)
+                        {
+                            node.agent().onUncaughtException(CoordinationFailed.wrap(withEpochFailure));
+                            return;
+                        }
                         stabilise(adapter, node, tracker.topologies(), route, ballot, txnId, txn, executeAt, committedDeps, this);
                     });
                     return;
@@ -362,14 +379,19 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         propose(txnId, proposeDeps);
     }
 
-    private void withCommittedDeps(Timestamp executeAt, Consumer<Deps> withDeps)
+    private void withCommittedDeps(Timestamp executeAt, BiConsumer<Deps, Throwable> withDeps)
     {
         LatestDeps.MergedCommitResult merged = LatestDeps.mergeCommit(txnId, executeAt, Arrays.asList(recoverOks), ok -> ok == null ? null : ok.deps);
-        node.withEpoch(executeAt.epoch(), () -> {
+        node.withEpoch(executeAt.epoch(), (ignored, withEpochFailure) -> {
+            if (withEpochFailure != null)
+            {
+                withDeps.accept(null, CoordinationFailed.wrap(withEpochFailure));
+                return;
+            }
             Seekables<?, ?> missing = txn.keys().subtract(merged.sufficientFor);
             if (missing.isEmpty())
             {
-                withDeps.accept(merged.deps);
+                withDeps.accept(merged.deps, null);
             }
             else
             {
@@ -381,7 +403,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                     }
                     else
                     {
-                        withDeps.accept(merged.deps.with(extraDeps));
+                        withDeps.accept(merged.deps.with(extraDeps), null);
                     }
                 });
             }
@@ -401,14 +423,28 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         // If not accepted then the executeAt is not consistent cross the peers and likely different on every node.  There is also an edge case
         // when ranges are removed from the topology, during this case the executeAt won't know the ranges and the invalidate commit will fail.
         Timestamp invalidateUntil = Stream.of(recoverOks).map(ok -> ok == null ? null : ok.status.hasBeen(Status.Accepted) ? ok.executeAt : ok.txnId).reduce(txnId, Timestamp::nonNullOrMax);
-        node.withEpoch(invalidateUntil.epoch(), () -> Commit.Invalidate.commitInvalidate(node, txnId, route, invalidateUntil));
+        node.withEpoch(invalidateUntil.epoch(), (ignored, withEpochFailure) -> {
+            if (withEpochFailure != null)
+            {
+                node.agent().onUncaughtException(CoordinationFailed.wrap(withEpochFailure));
+                return;
+            }
+            Commit.Invalidate.commitInvalidate(node, txnId, route, invalidateUntil);
+        });
         isDone = true;
         locallyInvalidateAndCallback(node, txnId, invalidateUntil, route, ProgressToken.INVALIDATED, callback);
     }
 
     private void propose(Timestamp executeAt, Deps deps)
     {
-        node.withEpoch(executeAt.epoch(), () -> Invoke.propose(adapter, node, route, ballot, txnId, txn, executeAt, deps, this));
+        node.withEpoch(executeAt.epoch(), (ignored, withEpochFailure) -> {
+            if (withEpochFailure != null)
+            {
+                this.accept(null, CoordinationFailed.wrap(withEpochFailure));
+                return;
+            }
+            Invoke.propose(adapter, node, route, ballot, txnId, txn, executeAt, deps, this);
+        });
     }
 
     private void retry()

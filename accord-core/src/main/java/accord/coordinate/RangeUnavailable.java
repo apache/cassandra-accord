@@ -18,8 +18,13 @@
 
 package accord.coordinate;
 
+import javax.annotation.Nullable;
+
+import accord.api.RoutingKey;
 import accord.primitives.Ranges;
 import accord.primitives.TxnId;
+
+import static accord.utils.Invariants.checkState;
 
 public class RangeUnavailable extends Exhausted
 {
@@ -29,6 +34,19 @@ public class RangeUnavailable extends Exhausted
     {
         super(txnId, null, buildMessage(unavailable));
         this.unavailable = unavailable;
+    }
+
+    private RangeUnavailable(Ranges unavailable, TxnId txnId, @Nullable RoutingKey homeKey, RangeUnavailable cause)
+    {
+        super(txnId, homeKey, cause);
+        this.unavailable = unavailable;
+    }
+
+    @Override
+    public RangeUnavailable wrap()
+    {
+        checkState(this.getClass() == RangeUnavailable.class);
+        return new RangeUnavailable(unavailable, txnId(), homeKey(), this);
     }
 
     private static String buildMessage(Ranges unavailable)

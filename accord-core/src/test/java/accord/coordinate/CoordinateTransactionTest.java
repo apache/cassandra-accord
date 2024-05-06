@@ -250,14 +250,14 @@ public class CoordinateTransactionTest
             // Create a txn to block the one we are about to create after this
             SimpleProgressLog.PAUSE_FOR_TEST = true;
             TxnId blockingTxnId = new TxnId(txnId.epoch(), 1, Read, Key, new Id(1));
-            Txn blockingTxn = agent.emptyTxn(Read, keys);
+            Txn blockingTxn = agent.emptySystemTxn(Read, keys);
             PreLoadContext blockingTxnContext = PreLoadContext.contextFor(blockingTxnId, keys);
             for (Node n : cluster)
                 assertEquals(AcceptOutcome.Success, getUninterruptibly(n.unsafeForKey(key).submit(blockingTxnContext, store ->
                         Commands.preaccept(store, store.get(blockingTxnId, homeKey), blockingTxnId, blockingTxnId.epoch(), blockingTxn.slice(store.ranges().allAt(blockingTxnId), true), route, null))));
 
             // Now create the transaction that should be blocked by the previous one
-            Txn txn = agent.emptyTxn(Write, keys);
+            Txn txn = agent.emptySystemTxn(Write, keys);
             PreLoadContext context = PreLoadContext.contextFor(txnId, keys);
             for (Node n : cluster)
                 assertEquals(AcceptOutcome.Success, getUninterruptibly(n.unsafeForKey(key).submit(context, store ->

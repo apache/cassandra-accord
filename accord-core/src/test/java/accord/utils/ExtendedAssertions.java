@@ -18,6 +18,10 @@
 
 package accord.utils;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.function.Consumer;
+
 import accord.api.RoutingKey;
 import accord.local.Node;
 import accord.messages.PreAccept;
@@ -41,11 +45,6 @@ import org.assertj.core.error.ShouldHaveSize;
 import org.assertj.core.error.ShouldNotBeEmpty;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
-
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-import java.util.function.Consumer;
 
 public class ExtendedAssertions
 {

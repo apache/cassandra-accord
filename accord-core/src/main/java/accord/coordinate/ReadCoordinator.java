@@ -18,20 +18,23 @@
 
 package accord.coordinate;
 
-import accord.coordinate.tracking.RequestStatus;
-import accord.messages.Callback;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+
 import com.google.common.collect.Lists;
 
 import accord.coordinate.tracking.ReadTracker;
+import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node;
 import accord.local.Node.Id;
+import accord.messages.Callback;
 import accord.messages.CheckStatus.WithQuorum;
 import accord.primitives.Ranges;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
-
-import java.util.*;
 
 import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
 import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
@@ -235,8 +238,9 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
                 break;
             case Success:
                 Invariants.checkState(!isDone);
-                isDone = true;
                 onDone(waitingOnData == 0 ? Success.Success : Success.Quorum, null);
+                // isDone = true needs to be last or exceptions thrown by onDone are ignored and this never finishes
+                isDone = true;
                 break;
             case Failed:
                 finishOnExhaustion();
