@@ -167,15 +167,15 @@ public class SerializerSupport
             case TruncatedApplyWithDeps:
                 Set<MessageType> witnessed = messageProvider.test(APPLY_TYPES);
                 checkState(!witnessed.isEmpty());
-                if (witnessed.contains(APPLY_MINIMAL_REQ))
-                {
-                    Apply apply = messageProvider.applyMinimal();
-                    writes = apply.writes;
-                    result = apply.result;
-                }
                 if (witnessed.contains(APPLY_MAXIMAL_REQ))
                 {
                     Apply apply = messageProvider.applyMaximal();
+                    writes = apply.writes;
+                    result = apply.result;
+                }
+                else if (witnessed.contains(APPLY_MINIMAL_REQ))
+                {
+                    Apply apply = messageProvider.applyMinimal();
                     writes = apply.writes;
                     result = apply.result;
                 }
