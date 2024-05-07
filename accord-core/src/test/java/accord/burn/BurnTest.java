@@ -34,6 +34,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -50,13 +51,15 @@ import accord.impl.MessageListener;
 import accord.utils.Gen;
 import accord.utils.Gens;
 import accord.utils.Utils;
+import accord.utils.async.AsyncChains;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
 import accord.verify.CompositeVerifier;
 import accord.verify.ElleVerifier;
 import accord.verify.StrictSerializabilityVerifier;
 import accord.verify.Verifier;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -541,19 +544,58 @@ public class BurnTest
     }
 
     @Test
-    @Timeout(value = 3, unit = TimeUnit.MINUTES)
-//    @RepeatedTest(Integer.MAX_VALUE)
     public void testOne()
     {
-//        run(System.nanoTime());
+        run(System.nanoTime());
+//        run(320860822860166L); // Incomplete txn ({read:[]}) provided; does not cover [(542#7281,542#10920]] // In debugging the txn was a historic txn
+//        run(321378044901625L); // Incomplete txn ({read:[]}) provided; does not cover [(849#4681,849#9362], (849#9362,849#10854]]
+//        run(321814000189583L); // Incomplete txn ({read:[]}) provided; does not cover [(36#13106,36#14320]]
 
-        run(296358152117833L); // Unable to find messages that lead to PreApplied state; witnessed [PRE_ACCEPT_REQ, ACCEPT_REQ, COMMIT_SLOW_PATH_REQ, APPLY_THEN_WAIT_UNTIL_APPLIED_REQ]
-//        run(296520943500625L); // Unable to find messages that lead to PreApplied state; witnessed [PRE_ACCEPT_REQ, ACCEPT_REQ, COMMIT_SLOW_PATH_REQ, APPLY_THEN_WAIT_UNTIL_APPLIED_REQ]
+//        run(321402699680416L); // Inconsistent execution timestamp detected for command Command@1486670059{[5,26002,6(KS),15]:Committed}: [5,26002,6(KS),15] != [5,26031,111,9]
+//        run(321824911459041L); // Inconsistent execution timestamp detected for command Command@45621272{[3,21004,6(KS),7]:PreApplied}: [3,21004,6(KS),7] != [3,21817,10,12]
+
+//        run(321453140939208L); // ISE in accord.local.SerializerSupport.truncated(SerializerSupport.java:171)
     }
 
     private static void run(long seed)
     {
-        run(seed, 1000);
+        Duration timeout = Duration.ofMinutes(3);
+        Runnable fn = () -> run(seed, 1000);
+        AsyncResult.Settable<?> promise = AsyncResults.settable();
+        Thread t = new Thread(() -> {
+            try
+            {
+                fn.run();
+                promise.setSuccess(null);
+            }
+            catch (Throwable e)
+            {
+                promise.setFailure(e);
+            }
+        });
+        t.setName("BurnTest with timeout");
+        t.setDaemon(true);
+        try
+        {
+            t.start();
+            AsyncChains.getBlocking(promise, timeout.toNanos(), TimeUnit.NANOSECONDS);
+        }
+        catch (Throwable thrown)
+        {
+            Throwable cause = thrown;
+            if (cause instanceof ExecutionException)
+                cause = cause.getCause();
+            if (cause instanceof InterruptedException || cause instanceof TimeoutException)
+                t.interrupt();
+            if (cause instanceof TimeoutException)
+            {
+                TimeoutException override = new TimeoutException("test did not complete within " + timeout);
+                override.setStackTrace(new StackTraceElement[0]);
+                cause = override;
+            }
+            logger.error("Exception running burn test for seed {}:", seed, t);
+            throw SimulationException.wrap(seed, cause);
+        }
     }
 
     private static void run(long seed, int operations)
