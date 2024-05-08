@@ -650,7 +650,7 @@ public abstract class InMemoryCommandStore extends CommandStore
     public static class InMemorySafeStore extends AbstractSafeCommandStore<InMemorySafeCommand, InMemorySafeTimestampsForKey, InMemorySafeCommandsForKey>
     {
         private final InMemoryCommandStore commandStore;
-        private final Map<TxnId, InMemorySafeCommand> commands;
+        protected final Map<TxnId, InMemorySafeCommand> commands;
         private final Map<RoutableKey, InMemorySafeTimestampsForKey> timestampsForKey;
         private final Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKey;
         private final RangesForEpoch ranges;

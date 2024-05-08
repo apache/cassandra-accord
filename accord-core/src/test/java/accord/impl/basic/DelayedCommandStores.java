@@ -19,6 +19,7 @@
 package accord.impl.basic;
 
 import java.util.LinkedList;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.Callable;
@@ -32,6 +33,9 @@ import accord.api.DataStore;
 import accord.api.ProgressLog;
 import accord.impl.InMemoryCommandStore;
 import accord.impl.InMemoryCommandStores;
+import accord.impl.InMemorySafeCommand;
+import accord.impl.InMemorySafeCommandsForKey;
+import accord.impl.InMemorySafeTimestampsForKey;
 import accord.impl.PrefixedIntHashKey;
 import accord.impl.basic.TaskExecutorService.Task;
 import accord.local.Command;
@@ -44,8 +48,11 @@ import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
 import accord.local.SerializerSupport;
 import accord.local.ShardDistributor;
+import accord.messages.Message;
 import accord.primitives.Range;
+import accord.primitives.RoutableKey;
 import accord.primitives.Txn;
+import accord.primitives.TxnId;
 import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.RandomSource;
@@ -144,8 +151,6 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
                 // lead to a case where deps mismatch, so ignoring this for now
                 if (t.getMessage() != null && t.getMessage().startsWith("Deps do not match; expected"))
                     return;
-                // here for debugging
-                SerializerSupport.reconstruct(unsafeRangesForEpoch(), mutable, current.saveStatus(), current.executeAt(), current.txnId().kind().awaitsOnlyDeps() ? current.executesAtLeast() : null, current.promised(), current.acceptedOrCommitted(), ignore -> finalWaitingOn, messages);
                 throw t;
             }
             //TODO (correctness): journal doesn’t guarantee we pick the same records we used to state transition
@@ -240,6 +245,43 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         public void shutdown()
         {
 
+        }
+
+        @Override
+        protected InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeTimestampsForKey> timestampsForKey, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKeys)
+        {
+            return new DelayedSafeStore(this, ranges, context, commands, timestampsForKey, commandsForKeys);
+        }
+    }
+
+    public static class DelayedSafeStore extends InMemoryCommandStore.InMemorySafeStore
+    {
+        private final DelayedCommandStore commandStore;
+        public DelayedSafeStore(DelayedCommandStore commandStore, RangesForEpoch ranges, PreLoadContext context, Map<TxnId, InMemorySafeCommand> commands, Map<RoutableKey, InMemorySafeTimestampsForKey> timestampsForKey, Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKey)
+        {
+            super(commandStore, ranges, context, commands, timestampsForKey, commandsForKey);
+            this.commandStore = commandStore;
+        }
+
+        @Override
+        public void postExecute()
+        {
+            if (context instanceof Message)
+            {
+                Message m = (Message) context;
+                if (m.type() != null && !m.type().hasSideEffects())
+                {
+                    // double check there are no modifications
+                    commands.entrySet().forEach(e -> {
+                        InMemorySafeCommand safe = e.getValue();
+                        if (!safe.isModified()) return;
+                        commandStore.validateRead(safe.current());
+                        Command original = safe.original();
+                        if (original != null)
+                            commandStore.validateRead(original);
+                    });
+                }
+            }
         }
     }
 }
