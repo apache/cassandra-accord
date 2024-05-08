@@ -65,6 +65,30 @@ import static accord.utils.Invariants.illegalState;
 @VisibleForImplementation
 public class SerializerSupport
 {
+    private static final Set<MessageType> PRE_ACCEPT_TYPES =
+    ImmutableSet.of(PRE_ACCEPT_REQ, BEGIN_RECOVER_REQ, PROPAGATE_PRE_ACCEPT_MSG);
+
+    private static final Set<MessageType> PRE_ACCEPT_COMMIT_TYPES =
+    ImmutableSet.<MessageType>builder()
+                .addAll(PRE_ACCEPT_TYPES)
+                .add(COMMIT_SLOW_PATH_REQ, COMMIT_MAXIMAL_REQ)
+                .build();
+
+    private static final Set<MessageType> PRE_ACCEPT_STABLE_TYPES =
+    ImmutableSet.<MessageType>builder()
+                .addAll(PRE_ACCEPT_COMMIT_TYPES)
+                .add(STABLE_FAST_PATH_REQ, STABLE_SLOW_PATH_REQ, STABLE_MAXIMAL_REQ, PROPAGATE_STABLE_MSG)
+                .build();
+
+    private static final Set<MessageType> APPLY_TYPES =
+    ImmutableSet.of(APPLY_MINIMAL_REQ, APPLY_MAXIMAL_REQ, PROPAGATE_APPLY_MSG, APPLY_THEN_WAIT_UNTIL_APPLIED_REQ);
+
+    private static final Set<MessageType> PRE_ACCEPT_COMMIT_APPLY_TYPES =
+    ImmutableSet.<MessageType>builder()
+                .addAll(PRE_ACCEPT_STABLE_TYPES)
+                .addAll(APPLY_TYPES)
+                .build();
+
     /**
      * Reconstructs Command from register values and protocol messages.
      */
@@ -95,9 +119,6 @@ public class SerializerSupport
         }
     }
 
-    private static final Set<MessageType> PRE_ACCEPT_TYPES =
-        ImmutableSet.of(PRE_ACCEPT_REQ, BEGIN_RECOVER_REQ, PROPAGATE_PRE_ACCEPT_MSG);
-
     private static Command.PreAccepted preAccepted(RangesForEpoch rangesForEpoch, Mutable attrs, Timestamp executeAt, Ballot promised, MessageProvider messageProvider)
     {
         Set<MessageType> witnessed = messageProvider.test(PRE_ACCEPT_TYPES);
@@ -124,24 +145,11 @@ public class SerializerSupport
         return Command.Accepted.accepted(attrs, status, executeAt, promised, accepted);
     }
 
-    private static final Set<MessageType> PRE_ACCEPT_COMMIT_TYPES =
-        ImmutableSet.of(PRE_ACCEPT_REQ, BEGIN_RECOVER_REQ, PROPAGATE_PRE_ACCEPT_MSG, COMMIT_SLOW_PATH_REQ, COMMIT_MAXIMAL_REQ);
-
-    private static final Set<MessageType> PRE_ACCEPT_STABLE_TYPES =
-        ImmutableSet.of(PRE_ACCEPT_REQ, BEGIN_RECOVER_REQ, PROPAGATE_PRE_ACCEPT_MSG,
-                        COMMIT_SLOW_PATH_REQ, COMMIT_MAXIMAL_REQ, STABLE_FAST_PATH_REQ, STABLE_SLOW_PATH_REQ, STABLE_MAXIMAL_REQ, PROPAGATE_STABLE_MSG);
-
     private static Command.Committed committed(RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
     {
         attrs = extract(rangesForEpoch, status, accepted, messageProvider, (attrs0, txn, deps, i1, i2) -> attrs0.partialTxn(txn).partialDeps(deps), attrs);
         return Command.Committed.committed(attrs, status, executeAt, promised, accepted, waitingOnProvider.provide(attrs.partialDeps()));
     }
-
-    private static final Set<MessageType> PRE_ACCEPT_COMMIT_APPLY_TYPES =
-        ImmutableSet.of(PRE_ACCEPT_REQ, BEGIN_RECOVER_REQ, PROPAGATE_PRE_ACCEPT_MSG,
-                        COMMIT_SLOW_PATH_REQ, COMMIT_MAXIMAL_REQ, STABLE_MAXIMAL_REQ, STABLE_FAST_PATH_REQ, PROPAGATE_STABLE_MSG,
-                        APPLY_MINIMAL_REQ, APPLY_MAXIMAL_REQ, PROPAGATE_APPLY_MSG, APPLY_THEN_WAIT_UNTIL_APPLIED_REQ,
-                        PROPAGATE_OTHER_MSG);
 
     private static Command.Executed executed(RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
     {
@@ -152,9 +160,6 @@ public class SerializerSupport
             return Command.Executed.executed(attrs, status, executeAt, promised, accepted, waitingOnProvider.provide(deps), writes, result);
         }, attrs);
     }
-
-    private static final Set<MessageType> APPLY_TYPES =
-            ImmutableSet.of(APPLY_MINIMAL_REQ, APPLY_MAXIMAL_REQ, PROPAGATE_APPLY_MSG);
 
     private static Command.Truncated truncated(Mutable attrs, SaveStatus status, Timestamp executeAt, @Nullable Timestamp executesAtLeast, MessageProvider messageProvider)
     {
@@ -186,6 +191,16 @@ public class SerializerSupport
                     Propagate propagate = messageProvider.propagateApply();
                     writes = propagate.writes;
                     result = propagate.result;
+                }
+                else if (witnessed.contains(APPLY_THEN_WAIT_UNTIL_APPLIED_REQ))
+                {
+                    ApplyThenWaitUntilApplied apply = messageProvider.applyThenWaitUntilApplied();
+                    writes = apply.writes;
+                    result = apply.result;
+                }
+                else
+                {
+                    throw new UnsupportedOperationException("Unhandled types: " + witnessed);
                 }
             case TruncatedApply:
                 return Command.Truncated.truncatedApply(attrs, status, executeAt, writes, result, executesAtLeast);
