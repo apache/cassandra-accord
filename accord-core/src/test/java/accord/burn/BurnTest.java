@@ -59,6 +59,7 @@ import accord.verify.ElleVerifier;
 import accord.verify.StrictSerializabilityVerifier;
 import accord.verify.Verifier;
 
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -543,7 +544,8 @@ public class BurnTest
         }
     }
 
-    @Test
+//    @Test
+    @RepeatedTest(Integer.MAX_VALUE)
     public void testOne()
     {
         run(System.nanoTime());
@@ -555,11 +557,16 @@ public class BurnTest
 //        run(321824911459041L); // Inconsistent execution timestamp detected for command Command@45621272{[3,21004,6(KS),7]:PreApplied}: [3,21004,6(KS),7] != [3,21817,10,12]
 
 //        run(321453140939208L); // ISE in accord.local.SerializerSupport.truncated(SerializerSupport.java:171)
+//        run(325079839240208L); // ISE in accord.local.SerializerSupport.truncated(SerializerSupport.java:171)
+
+//        run(325076065173541L); // Invalid state: waiting for execution of command that is not owned at the execution time
+
+//        run(325459494008416L); // Writes is null
     }
 
     private static void run(long seed)
     {
-        Duration timeout = Duration.ofMinutes(3);
+        Duration timeout = Duration.ofMinutes(2);
         Runnable fn = () -> run(seed, 1000);
         AsyncResult.Settable<?> promise = AsyncResults.settable();
         Thread t = new Thread(() -> {

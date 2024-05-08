@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -55,7 +56,9 @@ import accord.coordinate.Exhausted;
 import accord.coordinate.Invalidated;
 import accord.coordinate.Preempted;
 import accord.coordinate.Timeout;
+import accord.impl.AbstractSafeCommandStore;
 import accord.impl.CoordinateDurabilityScheduling;
+import accord.impl.InMemoryCommandStore;
 import accord.impl.MessageListener;
 import accord.impl.PrefixedIntHashKey;
 import accord.impl.SimpleProgressLog;
@@ -63,9 +66,12 @@ import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TopologyFactory;
 import accord.impl.list.ListStore;
 import accord.local.AgentExecutor;
+import accord.local.Command;
 import accord.local.Node.Id;
 import accord.local.Node;
 import accord.local.NodeTimeService;
+import accord.local.PreLoadContext;
+import accord.local.SafeCommand;
 import accord.local.ShardDistributor;
 import accord.messages.Message;
 import accord.messages.MessageType;
@@ -76,6 +82,7 @@ import accord.primitives.Keys;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import accord.topology.Topology;
 import accord.topology.TopologyRandomizer;
 import accord.utils.Invariants;
@@ -296,7 +303,7 @@ public class Cluster implements Scheduler
             };
             TopologyRandomizer configRandomizer = new TopologyRandomizer(randomSupplier, topology, topologyUpdates, nodeMap::get, schemaApply);
             List<CoordinateDurabilityScheduling> durabilityScheduling = new ArrayList<>();
-            List<BarrierScheduler> barrierScheduling = new ArrayList<>();
+            List<Service> services = new ArrayList<>();
             for (Id id : nodes)
             {
                 MessageSink messageSink = sinks.create(id, randomSupplier.get());
@@ -322,7 +329,8 @@ public class Cluster implements Scheduler
                 durabilityScheduling.add(durability);
                 nodeMap.put(id, node);
                 durabilityScheduling.add(new CoordinateDurabilityScheduling(node));
-                barrierScheduling.add(new BarrierScheduler(node, randomSupplier.get()));
+                services.add(new BarrierService(node, randomSupplier.get()));
+                services.add(new HistoricalTxnService(node, randomSupplier.get()));
             }
 
             Runnable updateDurabilityRate;
@@ -359,12 +367,12 @@ public class Cluster implements Scheduler
 
             Scheduled reconfigure = sinks.recurring(configRandomizer::maybeUpdateTopology, 1, SECONDS);
             durabilityScheduling.forEach(CoordinateDurabilityScheduling::start);
-            barrierScheduling.forEach(BarrierScheduler::start);
+            services.forEach(Service::start);
 
             noMoreWorkSignal.accept(() -> {
                 reconfigure.cancel();
                 durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
-                barrierScheduling.forEach(BarrierScheduler::close);
+                services.forEach(Service::close);
             });
             readySignal.accept(nodeMap);
 
@@ -377,7 +385,7 @@ public class Cluster implements Scheduler
             chaos.cancel();
             reconfigure.cancel();
             durabilityScheduling.forEach(CoordinateDurabilityScheduling::stop);
-            barrierScheduling.forEach(BarrierScheduler::close);
+            services.forEach(Service::close);
             sinks.links = sinks.linkConfig.defaultLinks;
 
             // give progress log et al a chance to finish
@@ -405,22 +413,45 @@ public class Cluster implements Scheduler
         }
     }
 
-    private static class BarrierScheduler implements AutoCloseable, Runnable
+    private interface Service extends AutoCloseable
     {
-        private final Node node;
-        private final RandomSource rs;
+        void start();
+        @Override
+        void close();
+    }
+
+    private static abstract class AbstractService implements Service, Runnable
+    {
+        protected final Node node;
+        protected final RandomSource rs;
         private Scheduled scheduled;
 
-        private BarrierScheduler(Node node, RandomSource rs)
+        protected AbstractService(Node node, RandomSource rs)
         {
             this.node = node;
             this.rs = rs;
         }
 
+        @Override
         public void start()
         {
             Invariants.checkState(scheduled == null, "Start already called...");
             this.scheduled = node.scheduler().recurring(this, 1, SECONDS);
+        }
+
+        protected abstract void doRun() throws Exception;
+
+        @Override
+        public final void run()
+        {
+            try
+            {
+                doRun();
+            }
+            catch (Throwable t)
+            {
+                node.agent().onUncaughtException(t);
+            }
         }
 
         @Override
@@ -432,9 +463,17 @@ public class Cluster implements Scheduler
                 scheduled = null;
             }
         }
+    }
+
+    private static class BarrierService extends AbstractService
+    {
+        private BarrierService(Node node, RandomSource rs)
+        {
+            super(node, rs);
+        }
 
         @Override
-        public void run()
+        public void doRun()
         {
             Topology current = node.topology().current();
             BarrierType type = rs.pick(BarrierType.values());
@@ -460,6 +499,44 @@ public class Cluster implements Scheduler
                     node.agent().onUncaughtException(f);
                 }
             });
+        }
+    }
+
+    private static class HistoricalTxnService extends AbstractService
+    {
+        private HistoricalTxnService(Node node, RandomSource rs)
+        {
+            super(node, rs);
+        }
+        @Override
+        public void doRun()
+        {
+            List<Set<TxnId>> selection = new ArrayList<>();
+            IdentityHashMap<Set<TxnId>, InMemoryCommandStore> historyToStore = new IdentityHashMap<>();
+            for (int id : node.commandStores().ids())
+            {
+                InMemoryCommandStore store = (InMemoryCommandStore) node.commandStores().forId(id);
+                Set<TxnId> set = store.historicalTxnIds();
+                if (set.isEmpty()) continue;
+                selection.add(set);
+                historyToStore.put(set, store);
+            }
+            if (selection.isEmpty())
+                return;
+            Set<TxnId> set = rs.pick(selection);
+            InMemoryCommandStore store = historyToStore.get(set);
+            TxnId id = rs.pick(set);
+            store.execute(PreLoadContext.contextFor(id), safe -> {
+                SafeCommand safeCommand = ((AbstractSafeCommandStore) safe).getInternal(id);
+                if (safeCommand == null)
+                {
+                    node.agent().onUncaughtException(new IllegalStateException("Unable to find txn from historic txn set"));
+                    return;
+                }
+                Command current = safeCommand.current();
+                if (current == null)
+                    node.agent().onUncaughtException(new IllegalStateException("Unable to find txn from historic txn set"));
+            }).begin(node.agent());
         }
     }
 

@@ -29,6 +29,7 @@ import java.util.NavigableMap;
 import java.util.Queue;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
@@ -99,6 +100,7 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     private final TreeMap<TxnId, RangeCommand> rangeCommands = new TreeMap<>();
     private final TreeMap<TxnId, Ranges> historicalRangeCommands = new TreeMap<>();
+    private final TreeSet<TxnId> historicalTxnIds = new TreeSet<>();
     protected Timestamp maxRedundant = Timestamp.NONE;
 
     private InMemorySafeStore current;
@@ -106,6 +108,11 @@ public abstract class InMemoryCommandStore extends CommandStore
     public InMemoryCommandStore(int id, NodeTimeService time, Agent agent, DataStore store, ProgressLog.Factory progressLogFactory, EpochUpdateHolder epochUpdateHolder)
     {
         super(id, time, agent, store, progressLogFactory, epochUpdateHolder);
+    }
+
+    public Set<TxnId> historicalTxnIds()
+    {
+        return historicalTxnIds;
     }
 
     protected boolean canExposeUnloaded()
@@ -797,6 +804,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                         return;
 
                     get(key).registerHistorical(this, txnId);
+                    commandStore.historicalTxnIds.add(txnId);
                 });
 
             });
@@ -815,6 +823,7 @@ public abstract class InMemoryCommandStore extends CommandStore
                     return;
 
                 historicalRangeCommands.merge(txnId, ranges.slice(allRanges), Ranges::with);
+                commandStore.historicalTxnIds.add(txnId);
             });
         }
 
