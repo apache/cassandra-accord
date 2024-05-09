@@ -312,6 +312,12 @@ public class Journal implements LocalRequest.Handler, Runnable
         }
 
         @Override
+        public TxnId txnId()
+        {
+            return txnId;
+        }
+
+        @Override
         public Set<MessageType> test(Set<MessageType> messages)
         {
             return Sets.intersection(writes.keySet(), messages);

@@ -41,6 +41,7 @@ import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
 
@@ -422,7 +423,7 @@ public class SerializerSupport
                 }
                 else
                 {
-                    throw illegalState("Unable to find messages that lead to PreApplied state; witnessed %s", new LoggedMessageProvider(messageProvider));
+                    throw illegalState("Unable to find messages that lead to PreApplied state; txn_id=%s, witnessed %s", messageProvider.txnId(), new LoggedMessageProvider(messageProvider));
                 }
             }
 
@@ -504,6 +505,7 @@ public class SerializerSupport
     // TODO (required): randomised testing that we always restore the exact same state
     public interface MessageProvider
     {
+        TxnId txnId();
         Set<MessageType> test(Set<MessageType> messages);
         Set<MessageType> all();
 
