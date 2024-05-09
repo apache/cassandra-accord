@@ -263,8 +263,7 @@ class Bootstrap
                 // TODO (expected): first check to see if we are still relevant
                 CommandStore store = CommandStore.current();
                 node.agent().onFailedBootstrap("SafeToRead", state.ranges, () -> {
-                    if (CommandStore.maybeCurrent() == store) started(state, null);
-                    else                                      store.execute(() -> started(state, null));
+                    store.maybeExecuteImmediately(() -> started(state, null));
                 }, failure);
             }
         }
