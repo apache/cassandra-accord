@@ -66,12 +66,10 @@ import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TopologyFactory;
 import accord.impl.list.ListStore;
 import accord.local.AgentExecutor;
-import accord.local.Command;
 import accord.local.Node.Id;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
-import accord.local.SafeCommand;
 import accord.local.ShardDistributor;
 import accord.messages.Message;
 import accord.messages.MessageType;
@@ -79,12 +77,14 @@ import accord.messages.Reply;
 import accord.messages.Request;
 import accord.messages.SafeCallback;
 import accord.primitives.Keys;
+import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topology;
 import accord.topology.TopologyRandomizer;
+import accord.utils.Gens;
 import accord.utils.Invariants;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChains;
@@ -95,6 +95,8 @@ import static accord.impl.basic.Cluster.OverrideLinksKind.RANDOM_BIDIRECTIONAL;
 import static accord.impl.basic.NodeSink.Action.DELIVER;
 import static accord.impl.basic.NodeSink.Action.DROP;
 import static accord.utils.AccordGens.keysInsideRanges;
+import static accord.utils.AccordGens.rangeInsideRange;
+import static accord.utils.Gens.mixedDistribution;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -105,6 +107,7 @@ import static java.util.stream.Collectors.toList;
 public class Cluster implements Scheduler
 {
     public static final Logger trace = LoggerFactory.getLogger("accord.impl.basic.Trace");
+    public static boolean TODO_ENABLE_BARRIER = true;
 
     public static class Stats
     {
@@ -329,7 +332,8 @@ public class Cluster implements Scheduler
                 durabilityScheduling.add(durability);
                 nodeMap.put(id, node);
                 durabilityScheduling.add(new CoordinateDurabilityScheduling(node));
-                services.add(new BarrierService(node, randomSupplier.get()));
+                if (TODO_ENABLE_BARRIER)
+                    services.add(new BarrierService(node, randomSupplier.get()));
                 services.add(new HistoricalTxnService(node, randomSupplier.get()));
             }
 
@@ -467,24 +471,41 @@ public class Cluster implements Scheduler
 
     private static class BarrierService extends AbstractService
     {
+        private final Supplier<BarrierType> typeSupplier;
+        private final Supplier<Boolean> includeRangeSupplier;
+        private final Supplier<Boolean> wholeOrPartialSupplier;
+
         private BarrierService(Node node, RandomSource rs)
         {
             super(node, rs);
+            this.typeSupplier = mixedDistribution(BarrierType.values()).next(rs).asSupplier(rs);
+            this.includeRangeSupplier = Gens.bools().mixedDistribution().next(rs).asSupplier(rs);
+            this.wholeOrPartialSupplier = Gens.bools().mixedDistribution().next(rs).asSupplier(rs);
         }
 
         @Override
         public void doRun()
         {
             Topology current = node.topology().current();
-            BarrierType type = rs.pick(BarrierType.values());
             Ranges ranges = current.rangesForNode(node.id());
+            if (ranges.isEmpty())
+                return;
+            BarrierType type = typeSupplier.get();
             if (type == BarrierType.local)
             {
                 run(node, Keys.of(keysInsideRanges(ranges).next(rs)), current.epoch(), type);
             }
             else
             {
-                run(node, ranges, current.epoch(), type);
+                List<Range> subset = new ArrayList<>();
+                for (Range range : ranges)
+                {
+                    if (includeRangeSupplier.get())
+                        subset.add(wholeOrPartialSupplier.get() ? range : rangeInsideRange(range).next(rs));
+                }
+                if (subset.isEmpty())
+                    return;
+                run(node, Ranges.of(subset.toArray(Range[]::new)), current.epoch(), type);
             }
         }
 
@@ -526,17 +547,8 @@ public class Cluster implements Scheduler
             Set<TxnId> set = rs.pick(selection);
             InMemoryCommandStore store = historyToStore.get(set);
             TxnId id = rs.pick(set);
-            store.execute(PreLoadContext.contextFor(id), safe -> {
-                SafeCommand safeCommand = ((AbstractSafeCommandStore) safe).getInternal(id);
-                if (safeCommand == null)
-                {
-                    node.agent().onUncaughtException(new IllegalStateException("Unable to find txn from historic txn set"));
-                    return;
-                }
-                Command current = safeCommand.current();
-                if (current == null)
-                    node.agent().onUncaughtException(new IllegalStateException("Unable to find txn from historic txn set"));
-            }).begin(node.agent());
+            // getInternal will fail if the cmd is null
+            store.execute(PreLoadContext.contextFor(id), safe -> ((AbstractSafeCommandStore) safe).getInternal(id)).begin(node.agent());
         }
     }
 

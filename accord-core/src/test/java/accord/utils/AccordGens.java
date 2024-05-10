@@ -385,6 +385,39 @@ public class AccordGens
         return ranges(sizeGen, keyGen, (ignore, a, b) -> factory.apply(a, b));
     }
 
+    public static Gen<Range> rangeInsideRange(Range range)
+    {
+        if (range.end() instanceof PrefixedIntHashKey)
+            return prefixedIntHashKeyRangeInsideRange(range);
+        throw new IllegalArgumentException("Unsupported type: " + range.start().getClass());
+    }
+
+    public static Gen<Range> prefixedIntHashKeyRangeInsideRange(Range range)
+    {
+        if (!(range.end() instanceof PrefixedIntHashKey))
+            throw new IllegalArgumentException("Only PrefixedIntHashKey supported; saw " + range.end().getClass());
+        PrefixedIntHashKey start = (PrefixedIntHashKey) range.start();
+        PrefixedIntHashKey end = (PrefixedIntHashKey) range.end();
+        if (start.hash + 1 == end.hash)
+        {
+            // range is of size 1, so can not split into a smaller range...
+            return ignore -> range;
+        }
+        return rs -> {
+            int a = rs.nextInt(start.hash, end.hash);
+            int b = rs.nextInt(start.hash, end.hash);
+            while (a == b)
+                b = rs.nextInt(start.hash, end.hash);
+            if (a > b)
+            {
+                int tmp = a;
+                a = b;
+                b = tmp;
+            }
+            return PrefixedIntHashKey.range(start.prefix, a, b);
+        };
+    }
+
     public static Gen<Ranges> prefixedIntHashKeyRanges(int numNodes, int rf)
     {
         return rs -> {
