@@ -246,7 +246,7 @@ public abstract class SafeCommandStore
             keys = updated.asCommitted().waitingOn.keys;
             // TODO (required): consider how execution works for transactions that await future deps and where the command store inherits additional keys in execution epoch
             Ranges ranges = ranges().allAt(updated.executeAt());
-            PreLoadContext context = PreLoadContext.contextFor(txnId, keys);
+            PreLoadContext context = PreLoadContext.contextFor(txnId, keys, COMMANDS);
             // TODO (expected): execute immediately for any keys we already have loaded, and save only those we haven't for later
             if (canExecuteWith(context))
             {

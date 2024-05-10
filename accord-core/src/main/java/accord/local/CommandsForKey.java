@@ -1221,7 +1221,7 @@ public class CommandsForKey implements CommandsSummary
             Key key = this.key;
             Keys keys = Keys.of(key);
             safeStore = safeStore; // make unsafe for compiler to permit in lambda
-            safeStore.commandStore().execute(PreLoadContext.contextFor(txnId, keys), safeStore0 -> {
+            safeStore.commandStore().execute(PreLoadContext.contextFor(txnId, keys, KeyHistory.COMMANDS), safeStore0 -> {
                 SafeCommand safeCommand0 = safeStore0.get(txnId);
                 safeCommand0.initialise();
                 Command command = safeCommand0.current();

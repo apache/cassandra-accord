@@ -419,6 +419,8 @@ public abstract class InMemoryCommandStore extends CommandStore
             {
                 case Key:
                     RoutableKey key = (RoutableKey) seekable;
+                    if (context.keyHistory() == KeyHistory.NONE)
+                        continue;
                     commandsForKey.put(key, commandsForKey((Key) key).createSafeReference());
                     timestampsForKey.put(key, timestampsForKey((Key) key).createSafeReference());
                     break;
