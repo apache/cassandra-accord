@@ -55,13 +55,23 @@ public class Gens {
         return ignore -> constant.get();
     }
 
-    public static <T> Gen<T> oneOf(Gen<T>... gens)
+    public static <T> Gen<T> oneOf(Gen<? extends T>... gens)
     {
+        switch (gens.length)
+        {
+            case 0: throw new IllegalArgumentException("Unable to select oneOf an empty list");
+            case 1: return (Gen<T>) gens[0];
+        }
         return oneOf(Arrays.asList(gens));
     }
 
-    public static <T> Gen<T> oneOf(List<Gen<T>> gens)
+    public static <T> Gen<T> oneOf(List<Gen<? extends T>> gens)
     {
+        switch (gens.size())
+        {
+            case 0: throw new IllegalArgumentException("Unable to select oneOf an empty list");
+            case 1: return (Gen<T>) gens.get(0);
+        }
         return rs -> rs.pick(gens).next(rs);
     }
 
