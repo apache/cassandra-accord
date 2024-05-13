@@ -59,7 +59,7 @@ import accord.verify.ElleVerifier;
 import accord.verify.StrictSerializabilityVerifier;
 import accord.verify.Verifier;
 
-import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -543,32 +543,15 @@ public class BurnTest
         }
     }
 
-//    @Test
-    @RepeatedTest(Integer.MAX_VALUE)
+    @Test
+//    @RepeatedTest(Integer.MAX_VALUE)
     public void testOne()
     {
         run(System.nanoTime());
 
-//        run(334992641419791L); // Unable to find epoch 8; known epochs are 1 -> 7
-
-//        run(335183954765708L); // Incomplete txn ({read:[]}) provided; does not cover [(0#9008,0#9828]]
-//        run(337025404281958L); // Incomplete txn ({read:[]}) provided; does not cover [(540#27305,540#30034]]
-//        run(338379650834666L); // Incomplete txn ({read:[]}) provided; does not cover [(204#0,204#1153]]
-//        run(339112100571666L); // Incomplete txn ({read:[]}) provided; does not cover [(604#43685,604#43686]]
-
-        // Barrier + Historic Txn
-//        Cluster.TODO_ENABLE_BARRIER = true;
-//        run(404425253949041L); // ISE in at accord.impl.SimpleProgressLog$Instance$State$BlockingState.lambda$run$0(SimpleProgressLog.java:343)
-
-        // Disabled Barrier but kept Historic Txn
-//        Cluster.TODO_ENABLE_BARRIER = false;
-//        run(340449352150666L); // Unable to find messages that lead to PreApplied state; witnessed [PROPAGATE_OTHER_MSG]
-//        run(342698395526500L); // Unable to find messages that lead to PreApplied state; witnessed [PROPAGATE_OTHER_MSG]
-//        run(344553207571458L); // Unable to find messages that lead to PreApplied state; witnessed [PROPAGATE_OTHER_MSG]
-//        run(349933872876166L); // Unable to find messages that lead to PreApplied state; witnessed [PROPAGATE_OTHER_MSG]
-
-//        run(378713175265083L); // ISE in at accord.local.Command$Executed.<init>(Command.java:1225)
-//        run(380371149258458L); // ISE in at accord.local.Command$Executed.<init>(Command.java:1225)
+//        run(516192490847500L); // Incomplete txn ({read:[]}) provided; does not cover [(857#0,857#13107], (857#13107,857#22936]]
+//        run(517010705664541L); // Incomplete txn ({read:[]}) provided; does not cover [(0#54964,0#56246]]
+//        run(517027263147375L); // Incomplete txn ({read:[]}) provided; does not cover [(739#19659,739#22932]]
     }
 
     private static void run(long seed)
