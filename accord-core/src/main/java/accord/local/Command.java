@@ -1699,6 +1699,7 @@ public abstract class Command implements CommonAttributes
     static Command.Accepted acceptInvalidated(Command command, Ballot ballot)
     {
         SaveStatus saveStatus = SaveStatus.get(Status.AcceptedInvalidate, command.known());
+        // TODO (desired): This should be NonNull, but AcceptedInvalidated is represented by Command.Accepted because there’s no acceptedOrCommitted register in NotDefined
         return validate(new Command.Accepted(command, saveStatus, ballot, command.executeAt(), command.partialTxn(), null, ballot));
     }
 
