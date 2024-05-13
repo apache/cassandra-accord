@@ -412,10 +412,18 @@ public abstract class InMemoryCommandStore extends CommandStore
             {
                 case Key:
                     RoutableKey key = (RoutableKey) seekable;
-                    if (context.keyHistory() == KeyHistory.NONE)
-                        continue;
-                    commandsForKey.put(key, commandsForKey((Key) key).createSafeReference());
-                    timestampsForKey.put(key, timestampsForKey((Key) key).createSafeReference());
+                    switch (context.keyHistory())
+                    {
+                        case NONE:
+                            continue;
+                        case COMMANDS:
+                            commandsForKey.put(key, commandsForKey((Key) key).createSafeReference());
+                            break;
+                        case TIMESTAMPS:
+                            timestampsForKey.put(key, timestampsForKey((Key) key).createSafeReference());
+                            break;
+                        default: throw new UnsupportedOperationException("Unknown key history: " + context.keyHistory());
+                    }
                     break;
                 case Range:
                     // load range cfks here
