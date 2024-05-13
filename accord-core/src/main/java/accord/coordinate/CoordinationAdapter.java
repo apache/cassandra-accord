@@ -20,8 +20,6 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
-import javax.annotation.Nullable;
-
 import accord.api.Result;
 import accord.coordinate.ExecuteSyncPoint.ExecuteBlocking;
 import accord.local.Node;
@@ -39,6 +37,7 @@ import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.utils.Faults;
+import javax.annotation.Nullable;
 
 import static accord.coordinate.ExecutePath.FAST;
 import static accord.coordinate.ExecutePath.SLOW;
@@ -146,7 +145,7 @@ public interface CoordinationAdapter<R>
 
         public static <S extends Seekables<?, ?>> CoordinationAdapter<SyncPoint<S>> inclusiveSyncPoint()
         {
-            return InclusiveSyncPointAdapter.INSTANCE;
+            return AsyncInclusiveSyncPointAdapter.INSTANCE;
         }
 
         public static <S extends Seekables<?, ?>> CoordinationAdapter<SyncPoint<S>> inclusiveSyncPointBlocking()
@@ -261,21 +260,60 @@ public interface CoordinationAdapter<R>
             }
         }
 
-        public static class InclusiveSyncPointAdapter<S extends Seekables<?, ?>> extends AbstractSyncPointAdapter<S>
+        private static abstract class AbstractInclusiveSyncPointAdapter<S extends Seekables<?, ?>> extends AbstractSyncPointAdapter<S>
         {
-            private static final InclusiveSyncPointAdapter INSTANCE = new InclusiveSyncPointAdapter();
-        }
 
-        public static class InclusiveSyncPointBlockingAdapter<S extends Seekables<?, ?>> extends AbstractSyncPointAdapter<S>
-        {
-            private static final InclusiveSyncPointBlockingAdapter INSTANCE = new InclusiveSyncPointBlockingAdapter();
+            protected AbstractInclusiveSyncPointAdapter()
+            {
+                super();
+            }
 
             @Override
             public void execute(Node node, Topologies all, FullRoute<?> route, ExecutePath path, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super SyncPoint<S>, Throwable> callback)
             {
                 ExecuteBlocking<S> execute = ExecuteBlocking.atQuorum(node, all, new SyncPoint<>(txnId, deps, (S)txn.keys(), route), executeAt);
-                execute.addCallback(callback);
                 execute.start();
+                addOrExecuteCallback(execute, callback);
+            }
+
+            protected abstract void addOrExecuteCallback(ExecuteBlocking<S> execute, BiConsumer<? super SyncPoint<S>, Throwable> callback);
+        }
+
+        /*
+         * Async meaning that the result of the distributed sync point is not known when this returns
+         * At most the caller can wait for the sync point to complete locally. This does mean that the sync
+         * point is being executed and that eventually information will be known locally everywhere about the last
+         * sync point for the keys/ranges this sync point covered.
+         */
+        private static class AsyncInclusiveSyncPointAdapter<S extends Seekables<?, ?>> extends AbstractInclusiveSyncPointAdapter<S>
+        {
+            private static final AsyncInclusiveSyncPointAdapter INSTANCE = new AsyncInclusiveSyncPointAdapter();
+
+            protected AsyncInclusiveSyncPointAdapter() {
+                super();
+            }
+
+            @Override
+            protected void addOrExecuteCallback(ExecuteBlocking<S> execute, BiConsumer<? super SyncPoint<S>, Throwable> callback)
+            {
+                // If this is the async adapter then we want to invoke the callback immediately
+                // and the caller can wait on the txn locally if they want
+                callback.accept(execute.syncPoint, null);
+            }
+        }
+
+        private static class InclusiveSyncPointBlockingAdapter<S extends Seekables<?, ?>> extends AbstractInclusiveSyncPointAdapter<S>
+        {
+            private static final InclusiveSyncPointBlockingAdapter INSTANCE = new InclusiveSyncPointBlockingAdapter();
+
+            protected InclusiveSyncPointBlockingAdapter() {
+                super();
+            }
+
+            @Override
+            protected void addOrExecuteCallback(ExecuteBlocking<S> execute, BiConsumer<? super SyncPoint<S>, Throwable> callback)
+            {
+                execute.addCallback(callback);
             }
 
             @Override

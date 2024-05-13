@@ -41,7 +41,7 @@ import java.util.function.Predicate;
 import static accord.primitives.Txn.Kind.Kinds.AnyGloballyVisible;
 import static accord.primitives.Txn.Kind.Kinds.Nothing;
 import static accord.primitives.Txn.Kind.Kinds.RsOrWs;
-import static accord.primitives.Txn.Kind.Kinds.SyncPoints;
+import static accord.primitives.Txn.Kind.Kinds.ExclusiveSyncPoints;
 import static accord.primitives.Txn.Kind.Kinds.Ws;
 import static accord.primitives.Txn.Kind.Kinds.WsOrSyncPoints;
 
@@ -133,7 +133,7 @@ public interface Txn
             RsOrWs,
 
             WsOrSyncPoints,
-            SyncPoints,
+            ExclusiveSyncPoints,
             AnyGloballyVisible;
 
             @Override
@@ -144,7 +144,7 @@ public interface Txn
                     default: throw new AssertionError();
                     case AnyGloballyVisible: return kind.isGloballyVisible();
                     case WsOrSyncPoints: return kind == Write || kind == Kind.SyncPoint || kind == ExclusiveSyncPoint;
-                    case SyncPoints: return kind == Kind.SyncPoint || kind == ExclusiveSyncPoint;
+                    case ExclusiveSyncPoints: return kind == ExclusiveSyncPoint;
                     case RsOrWs: return kind == Read || kind == Write;
                     case Ws: return kind == Write;
                     case Nothing: return false; // TODO (expected, consider): throw exception? we shouldn't ever be presented the option to test even.
@@ -227,8 +227,8 @@ public interface Txn
                 case Read:
                     return Ws;
                 case Write:
-                    return RsOrWs;
                 case SyncPoint:
+                    return RsOrWs;
                 case ExclusiveSyncPoint:
                     return AnyGloballyVisible;
             }
@@ -257,7 +257,7 @@ public interface Txn
                     return AnyGloballyVisible;
                 case SyncPoint:
                 case ExclusiveSyncPoint:
-                    return SyncPoints;
+                    return ExclusiveSyncPoints;
             }
         }
 

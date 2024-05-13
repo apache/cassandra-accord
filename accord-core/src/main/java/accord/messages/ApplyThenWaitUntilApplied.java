@@ -115,7 +115,8 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
             default:
                 throw illegalState("Unexpected ApplyReply");
             case Insufficient:
-                throw illegalState("ApplyThenWaitUntilApplied is always sent with a maximal `Commit` so how can `Apply` have an `Insufficient` result");
+                // Ignore here, the read in super.apply will return the CommitOrReadNack.Insufficient response we need to get the maximal apply
+                break;
             case Redundant:
                 // TODO (required): redundant is not necessarily safe for awaitsOnlyDeps commands as might need a future epoch
             case Applied:

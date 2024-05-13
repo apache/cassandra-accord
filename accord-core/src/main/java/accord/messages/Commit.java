@@ -134,7 +134,7 @@ public class Commit extends TxnRequest<CommitOrReadNack>
             Ranges executeRanges = topologies.computeRangesForNode(to);
             Ranges extraRanges = executeRanges.subtract(coordinateRanges);
             if (!extraRanges.isEmpty())
-                partialTxn = txn.slice(extraRanges, coordinateRanges.contains(route.homeKey()));
+                partialTxn = txn.slice(scope.covering().subtract(coordinateRanges), coordinateRanges.contains(route.homeKey()));
         }
 
         this.kind = kind;

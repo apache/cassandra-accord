@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import accord.Utils;
 import accord.api.Agent;
 import accord.api.BarrierType;
 import accord.api.Result;
@@ -199,6 +200,12 @@ public class CoordinateTransactionTest
             assertTrue(barrierAppliedLocally.tryAcquire(5, TimeUnit.SECONDS));
             // If the command is locally applied the future for the barrier should be completed as well and not waiting on messages from other nodes
             getUninterruptibly(localInitiatingBarrier, 1, TimeUnit.SECONDS);
+            for (Node n : cluster)
+            {
+                int localBarrierCount = ((TestAgent)n.agent()).completedLocalBarriers.getOrDefault(initiatingBarrierSyncTxnId, new AtomicInteger(0)).get();
+                logger.info("Local barrier count " + localBarrierCount);
+                assertEquals(1, localBarrierCount);
+            }
             cluster.networkFilter.clear();
 
             Keys globalSyncBarrierKeys = keys(2, 3);
@@ -206,10 +213,19 @@ public class CoordinateTransactionTest
             cluster.networkFilter.isolate(cluster.get(2).id());
             Barrier<Keys> globalInitiatingBarrier = Barrier.barrier(node, globalSyncBarrierKeys, node.epoch(), BarrierType.global_sync);
             Timestamp globalBarrierTimestamp = getUninterruptibly(globalInitiatingBarrier);
-            int localBarrierCount = ((TestAgent)agent).completedLocalBarriers.getOrDefault(globalBarrierTimestamp, new AtomicInteger(0)).get();
+
             assertNotNull(globalInitiatingBarrier.coordinateSyncPoint);
-            assertEquals(2, localBarrierCount);
-            logger.info("Local barrier count " + localBarrierCount);
+            Utils.spinUntilSuccess(() -> {
+                for (Node n : cluster)
+                {
+                    // 2 is blocked by filtering
+                    if (n.id().id == 2)
+                        continue;
+                    int localBarrierCount = ((TestAgent)n.agent()).completedLocalBarriers.getOrDefault(globalBarrierTimestamp, new AtomicInteger(0)).get();
+                    logger.info("Local barrier count " + localBarrierCount);
+                    assertEquals(1, localBarrierCount);
+                }
+            });
             cluster.networkFilter.clear();
 
             // The existing barrier should suffice here

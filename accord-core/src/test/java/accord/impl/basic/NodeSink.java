@@ -25,18 +25,17 @@ import java.util.function.Function;
 import accord.api.MessageSink;
 import accord.impl.basic.Cluster.Link;
 import accord.local.AgentExecutor;
-import accord.messages.SafeCallback;
-import accord.messages.Message;
-import accord.utils.RandomSource;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Callback;
+import accord.messages.Message;
 import accord.messages.Reply;
 import accord.messages.Reply.FailureReply;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
+import accord.messages.SafeCallback;
+import accord.utils.RandomSource;
 
-import static accord.impl.basic.Packet.SENTINEL_MESSAGE_ID;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
@@ -64,7 +63,7 @@ public class NodeSink implements MessageSink
     @Override
     public void send(Id to, Request send)
     {
-        maybeEnqueue(to, SENTINEL_MESSAGE_ID, send, null);
+        maybeEnqueue(to, nextMessageId++, send, null);
     }
 
     @Override

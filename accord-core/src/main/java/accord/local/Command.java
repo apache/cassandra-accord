@@ -48,7 +48,6 @@ import accord.utils.IndexedTriConsumer;
 import accord.utils.Invariants;
 import accord.utils.SimpleBitSet;
 import accord.utils.SortedArrays.SortedArrayList;
-
 import javax.annotation.Nullable;
 
 import static accord.local.Command.AbstractCommand.validate;

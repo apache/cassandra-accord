@@ -21,7 +21,6 @@ package accord.impl;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import javax.annotation.Nonnull;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +35,8 @@ import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
+import accord.primitives.TxnId;
+import javax.annotation.Nonnull;
 
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
@@ -44,7 +45,7 @@ public class TestAgent implements Agent
 {
     private static final Logger logger = LoggerFactory.getLogger(TestAgent.class);
 
-    public static final ConcurrentMap<Timestamp, AtomicInteger> completedLocalBarriers = new ConcurrentHashMap<>();
+    public final ConcurrentMap<Timestamp, AtomicInteger> completedLocalBarriers = new ConcurrentHashMap<>();
 
     public static class RethrowAgent extends TestAgent
     {
@@ -126,8 +127,8 @@ public class TestAgent implements Agent
     }
 
     @Override
-    public void onLocalBarrier(@Nonnull Seekables<?, ?> keysOrRanges, @Nonnull Timestamp executeAt)
+    public void onLocalBarrier(@Nonnull Seekables<?, ?> keysOrRanges, @Nonnull TxnId txnId)
     {
-        completedLocalBarriers.computeIfAbsent(executeAt, ignored -> new AtomicInteger()).incrementAndGet();
+        completedLocalBarriers.computeIfAbsent(txnId, ignored -> new AtomicInteger()).incrementAndGet();
     }
 }

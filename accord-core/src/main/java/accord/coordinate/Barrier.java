@@ -19,9 +19,7 @@
 package accord.coordinate;
 
 import java.util.function.BiFunction;
-import javax.annotation.Nonnull;
 
-import accord.local.*;
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,8 +27,15 @@ import org.slf4j.LoggerFactory;
 import accord.api.BarrierType;
 import accord.api.Key;
 import accord.api.RoutingKey;
+import accord.local.Command;
+import accord.local.KeyHistory;
+import accord.local.Node;
+import accord.local.PreLoadContext;
+import accord.local.SafeCommand;
+import accord.local.SafeCommandStore;
 import accord.local.SafeCommandStore.TestDep;
 import accord.local.SafeCommandStore.TestStartedAt;
+import accord.local.Status;
 import accord.primitives.Routable.Domain;
 import accord.primitives.Seekables;
 import accord.primitives.SyncPoint;
@@ -39,10 +44,11 @@ import accord.primitives.TxnId;
 import accord.utils.MapReduceConsume;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
+import javax.annotation.Nonnull;
 
 import static accord.local.PreLoadContext.contextFor;
-import static accord.primitives.Txn.Kind.Kinds.AnyGloballyVisible;
 import static accord.local.SafeCommandStore.TestStatus.IS_STABLE;
+import static accord.primitives.Txn.Kind.Kinds.AnyGloballyVisible;
 import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.checkState;
 import static accord.utils.Invariants.illegalState;
@@ -55,7 +61,7 @@ import static accord.utils.Invariants.illegalState;
  *
  * Note that reads might still order after, but side effect bearing transactions should not.
  */
-public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractResult<Timestamp>
+public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractResult<TxnId>
 {
     @SuppressWarnings("unused")
     private static final Logger logger = LoggerFactory.getLogger(Barrier.class);
@@ -146,16 +152,15 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
         }
     }
 
-    private void doBarrierSuccess(Timestamp executeAt)
+    private void doBarrierSuccess(TxnId syncId)
     {
         // The transaction we wait on might have more keys, but it's not
         // guaranteed they were wanted and we don't want to force the agent to filter them
         // so provide the seekables we were given.
         // We also don't notify the agent for range barriers since that makes sense as a local concept
         // since ranges can easily span multiple nodes
-        if (seekables != null)
-            node.agent().onLocalBarrier(seekables, executeAt);
-        Barrier.this.trySuccess(executeAt);
+        node.agent().onLocalBarrier(seekables, syncId);
+        Barrier.this.trySuccess(syncId);
     }
 
     private void createSyncPoint()
@@ -194,10 +199,9 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
             Command command = safeCommand.current();
             if (command.is(Status.Applied))
             {
-                Timestamp executeAt = command.executeAt();
                 // In all the cases where we add a listener (listening to existing command, async completion of CoordinateSyncPoint)
                 // we want to notify the agent
-                doBarrierSuccess(executeAt);
+                doBarrierSuccess(command.txnId());
             }
             else if (command.hasBeen(Status.Truncated))
                 // Surface the invalidation/truncation and the barrier can be retried by the caller
