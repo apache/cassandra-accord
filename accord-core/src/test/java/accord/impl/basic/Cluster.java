@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -56,9 +55,7 @@ import accord.coordinate.Exhausted;
 import accord.coordinate.Invalidated;
 import accord.coordinate.Preempted;
 import accord.coordinate.Timeout;
-import accord.impl.AbstractSafeCommandStore;
 import accord.impl.CoordinateDurabilityScheduling;
-import accord.impl.InMemoryCommandStore;
 import accord.impl.MessageListener;
 import accord.impl.PrefixedIntHashKey;
 import accord.impl.SimpleProgressLog;
@@ -69,7 +66,6 @@ import accord.local.AgentExecutor;
 import accord.local.Node.Id;
 import accord.local.Node;
 import accord.local.NodeTimeService;
-import accord.local.PreLoadContext;
 import accord.local.ShardDistributor;
 import accord.messages.Message;
 import accord.messages.MessageType;
@@ -81,7 +77,6 @@ import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
-import accord.primitives.TxnId;
 import accord.topology.Topology;
 import accord.topology.TopologyRandomizer;
 import accord.utils.Gens;
@@ -107,7 +102,6 @@ import static java.util.stream.Collectors.toList;
 public class Cluster implements Scheduler
 {
     public static final Logger trace = LoggerFactory.getLogger("accord.impl.basic.Trace");
-    public static boolean TODO_ENABLE_BARRIER = true;
 
     public static class Stats
     {
@@ -332,9 +326,7 @@ public class Cluster implements Scheduler
                 durabilityScheduling.add(durability);
                 nodeMap.put(id, node);
                 durabilityScheduling.add(new CoordinateDurabilityScheduling(node));
-                if (TODO_ENABLE_BARRIER)
-                    services.add(new BarrierService(node, randomSupplier.get()));
-                services.add(new HistoricalTxnService(node, randomSupplier.get()));
+                services.add(new BarrierService(node, randomSupplier.get()));
             }
 
             Runnable updateDurabilityRate;
@@ -520,35 +512,6 @@ public class Cluster implements Scheduler
                     node.agent().onUncaughtException(f);
                 }
             });
-        }
-    }
-
-    private static class HistoricalTxnService extends AbstractService
-    {
-        private HistoricalTxnService(Node node, RandomSource rs)
-        {
-            super(node, rs);
-        }
-        @Override
-        public void doRun()
-        {
-            List<Set<TxnId>> selection = new ArrayList<>();
-            IdentityHashMap<Set<TxnId>, InMemoryCommandStore> historyToStore = new IdentityHashMap<>();
-            for (int id : node.commandStores().ids())
-            {
-                InMemoryCommandStore store = (InMemoryCommandStore) node.commandStores().forId(id);
-                Set<TxnId> set = store.historicalTxnIds();
-                if (set.isEmpty()) continue;
-                selection.add(set);
-                historyToStore.put(set, store);
-            }
-            if (selection.isEmpty())
-                return;
-            Set<TxnId> set = rs.pick(selection);
-            InMemoryCommandStore store = historyToStore.get(set);
-            TxnId id = rs.pick(set);
-            // getInternal will fail if the cmd is null
-            store.execute(PreLoadContext.contextFor(id), safe -> ((AbstractSafeCommandStore) safe).getInternal(id)).begin(node.agent());
         }
     }
 
