@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -473,6 +474,11 @@ public class Gens {
     public static StringDSL strings()
     {
         return new StringDSL();
+    }
+
+    public static BooleanSupplier supplier(Gen<Boolean> gen, RandomSource rs)
+    {
+        return () -> gen.next(rs);
     }
 
     public static class BooleanDSL
