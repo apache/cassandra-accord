@@ -589,14 +589,21 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
 
     public static <V> AsyncChain<V> ofCallable(Executor executor, Callable<V> callable)
     {
-        return new Head<V>()
+        return ofCallable(executor, callable, AsyncChains::encapsulate);
+    }
+
+    public static <V> AsyncChain<V> ofCallable(Executor executor,
+                                               Callable<V> callable,
+                                               BiFunction<Callable<V>, BiConsumer<? super V, Throwable>, Runnable> encapsulator)
+    {
+        return new Head<>()
         {
             @Override
             protected void start(BiConsumer<? super V, Throwable> callback)
             {
                 try
                 {
-                    executor.execute(encapsulate(callable, callback));
+                    executor.execute(encapsulator.apply(callable, callback));
                 }
                 catch (Throwable t)
                 {
@@ -615,7 +622,7 @@ public abstract class AsyncChains<V> implements AsyncChain<V>
             {
                 try
                 {
-                    executor.execute(AsyncChains.encapsulate(runnable, callback));
+                    executor.execute(encapsulate(runnable, callback));
                 }
                 catch (Throwable t)
                 {

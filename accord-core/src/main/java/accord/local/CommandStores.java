@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -588,6 +589,22 @@ public abstract class CommandStores
             chain = chain != null ? AsyncChains.reduce(chain, next, reducer) : next;
         }
         return chain == null ? AsyncChains.success(null) : chain;
+    }
+
+    public <O> AsyncChain<List<O>> map(Function<? super SafeCommandStore, O> mapper)
+    {
+        return map(PreLoadContext.empty(), mapper);
+    }
+
+    public <O> AsyncChain<List<O>> map(PreLoadContext context, Function<? super SafeCommandStore, O> mapper)
+    {
+        ShardHolder[] shards = current.shards;
+        List<AsyncChain<O>> results = new ArrayList<>(shards.length);
+
+        for (ShardHolder shard : shards)
+            results.add(shard.store.submit(context, mapper));
+
+        return AsyncChains.all(results);
     }
 
     protected <O> AsyncChain<O> mapReduce(PreLoadContext context, IntStream commandStoreIds, MapReduce<? super SafeCommandStore, O> mapReduce)
