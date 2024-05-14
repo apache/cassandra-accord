@@ -18,7 +18,6 @@
 
 package accord.api;
 
-import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 
 import accord.local.Command;
@@ -70,7 +69,10 @@ public interface Agent extends UncaughtExceptionListener
 
     void onHandledException(Throwable t);
 
-    long preAcceptTimeout(TimeUnit timeUnit);
+    /**
+     * @return PreAccept timeout with implementation-defined resolution of the hybrid logical clock
+     */
+    long preAcceptTimeout();
 
     Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges);
 

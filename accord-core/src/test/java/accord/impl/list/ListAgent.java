@@ -18,7 +18,6 @@
 
 package accord.impl.list;
 
-import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -32,8 +31,6 @@ import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
-
-import static java.util.concurrent.TimeUnit.MICROSECONDS;
 
 import static accord.local.Node.Id.NONE;
 import static accord.utils.Invariants.checkState;
@@ -100,9 +97,9 @@ public class ListAgent implements Agent
     }
 
     @Override
-    public long preAcceptTimeout(TimeUnit timeUnit)
+    public long preAcceptTimeout()
     {
-        return timeUnit.convert(timeout, MICROSECONDS);
+        return timeout;
     }
 
     @Override

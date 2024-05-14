@@ -65,8 +65,6 @@ import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.utils.async.AsyncResults;
 
-import static java.util.concurrent.TimeUnit.MICROSECONDS;
-
 import static accord.api.ConfigurationService.EpochReady.DONE;
 import static accord.local.KeyHistory.COMMANDS;
 import static accord.local.PreLoadContext.contextFor;
@@ -321,7 +319,7 @@ public abstract class CommandStore implements AgentExecutor
 
         NodeTimeService time = safeStore.time();
 
-        boolean isExpired = time.now() - txnId.hlc() >= agent().preAcceptTimeout(MICROSECONDS) && !txnId.kind().isSyncPoint();
+        boolean isExpired = time.now() - txnId.hlc() >= agent().preAcceptTimeout() && !txnId.kind().isSyncPoint();
         if (rejectBefore != null && !isExpired)
             isExpired = null == rejectBefore.foldl(keys, (rejectIfBefore, test) -> rejectIfBefore.compareTo(test) > 0 ? null : test, txnId, Objects::isNull);
 

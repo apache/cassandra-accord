@@ -17,8 +17,6 @@
  */
 package accord.messages;
 
-import java.util.concurrent.TimeUnit;
-
 /**
  * Necessary context to allow for deterministic repeated execution of requests (e.g. when re-applying from a log)
  */
@@ -27,5 +25,5 @@ public interface ExecutionContext
     /**
      * @return PreAccept timeout as it was at request execution
      */
-    long preAcceptTimeout(TimeUnit unit);
+    long preAcceptTimeout();
 }

@@ -18,8 +18,6 @@
 
 package accord.maelstrom;
 
-import java.util.concurrent.TimeUnit;
-
 import accord.api.Agent;
 import accord.api.Result;
 import accord.local.Command;
@@ -30,6 +28,7 @@ import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 
+import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
 import static accord.utils.Invariants.checkState;
@@ -81,9 +80,9 @@ public class MaelstromAgent implements Agent
     }
 
     @Override
-    public long preAcceptTimeout(TimeUnit timeUnit)
+    public long preAcceptTimeout()
     {
-        return timeUnit.convert(10, SECONDS);
+        return MICROSECONDS.convert(10, SECONDS);
     }
 
     @Override
