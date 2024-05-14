@@ -37,12 +37,8 @@ import java.util.function.ToLongFunction;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import accord.coordinate.CoordinateEphemeralRead;
-import accord.coordinate.CoordinationAdapter;
-import accord.coordinate.CoordinationAdapter.Factory.Step;
-import accord.utils.DeterministicSet;
-import accord.utils.Invariants;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,7 +54,10 @@ import accord.api.RoutingKey;
 import accord.api.Scheduler;
 import accord.api.TopologySorter;
 import accord.config.LocalConfig;
+import accord.coordinate.CoordinateEphemeralRead;
 import accord.coordinate.CoordinateTransaction;
+import accord.coordinate.CoordinationAdapter;
+import accord.coordinate.CoordinationAdapter.Factory.Step;
 import accord.coordinate.MaybeRecover;
 import accord.coordinate.Outcome;
 import accord.coordinate.RecoverWithRoute;
@@ -85,6 +84,8 @@ import accord.primitives.Unseekables;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.topology.TopologyManager;
+import accord.utils.DeterministicSet;
+import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChain;
@@ -194,6 +195,11 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     public LocalConfig localConfig()
     {
         return localConfig;
+    }
+
+    public Map<TxnId, AsyncResult<? extends Outcome>> coordinating()
+    {
+        return ImmutableMap.copyOf(coordinating);
     }
 
     /**
