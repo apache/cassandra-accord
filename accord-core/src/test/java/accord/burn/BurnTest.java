@@ -544,15 +544,9 @@ public class BurnTest
     }
 
     @Test
-//    @RepeatedTest(Integer.MAX_VALUE)
     public void testOne()
     {
         run(System.nanoTime());
-
-//        run(516192490847500L); // Incomplete txn ({read:[]}) provided; does not cover [(857#0,857#13107], (857#13107,857#22936]]
-//        run(517010705664541L); // Incomplete txn ({read:[]}) provided; does not cover [(0#54964,0#56246]]
-//        run(517027263147375L); // Incomplete txn ({read:[]}) provided; does not cover [(739#19659,739#22932]]
-//        run(517209858698166L); // Inconsistent execution timestamp detected for command Command@781010128{[2,3004,6(KS),16]:Applied}: [2,3004,6(KS),16] != [3,3013,10,2]
     }
 
     private static void run(long seed)
