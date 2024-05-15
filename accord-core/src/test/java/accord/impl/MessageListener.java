@@ -28,6 +28,8 @@ import accord.messages.SimpleReply;
 import accord.messages.TxnRequest;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.topology.Topology;
+
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
@@ -49,6 +51,7 @@ public interface MessageListener
     void onMessage(NodeSink.Action action, Node.Id src, Node.Id to, long id, Message message);
 
     void onClientAction(ClientAction action, Node.Id from, TxnId id, Object message);
+    void onTopologyChange(Topology topology);
 
     static MessageListener get()
     {
@@ -68,6 +71,12 @@ public interface MessageListener
 
         @Override
         public void onClientAction(ClientAction action, Node.Id from, TxnId id, Object message)
+        {
+
+        }
+
+        @Override
+        public void onTopologyChange(Topology topology)
         {
 
         }
@@ -115,6 +124,16 @@ public interface MessageListener
                              "Client  {}: From {}, To {}, id {}, Message {}";
                 logger.debug(log, normalize(action), normalize(from), normalize(from), normalize(id), normalizeClientMessage(message));
             }
+        }
+
+        private Topology previous = null;
+
+        @Override
+        public void onTopologyChange(Topology topology)
+        {
+            if (previous != null)
+                logger.debug("Topology Change {} -> {}", previous.epoch(), topology.epoch());
+            previous = topology;
         }
 
         private static Object normalizeClientMessage(Object o)

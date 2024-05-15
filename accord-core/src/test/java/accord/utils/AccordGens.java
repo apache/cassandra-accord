@@ -213,6 +213,17 @@ public class AccordGens
         };
     }
 
+    public static Gen<Key> keysInsideRanges(Ranges ranges)
+    {
+        Invariants.checkArgument(!ranges.isEmpty(), "Ranges empty");
+        RoutingKey sample = ranges.get(0).end();
+        if (sample instanceof PrefixedIntHashKey)
+            return prefixedIntHashKeyInsideRanges(ranges);
+        if (sample instanceof IntKey.Routing)
+            return intKeysInsideRanges(ranges);
+        throw new IllegalArgumentException("Unsupported key type " + sample.getClass() + "; supported = PrefixedIntHashKey, IntKey");
+    }
+
     public static Gen<KeyDeps> keyDeps(Gen<? extends Key> keyGen)
     {
         return keyDeps(keyGen, txnIds());
@@ -372,6 +383,39 @@ public class AccordGens
     public static <T extends RoutingKey> Gen<Ranges> ranges(Gen.IntGen sizeGen, Gen<T> keyGen, BiFunction<? super T, ? super T, ? extends Range> factory)
     {
         return ranges(sizeGen, keyGen, (ignore, a, b) -> factory.apply(a, b));
+    }
+
+    public static Gen<Range> rangeInsideRange(Range range)
+    {
+        if (range.end() instanceof PrefixedIntHashKey)
+            return prefixedIntHashKeyRangeInsideRange(range);
+        throw new IllegalArgumentException("Unsupported type: " + range.start().getClass());
+    }
+
+    public static Gen<Range> prefixedIntHashKeyRangeInsideRange(Range range)
+    {
+        if (!(range.end() instanceof PrefixedIntHashKey))
+            throw new IllegalArgumentException("Only PrefixedIntHashKey supported; saw " + range.end().getClass());
+        PrefixedIntHashKey start = (PrefixedIntHashKey) range.start();
+        PrefixedIntHashKey end = (PrefixedIntHashKey) range.end();
+        if (start.hash + 1 == end.hash)
+        {
+            // range is of size 1, so can not split into a smaller range...
+            return ignore -> range;
+        }
+        return rs -> {
+            int a = rs.nextInt(start.hash, end.hash);
+            int b = rs.nextInt(start.hash, end.hash);
+            while (a == b)
+                b = rs.nextInt(start.hash, end.hash);
+            if (a > b)
+            {
+                int tmp = a;
+                a = b;
+                b = tmp;
+            }
+            return PrefixedIntHashKey.range(start.prefix, a, b);
+        };
     }
 
     public static Gen<Ranges> prefixedIntHashKeyRanges(int numNodes, int rf)

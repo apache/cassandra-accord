@@ -219,6 +219,12 @@ public abstract class CommandStore implements AgentExecutor
 
     public abstract boolean inStore();
 
+    public void maybeExecuteImmediately(Runnable task)
+    {
+        if (inStore()) task.run();
+        else           execute(task);
+    }
+
     public abstract AsyncChain<Void> execute(PreLoadContext context, Consumer<? super SafeCommandStore> consumer);
 
     public abstract <T> AsyncChain<T> submit(PreLoadContext context, Function<? super SafeCommandStore, T> apply);

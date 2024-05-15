@@ -50,6 +50,11 @@ public class Invariants
          throw createIllegalState(msg);
     }
 
+    public static IllegalStateException illegalState(String fmt, Object... args)
+    {
+        return illegalState(format(fmt, args));
+    }
+
     public static IllegalStateException illegalState()
     {
         throw illegalState(null);

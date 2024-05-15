@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -55,13 +56,23 @@ public class Gens {
         return ignore -> constant.get();
     }
 
-    public static <T> Gen<T> oneOf(Gen<T>... gens)
+    public static <T> Gen<T> oneOf(Gen<? extends T>... gens)
     {
+        switch (gens.length)
+        {
+            case 0: throw new IllegalArgumentException("Unable to select oneOf an empty list");
+            case 1: return (Gen<T>) gens[0];
+        }
         return oneOf(Arrays.asList(gens));
     }
 
-    public static <T> Gen<T> oneOf(List<Gen<T>> gens)
+    public static <T> Gen<T> oneOf(List<Gen<? extends T>> gens)
     {
+        switch (gens.size())
+        {
+            case 0: throw new IllegalArgumentException("Unable to select oneOf an empty list");
+            case 1: return (Gen<T>) gens.get(0);
+        }
         return rs -> rs.pick(gens).next(rs);
     }
 
@@ -463,6 +474,11 @@ public class Gens {
     public static StringDSL strings()
     {
         return new StringDSL();
+    }
+
+    public static BooleanSupplier supplier(Gen<Boolean> gen, RandomSource rs)
+    {
+        return () -> gen.next(rs);
     }
 
     public static class BooleanDSL

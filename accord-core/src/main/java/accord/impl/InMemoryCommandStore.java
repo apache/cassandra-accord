@@ -388,6 +388,8 @@ public abstract class InMemoryCommandStore extends CommandStore
         timestampsForKey.put(key, timestampsForKey((Key) key).createSafeReference());
     }
 
+    protected void validateRead(Command current) {}
+
     protected final InMemorySafeStore createSafeStore(PreLoadContext context, RangesForEpoch ranges)
     {
         Map<TxnId, InMemorySafeCommand> commands = new HashMap<>();
@@ -395,6 +397,14 @@ public abstract class InMemoryCommandStore extends CommandStore
         Map<RoutableKey, InMemorySafeTimestampsForKey> timestampsForKey = new HashMap<>();
 
         context.forEachId(txnId -> commands.put(txnId, lazyReference(txnId)));
+        for (InMemorySafeCommand safe : commands.values())
+        {
+            GlobalCommand global = safe.unsafeGlobal();
+            if (global == null) continue;
+            Command current = global.value();
+            if (current == null) continue;
+            validateRead(current);
+        }
 
         for (Seekable seekable : context.keys())
         {
@@ -402,8 +412,18 @@ public abstract class InMemoryCommandStore extends CommandStore
             {
                 case Key:
                     RoutableKey key = (RoutableKey) seekable;
-                    commandsForKey.put(key, commandsForKey((Key) key).createSafeReference());
-                    timestampsForKey.put(key, timestampsForKey((Key) key).createSafeReference());
+                    switch (context.keyHistory())
+                    {
+                        case NONE:
+                            continue;
+                        case COMMANDS:
+                            commandsForKey.put(key, commandsForKey((Key) key).createSafeReference());
+                            break;
+                        case TIMESTAMPS:
+                            timestampsForKey.put(key, timestampsForKey((Key) key).createSafeReference());
+                            break;
+                        default: throw new UnsupportedOperationException("Unknown key history: " + context.keyHistory());
+                    }
                     break;
                 case Range:
                     // load range cfks here
@@ -633,7 +653,7 @@ public abstract class InMemoryCommandStore extends CommandStore
     public static class InMemorySafeStore extends AbstractSafeCommandStore<InMemorySafeCommand, InMemorySafeTimestampsForKey, InMemorySafeCommandsForKey>
     {
         private final InMemoryCommandStore commandStore;
-        private final Map<TxnId, InMemorySafeCommand> commands;
+        protected final Map<TxnId, InMemorySafeCommand> commands;
         private final Map<RoutableKey, InMemorySafeTimestampsForKey> timestampsForKey;
         private final Map<RoutableKey, InMemorySafeCommandsForKey> commandsForKey;
         private final RangesForEpoch ranges;

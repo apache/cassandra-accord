@@ -23,6 +23,8 @@ import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import com.google.common.collect.Sets;
+
 import accord.impl.*;
 import accord.primitives.*;
 import org.slf4j.Logger;
@@ -62,6 +64,31 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
             logger.trace("WRITE on {} at {} key:{} -> {}", s.node, executeAt, key, data);
             return null;
         });
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (o == this) return true;
+        if (!(o instanceof ListWrite)) return false;
+        ListWrite other = (ListWrite) o;
+        // Can not rely on Map.equals as our value is an array: (new int[] {2}).equals(new int[] {2}) == false!
+        if (!Sets.difference(keySet(), other.keySet()).isEmpty()
+            || !Sets.difference(other.keySet(), keySet()).isEmpty())
+            return false;
+        // keys match
+        for (Key k : keySet())
+        {
+            if (!Arrays.equals(get(k), other.get(k)))
+                return false;
+        }
+        return true;
+    }
+
+    @Override
+    public int hashCode()
+    {
+        throw new UnsupportedOperationException();
     }
 
     @Override

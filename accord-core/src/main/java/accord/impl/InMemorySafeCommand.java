@@ -18,7 +18,10 @@
 
 package accord.impl;
 
+import java.util.Objects;
 import java.util.function.Supplier;
+
+import javax.annotation.Nullable;
 
 import accord.impl.InMemoryCommandStore.GlobalCommand;
 import accord.local.Command;
@@ -30,9 +33,11 @@ import static accord.utils.Invariants.illegalState;
 
 public class InMemorySafeCommand extends SafeCommand implements SafeState<Command>
 {
+    private static final Object INIT = new Object();
     private static final Supplier<GlobalCommand> INVALIDATED = () -> null;
 
     private Supplier<GlobalCommand> lazy;
+    private Object original = INIT;
     private GlobalCommand global;
 
     public InMemorySafeCommand(TxnId txnId, GlobalCommand global)
@@ -54,10 +59,26 @@ public class InMemorySafeCommand extends SafeCommand implements SafeState<Comman
         return global.value();
     }
 
+    public boolean isModified()
+    {
+        return original != INIT && !Objects.equals(original, global.value());
+    }
+
+    @Nullable
+    public Command original()
+    {
+        touch();
+        if (!isModified())
+            return global.value();
+        return (Command) original;
+    }
+
     @Override
     protected void set(Command update)
     {
         touch();
+        if (original == INIT)
+            original = global.value();
         global.value(update);
     }
 
@@ -83,6 +104,7 @@ public class InMemorySafeCommand extends SafeCommand implements SafeState<Comman
     public void invalidate()
     {
         lazy = INVALIDATED;
+        original = INIT;
     }
 
     @Override
@@ -105,6 +127,12 @@ public class InMemorySafeCommand extends SafeCommand implements SafeState<Comman
     GlobalCommand global()
     {
         touch();
+        return global;
+    }
+
+    @Nullable
+    GlobalCommand unsafeGlobal()
+    {
         return global;
     }
 }

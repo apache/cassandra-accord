@@ -19,6 +19,7 @@
 package accord.impl.list;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 
 import accord.local.SafeCommandStore;
@@ -105,6 +106,23 @@ public class ListRead implements Read
     public Read merge(Read other)
     {
         return new ListRead(executor, isEphemeralRead, ((Seekables) userReadKeys).with(((ListRead)other).userReadKeys), ((Seekables)keys).with(((ListRead)other).keys));
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        ListRead listRead = (ListRead) o;
+        return isEphemeralRead == listRead.isEphemeralRead
+               && Objects.equals(userReadKeys, listRead.userReadKeys)
+               && Objects.equals(keys, listRead.keys);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        throw new UnsupportedOperationException();
     }
 
     @Override

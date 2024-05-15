@@ -662,12 +662,13 @@ public class CommandsForKey implements CommandsSummary
             {
                 if (newStatus.compareTo(cur.status) <= 0)
                 {
+                    // TODO (required): this validation is not safe for replay where we may have to "catch up" commands that are behind CFK
                     // we can redundantly update the same transaction via notifyWaitingOnCommit since updates to CFK may be asynchronous
                     // (particularly for invalidations). So we should expect that we might already represent the latest information for this transaction.
                     // TODO (desired): consider only accepting this for Invalidation
                     // TODO (desired): also clean-up special casing for AcceptedInvalidate, which exists because it currently has no effect on the CFK state
                     //    so it could be any of Transitively Known, Historic, PreAccept or Accept
-                    Invariants.checkState(cur.status == newStatus || next.status() == Status.AcceptedInvalidate);
+                    Invariants.checkState(cur.status == newStatus || next.status() == Status.AcceptedInvalidate, "Attempted update to CommandsForKey with %s, implying stale status; found %s", next, cur);
                     if (!newStatus.hasInfo || next.acceptedOrCommitted().equals(prev.acceptedOrCommitted()))
                         return this;
                 }
@@ -1220,7 +1221,7 @@ public class CommandsForKey implements CommandsSummary
             Key key = this.key;
             Keys keys = Keys.of(key);
             safeStore = safeStore; // make unsafe for compiler to permit in lambda
-            safeStore.commandStore().execute(PreLoadContext.contextFor(txnId, keys), safeStore0 -> {
+            safeStore.commandStore().execute(PreLoadContext.contextFor(txnId, keys, KeyHistory.COMMANDS), safeStore0 -> {
                 SafeCommand safeCommand0 = safeStore0.get(txnId);
                 safeCommand0.initialise();
                 Command command = safeCommand0.current();

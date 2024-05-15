@@ -19,6 +19,8 @@ package accord.local;
 
 import java.util.Set;
 
+import javax.annotation.Nullable;
+
 import com.google.common.collect.ImmutableSet;
 
 import accord.api.Result;
@@ -28,6 +30,7 @@ import accord.local.CommandStores.RangesForEpoch;
 import accord.local.CommonAttributes.Mutable;
 import accord.messages.Accept;
 import accord.messages.Apply;
+import accord.messages.ApplyThenWaitUntilApplied;
 import accord.messages.BeginRecovery;
 import accord.messages.Commit;
 import accord.messages.MessageType;
@@ -38,18 +41,21 @@ import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
 
 import static accord.messages.MessageType.APPLY_MAXIMAL_REQ;
 import static accord.messages.MessageType.APPLY_MINIMAL_REQ;
+import static accord.messages.MessageType.APPLY_THEN_WAIT_UNTIL_APPLIED_REQ;
 import static accord.messages.MessageType.BEGIN_RECOVER_REQ;
 import static accord.messages.MessageType.COMMIT_MAXIMAL_REQ;
 import static accord.messages.MessageType.COMMIT_SLOW_PATH_REQ;
 import static accord.messages.MessageType.PRE_ACCEPT_REQ;
 import static accord.messages.MessageType.PROPAGATE_APPLY_MSG;
-import static accord.messages.MessageType.PROPAGATE_STABLE_MSG;
+import static accord.messages.MessageType.PROPAGATE_OTHER_MSG;
 import static accord.messages.MessageType.PROPAGATE_PRE_ACCEPT_MSG;
+import static accord.messages.MessageType.PROPAGATE_STABLE_MSG;
 import static accord.messages.MessageType.STABLE_FAST_PATH_REQ;
 import static accord.messages.MessageType.STABLE_MAXIMAL_REQ;
 import static accord.messages.MessageType.STABLE_SLOW_PATH_REQ;
@@ -60,15 +66,40 @@ import static accord.utils.Invariants.illegalState;
 @VisibleForImplementation
 public class SerializerSupport
 {
+    private static final Set<MessageType> PRE_ACCEPT_TYPES =
+    ImmutableSet.of(PRE_ACCEPT_REQ, BEGIN_RECOVER_REQ, PROPAGATE_PRE_ACCEPT_MSG);
+
+    private static final Set<MessageType> PRE_ACCEPT_COMMIT_TYPES =
+    ImmutableSet.<MessageType>builder()
+                .addAll(PRE_ACCEPT_TYPES)
+                .add(COMMIT_SLOW_PATH_REQ, COMMIT_MAXIMAL_REQ)
+                .build();
+
+    private static final Set<MessageType> PRE_ACCEPT_STABLE_TYPES =
+    ImmutableSet.<MessageType>builder()
+                .addAll(PRE_ACCEPT_COMMIT_TYPES)
+                .add(STABLE_FAST_PATH_REQ, STABLE_SLOW_PATH_REQ, STABLE_MAXIMAL_REQ, PROPAGATE_STABLE_MSG)
+                .build();
+
+    private static final Set<MessageType> APPLY_TYPES =
+    ImmutableSet.of(APPLY_MINIMAL_REQ, APPLY_MAXIMAL_REQ, PROPAGATE_APPLY_MSG, APPLY_THEN_WAIT_UNTIL_APPLIED_REQ);
+
+    private static final Set<MessageType> PRE_ACCEPT_COMMIT_APPLY_TYPES =
+    ImmutableSet.<MessageType>builder()
+                .addAll(PRE_ACCEPT_STABLE_TYPES)
+                .addAll(APPLY_TYPES)
+                .build();
+
     /**
      * Reconstructs Command from register values and protocol messages.
      */
-    public static Command reconstruct(RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
+    public static Command reconstruct(RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, @Nullable Timestamp executesAtLeast, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
     {
         switch (status.status)
         {
             case NotDefined:
-                return Command.NotDefined.notDefined(attrs, promised);
+                return status == SaveStatus.Uninitialised ? Command.NotDefined.uninitialised(attrs.txnId())
+                                                          : Command.NotDefined.notDefined(attrs, promised);
             case PreAccepted:
                 return preAccepted(rangesForEpoch, attrs, executeAt, promised, messageProvider);
             case AcceptedInvalidate:
@@ -83,14 +114,11 @@ public class SerializerSupport
                 return executed(rangesForEpoch, attrs, status, executeAt, promised, accepted, waitingOnProvider, messageProvider);
             case Truncated:
             case Invalidated:
-                return truncated(attrs, status, executeAt, messageProvider);
+                return truncated(attrs, status, executeAt, executesAtLeast, messageProvider);
             default:
                 throw new IllegalStateException();
         }
     }
-
-    private static final Set<MessageType> PRE_ACCEPT_TYPES =
-        ImmutableSet.of(PRE_ACCEPT_REQ, BEGIN_RECOVER_REQ, PROPAGATE_PRE_ACCEPT_MSG);
 
     private static Command.PreAccepted preAccepted(RangesForEpoch rangesForEpoch, Mutable attrs, Timestamp executeAt, Ballot promised, MessageProvider messageProvider)
     {
@@ -118,23 +146,11 @@ public class SerializerSupport
         return Command.Accepted.accepted(attrs, status, executeAt, promised, accepted);
     }
 
-    private static final Set<MessageType> PRE_ACCEPT_COMMIT_TYPES =
-        ImmutableSet.of(PRE_ACCEPT_REQ, BEGIN_RECOVER_REQ, PROPAGATE_PRE_ACCEPT_MSG, COMMIT_SLOW_PATH_REQ, COMMIT_MAXIMAL_REQ);
-
-    private static final Set<MessageType> PRE_ACCEPT_STABLE_TYPES =
-        ImmutableSet.of(PRE_ACCEPT_REQ, BEGIN_RECOVER_REQ, PROPAGATE_PRE_ACCEPT_MSG,
-                        COMMIT_SLOW_PATH_REQ, COMMIT_MAXIMAL_REQ, STABLE_FAST_PATH_REQ, STABLE_SLOW_PATH_REQ, STABLE_MAXIMAL_REQ, PROPAGATE_STABLE_MSG);
-
     private static Command.Committed committed(RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
     {
         attrs = extract(rangesForEpoch, status, accepted, messageProvider, (attrs0, txn, deps, i1, i2) -> attrs0.partialTxn(txn).partialDeps(deps), attrs);
         return Command.Committed.committed(attrs, status, executeAt, promised, accepted, waitingOnProvider.provide(attrs.partialDeps()));
     }
-
-    private static final Set<MessageType> PRE_ACCEPT_COMMIT_APPLY_TYPES =
-        ImmutableSet.of(PRE_ACCEPT_REQ, BEGIN_RECOVER_REQ, PROPAGATE_PRE_ACCEPT_MSG,
-                        COMMIT_SLOW_PATH_REQ, COMMIT_MAXIMAL_REQ, STABLE_MAXIMAL_REQ, STABLE_FAST_PATH_REQ, PROPAGATE_STABLE_MSG,
-                        APPLY_MINIMAL_REQ, APPLY_MAXIMAL_REQ, PROPAGATE_APPLY_MSG);
 
     private static Command.Executed executed(RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
     {
@@ -146,10 +162,7 @@ public class SerializerSupport
         }, attrs);
     }
 
-    private static final Set<MessageType> APPLY_TYPES =
-            ImmutableSet.of(APPLY_MINIMAL_REQ, APPLY_MAXIMAL_REQ, PROPAGATE_APPLY_MSG);
-
-    private static Command.Truncated truncated(Mutable attrs, SaveStatus status, Timestamp executeAt, MessageProvider messageProvider)
+    private static Command.Truncated truncated(Mutable attrs, SaveStatus status, Timestamp executeAt, @Nullable Timestamp executesAtLeast, MessageProvider messageProvider)
     {
         Writes writes = null;
         Result result = null;
@@ -162,15 +175,15 @@ public class SerializerSupport
             case TruncatedApplyWithDeps:
                 Set<MessageType> witnessed = messageProvider.test(APPLY_TYPES);
                 checkState(!witnessed.isEmpty());
-                if (witnessed.contains(APPLY_MINIMAL_REQ))
-                {
-                    Apply apply = messageProvider.applyMinimal();
-                    writes = apply.writes;
-                    result = apply.result;
-                }
                 if (witnessed.contains(APPLY_MAXIMAL_REQ))
                 {
                     Apply apply = messageProvider.applyMaximal();
+                    writes = apply.writes;
+                    result = apply.result;
+                }
+                else if (witnessed.contains(APPLY_MINIMAL_REQ))
+                {
+                    Apply apply = messageProvider.applyMinimal();
                     writes = apply.writes;
                     result = apply.result;
                 }
@@ -180,8 +193,18 @@ public class SerializerSupport
                     writes = propagate.writes;
                     result = propagate.result;
                 }
+                else if (witnessed.contains(APPLY_THEN_WAIT_UNTIL_APPLIED_REQ))
+                {
+                    ApplyThenWaitUntilApplied apply = messageProvider.applyThenWaitUntilApplied();
+                    writes = apply.writes;
+                    result = apply.result;
+                }
+                else
+                {
+                    throw new UnsupportedOperationException("Unhandled types: " + witnessed);
+                }
             case TruncatedApply:
-                return Command.Truncated.truncatedApply(attrs, status, executeAt, writes, result);
+                return Command.Truncated.truncatedApply(attrs, status, executeAt, writes, result, executesAtLeast);
             case ErasedOrInvalidated:
                 return Command.Truncated.erasedOrInvalidated(attrs.txnId(), attrs.durability(), attrs.route());
             case Erased:
@@ -231,6 +254,7 @@ public class SerializerSupport
             case AcceptedInvalidate:
             case Accepted:
             case PreCommitted:
+            {
                 PartialTxn txn = null;
                 PartialDeps deps = null;
 
@@ -247,7 +271,7 @@ public class SerializerSupport
                     deps = slicePartialDeps(rangesForEpoch, accept);
                 }
                 return withContents.apply(param, txn, deps, null, null);
-
+            }
             case Committed:
             {
                 witnessed = messageProvider.test(PRE_ACCEPT_COMMIT_TYPES);
@@ -285,14 +309,25 @@ public class SerializerSupport
                 else
                 {
                     checkState(witnessed.contains(STABLE_SLOW_PATH_REQ), "Unable to find STABLE_SLOW_PATH_REQ; witnessed %s", new LoggedMessageProvider(messageProvider));
-                    if (witnessed.contains(COMMIT_SLOW_PATH_REQ))
+                    if (witnessed.contains(COMMIT_MAXIMAL_REQ))
+                    {
+                        commit = messageProvider.commitMaximal();
+                    }
+                    else if (witnessed.contains(COMMIT_SLOW_PATH_REQ))
                     {
                         commit = messageProvider.commitSlowPath();
                     }
+                    else if (witnessed.contains(PRE_ACCEPT_REQ) || witnessed.contains(BEGIN_RECOVER_REQ) || witnessed.contains(PROPAGATE_PRE_ACCEPT_MSG))
+                    {
+                        Commit slowPath = messageProvider.stableSlowPath();
+                        Ranges ranges = rangesForEpoch.allBetween(slowPath.txnId.epoch(), slowPath.executeAt.epoch());
+                        PartialTxn txn = txnFromPreAcceptOrBeginRecover(rangesForEpoch, witnessed, messageProvider).slice(ranges, true);
+                        PartialDeps deps = slowPath.partialDeps.slice(ranges);
+                        return withContents.apply(param, txn, deps, null, null);
+                    }
                     else
                     {
-                        checkState(witnessed.contains(COMMIT_MAXIMAL_REQ), "Unable to find COMMIT_MAXIMAL_REQ; witnessed %s", new LoggedMessageProvider(messageProvider));
-                        commit = messageProvider.commitMaximal();
+                        throw illegalState("Unable to find COMMIT_SLOW_PATH_REQ; witnessed %s", new LoggedMessageProvider(messageProvider));
                     }
                 }
 
@@ -309,14 +344,14 @@ public class SerializerSupport
                     Ranges ranges = rangesForEpoch.allBetween(apply.txnId.epoch(), apply.executeAt.epoch());
                     return withContents.apply(param, apply.txn.slice(ranges, true), apply.deps.slice(ranges), apply.writes, apply.result);
                 }
-                else if (witnessed.contains(PROPAGATE_APPLY_MSG))
+                else if (witnessed.contains(APPLY_THEN_WAIT_UNTIL_APPLIED_REQ))
                 {
-                    Propagate propagate = messageProvider.propagateApply();
-                    return sliceAndApply(rangesForEpoch, propagate, withContents, param, propagate.writes, propagate.result);
+                    ApplyThenWaitUntilApplied apply = messageProvider.applyThenWaitUntilApplied();
+                    Ranges ranges = rangesForEpoch.allBetween(apply.txnId.epoch(), apply.executeAt.epoch());
+                    return withContents.apply(param, apply.txn.slice(ranges, true), apply.deps.slice(ranges), apply.writes, apply.result);
                 }
-                else
+                else if (witnessed.contains(APPLY_MINIMAL_REQ))
                 {
-                    checkState(witnessed.contains(APPLY_MINIMAL_REQ), "Unable to find APPLY_MINIMAL_REQ; witnessed %s", new LoggedMessageProvider(messageProvider));
                     Apply apply = messageProvider.applyMinimal();
                     Commit commit;
                     if (witnessed.contains(STABLE_MAXIMAL_REQ))
@@ -326,7 +361,18 @@ public class SerializerSupport
                     else if (witnessed.contains(PROPAGATE_STABLE_MSG))
                     {
                         Propagate propagate = messageProvider.propagateStable();
-                        return withContents.apply(param, propagate.partialTxn, propagate.stableDeps, apply.writes, apply.result);
+                        var ranges = propagate.committedExecuteAt == null ? rangesForEpoch.allAt(propagate.txnId) : rangesForEpoch.allBetween(propagate.txnId, propagate.committedExecuteAt);
+                        return withContents.apply(param, propagate.partialTxn.slice(ranges, true), propagate.stableDeps.slice(ranges), apply.writes, apply.result);
+                    }
+                    else if (witnessed.contains(PROPAGATE_APPLY_MSG))
+                    {
+                        Propagate propagate = messageProvider.propagateApply();
+                        var ranges = propagate.committedExecuteAt == null ? rangesForEpoch.allAt(propagate.txnId) : rangesForEpoch.allBetween(propagate.txnId, propagate.committedExecuteAt);
+                        return withContents.apply(param, propagate.partialTxn.slice(ranges, true), propagate.stableDeps.slice(ranges), apply.writes, apply.result);
+                    }
+                    else if (witnessed.contains(COMMIT_MAXIMAL_REQ))
+                    {
+                        commit = messageProvider.commitMaximal();
                     }
                     else if (witnessed.contains(COMMIT_SLOW_PATH_REQ))
                     {
@@ -336,12 +382,48 @@ public class SerializerSupport
                     {
                         commit = messageProvider.stableFastPath();
                     }
+                    else if (witnessed.contains(PRE_ACCEPT_REQ) || witnessed.contains(BEGIN_RECOVER_REQ) || witnessed.contains(PROPAGATE_PRE_ACCEPT_MSG))
+                    {
+                        PartialTxn txn = txnFromPreAcceptOrBeginRecover(rangesForEpoch, witnessed, messageProvider);
+                        Ranges ranges = rangesForEpoch.allBetween(apply.txnId.epoch(), apply.executeAt.epoch());
+                        return withContents.apply(param, txn.slice(ranges, true), apply.deps.slice(ranges), apply.writes, apply.result);
+                    }
                     else
                     {
                         throw illegalState("Invalid state: insufficient stable or commit messages found to reconstruct PreApplied or greater SaveStatus; witnessed " + witnessed);
                     }
 
                     return sliceAndApply(rangesForEpoch, messageProvider, witnessed, commit, withContents, param, apply.writes, apply.result);
+                }
+                else if (witnessed.contains(PROPAGATE_APPLY_MSG))
+                {
+                    Propagate propagate = messageProvider.propagateApply();
+                    Invariants.nonNull(propagate.partialTxn, "Unable to find partialTxn; witnessed %s", new LoggedMessageProvider(messageProvider));
+                    Invariants.nonNull(propagate.stableDeps, "Unable to find stableDeps; witnessed %s", new LoggedMessageProvider(messageProvider));
+                    return sliceAndApply(rangesForEpoch, propagate, withContents, param, propagate.writes, propagate.result);
+                }
+                else if (witnessed.contains(PROPAGATE_PRE_ACCEPT_MSG))
+                {
+                    // once propgate runs locally it merges the local state with the remote state, which may make this go from PRE_ACCEPT to PRE_APPLIED!
+                    Propagate propagate = messageProvider.propagatePreAccept();
+                    Invariants.nonNull(propagate.partialTxn, "Unable to find partialTxn; witnessed %s", new LoggedMessageProvider(messageProvider));
+                    Invariants.nonNull(propagate.stableDeps, "Unable to find stableDeps; witnessed %s", new LoggedMessageProvider(messageProvider));
+
+                    var ranges = propagate.committedExecuteAt == null ? rangesForEpoch.allAt(propagate.txnId) : rangesForEpoch.allBetween(propagate.txnId, propagate.committedExecuteAt);
+                    return withContents.apply(param, propagate.partialTxn.slice(ranges, true), propagate.stableDeps.slice(ranges), propagate.writes, propagate.result);
+                }
+                else if (witnessed.contains(PROPAGATE_OTHER_MSG))
+                {
+                    // the txn/deps may have been erased, won't always be here...
+                    Propagate propagate = messageProvider.propagateOther();
+                    var ranges = propagate.committedExecuteAt == null ? rangesForEpoch.allAt(propagate.txnId) : rangesForEpoch.allBetween(propagate.txnId, propagate.committedExecuteAt);
+                    PartialTxn txn = propagate.partialTxn == null ? null : propagate.partialTxn.slice(ranges, true);
+                    PartialDeps deps = propagate.stableDeps == null ? null : propagate.stableDeps.slice(ranges);
+                    return withContents.apply(param, txn, deps, propagate.writes, propagate.result);
+                }
+                else
+                {
+                    throw illegalState("Unable to find messages that lead to PreApplied state; txn_id=%s, witnessed %s", messageProvider.txnId(), new LoggedMessageProvider(messageProvider));
                 }
             }
 
@@ -406,6 +488,8 @@ public class SerializerSupport
                 PartialTxn preAcceptedPartialTxn = txnFromPreAcceptOrBeginRecover(rangesForEpoch, witnessed, messageProvider);
                 if (partialTxn == null || partialTxn.keys().size() == 0) partialTxn = preAcceptedPartialTxn;
                 else partialTxn = merge(preAcceptedPartialTxn, partialTxn);
+                if (partialTxn == null && witnessed.contains(COMMIT_MAXIMAL_REQ))
+                    partialTxn = messageProvider.commitMaximal().partialTxn;
             case StableWithTxnAndDeps:
             case CommitWithTxn:
         }
@@ -421,6 +505,7 @@ public class SerializerSupport
     // TODO (required): randomised testing that we always restore the exact same state
     public interface MessageProvider
     {
+        TxnId txnId();
         Set<MessageType> test(Set<MessageType> messages);
         Set<MessageType> all();
 
@@ -437,6 +522,7 @@ public class SerializerSupport
         Commit commitMaximal();
 
         Commit stableFastPath();
+        Commit stableSlowPath();
 
         Commit stableMaximal();
 
@@ -447,6 +533,10 @@ public class SerializerSupport
         Apply applyMaximal();
 
         Propagate propagateApply();
+
+        Propagate propagateOther();
+
+        ApplyThenWaitUntilApplied applyThenWaitUntilApplied();
     }
 
     private static class LoggedMessageProvider

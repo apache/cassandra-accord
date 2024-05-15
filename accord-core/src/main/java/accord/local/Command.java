@@ -370,10 +370,10 @@ public abstract class Command implements CommonAttributes
                     case DefinitionErased:
                     case DefinitionUnknown:
                     case NoOp:
-                        Invariants.checkState(partialTxn == null);
+                        Invariants.checkState(partialTxn == null, "partialTxn is defined");
                         break;
                     case DefinitionKnown:
-                        Invariants.checkState(partialTxn != null);
+                        Invariants.checkState(partialTxn != null, "partialTxn is null");
                         break;
                 }
             }
@@ -418,8 +418,8 @@ public abstract class Command implements CommonAttributes
                 {
                     default: throw new AssertionError("Unhandled Outcome: " + known.outcome);
                     case Apply:
-                        Invariants.checkState(writes != null);
-                        Invariants.checkState(result != null);
+                        Invariants.checkState(writes != null, "Writes is null");
+                        Invariants.checkState(result != null, "Result is null");
                         break;
                     case Invalidated:
                         Invariants.checkState(validate.durability().isMaybeInvalidated());
@@ -427,8 +427,8 @@ public abstract class Command implements CommonAttributes
                         Invariants.checkState(validate.durability() != Local);
                     case Erased:
                     case WasApply:
-                        Invariants.checkState(writes == null);
-                        Invariants.checkState(result == null);
+                        Invariants.checkState(writes == null, "Writes exist");
+                        Invariants.checkState(result == null, "Results exist");
                         break;
                 }
             }
@@ -840,15 +840,18 @@ public abstract class Command implements CommonAttributes
 
         public static Truncated truncatedApply(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result)
         {
-            // TODO (now) !!! uncomment and fix
-//            Invariants.checkArgument(!common.txnId().kind().awaitsOnlyDeps());
+            Invariants.checkArgument(!common.txnId().kind().awaitsOnlyDeps());
             Durability durability = checkTruncatedApplyInvariants(common, saveStatus, executeAt);
             return validate(new Truncated(common.txnId(), saveStatus, durability, common.route(), executeAt, EMPTY, writes, result));
         }
 
-        public static Truncated truncatedApply(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result, Timestamp dependencyExecutesAt)
+        public static Truncated truncatedApply(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result, @Nullable Timestamp dependencyExecutesAt)
         {
-            Invariants.checkArgument(common.txnId().kind().awaitsOnlyDeps());
+            if (!common.txnId().kind().awaitsOnlyDeps())
+            {
+                Invariants.checkState(dependencyExecutesAt == null);
+                return truncatedApply(common, saveStatus, executeAt, writes, result);
+            }
             Durability durability = checkTruncatedApplyInvariants(common, saveStatus, executeAt);
             return validate(new TruncatedAwaitsOnlyDeps(common.txnId(), saveStatus, durability, common.route(), executeAt, EMPTY, writes, result, dependencyExecutesAt));
         }
@@ -926,6 +929,10 @@ public abstract class Command implements CommonAttributes
 
     public static class TruncatedAwaitsOnlyDeps extends Truncated
     {
+        /**
+         * TODO (desired): Ideally we would not store this differently than we do for earlier states (where we encode in WaitingOn), but we also
+         *  don't want to waste the space and complexity budget in earlier phases. Consider how to improve.
+         */
         @Nullable final Timestamp executesAtLeast;
 
         public TruncatedAwaitsOnlyDeps(CommonAttributes commonAttributes, SaveStatus saveStatus, @Nullable Timestamp executeAt, @Nullable Writes writes, @Nullable Result result, @Nullable Timestamp executesAtLeast)
@@ -963,7 +970,7 @@ public abstract class Command implements CommonAttributes
 
     public static class PreAccepted extends AbstractCommand
     {
-        private final Timestamp executeAt;
+        private final @Nullable Timestamp executeAt;
         private final PartialTxn partialTxn;
         private final @Nullable PartialDeps partialDeps;
 
@@ -993,7 +1000,7 @@ public abstract class Command implements CommonAttributes
             if (o == null || getClass() != o.getClass()) return false;
             if (!super.equals(o)) return false;
             PreAccepted that = (PreAccepted) o;
-            return executeAt.equals(that.executeAt)
+            return Objects.equals(executeAt, that.executeAt)
                     && Objects.equals(partialTxn, that.partialTxn)
                     && Objects.equals(partialDeps, that.partialDeps);
         }
@@ -1692,6 +1699,7 @@ public abstract class Command implements CommonAttributes
     static Command.Accepted acceptInvalidated(Command command, Ballot ballot)
     {
         SaveStatus saveStatus = SaveStatus.get(Status.AcceptedInvalidate, command.known());
+        // TODO (desired): This should be NonNull, but AcceptedInvalidated is represented by Command.Accepted because there’s no acceptedOrCommitted register in NotDefined
         return validate(new Command.Accepted(command, saveStatus, ballot, command.executeAt(), command.partialTxn(), null, ballot));
     }
 

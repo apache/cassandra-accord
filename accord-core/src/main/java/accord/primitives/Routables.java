@@ -24,6 +24,8 @@ import accord.utils.*;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 import java.util.function.Predicate;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import static accord.utils.SortedArrays.Search.FLOOR;
 
@@ -46,6 +48,10 @@ public interface Routables<K extends Routable> extends Iterable<K>
     int size();
 
     boolean isEmpty();
+    default Stream<K> stream()
+    {
+        return StreamSupport.stream(spliterator(), false);
+    }
     boolean intersects(AbstractRanges ranges);
     boolean intersects(AbstractKeys<?> keys);
     default boolean intersects(Routables<?> routables)
