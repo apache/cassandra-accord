@@ -266,22 +266,14 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         @Override
         public void postExecute()
         {
-            if (context instanceof Message)
-            {
-                Message m = (Message) context;
-                if (m.type() != null && !m.type().hasSideEffects())
-                {
-                    // double check there are no modifications
-                    commands.entrySet().forEach(e -> {
-                        InMemorySafeCommand safe = e.getValue();
-                        if (!safe.isModified()) return;
-                        commandStore.validateRead(safe.current());
-                        Command original = safe.original();
-                        if (original != null)
-                            commandStore.validateRead(original);
-                    });
-                }
-            }
+            commands.entrySet().forEach(e -> {
+                InMemorySafeCommand safe = e.getValue();
+                if (!safe.isModified()) return;
+                commandStore.validateRead(safe.current());
+                Command original = safe.original();
+                if (original != null)
+                    commandStore.validateRead(original);
+            });
         }
     }
 }
