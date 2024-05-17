@@ -48,7 +48,6 @@ import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
 import accord.local.SerializerSupport;
 import accord.local.ShardDistributor;
-import accord.messages.Message;
 import accord.primitives.Range;
 import accord.primitives.RoutableKey;
 import accord.primitives.Txn;
@@ -266,22 +265,14 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         @Override
         public void postExecute()
         {
-            if (context instanceof Message)
-            {
-                Message m = (Message) context;
-                if (m.type() != null && !m.type().hasSideEffects())
-                {
-                    // double check there are no modifications
-                    commands.entrySet().forEach(e -> {
-                        InMemorySafeCommand safe = e.getValue();
-                        if (!safe.isModified()) return;
-                        commandStore.validateRead(safe.current());
-                        Command original = safe.original();
-                        if (original != null)
-                            commandStore.validateRead(original);
-                    });
-                }
-            }
+            commands.entrySet().forEach(e -> {
+                InMemorySafeCommand safe = e.getValue();
+                if (!safe.isModified()) return;
+                commandStore.validateRead(safe.current());
+                Command original = safe.original();
+                if (original != null)
+                    commandStore.validateRead(original);
+            });
         }
     }
 }
