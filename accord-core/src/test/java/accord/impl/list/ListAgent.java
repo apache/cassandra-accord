@@ -31,7 +31,6 @@ import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
-import accord.primitives.TxnId;
 
 import static accord.local.Node.Id.NONE;
 import static accord.utils.Invariants.checkState;
@@ -98,9 +97,9 @@ public class ListAgent implements Agent
     }
 
     @Override
-    public boolean isExpired(TxnId initiated, long now)
+    public long preAcceptTimeout()
     {
-        return now - initiated.hlc() >= timeout && !initiated.kind().isSyncPoint();
+        return timeout;
     }
 
     @Override

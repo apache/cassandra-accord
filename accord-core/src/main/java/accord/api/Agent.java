@@ -26,7 +26,6 @@ import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
-import accord.primitives.TxnId;
 
 /**
  * Facility for augmenting node behaviour at specific points
@@ -70,7 +69,10 @@ public interface Agent extends UncaughtExceptionListener
 
     void onHandledException(Throwable t);
 
-    boolean isExpired(TxnId initiated, long now);
+    /**
+     * @return PreAccept timeout with implementation-defined resolution of the hybrid logical clock
+     */
+    long preAcceptTimeout();
 
     Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges);
 

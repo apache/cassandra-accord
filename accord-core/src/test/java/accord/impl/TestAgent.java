@@ -20,7 +20,6 @@ package accord.impl;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.Nonnull;
 
@@ -37,7 +36,9 @@ import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
-import accord.primitives.TxnId;
+
+import static java.util.concurrent.TimeUnit.MICROSECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 public class TestAgent implements Agent
 {
@@ -113,9 +114,9 @@ public class TestAgent implements Agent
     }
 
     @Override
-    public boolean isExpired(TxnId initiated, long now)
+    public long preAcceptTimeout()
     {
-        return TimeUnit.SECONDS.convert(now - initiated.hlc(), TimeUnit.MICROSECONDS) >= 10;
+        return MICROSECONDS.convert(10, SECONDS);
     }
 
     @Override

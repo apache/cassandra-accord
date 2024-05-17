@@ -84,7 +84,7 @@ public class CoordinateTransaction extends CoordinatePreAccept<Result>
             //                                  but by sending accept we rule out hybrid fast-path
             // TODO (low priority, efficiency): if we receive an expired response, perhaps defer to permit at least one other
             //                                  node to respond before invalidating
-            if (executeAt.isRejected() || node.agent().isExpired(txnId, executeAt.hlc()))
+            if (executeAt.isRejected() || executeAt.hlc() - txnId.hlc() >= node.agent().preAcceptTimeout())
             {
                 proposeAndCommitInvalidate(node, Ballot.ZERO, txnId, route.homeKey(), route, executeAt,this);
             }

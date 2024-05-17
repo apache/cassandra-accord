@@ -18,8 +18,6 @@
 
 package accord.maelstrom;
 
-import java.util.concurrent.TimeUnit;
-
 import accord.api.Agent;
 import accord.api.Result;
 import accord.local.Command;
@@ -29,7 +27,9 @@ import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
-import accord.primitives.TxnId;
+
+import static java.util.concurrent.TimeUnit.MICROSECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 import static accord.utils.Invariants.checkState;
 
@@ -80,9 +80,9 @@ public class MaelstromAgent implements Agent
     }
 
     @Override
-    public boolean isExpired(TxnId initiated, long now)
+    public long preAcceptTimeout()
     {
-        return TimeUnit.SECONDS.convert(now - initiated.hlc(), TimeUnit.MICROSECONDS) >= 10;
+        return MICROSECONDS.convert(10, SECONDS);
     }
 
     @Override
