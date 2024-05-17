@@ -1714,7 +1714,8 @@ public class CommandsForKey implements CommandsSummary
         if (o == null || getClass() != o.getClass()) return false;
         CommandsForKey that = (CommandsForKey) o;
         return Objects.equals(key, that.key)
-               && Arrays.equals(txns, that.txns);
+               && Arrays.equals(txns, that.txns)
+               && Arrays.equals(unmanageds, that.unmanageds);
     }
 
     @Override
