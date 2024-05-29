@@ -112,6 +112,11 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
     protected transient Id replyTo;
     protected transient ReplyContext replyContext;
 
+    public ReplyContext replyContext()
+    {
+        return replyContext;
+    }
+
     public TxnRequest(Node.Id to, Topologies topologies, Route<?> route, TxnId txnId)
     {
         this(to, topologies, route, txnId, latestRelevantEpochIndex(to, topologies, route));

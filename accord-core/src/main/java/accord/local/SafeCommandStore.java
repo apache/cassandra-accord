@@ -183,6 +183,11 @@ public abstract class SafeCommandStore
         return maybeTruncate(safeCfk);
     }
 
+    public long preAcceptTimeout()
+    {
+        return agent().preAcceptTimeout();
+    }
+
     protected abstract SafeCommand getInternal(TxnId txnId);
     protected abstract SafeCommand getInternalIfLoadedAndInitialised(TxnId txnId);
     protected abstract SafeCommandsForKey getInternal(Key key);
