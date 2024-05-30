@@ -707,7 +707,7 @@ public class CommandsForKey implements CommandsSummary
 
     public static boolean needsUpdate(Command prev, Command updated)
     {
-        if (!updated.txnId().kind().isGloballyVisible())
+        if (updated.txnId().kind() == Kind.LocalOnly)
             return false;
 
         SaveStatus prevStatus;

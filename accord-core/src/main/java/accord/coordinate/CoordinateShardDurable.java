@@ -50,7 +50,7 @@ public class CoordinateShardDurable extends ExecuteSyncPoint<Ranges> implements 
     @Override
     protected void onSuccess()
     {
-        node.configService().reportEpochRedundant(syncPoint.keysOrRanges, syncPoint.syncId.epoch());
+        node.configService().reportEpochRedundant(syncPoint.keysOrRanges, syncPoint.syncId.epoch() - 1);
         node.send(tracker.nodes(), new SetShardDurable(syncPoint));
         super.onSuccess();
     }
