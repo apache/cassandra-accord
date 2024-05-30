@@ -469,6 +469,18 @@ public class CommandsForKey implements CommandsSummary
         Arrays.sort(committed, Comparator.comparing(c -> c.executeAt));
     }
 
+    CommandsForKey(CommandsForKey copy, Unmanaged[] unmanageds)
+    {
+        this.key = copy.key;
+        this.redundantBefore = copy.redundantBefore;
+        this.txns = copy.txns;
+        this.committed = copy.committed;
+        this.minUncommitted = copy.minUncommitted;
+        this.nextWrite = copy.nextWrite;
+        this.next = copy.next;
+        this.unmanageds = unmanageds;
+    }
+
     public CommandsForKey(Key key)
     {
         this.key = key;
@@ -1211,7 +1223,7 @@ public class CommandsForKey implements CommandsSummary
         if (minUncommitted == null || next != null)
             pending = notifyUnmanaged(safeStore, APPLY, pending, next == null ? Timestamp.MAX : next.executeAt, this);
 
-        return new CommandsForKey(key, redundantBefore, txns, pending);
+        return new CommandsForKey(this, pending);
     }
 
     public CommandsForKey notifyAndUpdatePending(SafeCommandStore safeStore, CommandsForKey prevCfk)
@@ -1222,7 +1234,7 @@ public class CommandsForKey implements CommandsSummary
         if (minUncommitted == null || next != null)
             pending = notifyUnmanaged(safeStore, APPLY, pending, next == null ? Timestamp.MAX : next.executeAt, this);
 
-        return new CommandsForKey(key, redundantBefore, txns, pending);
+        return new CommandsForKey(this, pending);
     }
 
     private void notifyWaitingOnCommit(SafeCommandStore safeStore, TxnInfo uncommitted)
@@ -1325,7 +1337,7 @@ public class CommandsForKey implements CommandsSummary
             if (addPending != null)
             {
                 Unmanaged[] newPending = SortedArrays.insert(prev.unmanageds, addPending, Unmanaged[]::new);
-                safeCommandsForKey.set(new CommandsForKey(prev.key, prev.redundantBefore, prev.txns, newPending));
+                safeCommandsForKey.set(new CommandsForKey(prev, newPending));
             }
         }).begin(safeStore.agent());
     }
@@ -1489,6 +1501,9 @@ public class CommandsForKey implements CommandsSummary
                 }
                 else newPendingRecord = new Unmanaged(COMMIT, command.txnId(), txnIds.get(txnIds.size() - 1));
                 Unmanaged[] newPending = SortedArrays.insert(unmanageds, newPendingRecord, Unmanaged[]::new);
+
+                if (newTxns == txns)
+                    return new CommandsForKey(this, newPending);
                 return new CommandsForKey(key, redundantBefore, newTxns, newPending);
             }
         }
