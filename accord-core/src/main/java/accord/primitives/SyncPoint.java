@@ -18,6 +18,8 @@
 
 package accord.primitives;
 
+import java.util.Objects;
+
 import accord.api.RoutingKey;
 import accord.utils.Invariants;
 
@@ -71,5 +73,31 @@ public class SyncPoint<S extends Seekables<?, ?>>
     {
         TxnId maxDep = waitFor.maxTxnId();
         return TxnId.nonNullOrMax(maxDep, syncId).epoch();
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        SyncPoint<?> syncPoint = (SyncPoint<?>) o;
+        return syncId.equals(syncPoint.syncId) && waitFor.equals(syncPoint.waitFor) && keysOrRanges.equals(syncPoint.keysOrRanges) && homeKey.equals(syncPoint.homeKey);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public String toString()
+    {
+        return "SyncPoint{" +
+               "syncId=" + syncId +
+               ", waitFor=" + waitFor +
+               ", keysOrRanges=" + keysOrRanges +
+               ", homeKey=" + homeKey +
+               '}';
     }
 }

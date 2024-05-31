@@ -23,6 +23,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
 
+import accord.api.Agent;
 import accord.api.Result;
 import accord.api.VisibleForImplementation;
 import accord.local.Command.WaitingOn;
@@ -37,10 +38,12 @@ import accord.messages.MessageType;
 import accord.messages.PreAccept;
 import accord.messages.Propagate;
 import accord.primitives.Ballot;
+import accord.primitives.Deps;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
@@ -90,11 +93,80 @@ public class SerializerSupport
                 .addAll(APPLY_TYPES)
                 .build();
 
+    private static final Set<MessageType> BOOTSTRAP_TYPES = ImmutableSet.of(MessageType.BOOTSTRAP_ATTEMPT_MARK_BOOTSTRAP_COMPLETE,
+                                                                            MessageType.BOOTSTRAP_ATTEMPT_COMPLETE_MARKER);
+
+    private static Command localOnly(Agent agent, RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, @Nullable Timestamp executesAtLeast, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
+    {
+        Set<MessageType> witnessed = messageProvider.test(BOOTSTRAP_TYPES);
+        Writes writes = null;
+        Result results = null;
+        if (status.hasBeen(Status.PreApplied))
+        {
+            Invariants.checkArgument(witnessed.contains(MessageType.BOOTSTRAP_ATTEMPT_MARK_BOOTSTRAP_COMPLETE), "%s LocalOnly command was missing BOOTSTRAP_ATTEMPT_MARK_BOOTSTRAP_COMPLETE; found %s", status, new LoggedMessageProvider(messageProvider));
+            var marker = messageProvider.bootstrapAttemptMarkBootstrapComplete();
+            Txn emptyTxn = agent.emptyTxn(marker.localSyncId.kind(), marker.ranges);
+            writes = emptyTxn.execute(marker.localSyncId, marker.localSyncId, null);
+            results = emptyTxn.result(marker.localSyncId, marker.localSyncId, null);
+            Ranges coordinateRanges = rangesForEpoch.coordinates(attrs.txnId());
+            attrs.partialTxn(emptyTxn.slice(coordinateRanges, true))
+                 .partialDeps(Deps.NONE.slice(coordinateRanges));
+        }
+        else
+        {
+            Invariants.checkArgument(witnessed.contains(MessageType.BOOTSTRAP_ATTEMPT_COMPLETE_MARKER), "%s LocalOnly command was missing BOOTSTRAP_ATTEMPT_COMPLETE_MARKER; found %s", status, new LoggedMessageProvider(messageProvider));
+            var marker = messageProvider.bootstrapAttemptCompleteMarker();
+            var keys = marker.valid;
+            var route = marker.syncPoint.route();
+
+            Txn emptyTxn = agent.emptyTxn(marker.localSyncId.kind(), keys);
+            Ranges coordinateRanges = rangesForEpoch.coordinates(attrs.txnId());
+            attrs.partialTxn(emptyTxn.slice(coordinateRanges, true))
+                 .partialDeps(Deps.NONE.slice(coordinateRanges));
+        }
+
+        switch (status.status)
+        {
+            case NotDefined:
+                return status == SaveStatus.Uninitialised ? Command.NotDefined.uninitialised(attrs.txnId())
+                                                          : Command.NotDefined.notDefined(attrs, promised);
+            case PreAccepted:
+                return Command.PreAccepted.preAccepted(attrs, executeAt, promised);
+            case AcceptedInvalidate:
+            case Accepted:
+            case PreCommitted:
+                return Command.Accepted.accepted(attrs, status, executeAt, promised, accepted);
+            case Committed:
+            case Stable:
+                return Command.Committed.committed(attrs, status, executeAt, promised, accepted, waitingOnProvider.provide(attrs.partialDeps()));
+            case PreApplied:
+            case Applied:
+                return Command.Executed.executed(attrs, status, executeAt, promised, accepted, waitingOnProvider.provide(attrs.partialDeps()), writes, results);
+            case Truncated:
+            case Invalidated:
+                switch (status)
+                {
+                    case Erased:
+                        return Command.Truncated.erased(attrs.txnId(), attrs.durability(), attrs.route());
+                    case TruncatedApplyWithOutcome:
+                        return Command.Truncated.truncatedApply(attrs, status, executeAt, writes, results, executesAtLeast);
+                    case TruncatedApply:
+                        return Command.Truncated.truncatedApply(attrs, status, executeAt, null, null, executesAtLeast);
+                    default:
+                        throw new AssertionError("Unexpected truncate status: " + status);
+                }
+            default:
+                throw new IllegalStateException();
+        }
+    }
+
     /**
      * Reconstructs Command from register values and protocol messages.
      */
-    public static Command reconstruct(RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, @Nullable Timestamp executesAtLeast, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
+    public static Command reconstruct(Agent agent, RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, @Nullable Timestamp executesAtLeast, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
     {
+        if (attrs.txnId().kind() == Txn.Kind.LocalOnly)
+            return localOnly(agent, rangesForEpoch, attrs, status, executeAt, executesAtLeast, promised, accepted, waitingOnProvider, messageProvider);
         switch (status.status)
         {
             case NotDefined:
@@ -308,7 +380,7 @@ public class SerializerSupport
                 }
                 else
                 {
-                    checkState(witnessed.contains(STABLE_SLOW_PATH_REQ), "Unable to find STABLE_SLOW_PATH_REQ; witnessed %s", new LoggedMessageProvider(messageProvider));
+                    checkState(witnessed.contains(STABLE_SLOW_PATH_REQ), "Unable to find STABLE_SLOW_PATH_REQ; txn_id=%s, witnessed %s", messageProvider.txnId(), new LoggedMessageProvider(messageProvider));
                     if (witnessed.contains(COMMIT_MAXIMAL_REQ))
                     {
                         commit = messageProvider.commitMaximal();
@@ -537,6 +609,9 @@ public class SerializerSupport
         Propagate propagateOther();
 
         ApplyThenWaitUntilApplied applyThenWaitUntilApplied();
+
+        Bootstrap.CreateBootstrapCompleteMarkerTransaction bootstrapAttemptCompleteMarker();
+        Bootstrap.MarkBootstrapComplete bootstrapAttemptMarkBootstrapComplete();
     }
 
     private static class LoggedMessageProvider

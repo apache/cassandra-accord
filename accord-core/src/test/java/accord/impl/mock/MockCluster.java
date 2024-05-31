@@ -125,7 +125,7 @@ public class MockCluster implements Network, AutoCloseable, Iterable<Node>
         LocalConfig localConfig = new MutableLocalConfig();
         Node node = new Node(id,
                              messageSink,
-                             LocalRequest::process,
+                             LocalRequest::simpleHandler,
                              configurationService,
                              nowSupplier,
                              NodeTimeService.unixWrapper(TimeUnit.MILLISECONDS, nowSupplier),

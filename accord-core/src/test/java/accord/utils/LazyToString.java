@@ -15,29 +15,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package accord.messages;
 
-import accord.local.Node;
-import accord.primitives.TxnId;
+package accord.utils;
 
-import java.util.function.BiConsumer;
-import javax.annotation.Nullable;
+import java.util.function.Supplier;
 
-public interface LocalRequest<R> extends Message
+public class LazyToString
 {
-    default long waitForEpoch() { return 0; }
-    @Nullable
-    TxnId primaryTxnId();
+    private final Supplier<String> toString;
 
-    void process(Node on, BiConsumer<? super R, Throwable> callback);
-
-    interface Handler
+    public LazyToString(Supplier<String> toString)
     {
-        <R> void handle(LocalRequest<R> message, BiConsumer<? super R, Throwable> callback, Node node);
+        this.toString = toString;
     }
 
-    static <R> void simpleHandler(LocalRequest<R> message, BiConsumer<? super R, Throwable> callback, Node node)
+    @Override
+    public String toString()
     {
-        message.process(node, callback);
+        return this.toString.get();
     }
 }

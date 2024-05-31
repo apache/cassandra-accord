@@ -20,8 +20,10 @@ package accord.local;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 
 import accord.api.Agent;
 import accord.api.DataStore;
@@ -30,8 +32,11 @@ import accord.api.DataStore.FetchResult;
 import accord.api.DataStore.StartingRangeFetch;
 import accord.coordinate.FetchMaxConflict;
 import accord.coordinate.CoordinateSyncPoint;
+import accord.messages.LocalRequest;
+import accord.messages.MessageType;
 import accord.primitives.Ranges;
 import accord.primitives.Routable;
+import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.utils.DeterministicIdentitySet;
@@ -78,7 +83,7 @@ import static accord.utils.Invariants.illegalState;
  *   - Bootstrap.Attempt.maybeComplete
  *      - Invoked whenever we have finished fetching a range
  */
-class Bootstrap
+public class Bootstrap
 {
     static class SafeToRead
     {
@@ -120,6 +125,7 @@ class Bootstrap
         {
             globalSyncId = node.nextTxnId(ExclusiveSyncPoint, Routable.Domain.Range);
             localSyncId = globalSyncId.as(LocalOnly).withEpoch(epoch);
+            Invariants.checkArgument(epoch <= globalSyncId.epoch(), "Attempting to use local epoch %d which is larger than global epoch %d", epoch, globalSyncId.epoch());
 
             if (!node.topology().hasEpoch(globalSyncId.epoch()))
             {
@@ -136,19 +142,20 @@ class Bootstrap
                // TODO (required, correcness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
                // TODO (required): is localSyncId even being used anymore
                // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
-               .flatMap(syncPoint -> node.withEpoch(epoch, () -> store.submit(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.COMMANDS), safeStore1 -> {
+               .flatMap(syncPoint -> store.submit(empty(), safeStore1 -> {
+                   //TODO (deterministic reply): this changes due to errors and invalidate, so how do we handle this on reply?
                    if (valid.isEmpty()) // we've lost ownership of the range
                        return AsyncResults.success(Ranges.EMPTY);
 
-                   Commands.createBootstrapCompleteMarkerTransaction(safeStore1, localSyncId, syncPoint, valid);
-                   safeStore1.registerHistoricalTransactions(syncPoint.waitFor);
-                   return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this);
-               })))
-               .flatMap(i -> i)
-               .flatMap(ranges -> store.execute(contextFor(localSyncId), safeStore -> {
-                   if (!ranges.isEmpty())
-                       Commands.markBootstrapComplete(safeStore, localSyncId, ranges);
+                   return node.localRequest(new CreateBootstrapCompleteMarkerTransaction(safeStore1.commandStore().id(), localSyncId, syncPoint, valid))
+                              .flatMap(s -> {
+                                  Invariants.checkArgument(s.commandStore().inStore(), "Attempted to access a SafeCommandStore outside of the store thread");
+                                  s.registerHistoricalTransactions(syncPoint.waitFor);
+                                  return fetch = s.dataStore().fetch(node, s, valid, syncPoint, this);
+                              });
                }))
+               .flatMap(i -> i)
+               .flatMap(ranges -> node.localRequest(new MarkBootstrapComplete(store.id(), localSyncId, ranges)))
                .begin(this);
         }
 
@@ -479,5 +486,170 @@ class Bootstrap
         remaining = remaining.subtract(invalidate);
         for (Attempt attempt : inProgress)
             attempt.invalidate(invalidate);
+    }
+
+    private static abstract class LocalStoreRequest<T> implements LocalRequest<T>, Function<SafeCommandStore, T>
+    {
+        public final int storeId;
+
+        private LocalStoreRequest(int storeId)
+        {
+            this.storeId = storeId;
+        }
+
+        protected abstract PreLoadContext ctx();
+
+        @Override
+        public void process(Node on, BiConsumer<? super T, Throwable> callback)
+        {
+            CommandStore store = on.commandStores().forId(storeId);
+            if (store == null)
+                throw new IllegalStateException("Store " + storeId + " is no longer valid");
+            store.submit(ctx(), this::apply).begin(callback);
+        }
+    }
+
+    public static class CreateBootstrapCompleteMarkerTransaction extends LocalStoreRequest<SafeCommandStore>
+    {
+        public final TxnId localSyncId;
+        public final SyncPoint<Ranges> syncPoint;
+        public final Ranges valid;
+
+        public CreateBootstrapCompleteMarkerTransaction(int storeId, TxnId localSyncId, SyncPoint<Ranges> syncPoint, Ranges valid)
+        {
+            super(storeId);
+            this.localSyncId = localSyncId;
+            this.syncPoint = syncPoint;
+            this.valid = valid;
+        }
+
+        @Override
+        protected PreLoadContext ctx()
+        {
+            return contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.COMMANDS);
+        }
+
+        @Override
+        public long waitForEpoch()
+        {
+            return localSyncId.epoch();
+        }
+
+        @Nullable
+        @Override
+        public TxnId primaryTxnId()
+        {
+            return localSyncId;
+        }
+
+        @Override
+        public MessageType type()
+        {
+            return MessageType.BOOTSTRAP_ATTEMPT_COMPLETE_MARKER;
+        }
+
+        @Override
+        public SafeCommandStore apply(SafeCommandStore safe)
+        {
+            Commands.createBootstrapCompleteMarkerTransaction(safe, localSyncId, syncPoint, valid);
+            return safe;
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            CreateBootstrapCompleteMarkerTransaction that = (CreateBootstrapCompleteMarkerTransaction) o;
+            return storeId == that.storeId && localSyncId.equals(that.localSyncId) && syncPoint.equals(that.syncPoint) && valid.equals(that.valid);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String toString()
+        {
+            return "CreateBootstrapCompleteMarkerTransaction{" +
+                   "storeId=" + storeId +
+                   ", localSyncId=" + localSyncId +
+                   ", syncPoint=" + syncPoint +
+                   ", valid=" + valid +
+                   '}';
+        }
+    }
+
+    public static class MarkBootstrapComplete extends LocalStoreRequest<Void>
+    {
+        public final TxnId localSyncId;
+        public final Ranges ranges;
+
+        public MarkBootstrapComplete(int storeId, TxnId localSyncId, Ranges ranges)
+        {
+            super(storeId);
+            this.localSyncId = localSyncId;
+            this.ranges = ranges;
+        }
+
+        @Override
+        protected PreLoadContext ctx()
+        {
+            return contextFor(localSyncId);
+        }
+
+        @Override
+        public long waitForEpoch()
+        {
+            return localSyncId.epoch();
+        }
+
+        @Nullable
+        @Override
+        public TxnId primaryTxnId()
+        {
+            return localSyncId;
+        }
+
+        @Override
+        public MessageType type()
+        {
+            return MessageType.BOOTSTRAP_ATTEMPT_MARK_BOOTSTRAP_COMPLETE;
+        }
+
+        @Override
+        public Void apply(SafeCommandStore safeStore)
+        {
+            if (!ranges.isEmpty())
+                Commands.markBootstrapComplete(safeStore, localSyncId, ranges);
+            return null;
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            MarkBootstrapComplete that = (MarkBootstrapComplete) o;
+            return storeId == that.storeId && localSyncId.equals(that.localSyncId) && ranges.equals(that.ranges);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String toString()
+        {
+            return "MarkBootstrapComplete{" +
+                   "storeId=" + storeId +
+                   ", localSyncId=" + localSyncId +
+                   ", ranges=" + ranges +
+                   '}';
+        }
     }
 }

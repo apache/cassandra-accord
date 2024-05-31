@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiFunction;
+import java.util.function.ToIntBiFunction;
 
 import javax.annotation.Nullable;
 
@@ -390,6 +391,28 @@ public class AccordGens
         if (range.end() instanceof PrefixedIntHashKey)
             return prefixedIntHashKeyRangeInsideRange(range);
         throw new IllegalArgumentException("Unsupported type: " + range.start().getClass());
+    }
+
+    public static Gen<Ranges> rangesInsideRanges(Ranges ranges, ToIntBiFunction<RandomSource, Range> numSplits)
+    {
+        if (ranges.isEmpty())
+            return ignore -> ranges;
+        List<Gen<Range>> subsets = new ArrayList<>(ranges.size());
+        ranges.forEach(r -> subsets.add(rangeInsideRange(r)));
+        return rs -> {
+            List<Range> result = new ArrayList<>(subsets.size());
+            for (int i = 0; i < subsets.size(); i++)
+            {
+                Range range = ranges.get(i);
+                int splits = numSplits.applyAsInt(rs, range);
+                if (splits < 0) throw new IllegalArgumentException("numSplits is less than 0: given " + splits);
+                if (splits == 0) continue;
+                Gen<Range> gen = subsets.get(i);
+                for (int s = 0; s < splits; s++)
+                    result.add(gen.next(rs));
+            }
+            return Ranges.of(result.toArray(Range[]::new));
+        };
     }
 
     public static Gen<Range> prefixedIntHashKeyRangeInsideRange(Range range)

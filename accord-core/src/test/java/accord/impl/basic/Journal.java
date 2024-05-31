@@ -28,12 +28,14 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 
 import accord.impl.MessageListener;
+import accord.local.Bootstrap;
 import accord.local.Node;
 import accord.local.SerializerSupport;
 import accord.messages.AbstractEpochRequest;
@@ -63,6 +65,8 @@ import static accord.messages.MessageType.APPLY_MINIMAL_REQ;
 import static accord.messages.MessageType.APPLY_THEN_WAIT_UNTIL_APPLIED_REQ;
 import static accord.messages.MessageType.BEGIN_INVALIDATE_REQ;
 import static accord.messages.MessageType.BEGIN_RECOVER_REQ;
+import static accord.messages.MessageType.BOOTSTRAP_ATTEMPT_COMPLETE_MARKER;
+import static accord.messages.MessageType.BOOTSTRAP_ATTEMPT_MARK_BOOTSTRAP_COMPLETE;
 import static accord.messages.MessageType.COMMIT_INVALIDATE_REQ;
 import static accord.messages.MessageType.COMMIT_MAXIMAL_REQ;
 import static accord.messages.MessageType.COMMIT_SLOW_PATH_REQ;
@@ -108,6 +112,8 @@ public class Journal implements LocalRequest.Handler, Runnable
                                                                                       .put(PROPAGATE_STABLE_MSG, LOCAL)
                                                                                       .put(PROPAGATE_APPLY_MSG, LOCAL)
                                                                                       .put(PROPAGATE_OTHER_MSG, LOCAL)
+                                                                                      .put(BOOTSTRAP_ATTEMPT_COMPLETE_MARKER, LOCAL)
+                                                                                      .put(BOOTSTRAP_ATTEMPT_MARK_BOOTSTRAP_COMPLETE, LOCAL)
                                                                                       .build();
 
     private final Queue<RequestContext> unframedRequests = new ArrayDeque<>();
@@ -132,18 +138,18 @@ public class Journal implements LocalRequest.Handler, Runnable
     {
         this.node = null;
     }
-    
+
     @Override
-    public void handle(LocalRequest<?> message, Node node)
+    public <R> void handle(LocalRequest<R> message, BiConsumer<? super R, Throwable> callback, Node node)
     {
         messageListener.onMessage(NodeSink.Action.DELIVER, node.id(), node.id(), -1, message);
         if (message.type().hasSideEffects())
         {
             // enqueue
-            unframedRequests.add(new RequestContext(message, () -> node.scheduler().now(() -> message.process(node))));
+            unframedRequests.add(new RequestContext(message, message.waitForEpoch(), () -> node.scheduler().now(() -> message.process(node, callback))));
             return;
         }
-        message.process(node);
+        message.process(node, callback);
     }
 
     public void handle(Request request, Node.Id from, ReplyContext replyContext)
@@ -151,7 +157,7 @@ public class Journal implements LocalRequest.Handler, Runnable
         if (request.type() != null && request.type().hasSideEffects())
         {
             // enqueue
-            unframedRequests.add(new RequestContext(request, () -> node.receive(request, from, replyContext)));
+            unframedRequests.add(new RequestContext(request, request.waitForEpoch(), () -> node.receive(request, from, replyContext)));
             return;
         }
         node.receive(request, from, replyContext);
@@ -286,9 +292,9 @@ public class Journal implements LocalRequest.Handler, Runnable
         final Message message;
         final Runnable fn;
 
-        protected RequestContext(Request request, Runnable fn)
+        protected RequestContext(Message request, long waitForEpoch, Runnable fn)
         {
-            this.waitForEpoch = request.waitForEpoch();
+            this.waitForEpoch = waitForEpoch;
             this.message = request;
             this.fn = fn;
         }
@@ -431,6 +437,18 @@ public class Journal implements LocalRequest.Handler, Runnable
         public ApplyThenWaitUntilApplied applyThenWaitUntilApplied()
         {
             return get(APPLY_THEN_WAIT_UNTIL_APPLIED_REQ);
+        }
+
+        @Override
+        public Bootstrap.CreateBootstrapCompleteMarkerTransaction bootstrapAttemptCompleteMarker()
+        {
+            return get(BOOTSTRAP_ATTEMPT_COMPLETE_MARKER);
+        }
+
+        @Override
+        public Bootstrap.MarkBootstrapComplete bootstrapAttemptMarkBootstrapComplete()
+        {
+            return get(BOOTSTRAP_ATTEMPT_MARK_BOOTSTRAP_COMPLETE);
         }
     }
 }

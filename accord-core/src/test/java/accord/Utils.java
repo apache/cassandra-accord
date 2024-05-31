@@ -163,7 +163,7 @@ public class Utils
         LocalConfig localConfig = new MutableLocalConfig();
         Node node = new Node(nodeId,
                              messageSink,
-                             LocalRequest::process,
+                             LocalRequest::simpleHandler,
                              new MockConfigurationService(messageSink, EpochFunction.noop(), topology),
                              clock,
                              NodeTimeService.unixWrapper(TimeUnit.MICROSECONDS, clock),
