@@ -18,7 +18,6 @@
 package accord.local;
 
 import java.util.Set;
-
 import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
@@ -92,6 +91,7 @@ public class SerializerSupport
     ImmutableSet.<MessageType>builder()
                 .addAll(PRE_ACCEPT_STABLE_TYPES)
                 .addAll(APPLY_TYPES)
+                .add(PROPAGATE_OTHER_MSG)
                 .build();
 
     private static Command localOnly(Agent agent, RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, @Nullable Timestamp executesAtLeast, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)

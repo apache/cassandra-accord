@@ -18,24 +18,55 @@
 
 package accord.primitives;
 
-import accord.api.Key;
-import accord.api.RoutingKey;
-import accord.utils.*;
-import accord.utils.SortedArrays.SortedArrayList;
-import net.nicoulaj.compilecommand.annotations.DontInline;
-import net.nicoulaj.compilecommand.annotations.Inline;
-
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.BitSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
-import static accord.utils.ArrayBuffers.*;
-import static accord.utils.RelationMultiMap.*;
+import accord.api.Key;
+import accord.api.RoutingKey;
+import accord.utils.ArrayBuffers;
+import accord.utils.IndexedBiConsumer;
+import accord.utils.IndexedConsumer;
+import accord.utils.IndexedQuadConsumer;
+import accord.utils.IndexedRangeQuadConsumer;
+import accord.utils.Invariants;
+import accord.utils.RelationMultiMap;
+import accord.utils.SearchableRangeList;
+import accord.utils.SortedArrays;
+import accord.utils.SortedArrays.SortedArrayList;
+import accord.utils.SymmetricComparator;
+import accord.utils.TriFunction;
+import net.nicoulaj.compilecommand.annotations.DontInline;
+import net.nicoulaj.compilecommand.annotations.Inline;
+
+import static accord.utils.ArrayBuffers.ObjectBuffers;
+import static accord.utils.ArrayBuffers.cachedInts;
+import static accord.utils.ArrayBuffers.cachedRanges;
+import static accord.utils.ArrayBuffers.cachedTxnIds;
+import static accord.utils.RelationMultiMap.AbstractBuilder;
+import static accord.utils.RelationMultiMap.Adapter;
+import static accord.utils.RelationMultiMap.LinearMerger;
+import static accord.utils.RelationMultiMap.NO_INTS;
+import static accord.utils.RelationMultiMap.NO_TXNIDS;
+import static accord.utils.RelationMultiMap.SortedRelationList;
+import static accord.utils.RelationMultiMap.endOffset;
+import static accord.utils.RelationMultiMap.invert;
+import static accord.utils.RelationMultiMap.linearUnion;
+import static accord.utils.RelationMultiMap.newIterator;
+import static accord.utils.RelationMultiMap.remove;
+import static accord.utils.RelationMultiMap.startOffset;
+import static accord.utils.RelationMultiMap.testEquality;
+import static accord.utils.RelationMultiMap.trimUnusedValues;
 import static accord.utils.SortedArrays.Search.CEIL;
 import static accord.utils.SortedArrays.Search.FAST;
 
@@ -222,7 +253,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
 
     private <P1> void visitTxnIdsForRangeIndex(BiConsumer<P1, TxnId> forEach, P1 p1, @Nullable BitSet visited, int start, int end)
     {
-        if (end == 0)
+        if (end <= start)
             return;
         for (int i = startOffset(ranges, rangesToTxnIds, start) ; i < endOffset(rangesToTxnIds, end - 1) ; ++i)
             visitTxnId(rangesToTxnIds[i], forEach, p1, visited);
@@ -407,8 +438,9 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     public <P1> void forEachUniqueTxnId(AbstractRanges ranges, P1 p1, BiConsumer<P1, TxnId> forEach)
     {
         int minIndex = 0;
+        BitSet visited = new BitSet();
         for (int i = 0; i < ranges.size() ; ++i)
-            minIndex = forEach(ranges.get(i), forEach, p1, minIndex, new BitSet());
+            minIndex = forEach(ranges.get(i), forEach, p1, minIndex, visited);
     }
 
     // return true iff we map any ranges to any txnId
@@ -775,6 +807,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
 
         Range[] getRanges()
         {
+            Invariants.checkState(oooCount == 0);
             Range[] result = cachedRanges().completeAndDiscard(rangesOut, rangesCount);
             rangesOut = null;
             return result;

@@ -22,14 +22,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BiConsumer;
+import javax.annotation.Nullable;
 
 import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.DataStore.FetchRanges;
 import accord.api.DataStore.FetchResult;
 import accord.api.DataStore.StartingRangeFetch;
-import accord.coordinate.FetchMaxConflict;
 import accord.coordinate.CoordinateSyncPoint;
+import accord.coordinate.FetchMaxConflict;
 import accord.primitives.Ranges;
 import accord.primitives.Routable;
 import accord.primitives.Timestamp;
@@ -38,7 +39,6 @@ import accord.utils.DeterministicIdentitySet;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
-import javax.annotation.Nullable;
 
 import static accord.local.PreLoadContext.contextFor;
 import static accord.local.PreLoadContext.empty;
@@ -125,7 +125,7 @@ class Bootstrap
             if (!node.topology().hasEpoch(globalSyncId.epoch()))
             {
                 node.topology().awaitEpoch(globalSyncId.epoch())
-                    .addCallback(() -> store.execute(empty(), this::start));
+                    .addCallback(() -> store.execute(empty(), this::start).begin(node.agent())).begin(node.agent());
                 return;
             }
 

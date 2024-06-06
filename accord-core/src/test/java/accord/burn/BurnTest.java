@@ -46,26 +46,15 @@ import java.util.function.Supplier;
 import java.util.stream.IntStream;
 import java.util.zip.CRC32;
 
-import accord.burn.random.FrequentLargeRange;
-import accord.impl.MessageListener;
-import accord.utils.Gen;
-import accord.utils.Gens;
-import accord.utils.Utils;
-import accord.utils.async.AsyncChains;
-import accord.utils.async.AsyncResult;
-import accord.utils.async.AsyncResults;
-import accord.verify.CompositeVerifier;
-import accord.verify.ElleVerifier;
-import accord.verify.StrictSerializabilityVerifier;
-import accord.verify.Verifier;
-
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.api.Key;
-import accord.impl.TopologyFactory;
+import accord.burn.random.FrequentLargeRange;
+import accord.impl.MessageListener;
 import accord.impl.PrefixedIntHashKey;
+import accord.impl.TopologyFactory;
 import accord.impl.basic.Cluster;
 import accord.impl.basic.Cluster.Stats;
 import accord.impl.basic.Packet;
@@ -93,8 +82,18 @@ import accord.primitives.Txn;
 import accord.topology.Shard;
 import accord.topology.Topology;
 import accord.utils.DefaultRandom;
+import accord.utils.Gen;
+import accord.utils.Gens;
 import accord.utils.RandomSource;
+import accord.utils.Utils;
+import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncExecutor;
+import accord.utils.async.AsyncResult;
+import accord.utils.async.AsyncResults;
+import accord.verify.CompositeVerifier;
+import accord.verify.ElleVerifier;
+import accord.verify.StrictSerializabilityVerifier;
+import accord.verify.Verifier;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.IntHashSet;
 

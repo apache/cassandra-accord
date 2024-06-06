@@ -60,9 +60,9 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     @SuppressWarnings("unused")
     public static class SerializerSupport
     {
-        public static ApplyThenWaitUntilApplied create(TxnId txnId, Participants<?> readScope, long executeAtEpoch, Timestamp executeAt, FullRoute<?> route, PartialTxn txn, PartialDeps deps, Writes writes, Result result, Seekables<?, ?> notify)
+        public static ApplyThenWaitUntilApplied create(TxnId txnId, Participants<?> readScope, Timestamp executeAt, FullRoute<?> route, PartialTxn txn, PartialDeps deps, Writes writes, Result result, Seekables<?, ?> notify)
         {
-            return new ApplyThenWaitUntilApplied(txnId, readScope, executeAtEpoch, executeAt, route, txn, deps, writes, result, notify);
+            return new ApplyThenWaitUntilApplied(txnId, readScope, executeAt, route, txn, deps, writes, result, notify);
         }
     }
 
@@ -74,9 +74,9 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     public final Result result;
     public final Seekables<?, ?> notify;
 
-    public ApplyThenWaitUntilApplied(Node.Id to, Topologies topologies, Timestamp executeAt, FullRoute<?> route, TxnId txnId, Txn txn, Deps deps, Participants<?> readScope, long executeAtEpoch, Writes writes, Result result, Seekables<?, ?> notify)
+    public ApplyThenWaitUntilApplied(Node.Id to, Topologies topologies, Timestamp executeAt, FullRoute<?> route, TxnId txnId, Txn txn, Deps deps, Participants<?> readScope, Writes writes, Result result, Seekables<?, ?> notify)
     {
-        super(to, topologies, txnId, readScope, executeAtEpoch);
+        super(to, topologies, txnId, readScope, executeAt.epoch());
         this.executeAt = executeAt;
         Ranges slice = computeScope(to, topologies, null, 0, (i,r)->r, Ranges::with);
         this.route = route;
@@ -87,9 +87,9 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
         this.notify = notify == null ? null : notify.slice(slice);
     }
 
-    protected ApplyThenWaitUntilApplied(TxnId txnId, Participants<?> readScope, long executeAtEpoch, Timestamp executeAt, FullRoute<?> route, PartialTxn txn, PartialDeps deps, Writes writes, Result result, Seekables<?, ?> notify)
+    protected ApplyThenWaitUntilApplied(TxnId txnId, Participants<?> readScope, Timestamp executeAt, FullRoute<?> route, PartialTxn txn, PartialDeps deps, Writes writes, Result result, Seekables<?, ?> notify)
     {
-        super(txnId, readScope, executeAtEpoch);
+        super(txnId, readScope, executeAt.epoch());
         this.executeAt = executeAt;
         this.route = route;
         this.txn = txn;

@@ -63,7 +63,7 @@ public abstract class ExecuteSyncPoint<S extends Seekables<?, ?>> extends Settab
             node.send(tracker.topologies().nodes(), to -> {
                 Seekables<?, ?> notify = to.equals(node.id()) ? null : syncPoint.keysOrRanges;
                 Participants<?> participants = syncPoint.keysOrRanges.toParticipants();
-                return new ApplyThenWaitUntilApplied(to, tracker.topologies(), executeAt, syncPoint.route(), syncPoint.syncId, txn, syncPoint.waitFor, participants, syncPoint.syncId.epoch(), writes, result, notify);
+                return new ApplyThenWaitUntilApplied(to, tracker.topologies(), executeAt, syncPoint.route(), syncPoint.syncId, txn, syncPoint.waitFor, participants, writes, result, notify);
             }, this);
         }
     }

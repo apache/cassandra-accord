@@ -93,9 +93,9 @@ public class SyncPoint<S extends Seekables<?, ?>>
     {
         return "SyncPoint{" +
                "syncId=" + syncId +
-               ", waitFor=" + waitFor +
                ", keysOrRanges=" + keysOrRanges +
                ", homeKey=" + homeKey +
+               ", waitFor=" + waitFor +
                '}';
     }
 }

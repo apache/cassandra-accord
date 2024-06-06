@@ -18,13 +18,21 @@
 
 package accord.primitives;
 
-import accord.impl.IntKey;
-import accord.local.Node;
-import accord.primitives.Routable.Domain;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import java.util.*;
+import accord.impl.IntKey;
+import accord.local.Node;
+import accord.primitives.Routable.Domain;
 
 import static accord.primitives.Txn.Kind.Write;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -106,6 +114,38 @@ public class RangeDepsTest
             return set;
         }
 
+        Set<TxnId> canonicalSlice(Ranges ranges)
+        {
+            Set<TxnId> set = new TreeSet<>();
+            for (Map.Entry<TxnId, Ranges> e : canonical.entrySet())
+            {
+                for (Range r : ranges)
+                {
+                    for (Range cR : e.getValue())
+                    {
+                        if (cR.intersection(r) != null)
+                        {
+                            set.add(e.getKey());
+                            break;
+                        }
+                    }
+                }
+            }
+            return set;
+        }
+
+        Set<TxnId> testSlice(Ranges ranges)
+        {
+            RangeDeps slice = test.slice(ranges);
+            List<TxnId> uniq = new ArrayList<>();
+            slice.forEachUniqueTxnId(ranges, uniq::add);
+            Set<TxnId> set = new TreeSet<>();
+            slice.forEach((AbstractRanges) ranges, null, (ignored, txnId) -> set.add(txnId));
+            assertThat(uniq).doesNotHaveDuplicates()
+                            .containsExactlyInAnyOrderElementsOf(set);
+            return set;
+        }
+
         Set<TxnId> canonicalOverlaps(RoutableKey key)
         {
             Set<TxnId> set = new TreeSet<>();
@@ -144,6 +184,11 @@ public class RangeDepsTest
                 Assertions.assertEquals(canonicalOverlaps(range), testOverlaps(range));
                 Assertions.assertEquals(canonicalOverlaps(range.start()), testOverlaps(range.start()));
                 Assertions.assertEquals(canonicalOverlaps(range.end()), testOverlaps(range.end()));
+            }
+            for (int i = 0; i < 10; i++)
+            {
+                Ranges ranges = Ranges.of(generate.generateRanges(random, random.nextInt(10) + 1));
+                Assertions.assertEquals(canonicalSlice(ranges), testSlice(ranges));
             }
         }
     }

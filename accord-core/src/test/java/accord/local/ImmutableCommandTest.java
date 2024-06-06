@@ -23,7 +23,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Lists;
@@ -34,20 +33,21 @@ import accord.api.ProgressLog;
 import accord.api.RoutingKey;
 import accord.api.Scheduler;
 import accord.api.TestableConfigurationService;
-import accord.coordinate.CoordinationAdapter;
 import accord.config.LocalConfig;
+import accord.config.MutableLocalConfig;
+import accord.coordinate.CoordinationAdapter;
 import accord.impl.InMemoryCommandStore;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.IntKey;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TestAgent;
+import accord.impl.TestAgent.RethrowAgent;
 import accord.impl.TopologyFactory;
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
 import accord.impl.mock.MockStore;
 import accord.local.Node.Id;
 import accord.local.SaveStatus.LocalExecution;
-import accord.config.MutableLocalConfig;
 import accord.primitives.FullKeyRoute;
 import accord.primitives.Keys;
 import accord.primitives.Participants;
@@ -179,6 +179,6 @@ public class ImmutableCommandTest
             Command command = safeStore.get(txnId).current();
             Assertions.assertEquals(Status.PreAccepted, command.status());
             Assertions.assertEquals(expectedTimestamp, command.executeAt());
-        });
+        }).begin(new RethrowAgent());
     }
 }

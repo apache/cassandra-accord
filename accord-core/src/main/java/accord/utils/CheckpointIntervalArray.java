@@ -213,9 +213,6 @@ public class CheckpointIntervalArray<Ranges, Range, Key>
                 forEachScanOrCheckpoint.accept(p1, p2, p3, p4, i);
         }
 
-        if (start == end)
-            return end;
-
         forEachRange.accept(p1, p2, p3, p4, start, end);
         return end;
     }

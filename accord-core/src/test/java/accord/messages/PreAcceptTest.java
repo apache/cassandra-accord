@@ -18,24 +18,25 @@
 
 package accord.messages;
 
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
 import accord.api.RoutingKey;
-import accord.impl.IntKey.Raw;
 import accord.impl.IntKey;
+import accord.impl.IntKey.Raw;
+import accord.impl.TestAgent.RethrowAgent;
 import accord.impl.TopologyFactory;
 import accord.impl.mock.MockCluster.Clock;
 import accord.impl.mock.Network;
 import accord.impl.mock.RecordingMessageSink;
 import accord.local.Command;
-import accord.local.CommandsForKey;
 import accord.local.CommandStore;
-import accord.local.Node.Id;
+import accord.local.CommandsForKey;
 import accord.local.Node;
+import accord.local.Node.Id;
 import accord.local.PreLoadContext;
 import accord.local.Status;
 import accord.primitives.Ballot;
@@ -106,7 +107,7 @@ public class PreAcceptTest
                 TxnId commandId = cfk.findFirst();
                 Command command = safeStore.ifInitialised(commandId).current();
                 Assertions.assertEquals(Status.PreAccepted, command.status());
-            });
+            }).begin(new RethrowAgent());
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
@@ -275,7 +276,7 @@ public class PreAcceptTest
                 TxnId commandId = cfk.findFirst();
                 Command command = safeStore.ifInitialised(commandId).current();
                 Assertions.assertEquals(Status.PreAccepted, command.status());
-            });
+            }).begin(new RethrowAgent());
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);

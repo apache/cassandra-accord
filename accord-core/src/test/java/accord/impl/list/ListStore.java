@@ -31,6 +31,7 @@ import java.util.stream.Collectors;
 import accord.api.DataStore;
 import accord.api.Key;
 import accord.coordinate.CoordinateSyncPoint;
+import accord.coordinate.ExecuteSyncPoint.SyncPointErased;
 import accord.coordinate.Invalidated;
 import accord.coordinate.Preempted;
 import accord.coordinate.Timeout;
@@ -501,7 +502,7 @@ public class ListStore implements DataStore
 
         private Await(Node node, long minEpoch, SyncPoint<Ranges> exclusiveSyncPoint)
         {
-            Topologies topologies = node.topology().withOpenEpochs(exclusiveSyncPoint.keysOrRanges, () -> minEpoch, exclusiveSyncPoint.syncId);
+            Topologies topologies = node.topology().forEpoch(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.sourceEpoch());
             this.node = node;
             this.tracker = new AppliedTracker(topologies);
             this.exclusiveSyncPoint = exclusiveSyncPoint;
@@ -512,6 +513,8 @@ public class ListStore implements DataStore
             Await coordinate = new Await(node, minEpoch, sp);
             coordinate.start();
             return coordinate.recover(t -> {
+                if (t.getClass() == SyncPointErased.class)
+                    return AsyncChains.success(null);
                 if (t instanceof Timeout ||
                     // TODO (expected): why are we not simply handling Insufficient properly?
                     t instanceof RuntimeException && "Insufficient".equals(t.getMessage()) ||
@@ -538,12 +541,14 @@ public class ListStore implements DataStore
                 {
                     default: throw new AssertionError("Unhandled: " + reply);
 
-                    case Rejected:
                     case Insufficient:
-                    case Redundant:
-                        tryFailure(new RuntimeException(nack.name()));
+                        CoordinateSyncPoint.sendApply(node, from, exclusiveSyncPoint);
                         return;
-
+                    case Rejected:
+                        tryFailure(new RuntimeException(nack.name()));
+                    case Redundant:
+                        tryFailure(new SyncPointErased());
+                        return;
                     case Invalid:
                         tryFailure(new Invalidated(exclusiveSyncPoint.syncId, exclusiveSyncPoint.homeKey));
                         return;
