@@ -89,6 +89,22 @@ public interface Gen<A> {
         };
     }
 
+    default Gen<A> filter(int maxAttempts, A defaultValue, Predicate<A> fn)
+    {
+        Invariants.checkArgument(maxAttempts > 0, "Max attempts must be positive; given %d", maxAttempts);
+        Gen<A> self = this;
+        return r -> {
+            for (int i = 0; i < maxAttempts; i++)
+            {
+                A v = self.next(r);
+                if (fn.test(v))
+                    return v;
+
+            }
+            return defaultValue;
+        };
+    }
+
     default Supplier<A> asSupplier(RandomSource rs)
     {
         return () -> next(rs);

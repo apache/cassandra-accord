@@ -26,6 +26,7 @@ import com.google.common.annotations.VisibleForTesting;
 import accord.api.Key;
 import accord.api.VisibleForImplementation;
 import accord.local.*;
+import accord.local.cfk.SafeCommandsForKey;
 import accord.primitives.*;
 import accord.utils.Invariants;
 
@@ -160,15 +161,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
         return context.isSubsetOf(this.context);
     }
 
-    protected abstract void invalidateSafeState();
-
     public void postExecute()
     {
-    }
-
-    public void complete()
-    {
-        postExecute();
-        invalidateSafeState();
     }
 }

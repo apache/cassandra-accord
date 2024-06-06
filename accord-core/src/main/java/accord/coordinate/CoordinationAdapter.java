@@ -101,7 +101,7 @@ public interface CoordinationAdapter<R>
             else if (any.currentEpoch() >= executeAt.epoch() && any.oldestEpoch() <= txnId.epoch()) all = any.forEpochs(txnId.epoch(), executeAt.epoch());
             else all = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
 
-            adapter.stabilise(node, any, all, route, ballot, txnId, txn, executeAt, deps, callback);
+            adapter.stabilise(node, coordinates, all, route, ballot, txnId, txn, executeAt, deps, callback);
         }
 
         public static <R> void execute(CoordinationAdapter<R> adapter, Node node, Topologies any, FullRoute<?> route, ExecutePath path, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super R, Throwable> callback)

@@ -573,9 +573,9 @@ public class RelationMultiMap
         try
         {
             outKeys = SortedArrays.linearUnion(leftKeys, leftKeysLength, rightKeys, rightKeysLength, keyComparator, keyBuffers);
-            outKeysLength = keyBuffers.lengthOfLast(outKeys);
+            outKeysLength = keyBuffers.sizeOfLast(outKeys);
             outValues = SortedArrays.linearUnion(leftValues, leftValuesLength, rightValues, rightValuesLength, valueComparator, valueBuffers);
-            outValuesLength = valueBuffers.lengthOfLast(outValues);
+            outValuesLength = valueBuffers.sizeOfLast(outValues);
 
             remapLeft = remapToSuperset(leftValues, leftValuesLength, outValues, outValuesLength, valueComparator, intBuffers);
             remapRight = remapToSuperset(rightValues, rightValuesLength, outValues, outValuesLength, valueComparator, intBuffers);

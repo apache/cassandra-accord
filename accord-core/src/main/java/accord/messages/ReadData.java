@@ -148,7 +148,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
     @Override
     public PreLoadContext listenerPreLoadContext(TxnId caller)
     {
-        return PreLoadContext.contextFor(txnId, caller, keys());
+        return PreLoadContext.contextFor(txnId, keys());
     }
 
     @Override
@@ -192,6 +192,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
                 ++waitingOnCount;
                 safeCommand.addListener(this);
                 safeStore.progressLog().waiting(safeCommand, executeOn().min.execution, null, readScope);
+                beginWaiting(safeStore, false);
                 return status.compareTo(SaveStatus.Stable) >= 0 ? null : Insufficient;
 
             case OBSOLETE:
@@ -202,6 +203,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
                 waitingOn.set(safeStore.commandStore().id());
                 reading.set(safeStore.commandStore().id());
                 ++waitingOnCount;
+                beginWaiting(safeStore, true);
                 safeCommand.addListener(this);
                 read(safeStore, safeCommand.current());
                 return null;
@@ -351,31 +353,37 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
         }
     }
 
-    void cancel(@Nullable SafeCommandStore safeStore)
+    void beginCancel(@Nullable SafeCommandStore safeStore)
     {
         if (safeStore != null)
         {
-            SafeCommand safeCommand = safeStore.ifInitialised(txnId);
-            if (safeCommand != null) safeCommand.removeListener(this);
-            waitingOn.clear(safeStore.commandStore().id());
+            int id = safeStore.commandStore().id();
+            cancelWaiting(safeStore);
+            waitingOn.clear(id);
         }
 
         // TODO (expected): efficient unsubscribe mechanism
-        if (waitingOn != null)
-            node.commandStores().mapReduceConsume(this, waitingOn.stream(), forEach(in -> {
-                SafeCommand safeCommand = in.ifInitialised(txnId);
-                if (safeCommand != null) safeCommand.removeListener(this);
-            }, node.agent()));
+        node.commandStores().mapReduceConsume(this, waitingOn.stream(), forEach(safeStore0 -> cancelWaiting(safeStore0), node.agent()));
         state = State.OBSOLETE;
-        waitingOn = null;
+        waitingOn.clear();
         reading = null;
         data = null;
         unavailable = null;
     }
 
+    protected void beginWaiting(SafeCommandStore safeStore, boolean isExecuting)
+    {
+    }
+
+    protected void cancelWaiting(SafeCommandStore safeStore)
+    {
+        SafeCommand safeCommand = safeStore.ifInitialised(txnId);
+        if (safeCommand != null) safeCommand.removeListener(this);
+    }
+
     void onFailure(@Nullable SafeCommandStore safeStore, CommitOrReadNack failReply, Throwable throwable)
     {
-        cancel(safeStore);
+        beginCancel(safeStore);
         if (throwable != null)
         {
             node.reply(replyTo, replyContext, null, throwable);

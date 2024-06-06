@@ -340,6 +340,16 @@ public class Json
                 out.endArray();
             }
             out.endArray();
+            out.name("directKeyDeps");
+            out.beginArray();
+            for (Map.Entry<Key, TxnId> e : value.directKeyDeps)
+            {
+                out.beginArray();
+                ((MaelstromKey)e.getKey()).datum.write(out);
+                GSON.toJson(e.getValue(), TxnId.class, out);
+                out.endArray();
+            }
+            out.endArray();
             out.endObject();
         }
 
@@ -347,6 +357,7 @@ public class Json
         public Deps read(JsonReader in) throws IOException
         {
             KeyDeps keyDeps = KeyDeps.NONE;
+            KeyDeps directKeyDeps = KeyDeps.NONE;
             RangeDeps rangeDeps = RangeDeps.NONE;
             in.beginObject();
             while (in.hasNext())
@@ -369,6 +380,24 @@ public class Json
                             }
                             in.endArray();
                             keyDeps = builder.build();
+                        }
+                    }
+                    break;
+                    case "directKeyDeps":
+                    {
+                        try (KeyDeps.Builder builder = KeyDeps.builder())
+                        {
+                            in.beginArray();
+                            while (in.hasNext())
+                            {
+                                in.beginArray();
+                                Key key = MaelstromKey.readKey(in);
+                                TxnId txnId = GSON.fromJson(in, TxnId.class);
+                                builder.add(key, txnId);
+                                in.endArray();
+                            }
+                            in.endArray();
+                            directKeyDeps = builder.build();
                         }
                     }
                     break;
@@ -395,7 +424,7 @@ public class Json
                 }
             }
             in.endObject();
-            return new Deps(keyDeps, rangeDeps);
+            return new Deps(keyDeps, rangeDeps, directKeyDeps);
         }
     };
 

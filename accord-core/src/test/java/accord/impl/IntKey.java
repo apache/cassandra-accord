@@ -115,6 +115,12 @@ public class IntKey implements RoutableKey
         {
             super(key);
         }
+
+        @Override
+        public accord.primitives.Range asRange()
+        {
+            return new Range(new Routing(key - 1), new Routing(key));
+        }
     }
 
     public static class Routing extends IntKey implements accord.api.RoutingKey

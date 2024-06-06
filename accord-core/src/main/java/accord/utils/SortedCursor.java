@@ -15,25 +15,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package accord.utils;
 
-package accord.api;
-
-import accord.primitives.Ranges;
-import accord.primitives.Seekables;
-import accord.primitives.Timestamp;
-
-import javax.annotation.Nullable;
-
-/**
- * A client-defined update operation (the write equivalent of a query).
- * Takes as input the data returned by {@code Read}, and returns a {@code Write}
- * representing new information to distributed to each shard's stores.
- */
-public interface Update
+public interface SortedCursor<T extends Comparable<? super T>>
 {
-    Seekables<?, ?> keys();
-    // null is provided only if nothing was read
-    Write apply(Timestamp executeAt, @Nullable Data data);
-    Update slice(Ranges ranges);
-    Update merge(Update other);
+    // move to the first item >= find, returning true if an exact match was found
+    boolean find(Comparable<? super T> find);
+    void advance();
+    boolean hasCur();
+    T cur();
 }

@@ -43,7 +43,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
 
     public static class SerializerSupport
     {
-        public static <V> LatestDeps create(boolean inclusiveEnds, RoutingKey[] starts, LatestEntry[] values)
+        public static LatestDeps create(boolean inclusiveEnds, RoutingKey[] starts, LatestEntry[] values)
         {
             return new LatestDeps(inclusiveEnds, starts, values);
         }
@@ -128,14 +128,16 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
             if (deps == null) return null;
             KeyDeps keyDeps = deps.keyDeps;
             RangeDeps rangeDeps = deps.rangeDeps;
+            KeyDeps directKeyDeps = deps.directKeyDeps;
             Keys keys = deps.keyDeps.keys;
 
             boolean slice = keys.indexOf(start) != -1 || keys.indexOf(end) != -1 - keys.size();
+            if (!slice) slice = directKeyDeps.keys.indexOf(start) != -1 || directKeyDeps.keys.indexOf(end) != -1 - keys.size();
             if (!slice) slice = rangeDeps.indexOfStart(start) != -1 || rangeDeps.indexOfStart(end) != -1 - rangeDeps.rangeCount();
             if (!slice) return deps;
 
             Ranges ranges = Ranges.of(start.rangeFactory().newRange(start, end));
-            return new Deps(keyDeps.slice(ranges), rangeDeps.slice(ranges));
+            return new Deps(keyDeps.slice(ranges), rangeDeps.slice(ranges), directKeyDeps.slice(ranges));
         }
 
         public String toString()
@@ -186,7 +188,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
         if (deps == null)
             return null;
 
-        return new Deps(deps.keyDeps.slice(ranges), deps.rangeDeps.slice(ranges));
+        return new Deps(deps.keyDeps.slice(ranges), deps.rangeDeps.slice(ranges), deps.directKeyDeps.slice(ranges));
     }
 
     static class Builder extends AbstractIntervalBuilder<RoutingKey, LatestEntry, LatestDeps>
@@ -309,8 +311,9 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
                 return Deps.NONE;
 
             KeyDeps keyDeps =  KeyDeps.merge(stream(Merge::forProposal, (d, r) -> d.keyDeps.slice(r)));
+            KeyDeps directKeyDeps =  KeyDeps.merge(stream(Merge::forProposal, (d, r) -> d.directKeyDeps.slice(r)));
             RangeDeps rangeDeps =  RangeDeps.merge(stream(Merge::forProposal, (d, r) -> d.rangeDeps.slice(r)));
-            return new Deps(keyDeps, rangeDeps);
+            return new Deps(keyDeps, rangeDeps, directKeyDeps);
         }
 
         MergedCommitResult mergeCommit(TxnId txnId, Timestamp executeAt)
@@ -321,8 +324,9 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
             List<Range> sufficientFor = new ArrayList<>();
             boolean useLocalDeps = txnId.equals(executeAt);
             KeyDeps keyDeps =  KeyDeps.merge(stream(forCommit(useLocalDeps, sufficientFor), (d, r) -> d.keyDeps.slice(r)));
+            KeyDeps directKeyDeps =  KeyDeps.merge(stream(forCommit(useLocalDeps, sufficientFor), (d, r) -> d.directKeyDeps.slice(r)));
             RangeDeps rangeDeps =  RangeDeps.merge(stream(forCommit(useLocalDeps, sufficientFor), (d, r) -> d.rangeDeps.slice(r)));
-            return new MergedCommitResult(new Deps(keyDeps, rangeDeps), Ranges.of(sufficientFor.toArray(new Range[0])));
+            return new MergedCommitResult(new Deps(keyDeps, rangeDeps, directKeyDeps), Ranges.of(sufficientFor.toArray(new Range[0])));
         }
 
         private <V> Stream<V> stream(TriFunction<Ranges, MergeEntry, BiFunction<Deps, Ranges, V>, Stream<V>> selector, BiFunction<Deps, Ranges, V> getter)

@@ -108,7 +108,7 @@ public class ReadEphemeralTxnData extends ReadData
         if (retryInLaterEpoch > 0)
         {
             // TODO (expected): wait for all stores' results and report only the ranges that execute later to be retried
-            cancel(safeStore);
+            beginCancel(safeStore);
             node.reply(replyTo, replyContext, new ReadOkWithFutureEpoch(null, null, retryInLaterEpoch), null);
         }
         super.read(safeStore, command);

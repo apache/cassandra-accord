@@ -121,6 +121,18 @@ public class TestAgent implements Agent
     }
 
     @Override
+    public long cfkHlcPruneDelta()
+    {
+        return 1000;
+    }
+
+    @Override
+    public int cfkPruneInterval()
+    {
+        return 1;
+    }
+
+    @Override
     public Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
     {
         return new Txn.InMemory(kind, keysOrRanges, MockStore.read(Keys.EMPTY), MockStore.QUERY, null);
