@@ -32,22 +32,25 @@ import accord.local.Status.Known;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
+import accord.primitives.KeyDeps;
 import accord.primitives.Keys;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.RangeDeps;
+import accord.primitives.Ranges;
 import accord.primitives.Route;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.primitives.Writes;
 import accord.utils.ImmutableBitSet;
 import accord.utils.IndexedQuadConsumer;
 import accord.utils.IndexedTriConsumer;
 import accord.utils.Invariants;
 import accord.utils.SimpleBitSet;
-import accord.utils.SortedArrays.SortedArrayList;
+
 import javax.annotation.Nullable;
 
 import static accord.local.Command.AbstractCommand.validate;
@@ -61,6 +64,8 @@ import static accord.local.Status.Invalidated;
 import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
 import static accord.local.Status.Stable;
 import static accord.primitives.Routable.Domain.Range;
+import static accord.primitives.Routables.Slice.Minimal;
+import static accord.utils.Invariants.illegalArgument;
 import static accord.utils.Invariants.illegalState;
 import static accord.utils.SortedArrays.forEachIntersection;
 import static accord.utils.Utils.ensureImmutable;
@@ -236,12 +241,6 @@ public abstract class Command implements CommonAttributes
         }
     }
 
-    /**
-     * @return true if this command is equivalent to {@code other}; it could also be fuller - have some of its
-     *      registers be not sliced, whereas {@code other} may have them sliced
-     */
-    public abstract boolean isEqualOrFuller(Command other);
-
     abstract static class AbstractCommand extends Command
     {
         private final TxnId txnId;
@@ -289,19 +288,6 @@ public abstract class Command implements CommonAttributes
                     && Objects.equals(additionalKeysOrRanges, command.additionalKeysOrRanges())
                     && Objects.equals(promised(), command.promised())
                     && Objects.equals(durableListeners(), command.durableListeners());
-        }
-
-        @Override
-        public boolean isEqualOrFuller(Command command)
-        {
-            if (this == command) return true;
-            if (command == null || getClass() != command.getClass()) return false;
-            return txnId().equals(command.txnId())
-                && saveStatus() == command.saveStatus()
-                && durability() == command.durability()
-                && Objects.equals(route(), command.route())
-                && Objects.equals(promised(), command.promised())
-                && durableListeners().containsAll(command.durableListeners());
         }
 
         @Override
@@ -387,7 +373,7 @@ public abstract class Command implements CommonAttributes
                         break;
                     case ExecuteAtProposed:
                     case ExecuteAtKnown:
-                        Invariants.checkState(executeAt != null && !executeAt.equals(Timestamp.NONE));
+                        Invariants.checkState(executeAt != null && executeAt.compareTo(validate.txnId()) >= 0);
                         break;
                     case NoExecuteAt:
                         Invariants.checkState(executeAt.equals(Timestamp.NONE));
@@ -532,7 +518,7 @@ public abstract class Command implements CommonAttributes
     private static void checkSameClass(Command command, Class<? extends Command> klass, String errorMsg)
     {
         if (!isSameClass(command, klass))
-            throw new IllegalArgumentException(errorMsg + format(" expected %s got %s", klass.getSimpleName(), command.getClass().getSimpleName()));
+            throw illegalArgument(errorMsg + format(" expected %s got %s", klass.getSimpleName(), command.getClass().getSimpleName()));
     }
 
     public abstract Timestamp executeAt();
@@ -785,18 +771,6 @@ public abstract class Command implements CommonAttributes
                 && Objects.equals(result, that.result);
         }
 
-        @Override
-        public boolean isEqualOrFuller(Command c)
-        {
-            if (this == c) return true;
-            if (c == null || getClass() != c.getClass()) return false;
-            if (!super.isEqualOrFuller(c)) return false;
-            Truncated that = (Truncated) c;
-            return Objects.equals(executeAt(), that.executeAt())
-                && Objects.equals(writes(), that.writes())
-                && Objects.equals(result(), that.result());
-        }
-
         public static Truncated erased(Command command)
         {
             Durability durability = Durability.mergeAtLeast(command.durability(), UniversalOrInvalidated);
@@ -959,14 +933,6 @@ public abstract class Command implements CommonAttributes
             if (!super.equals(o)) return false;
             return Objects.equals(executesAtLeast, ((TruncatedAwaitsOnlyDeps)o).executesAtLeast);
         }
-
-        @Override
-        public boolean isEqualOrFuller(Command command)
-        {
-            if (!super.isEqualOrFuller(command)) return false;
-            return Objects.equals(executesAtLeast, ((TruncatedAwaitsOnlyDeps)command).executesAtLeast);
-        }
-
     }
 
     public static class PreAccepted extends AbstractCommand
@@ -1004,19 +970,6 @@ public abstract class Command implements CommonAttributes
             return Objects.equals(executeAt, that.executeAt)
                     && Objects.equals(partialTxn, that.partialTxn)
                     && Objects.equals(partialDeps, that.partialDeps);
-        }
-
-        @Override
-        public boolean isEqualOrFuller(Command c)
-        {
-            if (this == c) return true;
-            if (c == null || getClass() != c.getClass()) return false;
-            if (!super.isEqualOrFuller(c)) return false;
-            PreAccepted that = (PreAccepted) c;
-            if (!executeAt().equals(that.executeAt()) || !partialTxn().isEqualOrFuller(that.partialTxn()))
-                return false;
-            return (partialDeps() == null && that.partialDeps() == null)
-                || (partialDeps() != null && that.partialDeps() != null && partialDeps().isEqualOrFuller(that.partialDeps()));
         }
 
         public static PreAccepted preAccepted(CommonAttributes common, Timestamp executeAt, Ballot promised)
@@ -1097,16 +1050,6 @@ public abstract class Command implements CommonAttributes
             return Objects.equals(acceptedOrCommitted, that.acceptedOrCommitted);
         }
 
-        @Override
-        public boolean isEqualOrFuller(Command c)
-        {
-            if (this == c) return true;
-            if (c == null || getClass() != c.getClass()) return false;
-            if (!super.isEqualOrFuller(c)) return false;
-            Accepted that = (Accepted) c;
-            return Objects.equals(acceptedOrCommitted(), that.acceptedOrCommitted());
-        }
-
         public static Accepted accepted(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted)
         {
             return validate(new Accepted(common, status, promised, executeAt, accepted));
@@ -1140,7 +1083,6 @@ public abstract class Command implements CommonAttributes
             super(common, status, promised, executeAt, accepted);
             this.waitingOn = waitingOn;
             Invariants.checkState(common.route().kind().isFullRoute(), "Expected a full route but given %s", common.route().kind());
-            if (status.hasBeen(Stable)) Invariants.checkState(waitingOn == WaitingOn.EMPTY || (waitingOn.txnIds.equals(common.partialDeps().rangeDeps.txnIds()) && waitingOn.keys.equals(common.partialDeps().keyDeps.keys())), "Deps do not match; expected (%s, %s) == (%s, %s)", waitingOn.keys, waitingOn.txnIds, common.partialDeps().keyDeps.keys(), common.partialDeps().rangeDeps.txnIds());
         }
 
         @Override
@@ -1165,16 +1107,6 @@ public abstract class Command implements CommonAttributes
             if (!super.equals(o)) return false;
             Committed committed = (Committed) o;
             return Objects.equals(waitingOn, committed.waitingOn);
-        }
-
-        @Override
-        public boolean isEqualOrFuller(Command c)
-        {
-            if (this == c) return true;
-            if (c == null || getClass() != c.getClass()) return false;
-            // TODO (required): revisit this method to make sure it is correct in context of usage
-            //   but checking fullness of WaitingOn doesn't make much sense
-            return super.isEqualOrFuller(c);
         }
 
         private static Committed committed(Committed command, CommonAttributes common, Ballot promised, SaveStatus status, WaitingOn waitingOn)
@@ -1245,17 +1177,6 @@ public abstract class Command implements CommonAttributes
                 && Objects.equals(result, executed.result);
         }
 
-        @Override
-        public boolean isEqualOrFuller(Command c)
-        {
-            if (this == c) return true;
-            if (c == null || getClass() != c.getClass()) return false;
-            if (!super.isEqualOrFuller(c)) return false;
-            Executed executed = (Executed) c;
-            return Objects.equals(writes(), executed.writes())
-                && Objects.equals(result(), executed.result());
-        }
-
         public static Executed executed(Executed command, CommonAttributes common, SaveStatus status, Ballot promised, WaitingOn waitingOn)
         {
             checkSameClass(command, Executed.class, "Cannot update");
@@ -1295,25 +1216,59 @@ public abstract class Command implements CommonAttributes
 
     public static class WaitingOn
     {
-        public static final WaitingOn EMPTY = new WaitingOn(Keys.EMPTY, RangeDeps.NONE.txnIds(), ImmutableBitSet.EMPTY, ImmutableBitSet.EMPTY);
+        public static final WaitingOn EMPTY = new WaitingOn(Keys.EMPTY, RangeDeps.NONE, KeyDeps.NONE, ImmutableBitSet.EMPTY, ImmutableBitSet.EMPTY);
 
         public final Keys keys;
-        public final SortedArrayList<TxnId> txnIds;
+        public final RangeDeps directRangeDeps;
+        public final KeyDeps directKeyDeps;
         // waitingOn ONLY encodes both txnIds and keys
         public final ImmutableBitSet waitingOn;
         public final @Nullable ImmutableBitSet appliedOrInvalidated;
 
         public WaitingOn(WaitingOn copy)
         {
-            this(copy.keys, copy.txnIds, copy.waitingOn, copy.appliedOrInvalidated);
+            this(copy.keys, copy.directRangeDeps, copy.directKeyDeps, copy.waitingOn, copy.appliedOrInvalidated);
         }
 
-        public WaitingOn(Keys keys, SortedArrayList<TxnId> txnIds, ImmutableBitSet waitingOn, ImmutableBitSet appliedOrInvalidated)
+        public WaitingOn(Keys keys, RangeDeps directRangeDeps, KeyDeps directKeyDeps, ImmutableBitSet waitingOn, ImmutableBitSet appliedOrInvalidated)
         {
             this.keys = keys;
-            this.txnIds = txnIds;
+            this.directRangeDeps = directRangeDeps;
+            this.directKeyDeps = directKeyDeps;
             this.waitingOn = waitingOn;
             this.appliedOrInvalidated = appliedOrInvalidated;
+        }
+
+        public int txnIdCount()
+        {
+            return directRangeDeps.txnIdCount() + directKeyDeps.txnIdCount();
+        }
+
+        TxnId txnId(int i)
+        {
+            int ki = i - directRangeDeps.txnIdCount();
+            if (ki < 0)
+                return directRangeDeps.txnId(i);
+
+            if (ki < directKeyDeps.txnIdCount())
+                return directKeyDeps.txnId(ki);
+
+            throw new IndexOutOfBoundsException(i + " >= " + txnIdCount());
+        }
+
+        int indexOf(TxnId txnId)
+        {
+            if (txnId.domain() == Range)
+                return directRangeDeps.indexOf(txnId);
+
+            if (!CommandsForKey.managesExecution(txnId))
+            {
+                int i = directKeyDeps.indexOf(txnId);
+                int offset = directRangeDeps.txnIdCount();
+                return i < 0 ? i - offset : i + offset;
+            }
+
+            throw new IllegalArgumentException("WaitingOn does not track this kind of TxnId: " + txnId);
         }
 
         public Timestamp executeAtLeast()
@@ -1329,7 +1284,7 @@ public abstract class Command implements CommonAttributes
         public static WaitingOn none(Deps deps)
         {
             ImmutableBitSet empty = new ImmutableBitSet(deps.txnIdCount() + deps.keyDeps.keys().size());
-            return new WaitingOn(deps.keyDeps.keys(), deps.rangeDeps.txnIds(), empty, empty);
+            return new WaitingOn(deps.keyDeps.keys(), deps.rangeDeps, deps.directKeyDeps, empty, empty);
         }
 
         public boolean isWaiting()
@@ -1339,52 +1294,60 @@ public abstract class Command implements CommonAttributes
 
         public boolean isWaitingOnKey()
         {
-            return waitingOn.lastSetBit() >= txnIds.size();
+            return waitingOn.lastSetBit() >= txnIdCount();
         }
 
         public boolean isWaitingOnKey(int keyIndex)
         {
-            return waitingOn.get(txnIds.size() + keyIndex);
+            return waitingOn.get(txnIdCount() + keyIndex);
         }
 
         public boolean isWaitingOnCommand()
         {
-            return waitingOn.firstSetBit() < txnIds.size();
+            return waitingOn.firstSetBit() < txnIdCount();
         }
 
         public boolean isWaitingOn(TxnId txnId)
         {
-            int index = txnIds.indexOf(txnId);
+            int index = indexOf(txnId);
             return index >= 0 && waitingOn.get(index);
         }
 
         public TxnId nextWaitingOn()
         {
-            int i = waitingOn.prevSetBit(txnIds.size());
-            return i < 0 ? null : txnIds.get(i);
+            int i = nextWaitingOnIndex();
+            return i < 0 ? null : txnId(i);
         }
 
         private int nextWaitingOnIndex()
         {
-            return waitingOn.prevSetBit(txnIds.size());
-        }
+            int directRangeTxnIdCount = directRangeDeps.txnIdCount();
+            int nextWaitingOnDirectRangeIndex = waitingOn.prevSetBit(directRangeTxnIdCount);
+            if (directKeyDeps == KeyDeps.NONE)
+                return nextWaitingOnDirectRangeIndex;
 
-        private static String toString(Keys keys, SortedArrayList<TxnId> txnIds, SimpleBitSet waitingOn)
-        {
-            List<TxnId> waitingOnTxnIds = new ArrayList<>();
-            List<Key> waitingOnKeys = new ArrayList<>();
-            waitingOn.reverseForEach(waitingOnTxnIds, waitingOnKeys, txnIds, keys, (outIds, outKeys, ids, ks, i) -> {
-                if (i < ids.size()) outIds.add(ids.get(i));
-                else outKeys.add(ks.get(i - ids.size()));
-            });
-            Collections.reverse(waitingOnKeys);
-            return "keys=" + waitingOnKeys + ", txnIds=" + waitingOnTxnIds;
+            int directKeyTxnIdCount = directKeyDeps.txnIdCount();
+            int txnIdCount = directKeyTxnIdCount + directRangeTxnIdCount;
+            int nextWaitingOnDirectKeyIndex = waitingOn.prevSetBitNotBefore(txnIdCount, directRangeTxnIdCount);
+            if (nextWaitingOnDirectKeyIndex < 0)
+                return nextWaitingOnDirectRangeIndex;
+            if (nextWaitingOnDirectRangeIndex < 0)
+                return nextWaitingOnDirectKeyIndex;
+            int c = directRangeDeps.txnId(nextWaitingOnDirectRangeIndex).compareTo(directKeyDeps.txnId(nextWaitingOnDirectKeyIndex - directRangeDeps.txnIdCount()));
+            return c > 0 ? nextWaitingOnDirectRangeIndex : nextWaitingOnDirectKeyIndex;
         }
 
         @Override
         public String toString()
         {
-            return toString(keys, txnIds, waitingOn);
+            List<TxnId> waitingOnTxnIds = new ArrayList<>();
+            List<Key> waitingOnKeys = new ArrayList<>();
+            waitingOn.reverseForEach(waitingOnTxnIds, waitingOnKeys, this, keys, (outIds, outKeys, self, ks, i) -> {
+                if (i < self.txnIdCount()) outIds.add(self.txnId(i));
+                else outKeys.add(ks.get(i - self.txnIdCount()));
+            });
+            Collections.reverse(waitingOnKeys);
+            return "keys=" + waitingOnKeys + ", txnIds=" + waitingOnTxnIds;
         }
 
         @Override
@@ -1396,7 +1359,8 @@ public abstract class Command implements CommonAttributes
         boolean equals(WaitingOn other)
         {
             return this.keys.equals(other.keys)
-                && txnIds.equals(other.txnIds)
+                && directKeyDeps.equals(other.directKeyDeps)
+                && directRangeDeps.equals(other.directRangeDeps)
                 && this.waitingOn.equals(other.waitingOn)
                 && Objects.equals(this.appliedOrInvalidated, other.appliedOrInvalidated);
         }
@@ -1404,7 +1368,8 @@ public abstract class Command implements CommonAttributes
         public static class Update
         {
             final Keys keys;
-            final SortedArrayList<TxnId> txnIds;
+            final RangeDeps directRangeDeps;
+            final KeyDeps directKeyDeps;
             private SimpleBitSet waitingOn;
             private @Nullable SimpleBitSet appliedOrInvalidated;
             private Timestamp executeAtLeast;
@@ -1412,7 +1377,8 @@ public abstract class Command implements CommonAttributes
             public Update(WaitingOn waitingOn)
             {
                 this.keys = waitingOn.keys;
-                this.txnIds = waitingOn.txnIds;
+                this.directRangeDeps = waitingOn.directRangeDeps;
+                this.directKeyDeps = waitingOn.directKeyDeps;
                 this.waitingOn = waitingOn.waitingOn;
                 this.appliedOrInvalidated = waitingOn.appliedOrInvalidated;
                 if (waitingOn.getClass() == WaitingOnWithExecuteAt.class)
@@ -1424,17 +1390,28 @@ public abstract class Command implements CommonAttributes
                 this(committed.waitingOn);
             }
 
-            public Update(TxnId txnId, Deps deps)
-            {
-                this(txnId, deps.keyDeps.keys(), deps.rangeDeps.txnIds());
-            }
-
-            public Update(TxnId txnId, Keys keys, SortedArrayList<TxnId> txnIds)
+            private Update(TxnId txnId, Keys keys, RangeDeps directRangeDeps, KeyDeps directKeyDeps)
             {
                 this.keys = keys;
-                this.txnIds = txnIds;
-                this.waitingOn = new SimpleBitSet(txnIds.size() + keys.size(), false);
-                this.appliedOrInvalidated = txnId.domain() == Range ? new SimpleBitSet(txnIds.size(), false) : null;
+                this.directRangeDeps = directRangeDeps;
+                this.directKeyDeps = directKeyDeps;
+                this.waitingOn = new SimpleBitSet(txnIdCount() + keys.size(), false);
+                this.appliedOrInvalidated = CommandsForKey.managesExecution(txnId) ? null : new SimpleBitSet(txnIdCount(), false);
+            }
+
+            public static Update initialise(TxnId txnId, Route route, Ranges ranges, Deps deps)
+            {
+                Unseekables<?> executionParticipants = route.participants().slice(ranges, Minimal);
+                Update update = new Update(txnId, deps.keyDeps.keys(), deps.rangeDeps, deps.directKeyDeps);
+                deps.rangeDeps.forEach(executionParticipants, update, Update::initialise);
+                deps.directKeyDeps.forEach(ranges, 0, deps.directKeyDeps.txnIdCount(), update, deps.rangeDeps, (upd, rdeps, index) -> upd.initialise(index + rdeps.txnIdCount()));
+                deps.keyDeps.keys().forEach(ranges, (upd, key, index) -> upd.initialise(index + upd.txnIdCount()), update);
+                return update;
+            }
+
+            private void initialise(int i)
+            {
+                waitingOn.set(i);
             }
 
             public boolean hasChanges()
@@ -1443,9 +1420,33 @@ public abstract class Command implements CommonAttributes
                        || (appliedOrInvalidated != null && !(appliedOrInvalidated instanceof ImmutableBitSet));
             }
 
+            public TxnId txnId(int i)
+            {
+                int ki = i - directRangeDeps.txnIdCount();
+                if (ki < 0)
+                    return directRangeDeps.txnId(i);
+                if (ki < directKeyDeps.txnIdCount())
+                    return directKeyDeps.txnId(ki);
+                throw new IndexOutOfBoundsException(i + " >= " + txnIdCount());
+            }
+
+            public int indexOf(TxnId txnId)
+            {
+                if (txnId.domain() == Range)
+                    return directRangeDeps.indexOf(txnId);
+                if (!CommandsForKey.managesExecution(txnId))
+                    return directRangeDeps.txnIdCount() + directKeyDeps.indexOf(txnId);
+                throw new IllegalArgumentException("WaitingOn does not track this kind of TxnId: " + txnId);
+            }
+
+            int txnIdCount()
+            {
+                return directRangeDeps.txnIdCount() + directKeyDeps.txnIdCount();
+            }
+
             public boolean removeWaitingOn(TxnId txnId)
             {
-                int index = txnIds.indexOf(txnId);
+                int index = indexOf(txnId);
                 if (!waitingOn.get(index))
                     return false;
 
@@ -1456,7 +1457,7 @@ public abstract class Command implements CommonAttributes
 
             public boolean isWaitingOn(TxnId txnId)
             {
-                int index = txnIds.indexOf(txnId);
+                int index = indexOf(txnId);
                 return index >= 0 && waitingOn.get(index);
             }
 
@@ -1473,7 +1474,7 @@ public abstract class Command implements CommonAttributes
                 // TODO (expected): simply remove ourselves from any CFK we aren't waiting on
                 if (index < 0) return false;
 
-                index += txnIds.size();
+                index += txnIdCount();
                 if (!waitingOn.get(index))
                     return false;
 
@@ -1484,13 +1485,8 @@ public abstract class Command implements CommonAttributes
 
             public boolean isWaitingOn(Key key)
             {
-                int index = keys.indexOf(key) + txnIds.size();
+                int index = keys.indexOf(key) + txnIdCount();
                 return index >= 0 && waitingOn.get(index);
-            }
-
-            void initialiseWaiting(int index)
-            {
-                waitingOn.set(index);
             }
 
             public boolean isWaiting()
@@ -1500,13 +1496,36 @@ public abstract class Command implements CommonAttributes
 
             public TxnId minWaitingOnTxnId()
             {
-                int index = waitingOn.firstSetBit();
-                return index < 0 || index >= txnIds.size() ? null : txnIds.get(index);
+                int index = minWaitingOnTxnIdx();
+                return index < 0 ? null : txnId(index);
             }
 
-            public boolean isWaitingOn(int txnIdx)
+            public int minWaitingOnTxnIdx()
             {
-                return waitingOn.get(txnIdx);
+                int directRangeTxnIdCount = directRangeDeps.txnIdCount();
+                int minWaitingOnDirectRangeIndex = waitingOn.nextSetBitBefore(0, directRangeTxnIdCount);
+                if (directKeyDeps == KeyDeps.NONE)
+                    return minWaitingOnDirectRangeIndex;
+
+                int directKeyTxnIdCount = directKeyDeps.txnIdCount();
+                int txnIdCount = directKeyTxnIdCount + directRangeTxnIdCount;
+                int minWaitingOnDirectKeyIndex = waitingOn.nextSetBitBefore(directRangeTxnIdCount, txnIdCount);
+                if (minWaitingOnDirectKeyIndex < 0)
+                    return minWaitingOnDirectRangeIndex;
+                if (minWaitingOnDirectRangeIndex < 0)
+                    return minWaitingOnDirectKeyIndex;
+                int c = directRangeDeps.txnId(minWaitingOnDirectRangeIndex).compareTo(directKeyDeps.txnId(minWaitingOnDirectKeyIndex - directRangeDeps.txnIdCount()));
+                return c < 0 ? minWaitingOnDirectRangeIndex : minWaitingOnDirectKeyIndex;
+            }
+
+            public boolean isWaitingOnDirectRangeTxnIdx(int idx)
+            {
+                return waitingOn.get(idx);
+            }
+
+            public boolean isWaitingOnDirectKeyTxnIdx(int idx)
+            {
+                return waitingOn.get(idx + directRangeDeps.txnIdCount());
             }
 
             public void updateExecuteAtLeast(Timestamp executeAtLeast)
@@ -1514,17 +1533,22 @@ public abstract class Command implements CommonAttributes
                 this.executeAtLeast = Timestamp.nonNullOrMax(executeAtLeast, this.executeAtLeast);
             }
 
-            boolean removeWaitingOnTxnId(int i)
+            boolean removeWaitingOnDirectRangeTxnId(int i)
             {
                 return removeWaitingOn(i);
             }
 
-            boolean removeWaitingOnKey(int i)
+            boolean removeWaitingOnDirectKeyTxnId(int i)
             {
-                return removeWaitingOn(txnIds.size() + i);
+                return removeWaitingOn(i + directRangeDeps.txnIdCount());
             }
 
-            boolean removeWaitingOn(int i)
+            boolean removeWaitingOnKey(int i)
+            {
+                return removeWaitingOn(txnIdCount() + i);
+            }
+
+            private boolean removeWaitingOn(int i)
             {
                 if (waitingOn.get(i))
                 {
@@ -1547,11 +1571,21 @@ public abstract class Command implements CommonAttributes
              */
             public boolean setAppliedOrInvalidated(TxnId txnId)
             {
-                int index = txnIds.indexOf(txnId);
+                int index = indexOf(txnId);
                 return setAppliedOrInvalidated(index);
             }
 
-            public boolean setAppliedOrInvalidated(int i)
+            private boolean setAppliedOrInvalidatedDirectRangeTxn(int i)
+            {
+                return setAppliedOrInvalidated(i);
+            }
+
+            private boolean setAppliedOrInvalidatedDirectKeyTxn(int i)
+            {
+                return setAppliedOrInvalidated(i + directRangeDeps.txnIdCount());
+            }
+
+            private boolean setAppliedOrInvalidated(int i)
             {
                 if (appliedOrInvalidated == null)
                     return removeWaitingOn(i);
@@ -1569,17 +1603,26 @@ public abstract class Command implements CommonAttributes
 
             public boolean setAppliedAndPropagate(TxnId txnId, WaitingOn propagate)
             {
-                int index = txnIds.indexOf(txnId);
+                int index = indexOf(txnId);
                 if (!setAppliedOrInvalidated(index))
                     return false;
 
                 if (propagate.appliedOrInvalidated != null && !propagate.appliedOrInvalidated.isEmpty())
                 {
-                    forEachIntersection(propagate.txnIds, txnIds,
+                    forEachIntersection(propagate.directRangeDeps.txnIds(), directRangeDeps.txnIds(),
                                         (from, to, ignore, i1, i2) -> {
                                             if (from.get(i1))
-                                                to.setAppliedOrInvalidated(i2);
+                                                to.setAppliedOrInvalidatedDirectRangeTxn(i2);
                                         }, propagate.appliedOrInvalidated, this, null);
+
+                    if (propagate.directKeyDeps != KeyDeps.NONE)
+                    {
+                        forEachIntersection(propagate.directKeyDeps.txnIds(), directKeyDeps.txnIds(),
+                                            (from, to, ignore, i1, i2) -> {
+                                                if (from.get(i1))
+                                                    to.setAppliedOrInvalidatedDirectKeyTxn(i2);
+                                            }, propagate.appliedOrInvalidated, this, null);
+                    }
                 }
 
                 return true;
@@ -1587,17 +1630,17 @@ public abstract class Command implements CommonAttributes
 
             public <P1, P2, P3, P4> void forEachWaitingOnId(P1 p1, P2 p2, P3 p3, P4 p4, IndexedQuadConsumer<P1, P2, P3, P4> forEach)
             {
-                waitingOn.reverseForEach(0, txnIds.size(), p1, p2, p3, p4, forEach);
+                waitingOn.reverseForEach(0, txnIdCount(), p1, p2, p3, p4, forEach);
             }
 
             public <P1, P2, P3, P4> void forEachWaitingOnKey(P1 p1, P2 p2, P3 p3, IndexedTriConsumer<P1, P2, P3> forEach)
             {
-                waitingOn.reverseForEach(txnIds.size(), keys.size(), p1, p2, p3, txnIds, (pp1, pp2, pp3, pp4, i) -> forEach.accept(pp1, pp2, pp3, i - pp4.size()));
+                waitingOn.reverseForEach(txnIdCount(), keys.size(), p1, p2, p3, this, (pp1, pp2, pp3, pp4, i) -> forEach.accept(pp1, pp2, pp3, i - pp4.txnIdCount()));
             }
 
             public WaitingOn build()
             {
-                WaitingOn result = new WaitingOn(keys, txnIds, ensureImmutable(waitingOn), ensureImmutable(appliedOrInvalidated));
+                WaitingOn result = new WaitingOn(keys, directRangeDeps, directKeyDeps, ensureImmutable(waitingOn), ensureImmutable(appliedOrInvalidated));
                 if (executeAtLeast == null)
                     return result;
                 return new WaitingOnWithExecuteAt(result, executeAtLeast);
@@ -1606,7 +1649,14 @@ public abstract class Command implements CommonAttributes
             @Override
             public String toString()
             {
-                return WaitingOn.toString(keys, txnIds, waitingOn);
+                List<TxnId> waitingOnTxnIds = new ArrayList<>();
+                List<Key> waitingOnKeys = new ArrayList<>();
+                waitingOn.reverseForEach(waitingOnTxnIds, waitingOnKeys, this, keys, (outIds, outKeys, self, ks, i) -> {
+                    if (i < self.txnIdCount()) outIds.add(self.txnId(i));
+                    else outKeys.add(ks.get(i - self.txnIdCount()));
+                });
+                Collections.reverse(waitingOnKeys);
+                return "keys=" + waitingOnKeys + ", txnIds=" + waitingOnTxnIds;
             }
         }
     }
@@ -1640,7 +1690,7 @@ public abstract class Command implements CommonAttributes
 
         boolean equals(WaitingOnWithExecuteAt other)
         {
-            return super.equals((WaitingOn) other) && executeAtLeast == other.executeAtLeast;
+            return super.equals(other) && executeAtLeast == other.executeAtLeast;
         }
     }
 

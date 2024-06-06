@@ -18,8 +18,6 @@
 
 package accord.primitives;
 
-import java.util.Objects;
-
 import accord.api.Query;
 import accord.api.Read;
 import accord.api.Update;
@@ -58,8 +56,6 @@ public interface PartialTxn extends Txn
         }
         return covering().containsAll(participants);
     }
-
-    boolean isEqualOrFuller(PartialTxn txn);
 
     static PartialTxn merge(@Nullable PartialTxn a, @Nullable PartialTxn b)
     {
@@ -110,17 +106,6 @@ public interface PartialTxn extends Txn
         public boolean covers(Ranges ranges)
         {
             return covering.containsAll(ranges);
-        }
-
-        @Override
-        public boolean isEqualOrFuller(PartialTxn txn)
-        {
-            return kind() == txn.kind()
-                && covering().containsAll(txn.covering())
-                && keys().containsAll(txn.keys())
-                && read().isEqualOrFuller(txn.read())
-                && Objects.equals(query(), txn.query())
-                && ((update() == null && txn.update() == null) || (update() != null && txn.update() != null && update().isEqualOrFuller(txn.update())));
         }
 
         @Override

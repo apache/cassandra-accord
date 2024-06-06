@@ -141,7 +141,7 @@ public abstract class SafeCommandStore
      *
      * This permits efficient operation when a transaction involved in processing another transaction happens to be in memory.
      */
-    public final SafeCommand ifLoadedAndInitialised(TxnId txnId)
+    public SafeCommand ifLoadedAndInitialised(TxnId txnId)
     {
         SafeCommand safeCommand = getInternalIfLoadedAndInitialised(txnId);
         if (safeCommand == null)
@@ -219,58 +219,64 @@ public abstract class SafeCommandStore
         commandStore().updateMaxConflicts(prev, updated);
     }
 
-    private void updateCommandsForKey(Command prev, Command updated)
+    private void updateCommandsForKey(Command prev, Command next)
     {
-        if (!CommandsForKey.needsUpdate(prev, updated))
+        if (!CommandsForKey.needsUpdate(prev, next))
             return;
 
-        TxnId txnId = updated.txnId();
-        Keys keys;
-        if (txnId.domain().isKey() && txnId.kind().isGloballyVisible())
-        {
-            keys = (Keys)updated.keysOrRanges();
-            if (keys == null || updated.hasBeen(Status.Truncated)) keys = (Keys)prev.keysOrRanges();
-            if (keys == null)
-                return;
+        TxnId txnId = next.txnId();
+        if (CommandsForKey.manages(txnId)) updateManagedCommandsForKey(this, prev, next);
+        if (!CommandsForKey.managesExecution(txnId) && next.hasBeen(Status.Stable) && !next.hasBeen(Status.Truncated) && !prev.hasBeen(Status.Stable))
+            updateUnmanagedExecutionCommandsForKey(this, next);
+    }
 
-            PreLoadContext context = PreLoadContext.contextFor(txnId, keys, COMMANDS);
-            // TODO (expected): execute immediately for any keys we already have loaded, and save only those we haven't for later
-            if (canExecuteWith(context))
+    private static void updateManagedCommandsForKey(SafeCommandStore safeStore, Command prev, Command next)
+    {
+        TxnId txnId = next.txnId();
+        Keys keys = (Keys)next.keysOrRanges();
+        if (keys == null || next.hasBeen(Status.Truncated)) keys = (Keys)prev.keysOrRanges();
+        if (keys == null)
+            return;
+
+        // TODO (required): additionalKeysOrRanges may not be being handled entirely correctly here, though it may not matter.
+        //    Once committed without a given key, we should be effectively erasing the command from that CFK
+        PreLoadContext context = PreLoadContext.contextFor(txnId, keys, COMMANDS);
+        // TODO (expected): execute immediately for any keys we already have loaded, and save only those we haven't for later
+        if (safeStore.canExecuteWith(context))
+        {
+            for (Key key : keys)
             {
-                for (Key key : keys)
-                {
-                    get(key).update(this, prev, updated);
-                }
-            }
-            else
-            {
-                commandStore().execute(context, safeStore -> safeStore.updateCommandsForKey(prev, updated))
-                              .begin(commandStore().agent);
+                safeStore.get(key).update(safeStore, next);
             }
         }
         else
         {
-            if (!updated.hasBeen(Status.Stable) || prev.hasBeen(Status.Stable) || updated.hasBeen(Status.Truncated))
-                return;
+            safeStore = safeStore;
+            safeStore.commandStore().execute(context, safeStore0 -> updateManagedCommandsForKey(safeStore0, prev, next))
+                          .begin(safeStore.commandStore().agent);
+        }
+    }
 
-            keys = updated.asCommitted().waitingOn.keys;
-            // TODO (required): consider how execution works for transactions that await future deps and where the command store inherits additional keys in execution epoch
-            Ranges ranges = ranges().allAt(updated.executeAt());
-            PreLoadContext context = PreLoadContext.contextFor(txnId, keys, COMMANDS);
-            // TODO (expected): execute immediately for any keys we already have loaded, and save only those we haven't for later
-            if (canExecuteWith(context))
-            {
-                Routables.foldl(keys, ranges, (self, t, key, o, i) -> {
-                    self.get(key).registerUnmanaged(self, self.get(t));
-                    return null;
-                }, this, txnId, null, i->false);
-            }
-            else
-            {
-                commandStore().execute(context, safeStore -> safeStore.updateCommandsForKey(prev, updated))
-                              .begin(commandStore().agent);
-            }
-
+    private static void updateUnmanagedExecutionCommandsForKey(SafeCommandStore safeStore, Command next)
+    {
+        TxnId txnId = next.txnId();
+        Keys keys = next.asCommitted().waitingOn.keys;
+        // TODO (required): consider how execution works for transactions that await future deps and where the command store inherits additional keys in execution epoch
+        Ranges ranges = safeStore.ranges().allAt(next.executeAt());
+        PreLoadContext context = PreLoadContext.contextFor(txnId, keys, COMMANDS);
+        // TODO (expected): execute immediately for any keys we already have loaded, and save only those we haven't for later
+        if (safeStore.canExecuteWith(context))
+        {
+            Routables.foldl(keys, ranges, (ss, t, key, o, i) -> {
+                ss.get(key).registerUnmanaged(ss, ss.get(t));
+                return null;
+            }, safeStore, txnId, null, i->false);
+        }
+        else
+        {
+            safeStore = safeStore;
+            safeStore.commandStore().execute(context, safeStore0 -> updateUnmanagedExecutionCommandsForKey(safeStore0, next))
+                          .begin(safeStore.commandStore().agent);
         }
     }
 

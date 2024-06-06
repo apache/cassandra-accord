@@ -84,7 +84,7 @@ class JsonTest
 
     static Gen<Deps> depsGen()
     {
-        return AccordGens.deps(AccordGens.keyDeps(keyGen()), rangeDepsGen());
+        return AccordGens.deps(AccordGens.keyDeps(keyGen()), rangeDepsGen(), AccordGens.directKeyDeps(keyGen()));
     }
 
 }

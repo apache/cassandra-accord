@@ -28,7 +28,8 @@ import javax.annotation.Nullable;
 import accord.api.Agent;
 
 import accord.local.CommandStores.RangesForEpoch;
-import accord.primitives.Deps;
+import accord.primitives.KeyDeps;
+import accord.primitives.Keys;
 import accord.primitives.Range;
 import accord.primitives.Routables;
 import accord.utils.async.AsyncChain;
@@ -382,9 +383,7 @@ public abstract class CommandStore implements AgentExecutor
     @Override
     public String toString()
     {
-        return getClass().getSimpleName() + "{" +
-               "id=" + id +
-               '}';
+        return getClass().getSimpleName() + "{id=" + id + ", node=" + time.id().id + '}';
     }
 
     @Nullable
@@ -594,8 +593,68 @@ public abstract class CommandStore implements AgentExecutor
         return null != rejectBefore.foldl(participants, (rejectIfBefore, test) -> rejectIfBefore.compareTo(test) > 0 ? null : test, txnId, Objects::isNull);
     }
 
-    public final void removeRedundantDependencies(Unseekables<?> participants, Deps deps, WaitingOn.Update builder)
+    public final void removeRedundantDependencies(Unseekables<?> participants, WaitingOn.Update builder)
     {
+        // Note: we do not need to track the bootstraps we implicitly depend upon, because we will not serve any read requests until this has completed
+        //  and since we are a timestamp store, and we write only this will sort itself out naturally
+        // TODO (required): make sure we have no races on HLC around SyncPoint else this resolution may not work (we need to know the micros equivalent timestamp of the snapshot)
+        class KeyState
+        {
+            Map<Integer, Keys> partiallyBootstrapping;
+
+            /**
+             * Are the participating ranges for the txn fully covered by bootstrapping ranges for this command store
+             */
+            boolean isFullyBootstrapping(WaitingOn.Update builder, Range range, int txnIdx)
+            {
+                if (builder.directKeyDeps.foldEachKey(txnIdx, range, true, (r0, k, p) -> p && r0.contains(k)))
+                    return true;
+
+                if (partiallyBootstrapping == null)
+                    partiallyBootstrapping = new HashMap<>();
+                Keys prev = partiallyBootstrapping.get(txnIdx);
+                Keys remaining = prev;
+                if (remaining == null) remaining = builder.directKeyDeps.participatingKeys(txnIdx);
+                else Invariants.checkState(!remaining.isEmpty());
+                remaining = remaining.subtract(range);
+                if (prev == null) Invariants.checkState(!remaining.isEmpty());
+                partiallyBootstrapping.put(txnIdx, remaining);
+                return remaining.isEmpty();
+            }
+        }
+
+        KeyDeps directKeyDeps = builder.directKeyDeps;
+        if (!directKeyDeps.isEmpty())
+        {
+            redundantBefore().foldl(directKeyDeps.keys(), (e, s, d, b) -> {
+                // TODO (desired, efficiency): foldlInt so we can track the lower rangeidx bound and not revisit unnecessarily
+                // find the txnIdx below which we are known to be fully redundant locally due to having been applied or invalidated
+                int bootstrapIdx = d.txnIds().find(e.bootstrappedAt);
+                if (bootstrapIdx < 0) bootstrapIdx = -1 - bootstrapIdx;
+                int appliedIdx = d.txnIds().find(e.locallyAppliedOrInvalidatedBefore);
+                if (appliedIdx < 0) appliedIdx = -1 - appliedIdx;
+
+                // remove intersecting transactions with known redundant txnId
+                // note that we must exclude all transactions that are pre-bootstrap, and perform the more complicated dance below,
+                // as these transactions may be only partially applied, and we may need to wait for them on another key.
+                if (appliedIdx > bootstrapIdx)
+                {
+                    d.forEach(e.range, bootstrapIdx, appliedIdx, b, s, (b0, s0, txnIdx) -> {
+                        b0.removeWaitingOnDirectKeyTxnId(txnIdx);
+                    });
+                }
+
+                if (bootstrapIdx > 0)
+                {
+                    d.forEach(e.range, 0, bootstrapIdx, b, s, e.range, (b0, s0, r, txnIdx) -> {
+                        if (b0.isWaitingOnDirectKeyTxnIdx(txnIdx) && s0.isFullyBootstrapping(b0, r, txnIdx))
+                            b0.removeWaitingOnDirectKeyTxnId(txnIdx);
+                    });
+                }
+                return s;
+            }, new KeyState(), directKeyDeps, builder, ignore -> false);
+        }
+
         /**
          * If we have to handle bootstrapping ranges for range transactions, these may only partially cover the
          * transaction, in which case we should not remove the transaction as a dependency. But if it is fully
@@ -613,14 +672,14 @@ public abstract class CommandStore implements AgentExecutor
             boolean isFullyBootstrapping(int rangeTxnIdx)
             {
                 // if all deps for the txnIdx are contained in the range, don't inflate any shared object state
-                if (deps.rangeDeps.foldEachRange(rangeTxnIdx, range, true, (r1, r2, p) -> p && r1.contains(r2)))
+                if (builder.directRangeDeps.foldEachRange(rangeTxnIdx, range, true, (r1, r2, p) -> p && r1.contains(r2)))
                     return true;
 
                 if (partiallyBootstrapping == null)
                     partiallyBootstrapping = new HashMap<>();
                 Ranges prev = partiallyBootstrapping.get(rangeTxnIdx);
                 Ranges remaining = prev;
-                if (remaining == null) remaining = deps.rangeDeps.ranges(rangeTxnIdx);
+                if (remaining == null) remaining = builder.directRangeDeps.ranges(rangeTxnIdx);
                 else Invariants.checkState(!remaining.isEmpty());
                 remaining = remaining.subtract(Ranges.of(range));
                 if (prev == null) Invariants.checkState(!remaining.isEmpty());
@@ -628,7 +687,8 @@ public abstract class CommandStore implements AgentExecutor
                 return remaining.isEmpty();
             }
         }
-        RangeDeps rangeDeps = deps.rangeDeps;
+
+        RangeDeps rangeDeps = builder.directRangeDeps;
         // TODO (required, consider): slice to only those ranges we own, maybe don't even construct rangeDeps.covering()
         redundantBefore().foldl(participants, (e, s, d, b) -> {
             int bootstrapIdx = d.txnIds().find(e.bootstrappedAt);
@@ -646,7 +706,7 @@ public abstract class CommandStore implements AgentExecutor
                 // TODO (desired): move the bounds check into forEach, matching structure used for keys
                 d.forEach(e.range, b, s, (b0, s0, txnIdx) -> {
                     if (txnIdx >= s0.bootstrapIdx && txnIdx < s0.appliedIdx)
-                        b0.removeWaitingOn(txnIdx);
+                        b0.removeWaitingOnDirectRangeTxnId(txnIdx);
                 });
             }
 
@@ -657,8 +717,8 @@ public abstract class CommandStore implements AgentExecutor
                 s.range = e.range;
                 // TODO (desired): move the bounds check into forEach, matching structure used for keys
                 d.forEach(e.range, b, s, (b0, s0, txnIdx) -> {
-                    if (txnIdx < s0.bootstrapIdx && b0.isWaitingOn(txnIdx) && s0.isFullyBootstrapping(txnIdx))
-                        b0.removeWaitingOn(txnIdx);
+                    if (txnIdx < s0.bootstrapIdx && b0.isWaitingOnDirectRangeTxnIdx(txnIdx) && s0.isFullyBootstrapping(txnIdx))
+                        b0.removeWaitingOnDirectRangeTxnId(txnIdx);
                 });
             }
             return s;

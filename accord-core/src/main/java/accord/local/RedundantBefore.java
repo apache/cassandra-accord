@@ -109,6 +109,8 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
             this.shardAppliedOrInvalidatedBefore = shardAppliedOrInvalidatedBefore;
             this.bootstrappedAt = bootstrappedAt;
             this.staleUntilAtLeast = staleUntilAtLeast;
+            Invariants.checkArgument(locallyAppliedOrInvalidatedBefore.equals(TxnId.NONE) || locallyAppliedOrInvalidatedBefore.domain().isRange());
+            Invariants.checkArgument(shardAppliedOrInvalidatedBefore.equals(TxnId.NONE) || shardAppliedOrInvalidatedBefore.domain().isRange());
         }
 
         public static Entry reduce(Entry a, Entry b)

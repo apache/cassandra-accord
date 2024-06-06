@@ -27,8 +27,10 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.utils.ArrayBuffers.ObjectBuffers;
+import accord.utils.IndexedBiConsumer;
 import accord.utils.IndexedFold;
 import accord.utils.IndexedFoldToLong;
 import accord.utils.IndexedTriFold;
@@ -259,6 +261,15 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
     }
 
     @Inline
+    public final <P1> void forEach(Ranges rs, IndexedBiConsumer<P1, ? super K> forEach, P1 p1)
+    {
+        Routables.foldl(this, rs, (p, ignore, k, consumer, i) -> {
+            consumer.accept(p, k, i);
+            return consumer;
+        }, p1, null, forEach, i -> false);
+    }
+
+    @Inline
     public final long foldl(Ranges rs, IndexedFoldToLong<? super K> fold, long param, long initialValue, long terminalValue)
     {
         return Routables.foldl(this, rs, fold, param, initialValue, terminalValue);
@@ -274,6 +285,12 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
                 return initialValue;
         }
         return initialValue;
+    }
+
+    public void forEach(Consumer<? super K> forEach)
+    {
+        for (K key : keys)
+            forEach.accept(key);
     }
 
     public final FullKeyRoute toRoute(RoutingKey homeKey)

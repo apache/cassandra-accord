@@ -444,9 +444,10 @@ public abstract class InMemoryCommandStore extends CommandStore
     {
         if (store != current)
             throw illegalState("This operation has already been cleared");
+
         try
         {
-            current.complete();
+            current.postExecute();
         }
         catch (Throwable t)
         {
@@ -1003,7 +1004,7 @@ public abstract class InMemoryCommandStore extends CommandStore
         }
 
         @Override
-        protected void invalidateSafeState()
+        public void postExecute()
         {
             commands.values().forEach(c -> {
                 if (c != null && c.current() != null)
@@ -1017,9 +1018,21 @@ public abstract class InMemoryCommandStore extends CommandStore
                 }
             });
 
-            commands.values().forEach(InMemorySafeCommand::invalidate);
-            timestampsForKey.values().forEach(InMemorySafeTimestampsForKey::invalidate);
-            commandsForKey.values().forEach(InMemorySafeCommandsForKey::invalidate);
+            commands.values().forEach(c -> {
+                if (c.isUnset())
+                    commandStore.commands.remove(c.txnId());
+                c.invalidate();
+            });
+            timestampsForKey.values().forEach(tfk -> {
+                if (tfk.isUnset())
+                    commandStore.timestampsForKey.remove(tfk.key());
+                tfk.invalidate();
+            });
+            commandsForKey.values().forEach(cfk -> {
+                if (cfk.isUnset())
+                    commandStore.commandsForKey.remove(cfk.key());
+                cfk.invalidate();
+            });
         }
     }
 

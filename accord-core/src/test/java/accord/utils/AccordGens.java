@@ -87,12 +87,21 @@ public class AccordGens
 
     public static Gen<TxnId> txnIds()
     {
-        return txnIds(epochs()::nextLong, rs -> rs.nextLong(0, Long.MAX_VALUE), RandomSource::nextInt);
+        return txnIds(Gens.enums().all(Txn.Kind.class));
+    }
+
+    public static Gen<TxnId> txnIds(Gen<Txn.Kind> kinds)
+    {
+        return txnIds(epochs()::nextLong, rs -> rs.nextLong(0, Long.MAX_VALUE), RandomSource::nextInt, kinds);
     }
 
     public static Gen<TxnId> txnIds(Gen.LongGen epochs, Gen.LongGen hlcs, Gen.IntGen nodes)
     {
-        Gen<Txn.Kind> kinds = Gens.enums().all(Txn.Kind.class);
+        return txnIds(epochs, hlcs, nodes, Gens.enums().all(Txn.Kind.class));
+    }
+
+    public static Gen<TxnId> txnIds(Gen.LongGen epochs, Gen.LongGen hlcs, Gen.IntGen nodes, Gen<Txn.Kind> kinds)
+    {
         Gen<Routable.Domain> domains = Gens.enums().all(Routable.Domain.class);
         return rs -> new TxnId(epochs.nextLong(rs), hlcs.nextLong(rs), kinds.next(rs), domains.next(rs), new Node.Id(nodes.nextInt(rs)));
     }
@@ -227,7 +236,14 @@ public class AccordGens
 
     public static Gen<KeyDeps> keyDeps(Gen<? extends Key> keyGen)
     {
-        return keyDeps(keyGen, txnIds());
+        Gen<Txn.Kind> kinds = Gens.pick(Txn.Kind.Write, Txn.Kind.Read);
+        return keyDeps(keyGen, txnIds(kinds));
+    }
+
+    public static Gen<KeyDeps> directKeyDeps(Gen<? extends Key> keyGen)
+    {
+        Gen<Txn.Kind> kinds = Gens.pick(Txn.Kind.SyncPoint, Txn.Kind.ExclusiveSyncPoint);
+        return keyDeps(keyGen, txnIds(kinds));
     }
 
     public static Gen<KeyDeps> keyDeps(Gen<? extends Key> keyGen, Gen<TxnId> idGen)
@@ -461,7 +477,8 @@ public class AccordGens
 
     public static Gen<RangeDeps> rangeDeps(Gen<? extends Range> rangeGen)
     {
-        return rangeDeps(rangeGen, txnIds());
+        Gen<Txn.Kind> kinds = Gens.pick(Txn.Kind.Write, Txn.Kind.Read, Txn.Kind.SyncPoint, Txn.Kind.ExclusiveSyncPoint);
+        return rangeDeps(rangeGen, txnIds(kinds));
     }
 
     public static Gen<RangeDeps> rangeDeps(Gen<? extends Range> rangeGen, Gen<TxnId> idGen)
@@ -481,8 +498,8 @@ public class AccordGens
         };
     }
 
-    public static Gen<Deps> deps(Gen<KeyDeps> keyDepsGen, Gen<RangeDeps> rangeDepsGen)
+    public static Gen<Deps> deps(Gen<KeyDeps> keyDepsGen, Gen<RangeDeps> rangeDepsGen, Gen<KeyDeps> directKeyDepsGen)
     {
-        return rs -> new Deps(keyDepsGen.next(rs), rangeDepsGen.next(rs));
+        return rs -> new Deps(keyDepsGen.next(rs), rangeDepsGen.next(rs), directKeyDepsGen.next(rs));
     }
 }

@@ -18,11 +18,12 @@
 
 package accord.local;
 
+import javax.annotation.Nullable;
+
+import accord.api.Agent;
 import accord.api.Key;
 import accord.impl.SafeState;
 import accord.primitives.TxnId;
-
-import static accord.local.CommandsForKey.InternalStatus.HISTORICAL;
 
 public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
 {
@@ -40,51 +41,58 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
         return key;
     }
 
-    CommandsForKey update(SafeCommandStore safeStore, Command prevCommand, Command nextCommand)
+    void updatePruned(SafeCommandStore safeStore, Command nextCommand, NotifySink notifySink)
     {
         CommandsForKey prevCfk = current();
-        CommandsForKey nextCfk = prevCfk.update(prevCommand, nextCommand);
-        if (nextCfk == prevCfk)
-            return prevCfk;
-        set(nextCfk.notifyAndUpdatePending(safeStore, nextCommand, prevCfk));
-        return nextCfk;
+        update(safeStore, nextCommand, prevCfk, prevCfk.updatePruned(nextCommand), notifySink);
     }
 
-    CommandsForKey update(SafeCommandStore safeStore, Command nextCommand)
+    public void update(SafeCommandStore safeStore, Command nextCommand)
     {
         CommandsForKey prevCfk = current();
-        CommandsForKey nextCfk = prevCfk.update(null, nextCommand, false);
-        if (nextCfk == prevCfk)
-            return prevCfk;
-        set(nextCfk.notifyAndUpdatePending(safeStore, nextCommand, prevCfk));
-        return nextCfk;
+        update(safeStore, nextCommand, prevCfk, prevCfk.update(nextCommand));
     }
 
-    CommandsForKey registerUnmanaged(SafeCommandStore safeStore, SafeCommand unmanaged)
+    private void update(SafeCommandStore safeStore, @Nullable Command command, CommandsForKey prevCfk, CommandsForKeyUpdate updateCfk)
     {
-        CommandsForKey prev = current();
-        CommandsForKey next = prev.registerUnmanaged(safeStore, unmanaged);
-        if (next != prev)
-            set(next.notifyAndUpdatePending(safeStore, prev));
-        return next;
+        update(safeStore, command, prevCfk, updateCfk, DefaultNotifySink.INSTANCE);
     }
 
-    public CommandsForKey registerHistorical(SafeCommandStore safeStore, TxnId txnId)
+    private void update(SafeCommandStore safeStore, @Nullable Command command, CommandsForKey prevCfk, CommandsForKeyUpdate updateCfk, NotifySink notifySink)
     {
-        CommandsForKey prev = current();
-        CommandsForKey next = prev.registerHistorical(txnId);
-        if (next != prev)
-            set(next.notifyAndUpdatePending(safeStore, txnId, HISTORICAL, txnId, prev));
-        return next;
+        if (updateCfk == prevCfk)
+            return;
+
+        CommandsForKey nextCfk = updateCfk.cfk();
+        if (nextCfk != prevCfk)
+        {
+            if (command != null && command.hasBeen(Status.Applied))
+            {
+                Agent agent = safeStore.agent();
+                nextCfk = nextCfk.maybePrune(agent.cfkPruneInterval(), agent.cfkHlcPruneDelta());
+            }
+            set(nextCfk);
+        }
+
+        updateCfk.notify(safeStore, prevCfk, command, notifySink);
     }
 
-    public CommandsForKey updateRedundantBefore(SafeCommandStore safeStore, RedundantBefore.Entry redundantBefore)
+    void registerUnmanaged(SafeCommandStore safeStore, SafeCommand unmanaged)
     {
-        CommandsForKey prev = current();
-        CommandsForKey next = prev.withRedundantBefore(redundantBefore);
-        if (next != prev)
-            set(next.notifyAndUpdatePending(safeStore, prev));
-        return next;
+        CommandsForKey prevCfk = current();
+        update(safeStore, null, prevCfk, prevCfk.registerUnmanaged(safeStore, unmanaged));
+    }
+
+    public void registerHistorical(SafeCommandStore safeStore, TxnId txnId)
+    {
+        CommandsForKey prevCfk = current();
+        update(safeStore, null, prevCfk, prevCfk.registerHistorical(txnId));
+    }
+
+    public void updateRedundantBefore(SafeCommandStore safeStore, RedundantBefore.Entry redundantBefore)
+    {
+        CommandsForKey prevCfk = current();
+        update(safeStore, null, prevCfk, prevCfk.withRedundantBeforeAtLeast(redundantBefore));
     }
 
     public void initialize()

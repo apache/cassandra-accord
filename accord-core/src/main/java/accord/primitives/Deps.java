@@ -18,12 +18,10 @@
 
 package accord.primitives;
 
-import accord.api.Key;
+import accord.local.CommandsForKey;
 import accord.utils.Invariants;
 
 import java.util.AbstractList;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -35,7 +33,7 @@ import javax.annotation.Nullable;
  */
 public class Deps
 {
-    public static final Deps NONE = new Deps(KeyDeps.NONE, RangeDeps.NONE);
+    public static final Deps NONE = new Deps(KeyDeps.NONE, RangeDeps.NONE, KeyDeps.NONE);
 
     public static Builder builder()
     {
@@ -47,6 +45,7 @@ public class Deps
     {
         final KeyDeps.Builder keyBuilder;
         RangeDeps.Builder rangeBuilder;
+        KeyDeps.Builder directKeyBuilder;
 
         AbstractBuilder()
         {
@@ -55,12 +54,23 @@ public class Deps
 
         public AbstractBuilder<T> add(Seekable keyOrRange, TxnId txnId)
         {
-            switch (keyOrRange.domain())
+            Invariants.checkArgument(keyOrRange.domain() == txnId.domain(), keyOrRange + " is not same domain as " + txnId);
+            switch (txnId.domain())
             {
                 default: throw new AssertionError();
                 case Key:
-                    keyBuilder.add(keyOrRange.asKey(), txnId);
+                    if (CommandsForKey.managesExecution(txnId))
+                    {
+                        keyBuilder.add(keyOrRange.asKey(), txnId);
+                    }
+                    else
+                    {
+                        if (directKeyBuilder == null)
+                            directKeyBuilder = KeyDeps.builder();
+                        directKeyBuilder.add(keyOrRange.asKey(), txnId);
+                    }
                     break;
+
                 case Range:
                     if (rangeBuilder == null)
                         rangeBuilder = RangeDeps.builder();
@@ -78,6 +88,8 @@ public class Deps
             keyBuilder.close();
             if (rangeBuilder != null)
                 rangeBuilder.close();
+            if (directKeyBuilder != null)
+                directKeyBuilder.close();
         }
     }
 
@@ -91,37 +103,67 @@ public class Deps
         @Override
         public Deps build()
         {
-            return new Deps(keyBuilder.build(), rangeBuilder == null ? RangeDeps.NONE : rangeBuilder.build());
+            return new Deps(keyBuilder.build(),
+                            rangeBuilder == null ? RangeDeps.NONE : rangeBuilder.build(),
+                            directKeyBuilder == null ? KeyDeps.NONE : directKeyBuilder.build());
         }
     }
 
+    /**
+     * key dependencies where the execution will be managed by {@link CommandsForKey}, so {@link accord.local.Command.WaitingOn} will wait only on the Key.
+     * This is essentially plain reads and writes.
+     *
+     * i.e. where {@code CommandsForKey.managesExecution}
+     */
     public final KeyDeps keyDeps;
+
     public final RangeDeps rangeDeps;
 
-    public Deps(KeyDeps keyDeps, RangeDeps rangeDeps)
+    /**
+     * key dependencies where the execution will be managed by direct dependency relationships, so {@link accord.local.Command.WaitingOn} will wait on the {@code TxnId} directly
+     * i.e. where {@code !CommandsForKey.managesExecution}
+     */
+    public final KeyDeps directKeyDeps;
+
+    public Deps(KeyDeps keyDeps, RangeDeps rangeDeps, KeyDeps directKeyDeps)
     {
         this.keyDeps = keyDeps;
+        this.directKeyDeps = directKeyDeps;
         this.rangeDeps = rangeDeps;
     }
 
     public boolean contains(TxnId txnId)
     {
-        return keyDeps.contains(txnId) || rangeDeps.contains(txnId);
+        Routable.Domain domain = txnId.domain();
+        if (domain.isRange())
+            return rangeDeps.contains(txnId);
+
+        if (CommandsForKey.managesExecution(txnId))
+            return keyDeps.contains(txnId);
+
+        return directKeyDeps.contains(txnId);
     }
 
     public boolean intersects(TxnId txnId, Ranges ranges)
     {
-        return keyDeps.intersects(txnId, ranges) || rangeDeps.intersects(txnId, ranges);
+        Routable.Domain domain = txnId.domain();
+        if (domain.isRange())
+            return rangeDeps.intersects(txnId, ranges);
+
+        if (CommandsForKey.managesExecution(txnId))
+            return keyDeps.intersects(txnId, ranges);
+
+        return directKeyDeps.intersects(txnId, ranges);
     }
 
     public Deps with(Deps that)
     {
-        return new Deps(this.keyDeps.with(that.keyDeps), this.rangeDeps.with(that.rangeDeps));
+        return new Deps(this.keyDeps.with(that.keyDeps), this.rangeDeps.with(that.rangeDeps), this.directKeyDeps.with(that.directKeyDeps));
     }
 
     public Deps without(Predicate<TxnId> remove)
     {
-        return new Deps(keyDeps.without(remove), rangeDeps.without(remove));
+        return new Deps(keyDeps.without(remove), rangeDeps.without(remove), directKeyDeps.without(remove));
     }
 
     public PartialDeps slice(Ranges covering)
@@ -131,109 +173,50 @@ public class Deps
 
     public PartialDeps slice(Ranges covering, Ranges slice)
     {
-        return new PartialDeps(covering, keyDeps.slice(slice), rangeDeps.slice(slice));
+        return new PartialDeps(covering, keyDeps.slice(slice), rangeDeps.slice(slice), directKeyDeps.slice(slice));
     }
 
     public boolean isEmpty()
     {
-        return keyDeps.isEmpty() && rangeDeps.isEmpty();
+        return keyDeps.isEmpty() && rangeDeps.isEmpty() && directKeyDeps.isEmpty();
     }
 
     public int txnIdCount()
     {
-        return keyDeps.txnIdCount() + rangeDeps.txnIdCount();
-    }
-
-    public int indexOf(TxnId txnId)
-    {
-        switch (txnId.domain())
-        {
-            default: throw new AssertionError("Unknown domain: " + txnId.domain());
-            case Key:
-                return Arrays.binarySearch(keyDeps.txnIds, txnId);
-            case Range:
-                int i = Arrays.binarySearch(rangeDeps.txnIds, txnId);
-                if (i < 0) i -= keyDeps.txnIdCount();
-                else i += keyDeps.txnIdCount();
-                return i;
-        }
+        return keyDeps.txnIdCount() + rangeDeps.txnIdCount() + directKeyDeps.txnIdCount();
     }
 
     public TxnId txnId(int i)
     {
-        return i < keyDeps.txnIdCount()
-                ? keyDeps.txnId(i)
-                : rangeDeps.txnId(i - keyDeps.txnIdCount());
-    }
+        {
+            int keyDepsLimit = keyDeps.txnIdCount();
+            if (i < keyDepsLimit)
+                return keyDeps.txnId(i);
+            i -= keyDepsLimit;
+        }
 
-    public TxnId minTxnId()
-    {
-        if (keyDeps.isEmpty() && rangeDeps.isEmpty())
-            throw new IndexOutOfBoundsException();
-        if (keyDeps.isEmpty()) return rangeDeps.txnId(0);
-        if (rangeDeps.isEmpty()) return keyDeps.txnId(0);
-        return TxnId.min(keyDeps.txnId(0), rangeDeps.txnId(0));
+        {
+            int directKeyDepsLimit = directKeyDeps.txnIdCount();
+            if (i < directKeyDepsLimit)
+                return directKeyDeps.txnId(i);
+            i -= directKeyDepsLimit;
+        }
+
+        return rangeDeps.txnId(i);
     }
 
     public List<TxnId> txnIds()
     {
-        final int txnIdCount = txnIdCount();
-        final int keyDepsCount = keyDeps.txnIdCount();
-        return new AbstractList<TxnId>() {
+        return new AbstractList<>()
+        {
             @Override
-            public TxnId get(int index)
-            {
-                return index < keyDepsCount
-                        ? keyDeps.txnId(index)
-                        : rangeDeps.txnId(index - keyDepsCount);
-            }
-
+            public TxnId get(int index) { return txnId(index); }
             @Override
             public int size()
             {
-                return txnIdCount;
+                return txnIdCount();
             }
         };
-    }
-
-    public List<TxnId> computeTxnIds(Seekable keyOrRange)
-    {
-        List<TxnId> keyIds, rangeIds;
-        switch (keyOrRange.domain())
-        {
-            default: throw new AssertionError();
-            case Key:
-            {
-                Key key = keyOrRange.asKey();
-                keyIds = keyDeps.txnIds(key);
-                rangeIds = rangeDeps.computeTxnIds(key);
-                break;
-            }
-            case Range:
-            {
-                Range range = keyOrRange.asRange();
-                keyIds = keyDeps.txnIds(range);
-                rangeIds = rangeDeps.computeTxnIds(range);
-            }
-        }
-
-        if (rangeIds.isEmpty()) return keyIds;
-        if (keyIds.isEmpty()) return rangeIds;
-
-        List<TxnId> output = new ArrayList<>(keyIds.size() + rangeIds.size());
-        int ki = 0, ri = 0;
-        while (ki < keyIds.size() && ri < rangeIds.size())
-        {
-            int c = keyIds.get(ki).compareTo(rangeIds.get(ri));
-            Invariants.checkState(c != 0);
-            if (c < 0) output.add(keyIds.get(ki++));
-            else output.add(rangeIds.get(ri++));
-        }
-        while (ki < keyIds.size())
-            output.add(keyIds.get(ki++));
-        while (ri < rangeIds.size())
-            output.add(rangeIds.get(ri++));
-        return output;
     }
 
     public Participants<?> participants(TxnId txnId)
@@ -241,7 +224,7 @@ public class Deps
         switch (txnId.domain())
         {
             default:    throw new AssertionError();
-            case Key:   return keyDeps.participants(txnId);
+            case Key:   return CommandsForKey.managesExecution(txnId) ? keyDeps.participants(txnId) : directKeyDeps.participants(txnId);
             case Range: return rangeDeps.participants(txnId);
         }
     }
@@ -250,19 +233,21 @@ public class Deps
     public void forEachUniqueTxnId(Ranges ranges, Consumer<TxnId> forEach)
     {
         keyDeps.forEachUniqueTxnId(ranges, forEach);
+        directKeyDeps.forEachUniqueTxnId(ranges, forEach);
         rangeDeps.forEachUniqueTxnId(ranges, forEach);
     }
 
     public static <T> Deps merge(List<T> list, Function<T, Deps> getter)
     {
         return new Deps(KeyDeps.merge(list, getter, deps -> deps.keyDeps),
-                        RangeDeps.merge(list, getter, deps -> deps.rangeDeps));
+                        RangeDeps.merge(list, getter, deps -> deps.rangeDeps),
+                        KeyDeps.merge(list, getter, deps -> deps.directKeyDeps));
     }
 
     @Override
     public String toString()
     {
-        return keyDeps.toString() + ", " + rangeDeps.toString();
+        return keyDeps + ", " + rangeDeps + ", " + directKeyDeps;
     }
 
     @Override
@@ -273,14 +258,15 @@ public class Deps
 
     public boolean equals(Deps that)
     {
-        return that != null && this.keyDeps.equals(that.keyDeps) && this.rangeDeps.equals(that.rangeDeps);
+        return that != null && this.keyDeps.equals(that.keyDeps) && this.rangeDeps.equals(that.rangeDeps) && this.directKeyDeps.equals(that.directKeyDeps);
     }
 
     public @Nullable TxnId maxTxnId()
     {
         TxnId maxKeyDep = keyDeps.isEmpty() ? null : keyDeps.txnId(keyDeps.txnIdCount() - 1);
         TxnId maxRangeDep = rangeDeps.isEmpty() ? null : rangeDeps.txnId(rangeDeps.txnIdCount() - 1);
-        return TxnId.nonNullOrMax(maxKeyDep, maxRangeDep);
+        TxnId maxDirectKeyDep = directKeyDeps.isEmpty() ? null : directKeyDeps.txnId(directKeyDeps.txnIdCount() - 1);
+        return TxnId.nonNullOrMax(TxnId.nonNullOrMax(maxKeyDep, maxRangeDep), maxDirectKeyDep);
     }
 
     @Override

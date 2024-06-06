@@ -159,7 +159,7 @@ public enum Status
 
         public Known atLeast(Known that)
         {
-            // TODO (expected): validate no inconsistent combos
+            Invariants.checkArgument(compatibleWith(that));
             KnownRoute maxRoute = route.atLeast(that.route);
             Definition maxDefinition = definition.atLeast(that.definition);
             KnownExecuteAt maxExecuteAt = executeAt.atLeast(that.executeAt);
@@ -168,8 +168,25 @@ public enum Status
             return selectOrCreate(that, maxRoute, maxDefinition, maxExecuteAt, maxDeps, maxOutcome);
         }
 
+        public Known min(Known that)
+        {
+            Invariants.checkArgument(compatibleWith(that));
+            KnownRoute minRoute = min(route, that.route);
+            Definition minDefinition = min(definition, that.definition);
+            KnownExecuteAt minExecuteAt = min(executeAt, that.executeAt);
+            KnownDeps minDeps = min(deps, that.deps);
+            Outcome minOutcome = min(outcome, that.outcome);
+            return selectOrCreate(that, minRoute, minDefinition, minExecuteAt, minDeps, minOutcome);
+        }
+
+        static <E extends Enum<E>> E min(E a, E b)
+        {
+            return a.compareTo(b) <= 0 ? a : b;
+        }
+
         public Known reduce(Known that)
         {
+            Invariants.checkArgument(compatibleWith(that));
             KnownRoute maxRoute = route.reduce(that.route);
             Definition minDefinition = definition.reduce(that.definition);
             KnownExecuteAt maxExecuteAt = executeAt.reduce(that.executeAt);
@@ -186,6 +203,13 @@ public enum Status
             KnownDeps minDeps = deps.validForAll();
             Outcome maxOutcome = outcome.validForAll();
             return selectOrCreate(maxRoute, minDefinition, maxExecuteAt, minDeps, maxOutcome);
+        }
+
+        boolean compatibleWith(Known that)
+        {
+            return executeAt.compatibleWith(that.executeAt)
+                   && deps.compatibleWith(that.deps)
+                   && outcome.compatibleWith(that.outcome);
         }
 
         @Nonnull
@@ -320,6 +344,10 @@ public enum Status
             return definition.isKnown();
         }
 
+        // TODO (expected): this isn't exactly correct, though it is probably fine:
+        //  outcome.isDecided includes Erased and Invalidated; Invalidated is definitely fine because we only use this to infer invalidation
+        //  whereas for Erased, we are inaccurate in the safer direction (saying it is Decided to avoid inferring Invalidated when we don't know),
+        //  but it would be good to tidy this up - either by clarifying the semantics or the naming
         public boolean hasDefinitionBeenKnown()
         {
             return definition.isKnown() || outcome.isDecided();
@@ -534,6 +562,15 @@ public enum Status
         {
             return this == ExecuteAtUnknown;
         }
+
+        public boolean compatibleWith(KnownExecuteAt that)
+        {
+            if (this == that) return true;
+            int c = compareTo(that);
+            KnownExecuteAt max = c >= 0 ? this : that;
+            KnownExecuteAt min = c <= 0 ? this : that;
+            return max != NoExecuteAt || min != ExecuteAtKnown;
+        }
     }
 
     public enum KnownDeps
@@ -633,6 +670,15 @@ public enum Status
         {
             return this == NoDeps ? NoDeps : DepsUnknown;
         }
+
+        public boolean compatibleWith(KnownDeps that)
+        {
+            if (this == that) return true;
+            int c = compareTo(that);
+            KnownDeps max = c >= 0 ? this : that;
+            KnownDeps min = c <= 0 ? this : that;
+            return max != NoDeps || (min != DepsCommitted && min != DepsKnown);
+        }
     }
 
     /**
@@ -646,7 +692,7 @@ public enum Status
         DefinitionUnknown,
 
         /**
-         * The definition was known, but has been erased
+         * The definition was perhaps known previously, but has since been erased
          */
         DefinitionErased,
 
@@ -785,6 +831,15 @@ public enum Status
         public boolean isDecided()
         {
             return this != Unknown;
+        }
+
+        public boolean compatibleWith(Outcome that)
+        {
+            if (this == that) return true;
+            int c = compareTo(that);
+            Outcome max = c >= 0 ? this : that;
+            Outcome min = c <= 0 ? this : that;
+            return max != Invalidated || (min != Apply && min != WasApply);
         }
     }
 

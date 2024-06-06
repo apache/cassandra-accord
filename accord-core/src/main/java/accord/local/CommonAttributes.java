@@ -34,6 +34,7 @@ public interface CommonAttributes
     Route<?> route();
     PartialTxn partialTxn();
     @Nullable Seekables<?, ?> additionalKeysOrRanges();
+    // TODO (expected): we don't need PartialDeps, only
     PartialDeps partialDeps();
     Listeners.Immutable durableListeners();
 

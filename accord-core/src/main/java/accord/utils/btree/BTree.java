@@ -501,6 +501,23 @@ public class BTree
         }
     }
 
+    public static <Compare, Existing extends Compare, Insert extends Compare> Object[] updateExisting(Object[] toUpdate,
+                                                                                              Insert insert,
+                                                                                              int index,
+                                                                                              UpdateFunction<Insert, Existing> updateF)
+    {
+        Existing prev = (Existing) toUpdate[index];
+        Object next = updateF.merge(prev, insert);
+        if (next == prev)
+            return toUpdate;
+
+        Object[] merged = new Object[toUpdate.length];
+        System.arraycopy(toUpdate, 0, merged, 0, index);
+        merged[index] = next;
+        System.arraycopy(toUpdate, index + 1, merged, index + 1, toUpdate.length - (index + 1));
+        return merged;
+    }
+
     public static void reverseInSitu(Object[] tree)
     {
         reverseInSitu(tree, height(tree), true);

@@ -419,6 +419,19 @@ public class SimpleBitSet
         }
     }
 
+    public void intersect(SimpleBitSet with)
+    {
+        if (with.size() != size())
+            throw new IllegalArgumentException("BitSets must be the same size");
+
+        for (int i = 0 ; i < bits.length && count > 0 ; ++i)
+        {
+            long oldBits = bits[i];
+            long newBits = oldBits & with.bits[i];
+            count -= Long.bitCount(oldBits) - Long.bitCount(newBits);
+        }
+    }
+
     private int indexOf(int i)
     {
         int index = i >>> 6;

@@ -28,13 +28,16 @@ import static java.lang.String.format;
 
 public class Invariants
 {
-    // TODO (now): configure by system parameter and turn off by default
-    private static final boolean PARANOID = true;
-    private static final boolean DEBUG = true;
+    private static final int PARANOIA = Integer.parseInt(System.getProperty("accord.paranoia", "0"));
+    private static final boolean DEBUG = System.getProperty("accord.debug", "false").equals("true");
 
     public static boolean isParanoid()
     {
-        return PARANOID;
+        return PARANOIA > 0;
+    }
+    public static int paranoia()
+    {
+        return PARANOIA;
     }
     public static boolean debug()
     {
@@ -92,7 +95,7 @@ public class Invariants
 
     public static void paranoid(boolean condition)
     {
-        if (PARANOID && !condition)
+        if (isParanoid() && !condition)
             illegalState();
     }
 
@@ -324,6 +327,14 @@ public class Invariants
         return param;
     }
 
+    @Inline
+    public static int checkNonNegative(int index)
+    {
+        if (index < 0)
+            throw illegalState("Index %d expected to be non-negative", index);
+        return index;
+    }
+
     public static <O> O cast(Object o, Class<O> klass)
     {
         try
@@ -348,4 +359,5 @@ public class Invariants
         if (endOffset > realLength)
             throw new IndexOutOfBoundsException(String.format("Offset %d, length = %d; real length was %d", offset, length, realLength));
     }
+
 }

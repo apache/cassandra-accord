@@ -79,6 +79,28 @@ public class SortedArrays
         {
             return test.array.length == SortedArrays.foldlIntersection(Comparable::compareTo, array, 0, array.length, test.array, 0, test.array.length, (t, p, v, li, ri) -> v + 1, 0, 0, test.array.length);
         }
+
+        public static class Builder<T extends Comparable<? super T>>
+        {
+            final T[] array;
+            int count;
+
+            public Builder(T[] array)
+            {
+                this.array = array;
+            }
+
+            public void add(T value)
+            {
+                array[count++] = value;
+            }
+
+            public SortedArrayList<T> build()
+            {
+                Invariants.checkState(count == array.length);
+                return new SortedArrayList<>(array);
+            }
+        }
     }
 
     public static class ExtendedSortedArrayList<T extends Comparable<? super T>> extends SortedArrayList<T>

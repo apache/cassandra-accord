@@ -111,7 +111,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            PartialDeps expectedDeps = new PartialDeps(Ranges.of(range(0, 12)), KeyDeps.NONE, RangeDeps.NONE);
+            PartialDeps expectedDeps = new PartialDeps(Ranges.of(range(0, 12)), KeyDeps.NONE, RangeDeps.NONE, KeyDeps.NONE);
             Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
@@ -206,7 +206,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID3, messageSink.responses.get(0).to);
-            PartialDeps expectedDeps = new PartialDeps(Ranges.of(range(0, 12)), KeyDeps.NONE, RangeDeps.NONE);
+            PartialDeps expectedDeps = new PartialDeps(Ranges.of(range(0, 12)), KeyDeps.NONE, RangeDeps.NONE, KeyDeps.NONE);
             Timestamp expectedTs = Timestamp.fromValues(1, 110, ID1).withExtraFlags(txnId2.flags());
             Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId2, expectedTs, expectedDeps),
                                     messageSink.responses.get(0).payload);
@@ -238,7 +238,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            PartialDeps expectedDeps = new PartialDeps(Ranges.of(range(0, 12)), KeyDeps.NONE, RangeDeps.NONE);
+            PartialDeps expectedDeps = new PartialDeps(Ranges.of(range(0, 12)), KeyDeps.NONE, RangeDeps.NONE, KeyDeps.NONE);
             Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, txnId, expectedDeps),
                                     messageSink.responses.get(0).payload);
         }
@@ -280,7 +280,7 @@ public class PreAcceptTest
 
             messageSink.assertHistorySizes(0, 1);
             Assertions.assertEquals(ID2, messageSink.responses.get(0).to);
-            PartialDeps expectedDeps = new PartialDeps(Ranges.of(range(0, 12)), KeyDeps.NONE, RangeDeps.NONE);
+            PartialDeps expectedDeps = new PartialDeps(Ranges.of(range(0, 12)), KeyDeps.NONE, RangeDeps.NONE, KeyDeps.NONE);
             Assertions.assertEquals(new PreAccept.PreAcceptOk(txnId, Timestamp.fromValues(2, 110, ID1), expectedDeps),
                                     messageSink.responses.get(0).payload);
         }

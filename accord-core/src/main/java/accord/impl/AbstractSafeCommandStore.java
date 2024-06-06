@@ -160,15 +160,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
         return context.isSubsetOf(this.context);
     }
 
-    protected abstract void invalidateSafeState();
-
     public void postExecute()
     {
-    }
-
-    public void complete()
-    {
-        postExecute();
-        invalidateSafeState();
     }
 }

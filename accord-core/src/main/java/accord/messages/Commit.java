@@ -161,6 +161,7 @@ public class Commit extends TxnRequest<CommitOrReadNack>
 
     public static void commitMinimal(Node node, Topologies coordinateEpochOnly, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, Deps unstableDeps, Callback<ReadReply> callback)
     {
+        Invariants.checkArgument(coordinateEpochOnly.size() == 1);
         // we want to send to everyone, and we want to include all of the relevant data, but we stabilise on the coordination epoch replica responses
         Topology coordinates = coordinateEpochOnly.forEpoch(txnId.epoch());
         Topologies all = coordinateEpochOnly;

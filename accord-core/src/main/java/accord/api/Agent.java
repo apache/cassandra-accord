@@ -74,6 +74,10 @@ public interface Agent extends UncaughtExceptionListener
      */
     long preAcceptTimeout();
 
+    long cfkHlcPruneDelta();
+
+    int cfkPruneInterval();
+
     Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges);
 
     default EventsListener metricsEventsListener()

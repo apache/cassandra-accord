@@ -36,5 +36,4 @@ public interface Update
     Write apply(Timestamp executeAt, @Nullable Data data);
     Update slice(Ranges ranges);
     Update merge(Update other);
-    default boolean isEqualOrFuller(Update other) { return true; }
 }

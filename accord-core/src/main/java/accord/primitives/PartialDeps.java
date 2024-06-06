@@ -22,7 +22,7 @@ import accord.utils.Invariants;
 
 public class PartialDeps extends Deps
 {
-    public static final PartialDeps NONE = new PartialDeps(Ranges.EMPTY, KeyDeps.NONE, RangeDeps.NONE);
+    public static final PartialDeps NONE = new PartialDeps(Ranges.EMPTY, KeyDeps.NONE, RangeDeps.NONE, KeyDeps.NONE);
 
     public static Builder builder(Ranges covering)
     {
@@ -39,7 +39,10 @@ public class PartialDeps extends Deps
         @Override
         public PartialDeps build()
         {
-            return new PartialDeps(covering, keyBuilder.build(), rangeBuilder == null ? RangeDeps.NONE : rangeBuilder.build());
+            return new PartialDeps(covering,
+                                   keyBuilder.build(),
+                                   rangeBuilder == null ? RangeDeps.NONE : rangeBuilder.build(),
+                                   directKeyBuilder == null ? KeyDeps.NONE : directKeyBuilder.build());
         }
     }
 
@@ -49,25 +52,18 @@ public class PartialDeps extends Deps
     //    where the store has some ranges that we participate in, and some we do not; we will not correctly construct covering in some cases
     public final Ranges covering;
 
-    public PartialDeps(Ranges covering, KeyDeps keyDeps, RangeDeps rangeDeps)
+    public PartialDeps(Ranges covering, KeyDeps keyDeps, RangeDeps rangeDeps, KeyDeps directKeyDeps)
     {
-        super(keyDeps, rangeDeps);
+        super(keyDeps, rangeDeps, directKeyDeps);
         this.covering = covering;
         Invariants.checkState(covering.containsAll(keyDeps.keys));
+        Invariants.checkState(covering.containsAll(directKeyDeps.keys));
         Invariants.checkState(rangeDeps.isCoveredBy(covering));
     }
 
     public boolean covers(Participants<?> participants)
     {
         return covering.containsAll(participants);
-    }
-
-    public boolean isEqualOrFuller(PartialDeps that)
-    {
-        // TODO (required): this is likely not correct: could have all txnIds but be missing some txnId<->key relations
-        return covering.containsAll(that.covering)
-            && keyDeps.txnIds().containsAll(that.keyDeps.txnIds())
-            && rangeDeps.txnIds().containsAll(that.rangeDeps.txnIds());
     }
 
     public Deps with(Deps that)
@@ -79,17 +75,18 @@ public class PartialDeps extends Deps
 
     public PartialDeps with(PartialDeps that)
     {
-        Invariants.checkArgument((this.rangeDeps == null) == (that.rangeDeps == null));
         return new PartialDeps(that.covering.with(this.covering),
                 this.keyDeps.with(that.keyDeps),
-                this.rangeDeps == null ? null : this.rangeDeps.with(that.rangeDeps));
+                this.rangeDeps.with(that.rangeDeps),
+                this.directKeyDeps.with(that.directKeyDeps)
+        );
     }
 
     public Deps reconstitute(FullRoute<?> route)
     {
         if (!covers(route.participants()))
             throw new IllegalArgumentException();
-        return new Deps(keyDeps, rangeDeps);
+        return new Deps(keyDeps, rangeDeps, directKeyDeps);
     }
 
     // covering might cover a wider set of ranges, some of which may have no involved keys
@@ -101,7 +98,7 @@ public class PartialDeps extends Deps
         if (covers(covering))
             return this;
 
-        return new PartialDeps(covering, keyDeps, rangeDeps);
+        return new PartialDeps(covering, keyDeps, rangeDeps, directKeyDeps);
     }
 
     @Override
