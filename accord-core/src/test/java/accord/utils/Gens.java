@@ -47,6 +47,11 @@ public class Gens {
     private Gens() {
     }
 
+    public static <T> Gen<T> flatten(Gen<Gen<T>> gen)
+    {
+        return rs -> gen.next(rs).next(rs);
+    }
+
     public static <T> Gen<T> constant(T constant)
     {
         return ignore -> constant;

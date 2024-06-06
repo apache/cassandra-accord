@@ -109,6 +109,8 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
             this.shardAppliedOrInvalidatedBefore = shardAppliedOrInvalidatedBefore;
             this.bootstrappedAt = bootstrappedAt;
             this.staleUntilAtLeast = staleUntilAtLeast;
+            Invariants.checkArgument(locallyAppliedOrInvalidatedBefore.equals(TxnId.NONE) || locallyAppliedOrInvalidatedBefore.domain().isRange());
+            Invariants.checkArgument(shardAppliedOrInvalidatedBefore.equals(TxnId.NONE) || shardAppliedOrInvalidatedBefore.domain().isRange());
         }
 
         public static Entry reduce(Entry a, Entry b)
@@ -460,9 +462,9 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         return staleRanges;
     }
 
-    static class Builder extends AbstractIntervalBuilder<RoutingKey, Entry, RedundantBefore>
+    public static class Builder extends AbstractIntervalBuilder<RoutingKey, Entry, RedundantBefore>
     {
-        protected Builder(boolean inclusiveEnds, int capacity)
+        public Builder(boolean inclusiveEnds, int capacity)
         {
             super(inclusiveEnds, capacity);
         }

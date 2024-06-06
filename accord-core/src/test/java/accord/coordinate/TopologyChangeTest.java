@@ -18,7 +18,6 @@
 
 package accord.coordinate;
 
-import accord.api.Result;
 import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
 import accord.local.Command;
@@ -32,7 +31,6 @@ import accord.utils.EpochFunction;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 import com.google.common.base.Predicates;
-import org.checkerframework.checker.units.qual.K;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 

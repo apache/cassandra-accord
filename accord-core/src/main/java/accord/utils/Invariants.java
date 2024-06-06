@@ -28,14 +28,32 @@ import static java.lang.String.format;
 
 public class Invariants
 {
-    // TODO (now): configure by system parameter and turn off by default
-    private static final boolean PARANOID = true;
-    private static final boolean DEBUG = true;
+    public enum Paranoia
+    {
+        NONE, CONSTANT, LINEAR, SUPERLINEAR, QUADRATIC
+    }
+
+    public enum ParanoiaCostFactor
+    {
+        LOW, HIGH
+    }
+
+    private static final int PARANOIA_COMPUTE = Paranoia.valueOf(System.getProperty("accord.paranoia.cpu", "NONE").toUpperCase()).ordinal();
+    private static final int PARANOIA_MEMORY = Paranoia.valueOf(System.getProperty("accord.paranoia.memory", "NONE").toUpperCase()).ordinal();
+    private static final int PARANOIA_FACTOR = ParanoiaCostFactor.valueOf(System.getProperty("accord.paranoia.costfactor", "LOW").toUpperCase()).ordinal();
+    private static boolean IS_PARANOID = PARANOIA_COMPUTE > 0 || PARANOIA_MEMORY > 0;
+    private static final boolean DEBUG = System.getProperty("accord.debug", "false").equals("true");
 
     public static boolean isParanoid()
     {
-        return PARANOID;
+        return IS_PARANOID;
     }
+
+    public static boolean testParanoia(Paranoia compute, Paranoia memory, ParanoiaCostFactor factor)
+    {
+        return PARANOIA_COMPUTE >= compute.ordinal() && PARANOIA_MEMORY >= memory.ordinal() && PARANOIA_FACTOR >= factor.ordinal();
+    }
+
     public static boolean debug()
     {
         return DEBUG;
@@ -92,7 +110,7 @@ public class Invariants
 
     public static void paranoid(boolean condition)
     {
-        if (PARANOID && !condition)
+        if (isParanoid() && !condition)
             illegalState();
     }
 
@@ -324,6 +342,14 @@ public class Invariants
         return param;
     }
 
+    @Inline
+    public static int checkNonNegative(int index)
+    {
+        if (index < 0)
+            throw illegalState("Index %d expected to be non-negative", index);
+        return index;
+    }
+
     public static <O> O cast(Object o, Class<O> klass)
     {
         try
@@ -333,6 +359,18 @@ public class Invariants
         catch (ClassCastException e)
         {
             throw illegalArgument(format("Unable to cast %s to %s", o, klass.getName()));
+        }
+    }
+
+    public static void checkIndex(int index, int length)
+    {
+        if (!(index >= 0 && index < length))
+        {
+            if (index < 0)
+                throw new IndexOutOfBoundsException("Index " + index + " must not be negative");
+            if (length < 0)
+                throw new IndexOutOfBoundsException("Length " + length + " must not be negative");
+            throw new IndexOutOfBoundsException(String.format("%d must be less than %d", index, length));
         }
     }
 
@@ -348,4 +386,5 @@ public class Invariants
         if (endOffset > realLength)
             throw new IndexOutOfBoundsException(String.format("Offset %d, length = %d; real length was %d", offset, length, realLength));
     }
+
 }

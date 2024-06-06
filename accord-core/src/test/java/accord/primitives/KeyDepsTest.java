@@ -20,6 +20,7 @@ package accord.primitives;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
@@ -38,6 +39,7 @@ import java.util.stream.IntStream;
 
 import accord.impl.IntHashKey.Hash;
 import accord.primitives.KeyDeps.Builder;
+import accord.utils.AccordGens;
 import accord.utils.DefaultRandom;
 import accord.utils.Gen;
 import accord.utils.Gens;
@@ -57,12 +59,43 @@ import accord.local.Node.Id;
 import static accord.utils.Gens.lists;
 import static accord.utils.Property.qt;
 import static accord.utils.Utils.toArray;
+import static org.assertj.core.api.Assertions.assertThat;
 
 // TODO (expected, testing): test Keys with no contents, "without", "with" where TxnId and Keys are the same, but Key -> [TxnId] does not match;
 //  ensure high code coverage
 public class KeyDepsTest
 {
     private static final Logger logger = LoggerFactory.getLogger(KeyDepsTest.class);
+
+    @Test
+    public void testFoldEachKey()
+    {
+        Gen<Gen<Key>> uniqueKeys = Gens.lists(AccordGens.intKeys()).uniqueBestEffort().ofSizeBetween(1, 10).map(l -> Gens.pick(l));
+        Gen<Gen<Key>> keyDistro = rs -> rs.nextBoolean() ? uniqueKeys.next(rs) : AccordGens.intKeys();
+        Gen<Gen<TxnId>> uniqueTxnIds = Gens.lists(AccordGens.txnIds()).uniqueBestEffort().ofSizeBetween(1, 10).map(l -> Gens.pick(l));
+        Gen<Gen<TxnId>> txnIdDistro = rs -> rs.nextBoolean() ? uniqueTxnIds.next(rs) : AccordGens.txnIds();
+        qt().check(rs -> {
+            Gen<KeyDeps> gen = AccordGens.keyDeps(keyDistro.next(rs), txnIdDistro.next(rs));
+            KeyDeps keyDeps = gen.next(rs);
+            Map<TxnId, List<Key>> reverseLookup = new HashMap<>();
+            for (Key key : keyDeps.keys)
+            {
+                for (TxnId id : keyDeps.txnIds(key))
+                    reverseLookup.computeIfAbsent(id, ignore -> new ArrayList<>()).add(key);
+            }
+            for (Key key : keyDeps.keys)
+            {
+                keyDeps.forEach(key.asRange(), null, null, null, (i1, i2, i3, index) -> {
+                    List<Key> expected = reverseLookup.get(keyDeps.txnId(index));
+                    List<Key> matches = keyDeps.foldEachKey(index, null, new ArrayList<>(), (ignore, k, accum) -> {
+                        accum.add(k);
+                        return accum;
+                    });
+                    assertThat(matches).isEqualTo(expected);
+                });
+            }
+        });
+    }
 
     @Test
     public void testRandom()

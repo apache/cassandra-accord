@@ -20,8 +20,8 @@ package accord.impl;
 
 import accord.api.Key;
 import accord.impl.InMemoryCommandStore.GlobalCommandsForKey;
-import accord.local.CommandsForKey;
-import accord.local.SafeCommandsForKey;
+import accord.local.cfk.CommandsForKey;
+import accord.local.cfk.SafeCommandsForKey;
 
 public class InMemorySafeCommandsForKey extends SafeCommandsForKey
 {
@@ -35,7 +35,7 @@ public class InMemorySafeCommandsForKey extends SafeCommandsForKey
     }
 
     @Override
-    public accord.local.CommandsForKey current()
+    public CommandsForKey current()
     {
         return global.value();
     }

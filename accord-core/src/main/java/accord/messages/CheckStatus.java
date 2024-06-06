@@ -157,7 +157,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
         if (!command.has(Known.DefinitionOnly) && Route.isRoute(query) && safeStore.ranges().allAt(txnId.epoch()).contains(Route.castToRoute(query).homeKey()))
             Commands.informHome(safeStore, safeCommand, Route.castToRoute(query));
 
-        InvalidIfNot invalidIfNotAtLeast = invalidIfNot(safeStore, command);
+        InvalidIfNot invalidIfNotAtLeast = invalidIfNot(safeStore, command, command.route());
         boolean isCoordinating = isCoordinating(node, command);
         Durability durability = command.durability();
         Route<?> route = command.route();
@@ -202,11 +202,14 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
         else node.reply(replyTo, replyContext, ok, null);
     }
 
-    private InvalidIfNot invalidIfNot(SafeCommandStore safeStore, Command command)
+    private InvalidIfNot invalidIfNot(SafeCommandStore safeStore, Command command, @Nullable Route<?> route)
     {
         if (command.known().isDecidedToExecute())
             return NotKnownToBeInvalid;
-        return Infer.invalidIfNot(safeStore, txnId, query);
+        InvalidIfNot invalidIfNot = Infer.invalidIfNot(safeStore, txnId, query);
+        if (route != null)
+            invalidIfNot = invalidIfNot.atLeast(Infer.invalidIfNot(safeStore, txnId, route));
+        return invalidIfNot;
     }
 
     public interface CheckStatusReply extends Reply

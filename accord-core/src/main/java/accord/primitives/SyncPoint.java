@@ -28,6 +28,10 @@ import accord.utils.Invariants;
  * expect the whole cluster to process these, and we do not want transaction processing to be held up,
  * so while these are processed much like a transaction, they are invisible to real transactions which
  * may proceed before this is witnessed by the node processing it.
+ *
+ * TODO (required): is this safe for barrier transactions? Since it is invisible to other transactions, it can be recovered
+ *   to execute at its TxnId time, even if a later txn exists. We must either make it visible to other transactions
+ *   for coordination (but not necessarily for execution), or else require that it has an Accept round.
  */
 public class SyncPoint<S extends Seekables<?, ?>>
 {

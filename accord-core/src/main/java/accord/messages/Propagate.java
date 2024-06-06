@@ -138,7 +138,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
         on.mapReduceConsumeLocal(this, route, txnId.epoch(), toEpoch, this);
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
+    @SuppressWarnings({"rawtypes"})
     public static void propagate(Node node, TxnId txnId, long sourceEpoch, WithQuorum withQuorum, Route route, @Nullable Status.Known target, CheckStatus.CheckStatusOkFull full, BiConsumer<Status.Known, Throwable> callback)
     {
         propagate(node, txnId, sourceEpoch, sourceEpoch, withQuorum, route, target, full, callback);

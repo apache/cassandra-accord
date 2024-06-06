@@ -74,6 +74,22 @@ public interface Agent extends UncaughtExceptionListener
      */
     long preAcceptTimeout();
 
+    /**
+     * Controls pruning of CommandsForKey
+     *
+     * The timestamp delta between the prune point and any pruned TxnId. This works primarily to minimise the
+     * chance of encountering a TxnId that precedes prunedBefore.
+     */
+    long cfkHlcPruneDelta();
+
+    /**
+     * Controls pruning of CommandsForKey.
+     *
+     * The number of entries before the candidate prune point that we require before we try to prune.
+     * This only works to reduce the time wasted pruning when there is limited benefit.
+     */
+    int cfkPruneInterval();
+
     Txn emptyTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges);
 
     default EventsListener metricsEventsListener()
