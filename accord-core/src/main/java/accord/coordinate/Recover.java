@@ -194,7 +194,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     private static Recover recover(Node node, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
     {
-        Ballot ballot = new Ballot(node.uniqueNow());
+        Ballot ballot = new Ballot(node.time().uniqueNow());
         return recover(node, ballot, txnId, txn, route, callback, topologies);
     }
 

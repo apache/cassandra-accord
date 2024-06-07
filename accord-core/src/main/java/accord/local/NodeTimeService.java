@@ -31,7 +31,9 @@ public interface NodeTimeService
     long epoch();
 
     /**
-     * Current time in some time unit that may be simulated and not match system time
+     * Current time in some time unit that may be simulated and not match system time.
+     *
+     * Implementations must guarantee that the same timestamp will not be returned more than once.
      */
     long now();
 
@@ -41,6 +43,7 @@ public interface NodeTimeService
      */
     long unix(TimeUnit unit);
 
+    Timestamp uniqueNow();
     Timestamp uniqueNow(Timestamp atLeast);
 
     static ToLongFunction<TimeUnit> unixWrapper(TimeUnit sourceUnit, LongSupplier nowSupplier)

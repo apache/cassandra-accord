@@ -42,13 +42,13 @@ public class NodeTest
             Node node = cluster.get(1);
 
             clock.increment();
-            Timestamp timestamp1 = node.uniqueNow();
-            Timestamp timestamp2 = node.uniqueNow();
+            Timestamp timestamp1 = node.time().uniqueNow();
+            Timestamp timestamp2 = node.time().uniqueNow();
 
             clock.increment();
             clock.increment();
             clock.increment();
-            Timestamp timestamp3 = node.uniqueNow();
+            Timestamp timestamp3 = node.time().uniqueNow();
 
             Assertions.assertEquals(ts(1, 101, 1), timestamp1);
             Assertions.assertEquals(ts(1, 102, 1), timestamp2);
@@ -66,11 +66,11 @@ public class NodeTest
             MockConfigurationService configService = (MockConfigurationService) node.configService();
 
             clock.increment();
-            Timestamp timestamp1 = node.uniqueNow();
+            Timestamp timestamp1 = node.time().uniqueNow();
             Assertions.assertEquals(ts(1, 101, 1), timestamp1);
 
             configService.reportTopology(TopologyUtils.withEpoch(node.topology().current(), 2));
-            Timestamp timestamp2 = node.uniqueNow();
+            Timestamp timestamp2 = node.time().uniqueNow();
             Assertions.assertEquals(ts(2, 102, 1), timestamp2);
         }
     }
@@ -84,16 +84,16 @@ public class NodeTest
             Node node = cluster.get(1);
 
             clock.increment();
-            Timestamp timestamp1 = node.uniqueNow();
+            Timestamp timestamp1 = node.time().uniqueNow();
             Assertions.assertEquals(ts(1, 101, 1), timestamp1);
 
             // atLeast equal to most recent ts, should simply increment
             Assertions.assertEquals(ts(1, 102, 1),
-                                    node.uniqueNow(timestamp1));
+                                    node.time().uniqueNow(timestamp1));
 
             // atLeast greater than most recent ts
             Assertions.assertEquals(ts(1, 111, 1),
-                                    node.uniqueNow(ts(1, 110, 2)));
+                                    node.time().uniqueNow(ts(1, 110, 2)));
         }
     }
 }

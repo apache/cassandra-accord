@@ -67,7 +67,7 @@ import static accord.utils.Invariants.nonNull;
  * TODO (desired, efficiency/clarity): make TopologyManager a Topologies and copy-on-write update to it,
  *  so we can always just take a reference for transactions instead of copying every time (and index into it by the txnId.epoch)
  */
-public class TopologyManager
+public class TopologyManager implements EpochSupplier
 {
     private static final AsyncResult<Void> SUCCESS = AsyncResults.success(null);
 

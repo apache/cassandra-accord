@@ -75,7 +75,7 @@ public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralRe
         Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, executionEpoch);
         PartialDeps deps = calculatePartialDeps(safeStore, txnId, keys, constant(minUnsyncedEpoch), Timestamp.MAX, ranges);
 
-        return new GetEphemeralReadDepsOk(deps, Math.max(safeStore.time().epoch(), node.epoch()));
+        return new GetEphemeralReadDepsOk(deps, Math.max(safeStore.time().epoch(), node.time().epoch()));
     }
 
     @Override

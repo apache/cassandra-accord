@@ -70,7 +70,7 @@ public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMa
     {
         Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, executionEpoch);
         Timestamp maxConflict = safeStore.commandStore().maxConflict(keys.slice(ranges));
-        return new GetMaxConflictOk(maxConflict, Math.max(safeStore.time().epoch(), node.epoch()));
+        return new GetMaxConflictOk(maxConflict, Math.max(safeStore.time().epoch(), node.time().epoch()));
     }
 
     @Override

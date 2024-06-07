@@ -84,7 +84,7 @@ public class Invalidate implements Callback<InvalidateReply>
 
     public static Invalidate invalidate(Node node, TxnId txnId, Unseekables<?> invalidateWith, boolean transitivelyInvokedByPriorInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
-        Ballot ballot = new Ballot(node.uniqueNow());
+        Ballot ballot = new Ballot(node.time().uniqueNow());
         Invalidate invalidate = new Invalidate(node, ballot, txnId, invalidateWith, transitivelyInvokedByPriorInvalidation, callback);
         invalidate.start();
         return invalidate;

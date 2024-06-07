@@ -27,11 +27,13 @@ import java.util.NavigableSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
+import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 import java.util.function.ToLongFunction;
 import javax.annotation.Nonnull;
@@ -97,10 +99,10 @@ import net.nicoulaj.compilecommand.annotations.Inline;
 import static accord.utils.Invariants.illegalState;
 import static java.lang.String.format;
 
-public class Node implements ConfigurationService.Listener, NodeTimeService
+public class Node implements ConfigurationService.Listener, EpochSupplier
 {
     private static final Logger logger = LoggerFactory.getLogger(Node.class);
-
+    
     public static class Id implements Comparable<Id>
     {
         public static final Id NONE = new Id(0);
@@ -152,12 +154,10 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private final LocalRequest.Handler localRequestHandler;
     private final ConfigurationService configService;
     private final TopologyManager topology;
+    private final TimeService timeService;
     private final CommandStores commandStores;
     private final CoordinationAdapter.Factory coordinationAdapters;
 
-    private final LongSupplier nowSupplier;
-    private final ToLongFunction<TimeUnit> nowTimeUnit;
-    private final AtomicReference<Timestamp> now;
     private final Agent agent;
     private final RandomSource random;
     private final LocalConfig localConfig;
@@ -181,13 +181,11 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         this.configService = configService;
         this.coordinationAdapters = coordinationAdapters;
         this.topology = new TopologyManager(topologySorter, id);
-        this.nowSupplier = nowSupplier;
-        this.nowTimeUnit = nowTimeUnit;
-        this.now = new AtomicReference<>(Timestamp.fromValues(topology.epoch(), nowSupplier.getAsLong(), id));
+        this.timeService = new TimeService(nowSupplier, nowTimeUnit);
         this.agent = agent;
         this.random = random;
         this.scheduler = scheduler;
-        this.commandStores = factory.create(this, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this));
+        this.commandStores = factory.create(timeService, agent, dataSupplier.get(), random.fork(), shardDistributor, progressLogFactory.apply(this));
         // TODO review these leak a reference to an object that hasn't finished construction, possibly to other threads
         configService.registerListener(this);
     }
@@ -214,6 +212,11 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         ready.coordination.addCallback(() -> this.topology.onEpochSyncComplete(id, topology.epoch()));
         configService.acknowledgeEpoch(ready, false);
         return ready.metadata;
+    }
+
+    public NodeTimeService time()
+    {
+        return timeService;
     }
 
     public CommandStores commandStores()
@@ -338,39 +341,6 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         commandStores.shutdown();
     }
 
-    public Timestamp uniqueNow()
-    {
-        while (true)
-        {
-            Timestamp cur = now.get();
-            Timestamp next = cur.withNextHlc(nowSupplier.getAsLong())
-                                .withEpochAtLeast(topology.epoch());
-
-            if (now.compareAndSet(cur, next))
-                return next;
-        }
-    }
-
-    @Override
-    public Timestamp uniqueNow(Timestamp atLeast)
-    {
-        Timestamp cur = now.get();
-        if (cur.compareTo(atLeast) < 0)
-        {
-            long topologyEpoch = topology.epoch();
-            if (atLeast.epoch() > topologyEpoch)
-                configService.fetchTopologyForEpoch(atLeast.epoch());
-            now.accumulateAndGet(atLeast, Node::nowAtLeast);
-        }
-        return uniqueNow();
-    }
-
-    @Override
-    public long unix(TimeUnit timeUnit)
-    {
-        return nowTimeUnit.applyAsLong(timeUnit);
-    }
-
     private static Timestamp nowAtLeast(Timestamp current, Timestamp proposed)
     {
         if (current.epoch() >= proposed.epoch() && current.hlc() >= proposed.hlc())
@@ -379,12 +349,6 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return proposed.withEpochAtLeast(proposed.epoch())
                        .withHlcAtLeast(current.hlc())
                        .withNode(current.node);
-    }
-
-    @Override
-    public long now()
-    {
-        return nowSupplier.getAsLong();
     }
 
     public AsyncChain<Void> forEachLocal(PreLoadContext context, Unseekables<?> unseekables, long minEpoch, long maxEpoch, Consumer<SafeCommandStore> forEach)
@@ -561,7 +525,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
      */
     public TxnId nextTxnId(Txn.Kind rw, Domain domain)
     {
-        return new TxnId(uniqueNow(), rw, domain);
+        return new TxnId(timeService.uniqueNow(), rw, domain);
     }
 
     public AsyncResult<Result> coordinate(Txn txn)
@@ -750,7 +714,6 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         return agent;
     }
 
-    @Override
     public Id id()
     {
         return id;
@@ -775,6 +738,88 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public LongSupplier unsafeGetNowSupplier()
     {
-        return nowSupplier;
+        return timeService.nowSupplier;
+    }
+
+    private class TimeService implements NodeTimeService
+    {
+        private final LongSupplier nowSupplier;
+        private final ToLongFunction<TimeUnit> nowTimeUnit;
+        private final AtomicReference<Timestamp> now;
+        private final AtomicLong lastTimestamp;
+
+        public TimeService(LongSupplier nowSupplier, ToLongFunction<TimeUnit> nowTimeUnit)
+        {
+            this.nowSupplier = nowSupplier;
+            this.nowTimeUnit = nowTimeUnit;
+            this.now = new AtomicReference<>(Timestamp.fromValues(topology.epoch(), nowSupplier.getAsLong(), id));
+            this.lastTimestamp = new AtomicLong(0);
+        }
+
+        @Override
+        public Id id()
+        {
+            return id;
+        }
+
+        @Override
+        public long epoch()
+        {
+            return topology.epoch();
+        }
+
+        @Override
+        public long now()
+        {
+            return lastTimestamp.updateAndGet(new LongUnaryOperator()
+            {
+                long now = nowSupplier.getAsLong();
+
+                @Override
+                public long applyAsLong(long prev)
+                {
+                    if (now > prev)
+                        // now is strictly monotonic; return it
+                        return now;
+                    else
+                        // we had a time warp or a collision
+                        return prev + 1;
+                }
+            });
+        }
+
+        @Override
+        public long unix(TimeUnit unit)
+        {
+            return nowTimeUnit.applyAsLong(unit);
+        }
+
+        @Override
+        public Timestamp uniqueNow()
+        {
+            while (true)
+            {
+                Timestamp cur = now.get();
+                Timestamp next = cur.withNextHlc(now())
+                                    .withEpochAtLeast(topology.epoch());
+
+                if (now.compareAndSet(cur, next))
+                    return next;
+            }
+        }
+
+        @Override
+        public Timestamp uniqueNow(Timestamp atLeast)
+        {
+            Timestamp cur = now.get();
+            if (cur.compareTo(atLeast) < 0)
+            {
+                long topologyEpoch = topology.epoch();
+                if (atLeast.epoch() > topologyEpoch)
+                    configService.fetchTopologyForEpoch(atLeast.epoch());
+                now.accumulateAndGet(atLeast, Node::nowAtLeast);
+            }
+            return uniqueNow();
+        }
     }
 }

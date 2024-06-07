@@ -161,7 +161,7 @@ public class CoordinateDurabilityScheduling
     public synchronized void start()
     {
         Invariants.checkState(!stop); // cannot currently restart safely
-        long nowMicros = node.unix(MICROSECONDS);
+        long nowMicros = node.time().unix(MICROSECONDS);
         prevShardSyncTimeMicros = nowMicros;
         setNextGlobalSyncTime(nowMicros);
         scheduled = node.scheduler().recurring(this::run, frequencyMicros, MICROSECONDS);
@@ -187,7 +187,7 @@ public class CoordinateDurabilityScheduling
         if (currentGlobalTopology == null || currentGlobalTopology.size() == 0)
             return;
 
-        long nowMicros = node.unix(MICROSECONDS);
+        long nowMicros = node.time().unix(MICROSECONDS);
         if (nextGlobalSyncTimeMicros <= nowMicros)
         {
             startGlobalSync();
@@ -243,7 +243,7 @@ public class CoordinateDurabilityScheduling
     {
         try
         {
-            long epoch = node.epoch();
+            long epoch = node.time().epoch();
             AsyncChain<AsyncResult<Void>> resultChain = node.withEpoch(epoch, () -> node.commandStores().any().submit(() -> CoordinateGloballyDurable.coordinate(node, epoch)));
             resultChain.begin((success, fail) -> {
                 if (fail != null) logger.trace("Exception initiating coordination of global durability", fail);
