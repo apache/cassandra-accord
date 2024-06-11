@@ -104,14 +104,14 @@ public class SerializerSupport
         Txn emptyTxn = agent.emptyTxn(txnId.kind(), participantRanges);
         Writes writes = emptyTxn.execute(txnId, txnId, null);
         Result results = emptyTxn.result(txnId, txnId, null);
-        Ranges coordinateRanges = rangesForEpoch.coordinates(attrs.txnId());
+        Ranges coordinateRanges = rangesForEpoch.coordinates(txnId);
         attrs.partialTxn(emptyTxn.slice(coordinateRanges, true))
              .partialDeps(Deps.NONE.slice(coordinateRanges));
 
         switch (status.status)
         {
             case NotDefined:
-                return status == SaveStatus.Uninitialised ? Command.NotDefined.uninitialised(attrs.txnId())
+                return status == SaveStatus.Uninitialised ? Command.NotDefined.uninitialised(txnId)
                                                           : Command.NotDefined.notDefined(attrs, promised);
             case PreAccepted:
                 return Command.PreAccepted.preAccepted(attrs, executeAt, promised);
@@ -130,7 +130,7 @@ public class SerializerSupport
                 switch (status)
                 {
                     case Erased:
-                        return Command.Truncated.erased(attrs.txnId(), attrs.durability(), attrs.route());
+                        return Command.Truncated.erased(txnId, attrs.durability(), attrs.route());
                     case TruncatedApplyWithOutcome:
                         return Command.Truncated.truncatedApply(attrs, status, executeAt, writes, results, executesAtLeast);
                     case TruncatedApply:
