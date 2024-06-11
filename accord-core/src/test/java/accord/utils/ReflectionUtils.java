@@ -36,6 +36,22 @@ import accord.primitives.Timestamp;
 
 public class ReflectionUtils
 {
+    /**
+     * Types that should not walk the fields in the type.
+     */
+    private static final Set<Class<?>> NO_RECURSIVE = ImmutableSet.of(String.class,
+                                                                      // numbers store primitives but reflection converts to a boxed value; this will cause a recursive check over the same thing over and over again...
+                                                                      Byte.class,
+                                                                      Character.class,
+                                                                      Short.class,
+                                                                      Integer.class,
+                                                                      Long.class,
+                                                                      Float.class,
+                                                                      Double.class,
+                                                                      // accord primitives
+                                                                      Timestamp.class,
+                                                                      Node.Id.class);
+
     public static String toString(Object o)
     {
         if (o == null) return "null";
@@ -111,19 +127,6 @@ public class ReflectionUtils
         if (startSize == accum.size())
             accum.add(new Difference<>(path, lhs, rhs));
     }
-
-    private static final Set<Class<?>> NO_RECURSIVE = ImmutableSet.of(String.class,
-                                                                      // numbers store primitives but reflection converts to a boxed value; this will cause a recursive check over the same thing over and over again...
-                                                                      Byte.class,
-                                                                      Character.class,
-                                                                      Short.class,
-                                                                      Integer.class,
-                                                                      Long.class,
-                                                                      Float.class,
-                                                                      Double.class,
-                                                                      // accord primitives
-                                                                      Timestamp.class,
-                                                                      Node.Id.class);
     private static boolean checkFields(Class<?> klass)
     {
         return !(klass.isEnum() || NO_RECURSIVE.contains(klass));
