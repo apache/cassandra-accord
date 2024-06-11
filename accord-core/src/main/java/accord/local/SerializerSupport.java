@@ -39,6 +39,7 @@ import accord.messages.PreAccept;
 import accord.messages.Propagate;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
+import accord.primitives.FullRangeRoute;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Ranges;
@@ -93,37 +94,19 @@ public class SerializerSupport
                 .addAll(APPLY_TYPES)
                 .build();
 
-    private static final Set<MessageType> BOOTSTRAP_TYPES = ImmutableSet.of(MessageType.BOOTSTRAP_ATTEMPT_MARK_BOOTSTRAP_COMPLETE,
-                                                                            MessageType.BOOTSTRAP_ATTEMPT_COMPLETE_MARKER);
-
     private static Command localOnly(Agent agent, RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, @Nullable Timestamp executesAtLeast, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
     {
-        Set<MessageType> witnessed = messageProvider.test(BOOTSTRAP_TYPES);
-        Writes writes = null;
-        Result results = null;
-        if (status.hasBeen(Status.PreApplied))
-        {
-            Invariants.checkArgument(witnessed.contains(MessageType.BOOTSTRAP_ATTEMPT_MARK_BOOTSTRAP_COMPLETE), "%s LocalOnly command was missing BOOTSTRAP_ATTEMPT_MARK_BOOTSTRAP_COMPLETE; found %s", status, new LoggedMessageProvider(messageProvider));
-            var marker = messageProvider.bootstrapAttemptMarkBootstrapComplete();
-            Txn emptyTxn = agent.emptyTxn(marker.localSyncId.kind(), marker.ranges);
-            writes = emptyTxn.execute(marker.localSyncId, marker.localSyncId, null);
-            results = emptyTxn.result(marker.localSyncId, marker.localSyncId, null);
-            Ranges coordinateRanges = rangesForEpoch.coordinates(attrs.txnId());
-            attrs.partialTxn(emptyTxn.slice(coordinateRanges, true))
-                 .partialDeps(Deps.NONE.slice(coordinateRanges));
-        }
-        else
-        {
-            Invariants.checkArgument(witnessed.contains(MessageType.BOOTSTRAP_ATTEMPT_COMPLETE_MARKER), "%s LocalOnly command was missing BOOTSTRAP_ATTEMPT_COMPLETE_MARKER; found %s", status, new LoggedMessageProvider(messageProvider));
-            var marker = messageProvider.bootstrapAttemptCompleteMarker();
-            var keys = marker.valid;
-            var route = marker.syncPoint.route();
+        TxnId txnId = attrs.txnId();
+        FullRangeRoute route = (FullRangeRoute) attrs.route();
+        //TODO (correctness): not 100% correct as the ranges was "valid" which can be mutated "after" the sync point... so might actually have less
+        Ranges participantRanges = route.participants().toRanges();
 
-            Txn emptyTxn = agent.emptyTxn(marker.localSyncId.kind(), keys);
-            Ranges coordinateRanges = rangesForEpoch.coordinates(attrs.txnId());
-            attrs.partialTxn(emptyTxn.slice(coordinateRanges, true))
-                 .partialDeps(Deps.NONE.slice(coordinateRanges));
-        }
+        Txn emptyTxn = agent.emptyTxn(txnId.kind(), participantRanges);
+        Writes writes = emptyTxn.execute(txnId, txnId, null);
+        Result results = emptyTxn.result(txnId, txnId, null);
+        Ranges coordinateRanges = rangesForEpoch.coordinates(attrs.txnId());
+        attrs.partialTxn(emptyTxn.slice(coordinateRanges, true))
+             .partialDeps(Deps.NONE.slice(coordinateRanges));
 
         switch (status.status)
         {

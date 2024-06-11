@@ -31,6 +31,9 @@ import java.util.stream.Stream;
 
 import com.google.common.collect.ImmutableSet;
 
+import accord.local.Node;
+import accord.primitives.Timestamp;
+
 public class ReflectionUtils
 {
     public static String toString(Object o)
@@ -109,7 +112,18 @@ public class ReflectionUtils
             accum.add(new Difference<>(path, lhs, rhs));
     }
 
-    private static final Set<Class<?>> NO_RECURSIVE = ImmutableSet.of(String.class);
+    private static final Set<Class<?>> NO_RECURSIVE = ImmutableSet.of(String.class,
+                                                                      // numbers store primitives but reflection converts to a boxed value; this will cause a recursive check over the same thing over and over again...
+                                                                      Byte.class,
+                                                                      Character.class,
+                                                                      Short.class,
+                                                                      Integer.class,
+                                                                      Long.class,
+                                                                      Float.class,
+                                                                      Double.class,
+                                                                      // accord primitives
+                                                                      Timestamp.class,
+                                                                      Node.Id.class);
     private static boolean checkFields(Class<?> klass)
     {
         return !(klass.isEnum() || NO_RECURSIVE.contains(klass));

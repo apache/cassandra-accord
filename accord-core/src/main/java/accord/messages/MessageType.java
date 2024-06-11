@@ -81,9 +81,6 @@ public class MessageType
     public static final MessageType PROPAGATE_APPLY_MSG               = local("PROPAGATE_APPLY_MSG",      true);
     public static final MessageType PROPAGATE_OTHER_MSG               = local("PROPAGATE_OTHER_MSG",      true);
 
-    public static final MessageType BOOTSTRAP_ATTEMPT_COMPLETE_MARKER               = local("BOOTSTRAP_ATTEMPT_COMPLETE_MARKER",      true);
-    public static final MessageType BOOTSTRAP_ATTEMPT_MARK_BOOTSTRAP_COMPLETE       = local("BOOTSTRAP_ATTEMPT_MARK_BOOTSTRAP_COMPLETE", true);
-
 
     /**
      * LOCAL messages are not sent to remote nodes.

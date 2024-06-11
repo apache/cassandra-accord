@@ -78,6 +78,8 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         }
 
         private static final List<Pattern> KNOWN_ISSUES = List.of(field(".partialTxn.keys."),
+                                                                  field(".partialTxn.read.keys."),
+                                                                  field(".partialTxn.read.userReadKeys.keys."),
                                                                   field(".partialTxn.covering."),
                                                                   field(".partialDeps.keyDeps."),
                                                                   field(".partialDeps.rangeDeps."),
