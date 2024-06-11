@@ -86,45 +86,40 @@ class BootstrapLocalTxnTest
                     SyncPoint<Ranges> syncPoint = new SyncPoint<>(globalSyncId, Deps.NONE, ranges, route);
                     Ranges valid = AccordGens.rangesInsideRanges(ranges, (rs2, r) -> rs2.nextInt(1, 4)).next(rs);
                     Invariants.checkArgument(syncPoint.keysOrRanges.containsAll(valid));
-                    store.execute(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.COMMANDS), safe -> {
-                             Commands.createBootstrapCompleteMarkerTransaction(safe, localSyncId, syncPoint, valid);
-                         })
+                    store.execute(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.COMMANDS), safe -> Commands.createBootstrapCompleteMarkerTransaction(safe, localSyncId, syncPoint, valid))
                          .flatMap(ignore -> store.execute(contextFor(localSyncId), safe -> validate.accept(safe.get(localSyncId, route.homeKey()).current())))
-                    .flatMap(ignore -> store.execute(contextFor(localSyncId), safe -> {
-                        if (!ranges.isEmpty())
-                            Commands.markBootstrapComplete(safe, localSyncId, ranges);
-                    }))
-                      .flatMap(ignore -> store.execute(contextFor(localSyncId), safe -> validate.accept(safe.get(localSyncId, route.homeKey()).current())))
-                      // cleanup txn
-                      .flatMap(ignore -> store.submit(PreLoadContext.empty(), safe -> {
-                          Cleanup target = cleanupGen.next(rs);
-                          if (target == Cleanup.NO)
-                              return Cleanup.NO;
-                          safe.commandStore().setRedundantBefore(RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, nextGlobalSyncId, nextGlobalSyncId, TxnId.NONE));
-                          switch (target)
-                          {
-                              case ERASE:
-                                  safe.commandStore().setDurableBefore(DurableBefore.create(ranges, nextGlobalSyncId, nextGlobalSyncId));
-                                  break;
-                              case TRUNCATE:
-                                  safe.commandStore().setDurableBefore(DurableBefore.create(ranges, nextGlobalSyncId, globalSyncId));
-                                  break;
-                              case TRUNCATE_WITH_OUTCOME:
-                                  // no update to DurableBefore = TRUNCATE_WITH_OUTCOME
-                                  break;
-                              default:
-                                  throw new UnsupportedOperationException(target.name());
-                          }
-                          return target;
-                      }))
-                      // validate cmd
-                      .flatMap(target -> store.execute(contextFor(localSyncId), safe -> {
-                          SafeCommand cmd = safe.get(localSyncId, route.homeKey());
-                          Command current = cmd.current();
-                          validate.accept(current);
-                          Assertions.assertThat(current.saveStatus()).isEqualTo(target == Cleanup.NO ? SaveStatus.Applied : target.appliesIfNot);
-                      }))
-                      .begin(on.agent());
+                         .flatMap(ignore -> store.execute(contextFor(localSyncId), safe -> Commands.markBootstrapComplete(safe, localSyncId, ranges)))
+                         .flatMap(ignore -> store.execute(contextFor(localSyncId), safe -> validate.accept(safe.get(localSyncId, route.homeKey()).current())))
+                         // cleanup txn
+                         .flatMap(ignore -> store.submit(PreLoadContext.empty(), safe -> {
+                             Cleanup target = cleanupGen.next(rs);
+                             if (target == Cleanup.NO)
+                                 return Cleanup.NO;
+                             safe.commandStore().setRedundantBefore(RedundantBefore.create(ranges, Long.MIN_VALUE, Long.MAX_VALUE, nextGlobalSyncId, nextGlobalSyncId, TxnId.NONE));
+                             switch (target)
+                             {
+                                 case ERASE:
+                                     safe.commandStore().setDurableBefore(DurableBefore.create(ranges, nextGlobalSyncId, nextGlobalSyncId));
+                                     break;
+                                 case TRUNCATE:
+                                     safe.commandStore().setDurableBefore(DurableBefore.create(ranges, nextGlobalSyncId, globalSyncId));
+                                     break;
+                                 case TRUNCATE_WITH_OUTCOME:
+                                     // no update to DurableBefore = TRUNCATE_WITH_OUTCOME
+                                     break;
+                                 default:
+                                     throw new UnsupportedOperationException(target.name());
+                             }
+                             return target;
+                         }))
+                         // validate cmd
+                         .flatMap(target -> store.execute(contextFor(localSyncId), safe -> {
+                             SafeCommand cmd = safe.get(localSyncId, route.homeKey());
+                             Command current = cmd.current();
+                             validate.accept(current);
+                             Assertions.assertThat(current.saveStatus()).isEqualTo(target == Cleanup.NO ? SaveStatus.Applied : target.appliesIfNot);
+                         }))
+                         .begin(on.agent());
                 }
             }
 
