@@ -592,9 +592,6 @@ public class SerializerSupport
         Propagate propagateOther();
 
         ApplyThenWaitUntilApplied applyThenWaitUntilApplied();
-
-        Bootstrap.CreateBootstrapCompleteMarkerTransaction bootstrapAttemptCompleteMarker();
-        Bootstrap.MarkBootstrapComplete bootstrapAttemptMarkBootstrapComplete();
     }
 
     private static class LoggedMessageProvider

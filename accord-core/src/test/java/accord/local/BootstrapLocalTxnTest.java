@@ -27,8 +27,6 @@ import org.junit.jupiter.api.Test;
 import accord.impl.PrefixedIntHashKey;
 import accord.impl.basic.Cluster;
 import accord.impl.basic.DelayedCommandStores.DelayedCommandStore;
-import accord.local.Bootstrap.CreateBootstrapCompleteMarkerTransaction;
-import accord.local.Bootstrap.MarkBootstrapComplete;
 import accord.messages.MessageType;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
@@ -88,9 +86,14 @@ class BootstrapLocalTxnTest
                     SyncPoint<Ranges> syncPoint = new SyncPoint<>(globalSyncId, Deps.NONE, ranges, route);
                     Ranges valid = AccordGens.rangesInsideRanges(ranges, (rs2, r) -> rs2.nextInt(1, 4)).next(rs);
                     Invariants.checkArgument(syncPoint.keysOrRanges.containsAll(valid));
-                    on.localRequest(new CreateBootstrapCompleteMarkerTransaction(storeId, localSyncId, syncPoint, valid))
-                      .flatMap(ignore -> store.execute(contextFor(localSyncId), safe -> validate.accept(safe.get(localSyncId, route.homeKey()).current())))
-                      .flatMap(ignore -> on.localRequest(new MarkBootstrapComplete(storeId, localSyncId, valid)))
+                    store.execute(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.COMMANDS), safe -> {
+                             Commands.createBootstrapCompleteMarkerTransaction(safe, localSyncId, syncPoint, valid);
+                         })
+                         .flatMap(ignore -> store.execute(contextFor(localSyncId), safe -> validate.accept(safe.get(localSyncId, route.homeKey()).current())))
+                    .flatMap(ignore -> store.execute(contextFor(localSyncId), safe -> {
+                        if (!ranges.isEmpty())
+                            Commands.markBootstrapComplete(safe, localSyncId, ranges);
+                    }))
                       .flatMap(ignore -> store.execute(contextFor(localSyncId), safe -> validate.accept(safe.get(localSyncId, route.homeKey()).current())))
                       // cleanup txn
                       .flatMap(ignore -> store.submit(PreLoadContext.empty(), safe -> {
