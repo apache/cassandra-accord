@@ -59,7 +59,6 @@ import accord.verify.ElleVerifier;
 import accord.verify.StrictSerializabilityVerifier;
 import accord.verify.Verifier;
 
-import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -544,11 +543,9 @@ public class BurnTest
         }
     }
 
-//    @Test
-    @RepeatedTest(Integer.MAX_VALUE)
+    @Test
     public void testOne()
     {
-//        run(1201597813464416L); // java.lang.IllegalStateException: Commands did not match: expected Command@342050343{[8,13004,7(RS),3]:Applied}, given Command@1800913503{[8,13004,7(RS),3]:Applied}, node Node{7}, store 2, diff Diff{path='.writes.executeAt.', lhs=[9,13037,110,3], rhs=[8,13004,7(RS),3]}
         run(System.nanoTime());
     }
 
