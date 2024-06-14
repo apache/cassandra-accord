@@ -127,7 +127,7 @@ public class Utils
         for (Key k : keys)
             update.put(k, 1);
         ListRead read = new ListRead(Function.identity(), false, keys, keys);
-        ListQuery query = new ListQuery(client, keys.size());
+        ListQuery query = new ListQuery(client, keys.size(), false);
         return new Txn.InMemory(keys, read, query, update);
     }
 
