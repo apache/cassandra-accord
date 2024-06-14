@@ -25,7 +25,6 @@ import java.util.function.Function;
 import accord.local.SafeCommandStore;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
-import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.Timestamped;
 import org.slf4j.Logger;
