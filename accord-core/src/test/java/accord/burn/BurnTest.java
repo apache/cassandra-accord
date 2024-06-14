@@ -149,7 +149,7 @@ public class BurnTest
                         requestRanges.add(nextRange.apply(prefixes));
                     Ranges ranges = Ranges.of(requestRanges.toArray(EMPTY_RANGES));
                     ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, false, ranges, ranges);
-                    ListQuery query = new ListQuery(client, finalCount);
+                    ListQuery query = new ListQuery(client, finalCount, false);
                     return new Txn.InMemory(ranges, read, query);
                 };
             }
@@ -183,7 +183,7 @@ public class BurnTest
                     if (isWrite)
                         requestKeys.addAll(update.keySet());
                     ListRead read = new ListRead(random.decide(readInCommandStore) ? Function.identity() : executor, kind == EphemeralRead, readKeys, new Keys(requestKeys));
-                    ListQuery query = new ListQuery(client, finalCount);
+                    ListQuery query = new ListQuery(client, finalCount, kind == EphemeralRead);
                     return new Txn.InMemory(kind, new Keys(requestKeys), read, query, update);
                 };
             }

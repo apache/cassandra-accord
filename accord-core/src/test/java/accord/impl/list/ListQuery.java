@@ -31,6 +31,7 @@ import accord.primitives.Keys;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.utils.Invariants;
 import accord.utils.Timestamped;
 import javax.annotation.Nonnull;
 
@@ -38,11 +39,13 @@ public class ListQuery implements Query
 {
     final Id client;
     final long requestId;
+    final boolean isEphemeralRead;
 
-    public ListQuery(Id client, long requestId)
+    public ListQuery(Id client, long requestId, boolean isEphemeralRead)
     {
         this.client = client;
         this.requestId = requestId;
+        this.isEphemeralRead = isEphemeralRead;
     }
 
     @Override
@@ -58,7 +61,12 @@ public class ListQuery implements Query
         {
             int i = responseKeys.indexOf(e.getKey());
             if (i >= 0)
+            {
+                Timestamp timestamp = e.getValue().timestamp;
+                Invariants.checkState(isEphemeralRead || timestamp.compareTo(executeAt) < 0,
+                                      "Data timestamp %s >= execute at %s", timestamp, executeAt);
                 values[i] = e.getValue().data;
+            }
         }
         return new ListResult(ListResult.Status.Applied, client, requestId, txnId, read.userReadKeys, responseKeys, values, (ListUpdate) update);
     }

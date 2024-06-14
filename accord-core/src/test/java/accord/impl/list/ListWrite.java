@@ -58,6 +58,7 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
             return Writes.SUCCESS;
         TimestampsForKeys.updateLastExecutionTimestamps((AbstractSafeCommandStore<?, ?, ?>) safeStore, (Key) key, executeAt, true);
 
+        logger.trace("submitting WRITE on {} at {} key:{}", s.node, executeAt, key);
         return executor.apply(safeStore.commandStore()).submit(() -> {
             int[] data = get(key);
             s.data.merge((Key)key, new Timestamped<>(executeAt, data, Arrays::toString), ListStore::merge);

@@ -359,11 +359,13 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
             if (safeCommand != null) safeCommand.removeListener(this);
             waitingOn.clear(safeStore.commandStore().id());
         }
+
         // TODO (expected): efficient unsubscribe mechanism
-        node.commandStores().mapReduceConsume(this, waitingOn.stream(), forEach(in -> {
-            SafeCommand safeCommand = in.ifInitialised(txnId);
-            if (safeCommand != null) safeCommand.removeListener(this);
-        }, node.agent()));
+        if (waitingOn != null)
+            node.commandStores().mapReduceConsume(this, waitingOn.stream(), forEach(in -> {
+                SafeCommand safeCommand = in.ifInitialised(txnId);
+                if (safeCommand != null) safeCommand.removeListener(this);
+            }, node.agent()));
         state = State.OBSOLETE;
         waitingOn = null;
         reading = null;
