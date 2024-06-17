@@ -645,9 +645,15 @@ public abstract class Command implements CommonAttributes
         SaveStatus saveStatus = saveStatus();
         return saveStatus.hasBeen(Status.Committed) && !saveStatus.hasBeen(Invalidated);
     }
+
     public final boolean isStable()
     {
         SaveStatus saveStatus = saveStatus();
+        return isStable(saveStatus);
+    }
+
+    public static boolean isStable(SaveStatus saveStatus)
+    {
         return saveStatus.hasBeen(Status.Stable) && !saveStatus.hasBeen(Invalidated);
     }
 
@@ -664,6 +670,11 @@ public abstract class Command implements CommonAttributes
     public final boolean isTruncated()
     {
         return status().hasBeen(Status.Truncated);
+    }
+
+    public static boolean isTruncated(Status status)
+    {
+        return status.hasBeen(Status.Truncated);
     }
 
     public abstract Command updateAttributes(CommonAttributes attrs, Ballot promised);
@@ -1105,7 +1116,7 @@ public abstract class Command implements CommonAttributes
             return Objects.equals(acceptedOrCommitted(), that.acceptedOrCommitted());
         }
 
-        static Accepted accepted(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted)
+        public static Accepted accepted(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted)
         {
             return validate(new Accepted(common, status, promised, executeAt, accepted));
         }
@@ -1197,7 +1208,7 @@ public abstract class Command implements CommonAttributes
             return committed(command, common, command.promised(), command.saveStatus(), waitingOn);
         }
 
-        static Committed committed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOn waitingOn)
+        public static Committed committed(CommonAttributes common, SaveStatus status, Timestamp executeAt, Ballot promised, Ballot accepted, WaitingOn waitingOn)
         {
             return validate(new Committed(common, status, executeAt, promised, accepted, waitingOn));
         }

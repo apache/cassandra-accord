@@ -19,6 +19,7 @@
 package accord.utils;
 
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
 import net.nicoulaj.compilecommand.annotations.Inline;
@@ -99,6 +100,12 @@ public class Invariants
     {
         if (!condition)
             illegalState();
+    }
+
+    public static void checkState(boolean condition, Supplier<String> msg)
+    {
+        if (!condition)
+            illegalState(msg.get());
     }
 
     public static void checkState(boolean condition, String msg)
