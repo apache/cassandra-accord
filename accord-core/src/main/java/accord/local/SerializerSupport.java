@@ -23,6 +23,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
 
+import accord.api.Agent;
 import accord.api.Result;
 import accord.api.VisibleForImplementation;
 import accord.local.Command.WaitingOn;
@@ -37,10 +38,13 @@ import accord.messages.MessageType;
 import accord.messages.PreAccept;
 import accord.messages.Propagate;
 import accord.primitives.Ballot;
+import accord.primitives.Deps;
+import accord.primitives.FullRangeRoute;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
@@ -90,11 +94,63 @@ public class SerializerSupport
                 .addAll(APPLY_TYPES)
                 .build();
 
+    private static Command localOnly(Agent agent, RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, @Nullable Timestamp executesAtLeast, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
+    {
+        //TODO (expected): LocalOnly doesn't reflect normal command flow so relying on this special casing helps reconstruct work, but is a bit brittle; should find a more maintainable way.
+        TxnId txnId = attrs.txnId();
+        FullRangeRoute route = (FullRangeRoute) attrs.route();
+        //TODO (correctness): not 100% correct as the ranges was "valid" which can be mutated "after" the sync point... so might actually have less
+        Ranges participantRanges = route.participants().toRanges();
+
+        Txn emptyTxn = agent.emptyTxn(txnId.kind(), participantRanges);
+        Writes writes = emptyTxn.execute(txnId, txnId, null);
+        Result results = emptyTxn.result(txnId, txnId, null);
+        Ranges coordinateRanges = rangesForEpoch.coordinates(txnId);
+        attrs.partialTxn(emptyTxn.slice(coordinateRanges, true))
+             .partialDeps(Deps.NONE.slice(coordinateRanges));
+
+        switch (status.status)
+        {
+            case NotDefined:
+                return status == SaveStatus.Uninitialised ? Command.NotDefined.uninitialised(txnId)
+                                                          : Command.NotDefined.notDefined(attrs, promised);
+            case PreAccepted:
+                return Command.PreAccepted.preAccepted(attrs, executeAt, promised);
+            case AcceptedInvalidate:
+            case Accepted:
+            case PreCommitted:
+                return Command.Accepted.accepted(attrs, status, executeAt, promised, accepted);
+            case Committed:
+            case Stable:
+                return Command.Committed.committed(attrs, status, executeAt, promised, accepted, waitingOnProvider.provide(attrs.partialDeps()));
+            case PreApplied:
+            case Applied:
+                return Command.Executed.executed(attrs, status, executeAt, promised, accepted, waitingOnProvider.provide(attrs.partialDeps()), writes, results);
+            case Truncated:
+            case Invalidated:
+                switch (status)
+                {
+                    case Erased:
+                        return Command.Truncated.erased(txnId, attrs.durability(), attrs.route());
+                    case TruncatedApplyWithOutcome:
+                        return Command.Truncated.truncatedApply(attrs, status, executeAt, writes, results, executesAtLeast);
+                    case TruncatedApply:
+                        return Command.Truncated.truncatedApply(attrs, status, executeAt, null, null, executesAtLeast);
+                    default:
+                        throw new AssertionError("Unexpected truncate status: " + status);
+                }
+            default:
+                throw new IllegalStateException();
+        }
+    }
+
     /**
      * Reconstructs Command from register values and protocol messages.
      */
-    public static Command reconstruct(RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, @Nullable Timestamp executesAtLeast, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
+    public static Command reconstruct(Agent agent, RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, @Nullable Timestamp executesAtLeast, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
     {
+        if (attrs.txnId().kind() == Txn.Kind.LocalOnly)
+            return localOnly(agent, rangesForEpoch, attrs, status, executeAt, executesAtLeast, promised, accepted, waitingOnProvider, messageProvider);
         switch (status.status)
         {
             case NotDefined:
@@ -308,7 +364,7 @@ public class SerializerSupport
                 }
                 else
                 {
-                    checkState(witnessed.contains(STABLE_SLOW_PATH_REQ), "Unable to find STABLE_SLOW_PATH_REQ; witnessed %s", new LoggedMessageProvider(messageProvider));
+                    checkState(witnessed.contains(STABLE_SLOW_PATH_REQ), "Unable to find STABLE_SLOW_PATH_REQ; txn_id=%s, witnessed %s", messageProvider.txnId(), new LoggedMessageProvider(messageProvider));
                     if (witnessed.contains(COMMIT_MAXIMAL_REQ))
                     {
                         commit = messageProvider.commitMaximal();

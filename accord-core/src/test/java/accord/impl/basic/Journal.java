@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
@@ -132,18 +133,18 @@ public class Journal implements LocalRequest.Handler, Runnable
     {
         this.node = null;
     }
-    
+
     @Override
-    public void handle(LocalRequest<?> message, Node node)
+    public <R> void handle(LocalRequest<R> message, BiConsumer<? super R, Throwable> callback, Node node)
     {
         messageListener.onMessage(NodeSink.Action.DELIVER, node.id(), node.id(), -1, message);
         if (message.type().hasSideEffects())
         {
             // enqueue
-            unframedRequests.add(new RequestContext(message, () -> node.scheduler().now(() -> message.process(node))));
+            unframedRequests.add(new RequestContext(message, message.waitForEpoch(), () -> node.scheduler().now(() -> message.process(node, callback))));
             return;
         }
-        message.process(node);
+        message.process(node, callback);
     }
 
     public void handle(Request request, Node.Id from, ReplyContext replyContext)
@@ -151,7 +152,7 @@ public class Journal implements LocalRequest.Handler, Runnable
         if (request.type() != null && request.type().hasSideEffects())
         {
             // enqueue
-            unframedRequests.add(new RequestContext(request, () -> node.receive(request, from, replyContext)));
+            unframedRequests.add(new RequestContext(request, request.waitForEpoch(), () -> node.receive(request, from, replyContext)));
             return;
         }
         node.receive(request, from, replyContext);
@@ -286,9 +287,9 @@ public class Journal implements LocalRequest.Handler, Runnable
         final Message message;
         final Runnable fn;
 
-        protected RequestContext(Request request, Runnable fn)
+        protected RequestContext(Message request, long waitForEpoch, Runnable fn)
         {
-            this.waitForEpoch = request.waitForEpoch();
+            this.waitForEpoch = waitForEpoch;
             this.message = request;
             this.fn = fn;
         }

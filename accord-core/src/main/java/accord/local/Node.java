@@ -89,6 +89,7 @@ import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
 import accord.utils.RandomSource;
 import accord.utils.async.AsyncChain;
+import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncExecutor;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
@@ -532,9 +533,21 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         messageSink.send(to, send);
     }
 
-    public void localRequest(LocalRequest message)
+    public <R> void localRequest(LocalRequest<R> message, BiConsumer<? super R, Throwable> callback)
     {
-        localRequestHandler.handle(message, this);
+        localRequestHandler.handle(message, callback, this);
+    }
+
+    public <R> AsyncChain<R> localRequest(LocalRequest<R> message)
+    {
+        return new AsyncChains.Head<R>()
+        {
+            @Override
+            protected void start(BiConsumer<? super R, Throwable> callback)
+            {
+                localRequest(message, callback);
+            }
+        };
     }
 
     public void reply(Id replyingToNode, ReplyContext replyContext, Reply send, Throwable failure)
@@ -602,6 +615,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public FullRoute<?> computeRoute(long epoch, Seekables<?, ?> keysOrRanges)
     {
+        Invariants.checkArgument(!keysOrRanges.isEmpty(), "Attempted to compute a route from empty keys or ranges");
         RoutingKey homeKey = trySelectHomeKey(epoch, keysOrRanges);
         if (homeKey == null)
             homeKey = selectRandomHomeKey(epoch);

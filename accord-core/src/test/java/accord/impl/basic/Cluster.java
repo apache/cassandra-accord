@@ -22,12 +22,15 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.BooleanSupplier;
@@ -61,6 +64,7 @@ import accord.impl.PrefixedIntHashKey;
 import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TopologyFactory;
+import accord.impl.list.ListAgent;
 import accord.impl.list.ListStore;
 import accord.local.AgentExecutor;
 import accord.local.Node.Id;
@@ -272,6 +276,84 @@ public class Cluster implements Scheduler
     public void now(Runnable run)
     {
         run.run();
+    }
+
+    public static Map<MessageType, Cluster.Stats> run(Supplier<RandomSource> randomSupplier,
+                                                      List<Node.Id> nodes,
+                                                      Topology initialTopology,
+                                                      Function<Map<Node.Id, Node>, Request> init)
+    {
+        List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
+        PropagatingPendingQueue queue = new PropagatingPendingQueue(failures, new RandomDelayQueue(randomSupplier.get()));
+        RandomSource retryRandom = randomSupplier.get();
+        Consumer<Runnable> retryBootstrap = retry -> {
+            long delay = retryRandom.nextInt(1, 15);
+            queue.add((PendingRunnable) retry::run, delay, TimeUnit.SECONDS);
+        };
+        Function<BiConsumer<Timestamp, Ranges>, ListAgent> agentSupplier = onStale -> new ListAgent(1000L, failures::add, retryBootstrap, onStale);
+        RandomSource nowRandom = randomSupplier.get();
+        Supplier<LongSupplier> nowSupplier = () -> {
+            RandomSource forked = nowRandom.fork();
+            // TODO (now): meta-randomise scale of clock drift
+            return FrequentLargeRange.builder(forked)
+                                     .ratio(1, 5)
+                                     .small(50, 5000, TimeUnit.MICROSECONDS)
+                                     .large(1, 10, TimeUnit.MILLISECONDS)
+                                     .build()
+                                     .mapAsLong(j -> Math.max(0, queue.nowInMillis() + TimeUnit.NANOSECONDS.toMillis(j)))
+                                     .asLongSupplier(forked);
+        };
+        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, new ListAgent(1000L, failures::add, retryBootstrap, (i1, i2) -> {
+            throw new IllegalAccessError("Global executor should enver get a stale event");
+        }));
+        TopologyFactory topologyFactory = new TopologyFactory(initialTopology.maxRf(), initialTopology.ranges().stream().toArray(Range[]::new))
+        {
+            @Override
+            public Topology toTopology(Node.Id[] cluster)
+            {
+                return initialTopology;
+            }
+        };
+        AtomicInteger counter = new AtomicInteger();
+        AtomicReference<Map<Id, Node>> nodeMap = new AtomicReference<>();
+        Map<MessageType, Cluster.Stats> stats = Cluster.run(nodes.toArray(Node.Id[]::new),
+                                                            MessageListener.get(),
+                                                            () -> queue,
+                                                            (id, onStale) -> globalExecutor.withAgent(agentSupplier.apply(onStale)),
+                                                            queue::checkFailures,
+                                                            ignore -> {
+                                                            },
+                                                            randomSupplier,
+                                                            nowSupplier,
+                                                            topologyFactory,
+                                                            new Supplier<>()
+                                                            {
+                                                                private Iterator<Request> requestIterator = null;
+                                                                private final RandomSource rs = randomSupplier.get();
+                                                                @Override
+                                                                public Packet get()
+                                                                {
+                                                                    // ((Cluster) node.scheduler()).onDone(() -> checkOnResult(homeKey, txnId, 0, null));
+                                                                    if (requestIterator == null)
+                                                                    {
+                                                                        Map<Node.Id, Node> nodes = nodeMap.get();
+                                                                        requestIterator = Collections.singleton(init.apply(nodes)).iterator();
+                                                                    }
+                                                                    if (!requestIterator.hasNext())
+                                                                        return null;
+                                                                    Node.Id id = rs.pick(nodes);
+                                                                    return new Packet(id, id, counter.incrementAndGet(), requestIterator.next());
+                                                                }
+                                                            },
+                                                            Runnable::run,
+                                                            nodeMap::set);
+        if (!failures.isEmpty())
+        {
+            AssertionError error = new AssertionError("Unexpected errors detected");
+            failures.forEach(error::addSuppressed);
+            throw error;
+        }
+        return stats;
     }
 
     public static Map<MessageType, Stats> run(Id[] nodes, MessageListener messageListener, Supplier<PendingQueue> queueSupplier,

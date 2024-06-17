@@ -120,6 +120,7 @@ class Bootstrap
         {
             globalSyncId = node.nextTxnId(ExclusiveSyncPoint, Routable.Domain.Range);
             localSyncId = globalSyncId.as(LocalOnly).withEpoch(epoch);
+            Invariants.checkArgument(epoch <= globalSyncId.epoch(), "Attempting to use local epoch %d which is larger than global epoch %d", epoch, globalSyncId.epoch());
 
             if (!node.topology().hasEpoch(globalSyncId.epoch()))
             {

@@ -21,25 +21,15 @@ package accord.local;
 import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.api.TestableConfigurationService;
-import accord.burn.random.FrequentLargeRange;
 import accord.coordinate.Preempted;
 import accord.coordinate.Timeout;
 import accord.coordinate.TopologyMismatch;
 import accord.impl.InMemoryCommandStore;
-import accord.impl.MessageListener;
 import accord.impl.PrefixedIntHashKey;
-import accord.impl.TopologyFactory;
 import accord.impl.basic.Cluster;
-import accord.impl.basic.Packet;
-import accord.impl.basic.PendingRunnable;
-import accord.impl.basic.PropagatingPendingQueue;
-import accord.impl.basic.RandomDelayQueue;
-import accord.impl.basic.SimulatedDelayedExecutorService;
-import accord.impl.list.ListAgent;
 import accord.messages.MessageType;
 import accord.messages.ReplyContext;
 import accord.messages.Request;
-import accord.primitives.Timestamp;
 import accord.topology.TopologyUtils;
 import accord.primitives.Keys;
 import accord.primitives.Range;
@@ -51,24 +41,13 @@ import accord.topology.Topology;
 import accord.utils.AccordGens;
 import accord.utils.Gen;
 import accord.utils.Gens;
-import accord.utils.RandomSource;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.function.LongSupplier;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -99,8 +78,12 @@ class CommandsTest
             Topology initialTopology = TopologyUtils.topology(1, nodes, Ranges.of(allRanges), rf);
             Topology updatedTopology = TopologyUtils.topology(2, nodes, Ranges.of(prefix0), rf); // drop prefix1
 
-            cluster(rs::fork, nodes, initialTopology, nodeMap -> new Request()
+            Cluster.run(rs::fork, nodes, initialTopology, nodeMap -> new Request()
             {
+                {
+                    // the node selected does not matter and should not impact determinism, they all share the same scheduler
+                    ((Cluster) nodeMap.values().stream().findFirst().get().scheduler()).onDone(() -> checkState(0, nodeMap.values()));
+                }
                 @Override
                 public void preProcess(Node on, Node.Id from, ReplyContext replyContext)
                 {
@@ -147,82 +130,6 @@ class CommandsTest
                 }
             });
         });
-    }
-
-    static void cluster(Supplier<RandomSource> randomSupplier, List<Node.Id> nodes, Topology initialTopology, Function<Map<Node.Id, Node>, Request> init)
-    {
-        List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
-        PropagatingPendingQueue queue = new PropagatingPendingQueue(failures, new RandomDelayQueue(randomSupplier.get()));
-        RandomSource retryRandom = randomSupplier.get();
-        Consumer<Runnable> retryBootstrap = retry -> {
-            long delay = retryRandom.nextInt(1, 15);
-            queue.add((PendingRunnable) retry::run, delay, TimeUnit.SECONDS);
-        };
-        Function<BiConsumer<Timestamp, Ranges>, ListAgent> agentSupplier = onStale -> new ListAgent(1000L, failures::add, retryBootstrap, onStale);
-        RandomSource nowRandom = randomSupplier.get();
-        Supplier<LongSupplier> nowSupplier = () -> {
-            RandomSource forked = nowRandom.fork();
-            // TODO (now): meta-randomise scale of clock drift
-            return FrequentLargeRange.builder(forked)
-                                     .ratio(1, 5)
-                                     .small(50, 5000, TimeUnit.MICROSECONDS)
-                                     .large(1, 10, TimeUnit.MILLISECONDS)
-                                     .build()
-                                     .mapAsLong(j -> Math.max(0, queue.nowInMillis() + TimeUnit.NANOSECONDS.toMillis(j)))
-                                     .asLongSupplier(forked);
-        };
-        SimulatedDelayedExecutorService globalExecutor = new SimulatedDelayedExecutorService(queue, new ListAgent(1000L, failures::add, retryBootstrap, (i1, i2) -> {
-            throw new IllegalAccessError("Global executor should enver get a stale event");
-        }));
-        TopologyFactory topologyFactory = new TopologyFactory(initialTopology.maxRf(), initialTopology.ranges().stream().toArray(Range[]::new))
-        {
-            @Override
-            public Topology toTopology(Node.Id[] cluster)
-            {
-                return initialTopology;
-            }
-        };
-        AtomicInteger counter = new AtomicInteger();
-        AtomicReference<Map<Node.Id, Node>> nodeMap = new AtomicReference<>();
-        Cluster.run(nodes.toArray(Node.Id[]::new),
-                    MessageListener.get(),
-                    () -> queue,
-                    (id, onStale) -> globalExecutor.withAgent(agentSupplier.apply(onStale)),
-                    queue::checkFailures,
-                    ignore -> {
-                    },
-                    randomSupplier,
-                    nowSupplier,
-                    topologyFactory,
-                    new Supplier<>()
-                    {
-                        private Iterator<Request> requestIterator = null;
-                        private final RandomSource rs = randomSupplier.get();
-                        @Override
-                        public Packet get()
-                        {
-                            // ((Cluster) node.scheduler()).onDone(() -> checkOnResult(homeKey, txnId, 0, null));
-                            if (requestIterator == null)
-                            {
-                                Map<Node.Id, Node> nodes = nodeMap.get();
-                                requestIterator = Collections.singleton(init.apply(nodes)).iterator();
-                                // the node selected does not matter and should not impact determinism, they all share the same scheduler
-                                ((Cluster) nodes.values().stream().findFirst().get().scheduler()).onDone(() -> checkState(0, nodes.values()));
-                            }
-                            if (!requestIterator.hasNext())
-                                return null;
-                            Node.Id id = rs.pick(nodes);
-                            return new Packet(id, id, counter.incrementAndGet(), requestIterator.next());
-                        }
-                    },
-                    Runnable::run,
-                    nodeMap::set);
-        if (!failures.isEmpty())
-        {
-            AssertionError error = new AssertionError("Unexpected errors detected");
-            failures.forEach(error::addSuppressed);
-            throw error;
-        }
     }
 
     private static void checkState(int attempt, Collection<Node> values)

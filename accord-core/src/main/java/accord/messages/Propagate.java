@@ -24,6 +24,7 @@ import accord.local.Command;
 import accord.local.Commands;
 import accord.local.KeyHistory;
 import accord.local.Node;
+import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.SaveStatus;
@@ -43,6 +44,7 @@ import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
+import accord.utils.MapReduceConsume;
 
 import javax.annotation.Nullable;
 import java.util.function.BiConsumer;
@@ -59,13 +61,13 @@ import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.illegalState;
 
 // TODO (required): detect propagate loops where we don't manage to update anything but should
-public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
+public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, PreLoadContext, MapReduceConsume<SafeCommandStore, Void>
 {
     public static class SerializerSupport
     {
         public static Propagate create(TxnId txnId, Route<?> route, SaveStatus maxKnowledgeSaveStatus, SaveStatus maxSaveStatus, Ballot ballot, Status.Durability durability, RoutingKey homeKey, RoutingKey progressKey, Status.Known achieved, FoundKnownMap known, boolean isTruncated, PartialTxn partialTxn, PartialDeps committedDeps, long toEpoch, Timestamp executeAt, Writes writes, Result result)
         {
-            return new Propagate(txnId, route, maxKnowledgeSaveStatus, maxSaveStatus, ballot, durability, homeKey, progressKey, achieved, known, isTruncated, partialTxn, committedDeps, toEpoch, executeAt, writes, result, null);
+            return new Propagate(txnId, route, maxKnowledgeSaveStatus, maxSaveStatus, ballot, durability, homeKey, progressKey, achieved, known, isTruncated, partialTxn, committedDeps, toEpoch, executeAt, writes, result);
         }
     }
 
@@ -89,14 +91,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
     @Nullable public final Timestamp committedExecuteAt;
     @Nullable public final Writes writes;
     @Nullable public final Result result;
-
-    protected transient BiConsumer<Status.Known, Throwable> callback;
-
-    @Override
-    public BiConsumer<Status.Known, Throwable> callback()
-    {
-        return callback;
-    }
+    protected transient BiConsumer<? super Status.Known, Throwable> callback;
 
     Propagate(
         TxnId txnId,
@@ -115,8 +110,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
         long toEpoch,
         @Nullable Timestamp committedExecuteAt,
         @Nullable Writes writes,
-        @Nullable Result result,
-        BiConsumer<Status.Known, Throwable> callback)
+        @Nullable Result result)
     {
         this.txnId = txnId;
         this.route = route;
@@ -135,14 +129,13 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
         this.committedExecuteAt = committedExecuteAt;
         this.writes = writes;
         this.result = result;
-        this.callback = callback;
     }
 
     @Override
-    public void process(Node on, BiConsumer<Status.Known, Throwable> callback)
+    public void process(Node on, BiConsumer<? super Status.Known, Throwable> callback)
     {
         this.callback = callback;
-        process(on);
+        on.mapReduceConsumeLocal(this, route, txnId.epoch(), toEpoch, this);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -213,9 +206,9 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
             stableDeps = full.stableDeps.slice(sliceRanges).reconstitutePartial(covering);
 
         Propagate propagate =
-            new Propagate(txnId, route, full.maxKnowledgeSaveStatus, full.maxSaveStatus, full.acceptedOrCommitted, full.durability, full.homeKey, progressKey, achieved, full.map, isShardTruncated, partialTxn, stableDeps, toEpoch, full.executeAtIfKnown(), full.writes, full.result, callback);
+            new Propagate(txnId, route, full.maxKnowledgeSaveStatus, full.maxSaveStatus, full.acceptedOrCommitted, full.durability, full.homeKey, progressKey, achieved, full.map, isShardTruncated, partialTxn, stableDeps, toEpoch, full.executeAtIfKnown(), full.writes, full.result);
 
-        node.localRequest(propagate);
+        node.localRequest(propagate, callback);
     }
 
     @Override
@@ -241,24 +234,6 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>
     public KeyHistory keyHistory()
     {
         return KeyHistory.COMMANDS;
-    }
-
-    @Override
-    public void preProcess(Node on, Node.Id from, ReplyContext replyContext)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void process(Node on, Node.Id from, ReplyContext replyContext)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void process(Node node)
-    {
-        node.mapReduceConsumeLocal(this, route, txnId.epoch(), toEpoch, this);
     }
 
     @Override

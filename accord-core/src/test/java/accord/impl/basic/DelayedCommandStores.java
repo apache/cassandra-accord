@@ -19,14 +19,17 @@
 package accord.impl.basic;
 
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.Callable;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import accord.api.Agent;
 import accord.api.DataStore;
@@ -54,12 +57,53 @@ import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topology;
 import accord.utils.Invariants;
+import accord.utils.LazyToString;
 import accord.utils.RandomSource;
+import accord.utils.ReflectionUtils;
+import accord.utils.ReflectionUtils.Difference;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
 public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 {
+    //TODO (correctness): remove once we have a Journal integration that does not change the values of a command...
+    // There are known issues due to Journal, so exclude known problamtic fields
+    private static class ValidationHack
+    {
+        private static Pattern field(String path)
+        {
+            path = path.replace(".", "\\.");
+            path += ".*";
+            return Pattern.compile(path);
+        }
+
+        private static final List<Pattern> KNOWN_ISSUES = List.of(field(".partialTxn.keys."),
+                                                                  field(".partialTxn.read.keys."),
+                                                                  field(".partialTxn.read.userReadKeys."),
+                                                                  field(".partialTxn.covering."),
+                                                                  field(".partialDeps.keyDeps."),
+                                                                  field(".partialDeps.rangeDeps."),
+                                                                  field(".partialDeps.covering."),
+                                                                  field(".additionalKeysOrRanges."),
+                                                                  // when a new epoch is detected and the execute ranges have more than the coordinating ranges,
+                                                                  // and the coordinating ranges doesn't include the home key... we drop the query...
+                                                                  // The logic to stitch messages together is not able to handle this as it doesn't know the original Topologies
+                                                                  field(".partialTxn.query."),
+                                                                  // cmd.mutable().build() != cmd.  This is due to Command.durability changing NotDurable to Local depending on the status
+                                                                  field(".durability."));
+    }
+
+    private static boolean hasKnownIssue(String path)
+    {
+        for (Pattern p : ValidationHack.KNOWN_ISSUES)
+        {
+            Matcher m = p.matcher(path);
+            if (m.find())
+                return true;
+        }
+        return false;
+    }
+
     private DelayedCommandStores(NodeTimeService time, Agent agent, DataStore store, RandomSource random, ShardDistributor shardDistributor, ProgressLog.Factory progressLogFactory, SimulatedDelayedExecutorService executorService, BooleanSupplier isLoadedCheck, Journal journal)
     {
         super(time, agent, store, random, shardDistributor, progressLogFactory, DelayedCommandStore.factory(executorService, isLoadedCheck, journal));
@@ -123,13 +167,10 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         }
 
         @Override
-        protected void validateRead(Command current)
+        public void validateRead(Command current)
         {
             // "loading" the command doesn't make sense as we don't "store" the command...
             if (current.txnId().kind() == Txn.Kind.EphemeralRead)
-                return;
-            //TODO (correctness): these type of txn must be durable but currently they are not... should make sure this is plugged into the C* journal properly for reply
-            if (current.txnId().kind() == Txn.Kind.LocalOnly)
                 return;
             Command.WaitingOn waitingOn = null;
             if (current.isStable() && !current.isTruncated())
@@ -138,10 +179,11 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             Command.WaitingOn finalWaitingOn = waitingOn;
             CommonAttributes.Mutable mutable = current.mutable();
             mutable.partialDeps(null).removePartialTxn();
+
             Command reconstructed;
             try
             {
-                reconstructed = SerializerSupport.reconstruct(unsafeRangesForEpoch(), mutable, current.saveStatus(), current.executeAt(), current.txnId().kind().awaitsOnlyDeps() ? current.executesAtLeast() : null, current.promised(), current.acceptedOrCommitted(), ignore -> finalWaitingOn, messages);
+                reconstructed = SerializerSupport.reconstruct(agent(), unsafeRangesForEpoch(), mutable, current.saveStatus(), current.executeAt(), current.txnId().kind().awaitsOnlyDeps() ? current.executesAtLeast() : null, current.promised(), current.acceptedOrCommitted(), ignore -> finalWaitingOn, messages);
             }
             catch (IllegalStateException t)
             {
@@ -152,16 +194,9 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
                     return;
                 throw t;
             }
-            //TODO (correctness): journal doesn't guarantee we pick the same records we used to state transition
-            if (current.partialDeps() != null && !current.partialDeps().rangeDeps.equals(reconstructed.partialDeps().rangeDeps))
-                return;
-            // for some reasons scope doesn't alaways match, this might be due to journal... what sucks is that this can also be a bug in the extract, so its
-            // hard to figure out what happened.
-            if (current.partialDeps() != null && !current.partialDeps().equals(reconstructed.partialDeps()))
-                return;
-            if (current.isCommitted() && !current.isTruncated() && !Objects.equals(current.asCommitted().waitingOn(), reconstructed.asCommitted().waitingOn()))
-                return;
-//            Invariants.checkState(current.equals(reconstructed), "Commands did not match: expected %s, given %s", current, reconstructed);
+            List<Difference<?>> diff = ReflectionUtils.recursiveEquals(current, reconstructed);
+            List<String> filteredDiff = diff.stream().filter(d -> !DelayedCommandStores.hasKnownIssue(d.path)).map(Object::toString).collect(Collectors.toList());
+            Invariants.checkState(filteredDiff.isEmpty(), "Commands did not match: expected %s, given %s, node %s, store %d, diff %s", current, reconstructed, time, id(), new LazyToString(() -> String.join("\n", filteredDiff)));
         }
 
         @Override

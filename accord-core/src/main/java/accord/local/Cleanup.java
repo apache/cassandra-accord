@@ -105,7 +105,7 @@ public enum Cleanup
         if (txnId.kind() == EphemeralRead)
             return Cleanup.NO; // TODO (required): clean-up based on timeout
 
-        if (durableBefore.min(txnId) == Universal)
+        if (durableBefore.min(txnId) == UniversalOrInvalidated)
         {
             if (status.hasBeen(PreCommitted) && !status.hasBeen(Applied)) // TODO (expected): may be stale
                 illegalState("Loading universally-durable command that has been PreCommitted but not Applied");

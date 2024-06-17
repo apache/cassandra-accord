@@ -19,6 +19,7 @@
 package accord.impl.list;
 
 import java.util.Map;
+import java.util.Objects;
 
 import accord.api.Data;
 import accord.api.Key;
@@ -61,5 +62,20 @@ public class ListQuery implements Query
                 values[i] = e.getValue().data;
         }
         return new ListResult(ListResult.Status.Applied, client, requestId, txnId, read.userReadKeys, responseKeys, values, (ListUpdate) update);
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        ListQuery listQuery = (ListQuery) o;
+        return requestId == listQuery.requestId && Objects.equals(client, listQuery.client);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        throw new UnsupportedOperationException();
     }
 }
