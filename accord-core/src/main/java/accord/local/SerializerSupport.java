@@ -96,6 +96,7 @@ public class SerializerSupport
 
     private static Command localOnly(Agent agent, RangesForEpoch rangesForEpoch, Mutable attrs, SaveStatus status, Timestamp executeAt, @Nullable Timestamp executesAtLeast, Ballot promised, Ballot accepted, WaitingOnProvider waitingOnProvider, MessageProvider messageProvider)
     {
+        //TODO (expected): LocalOnly doesn't reflect normal command flow so relying on this special casing helps reconstruct work, but is a bit brittle; should find a more maintainable way.
         TxnId txnId = attrs.txnId();
         FullRangeRoute route = (FullRangeRoute) attrs.route();
         //TODO (correctness): not 100% correct as the ranges was "valid" which can be mutated "after" the sync point... so might actually have less
