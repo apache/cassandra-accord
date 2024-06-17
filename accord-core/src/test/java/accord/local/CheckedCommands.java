@@ -33,34 +33,69 @@ import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
 
+import java.util.function.BiConsumer;
+
 import static accord.utils.Invariants.illegalState;
 
 public class CheckedCommands
 {
     public static void preaccept(SafeCommandStore safeStore, TxnId txnId, PartialTxn partialTxn, FullRoute<?> route, @Nullable RoutingKey progressKey)
     {
+        preaccept(safeStore, txnId, partialTxn, route, progressKey, (l, r) -> {});
+    }
+
+    public static void preaccept(SafeCommandStore safeStore, TxnId txnId, PartialTxn partialTxn, FullRoute<?> route, @Nullable RoutingKey progressKey, BiConsumer<Command, Command> consumer)
+    {
         SafeCommand safeCommand = safeStore.get(txnId, txnId, route);
+        Command before = safeCommand.current();
         Commands.AcceptOutcome result = Commands.preaccept(safeStore, safeCommand, txnId, txnId.epoch(), partialTxn, route, progressKey);
+        Command after = safeCommand.current();
         if (result != Commands.AcceptOutcome.Success) throw illegalState("Command mutation rejected: " + result);
+        consumer.accept(before, after);
     }
 
     public static void accept(SafeCommandStore safeStore, TxnId txnId, Ballot ballot, PartialRoute<?> route, Seekables<?, ?> keys, @Nullable RoutingKey progressKey, Timestamp executeAt, PartialDeps partialDeps)
     {
+        accept(safeStore, txnId, ballot, route, keys, progressKey, executeAt, partialDeps, (l, r) -> {});
+    }
+
+    public static void accept(SafeCommandStore safeStore, TxnId txnId, Ballot ballot, PartialRoute<?> route, Seekables<?, ?> keys, @Nullable RoutingKey progressKey, Timestamp executeAt, PartialDeps partialDeps, BiConsumer<Command, Command> consumer)
+    {
+        SafeCommand safeCommand = safeStore.get(txnId, txnId, route);
+        Command before = safeCommand.current();
         Commands.AcceptOutcome result = Commands.accept(safeStore, txnId, ballot, route, keys, progressKey, executeAt, partialDeps);
+        Command after = safeCommand.current();
         if (result != Commands.AcceptOutcome.Success) throw illegalState("Command mutation rejected: " + result);
+        consumer.accept(before, after);
     }
 
     public static void commit(SafeCommandStore safeStore, SaveStatus saveStatus, Ballot ballot, TxnId txnId, Route<?> route, @Nullable RoutingKey progressKey, @Nullable PartialTxn partialTxn, Timestamp executeAt, PartialDeps partialDeps)
     {
+        commit(safeStore, saveStatus, ballot, txnId, route, progressKey, partialTxn, executeAt, partialDeps, (l, r) -> {});
+    }
+
+    public static void commit(SafeCommandStore safeStore, SaveStatus saveStatus, Ballot ballot, TxnId txnId, Route<?> route, @Nullable RoutingKey progressKey, @Nullable PartialTxn partialTxn, Timestamp executeAt, PartialDeps partialDeps, BiConsumer<Command, Command> consumer)
+    {
         SafeCommand safeCommand = safeStore.get(txnId, txnId, route);
+        Command before = safeCommand.current();
         Commands.CommitOutcome result = Commands.commit(safeStore, safeCommand, saveStatus, ballot, txnId, route, progressKey, partialTxn, executeAt, partialDeps);
+        Command after = safeCommand.current();
         if (result != Commands.CommitOutcome.Success) throw illegalState("Command mutation rejected: " + result);
+        consumer.accept(before, after);
     }
 
     public static void apply(SafeCommandStore safeStore, TxnId txnId, Route<?> route, @Nullable RoutingKey progressKey, Timestamp executeAt, @Nullable PartialDeps partialDeps, @Nullable PartialTxn partialTxn, Writes writes, Result result)
     {
+        apply(safeStore, txnId, route, progressKey, executeAt, partialDeps, partialTxn, writes, result, (l, r) -> {});
+    }
+
+    public static void apply(SafeCommandStore safeStore, TxnId txnId, Route<?> route, @Nullable RoutingKey progressKey, Timestamp executeAt, @Nullable PartialDeps partialDeps, @Nullable PartialTxn partialTxn, Writes writes, Result result, BiConsumer<Command, Command> consumer)
+    {
         SafeCommand safeCommand = safeStore.get(txnId, txnId, route);
+        Command before = safeCommand.current();
         Commands.ApplyOutcome outcome = Commands.apply(safeStore, safeCommand, txnId, route, progressKey, executeAt, partialDeps, partialTxn, writes, result);
+        Command after = safeCommand.current();
         if (outcome != Commands.ApplyOutcome.Success) throw illegalState("Command mutation rejected: " + outcome);
+        consumer.accept(before, after);
     }
 }

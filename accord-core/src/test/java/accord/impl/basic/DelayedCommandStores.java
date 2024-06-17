@@ -34,6 +34,7 @@ import java.util.stream.Collectors;
 import accord.api.Agent;
 import accord.api.DataStore;
 import accord.api.ProgressLog;
+import accord.api.Result;
 import accord.impl.InMemoryCommandStore;
 import accord.impl.InMemoryCommandStores;
 import accord.impl.InMemorySafeCommand;
@@ -41,15 +42,14 @@ import accord.impl.InMemorySafeCommandsForKey;
 import accord.impl.InMemorySafeTimestampsForKey;
 import accord.impl.PrefixedIntHashKey;
 import accord.impl.basic.TaskExecutorService.Task;
+import accord.impl.mock.MockStore;
 import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
-import accord.local.CommonAttributes;
 import accord.local.Node;
 import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
-import accord.local.SerializerSupport;
 import accord.local.ShardDistributor;
 import accord.primitives.Range;
 import accord.primitives.RoutableKey;
@@ -77,18 +77,12 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             return Pattern.compile(path);
         }
 
-        private static final List<Pattern> KNOWN_ISSUES = List.of(field(".partialTxn.keys."),
-                                                                  field(".partialTxn.read.keys."),
-                                                                  field(".partialTxn.read.userReadKeys."),
-                                                                  field(".partialTxn.covering."),
-                                                                  field(".partialDeps.keyDeps."),
-                                                                  field(".partialDeps.rangeDeps."),
-                                                                  field(".partialDeps.covering."),
-                                                                  field(".additionalKeysOrRanges."),
+        private static final List<Pattern> KNOWN_ISSUES = List.of(
                                                                   // when a new epoch is detected and the execute ranges have more than the coordinating ranges,
                                                                   // and the coordinating ranges doesn't include the home key... we drop the query...
                                                                   // The logic to stitch messages together is not able to handle this as it doesn't know the original Topologies
-                                                                  field(".partialTxn.query."),
+                                                                  // TODO (required): test int if this is still true
+//                                                                  field(".partialTxn.query."),
                                                                   // cmd.mutable().build() != cmd.  This is due to Command.durability changing NotDurable to Local depending on the status
                                                                   field(".durability."));
     }
@@ -172,28 +166,12 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             // "loading" the command doesn't make sense as we don't "store" the command...
             if (current.txnId().kind() == Txn.Kind.EphemeralRead)
                 return;
-            Command.WaitingOn waitingOn = null;
-            if (current.isStable() && !current.isTruncated())
-                waitingOn = current.asCommitted().waitingOn;
-            SerializerSupport.MessageProvider messages = journal.makeMessageProvider(current.txnId());
-            Command.WaitingOn finalWaitingOn = waitingOn;
-            CommonAttributes.Mutable mutable = current.mutable();
-            mutable.partialDeps(null).removePartialTxn();
 
-            Command reconstructed;
-            try
-            {
-                reconstructed = SerializerSupport.reconstruct(agent(), unsafeRangesForEpoch(), mutable, current.saveStatus(), current.executeAt(), current.txnId().kind().awaitsOnlyDeps() ? current.executesAtLeast() : null, current.promised(), current.acceptedOrCommitted(), ignore -> finalWaitingOn, messages);
-            }
-            catch (IllegalStateException t)
-            {
-                //TODO (correctness): journal doesn't guarantee we pick the same records we used to state transition
-                // Journal stores a list of messages it saw in some order it defines, but when reconstructing a command we don't actually know what messages were used, this could
-                // lead to a case where deps mismatch, so ignoring this for now
-                if (t.getMessage() != null && t.getMessage().startsWith("Deps do not match; expected"))
-                    return;
-                throw t;
-            }
+            Result result = current.result();
+            if (result == null)
+                result = MockStore.RESULT;
+            // Journal will not have result persisted. This part is here for test purposes and ensuring that we have strict object equality.
+            Command reconstructed = journal.reconstruct(id, current.txnId(), result);
             List<Difference<?>> diff = ReflectionUtils.recursiveEquals(current, reconstructed);
             List<String> filteredDiff = diff.stream().filter(d -> !DelayedCommandStores.hasKnownIssue(d.path)).map(Object::toString).collect(Collectors.toList());
             Invariants.checkState(filteredDiff.isEmpty(), "Commands did not match: expected %s, given %s, node %s, store %d, diff %s", current, reconstructed, time, id(), new LazyToString(() -> String.join("\n", filteredDiff)));
@@ -303,10 +281,11 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             commands.entrySet().forEach(e -> {
                 InMemorySafeCommand safe = e.getValue();
                 if (!safe.isModified()) return;
+
+                Command before = safe.original();
+                Command after = safe.current();
+                commandStore.journal.onExecute(commandStore.id(), before, after, context.primaryTxnId().equals(after.txnId()));
                 commandStore.validateRead(safe.current());
-                Command original = safe.original();
-                if (original != null)
-                    commandStore.validateRead(original);
             });
         }
     }
