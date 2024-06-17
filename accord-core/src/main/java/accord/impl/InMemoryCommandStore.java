@@ -461,7 +461,6 @@ public abstract class InMemoryCommandStore extends CommandStore
 
     private <T> T executeInContext(InMemoryCommandStore commandStore, PreLoadContext preLoadContext, Function<? super SafeCommandStore, T> function, boolean isDirectCall)
     {
-
         SafeCommandStore safeStore = commandStore.beginOperation(preLoadContext);
         try
         {
@@ -620,18 +619,6 @@ public abstract class InMemoryCommandStore extends CommandStore
         public InMemorySafeCommandsForKey createSafeReference()
         {
             return new InMemorySafeCommandsForKey(key, this);
-        }
-    }
-
-    private static class TimestampAndStatus
-    {
-        public final Timestamp timestamp;
-        public final Status status;
-
-        public TimestampAndStatus(Timestamp timestamp, Status status)
-        {
-            this.timestamp = timestamp;
-            this.status = status;
         }
     }
 

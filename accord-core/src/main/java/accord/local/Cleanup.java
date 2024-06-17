@@ -34,7 +34,6 @@ import static accord.local.SaveStatus.TruncatedApplyWithOutcome;
 import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.Applied;
 import static accord.local.Status.Durability.Majority;
-import static accord.local.Status.Durability.Universal;
 import static accord.local.Status.Durability.UniversalOrInvalidated;
 import static accord.local.Status.PreCommitted;
 import static accord.primitives.Txn.Kind.EphemeralRead;

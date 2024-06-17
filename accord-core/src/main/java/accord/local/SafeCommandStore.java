@@ -194,6 +194,11 @@ public abstract class SafeCommandStore
     protected abstract SafeCommandsForKey getInternalIfLoadedAndInitialised(Key key);
     public abstract boolean canExecuteWith(PreLoadContext context);
 
+    public void load(Command loaded)
+    {
+        update(null, loaded);
+    }
+
     protected void update(Command prev, Command updated)
     {
         updateMaxConflicts(prev, updated);

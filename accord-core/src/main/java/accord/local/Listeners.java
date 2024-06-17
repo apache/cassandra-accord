@@ -51,7 +51,7 @@ public class Listeners<L extends Command.Listener> extends DeterministicSet<L>
             super(listeners);
         }
 
-        Listeners<L> mutable()
+        public Listeners<L> mutable()
         {
             return new Listeners<>(this);
         }

@@ -35,8 +35,6 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import accord.api.RoutingKey;
 import accord.impl.IntKey;
@@ -53,7 +51,6 @@ import static java.lang.Integer.MIN_VALUE;
 // TODO (desired): test start inclusive ranges
 public class ReducingRangeMapTest
 {
-    static final Logger logger = LoggerFactory.getLogger(ReducingRangeMapTest.class);
     static final ReducingRangeMap<Timestamp> EMPTY = new ReducingRangeMap<>();
     static final RoutingKey MINIMUM_EXCL = new IntKey.Routing(MIN_VALUE);
     static final RoutingKey MAXIMUM_EXCL = new IntKey.Routing(MAX_VALUE);
@@ -214,7 +211,6 @@ public class ReducingRangeMapTest
         try
         {
             Random random = new Random(seed);
-            logger.info(id);
             List<RandomWithCanonical> merge = new ArrayList<>();
             while (numberOfMerges-- > 0)
             {

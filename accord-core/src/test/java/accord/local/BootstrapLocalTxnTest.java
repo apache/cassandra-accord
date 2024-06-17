@@ -112,11 +112,10 @@ class BootstrapLocalTxnTest
                              }
                              return target;
                          }))
-                         // validate cmd
+                         // validateRead is called implicitly _on command completion_
                          .flatMap(target -> store.execute(contextFor(localSyncId), safe -> {
                              SafeCommand cmd = safe.get(localSyncId, route.homeKey());
                              Command current = cmd.current();
-                             validate.accept(current);
                              Assertions.assertThat(current.saveStatus()).isEqualTo(target == Cleanup.NO ? SaveStatus.Applied : target.appliesIfNot);
                          }))
                          .begin(on.agent());
