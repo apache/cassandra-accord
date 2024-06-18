@@ -110,6 +110,11 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
             return epochs.size();
         }
 
+        public boolean isEmpty()
+        {
+            return lastReceived == 0;
+        }
+
         EpochState getOrCreate(long epoch)
         {
             Invariants.checkArgument(epoch > 0, "Epoch must be positive but given %d", epoch);
@@ -208,6 +213,11 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
     public synchronized void registerListener(Listener listener)
     {
         listeners.add(listener);
+    }
+
+    public synchronized boolean isEmpty()
+    {
+        return epochs.isEmpty();
     }
 
     @Override
