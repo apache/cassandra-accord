@@ -18,6 +18,7 @@
 
 package accord.coordinate;
 
+import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
 import accord.api.RoutingKey;
@@ -29,11 +30,16 @@ public class FailureAccumulator
 
     public static Throwable append(@Nullable Throwable current, Throwable next)
     {
+        return append(current, next, FailureAccumulator::isTimeout);
+    }
+
+    public static Throwable append(@Nullable Throwable current, Throwable next, Predicate<Throwable> isTimeout)
+    {
         if (current == null) return next;
         // when a non-timeout is seen make sure it shows up in current rather than timeout
         // this is so checking if the cause is a timeout is able to do a single check rather
         // than walk the whole chain
-        if (current instanceof Timeout && !(next instanceof Timeout))
+        if (isTimeout.test(current) && !(isTimeout.test(next)))
         {
             Throwable tmp = current;
             current = next;
