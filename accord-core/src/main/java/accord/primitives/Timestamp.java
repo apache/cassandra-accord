@@ -366,6 +366,11 @@ public class Timestamp implements Comparable<Timestamp>, EpochSupplier
     @Override
     public String toString()
     {
+        return toStandardString();
+    }
+
+    public String toStandardString()
+    {
         return "[" + epoch() + ',' + hlc() + ',' + Integer.toBinaryString(flags()) + ',' + node + ']';
     }
 

@@ -128,6 +128,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
         public boolean equals(Id that)
         {
+            if (that == null) return false;
             return id == that.id;
         }
 
@@ -245,7 +246,23 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     private synchronized EpochReady onTopologyUpdateInternal(Topology topology, boolean startSync)
     {
         Supplier<EpochReady> bootstrap = commandStores.updateTopology(this, topology, startSync);
-        return this.topology.onTopologyUpdate(topology, bootstrap);
+        Supplier<EpochReady> ordering = () -> {
+            if (this.topology.isEmpty()) return bootstrap.get();
+            return order(this.topology.epochReady(topology.epoch() - 1), bootstrap.get());
+        };
+        return this.topology.onTopologyUpdate(topology, ordering);
+    }
+
+    private static EpochReady order(EpochReady previous, EpochReady next)
+    {
+        if (previous.epoch + 1 != next.epoch)
+            throw new IllegalArgumentException("Attempted to order epochs but they are not next to each other... previous=" + previous.epoch + ", next=" + next.epoch);
+        if (previous.coordination.isDone()) return next;
+        return new EpochReady(next.epoch,
+                              next.metadata,
+                              previous.coordination.flatMap(ignore -> next.coordination).beginAsResult(),
+                              next.data,
+                              next.reads);
     }
 
     @Override

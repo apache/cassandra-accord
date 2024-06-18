@@ -216,12 +216,12 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
         this.end = end;
     }
 
-    public final RoutingKey start()
+    public RoutingKey start()
     {
         return start;
     }
 
-    public final RoutingKey end()
+    public RoutingKey end()
     {
         return end;
     }

@@ -87,10 +87,8 @@ import accord.utils.Gen;
 import accord.utils.Gens;
 import accord.utils.RandomSource;
 import accord.utils.Utils;
-import accord.utils.async.AsyncChains;
 import accord.utils.async.AsyncExecutor;
-import accord.utils.async.AsyncResult;
-import accord.utils.async.AsyncResults;
+import accord.utils.async.TimeoutUtils;
 import accord.verify.CompositeVerifier;
 import accord.verify.ElleVerifier;
 import accord.verify.StrictSerializabilityVerifier;
@@ -581,40 +579,22 @@ public class BurnTest
     private static void run(long seed)
     {
         Duration timeout = Duration.ofMinutes(3);
-        Runnable fn = () -> run(seed, 1000);
-        AsyncResult.Settable<?> promise = AsyncResults.settable();
-        Thread t = new Thread(() -> {
-            try
-            {
-                fn.run();
-                promise.setSuccess(null);
-            }
-            catch (Throwable e)
-            {
-                promise.setFailure(e);
-            }
-        });
-        t.setName("BurnTest with timeout");
-        t.setDaemon(true);
         try
         {
-            t.start();
-            AsyncChains.getBlocking(promise, timeout.toNanos(), TimeUnit.NANOSECONDS);
+            TimeoutUtils.runBlocking(timeout, "BurnTest with timeout", () -> run(seed, 1000));
         }
         catch (Throwable thrown)
         {
             Throwable cause = thrown;
             if (cause instanceof ExecutionException)
                 cause = cause.getCause();
-            if (cause instanceof InterruptedException || cause instanceof TimeoutException)
-                t.interrupt();
             if (cause instanceof TimeoutException)
             {
                 TimeoutException override = new TimeoutException("test did not complete within " + timeout);
                 override.setStackTrace(new StackTraceElement[0]);
                 cause = override;
             }
-            logger.error("Exception running burn test for seed {}:", seed, t);
+            logger.error("Exception running burn test for seed {}:", seed, cause);
             throw SimulationException.wrap(seed, cause);
         }
     }

@@ -32,25 +32,25 @@ import static accord.utils.Invariants.checkState;
 public class Exhausted extends CoordinationFailed
 {
     final Ranges unavailable;
-    private String message;
 
     public Exhausted(TxnId txnId, @Nullable RoutingKey homeKey, Ranges unavailable)
     {
-        super(txnId, homeKey);
+        super(txnId, homeKey, getMessage(txnId, unavailable));
         this.unavailable = unavailable;
-    }
-
-    public String getMessage()
-    {
-        if (message == null)
-            message = unavailable == null ? "No more nodes to try" : "No more nodes to try for: " + unavailable;
-        return message;
     }
 
     Exhausted(TxnId txnId, @Nullable RoutingKey homeKey, Ranges unavailable, Exhausted cause)
     {
         super(txnId, homeKey, cause);
         this.unavailable = unavailable;
+    }
+
+    private static String getMessage(TxnId txnId, @Nullable Ranges unavailable)
+    {
+        String msg = "No more nodes to try for " + txnId;
+        if (unavailable != null)
+            msg += ": " + unavailable;
+        return msg;
     }
 
     @Override

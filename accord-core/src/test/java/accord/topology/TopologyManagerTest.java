@@ -146,6 +146,8 @@ public class TopologyManagerTest
         TopologyManager service = tracker();
 
         Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
+        // shards to nodes: [[1, 2, 3], [4, 5, 6]]
+        // by syncing node 1/2 shard 1 has reached quorum, but not shard 2
         service.onEpochSyncComplete(id(1), 2);
         service.onEpochSyncComplete(id(2), 2);
         Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
@@ -153,41 +155,24 @@ public class TopologyManagerTest
         Assertions.assertFalse(service.getEpochStateUnsafe(2).syncCompleteFor(keys(250).toParticipants()));
     }
 
-    /**
-     * Epochs should only report being synced if every preceding epoch is also reporting synced
-     */
     @Test
-    void existingEpochPendingSync()
+    void syncCompletePastEpochs()
     {
-        Range range = range(100, 200);
-        Topology topology1 = topology(1, shard(range, idList(1, 2, 3), idSet(1, 2)));
-        Topology topology2 = topology(2, shard(range, idList(1, 2, 3), idSet(2, 3)));
-        Topology topology3 = topology(3, shard(range, idList(1, 2, 3), idSet(1, 2)));
-
         TopologyManager service = testTopologyManager(SUPPLIER, ID);
-        service.onTopologyUpdate(topology1, () -> null);
-        service.onTopologyUpdate(topology2, () -> null);
-        service.onTopologyUpdate(topology3, () -> null);
+        Shard[] shards = { shard(range(0, 100), idList(1, 2, 3), idSet(1, 2, 3)),
+                           shard(range(100, 200), idList(3, 4, 5), idSet(3, 4, 5)) };
 
-        Assertions.assertTrue(service.getEpochStateUnsafe(1).syncComplete());
-        Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
-        Assertions.assertFalse(service.getEpochStateUnsafe(3).syncComplete());
+        service.onTopologyUpdate(topology(1, shards), () -> null);
+        service.onTopologyUpdate(topology(2, shards), () -> null);
+        service.onTopologyUpdate(topology(3, shards), () -> null);
 
-        // sync epoch 3
-        service.onEpochSyncComplete(id(1), 3);
-        service.onEpochSyncComplete(id(2), 3);
+        for (int i = 1; i <= 5; i++)
+            service.onEpochSyncComplete(id(i), service.epoch());
 
-        Assertions.assertTrue(service.getEpochStateUnsafe(1).syncComplete());
-        Assertions.assertFalse(service.getEpochStateUnsafe(2).syncComplete());
-        Assertions.assertFalse(service.getEpochStateUnsafe(3).syncComplete());
-
-        // sync epoch 2
-        service.onEpochSyncComplete(id(2), 2);
-        service.onEpochSyncComplete(id(3), 2);
-
-        Assertions.assertTrue(service.getEpochStateUnsafe(1).syncComplete());
-        Assertions.assertTrue(service.getEpochStateUnsafe(2).syncComplete());
-        Assertions.assertTrue(service.getEpochStateUnsafe(3).syncComplete());
+        Ranges expected = service.current().ranges().mergeTouching();
+        org.assertj.core.api.Assertions.assertThat(service.syncComplete(3)).describedAs("Unexpected sync complte for node 3").isEqualTo(expected);
+        org.assertj.core.api.Assertions.assertThat(service.syncComplete(2)).describedAs("Unexpected sync complte for node 2").isEqualTo(expected);
+        org.assertj.core.api.Assertions.assertThat(service.syncComplete(1)).describedAs("Unexpected sync complte for node 1").isEqualTo(expected);
     }
 
     /**

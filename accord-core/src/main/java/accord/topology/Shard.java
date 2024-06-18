@@ -52,7 +52,7 @@ public class Shard
         this.maxFailures = maxToleratedFailures(nodes.size());
         this.fastPathElectorate = ImmutableSet.copyOf(fastPathElectorate);
         this.joining = checkArgument(ImmutableSet.copyOf(joining), Iterables.all(joining, nodes::contains),
-                "joining nodes must also be present in nodes");
+                "joining nodes must also be present in nodes; joining=%s, nodes=%s", joining, nodes);
         int e = fastPathElectorate.size();
         this.recoveryFastPathSize = (maxFailures+1)/2;
         this.slowPathQuorumSize = slowPathQuorumSize(nodes.size());
@@ -116,6 +116,8 @@ public class Shard
                     sb.append('f');
             }
             sb.append(')');
+            if (!joining.isEmpty())
+                sb.append(":joining=").append(joining);
             s = sb.toString();
         }
         return s;

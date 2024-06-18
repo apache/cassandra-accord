@@ -66,6 +66,15 @@ public class QuorumTracker extends AbstractSimpleTracker<QuorumTracker.QuorumSha
         {
             return failures > shard.maxFailures;
         }
+
+        @Override
+        public String toString()
+        {
+            return getClass().getSimpleName() + "{successes: "+successes+"," +
+                   "failures: "+failures+"," +
+                   "quorum?: "+hasReachedQuorum()+"," +
+                   "shard:"+shard+"}";
+        }
     }
 
     public QuorumTracker(Topologies topologies)

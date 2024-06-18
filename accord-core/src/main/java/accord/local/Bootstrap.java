@@ -148,6 +148,8 @@ class Bootstrap
                .flatMap(syncPoint -> node.withEpoch(epoch, () -> store.submit(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.COMMANDS), safeStore1 -> {
                    if (valid.isEmpty()) // we've lost ownership of the range
                        return AsyncResults.success(Ranges.EMPTY);
+                   if (!syncPoint.waitFor.isEmpty() && !node.topology().hasEpoch(syncPoint.waitFor.minTxnId().epoch()))
+                       throw Invariants.illegalState("Deps has a txn %s that contains an unknown epoch; min=%d, max=%d", syncPoint.waitFor.minTxnId(), node.topology().minEpoch(), node.topology().current().epoch());
 
                    Commands.createBootstrapCompleteMarkerTransaction(safeStore1, localSyncId, valid);
                    safeStore1.registerHistoricalTransactions(syncPoint.waitFor);
