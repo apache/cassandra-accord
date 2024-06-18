@@ -71,6 +71,7 @@ public abstract class ExecuteSyncPoint<S extends Seekables<?, ?>> extends Settab
     final Node node;
     final AbstractSimpleTracker<?> tracker;
     final SyncPoint<S> syncPoint;
+    private Throwable failures = null;
 
     ExecuteSyncPoint(Node node, AbstractSimpleTracker<?> tracker, SyncPoint<S> syncPoint)
     {
@@ -123,8 +124,9 @@ public abstract class ExecuteSyncPoint<S extends Seekables<?, ?>> extends Settab
     public synchronized void onFailure(Node.Id from, Throwable failure)
     {
         if (isDone()) return;
+        failures = FailureAccumulator.append(failures, failure);
         if (tracker.recordFailure(from) == RequestStatus.Failed)
-            tryFailure(new Exhausted(syncPoint.syncId, syncPoint.homeKey));
+            tryFailure(FailureAccumulator.createFailure(failures, syncPoint.syncId, syncPoint.homeKey));
     }
 
     @Override
