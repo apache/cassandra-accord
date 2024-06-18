@@ -333,7 +333,7 @@ public class ListStore implements DataStore
                     if (!success.isEmpty())
                         fetchCompletes.add(new FetchComplete(storeId, syncPoint, success));
                 }
-                delegate.fail(ranges, new Throwable());
+                delegate.fail(ranges, new Throwable("Failed Fetch", failure));
             }
         };
         ListFetchCoordinator coordinator = new ListFetchCoordinator(node, ranges, syncPoint, hook, safeStore.commandStore(), this);

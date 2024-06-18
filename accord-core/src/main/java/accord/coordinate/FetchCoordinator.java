@@ -134,7 +134,7 @@ public abstract class FetchCoordinator
     // provided to us, and manages the safe-to-read state
     private final FetchRanges fetchRanges;
     private boolean isDone;
-    private Throwable failure;
+    private Throwable failures = null;
 
     final Map<Node.Id, State> stateMap = new HashMap<>();
     final List<State> states = new ArrayList<>();
@@ -204,10 +204,8 @@ public abstract class FetchCoordinator
 
         // some portion of the range is completely unavailable
         isDone = true;
-        Exhausted exhausted = new Exhausted(syncPoint.syncId, null, "No more nodes to contact for " + needed);
-        if (failure != null) exhausted.addSuppressed(failure);
-        failure = exhausted;
-        onDone(success, failure);
+        failures = FailureAccumulator.createFailure(failures, syncPoint.syncId, null, "No more nodes to contact for " + needed);
+        onDone(success, failures);
     }
 
     protected void exhausted(Ranges exhausted)
@@ -310,8 +308,7 @@ public abstract class FetchCoordinator
         if (isDone)
             return;
 
-        if (this.failure == null) this.failure = failure;
-        else this.failure.addSuppressed(failure);
+        failures = FailureAccumulator.append(failures, failure);
 
         unavailable(to, ranges);
     }
@@ -320,8 +317,7 @@ public abstract class FetchCoordinator
         if (isDone)
             return;
 
-        if (this.failure == null) this.failure = failure;
-        else this.failure.addSuppressed(failure);
+        failures = FailureAccumulator.append(failures, failure);
 
         State state = stateMap.get(to);
 
