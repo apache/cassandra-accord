@@ -18,6 +18,7 @@
 
 package accord.api;
 
+import java.util.Collection;
 import javax.annotation.Nullable;
 
 import accord.local.Node;
@@ -143,6 +144,8 @@ public interface ConfigurationService
          * in whatever epoch they execute in. Once the whole range is covered this epoch is redundant, and may be cleaned up.
          */
         void onEpochRedundant(Ranges ranges, long epoch);
+
+        default void onRemoveNodes(long epoch, Collection<Node.Id> removed) {}
     }
 
     void registerListener(Listener listener);

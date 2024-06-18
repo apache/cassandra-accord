@@ -262,6 +262,12 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     }
 
     @Override
+    public void onRemoveNodes(long epoch, Collection<Id> removed)
+    {
+        topology.onRemoveNodes(epoch, removed);
+    }
+
+    @Override
     public void truncateTopologyUntil(long epoch)
     {
         topology.truncateTopologyUntil(epoch);
