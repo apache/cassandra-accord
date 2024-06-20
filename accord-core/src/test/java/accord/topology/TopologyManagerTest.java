@@ -562,9 +562,9 @@ public class TopologyManagerTest
                     postTopologyUpdate(id, t);
                     break;
                 case OnEpochSyncComplete:
-                    long epoch = rs.pick(pendingSyncComplete.keySet());
+                    long epoch = rs.pickUnorderedSet(pendingSyncComplete.keySet());
                     Set<Node.Id> pendingNodes = pendingSyncComplete.get(epoch);
-                    Node.Id node = rs.pick(pendingNodes);
+                    Node.Id node = rs.pickUnorderedSet(pendingNodes);
                     pendingNodes.remove(node);
                     if (pendingNodes.isEmpty())
                         pendingSyncComplete.remove(epoch);
