@@ -156,6 +156,5 @@ public class LoggingRandomSource implements RandomSource
                                     || e.getClassName().startsWith("java.lang.reflect")))
                      .collect(Collectors.toList())
                      .toArray(StackTraceElement[]::new);
-//        return stackTrace;
     }
 }
