@@ -115,7 +115,7 @@ public class TopologyManager
 
         public boolean hasReachedQuorum()
         {
-            return syncTracker.hasReachedQuorum();
+            return syncTracker == null ? true : syncTracker.hasReachedQuorum();
         }
 
         public boolean recordSyncComplete(Id node)
