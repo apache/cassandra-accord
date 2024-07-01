@@ -20,6 +20,7 @@ package accord.topology;
 
 import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
@@ -110,6 +111,11 @@ public class TopologyManager
             prevSyncComplete = newPrevSyncComplete;
             syncComplete = curSyncComplete.slice(newPrevSyncComplete, Minimal).union(MERGE_ADJACENT, addedRanges);
             return true;
+        }
+
+        public boolean hasReachedQuorum()
+        {
+            return syncTracker == null ? true : syncTracker.hasReachedQuorum();
         }
 
         public boolean recordSyncComplete(Id node)
@@ -420,6 +426,12 @@ public class TopologyManager
         return current == null || result.isDone() ? result : result.withExecutor(current);
     }
 
+    public synchronized boolean hasReachedQuorum(long epoch)
+    {
+        EpochState state = epochs.get(epoch);
+        return state != null && state.hasReachedQuorum();
+    }
+
     @VisibleForTesting
     public EpochReady epochReady(long epoch)
     {
@@ -437,6 +449,23 @@ public class TopologyManager
     public synchronized void onEpochSyncComplete(Id node, long epoch)
     {
         epochs.syncComplete(node, epoch);
+    }
+
+    public synchronized void onRemoveNodes(long removedIn, Collection<Id> removed)
+    {
+        for (long epoch = removedIn, min = minEpoch(); epoch >= min; epoch--)
+        {
+            EpochState state = epochs.get(epoch);
+            if (state == null || state.hasReachedQuorum()) continue;
+            for (Id node : removed)
+                epochs.syncComplete(node, epoch);
+        }
+    }
+
+    @VisibleForTesting
+    public Ranges syncComplete(long epoch)
+    {
+        return epochs.get(epoch).syncComplete;
     }
 
     public synchronized void truncateTopologyUntil(long epoch)

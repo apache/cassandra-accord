@@ -21,9 +21,9 @@ package accord.utils;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.NavigableSet;
 import java.util.Random;
 import java.util.Set;
+import java.util.SortedSet;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
@@ -288,19 +288,20 @@ public interface RandomSource
         return array[nextInt(offset, offset + length)];
     }
 
-    default <T> T pick(NavigableSet<T> set)
+    default <T> T pickOrderedSet(SortedSet<T> set)
     {
         int offset = nextInt(0, set.size());
         return Iterables.get(set, offset);
     }
 
-    default <T extends Comparable<? super T>> T pick(Set<T> set)
+    default <T extends Comparable<? super T>> T pickUnorderedSet(Set<T> set)
     {
+        if (set instanceof SortedSet)
+            return pickOrderedSet((SortedSet<T>) set);
         List<T> values = new ArrayList<>(set);
         // Non-ordered sets may have different iteration order on different environments, which would make a seed produce different histories!
         // To avoid such a problem, make sure to apply a deterministic function (sort).
-        if (!(set instanceof NavigableSet))
-            values.sort(Comparator.naturalOrder());
+        values.sort(Comparator.naturalOrder());
         return pick(values);
     }
 

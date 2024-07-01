@@ -27,6 +27,8 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
@@ -35,7 +37,6 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
@@ -112,8 +113,18 @@ public class Gens {
     {
         if (values == null || values.isEmpty())
             throw new IllegalArgumentException("values is empty");
+        // if 2 values have the same weight we need some way to tie-break, but that isn't always possible...
+        // this method relies on the map having some order and will reject any map that doesn't define a deterministic order
+        if (!(values instanceof EnumMap || values instanceof LinkedHashMap))
+            throw new IllegalArgumentException("pick(Map) requires a map with deterministic iteration; given " + values.getClass());
         double totalWeight = values.values().stream().mapToDouble(Integer::intValue).sum();
-        List<Weight<T>> list = values.entrySet().stream().map(e -> new Weight<>(e.getKey(), e.getValue())).collect(Collectors.toList());
+        List<Weight<T>> list = new ArrayList<>(values.size());
+        Iterator<Map.Entry<T, Integer>> it = values.entrySet().iterator();
+        for (int i = 0; it.hasNext(); i++)
+        {
+            Map.Entry<T, Integer> e = it.next();
+            list.add(new Weight<>(e.getKey(), e.getValue(), i));
+        }
         Collections.sort(list);
         return rs -> {
             double value = rs.nextDouble() * totalWeight;
@@ -953,15 +964,20 @@ public class Gens {
     {
         private final T value;
         private final double weight;
+        private final int index;
 
-        private Weight(T value, double weight) {
+        private Weight(T value, double weight, int index) {
             this.value = value;
             this.weight = weight;
+            this.index = index;
         }
 
         @Override
         public int compareTo(Weight<T> o) {
-            return Double.compare(weight, o.weight);
+            int rc = Double.compare(weight, o.weight);
+            if (rc == 0)
+                rc = Integer.compare(index, o.index);
+            return rc;
         }
     }
 }
