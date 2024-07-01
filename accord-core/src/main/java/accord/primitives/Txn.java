@@ -63,47 +63,29 @@ public interface Txn
         EphemeralRead,
 
         /**
-         * A pseudo-transaction whose deps represent the complete set of transactions that may execute before it,
-         * without interfering with their execution.
-         *
-         * A SyncPoint is unique in that it does not agree an executeAt, but instead agrees a precise collection of
+         * A pseudo-transaction whose deps represent the complete set of transactions that may execute before it.
+         * The conflict relation is unidirectional for deps, that is a SyncPoint is never a dependency of regular
+         * transactions, but the SyncPoint does update the executeAt conflict collection so that conflicting transactions
+         * must take a later executeAt.
+         */
+        SyncPoint,
+
+        /**
+         * An ExclusiveSyncPoint is unique in that it does not agree an executeAt, but instead agrees a precise collection of
          * dependencies that represent a superset of the transactions that have reached consensus to execute before
-         * their txnId. This set of dependencies will be made durable in the Accept round, and re-proposed by recovery
-         * if the transaction is not fully committed (but was durably accepted).
+         * its txnId.
          *
          * This is only safe because the transaction does not really "execute" and does not order itself with respect to
          * others, it only orders others with respect to itself, so its executeAt can be declared to be its txnId.
          * In effect it represents an inequality relation, rather than a precise point in the transaction log - its
          * dependencies permit saying that we are "after" its point in the log, not that we are *at* that point.
-         * This permits us to use the dependencies from the PreAccept round.
-         *
-         * Note, it would be possible to do a three-round operation that achieved this with a precise "at" position
-         * in the log, with a second round between PreAccept and Accept to collect deps < executeAt, if executeAt &gt; txnId,
-         * but we do not need this property here.
-         *
-         * This all ensures the effect of this transaction on invalidation of earlier transactions is durable.
-         * This is most useful for ExclusiveSyncPoint.
-         *
-         * Invisible to other transactions.
-         */
-        SyncPoint,
-
-        /**
-         * A {@link #SyncPoint} that invalidates transactions with lower TxnId that it does not witness, i.e. it ensures
-         * that earlier TxnId that had not reached consensus before it did must be retried with a higher TxnId,
-         * so that replicas that are bootstrapping may ignore lower TxnId and still be sure they have a complete
-         * representation of the reified transaction log.
          *
          * Other transactions do not typically take a dependency upon an ExclusiveSyncPoint as part of coordination,
          * however during execution on a bootstrapping replica the sync point may be inserted as a dependency until
          * the bootstrap has progressed far enough to know which transactions will be executed before the bootstrap
          * (and therefore should be pruned from dependencies, as their outcome will be included in the bootstrap)
          * and those which will be executed after, on the replica (and therefore should be retained as dependencies).
-         *
-         * Invisible to other transactions.
          */
-        // TODO (expected): introduce a special kind of visible ExclusiveSyncPoint that creates a precise moment,
-        //    and is therefore visible to all transactions.
         ExclusiveSyncPoint('X'),
 
         /**

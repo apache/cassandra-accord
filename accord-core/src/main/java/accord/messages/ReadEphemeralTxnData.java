@@ -22,6 +22,7 @@ import javax.annotation.Nonnull;
 import accord.api.Data;
 import accord.local.Command;
 import accord.local.Commands;
+import accord.local.KeyHistory;
 import accord.local.Node.Id;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
@@ -32,6 +33,7 @@ import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
+import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -146,5 +148,17 @@ public class ReadEphemeralTxnData extends ReadData
     public MessageType type()
     {
         return MessageType.READ_EPHEMERAL_REQ;
+    }
+
+    @Override
+    public Seekables<?, ?> keys()
+    {
+        return partialTxn.keys();
+    }
+
+    @Override
+    public KeyHistory keyHistory()
+    {
+        return KeyHistory.COMMANDS;
     }
 }

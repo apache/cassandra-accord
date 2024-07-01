@@ -101,7 +101,7 @@ public interface PreLoadContext
     default boolean isSubsetOf(PreLoadContext superset)
     {
         KeyHistory requiredHistory = keyHistory();
-        if (requiredHistory != KeyHistory.NONE && requiredHistory != superset.keyHistory())
+        if (requiredHistory != KeyHistory.NONE && requiredHistory != superset.keyHistory() && !keys().isEmpty())
             return false;
 
         if (superset.keys().domain() != keys().domain() || !superset.keys().containsAll(keys()))

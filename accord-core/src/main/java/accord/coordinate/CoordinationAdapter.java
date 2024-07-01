@@ -209,8 +209,6 @@ public interface CoordinationAdapter<R>
         {
             void invokeSuccess(Node node, FullRoute<?> route, TxnId txnId, Txn txn, Deps deps, BiConsumer<? super SyncPoint<S>, Throwable> callback)
             {
-                if (txn.keys().domain() == Range)
-                    node.configService().reportEpochClosed((Ranges)txn.keys(), txnId.epoch());
                 callback.accept(new SyncPoint<>(txnId, deps, (S)txn.keys(), route), null);
             }
 
@@ -248,6 +246,9 @@ public interface CoordinationAdapter<R>
             @Override
             public void execute(Node node, Topologies all, FullRoute<?> route, ExecutePath path, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super SyncPoint<S>, Throwable> callback)
             {
+                if (txn.keys().domain() == Range)
+                    node.configService().reportEpochClosed((Ranges)txn.keys(), txnId.epoch() - 1);
+
                 // TODO (required): remember and document why we don't use fast path for exclusive sync points
                 if (path == FAST)
                 {

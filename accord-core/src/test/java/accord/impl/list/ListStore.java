@@ -558,7 +558,7 @@ public class ListStore implements DataStore
             {
                 if (tracker.recordSuccess(from) == RequestStatus.Success)
                 {
-                    node.configService().reportEpochRedundant(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.syncId.epoch());
+                    node.configService().reportEpochRedundant(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.syncId.epoch() - 1);
                     trySuccess(exclusiveSyncPoint);
                 }
             }
