@@ -669,7 +669,7 @@ public abstract class Command implements CommonAttributes
 
     public final boolean isTruncated()
     {
-        return status().hasBeen(Status.Truncated);
+        return isTruncated(status());
     }
 
     public static boolean isTruncated(Status status)
