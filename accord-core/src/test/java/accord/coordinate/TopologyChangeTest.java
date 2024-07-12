@@ -226,7 +226,7 @@ public class TopologyChangeTest
     }
 
     /**
-     * new nodes should not be able to coordinate if their bootstrap sync points don't reach a quorum
+     * bootstrapping nodes should not be able to coordinate if their bootstrap sync points don't reach a quorum
      */
     @Test
     void lostBarrierTest()
