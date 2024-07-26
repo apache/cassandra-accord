@@ -38,8 +38,6 @@ import static accord.local.SaveStatus.TruncatedApply;
  */
 public class WaitUntilApplied extends ReadData
 {
-    private static final Logger logger = LoggerFactory.getLogger(WaitUntilApplied.class);
-
     public static class SerializerSupport
     {
         public static WaitUntilApplied create(TxnId txnId, Participants<?> scope, long executeAtEpoch)
@@ -85,7 +83,9 @@ public class WaitUntilApplied extends ReadData
     @Override
     protected ReadOk constructReadOk(Ranges unavailable, Data data)
     {
-        return new ReadOkWithFutureEpoch(unavailable, data, retryInLaterEpoch);
+        if (retryInLaterEpoch > 0)
+            return new ReadOkWithFutureEpoch(unavailable, data, retryInLaterEpoch);
+        return new ReadOk(unavailable, data);
     }
 
     @Override

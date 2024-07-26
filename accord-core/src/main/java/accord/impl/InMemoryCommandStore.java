@@ -518,7 +518,7 @@ public abstract class InMemoryCommandStore extends CommandStore
     @Override
     public String toString()
     {
-        return getClass().getSimpleName() + "{" + "id=" + id + ",node=" + time.id().id + '}';
+        return getClass().getSimpleName() + "{id=" + id + ",node=" + time.id().id  + '}';
     }
 
     static class RangeCommand

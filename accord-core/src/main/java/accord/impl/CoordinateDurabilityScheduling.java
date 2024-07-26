@@ -71,7 +71,8 @@ import static java.util.concurrent.TimeUnit.MICROSECONDS;
  * The work for CoordinateShardDurable is further subdivided where each subrange a node operates on is divided a fixed
  * number of times and then processed one at a time with a fixed wait between them.
  *
- * // TODO (expected): cap number of coordinations we can have in flight at once
+ * TODO (expected): cap number of coordinations we can have in flight at once
+ * TODO (expected): do not start new ExclusiveSyncPoint if we have more than X already agreed and not yet applied
  * Didn't go with recurring because it doesn't play well with async execution of these tasks
  */
 public class CoordinateDurabilityScheduling
@@ -214,11 +215,19 @@ public class CoordinateDurabilityScheduling
     private void startShardSync(Ranges ranges)
     {
         TxnId at = node.nextTxnId(ExclusiveSyncPoint, Domain.Range);
+        logger.trace("{}: Coordinating ExclusiveSyncPoint for local shard durability of {}", at, ranges);
         node.scheduler().once(() -> node.withEpoch(at.epoch(), () -> {
                            CoordinateSyncPoint.exclusive(node, at, ranges)
                                .addCallback((success, fail) -> {
-                                   if (fail != null) logger.trace("Exception coordinating exclusive sync point for local shard durability of {}", ranges, fail);
-                                   else coordinateShardDurableAfterExclusiveSyncPoint(node, success);
+                                   if (fail != null)
+                                   {
+                                       logger.trace("{}: Exception coordinating ExclusiveSyncPoint for local shard durability of {}", at, ranges, fail);
+                                   }
+                                   else
+                                   {
+                                       coordinateShardDurableAfterExclusiveSyncPoint(node, success);
+                                       logger.trace("{}: Successfully coordinated ExclusiveSyncPoint for local shard durability of {}", at, ranges);
+                                   }
                                });
         }), txnIdLagMicros, MICROSECONDS);
     }
@@ -264,8 +273,8 @@ public class CoordinateDurabilityScheduling
         {
             Shard shard = e.getKey();
             int index = e.getValue();
-            long microsOffset = (index * shardCycleTimeMicros) / shard.rf();
             int shardCycleTimeMicros = Math.max(this.shardCycleTimeMicros, Ints.saturatedCast(shard.rf() * 3L * frequencyMicros));
+            long microsOffset = (index * (long)shardCycleTimeMicros) / shard.rf();
             long prevSyncTimeMicros = Math.max(prevShardSyncTimeMicros, nowMicros - ((shardCycleTimeMicros / shard.rf()) / 2L));
             int from = (int) ((prevSyncTimeMicros + microsOffset) % shardCycleTimeMicros);
             int to = (int) ((nowMicros + microsOffset) % shardCycleTimeMicros);

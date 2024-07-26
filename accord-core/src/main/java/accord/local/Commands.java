@@ -432,12 +432,10 @@ public class Commands
         if (command.hasBeen(Stable))
             return;
 
-        // TODO (required): by creating synthetic TxnId in future epochs we may not be evictable
-        //   but for ephemeral reads we want parallel eviction - or preferably no durability - anyway
-        txnId = txnId.withEpoch(executeAtEpoch);
-
+        // BREAKING CHANGE NOTE: if in future we support a CommandStore adopting additional ranges (rather than only shedding them)
+        //                       then we need to revisit how we execute transactions that awaitsOnlyDeps, as they may need additional
+        //                       information to execute in the eventual execution epoch (that they didn't know they needed when they were made stable)
         Ranges coordinateRanges = coordinateRanges(safeStore, txnId);
-        // TODO (desired, consider): in the case of sync points, the coordinator is unlikely to be a home shard, do we mind this? should document at least
         ProgressShard progressShard = No;
         Invariants.checkState(validate(command.status(), command, Ranges.EMPTY, coordinateRanges, progressShard, route, Set, partialTxn, Set, partialDeps, Set));
         CommonAttributes attrs = set(command, Ranges.EMPTY, coordinateRanges, progressShard, route, partialTxn, Set, partialDeps, Set);

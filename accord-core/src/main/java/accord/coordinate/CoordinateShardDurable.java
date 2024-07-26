@@ -18,6 +18,7 @@
 
 package accord.coordinate;
 
+import accord.coordinate.ExecuteSyncPoint.ExecuteExclusiveSyncPoint;
 import accord.coordinate.tracking.AppliedTracker;
 import accord.local.Node;
 import accord.messages.Callback;
@@ -28,11 +29,18 @@ import accord.primitives.Ranges;
 import accord.primitives.SyncPoint;
 import accord.utils.async.AsyncResult;
 
-public class CoordinateShardDurable extends ExecuteSyncPoint<Ranges> implements Callback<ReadReply>
+public class CoordinateShardDurable extends ExecuteExclusiveSyncPoint implements Callback<ReadReply>
 {
     private CoordinateShardDurable(Node node, SyncPoint<Ranges> exclusiveSyncPoint)
     {
-        super(node, new AppliedTracker(node.topology().forEpoch(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.sourceEpoch())), exclusiveSyncPoint);
+        super(node, exclusiveSyncPoint, AppliedTracker::new);
+        addCallback((success, fail) -> {
+            if (fail == null)
+            {
+                node.configService().reportEpochRedundant(syncPoint.keysOrRanges, syncPoint.syncId.epoch());
+                node.send(tracker.nodes(), new SetShardDurable(syncPoint));
+            }
+        });
     }
 
     public static AsyncResult<SyncPoint<Ranges>> coordinate(Node node, SyncPoint<Ranges> exclusiveSyncPoint)
@@ -45,13 +53,5 @@ public class CoordinateShardDurable extends ExecuteSyncPoint<Ranges> implements 
     protected void start()
     {
         node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), syncPoint.syncId, syncPoint.keysOrRanges, syncPoint.syncId.epoch()), this);
-    }
-
-    @Override
-    protected void onSuccess()
-    {
-        node.configService().reportEpochRedundant(syncPoint.keysOrRanges, syncPoint.syncId.epoch());
-        node.send(tracker.nodes(), new SetShardDurable(syncPoint));
-        super.onSuccess();
     }
 }
