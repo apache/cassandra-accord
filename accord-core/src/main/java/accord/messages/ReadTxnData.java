@@ -23,7 +23,7 @@ import accord.primitives.Participants;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
-import static accord.local.SaveStatus.ReadyToExecute;
+import static accord.primitives.SaveStatus.ReadyToExecute;
 
 // TODO (required, efficiency): dedup - can currently have infinite pending reads that will be executed independently
 public class ReadTxnData extends ReadData

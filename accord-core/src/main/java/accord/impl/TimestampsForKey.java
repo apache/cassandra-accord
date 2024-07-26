@@ -20,7 +20,7 @@ package accord.impl;
 
 import java.util.Objects;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
@@ -30,7 +30,7 @@ public class TimestampsForKey
 
     public static class SerializerSupport
     {
-        public static TimestampsForKey create(Key key,
+        public static TimestampsForKey create(RoutingKey key,
                                                   Timestamp lastExecutedTimestamp,
                                                   long lastExecutedHlc,
                                                   Timestamp lastWriteTimestamp)
@@ -39,13 +39,13 @@ public class TimestampsForKey
         }
     }
 
-    private final Key key;
+    private final RoutingKey key;
     private final Timestamp lastExecutedTimestamp;
     // TODO (desired): we have leaked C* implementation details here
     private final long rawLastExecutedHlc;
     private final Timestamp lastWriteTimestamp;
 
-    public TimestampsForKey(Key key, Timestamp lastExecutedTimestamp, long rawLastExecutedHlc, Timestamp lastWriteTimestamp)
+    public TimestampsForKey(RoutingKey key, Timestamp lastExecutedTimestamp, long rawLastExecutedHlc, Timestamp lastWriteTimestamp)
     {
         this.key = key;
         this.lastExecutedTimestamp = lastExecutedTimestamp;
@@ -53,7 +53,7 @@ public class TimestampsForKey
         this.lastWriteTimestamp = lastWriteTimestamp;
     }
 
-    public TimestampsForKey(Key key)
+    public TimestampsForKey(RoutingKey key)
     {
         this.key = key;
         this.lastExecutedTimestamp = Timestamp.NONE;
@@ -74,7 +74,7 @@ public class TimestampsForKey
         throw new UnsupportedOperationException();
     }
 
-    public Key key()
+    public RoutingKey key()
     {
         return key;
     }

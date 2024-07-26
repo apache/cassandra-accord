@@ -18,6 +18,7 @@
 
 package accord.primitives;
 
+// TODO (expected): this is probably redundant 
 public interface EpochSupplier
 {
     long epoch();

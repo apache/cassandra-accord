@@ -101,16 +101,6 @@ public class SortedArrays
             return Arrays.binarySearch(array, 0, array.length, find);
         }
 
-        public boolean contains(Comparable<? super T> find)
-        {
-            return find != null && find(find) >= 0;
-        }
-
-        public int indexOf(Comparable<? super T> find)
-        {
-            return find == null ? -1 : Math.max(-1, find(find));
-        }
-
         public boolean containsAll(SortedArrayList<T> test)
         {
             return isSubset(Comparable::compareTo, test.array, 0, test.array.length, array, 0, array.length);
@@ -142,30 +132,11 @@ public class SortedArrays
                 return new SortedArrayList<>(array);
             }
         }
-    }
 
-    public static class ExtendedSortedArrayList<T extends Comparable<? super T>> extends SortedArrayList<T>
-    {
-        public static <T extends Comparable<? super T>> ExtendedSortedArrayList<T> sortedCopyOf(Collection<T> copy, IntFunction<T[]> allocator)
+        public SortedArrayList<T> without(SortedArrayList<T> without)
         {
-            T[] array = allocator.apply(copy.size());
-            array = copy.toArray(array);
-            Arrays.sort(array);
-            // implicitly checks entries are non-null
-            checkArgument(array, SortedArrays::isSortedUnique);
-            return new ExtendedSortedArrayList<>(array, allocator);
-        }
-
-        final IntFunction<T[]> allocator;
-        public ExtendedSortedArrayList(T[] array, IntFunction<T[]> allocator)
-        {
-            super(array);
-            this.allocator = allocator;
-        }
-
-        public ExtendedSortedArrayList<T> difference(SortedArrayList<T> remove)
-        {
-            return new ExtendedSortedArrayList<>(linearSubtract(array, remove.array, allocator), allocator);
+            T[] array = (T[])SortedArrays.linearSubtract(Comparable::compareTo, this.array, without.array, ArrayBuffers.cachedAny());
+            return array == this.array ? this : new SortedArrayList<>(array);
         }
     }
 
@@ -680,70 +651,75 @@ public class SortedArrays
     /**
      * Given two sorted arrays, return the elements present only in the first, preferentially returning the first array
      * itself if possible
-     *
-     * TODO (expected): use cachedBuffers
      */
-    @SuppressWarnings("unused") // was used until recently, might be used again?
-    public static <T extends Comparable<? super T>> T[] linearSubtract(T[] keep, T[] subtract, IntFunction<T[]> allocate)
+    public static <V extends Comparable<? super V>> V[] linearSubtract(V[] keep, V[] subtract, ObjectBuffers<V> buffers)
     {
-        int subtractIdx = 0;
-        int keepIdx = 0;
+        return linearSubtract(Comparable::compareTo, keep, subtract, buffers);
+    }
 
-        T[] result = null;
+    public static <O, I extends O> O[] linearSubtract(Comparator<? super I> comparator, I[] keep, I[] subtract, ObjectBuffers<O> buffers)
+    {
+        return linearSubtract(comparator, keep, 0, keep.length, subtract, 0, subtract.length, buffers);
+    }
+
+    public static <O, I extends O> O[] linearSubtract(Comparator<? super I> comparator, I[] keep, int keepFrom, int keepTo, I[] subtract, int subtractFrom, int subtractTo, ObjectBuffers<O> buffers)
+    {
+        O[] result = null;
         int resultSize = 0;
 
-        while (keepIdx < keep.length && subtractIdx < subtract.length)
+        while (keepFrom < keepTo && subtractFrom < subtractTo)
         {
-            T keepKey = keep[keepIdx];
-            T subtractKey = subtract[subtractIdx];
-            int cmp = keepKey == subtractKey ? 0 : keepKey.compareTo(subtractKey);
+            I keepKey = keep[keepFrom];
+            I subtractKey = subtract[subtractFrom];
+            int cmp = keepKey == subtractKey ? 0 : comparator.compare(keepKey, subtractKey);
 
             if (cmp == 0)
             {
-                resultSize = keepIdx++;
-                ++subtractIdx;
-                result = allocate.apply(resultSize + keep.length - keepIdx);
+                resultSize = keepFrom++;
+                ++subtractFrom;
+                result = buffers.get(resultSize + keepTo - keepFrom);
                 System.arraycopy(keep, 0, result, 0, resultSize);
                 break;
             }
             else if (cmp < 0)
             {
-                ++keepIdx;
+                ++keepFrom;
             }
             else
             {
-                ++subtractIdx;
+                ++subtractFrom;
             }
         }
 
         if (result == null)
             return keep;
 
-        while (keepIdx < keep.length && subtractIdx < subtract.length)
+        while (keepFrom < keepTo && subtractFrom < subtractTo)
         {
-            T leftKey = keep[keepIdx];
-            T rightKey = subtract[subtractIdx];
-            int cmp = leftKey == rightKey ? 0 : leftKey.compareTo(rightKey);
+            I leftKey = keep[keepFrom];
+            I rightKey = subtract[subtractFrom];
+            int cmp = leftKey == rightKey ? 0 : comparator.compare(leftKey, rightKey);
 
             if (cmp > 0)
             {
-                result[resultSize++] = keep[keepIdx++];
+                result[resultSize++] = keep[keepFrom++];
             }
             else if (cmp < 0)
             {
-                ++subtractIdx;
+                ++subtractFrom;
             }
             else
             {
-                ++keepIdx;
-                ++subtractIdx;
+                ++keepFrom;
+                ++subtractFrom;
             }
         }
-        while (keepIdx < keep.length)
-            result[resultSize++] = keep[keepIdx++];
+
+        while (keepFrom < keepTo)
+            result[resultSize++] = keep[keepFrom++];
 
         if (resultSize < result.length)
-            result = Arrays.copyOf(result, resultSize);
+            result = buffers.completeAndDiscard(result, resultSize);
 
         return result;
     }

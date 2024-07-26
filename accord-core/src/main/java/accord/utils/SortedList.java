@@ -29,6 +29,16 @@ public interface SortedList<T extends Comparable<? super T>> extends List<T>, Se
     int findNext(int i, Comparable<? super T> find);
     int find(Comparable<? super T> find);
 
+    default boolean contains(Comparable<? super T> find)
+    {
+        return find != null && find(find) >= 0;
+    }
+
+    default int indexOf(Comparable<? super T> find)
+    {
+        return find == null ? -1 : Math.max(-1, find(find));
+    }
+
     @Override
     default boolean contains(Object o)
     {
@@ -63,4 +73,5 @@ public interface SortedList<T extends Comparable<? super T>> extends List<T>, Se
             public int size() { return select.size(); }
         };
     }
+
 }

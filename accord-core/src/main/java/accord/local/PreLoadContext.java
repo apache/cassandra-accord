@@ -18,13 +18,13 @@
 
 package accord.local;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.local.cfk.CommandsForKey;
-import accord.primitives.Keys;
-import accord.primitives.Seekables;
+import accord.primitives.RoutingKeys;
 import accord.primitives.TxnId;
 import com.google.common.collect.Iterators;
 
+import accord.primitives.Unseekables;
 import accord.utils.Invariants;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
@@ -64,7 +64,7 @@ public interface PreLoadContext
         Collection<TxnId> additional = additionalTxnIds();
         if (primaryTxnId == null) return additional;
         if (additional.isEmpty()) return Collections.singleton(primaryTxnId);
-        return new AbstractCollection<TxnId>()
+        return new AbstractCollection<>()
         {
             @Override
             public Iterator<TxnId> iterator()
@@ -97,7 +97,7 @@ public interface PreLoadContext
      *  potentially large scans, and for register we do not need to load into memory, we can perform a blind write.
      */
     // TODO (required): specify epochs for which we should load, so we can narrow to owned keys
-    default Seekables<?, ?> keys() { return Keys.EMPTY; }
+    default Unseekables<?> keys() { return RoutingKeys.EMPTY; }
 
     default KeyHistory keyHistory() { return KeyHistory.NONE; }
 
@@ -135,7 +135,7 @@ public interface PreLoadContext
         }
     }
 
-    static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional, Seekables<?, ?> keys, KeyHistory keyHistory)
+    static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional, Unseekables<?> keys, KeyHistory keyHistory)
     {
         Invariants.checkState(!additional.contains(primary));
         return new Standard(primary, additional, keys, keyHistory);
@@ -145,10 +145,10 @@ public interface PreLoadContext
     {
         private final TxnId primary;
         private final Collection<TxnId> additional;
-        private final Seekables<?, ?> keys;
+        private final Unseekables<?> keys;
         private final KeyHistory keyHistory;
 
-        public Standard(TxnId primary, Collection<TxnId> additional, Seekables<?, ?> keys, KeyHistory keyHistory)
+        public Standard(TxnId primary, Collection<TxnId> additional, Unseekables<?> keys, KeyHistory keyHistory)
         {
             this.primary = primary;
             this.additional = additional;
@@ -180,10 +180,7 @@ public interface PreLoadContext
         }
 
         @Override
-        public Seekables<?, ?> keys()
-        {
-            return keys;
-        }
+        public Unseekables<?> keys() { return keys; }
 
         @Override
         public KeyHistory keyHistory()
@@ -192,57 +189,57 @@ public interface PreLoadContext
         }
     }
 
-    static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional, Seekables<?, ?> keys)
+    static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional, Unseekables<?> keys)
     {
         return contextFor(primary, additional, keys, KeyHistory.NONE);
     }
 
     static PreLoadContext contextFor(TxnId primary, TxnId additional)
     {
-        return contextFor(primary, Collections.singletonList(additional), Keys.EMPTY);
+        return contextFor(primary, Collections.singletonList(additional), RoutingKeys.EMPTY);
     }
 
-    static PreLoadContext contextFor(TxnId primary, TxnId additional, Seekables<?, ?> keys)
+    static PreLoadContext contextFor(TxnId primary, TxnId additional, Unseekables<?> keys)
     {
         return contextFor(primary, Collections.singletonList(additional), keys);
     }
 
-    static PreLoadContext contextFor(TxnId txnId, Seekables<?, ?> keysOrRanges, KeyHistory keyHistory)
+    static PreLoadContext contextFor(TxnId txnId, Unseekables<?> keysOrRanges, KeyHistory keyHistory)
     {
         return contextFor(txnId, Collections.emptyList(), keysOrRanges, keyHistory);
     }
 
-    static PreLoadContext contextFor(TxnId txnId, Seekables<?, ?> keysOrRanges)
+    static PreLoadContext contextFor(TxnId txnId, Unseekables<?> keysOrRanges)
     {
         return contextFor(txnId, keysOrRanges, KeyHistory.NONE);
     }
 
     static PreLoadContext contextFor(TxnId txnId)
     {
-        return contextFor(txnId, Keys.EMPTY);
+        return contextFor(txnId, RoutingKeys.EMPTY);
     }
 
     static PreLoadContext contextFor(TxnId primary, Collection<TxnId> additional)
     {
-        return contextFor(primary, additional, Keys.EMPTY);
+        return contextFor(primary, additional, RoutingKeys.EMPTY);
     }
 
-    static PreLoadContext contextFor(Key key, KeyHistory keyHistory)
+    static PreLoadContext contextFor(RoutingKey key, KeyHistory keyHistory)
     {
-        return contextFor(null, Collections.emptyList(), Keys.of(key), keyHistory);
+        return contextFor(null, Collections.emptyList(), RoutingKeys.of(key), keyHistory);
     }
 
-    static PreLoadContext contextFor(Key key)
+    static PreLoadContext contextFor(RoutingKey key)
     {
         return contextFor(key, KeyHistory.NONE);
     }
 
-    static PreLoadContext contextFor(Collection<TxnId> ids, Seekables<?, ?> keys)
+    static PreLoadContext contextFor(Collection<TxnId> ids, Unseekables<?> keys)
     {
         return contextFor(null, ids, keys);
     }
 
-    static PreLoadContext contextFor(Seekables<?, ?> keys)
+    static PreLoadContext contextFor(Unseekables<?> keys)
     {
         return contextFor(null, Collections.emptyList(), keys);
     }
@@ -252,5 +249,5 @@ public interface PreLoadContext
         return EMPTY_PRELOADCONTEXT;
     }
 
-    PreLoadContext EMPTY_PRELOADCONTEXT = contextFor(null, Collections.emptyList(), Keys.EMPTY);
+    PreLoadContext EMPTY_PRELOADCONTEXT = contextFor(null, Collections.emptyList(), RoutingKeys.EMPTY);
 }

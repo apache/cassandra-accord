@@ -19,10 +19,11 @@
 package accord.primitives;
 
 import accord.api.RoutingKey;
-import accord.utils.ArrayBuffers;
 import accord.utils.SortedArrays;
 
 import java.util.Arrays;
+
+import static accord.utils.ArrayBuffers.cachedRoutingKeys;
 
 // TODO: do we need this class?
 public abstract class AbstractUnseekableKeys extends AbstractKeys<RoutingKey>
@@ -60,12 +61,12 @@ implements Iterable<RoutingKey>, Unseekables<RoutingKey>, Participants<RoutingKe
             case Key:
             {
                 AbstractUnseekableKeys that = (AbstractUnseekableKeys) intersecting;
-                return weakWrap(intersecting(that, ArrayBuffers.cachedRoutingKeys()), that);
+                return weakWrap(intersecting(that, cachedRoutingKeys()), that);
             }
             case Range:
             {
                 AbstractRanges that = (AbstractRanges) intersecting;
-                return wrap(intersecting(that, ArrayBuffers.cachedRoutingKeys()));
+                return wrap(intersecting(that, cachedRoutingKeys()));
             }
         }
     }
@@ -79,7 +80,7 @@ implements Iterable<RoutingKey>, Unseekables<RoutingKey>, Participants<RoutingKe
             case Key:
             {
                 AbstractUnseekableKeys that = (AbstractUnseekableKeys) keysOrRanges;
-                return weakWrap(SortedArrays.linearSubtract(this.keys, that.keys, RoutingKey[]::new), that);
+                return weakWrap(SortedArrays.linearSubtract(this.keys, that.keys, cachedRoutingKeys()), that);
             }
             case Range:
             {

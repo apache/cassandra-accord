@@ -131,6 +131,12 @@ public abstract class IntHashKey implements RoutableKey
         }
 
         @Override
+        public RoutingKey asRoutingKey()
+        {
+            return this;
+        }
+
+        @Override
         public RangeFactory rangeFactory()
         {
             return (s, e) -> new Range((Hash) s, (Hash) e);

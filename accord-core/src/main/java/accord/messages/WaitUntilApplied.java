@@ -27,8 +27,8 @@ import accord.primitives.Ranges;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
-import static accord.local.SaveStatus.Applied;
-import static accord.local.SaveStatus.TruncatedApply;
+import static accord.primitives.SaveStatus.Applied;
+import static accord.primitives.SaveStatus.TruncatedApply;
 
 /**
  * Wait until the transaction has been applied locally

@@ -25,8 +25,8 @@ import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
-import accord.local.Status.Durability;
+import accord.primitives.SaveStatus;
+import accord.primitives.Status.Durability;
 import accord.primitives.Participants;
 import accord.primitives.Route;
 import accord.primitives.Timestamp;
@@ -35,8 +35,8 @@ import accord.utils.SortedArrays;
 
 import static accord.api.ProgressLog.BlockedUntil.Query.HOME;
 import static accord.api.ProgressLog.BlockedUntil.Query.SHARD;
-import static accord.local.Status.Durability.Majority;
-import static accord.local.Status.Durability.NotDurable;
+import static accord.primitives.Status.Durability.Majority;
+import static accord.primitives.Status.Durability.NotDurable;
 import static accord.utils.SortedArrays.Search.FAST;
 
 /**

@@ -241,6 +241,12 @@ public abstract class Range implements Comparable<RoutableKey>, Unseekable, Seek
     }
 
     @Override
+    public RoutingKey asRoutingKey()
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public Range asRange()
     {
         return this;

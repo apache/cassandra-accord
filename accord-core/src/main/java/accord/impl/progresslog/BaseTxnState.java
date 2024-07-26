@@ -155,7 +155,7 @@ abstract class BaseTxnState extends LogGroupTimers.Timer implements Comparable<B
         return pendingTimerDelay == 0 ? 0 : scheduledDeadline + pendingTimerDelay;
     }
 
-    long pendingTimerDeadline(DefaultProgressLog owner)
+    long pendingTimerDeadline()
     {
         long pendingTimerDelay = pendingTimerDelay();
         return pendingTimerDelay == 0 ? 0 : deadline() + pendingTimerDelay;

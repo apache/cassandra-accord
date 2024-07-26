@@ -51,12 +51,12 @@ public class ListWrite extends TreeMap<Key, int[]> implements Write
     }
 
     @Override
-    public AsyncChain<Void> apply(Seekable key, SafeCommandStore safeStore, Timestamp executeAt, DataStore store, PartialTxn txn)
+    public AsyncChain<Void> apply(Seekable key, SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt, DataStore store, PartialTxn txn)
     {
         ListStore s = (ListStore) store;
         if (!containsKey(key))
             return Writes.SUCCESS;
-        TimestampsForKeys.updateLastExecutionTimestamps((AbstractSafeCommandStore<?, ?, ?>) safeStore, (Key) key, executeAt, true);
+        TimestampsForKeys.updateLastExecutionTimestamps((AbstractSafeCommandStore<?, ?, ?>) safeStore, ((Key)key).toUnseekable(), txnId, executeAt, true);
 
         logger.trace("submitting WRITE on {} at {} key:{}", s.node, executeAt, key);
         return executor.apply(safeStore.commandStore()).submit(() -> {

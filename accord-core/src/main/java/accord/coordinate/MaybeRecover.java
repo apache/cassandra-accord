@@ -20,7 +20,6 @@ package accord.coordinate;
 
 import java.util.function.BiConsumer;
 
-import accord.local.Status.Known;
 import accord.messages.InformDurable;
 import accord.primitives.*;
 import accord.utils.Invariants;
@@ -29,7 +28,6 @@ import accord.local.Node;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
 
-import static accord.coordinate.Infer.SafeEraseAndCallback.safeEraseAndCallback;
 import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAndCallback;
 
 /**
@@ -68,7 +66,6 @@ public class MaybeRecover extends CheckShards<Route<?>>
                               || ok.toProgressToken().compareTo(prevProgress) > 0);
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
     @Override
     protected void onDone(Success success, Throwable fail)
     {
@@ -87,12 +84,15 @@ public class MaybeRecover extends CheckShards<Route<?>>
             {
                 default: throw new AssertionError();
                 case Unknown:
-                    // TODO (required): ErasedOrInvalidated takes Unknown here. This is probably wrong, consider it more carefully.
-                    //     Specifically, we should probably not propose invalidation if it's possible the command has been Erased.
-                    //     We should probably introduce a MaybeErased Outcome.
-                    //     If we only have a partial route, and all end-points we contact are MaybeErased, we are either stale or
-                    //     we have enough local information to know the command's outcome is durable.
-                    //     If any shard is not MaybeErased but is also Unknown, then we are safe to Invalidate.
+                    // ErasedOrInvalidated takes Unknown, and so permits invalidation to be initiated.
+                    // This might prima facie seem unsafe, as ErasedOrInvalidated might mean the command
+                    // has been executed and erased, in which case it is not safe to invalidate.
+                    // However, replicas that have erased the history for these commands also cannot vote to proceed with
+                    // invalidation, so the Invalidation state machine must special-case this scenario.
+                    // If there exists a shard that has not been decided, then the outcome must be invalidated and it
+                    // may be disseminated globally. However, if all shards are erased then the outcome must be
+                    // decided locally by the application of GC points.
+                    // TODO (expected): replicas may be stale in this case, and should detect this and stop attempting to coordinate/invalidate.
                     if (known.canProposeInvalidation() && !Route.isFullRoute(full.route))
                     {
                         // for correctness reasons, we have not necessarily preempted the initial pre-accept round and
@@ -118,18 +118,15 @@ public class MaybeRecover extends CheckShards<Route<?>>
                     break;
 
                 case WasApply:
+                case Erased:
+                    // TODO (required): on Erased, should we maybe mark stale, or leave to FetchData?
                     callback.accept(full.toProgressToken(), null);
                     break;
 
                 case Invalidated:
-                    locallyInvalidateAndCallback(node, txnId, txnId, someRoute, full.toProgressToken(), callback);
+                    // TODO (required): revisit lowEpoch here
+                    locallyInvalidateAndCallback(node, txnId, txnId, txnId, someRoute, full.toProgressToken(), callback);
                     break;
-
-                case Erased:
-                    // TODO (required): this isn't valid. This is either an invalidated command or we're stale. Most likely the latter.
-                    //   this is because Erased is only permitted to be adopted when every shard has made the command durable.
-                    Invariants.checkState(!full.knownFor(route.participants()).isInvalidated());
-                    safeEraseAndCallback(node, txnId, txnId, someRoute, full.toProgressToken(), callback);
             }
         }
     }

@@ -35,8 +35,9 @@ import accord.impl.basic.Packet;
 import accord.impl.basic.SimulatedFault;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.SaveStatus;
-import accord.local.Status;
+import accord.primitives.Ranges;
+import accord.primitives.SaveStatus;
+import accord.primitives.Status;
 import accord.messages.CheckStatus;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
@@ -50,12 +51,13 @@ import accord.primitives.TxnId;
 import javax.annotation.Nullable;
 
 import static accord.impl.list.ListResult.Status.RecoveryApplied;
-import static accord.local.Status.Applied;
-import static accord.local.Status.Phase.Cleanup;
+import static accord.primitives.Routable.Domain.Key;
+import static accord.primitives.Status.Applied;
+import static accord.primitives.Status.Phase.Cleanup;
 
-import static accord.local.Status.PreAccepted;
-import static accord.local.Status.PreApplied;
-import static accord.local.Status.PreCommitted;
+import static accord.primitives.Status.PreAccepted;
+import static accord.primitives.Status.PreApplied;
+import static accord.primitives.Status.PreCommitted;
 import static accord.utils.Invariants.illegalState;
 
 public class ListRequest implements Request
@@ -84,7 +86,7 @@ public class ListRequest implements Request
         int count = 0;
         protected CheckOnResult(Node node, TxnId txnId, RoutingKey homeKey, BiConsumer<Outcome, Throwable> callback)
         {
-            super(node, txnId, RoutingKeys.of(homeKey), IncludeInfo.All);
+            super(node, txnId, txnId.is(Key) ? RoutingKeys.of(homeKey) : Ranges.of(homeKey.asRange()), IncludeInfo.All);
             this.callback = callback;
         }
 

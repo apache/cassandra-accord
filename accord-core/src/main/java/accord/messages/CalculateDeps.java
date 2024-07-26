@@ -23,43 +23,40 @@ import javax.annotation.Nonnull;
 import accord.local.KeyHistory;
 import accord.local.Node.Id;
 import accord.local.SafeCommandStore;
+import accord.local.StoreParticipants;
+import accord.primitives.Deps;
 import accord.primitives.FullRoute;
-import accord.primitives.PartialDeps;
-import accord.primitives.Ranges;
 import accord.primitives.Route;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 
-import static accord.messages.PreAccept.calculatePartialDeps;
+import static accord.messages.PreAccept.calculateDeps;
 import static accord.primitives.EpochSupplier.constant;
 
-public class CalculateDeps extends TxnRequest.WithUnsynced<PartialDeps>
+public class CalculateDeps extends TxnRequest.WithUnsynced<Deps>
 {
     public static final class SerializationSupport
     {
-        public static CalculateDeps create(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, Seekables<?, ?> keys, Timestamp executeAt)
+        public static CalculateDeps create(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, Timestamp executeAt)
         {
-            return new CalculateDeps(txnId, scope, waitForEpoch, minEpoch, keys, executeAt);
+            return new CalculateDeps(txnId, scope, waitForEpoch, minEpoch, executeAt);
         }
     }
 
-    public final Seekables<?, ?> keys;
     public final Timestamp executeAt;
 
-    public CalculateDeps(Id to, Topologies topologies, FullRoute<?> route, TxnId txnId, Seekables<?, ?> keys, Timestamp executeAt)
+    public CalculateDeps(Id to, Topologies topologies, FullRoute<?> route, TxnId txnId, Timestamp executeAt)
     {
         super(to, topologies, txnId, route);
-        this.keys = keys.intersecting(scope);
         this.executeAt = executeAt;
     }
 
-    protected CalculateDeps(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, Seekables<?, ?> keys, Timestamp executeAt)
+    protected CalculateDeps(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, Timestamp executeAt)
     {
         super(txnId, scope, waitForEpoch, minEpoch);
-        this.keys = keys;
         this.executeAt = executeAt;
     }
 
@@ -70,20 +67,20 @@ public class CalculateDeps extends TxnRequest.WithUnsynced<PartialDeps>
     }
 
     @Override
-    public PartialDeps apply(SafeCommandStore instance)
+    public Deps apply(SafeCommandStore safeStore)
     {
-        Ranges ranges = instance.ranges().allBetween(minEpoch, executeAt);
-        return calculatePartialDeps(instance, txnId, keys, scope, constant(minEpoch), executeAt, ranges);
+        StoreParticipants participants = StoreParticipants.read(safeStore, scope, txnId, minEpoch, executeAt.epoch());
+        return calculateDeps(safeStore, txnId, participants, constant(minEpoch), executeAt);
     }
 
     @Override
-    public PartialDeps reduce(PartialDeps deps1, PartialDeps deps2)
+    public Deps reduce(Deps deps1, Deps deps2)
     {
         return deps1.with(deps2);
     }
 
     @Override
-    public void accept(PartialDeps result, Throwable failure)
+    public void accept(Deps result, Throwable failure)
     {
         node.reply(replyTo, replyContext, result != null ? new CalculateDepsOk(result) : null, failure);
     }
@@ -99,7 +96,7 @@ public class CalculateDeps extends TxnRequest.WithUnsynced<PartialDeps>
     {
         return "CalculateDeps{" +
                "txnId:" + txnId +
-               ", keys:" + keys +
+               ", scope:" + scope +
                ", executeAt:" + executeAt +
                '}';
     }
@@ -111,9 +108,9 @@ public class CalculateDeps extends TxnRequest.WithUnsynced<PartialDeps>
     }
 
     @Override
-    public Seekables<?, ?> keys()
+    public Unseekables<?> keys()
     {
-        return keys;
+        return scope;
     }
 
     @Override
@@ -124,9 +121,9 @@ public class CalculateDeps extends TxnRequest.WithUnsynced<PartialDeps>
 
     public static class CalculateDepsOk implements Reply
     {
-        public final PartialDeps deps;
+        public final Deps deps;
 
-        public CalculateDepsOk(@Nonnull PartialDeps deps)
+        public CalculateDepsOk(@Nonnull Deps deps)
         {
             this.deps = Invariants.nonNull(deps);
         }

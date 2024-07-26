@@ -37,6 +37,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -60,7 +61,7 @@ import accord.impl.basic.Cluster;
 import accord.impl.basic.Cluster.Stats;
 import accord.impl.basic.Packet;
 import accord.impl.basic.PendingRunnable;
-import accord.impl.basic.PropagatingPendingQueue;
+import accord.impl.basic.MonitoredPendingQueue;
 import accord.impl.basic.RandomDelayQueue;
 import accord.impl.basic.RandomDelayQueue.Factory;
 import accord.impl.basic.SimulatedDelayedExecutorService;
@@ -317,7 +318,8 @@ public class BurnTest
     {
         List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
         RandomDelayQueue delayQueue = new Factory(random).get();
-        PropagatingPendingQueue queue = new PropagatingPendingQueue(failures, delayQueue);
+        AtomicLong progress = new AtomicLong();
+        MonitoredPendingQueue queue = new MonitoredPendingQueue(failures, progress, 5L, TimeUnit.MINUTES, delayQueue);
         long startNanos = System.nanoTime();
         long startLogicalMillis = queue.nowInMillis();
         Consumer<Runnable> retryBootstrap;
@@ -424,6 +426,7 @@ public class BurnTest
                     return;
                 }
 
+                progress.incrementAndGet();
                 switch (reply.status())
                 {
                     default: throw new AssertionError("Unhandled status: " + reply.status());

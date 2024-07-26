@@ -38,10 +38,10 @@ import org.junit.jupiter.api.Test;
 
 import accord.api.Agent;
 import accord.api.DataStore;
-import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.api.RemoteListeners;
 import accord.api.RemoteListeners.Registration;
+import accord.api.RoutingKey;
 import accord.impl.LocalListenersTest.TestSafeCommand;
 import accord.local.CommandStore;
 import accord.local.CommandStores;
@@ -50,16 +50,15 @@ import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
-import accord.local.Status.Durability;
+import accord.primitives.SaveStatus;
+import accord.primitives.Status.Durability;
 import accord.local.cfk.SafeCommandsForKey;
 import accord.primitives.Deps;
-import accord.primitives.Ranges;
 import accord.primitives.Route;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.utils.AccordGens;
 import accord.utils.RandomSource;
 import accord.utils.RandomTestRunner;
@@ -67,9 +66,9 @@ import accord.utils.async.AsyncChain;
 import org.agrona.collections.IntHashSet;
 import org.agrona.collections.ObjectHashSet;
 
-import static accord.local.SaveStatus.Uninitialised;
-import static accord.local.Status.Durability.NotDurable;
-import static accord.local.Status.KnownRoute.Full;
+import static accord.primitives.SaveStatus.Uninitialised;
+import static accord.primitives.Status.Durability.NotDurable;
+import static accord.primitives.Known.KnownRoute.Full;
 
 public class RemoteListenersTest
 {
@@ -416,15 +415,16 @@ public class RemoteListenersTest
 
         @Override protected SafeCommand getInternal(TxnId txnId) { return null; }
         @Override protected SafeCommand getInternalIfLoadedAndInitialised(TxnId txnId) { return null; }
-        @Override protected SafeCommandsForKey getInternal(Key key) { return null;}
-        @Override protected SafeCommandsForKey getInternalIfLoadedAndInitialised(Key key) { return null;}
+        @Override protected SafeCommandsForKey getInternal(RoutingKey key) { return null;}
+        @Override protected SafeCommandsForKey getInternalIfLoadedAndInitialised(RoutingKey key) { return null;}
         @Override public boolean canExecuteWith(PreLoadContext context) { return false;}
-        @Override public <P1, T> T mapReduceActive(Seekables<?, ?> keys, Ranges slice, @Nullable Timestamp withLowerTxnId, Txn.Kind.Kinds kinds, CommandFunction<P1, T, T> map, P1 p1, T initialValue) { return null; }
-        @Override public <P1, T> T mapReduceFull(Seekables<?, ?> keys, Ranges slice, TxnId testTxnId, Txn.Kind.Kinds testKind, TestStartedAt testStartedAt, TestDep testDep, TestStatus testStatus, CommandFunction<P1, T, T> map, P1 p1, T initialValue) { return null; }
+        @Override public <P1, T> T mapReduceActive(Unseekables<?> keys, @Nullable Timestamp withLowerTxnId, Txn.Kind.Kinds kinds, CommandFunction<P1, T, T> map, P1 p1, T initialValue) { return null; }
+        @Override public <P1, T> T mapReduceFull(Unseekables<?> keys, TxnId testTxnId, Txn.Kind.Kinds testKind, TestStartedAt testStartedAt, TestDep testDep, TestStatus testStatus, CommandFunction<P1, T, T> map, P1 p1, T initialValue) { return null; }
         @Override public DataStore dataStore() { return null; }
         @Override public Agent agent() { return null; }
         @Override public ProgressLog progressLog() { return null; }
         @Override public NodeTimeService time() { return null; }
         @Override public CommandStores.RangesForEpoch ranges() { return null; }
+        @Override public void registerHistoricalTransactions(Deps deps) { }
     }
 }

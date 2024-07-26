@@ -33,8 +33,8 @@ import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
-import accord.primitives.EpochSupplier;
+import accord.primitives.SaveStatus;
+import accord.local.StoreParticipants;
 import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
@@ -55,7 +55,7 @@ import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.illegalState;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
-public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrReadNack> implements EpochSupplier, LocalListeners.ComplexListener, RequestTimeouts.Timeout
+public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrReadNack> implements LocalListeners.ComplexListener, RequestTimeouts.Timeout
 {
     private static final Logger logger = LoggerFactory.getLogger(ReadData.class);
 
@@ -148,12 +148,6 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
     }
 
     @Override
-    public long epoch()
-    {
-        return executeAtEpoch;
-    }
-
-    @Override
     protected void process()
     {
         waitingOn = new BitSet();
@@ -173,11 +167,12 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
     @Override
     public synchronized CommitOrReadNack apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, this, readScope);
-        return apply(safeStore, safeCommand);
+        StoreParticipants participants = StoreParticipants.execute(safeStore, readScope, txnId, executeAtEpoch);
+        SafeCommand safeCommand = safeStore.get(txnId, participants);
+        return apply(safeStore, safeCommand, participants);
     }
 
-    protected synchronized CommitOrReadNack apply(SafeCommandStore safeStore, SafeCommand safeCommand)
+    protected synchronized CommitOrReadNack apply(SafeCommandStore safeStore, SafeCommand safeCommand, StoreParticipants participants)
     {
         if (state != State.PENDING)
             return null;
@@ -196,7 +191,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
                 ++waitingOnCount;
 
                 int c = status.compareTo(SaveStatus.Stable);
-                if (c < 0) safeStore.progressLog().waiting(HasStableDeps, safeStore, safeCommand, null, readScope);
+                if (c < 0) safeStore.progressLog().waiting(HasStableDeps, safeStore, safeCommand, participants.route(), participants.owns());
                 else if (c > 0 && status.compareTo(executeOn().min) >= 0 && status.compareTo(SaveStatus.PreApplied) < 0) safeStore.progressLog().waiting(CanApply, safeStore, safeCommand, null, readScope);
                 return status.compareTo(SaveStatus.Stable) >= 0 ? null : Insufficient;
 
@@ -259,12 +254,6 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
         }
     }
 
-    Ranges executeRanges(SafeCommandStore safeStore)
-    {
-        // TODO (required): is this correct for all cases incl awaitsOnlyDeps etc
-        return safeStore.ranges().allAt(executeAtEpoch);
-    }
-
     @Override
     public synchronized void accept(CommitOrReadNack reply, Throwable failure)
     {
@@ -278,6 +267,8 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
                 long replyTimeout = node.agent().replyTimeout(replyContext, MILLISECONDS);
                 timeout = node.requestTimeouts().register(this, replyTimeout, MILLISECONDS);
             }
+            if (reply != null)
+                node.reply(replyTo, replyContext, reply, null);
         }
         else
         {
@@ -368,6 +359,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
             case PENDING:
                 state = State.RETURNED;
                 node.reply(replyTo, replyContext, fail == null ? constructReadOk(unavailable, data) : null, fail);
+                clear();
                 break;
 
             default:
@@ -377,15 +369,20 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
 
     void cancel()
     {
+        state = State.OBSOLETE;
+        clear();
+    }
+
+    void clear()
+    {
         if (timeout != null)
             timeout.cancel();
-
-        state = State.OBSOLETE;
         registrations.forEach((i, r) -> r.cancel());
         waitingOn.clear();
         reading.clear();
         data = null;
         unavailable = null;
+        timeout = null;
     }
 
     synchronized public void timeout()

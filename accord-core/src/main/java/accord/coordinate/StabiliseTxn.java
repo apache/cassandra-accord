@@ -34,9 +34,9 @@ import static accord.coordinate.CoordinationAdapter.Factory.Step.Continue;
 
 public class StabiliseTxn extends Stabilise<Result>
 {
-    StabiliseTxn(Node node, Topologies coordinates, Topologies allTopologies, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps unstableDeps, BiConsumer<? super Result, Throwable> callback)
+    StabiliseTxn(Node node, Topologies coordinates, Topologies all, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps unstableDeps, BiConsumer<? super Result, Throwable> callback)
     {
-        super(node, coordinates, allTopologies, route, txnId, ballot, txn, executeAt, unstableDeps, callback);
+        super(node, coordinates, all, route, txnId, ballot, txn, executeAt, unstableDeps, callback);
     }
 
     @Override

@@ -44,7 +44,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
 
     public ReducingRangeMap()
     {
-        super();
+        super(false, RoutingKeys.EMPTY_KEYS_ARRAY, (V[])NO_OBJECTS);
     }
 
     protected ReducingRangeMap(boolean inclusiveEnds, RoutingKey[] starts, V[] values)

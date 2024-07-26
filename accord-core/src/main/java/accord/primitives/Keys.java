@@ -94,7 +94,7 @@ public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
     }
 
     @Override
-    public Routables<?> slice(int from, int to)
+    public Routables<Key> slice(int from, int to)
     {
         if (from == 0 && to == size())
             return this;
@@ -155,7 +155,7 @@ public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
     @Override
     public Keys without(Keys subtract)
     {
-        return wrap(SortedArrays.linearSubtract(keys, subtract.keys, Key[]::new));
+        return wrap(SortedArrays.linearSubtract(keys, subtract.keys, cachedKeys()));
     }
 
     public static Keys of(Key key)

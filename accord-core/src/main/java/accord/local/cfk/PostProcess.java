@@ -24,14 +24,15 @@ import java.util.List;
 
 import javax.annotation.Nullable;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.local.PreLoadContext;
+import accord.local.RedundantBefore;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.cfk.CommandsForKey.TxnInfo;
 import accord.local.cfk.CommandsForKey.Unmanaged;
 import accord.local.cfk.CommandsForKeyUpdate.CommandsForKeyUpdateWithPostProcess;
-import accord.primitives.Keys;
+import accord.primitives.RoutingKeys;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.utils.ArrayBuffers;
@@ -41,10 +42,11 @@ import accord.utils.btree.BTree;
 
 import static accord.local.KeyHistory.COMMANDS;
 import static accord.local.cfk.CommandsForKey.InternalStatus.APPLIED;
-import static accord.local.cfk.CommandsForKey.InternalStatus.INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED;
+import static accord.local.cfk.CommandsForKey.InternalStatus.INVALID_OR_TRUNCATED_OR_PRUNED;
 import static accord.local.cfk.CommandsForKey.InternalStatus.STABLE;
 import static accord.local.cfk.CommandsForKey.Unmanaged.Pending.APPLY;
 import static accord.local.cfk.CommandsForKey.maxContiguousManagedAppliedIndex;
+import static accord.local.cfk.CommandsForKey.updateAndNotifyUnmanageds;
 import static accord.local.cfk.Updating.updateUnmanaged;
 import static accord.local.cfk.Updating.updateUnmanagedAsync;
 import static accord.local.cfk.Utils.findApply;
@@ -52,6 +54,7 @@ import static accord.local.cfk.Utils.findCommit;
 import static accord.local.cfk.Utils.findFirstApply;
 import static accord.local.cfk.Utils.removeUnmanaged;
 import static accord.local.cfk.Utils.selectUnmanaged;
+import static accord.primitives.Timestamp.max;
 import static accord.primitives.TxnId.NO_TXNIDS;
 import static accord.utils.ArrayBuffers.cachedTxnIds;
 
@@ -64,14 +67,14 @@ abstract class PostProcess
         this.prev = prev;
     }
 
-    void postProcess(SafeCommandStore safeStore, Key key, NotifySink notifySink)
+    void postProcess(SafeCommandStore safeStore, RoutingKey key, NotifySink notifySink)
     {
         doNotify(safeStore, key, notifySink);
         if (prev != null)
             prev.postProcess(safeStore, key, notifySink);
     }
 
-    abstract void doNotify(SafeCommandStore safeStore, Key key, NotifySink notifySink);
+    abstract void doNotify(SafeCommandStore safeStore, RoutingKey key, NotifySink notifySink);
 
     static class LoadPruned extends PostProcess
     {
@@ -83,7 +86,7 @@ abstract class PostProcess
             this.load = load;
         }
 
-        void doNotify(SafeCommandStore safeStore, Key key, NotifySink notifySink)
+        void doNotify(SafeCommandStore safeStore, RoutingKey key, NotifySink notifySink)
         {
             SafeCommandsForKey safeCfk = safeStore.get(key);
             for (TxnId txnId : load)
@@ -92,7 +95,7 @@ abstract class PostProcess
                 SafeCommand safeCommand = safeStore.ifLoadedAndInitialised(txnId);
                 if (safeCommand != null) load(safeStore, safeCommand, safeCfk, notifySink);
                 else
-                    safeStore.commandStore().execute(PreLoadContext.contextFor(txnId, Keys.of(key), COMMANDS), safeStore0 -> {
+                    safeStore.commandStore().execute(PreLoadContext.contextFor(txnId, RoutingKeys.of(key), COMMANDS), safeStore0 -> {
                         load(safeStore0, safeStore0.unsafeGet(txnId), safeStore0.get(key), notifySink);
                     }).begin(safeStore.agent());
             }
@@ -121,7 +124,7 @@ abstract class PostProcess
             this.notify = notify;
         }
 
-        void doNotify(SafeCommandStore safeStore, Key key, NotifySink notifySink)
+        void doNotify(SafeCommandStore safeStore, RoutingKey key, NotifySink notifySink)
         {
             for (TxnId txnId : notify)
                 notifySink.notWaiting(safeStore, txnId, key);
@@ -135,20 +138,23 @@ abstract class PostProcess
      * In practice this means that transactions which include a bootstrap range and a range not covered by bootstrap
      * will not wait for the bootstrapping key.
      */
-    static CommandsForKeyUpdate notifyPreBootstrap(CommandsForKeyUpdate update)
+    static CommandsForKeyUpdate notifyManagedPreBootstrap(CommandsForKey prev, RedundantBefore.Entry newBoundsInfo, CommandsForKeyUpdate update)
     {
-        CommandsForKey cfk = update.cfk();
+        Timestamp maxApplied = null;
         TxnId[] notify = NO_TXNIDS;
         int notifyCount = 0;
         // <= because maxAppliedWrite is actually maxAppliedOrPreBootstrapWrite
-        for (int i = 0 ; i <= cfk.maxAppliedWriteByExecuteAt ; ++i)
+        for (TxnInfo txn : prev.committedByExecuteAt)
         {
-            TxnInfo txn = cfk.committedByExecuteAt[i];
-            if (txn.status == STABLE)
+            if (txn.compareTo(newBoundsInfo.bootstrappedAt) >= 0)
+                break;
+
+            if (txn.status() == STABLE)
             {
                 if (notifyCount == notify.length)
-                    notify = cachedTxnIds().get(Math.max(notifyCount * 2, 8));
+                    notify = cachedTxnIds().resize(notify, notifyCount, Math.max(notifyCount * 2, 8));
                 notify[notifyCount++] = txn.plainTxnId();
+                maxApplied = txn.executeAt;
             }
         }
 
@@ -157,6 +163,19 @@ abstract class PostProcess
 
         notify = cachedTxnIds().completeAndDiscard(notify, notifyCount);
         PostProcess newPostProcess = new NotifyNotWaiting(update.postProcess(), notify);
+
+        CommandsForKey cfk = update.cfk();
+        if (maxApplied != null)
+        {
+            int start = findFirstApply(cfk.unmanageds);
+            int end = findApply(cfk.unmanageds, start, maxApplied);
+            if (start != end)
+            {
+                TxnId[] notifyNotWaiting = selectUnmanaged(cfk.unmanageds, start, end);
+                cfk = cfk.update(removeUnmanaged(cfk.unmanageds, start, end));
+                newPostProcess = new PostProcess.NotifyNotWaiting(newPostProcess, notifyNotWaiting);
+            }
+        }
         return new CommandsForKeyUpdateWithPostProcess(cfk, newPostProcess);
     }
 
@@ -170,7 +189,7 @@ abstract class PostProcess
             this.notify = notify;
         }
 
-        void doNotify(SafeCommandStore safeStore, Key key, NotifySink notifySink)
+        void doNotify(SafeCommandStore safeStore, RoutingKey key, NotifySink notifySink)
         {
             SafeCommandsForKey safeCfk = safeStore.get(key);
             CommandsForKey cfk = safeCfk.current();
@@ -227,11 +246,14 @@ abstract class PostProcess
                                                  TxnInfo[] committedByExecuteAt,
                                                  int maxAppliedWriteByExecuteAt,
                                                  Object[] loadingPruned,
-                                                 TxnId redundantBefore,
-                                                 TxnId bootstrappedAt,
+                                                 RedundantBefore.Entry boundsInfo,
                                                  @Nullable TxnInfo curInfo,
                                                  @Nullable TxnInfo newInfo)
     {
+        TxnId redundantBefore = boundsInfo.shardRedundantBefore();
+        TxnId bootstrappedAt = boundsInfo.bootstrappedAt;
+        if (bootstrappedAt.compareTo(redundantBefore) <= 0) bootstrappedAt = null;
+
         PostProcess notifier = null;
         {
             // notify commit uses exclusive bounds, as we use minUndecided
@@ -251,7 +273,7 @@ abstract class PostProcess
 
         {
             Timestamp applyTo = null;
-            if (newInfo != null && newInfo.status == APPLIED)
+            if (newInfo != null && newInfo.status() == APPLIED)
             {
                 TxnInfo maxContiguousApplied = CommandsForKey.maxContiguousManagedApplied(committedByExecuteAt, maxAppliedWriteByExecuteAt, bootstrappedAt);
                 if (maxContiguousApplied != null && maxContiguousApplied.compareExecuteAt(newInfo) >= 0)
@@ -259,7 +281,6 @@ abstract class PostProcess
             }
             else if (newInfo == null)
             {
-//                applyTo = maxContiguousManagedAppliedExecuteAt(committedByExecuteAt, maxAppliedWriteByExecuteAt, bootstrappedAt, redundantBefore);
                 TxnInfo maxContiguousApplied = CommandsForKey.maxContiguousManagedApplied(committedByExecuteAt, maxAppliedWriteByExecuteAt, bootstrappedAt);
                 if (maxContiguousApplied != null)
                     applyTo = maxContiguousApplied.executeAt;
@@ -280,7 +301,7 @@ abstract class PostProcess
             }
         }
 
-        if (newInfo != null && newInfo.status == INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED && curInfo != null && curInfo.status.isCommitted())
+        if (newInfo != null && newInfo.status() == INVALID_OR_TRUNCATED_OR_PRUNED && curInfo != null && curInfo.status().isCommittedToExecute())
         {
             // this is a rare edge case, but we might have unmanaged transactions waiting on this command we must re-schedule or notify
             int start = findFirstApply(unmanageds);

@@ -27,6 +27,7 @@ import java.util.function.Predicate;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
+import static accord.utils.SortedArrays.Search.FAST;
 import static accord.utils.SortedArrays.Search.FLOOR;
 
 /**
@@ -56,6 +57,7 @@ public interface Routables<K extends Routable> extends Iterable<K>
     {
         return StreamSupport.stream(spliterator(), false);
     }
+    default boolean intersects(Range range) { return findNext(0, range, FAST) >= 0; }
     boolean intersects(AbstractRanges ranges);
     boolean intersects(AbstractKeys<?> keys);
     default boolean intersects(Routables<?> routables)
@@ -72,11 +74,14 @@ public interface Routables<K extends Routable> extends Iterable<K>
     boolean containsAll(Routables<?> keysOrRanges);
     boolean intersectsAll(Unseekables<?> keysOrRanges);
 
-    Routables<?> slice(int from, int to);
-    Routables<?> slice(Ranges ranges);
+    Routables<K> slice(int from, int to);
+    Routables<K> slice(Ranges ranges);
     Routables<K> slice(Ranges ranges, Slice slice);
-    Routables<?> intersecting(Unseekables<?> intersecting);
+    Routables<K> intersecting(Unseekables<?> intersecting);
     Routables<K> intersecting(Unseekables<?> intersecting, Slice slice);
+    Routables<K> without(Ranges ranges);
+
+    FullRoute<?> toRoute(RoutingKey homeKey);
 
     /**
      * Search forwards from {code thisIndex} and {@code withIndex} to find the first entries in each collection

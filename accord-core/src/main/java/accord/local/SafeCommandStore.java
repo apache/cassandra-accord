@@ -19,41 +19,38 @@
 package accord.local;
 
 import java.util.NavigableMap;
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import accord.api.Agent;
 import accord.api.DataStore;
-import accord.api.Key;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
-import accord.impl.ErasedSafeCommand;
 import accord.local.cfk.CommandsForKey;
 import accord.local.cfk.SafeCommandsForKey;
+import accord.primitives.AbstractUnseekableKeys;
 import accord.primitives.Deps;
-import accord.primitives.EpochSupplier;
-import accord.primitives.Keys;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Routable.Domain;
 import accord.primitives.Routables;
-import accord.primitives.Seekable;
-import accord.primitives.Seekables;
+import accord.primitives.RoutingKeys;
+import accord.primitives.SaveStatus;
+import accord.primitives.Status;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn.Kind;
 import accord.primitives.Txn.Kind.Kinds;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekable;
 import accord.primitives.Unseekables;
 import accord.utils.Invariants;
 
 import static accord.local.Cleanup.NO;
 import static accord.local.KeyHistory.COMMANDS;
 import static accord.local.RedundantBefore.PreBootstrapOrStale.FULLY;
-import static accord.local.SaveStatus.Applied;
-import static accord.local.SaveStatus.Erased;
-import static accord.local.SaveStatus.ErasedOrInvalidOrVestigial;
 import static accord.primitives.Routables.Slice.Minimal;
-import static accord.primitives.Route.isFullRoute;
+import static accord.primitives.SaveStatus.Applied;
 
 /**
  * A CommandStore with exclusive access; a reference to this should not be retained outside of the scope of the method
@@ -65,7 +62,7 @@ public abstract class SafeCommandStore
 {
     public interface CommandFunction<P1, I, O>
     {
-        O apply(P1 p1, Seekable keyOrRange, TxnId txnId, Timestamp executeAt, I in);
+        O apply(P1 p1, Unseekable keyOrRange, TxnId txnId, Timestamp executeAt, I in);
     }
 
     public enum TestStartedAt
@@ -90,19 +87,7 @@ public abstract class SafeCommandStore
         Command command = safeCommand.current();
         if (command.saveStatus().isUninitialised())
             return null;
-        return maybeTruncate(safeCommand, command, txnId, null);
-    }
-
-    public SafeCommand get(TxnId txnId, RoutingKey unseekable)
-    {
-        SafeCommand safeCommand = get(txnId);
-        Command command = safeCommand.current();
-        if (command.saveStatus().isUninitialised())
-        {
-            if (commandStore().durableBefore().isUniversal(txnId, unseekable))
-                return new ErasedSafeCommand(txnId, ErasedOrInvalidOrVestigial);
-        }
-        return maybeTruncate(safeCommand, command, txnId, null);
+        return maybeCleanup(safeCommand);
     }
 
     // decidedExecuteAt == null if not yet PreCommitted
@@ -125,21 +110,21 @@ public abstract class SafeCommandStore
      *
      * TODO (desired): Introduce static types that permit us to propagate this information safely.
      */
-    public SafeCommand get(TxnId txnId, EpochSupplier toEpoch, Unseekables<?> unseekables)
+    public SafeCommand get(TxnId txnId, StoreParticipants participants)
     {
         SafeCommand safeCommand = get(txnId);
-        Command command = safeCommand.current();
-        if (command.saveStatus().isUninitialised())
-        {
-            if (Cleanup.isSafeToCleanup(commandStore().durableBefore(), txnId, unseekables))
-                return new ErasedSafeCommand(txnId, isFullRoute(unseekables) ? Erased : ErasedOrInvalidOrVestigial);
-        }
-        return maybeTruncate(safeCommand, command, toEpoch, unseekables);
+        Commands.maybeCleanup(this, safeCommand, safeCommand.current(), participants);
+        return safeCommand;
     }
 
-    protected SafeCommand maybeTruncate(SafeCommand safeCommand, Command command, @Nullable EpochSupplier toEpoch, @Nullable Unseekables<?> maybeFullRoute)
+    protected SafeCommand maybeCleanup(SafeCommand safeCommand)
     {
-        Commands.maybeCleanup(this, safeCommand, command, toEpoch, maybeFullRoute);
+        return maybeCleanup(safeCommand, safeCommand.current(), StoreParticipants.empty(safeCommand.txnId()));
+    }
+
+    protected SafeCommand maybeCleanup(SafeCommand safeCommand, Command command, @Nonnull StoreParticipants participants)
+    {
+        Commands.maybeCleanup(this, safeCommand, command, participants);
         return safeCommand;
     }
 
@@ -154,13 +139,13 @@ public abstract class SafeCommandStore
         SafeCommand safeCommand = getInternalIfLoadedAndInitialised(txnId);
         if (safeCommand == null)
             return null;
-        return maybeTruncate(safeCommand, safeCommand.current(), txnId, null);
+        return maybeCleanup(safeCommand, safeCommand.current(), StoreParticipants.empty(txnId));
     }
 
     protected SafeCommand get(TxnId txnId)
     {
         SafeCommand safeCommand = getInternal(txnId);
-        return maybeTruncate(safeCommand, safeCommand.current(), null, null);
+        return maybeCleanup(safeCommand, safeCommand.current(), StoreParticipants.empty(txnId));
     }
 
     public SafeCommand unsafeGet(TxnId txnId)
@@ -168,7 +153,7 @@ public abstract class SafeCommandStore
         return get(txnId);
     }
 
-    protected SafeCommandsForKey maybeTruncate(SafeCommandsForKey safeCfk)
+    protected SafeCommandsForKey maybeCleanup(SafeCommandsForKey safeCfk)
     {
         RedundantBefore.Entry entry = commandStore().redundantBefore().get(safeCfk.key().toUnseekable());
         if (entry != null)
@@ -182,18 +167,18 @@ public abstract class SafeCommandStore
      *
      * This permits efficient operation when a transaction involved in processing another transaction happens to be in memory.
      */
-    public final SafeCommandsForKey ifLoadedAndInitialised(Key key)
+    public final SafeCommandsForKey ifLoadedAndInitialised(RoutingKey key)
     {
         SafeCommandsForKey safeCfk = getInternalIfLoadedAndInitialised(key);
         if (safeCfk == null)
             return null;
-        return maybeTruncate(safeCfk);
+        return maybeCleanup(safeCfk);
     }
 
-    public SafeCommandsForKey get(Key key)
+    public SafeCommandsForKey get(RoutingKey key)
     {
         SafeCommandsForKey safeCfk = getInternal(key);
-        return maybeTruncate(safeCfk);
+        return maybeCleanup(safeCfk);
     }
 
     public long preAcceptTimeout()
@@ -203,8 +188,8 @@ public abstract class SafeCommandStore
 
     protected abstract SafeCommand getInternal(TxnId txnId);
     protected abstract SafeCommand getInternalIfLoadedAndInitialised(TxnId txnId);
-    protected abstract SafeCommandsForKey getInternal(Key key);
-    protected abstract SafeCommandsForKey getInternalIfLoadedAndInitialised(Key key);
+    protected abstract SafeCommandsForKey getInternal(RoutingKey key);
+    protected abstract SafeCommandsForKey getInternalIfLoadedAndInitialised(RoutingKey key);
     public abstract boolean canExecuteWith(PreLoadContext context);
 
     protected void update(Command prev, Command updated)
@@ -244,7 +229,7 @@ public abstract class SafeCommandStore
             return;
 
         TxnId txnId = updated.txnId();
-        if (!txnId.kind().isGloballyVisible())
+        if (!txnId.isVisible())
             return;
 
         commandStore().updateMaxConflicts(prev, updated);
@@ -298,20 +283,17 @@ public abstract class SafeCommandStore
     private static void updateManagedCommandsForKey(SafeCommandStore safeStore, Command prev, Command next)
     {
         TxnId txnId = next.txnId();
-        Keys keys = (Keys)next.keysOrRanges();
-        if (keys == null || next.hasBeen(Status.Truncated)) keys = (Keys)prev.keysOrRanges();
-        if (keys == null)
-            return;
+        StoreParticipants participants = next.participants().supplement(prev.participants());
+        Participants<?> update = next.hasBeen(Status.Committed) ? participants.hasTouched : participants.touches;
 
-        // TODO (required): additionalKeysOrRanges may not be being handled entirely correctly here, though it may not matter.
-        //    Once committed without a given key, we should be effectively erasing the command from that CFK
-        PreLoadContext context = PreLoadContext.contextFor(txnId, keys, COMMANDS);
+        // TODO (expected): we don't want to insert any dependencies for those we only touch; we just need to record them as decided/applied for execution
+        PreLoadContext context = PreLoadContext.contextFor(txnId, update, COMMANDS);
         // TODO (expected): execute immediately for any keys we already have loaded, and save only those we haven't for later
         if (safeStore.canExecuteWith(context))
         {
-            for (Key key : keys)
+            for (RoutingKey key : (AbstractUnseekableKeys)update)
             {
-                safeStore.get(key).update(safeStore, next);
+                safeStore.get(key).update(safeStore, next, update != participants.touches && !participants.touches(key));
             }
         }
         else
@@ -325,7 +307,7 @@ public abstract class SafeCommandStore
     private static void updateUnmanagedExecutionCommandsForKey(SafeCommandStore safeStore, Command next)
     {
         TxnId txnId = next.txnId();
-        Keys keys = next.asCommitted().waitingOn.keys;
+        RoutingKeys keys = next.asCommitted().waitingOn.keys;
         // TODO (required): consider how execution works for transactions that await future deps and where the command store inherits additional keys in execution epoch
         Ranges ranges = safeStore.ranges().allAt(next.executeAt());
         PreLoadContext context = PreLoadContext.contextFor(txnId, keys, COMMANDS);
@@ -352,13 +334,13 @@ public abstract class SafeCommandStore
      * Within each key or range visits all visible txnids needed for the given scope in ascending order of queried timestamp.
      * TODO (expected): no need for slice in most (all?) cases
      */
-    public abstract <P1, T> T mapReduceActive(Seekables<?, ?> keys, Ranges slice, @Nullable Timestamp withLowerTxnId, Kinds kinds, CommandFunction<P1, T, T> map, P1 p1, T initialValue);
+    public abstract <P1, T> T mapReduceActive(Unseekables<?> keys, @Nullable Timestamp withLowerTxnId, Kinds kinds, CommandFunction<P1, T, T> map, P1 p1, T initialValue);
 
     /**
      * Visits keys first and then ranges, both in ascending order.
      * Within each key or range visits all unevicted txnids needed for the given scope in ascending order of queried timestamp.
      */
-    public abstract <P1, T> T mapReduceFull(Seekables<?, ?> keys, Ranges slice,
+    public abstract <P1, T> T mapReduceFull(Unseekables<?> keys,
                                             TxnId testTxnId,
                                             Kinds testKind,
                                             TestStartedAt testStartedAt,
@@ -373,19 +355,34 @@ public abstract class SafeCommandStore
     public abstract NodeTimeService time();
     public abstract CommandStores.RangesForEpoch ranges();
 
-    public boolean isTruncated(Command command)
+    public Ranges futureRanges(TxnId txnId)
     {
-        return Cleanup.shouldCleanup(this, command, null, null) != NO;
+        return ranges().allBefore(txnId.epoch());
+    }
+
+    public Ranges coordinateRanges(TxnId txnId)
+    {
+        return ranges().allAt(txnId.epoch());
+    }
+
+    public Ranges ranges(TxnId txnId, Timestamp executeAt)
+    {
+        return ranges(txnId, executeAt.epoch());
+    }
+
+    public Ranges ranges(TxnId txnId, long untilLocalEpoch)
+    {
+        return ranges().allBetween(txnId.epoch(), untilLocalEpoch);
     }
 
     // if we have to re-bootstrap (due to failed bootstrap or catching up on a range) then we may
     // have dangling redundant commands; these can safely be executed locally because we are a timestamp store
     final boolean isFullyPreBootstrapOrStale(Command command, Participants<?> forKeys)
     {
-        return commandStore().redundantBefore().preBootstrapOrStale(command.txnId(), command.executeAtOrTxnId(), forKeys) == FULLY;
+        return commandStore().redundantBefore().preBootstrapOrStale(command.txnId(), forKeys) == FULLY;
     }
 
-    public void registerListener(SafeCommand listeningTo, SaveStatus await, Status.KnownRoute route, TxnId waiting)
+    public void registerListener(SafeCommand listeningTo, SaveStatus await, TxnId waiting)
     {
         Invariants.checkState(listeningTo.current().saveStatus().compareTo(await) < 0);
         Invariants.checkState(!CommandsForKey.managesExecution(listeningTo.txnId()));
@@ -394,8 +391,9 @@ public abstract class SafeCommandStore
 
     public LocalListeners.Registered registerAndInvoke(TxnId txnId, RoutingKey someKey, LocalListeners.ComplexListener listener)
     {
+        StoreParticipants participants = StoreParticipants.read(this, Participants.singleton(txnId.domain(), someKey), txnId);
         LocalListeners.Registered registered = register(txnId, listener);
-        if (!listener.notify(this, get(txnId, someKey)))
+        if (!listener.notify(this, get(txnId, participants)))
             registered.cancel();
         return registered;
     }
@@ -409,5 +407,4 @@ public abstract class SafeCommandStore
     {
         commandStore().listeners.notify(this, safeCommand, prev);
     }
-
 }

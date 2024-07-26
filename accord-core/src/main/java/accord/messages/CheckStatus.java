@@ -1,5 +1,5 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
+ * Licensed to the Apache Software ation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
  * regarding copyright ownership.  The ASF licenses this file
@@ -18,16 +18,11 @@
 
 package accord.messages;
 
-import java.util.Arrays;
-import java.util.Objects;
-import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
 import accord.api.Result;
 import accord.api.RoutingKey;
-import accord.coordinate.Infer;
-import accord.coordinate.Infer.InvalidIfNot;
-import accord.coordinate.Infer.IsPreempted;
+import accord.coordinate.Infer.InvalidIf;
 import accord.local.Command;
 import accord.local.Commands;
 import accord.local.Node;
@@ -35,15 +30,17 @@ import accord.local.Node.Id;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
-import accord.local.Status;
+import accord.primitives.SaveStatus;
+import accord.primitives.Status;
+import accord.local.StoreParticipants;
 import accord.primitives.Ballot;
-import accord.primitives.EpochSupplier;
+import accord.primitives.KnownMap;
+import accord.primitives.WithQuorum;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
+import accord.primitives.Participants;
 import accord.primitives.ProgressToken;
 import accord.primitives.Ranges;
-import accord.primitives.Routables;
 import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -52,53 +49,48 @@ import accord.primitives.Writes;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
-import accord.utils.ReducingRangeMap;
 
 import javax.annotation.Nonnull;
 
-import static accord.coordinate.Infer.InvalidIfNot.IsNotInvalid;
-import static accord.coordinate.Infer.InvalidIfNot.NotKnownToBeInvalid;
-import static accord.coordinate.Infer.IsPreempted.NotPreempted;
-import static accord.coordinate.Infer.IsPreempted.Preempted;
-import static accord.local.Status.Durability;
-import static accord.local.Status.Durability.Local;
-import static accord.local.Status.Durability.Majority;
-import static accord.local.Status.Durability.ShardUniversal;
-import static accord.local.Status.Durability.Universal;
-import static accord.local.Status.Known;
-import static accord.local.Status.KnownDeps.DepsErased;
-import static accord.local.Status.NotDefined;
-import static accord.local.Status.Stable;
-import static accord.local.Status.Truncated;
-import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
+import static accord.coordinate.Infer.InvalidIf.IfUncommitted;
+import static accord.coordinate.Infer.InvalidIf.IsNotInvalid;
+import static accord.coordinate.Infer.InvalidIf.NotKnownToBeInvalid;
+import static accord.primitives.Status.Durability;
+import static accord.primitives.Status.Durability.Local;
+import static accord.primitives.Status.Durability.Majority;
+import static accord.primitives.Status.Durability.ShardUniversal;
+import static accord.primitives.Status.Durability.Universal;
+
+import accord.primitives.Known;
+import static accord.primitives.Status.NotDefined;
+import static accord.primitives.Status.Stable;
+import static accord.primitives.Status.Truncated;
 import static accord.messages.TxnRequest.computeScope;
-import static accord.primitives.Routables.Slice.Minimal;
+import static accord.primitives.WithQuorum.HasQuorum;
 import static accord.primitives.Route.castToRoute;
 import static accord.primitives.Route.isRoute;
 
 public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusReply>
-        implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, CheckStatus.CheckStatusReply>, EpochSupplier
+        implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, CheckStatus.CheckStatusReply>
 {
-    public enum WithQuorum { HasQuorum, NoQuorum }
-
     public static class SerializationSupport
     {
-        public static CheckStatusOk createOk(FoundKnownMap map, SaveStatus maxKnowledgeStatus, SaveStatus maxStatus,
+        public static CheckStatusOk createOk(KnownMap map, SaveStatus maxKnowledgeStatus, SaveStatus maxStatus,
                                              Ballot promised, Ballot maxAcceptedOrCommitted, Ballot acceptedOrCommitted,
                                              @Nullable Timestamp executeAt, boolean isCoordinating, Durability durability,
-                                             @Nullable Route<?> route, @Nullable RoutingKey homeKey)
+                                             @Nullable Route<?> route, @Nullable RoutingKey homeKey, InvalidIf invalidIf)
         {
             return new CheckStatusOk(map, maxKnowledgeStatus, maxStatus, promised, maxAcceptedOrCommitted, acceptedOrCommitted,
-                                     executeAt, isCoordinating, durability, route, homeKey);
+                                     executeAt, isCoordinating, durability, route, homeKey, invalidIf);
         }
-        public static CheckStatusOk createOk(FoundKnownMap map, SaveStatus maxKnowledgeStatus, SaveStatus maxStatus,
+        public static CheckStatusOk createOk(KnownMap map, SaveStatus maxKnowledgeStatus, SaveStatus maxStatus,
                                              Ballot promised, Ballot maxAcceptedOrCommitted, Ballot acceptedOrCommitted,
                                              @Nullable Timestamp executeAt, boolean isCoordinating, Durability durability,
-                                             @Nullable Route<?> route, @Nullable RoutingKey homeKey,
+                                             @Nullable Route<?> route, @Nullable RoutingKey homeKey, InvalidIf invalidIf,
                                              PartialTxn partialTxn, PartialDeps committedDeps, Writes writes, Result result)
         {
             return new CheckStatusOkFull(map, maxKnowledgeStatus, maxStatus, promised, maxAcceptedOrCommitted, acceptedOrCommitted,
-                                         executeAt, isCoordinating, durability, route, homeKey, partialTxn, committedDeps, writes, result);
+                                         executeAt, isCoordinating, durability, route, homeKey, invalidIf, partialTxn, committedDeps, writes, result);
         }
     }
 
@@ -109,13 +101,14 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     }
 
     // query is usually a Route
-    public final Unseekables<?> query;
+    public final Participants<?> query;
     public final long sourceEpoch;
     public final IncludeInfo includeInfo;
 
-    public CheckStatus(TxnId txnId, Unseekables<?> query, long sourceEpoch, IncludeInfo includeInfo)
+    public CheckStatus(TxnId txnId, Participants<?> query, long sourceEpoch, IncludeInfo includeInfo)
     {
         super(txnId);
+        Invariants.checkState(txnId.is(query.domain()));
         this.query = query;
         this.sourceEpoch = sourceEpoch;
         this.includeInfo = includeInfo;
@@ -127,11 +120,11 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
         return txnId;
     }
 
-    public CheckStatus(Id to, Topologies topologies, TxnId txnId, Unseekables<?> query, long sourceEpoch, IncludeInfo includeInfo)
+    public CheckStatus(Id to, Topologies topologies, TxnId txnId, Participants<?> query, long sourceEpoch, IncludeInfo includeInfo)
     {
         super(txnId);
         if (isRoute(query)) this.query = computeScope(to, topologies, castToRoute(query), 0, Route::slice, Route::with);
-        else this.query = computeScope(to, topologies, (Unseekables) query, 0, Unseekables::slice, Unseekables::with);
+        else this.query = computeScope(to, topologies, (Participants) query, 0, Participants::slice, Participants::with);
         this.sourceEpoch = sourceEpoch;
         this.includeInfo = includeInfo;
     }
@@ -144,25 +137,20 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     }
 
     @Override
-    public long epoch()
-    {
-        return sourceEpoch;
-    }
-
-    @Override
     public CheckStatusReply apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, this, query);
+        StoreParticipants participants = StoreParticipants.read(safeStore, query, txnId, sourceEpoch);
+        SafeCommand safeCommand = safeStore.get(txnId, participants);
         Command command = safeCommand.current();
 
-        Commands.updateRouteOrParticipants(safeStore, safeCommand, query);
+        Commands.updateParticipants(safeStore, safeCommand, participants);
 
         boolean isCoordinating = isCoordinating(node, command);
         Durability durability = command.durability();
+        // unsafe to augment durability using DurableBefore, as DurableBefore can in theory get ahead of RedundantBefore
         Route<?> route = command.route();
-        if (Route.isFullRoute(route))
-            durability = Durability.mergeAtLeast(durability, safeStore.commandStore().durableBefore().min(txnId, route));
-        FoundKnownMap map = foundKnown(safeStore, command, route);
+        KnownMap map = foundKnown(command, participants);
+        InvalidIf invalidIf = invalidIf(command, participants);
 
         switch (includeInfo)
         {
@@ -170,22 +158,27 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             case No:
             case Route:
                 Route<?> respondWithRoute = includeInfo == IncludeInfo.No ? null : route;
-                return new CheckStatusOk(map, isCoordinating, durability, respondWithRoute, command);
+                return new CheckStatusOk(map, isCoordinating, durability, respondWithRoute, invalidIf, command);
             case All:
-                return new CheckStatusOkFull(map, isCoordinating, durability, command);
+                return new CheckStatusOkFull(map, isCoordinating, durability, invalidIf, command);
         }
     }
 
-    private FoundKnownMap foundKnown(SafeCommandStore safeStore, Command command, @Nullable Route<?> route)
+    private KnownMap foundKnown(Command command, StoreParticipants participants)
     {
-        Unseekables<?> max = Route.isFullRoute(route) ? route : route != null ? Unseekables.merge((Unseekables)query, route.withHomeKey()) : query;
-        Unseekables<?> local = max.slice(safeStore.ranges().allAt(command.txnId()), Minimal);
-        FoundKnown known = new FoundKnown(command.saveStatus().known, NotKnownToBeInvalid, Timestamp.max(command.promised(), command.acceptedOrCommitted()).equals(Ballot.ZERO) ? NotPreempted : Preempted);
+        SaveStatus saveStatus = command.saveStatus();
+        return KnownMap.create(participants.owns(), saveStatus.known);
+    }
 
+    private InvalidIf invalidIf(Command command, StoreParticipants participants)
+    {
+        SaveStatus saveStatus = command.saveStatus();
+        InvalidIf invalidIf = NotKnownToBeInvalid;
         if (command.known().isDecidedToExecute())
-            return FoundKnownMap.create(local, known.withAtLeast(IsNotInvalid));
-
-        return Infer.withInvalidIfNot(safeStore, command.txnId(), local, max, known);
+            invalidIf = IsNotInvalid;
+        else if (saveStatus == SaveStatus.Erased && !participants.owns().isEmpty())
+            invalidIf = IfUncommitted;
+        return invalidIf;
     }
 
     private static boolean isCoordinating(Node node, Command command)
@@ -217,289 +210,10 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
     {
         boolean isOk();
     }
-
-    /**
-     * This is slightly different to Known, in that it represents the knowledge we have obtained from any shard that
-     * can be applied to any other shard, along with any information we might use to infer invalidation.
-     */
-    public static class FoundKnown extends Known
-    {
-        public static final FoundKnown Nothing = new FoundKnown(Known.Nothing, NotKnownToBeInvalid, NotPreempted);
-        public static final FoundKnown Invalidated = new FoundKnown(Known.Invalidated, NotKnownToBeInvalid, NotPreempted);
-
-        public final InvalidIfNot invalidIfNot;
-        public final IsPreempted isPreempted;
-
-        public FoundKnown(Known known, InvalidIfNot invalidIfNot, IsPreempted isPreempted)
-        {
-            super(known);
-            this.invalidIfNot = invalidIfNot;
-            this.isPreempted = isPreempted;
-        }
-
-        public FoundKnown atLeast(FoundKnown with)
-        {
-            Known known = super.atLeast(with);
-            if (known == this)
-                return this;
-            return new FoundKnown(known, invalidIfNot.atLeast(with.invalidIfNot), isPreempted.merge(with.isPreempted));
-        }
-
-        public FoundKnown reduce(FoundKnown with)
-        {
-            Known known = super.reduce(with);
-            if (known == this)
-                return this;
-            return new FoundKnown(known, invalidIfNot.reduce(with.invalidIfNot), isPreempted.validForBoth(with.isPreempted));
-        }
-
-        public FoundKnown withAtLeast(InvalidIfNot invalidIfNot)
-        {
-            invalidIfNot = this.invalidIfNot.atLeast(invalidIfNot);
-            if (this.invalidIfNot == invalidIfNot)
-                return this;
-            return new FoundKnown(this, invalidIfNot, isPreempted);
-        }
-
-        public FoundKnown validForAll()
-        {
-            Known known = super.validForAll();
-            if (known == this)
-                return this;
-            return new FoundKnown(known, NotKnownToBeInvalid, NotPreempted);
-        }
-
-        public boolean isTruncated()
-        {
-            switch (outcome)
-            {
-                default: throw new AssertionError("Unhandled outcome: " + outcome);
-                case Invalidated:
-                case Unknown:
-                    return false;
-                case Apply:
-                    // since Apply is universal, we can
-                    return deps == DepsErased;
-                case Erased:
-                case WasApply:
-                    return true;
-            }
-        }
-
-        public boolean canProposeInvalidation()
-        {
-            return deps.canProposeInvalidation() && executeAt.canProposeInvalidation() && outcome.canProposeInvalidation();
-        }
-
-        public boolean inferInvalidWithQuorum()
-        {
-            return invalidIfNot.inferInvalidWithQuorum(isPreempted, this);
-        }
-
-        @Override
-        public boolean equals(Object o)
-        {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            FoundKnown that = (FoundKnown) o;
-            return route == that.route && definition == that.definition && executeAt == that.executeAt && deps == that.deps && outcome == that.outcome && invalidIfNot == that.invalidIfNot && isPreempted == that.isPreempted;
-        }
-    }
-
-    // TODO (expected, consider): build only with keys/ranges found in command stores, not the covering ranges of command stores?
-    public static class FoundKnownMap extends ReducingRangeMap<FoundKnown>
-    {
-        public static class SerializerSupport
-        {
-            public static FoundKnownMap create(boolean inclusiveEnds, RoutingKey[] ends, FoundKnown[] values)
-            {
-                return new FoundKnownMap(inclusiveEnds, ends, values);
-            }
-        }
-
-        private transient final FoundKnown validForAll;
-
-        private FoundKnownMap()
-        {
-            this.validForAll = FoundKnown.Nothing;
-        }
-
-        public FoundKnownMap(boolean inclusiveEnds, RoutingKey[] starts, FoundKnown[] values)
-        {
-            this(inclusiveEnds, starts, values, FoundKnown.Nothing);
-        }
-
-        private FoundKnownMap(boolean inclusiveEnds, RoutingKey[] starts, FoundKnown[] values, FoundKnown validForAll)
-        {
-            super(inclusiveEnds, starts, values);
-            this.validForAll = validForAll;
-        }
-
-        public static FoundKnownMap create(Unseekables<?> keysOrRanges, SaveStatus saveStatus, InvalidIfNot invalidIfNot, Ballot promised)
-        {
-            FoundKnown known = new FoundKnown(saveStatus.known, invalidIfNot, promised.equals(Ballot.ZERO) ? NotPreempted : Preempted);
-            if (keysOrRanges.isEmpty())
-                return new FoundKnownMap();
-
-            return create(keysOrRanges, known, Builder::new);
-        }
-
-        public static FoundKnownMap create(Unseekables<?> keysOrRanges, FoundKnown known)
-        {
-            if (keysOrRanges.isEmpty())
-                return new FoundKnownMap();
-
-            return create(keysOrRanges, known, Builder::new);
-        }
-
-        public static FoundKnownMap merge(FoundKnownMap a, FoundKnownMap b)
-        {
-            return ReducingRangeMap.merge(a, b, FoundKnown::atLeast, Builder::new);
-        }
-
-        private FoundKnownMap finish(Unseekables<?> routeOrParticipants, WithQuorum withQuorum)
-        {
-            FoundKnown validForAll;
-            switch (withQuorum)
-            {
-                default: throw new AssertionError("Unhandled WithQuorum: " + withQuorum);
-                case HasQuorum: validForAll = foldlWithDefault(routeOrParticipants, FoundKnownMap::reduceInferredOrKnownForWithQuorum, FoundKnown.Nothing, null, i -> false); break;
-                case NoQuorum: validForAll = foldlWithDefault(routeOrParticipants, FoundKnownMap::reduceKnownFor, FoundKnown.Nothing, null, i -> false); break;
-            }
-            validForAll = this.validForAll.atLeast(validForAll).validForAll();
-            return with(validForAll);
-        }
-
-        private FoundKnownMap with(FoundKnown validForAll)
-        {
-            if (validForAll.equals(this.validForAll))
-                return this;
-
-            int i = 0;
-            for (; i < size(); ++i)
-            {
-                FoundKnown pre = values[i];
-                if (pre == null)
-                    continue;
-
-                FoundKnown post = pre.atLeast(validForAll);
-                if (!pre.equals(post))
-                    break;
-            }
-
-            if (i == size())
-                return new FoundKnownMap(inclusiveEnds(), starts, values, validForAll);
-
-            RoutingKey[] newStarts = new RoutingKey[size() + 1];
-            FoundKnown[] newValues = new FoundKnown[size()];
-            System.arraycopy(starts, 0, newStarts, 0, i);
-            System.arraycopy(values, 0, newValues, 0, i);
-            int count = i;
-            while (i < size())
-            {
-                FoundKnown pre = values[i++];
-                FoundKnown post = pre == null ? null : pre.atLeast(validForAll);
-                if (count == 0 || !Objects.equals(post, newValues[count - 1]))
-                {
-                    newStarts[count] = starts[i-1];
-                    newValues[count++] = post;
-                }
-            }
-            newStarts[count] = starts[size()];
-            if (count != newValues.length)
-            {
-                newValues = Arrays.copyOf(newValues, count);
-                newStarts = Arrays.copyOf(newStarts, count + 1);
-            }
-            return new FoundKnownMap(inclusiveEnds(), newStarts, newValues, validForAll);
-        }
-
-        public boolean hasTruncated(Routables<?> routables)
-        {
-            return foldlWithDefault(routables, (known, prev) -> known.isTruncated(), FoundKnown.Nothing, false, i -> i);
-        }
-
-        public boolean hasTruncated()
-        {
-            return foldl((known, prev) -> known.isTruncated(), false, i -> i);
-        }
-
-        public boolean hasInvalidated()
-        {
-            return foldl((known, prev) -> known.isInvalidated(), false, i -> i);
-        }
-
-        public Known knownFor(Routables<?> routables)
-        {
-            return validForAll.atLeast(foldlWithDefault(routables, FoundKnownMap::reduceKnownFor, FoundKnown.Nothing, null, i -> false));
-        }
-
-        public Known knownForAny()
-        {
-            return validForAll.atLeast(foldl(FoundKnown::atLeast, FoundKnown.Nothing, i -> false));
-        }
-
-        public Ranges matchingRanges(Predicate<FoundKnown> match)
-        {
-            return foldlWithBounds((known, ranges, start, end) -> match.test(known) ? ranges.with(Ranges.of(start.rangeFactory().newRange(start, end))) : ranges, Ranges.EMPTY, i -> false);
-        }
-
-        private static FoundKnown reduceInferredOrKnownForWithQuorum(FoundKnown foundKnown, @Nullable FoundKnown prev)
-        {
-            if (foundKnown.inferInvalidWithQuorum())
-                foundKnown = foundKnown.atLeast(FoundKnown.Invalidated);
-
-            if (prev == null)
-                return foundKnown;
-
-            return prev.reduce(foundKnown);
-        }
-
-        private static Known reduceKnownFor(FoundKnown foundKnown, @Nullable Known prev)
-        {
-            if (prev == null)
-                return foundKnown;
-
-            return prev.reduce(foundKnown);
-        }
-
-        private static FoundKnown reduceKnownFor(FoundKnown foundKnown, @Nullable FoundKnown prev)
-        {
-            if (prev == null)
-                return foundKnown;
-
-            return prev.reduce(foundKnown);
-        }
-
-        public Ranges knownForRanges(Known required, Ranges expect)
-        {
-            // TODO (desired): implement and use foldlWithDefaultAndBounds so can subtract rather than add
-            return foldlWithBounds(expect, (known, prev, start, end) -> {
-                if (!required.isSatisfiedBy(known))
-                    return prev;
-
-                return prev.with(Ranges.of(start.rangeFactory().newRange(start, end)));
-            }, Ranges.EMPTY, i -> false);
-        }
-
-        public static class Builder extends AbstractBoundariesBuilder<RoutingKey, FoundKnown, FoundKnownMap>
-        {
-            public Builder(boolean inclusiveEnds, int capacity)
-            {
-                super(inclusiveEnds, capacity);
-            }
-
-            @Override
-            protected FoundKnownMap buildInternal()
-            {
-                return new FoundKnownMap(inclusiveEnds, starts.toArray(new RoutingKey[0]), values.toArray(new FoundKnown[0]));
-            }
-        }
-    }
-
+    
     public static class CheckStatusOk implements CheckStatusReply
     {
-        public final FoundKnownMap map;
+        public final KnownMap map;
         // TODO (required): tighten up constraints here to ensure we only report truncated when the range is Durable
         // TODO (expected, cleanup): stop using saveStatus and maxSaveStatus - move to only Known
         //   care needed when merging Accepted and AcceptedInvalidate; might be easier to retain saveStatus only for merging these cases
@@ -520,29 +234,30 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
         public final Durability durability;
         public final @Nullable Route<?> route;
         public final @Nullable RoutingKey homeKey;
+        public final InvalidIf invalidIf;
 
-        public CheckStatusOk(FoundKnownMap map, boolean isCoordinating, Durability durability, Command command)
+        public CheckStatusOk(KnownMap map, boolean isCoordinating, Durability durability, InvalidIf invalidIf, Command command)
         {
-            this(map, isCoordinating, durability, command.route(), command);
+            this(map, isCoordinating, durability, command.route(), invalidIf, command);
         }
 
-        public CheckStatusOk(FoundKnownMap map, boolean isCoordinating, Durability durability, Route<?> route, Command command)
+        public CheckStatusOk(KnownMap map, boolean isCoordinating, Durability durability, Route<?> route, InvalidIf invalidIf, Command command)
         {
             this(map, command.saveStatus(), command.promised(), command.acceptedOrCommitted(), command.acceptedOrCommitted(),
-                 command.executeAt(), isCoordinating, durability, route, command.homeKey());
+                 command.executeAt(), isCoordinating, durability, route, command.homeKey(), invalidIf);
         }
 
-        private CheckStatusOk(FoundKnownMap map, SaveStatus saveStatus, Ballot maxPromised,
+        private CheckStatusOk(KnownMap map, SaveStatus saveStatus, Ballot maxPromised,
                               Ballot maxAcceptedOrCommitted, Ballot acceptedOrCommitted, @Nullable Timestamp executeAt,
                               boolean isCoordinating, Durability durability,
-                              @Nullable Route<?> route, @Nullable RoutingKey homeKey)
+                              @Nullable Route<?> route, @Nullable RoutingKey homeKey, InvalidIf invalidIf)
         {
-            this(map, saveStatus, saveStatus, maxPromised, maxAcceptedOrCommitted, acceptedOrCommitted, executeAt, isCoordinating, durability, route, homeKey);
+            this(map, saveStatus, saveStatus, maxPromised, maxAcceptedOrCommitted, acceptedOrCommitted, executeAt, isCoordinating, durability, route, homeKey, invalidIf);
         }
 
-        private CheckStatusOk(FoundKnownMap map, SaveStatus maxKnowledgeSaveStatus, SaveStatus maxSaveStatus, Ballot maxPromised, Ballot maxAcceptedOrCommitted, Ballot acceptedOrCommitted,
+        private CheckStatusOk(KnownMap map, SaveStatus maxKnowledgeSaveStatus, SaveStatus maxSaveStatus, Ballot maxPromised, Ballot maxAcceptedOrCommitted, Ballot acceptedOrCommitted,
                               @Nullable Timestamp executeAt, boolean isCoordinating, Durability durability,
-                              @Nullable Route<?> route, @Nullable RoutingKey homeKey)
+                              @Nullable Route<?> route, @Nullable RoutingKey homeKey, InvalidIf invalidIf)
         {
             this.map = map;
             this.maxSaveStatus = maxSaveStatus;
@@ -555,6 +270,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             this.durability = durability;
             this.route = route;
             this.homeKey = homeKey;
+            this.invalidIf = invalidIf;
         }
 
         public ProgressToken toProgressToken()
@@ -578,17 +294,24 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
                 Durability durability = this.durability;
                 if (durability == Local) durability = Majority;
                 else if (durability == ShardUniversal) durability = Universal;
-                finished = merge(durability);
+                finished = finished.merge(durability);
             }
+
             if (Route.isRoute(routeOrParticipants))
             {
                 finished = finished.merge(Route.castToRoute(routeOrParticipants));
-                return finished.with(finished.map.finish(finished.route, withQuorum));
+                routeOrParticipants = finished.route;
             }
             else
             {
-                return finished.with(finished.map.finish(Unseekables.merge(routeOrParticipants, (Unseekables) finished.route), withQuorum));
+                routeOrParticipants = Unseekables.merge(routeOrParticipants, (Unseekables) finished.route);
             }
+
+            Known validForAll = map.computeValidForAll(routeOrParticipants);
+            if (withQuorum == HasQuorum && invalidIf.inferInvalidWithQuorum(finished.maxKnown()))
+                validForAll = validForAll.atLeast(Known.Invalidated);
+
+            return finished.with(map.with(validForAll));
         }
 
         /**
@@ -600,14 +323,9 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             return map.hasTruncated();
         }
 
-        public boolean isTruncatedResponse(Routables<?> routables)
-        {
-            return map.hasTruncated(routables);
-        }
-
         public Ranges truncatedResponse()
         {
-            return map.matchingRanges(FoundKnown::isTruncated);
+            return map.matchingRanges(Known::isTruncated);
         }
 
         public CheckStatusOk merge(@Nonnull Route<?> route)
@@ -616,7 +334,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             if (mergedRoute == this.route)
                 return this;
             return new CheckStatusOk(map, maxKnowledgeSaveStatus, maxSaveStatus, maxPromised, maxAcceptedOrCommitted, acceptedOrCommitted,
-                                     executeAt, isCoordinating, durability, mergedRoute, homeKey);
+                                     executeAt, isCoordinating, durability, mergedRoute, homeKey, invalidIf);
         }
 
         public CheckStatusOk merge(@Nonnull Durability durability)
@@ -625,19 +343,19 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             if (durability == this.durability)
                 return this;
             return new CheckStatusOk(map, maxKnowledgeSaveStatus, maxSaveStatus, maxPromised, maxAcceptedOrCommitted, acceptedOrCommitted,
-                                     executeAt, isCoordinating, durability, route, homeKey);
+                                     executeAt, isCoordinating, durability, route, homeKey, invalidIf);
         }
 
-        CheckStatusOk with(@Nonnull FoundKnownMap newMap)
+        CheckStatusOk with(@Nonnull KnownMap newMap)
         {
             if (newMap == this.map)
                 return this;
             return new CheckStatusOk(newMap, maxKnowledgeSaveStatus, maxSaveStatus, maxPromised, maxAcceptedOrCommitted, acceptedOrCommitted,
-                                     executeAt, isCoordinating, durability, route, homeKey);
+                                     executeAt, isCoordinating, durability, route, homeKey, invalidIf);
         }
 
         // TODO (required): harden markShardStale against unnecessary actions by utilising inferInvalidated==MAYBE and performing a global query
-        public Known knownFor(Unseekables<?> participants)
+        public Known knownFor(TxnId txnId, Unseekables<?> participants)
         {
             Known known = map.knownFor(participants);
             Invariants.checkState(!known.hasFullRoute() || Route.isFullRoute(route));
@@ -691,7 +409,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             CheckStatusOk defer = prefer == this ? that : this;
 
             // then select the max along each criteria, preferring the coordinator
-            FoundKnownMap mergeMap = FoundKnownMap.merge(prefer.map, defer.map);
+            KnownMap mergeMap = KnownMap.merge(prefer.map, defer.map);
             CheckStatusOk maxStatus = SaveStatus.max(prefer, prefer.maxKnowledgeSaveStatus, prefer.acceptedOrCommitted, defer, defer.maxKnowledgeSaveStatus, defer.acceptedOrCommitted, true);
             SaveStatus mergeMaxKnowledgeStatus = SaveStatus.merge(prefer.maxKnowledgeSaveStatus, prefer.acceptedOrCommitted, defer.maxKnowledgeSaveStatus, defer.acceptedOrCommitted, true);
             SaveStatus mergeMaxStatus = SaveStatus.merge(prefer.maxSaveStatus, prefer.acceptedOrCommitted, defer.maxSaveStatus, defer.acceptedOrCommitted, false);
@@ -701,6 +419,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             CheckStatusOk maxExecuteAt = prefer.maxKnown().executeAt.compareTo(defer.maxKnown().executeAt) >= 0 ? prefer : defer;
             Route<?> mergedRoute = Route.merge(prefer.route, (Route)defer.route);
             Durability mergedDurability = Durability.merge(prefer.durability, defer.durability);
+            InvalidIf invalidIf = prefer.invalidIf.atLeast(defer.invalidIf);
 
             // if the maximum (or preferred equal) is the same on all dimensions, return it
             if (mergeMaxKnowledgeStatus == maxStatus.maxKnowledgeSaveStatus
@@ -718,17 +437,12 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             boolean isCoordinating = maxPromised == prefer ? prefer.isCoordinating : defer.isCoordinating;
             return new CheckStatusOk(mergeMap, mergeMaxKnowledgeStatus, mergeMaxStatus,
                                      maxPromised.maxPromised, maxAccepted.maxAcceptedOrCommitted, maxStatus.acceptedOrCommitted,
-                                     maxExecuteAt.executeAt, isCoordinating, mergedDurability, mergedRoute, maxHomeKey.homeKey);
+                                     maxExecuteAt.executeAt, isCoordinating, mergedDurability, mergedRoute, maxHomeKey.homeKey, invalidIf);
         }
 
         public Known maxKnown()
         {
             return map.foldl(Known::atLeast, Known.Nothing, i -> false);
-        }
-
-        public InvalidIfNot maxInvalidIfNot()
-        {
-            return map.foldl((known, prev) -> known.invalidIfNot.atLeast(prev), NotKnownToBeInvalid, InvalidIfNot::isMax);
         }
 
         @Override
@@ -745,21 +459,21 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
         public final Writes writes;
         public final Result result;
 
-        public CheckStatusOkFull(FoundKnownMap map, boolean isCoordinating, Durability durability, Command command)
+        public CheckStatusOkFull(KnownMap map, boolean isCoordinating, Durability durability, InvalidIf invalidIf, Command command)
         {
-            super(map, isCoordinating, durability, command);
+            super(map, isCoordinating, durability, invalidIf, command);
             this.partialTxn = command.partialTxn();
             this.stableDeps = command.status().compareTo(Stable) >= 0 ? command.partialDeps() : null;
             this.writes = command.writes();
             this.result = command.result();
         }
 
-        protected CheckStatusOkFull(FoundKnownMap map, SaveStatus maxNotTruncatedSaveStatus, SaveStatus maxSaveStatus, Ballot promised, Ballot maxAcceptedOrCommitted, Ballot acceptedOrCommitted,
+        protected CheckStatusOkFull(KnownMap map, SaveStatus maxNotTruncatedSaveStatus, SaveStatus maxSaveStatus, Ballot promised, Ballot maxAcceptedOrCommitted, Ballot acceptedOrCommitted,
                                     Timestamp executeAt, boolean isCoordinating, Durability durability, Route<?> route,
-                                    RoutingKey homeKey, PartialTxn partialTxn, PartialDeps stableDeps, Writes writes, Result result)
+                                    RoutingKey homeKey, InvalidIf invalidIf, PartialTxn partialTxn, PartialDeps stableDeps, Writes writes, Result result)
         {
             super(map, maxNotTruncatedSaveStatus, maxSaveStatus, promised, maxAcceptedOrCommitted, acceptedOrCommitted,
-                  executeAt, isCoordinating, durability, route, homeKey);
+                  executeAt, isCoordinating, durability, route, homeKey, invalidIf);
             this.partialTxn = partialTxn;
             this.stableDeps = stableDeps;
             this.writes = writes;
@@ -777,7 +491,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             if (mergedRoute == this.route)
                 return this;
             return new CheckStatusOkFull(map, maxKnowledgeSaveStatus, maxSaveStatus, maxPromised, maxAcceptedOrCommitted, acceptedOrCommitted,
-                                         executeAt, isCoordinating, durability, mergedRoute, homeKey, partialTxn, stableDeps, writes, result);
+                                         executeAt, isCoordinating, durability, mergedRoute, homeKey, invalidIf, partialTxn, stableDeps, writes, result);
         }
 
         public CheckStatusOkFull merge(@Nonnull Durability durability)
@@ -786,15 +500,15 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             if (durability == this.durability)
                 return this;
             return new CheckStatusOkFull(map, maxKnowledgeSaveStatus, maxSaveStatus, maxPromised, maxAcceptedOrCommitted, acceptedOrCommitted,
-                                         executeAt, isCoordinating, durability, route, homeKey, partialTxn, stableDeps, writes, result);
+                                         executeAt, isCoordinating, durability, route, homeKey, invalidIf, partialTxn, stableDeps, writes, result);
         }
 
-        CheckStatusOk with(@Nonnull FoundKnownMap newMap)
+        CheckStatusOk with(@Nonnull KnownMap newMap)
         {
             if (newMap == this.map)
                 return this;
             return new CheckStatusOkFull(newMap, maxKnowledgeSaveStatus, maxSaveStatus, maxPromised, maxAcceptedOrCommitted, acceptedOrCommitted,
-                                         executeAt, isCoordinating, durability, route, homeKey, partialTxn, stableDeps, writes, result);
+                                         executeAt, isCoordinating, durability, route, homeKey, invalidIf, partialTxn, stableDeps, writes, result);
         }
 
         /**
@@ -822,7 +536,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
                 return new CheckStatusOkFull(max.map, max.maxKnowledgeSaveStatus, max.maxSaveStatus,
                                              max.maxPromised, max.maxAcceptedOrCommitted, max.acceptedOrCommitted,
                                              fullMax.executeAt, max.isCoordinating, max.durability, max.route,
-                                             max.homeKey, fullMax.partialTxn, fullMax.stableDeps, fullMax.writes, fullMax.result);
+                                             max.homeKey, max.invalidIf, fullMax.partialTxn, fullMax.stableDeps, fullMax.writes, fullMax.result);
             }
 
             CheckStatusOkFull fullMin = (CheckStatusOkFull) minSrc;
@@ -838,7 +552,7 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
             return new CheckStatusOkFull(max.map, max.maxKnowledgeSaveStatus, max.maxSaveStatus,
                                          max.maxPromised, max.maxAcceptedOrCommitted, max.acceptedOrCommitted,
                                          max.executeAt, max.isCoordinating, max.durability, max.route,
-                                         max.homeKey, partialTxn, committedDeps, writes, result);
+                                         max.homeKey, max.invalidIf, partialTxn, committedDeps, writes, result);
         }
 
         /**
@@ -852,10 +566,10 @@ public class CheckStatus extends AbstractEpochRequest<CheckStatus.CheckStatusRep
          * nor any knowledge that does not transfer (i.e. Definition or Deps).
          */
         @Override
-        public Known knownFor(Unseekables<?> participants)
+        public Known knownFor(TxnId txnId, Unseekables<?> participants)
         {
-            Known known = super.knownFor(participants);
-            Invariants.checkState(!known.hasDefinition() || (partialTxn != null && partialTxn.covers(participants)));
+            Known known = super.knownFor(txnId, participants);
+            Invariants.checkState(!known.hasDefinition() || txnId.isSystemTxn() || (partialTxn != null && partialTxn.covers(participants)));
             Invariants.checkState(!known.hasDecidedDeps() || (stableDeps != null && stableDeps.covers(participants)));
             return known;
         }

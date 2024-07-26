@@ -18,10 +18,13 @@
 
 package accord.primitives;
 
+import accord.api.RoutingKey;
+
 /**
  * Something that can only be routed, i.e. is NOT a Seekable.
  */
 public interface Unseekable extends Routable
 {
     Range asRange();
+    RoutingKey asRoutingKey();
 }

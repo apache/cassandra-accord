@@ -18,11 +18,7 @@
 
 package accord.impl;
 
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import javax.annotation.Nonnull;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,7 +33,7 @@ import accord.local.SafeCommandStore;
 import accord.messages.ReplyContext;
 import accord.primitives.Keys;
 import accord.primitives.Ranges;
-import accord.primitives.Seekables;
+import accord.primitives.Routable.Domain;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -48,8 +44,6 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 public class TestAgent implements Agent
 {
     private static final Logger logger = LoggerFactory.getLogger(TestAgent.class);
-
-    public final ConcurrentMap<Timestamp, AtomicInteger> completedLocalBarriers = new ConcurrentHashMap<>();
 
     public static class RethrowAgent extends TestAgent
     {
@@ -137,9 +131,9 @@ public class TestAgent implements Agent
     }
 
     @Override
-    public Txn emptySystemTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
+    public Txn emptySystemTxn(Txn.Kind kind, Domain domain)
     {
-        return new Txn.InMemory(kind, keysOrRanges, MockStore.read(Keys.EMPTY), MockStore.QUERY, null);
+        return new Txn.InMemory(kind, domain == Domain.Key ? Keys.EMPTY : Ranges.EMPTY, MockStore.read(Keys.EMPTY), MockStore.QUERY, null);
     }
 
     @Override
@@ -164,11 +158,5 @@ public class TestAgent implements Agent
     public long retryAwaitTimeout(Node node, SafeCommandStore safeStore, TxnId txnId, int retryCount, ProgressLog.BlockedUntil retrying, TimeUnit units)
     {
         return units.convert(1L, SECONDS);
-    }
-
-    @Override
-    public void onLocalBarrier(@Nonnull Seekables<?, ?> keysOrRanges, @Nonnull TxnId txnId)
-    {
-        completedLocalBarriers.computeIfAbsent(txnId, ignored -> new AtomicInteger()).incrementAndGet();
     }
 }

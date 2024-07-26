@@ -47,7 +47,7 @@ public class LogGroupTimersTest
     @Test
     public void testOne()
     {
-        testOne(8059992770813814538L, 1000, 100);
+        testOne(1269396034272574761L, 1000, 100);
     }
 
     static class Timer extends LogGroupTimers.Timer
@@ -259,7 +259,7 @@ public class LogGroupTimersTest
         @Override
         public Scheduled once(Runnable run, long delay, TimeUnit units)
         {
-            at = now + delay;
+            at = maxNow + delay;
             return new Scheduled()
             {
                 @Override
@@ -296,6 +296,7 @@ public class LogGroupTimersTest
 
             Timer first = canonical.first();
             Assertions.assertTrue(at <= prevAt || prevAt < first.deadline);
+            Assertions.assertEquals(at, scheduling.scheduledAt());
         }
     }
 

@@ -23,43 +23,40 @@ import javax.annotation.Nonnull;
 import accord.local.KeyHistory;
 import accord.local.Node.Id;
 import accord.local.SafeCommandStore;
+import accord.local.StoreParticipants;
+import accord.primitives.Deps;
 import accord.primitives.FullRoute;
-import accord.primitives.PartialDeps;
-import accord.primitives.Ranges;
 import accord.primitives.Route;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 
-import static accord.messages.PreAccept.calculatePartialDeps;
+import static accord.messages.PreAccept.calculateDeps;
 import static accord.primitives.EpochSupplier.constant;
 
 public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralReadDeps.GetEphemeralReadDepsOk>
 {
     public static final class SerializationSupport
     {
-        public static GetEphemeralReadDeps create(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, Seekables<?, ?> keys, long executionEpoch)
+        public static GetEphemeralReadDeps create(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, long executionEpoch)
         {
-            return new GetEphemeralReadDeps(txnId, scope, waitForEpoch, minEpoch, keys, executionEpoch);
+            return new GetEphemeralReadDeps(txnId, scope, waitForEpoch, minEpoch, executionEpoch);
         }
     }
 
-    public final Seekables<?, ?> keys;
     public final long executionEpoch;
 
-    public GetEphemeralReadDeps(Id to, Topologies topologies, FullRoute<?> route, TxnId txnId, Seekables<?, ?> keys, long executionEpoch)
+    public GetEphemeralReadDeps(Id to, Topologies topologies, FullRoute<?> route, TxnId txnId, long executionEpoch)
     {
         super(to, topologies, txnId, route);
-        this.keys = keys.intersecting(scope);
         this.executionEpoch = executionEpoch;
     }
 
-    protected GetEphemeralReadDeps(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch,  Seekables<?, ?> keys, long executionEpoch)
+    protected GetEphemeralReadDeps(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, long executionEpoch)
     {
         super(txnId, scope, waitForEpoch, minEpoch);
-        this.keys = keys;
         this.executionEpoch = executionEpoch;
     }
 
@@ -72,8 +69,8 @@ public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralRe
     @Override
     public GetEphemeralReadDepsOk apply(SafeCommandStore safeStore)
     {
-        Ranges ranges = safeStore.ranges().allBetween(minEpoch, executionEpoch);
-        PartialDeps deps = calculatePartialDeps(safeStore, txnId, keys, scope, constant(minEpoch), Timestamp.MAX, ranges);
+        StoreParticipants participants = StoreParticipants.read(safeStore, scope, txnId, Long.MAX_VALUE);
+        Deps deps = calculateDeps(safeStore, txnId, participants, constant(minEpoch), Timestamp.MAX);
 
         return new GetEphemeralReadDepsOk(deps, Math.max(safeStore.time().epoch(), node.epoch()));
     }
@@ -101,7 +98,7 @@ public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralRe
     {
         return "GetEphemeralReadDeps{" +
                "txnId:" + txnId +
-               ", keys:" + keys +
+               ", scope:" + scope +
                '}';
     }
 
@@ -112,9 +109,9 @@ public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralRe
     }
 
     @Override
-    public Seekables<?, ?> keys()
+    public Unseekables<?> keys()
     {
-        return keys;
+        return scope;
     }
 
     @Override
@@ -125,10 +122,10 @@ public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralRe
 
     public static class GetEphemeralReadDepsOk implements Reply
     {
-        public final PartialDeps deps;
+        public final Deps deps;
         public final long latestEpoch;
 
-        public GetEphemeralReadDepsOk(@Nonnull PartialDeps deps, long latestEpoch)
+        public GetEphemeralReadDepsOk(@Nonnull Deps deps, long latestEpoch)
         {
             this.deps = Invariants.nonNull(deps);
             this.latestEpoch = latestEpoch;

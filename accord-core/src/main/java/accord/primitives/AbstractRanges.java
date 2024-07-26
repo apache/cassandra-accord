@@ -216,6 +216,11 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
         return SortedArrays.exponentialSearch(ranges, thisIndex, size(), find, (k, r) -> -r.compareTo(k), search);
     }
 
+    public Ranges toRanges()
+    {
+        return Ranges.ofSortedAndDeoverlappedUnchecked(ranges);
+    }
+
     /**
      * Subtracts the given set of ranges from this
      */

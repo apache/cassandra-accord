@@ -24,24 +24,24 @@ import accord.local.Node;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
-import accord.primitives.Seekables;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekable;
 import accord.topology.Topologies;
 
-public class StabiliseSyncPoint<S extends Seekables<?, ?>> extends Stabilise<SyncPoint<S>>
+public class StabiliseSyncPoint<U extends Unseekable> extends Stabilise<SyncPoint<U>>
 {
-    final CoordinationAdapter<SyncPoint<S>> adapter;
-    StabiliseSyncPoint(CoordinationAdapter<SyncPoint<S>> adapter, Node node, Topologies coordinates, Topologies allTopologies, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps unstableDeps, BiConsumer<? super SyncPoint<S>, Throwable> callback)
+    final CoordinationAdapter<SyncPoint<U>> adapter;
+    StabiliseSyncPoint(CoordinationAdapter<SyncPoint<U>> adapter, Node node, Topologies coordinates, Topologies all, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps unstableDeps, BiConsumer<? super SyncPoint<U>, Throwable> callback)
     {
-        super(node, coordinates, allTopologies, route, txnId, ballot, txn, executeAt, unstableDeps, callback);
+        super(node, coordinates, all, route, txnId, ballot, txn, executeAt, unstableDeps, callback);
         this.adapter = adapter;
     }
 
     @Override
-    protected CoordinationAdapter<SyncPoint<S>> adapter()
+    protected CoordinationAdapter<SyncPoint<U>> adapter()
     {
         return adapter;
     }

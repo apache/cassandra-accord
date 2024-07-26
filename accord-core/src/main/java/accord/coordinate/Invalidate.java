@@ -27,7 +27,6 @@ import accord.local.Node.Id;
 import accord.messages.Commit;
 import accord.local.*;
 import accord.primitives.*;
-import accord.topology.Shard;
 import accord.topology.Topologies;
 
 import accord.api.RoutingKey;
@@ -41,8 +40,8 @@ import javax.annotation.Nullable;
 
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
 import static accord.local.PreLoadContext.contextFor;
-import static accord.local.Status.Accepted;
-import static accord.local.Status.PreAccepted;
+import static accord.primitives.Status.Accepted;
+import static accord.primitives.Status.PreAccepted;
 import static accord.primitives.ProgressToken.INVALIDATED;
 import static accord.primitives.ProgressToken.TRUNCATED_DURABLE_OR_INVALIDATED;
 import static accord.utils.Invariants.illegalState;
@@ -52,7 +51,7 @@ public class Invalidate implements Callback<InvalidateReply>
     private final Node node;
     private final Ballot ballot;
     private final TxnId txnId;
-    private final Unseekables<?> invalidateWith;
+    private final Participants<?> invalidateWith;
     private final BiConsumer<Outcome, Throwable> callback;
 
     private boolean isDone;
@@ -63,7 +62,7 @@ public class Invalidate implements Callback<InvalidateReply>
     private final InvalidationTracker tracker;
     private Throwable failure;
 
-    private Invalidate(Node node, Ballot ballot, TxnId txnId, Unseekables<?> invalidateWith, boolean transitivelyInvokedByPriorInvalidation, BiConsumer<Outcome, Throwable> callback)
+    private Invalidate(Node node, Ballot ballot, TxnId txnId, Participants<?> invalidateWith, boolean transitivelyInvokedByPriorInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
         this.callback = callback;
         this.node = node;
@@ -78,12 +77,12 @@ public class Invalidate implements Callback<InvalidateReply>
         this.replies = new InvalidateReply[topology.nodes().size()];
     }
 
-    public static Invalidate invalidate(Node node, TxnId txnId, Unseekables<?> invalidateWith, BiConsumer<Outcome, Throwable> callback)
+    public static Invalidate invalidate(Node node, TxnId txnId, Participants<?> invalidateWith, BiConsumer<Outcome, Throwable> callback)
     {
         return invalidate(node, txnId, invalidateWith, false, callback);
     }
 
-    public static Invalidate invalidate(Node node, TxnId txnId, Unseekables<?> invalidateWith, boolean transitivelyInvokedByPriorInvalidation, BiConsumer<Outcome, Throwable> callback)
+    public static Invalidate invalidate(Node node, TxnId txnId, Participants<?> invalidateWith, boolean transitivelyInvokedByPriorInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
         Ballot ballot = new Ballot(node.uniqueNow());
         Invalidate invalidate = new Invalidate(node, ballot, txnId, invalidateWith, transitivelyInvokedByPriorInvalidation, callback);
@@ -103,7 +102,11 @@ public class Invalidate implements Callback<InvalidateReply>
             return;
 
         replies[topology.nodes().find(from)] = reply;
-        handle(tracker.recordSuccess(from, reply.isPromised(), reply.hasDecision(), reply.acceptedFastPath));
+
+        Participants<?> truncated = reply.truncated;
+        Participants<?> notTruncated = truncated == null ? invalidateWith : invalidateWith.without(truncated);
+        Participants<?> promised = reply.isPromiseRejected() ? null : notTruncated;
+        handle(tracker.recordSuccess(from, promised, notTruncated, truncated, reply.hasDecision(), reply.acceptedFastPath));
     }
 
     @Override
@@ -154,7 +157,7 @@ public class Invalidate implements Callback<InvalidateReply>
         // first look to see if it has already been decided/invalidated
         // check each shard independently - if we find any that can be invalidated, do so
         InvalidateReply max = InvalidateReply.max(replies);
-        InvalidateReply maxNotTruncated = max.maxKnowledgeStatus.is(Status.Truncated) ? max : InvalidateReply.maxNotTruncated(replies);
+        InvalidateReply maxNotTruncated = !max.maxKnowledgeStatus.is(Status.Truncated) ? max : InvalidateReply.maxNotTruncated(replies);
 
         if (maxNotTruncated != null)
         {
@@ -214,18 +217,29 @@ public class Invalidate implements Callback<InvalidateReply>
 
         if (max != maxNotTruncated)
         {
-            boolean allShardsTruncated = true;
-            for (Shard shard : topology.shards())
+            Invariants.checkState(maxNotTruncated == null || !maxNotTruncated.maxKnowledgeStatus.hasBeen(Status.PreCommitted));
+            isDone = true;
+            if (!tracker.isAnyNotTruncated())
             {
-                InvalidateReply maxReply = InvalidateReply.max(replies, shard, topology.nodes());
-                allShardsTruncated &= maxReply.maxStatus.is(Status.Truncated);
+                commitInvalidate();
             }
-            if (allShardsTruncated)
+            else
             {
-                isDone = true;
+                // TODO (required): revisit this logic some more
+                //   this exists because if we have truncated a range we cannot seek votes to advance the state machine, so we may not be able to reach a quorum
+                //   but, equally, we may not propagate the GC point to all replicas.
+                //   the current logic has pitfalls when *some* replica has a GC point that others cannot reach.
+                //   we should reconsider and at least
+                //      1) ensure GC points can be propagated between nodes;
+                //      2) broaden cases where we can derive that the command has not been decided and send invalidated/erased to everyone
+                // TODO (required): we have another edge cases to consider here only when we don't have a FullRoute and
+                //    we report that the outcome is durable - which may not be the case for all of the shards.
+                //    The home shard will stop attempting to recover the transaction in this case.
+                //    This is perhaps not even a problem, and requires that no healthy home shard even has the FullRoute.
+                //    Other shards would be expected to coordinate the invalidation of this transaction themselves.
                 callback.accept(TRUNCATED_DURABLE_OR_INVALIDATED, null);
-                return;
             }
+            return;
         }
 
         // if we have witnessed the transaction, but are able to invalidate, do we want to proceed?
@@ -267,17 +281,19 @@ public class Invalidate implements Callback<InvalidateReply>
 
         // TODO (desired, efficiency): commitInvalidate (and others) should skip the network for local applications,
         //  so we do not need to explicitly do so here before notifying the waiter
-        Unseekables<?> commitTo = Unseekables.merge(route, (Unseekables) invalidateWith);
+        Participants<?> commitTo = Participants.merge(route, (Participants) invalidateWith);
         Commit.Invalidate.commitInvalidate(node, txnId, commitTo, txnId);
         commitInvalidateLocal(commitTo);
     }
 
-    private void commitInvalidateLocal(Unseekables<?> commitTo)
+    private void commitInvalidateLocal(Participants<?> commitTo)
     {
         // TODO (desired): merge with FetchData.InvalidateOnDone
         // TODO (desired): when sending to network, register a callback for when local application of commitInvalidate message ahs been performed, so no need to special-case
         node.forEachLocal(contextFor(txnId), commitTo, txnId.epoch(), txnId.epoch(), safeStore -> {
-            Commands.commitInvalidate(safeStore, safeStore.get(txnId, txnId, commitTo), commitTo);
+            // TODO (expected): consid
+            StoreParticipants participants = StoreParticipants.invalidate(safeStore, commitTo, txnId);
+            Commands.commitInvalidate(safeStore, safeStore.get(txnId, participants), commitTo);
         }).begin((s, f) -> {
             callback.accept(INVALIDATED, null);
             if (f != null) // TODO (required): consider exception handling more carefully: should we catch these prior to passing to callbacks?

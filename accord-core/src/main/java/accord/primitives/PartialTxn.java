@@ -36,6 +36,9 @@ public interface PartialTxn extends Txn
 
     default boolean covers(Route<?> route)
     {
+        if (kind().isSystemTxn())
+            return true;
+
         if (query() == null && route.contains(route.homeKey()))
             return false;
 
@@ -44,6 +47,9 @@ public interface PartialTxn extends Txn
 
     default boolean covers(Unseekables<?> participants)
     {
+        if (kind().isSystemTxn())
+            return true;
+
         return keys().intersectsAll(participants);
     }
 
@@ -86,7 +92,7 @@ public interface PartialTxn extends Txn
         @Override
         public Txn reconstitute(FullRoute<?> route)
         {
-            if (!covers(route) || query() == null)
+            if (!kind().isSystemTxn() && !covers(route) || query() == null)
                 throw illegalState("Incomplete PartialTxn: " + this + ", route: " + route);
 
             return new Txn.InMemory(kind(), keys(), read(), query(), update());
@@ -95,7 +101,7 @@ public interface PartialTxn extends Txn
         @Override
         public PartialTxn reconstitutePartial(Participants<?> covering)
         {
-            if (!covers(covering))
+            if (kind().isSystemTxn() && !covers(covering))
                 throw illegalState("Incomplete PartialTxn: " + this + ", covering: " + covering);
 
             if (this.keys().containsAll(covering))

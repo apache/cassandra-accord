@@ -147,6 +147,12 @@ public class PrefixedIntHashKey implements RoutableKey
         {
             throw new UnsupportedOperationException();
         }
+
+        @Override
+        public RoutingKey asRoutingKey()
+        {
+            return this;
+        }
     }
 
     public static final class Hash extends PrefixedIntRoutingKey
@@ -163,6 +169,12 @@ public class PrefixedIntHashKey implements RoutableKey
                                           new Sentinel(prefix, true) :
                                           new Hash(prefix, hash - 1);
             return new Range(start, new Hash(prefix, hash));
+        }
+
+        @Override
+        public RoutingKey asRoutingKey()
+        {
+            return this;
         }
     }
 

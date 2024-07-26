@@ -23,8 +23,8 @@ import javax.annotation.Nullable;
 
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.Status;
-import accord.local.Status.Known;
+import accord.primitives.Status;
+import accord.primitives.Known;
 import accord.messages.CheckStatus;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.CheckStatusOkFull;
@@ -42,11 +42,10 @@ import accord.topology.Topologies;
 import accord.utils.Invariants;
 
 import static accord.coordinate.CoordinationAdapter.Factory.Step.InitiateRecovery;
-import static accord.coordinate.CoordinationAdapter.Invoke.persist;
-import static accord.local.Status.Durability.Majority;
-import static accord.local.Status.KnownDeps.DepsKnown;
-import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
-import static accord.local.Status.Outcome.Apply;
+import static accord.primitives.Status.Durability.Majority;
+import static accord.primitives.Known.KnownDeps.DepsKnown;
+import static accord.primitives.Known.KnownExecuteAt.ExecuteAtKnown;
+import static accord.primitives.Known.Outcome.Apply;
 import static accord.primitives.ProgressToken.APPLIED;
 import static accord.primitives.ProgressToken.INVALIDATED;
 import static accord.primitives.ProgressToken.TRUNCATED_DURABLE_OR_INVALIDATED;
@@ -122,7 +121,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
     protected boolean isSufficient(Route<?> route, CheckStatusOk ok)
     {
         CheckStatusOkFull full = (CheckStatusOkFull)ok;
-        Known sufficientTo = full.knownFor(route.participants());
+        Known sufficientTo = full.knownFor(txnId, route.participants());
         if (!sufficientTo.isDefinitionKnown())
             return false;
 
@@ -143,8 +142,9 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
         }
 
         CheckStatusOkFull full = ((CheckStatusOkFull) this.merged).finish(route, success.withQuorum);
-        Known known = full.knownFor(route.participants());
+        Known known = full.knownFor(txnId, route.participants());
 
+        // TODO (required): audit this logic, and centralise with e.g. FetchData inferences
         switch (known.outcome)
         {
             default: throw new AssertionError();
@@ -180,14 +180,14 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                         Participants<?> sendTo = route.participants().without(full.truncatedResponse());
                         if (!sendTo.isEmpty())
                         {
-                            known = full.knownFor(sendTo);
+                            known = full.knownFor(txnId, sendTo);
                             // we might not know the Apply outcome because we might have raced with truncation on one shard, and the original apply on another,
                             // so that we know to WasApply, but not
                             if (known.executeAt == ExecuteAtKnown && known.deps == DepsKnown && known.outcome == Apply)
                             {
                                 Invariants.checkState(full.stableDeps.covers(sendTo));
-                                Invariants.checkState(full.partialTxn.covers(sendTo));
-                                persist(node.coordinationAdapter(txnId, InitiateRecovery), node, route, sendTo, txnId, full.partialTxn, full.executeAt, full.stableDeps, full.writes, full.result, null);
+                                Invariants.checkState(txnId.isSystemTxn() || full.partialTxn.covers(sendTo));
+                                node.coordinationAdapter(txnId, InitiateRecovery).persist(node, null, route, sendTo, txnId, full.partialTxn, full.executeAt, full.stableDeps, full.writes, full.result, null);
                             }
                             propagate = full;
                         }
@@ -216,7 +216,7 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                             node.agent().onUncaughtException(CoordinationFailed.wrap(withEpochFailure));
                             return;
                         }
-                        persist(node.coordinationAdapter(txnId, InitiateRecovery), node, topologies, route(), txnId, txn, full.executeAt, deps, full.writes, full.result, null);
+                        node.coordinationAdapter(txnId, InitiateRecovery).persist(node, topologies, route(), txnId, txn, full.executeAt, deps, full.writes, full.result, null);
                     });
                     callback.accept(APPLIED, null);
                 }

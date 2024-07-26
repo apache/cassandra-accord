@@ -39,7 +39,6 @@ import org.slf4j.LoggerFactory;
 import accord.api.Agent;
 import accord.api.Data;
 import accord.api.DataStore;
-import accord.api.Key;
 import accord.api.ProgressLog;
 import accord.api.ProgressLog.BlockedUntil;
 import accord.api.Query;
@@ -61,13 +60,13 @@ import accord.local.NodeTimeService;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
-import accord.local.Status;
+import accord.primitives.SaveStatus;
+import accord.primitives.Status;
+import accord.local.StoreParticipants;
 import accord.local.cfk.CommandsForKey.TxnInfo;
 import accord.messages.ReplyContext;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
-import accord.primitives.EpochSupplier;
 import accord.primitives.FullRoute;
 import accord.primitives.Keys;
 import accord.primitives.PartialDeps;
@@ -90,7 +89,8 @@ import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResults;
 
 import static accord.local.Command.NotDefined.notDefined;
-import static accord.local.Status.Durability.NotDurable;
+import static accord.primitives.Routable.Domain.Key;
+import static accord.primitives.Status.Durability.NotDurable;
 
 // TODO (expected): test setting redundant before
 // TODO (expected): test ballot updates
@@ -101,7 +101,7 @@ import static accord.local.Status.Durability.NotDurable;
 public class CommandsForKeyTest
 {
     private static final Logger logger = LoggerFactory.getLogger(CommandsForKeyTest.class);
-    private static final Key KEY = IntKey.key(1);
+    private static final RoutingKey KEY = IntKey.routing(1);
     private static final Range RANGE = IntKey.range(0, 2);
     private static final Keys KEYS = IntKey.keys(1);
     private static final Ranges RANGES = Ranges.of(IntKey.range(0, 2));
@@ -124,7 +124,7 @@ public class CommandsForKeyTest
     // TODO (expected): randomise ballots
     static class Canon implements NotifySink
     {
-        private static final TxnId MIN = new TxnId(1, 1, Txn.Kind.Read, Domain.Key, new Node.Id(1));
+        private static final TxnId MIN = new TxnId(1, 1, Txn.Kind.Read, Key, new Node.Id(1));
 
         // TODO (expected): randomise ratios
         static final Txn.Kind[] KINDS = new Txn.Kind[] { Txn.Kind.Read, Txn.Kind.Write, Txn.Kind.EphemeralRead, Txn.Kind.SyncPoint, Txn.Kind.ExclusiveSyncPoint };
@@ -203,7 +203,7 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public void notWaiting(SafeCommandStore safeStore, TxnId txnId, Key key)
+        public void notWaiting(SafeCommandStore safeStore, TxnId txnId, RoutingKey key)
         {
             Command.Committed prev = byId.get(txnId).asCommitted();
             Command.WaitingOn.Update waitingOn = new Command.WaitingOn.Update(prev.waitingOn);
@@ -216,7 +216,7 @@ public class CommandsForKeyTest
                     Invariants.checkState(command.txnId().domain() == Domain.Range || !prev.txnId().kind().witnesses(command.txnId()) || command.saveStatus().compareTo(SaveStatus.Applied) >= 0);
             }
 
-            if (prev.txnId().domain() == Domain.Key)
+            if (prev.txnId().domain() == Key)
             {
                 for (Command command : committedByExecuteAt.tailMap(prev.executeAt(), false).values())
                     Invariants.checkState(command.txnId().kind().awaitsOnlyDeps() || !command.txnId().kind().witnesses(prev.txnId()) || command.saveStatus().compareTo(SaveStatus.Stable) < 0 || command.asCommitted().waitingOn.isWaitingOnKey(0));
@@ -227,7 +227,7 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public void waitingOn(SafeCommandStore safeStore, TxnInfo txn, Key key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk)
+        public void waitingOn(SafeCommandStore safeStore, TxnInfo txn, RoutingKey key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk)
         {
         }
 
@@ -348,7 +348,7 @@ public class CommandsForKeyTest
                     if (command.hasBeen(forStatus.compareTo(Status.Accepted) <= 0 ? Status.Committed : Status.Accepted) || rnd.nextBoolean())
                     {
                         unwitnessed.remove(command.txnId());
-                        builder.add(command.txnId().domain() == Domain.Key ? KEY : RANGE, command.txnId());
+                        builder.add(command.txnId().domain() == Key ? KEY : RANGE, command.txnId());
                     }
                 }
                 return builder.build();
@@ -371,7 +371,7 @@ public class CommandsForKeyTest
                 return txnId;
 
             min = Timestamp.max(min, Timestamp.fromValues(txnId.epoch(), txnId.hlc() + 1, txnId.node));
-            Timestamp max = Timestamp.fromValues(min.epoch(), min.hlc() + 100, min.node);
+            Timestamp max = Timestamp.fromValues(Math.min(100, min.epoch() * 2), min.hlc() + 100, min.node);
 
             Timestamp executeAt = generateTimestamp(min, max, true);
             Invariants.checkState(executeAt.compareTo(txnId) >= 0);
@@ -394,7 +394,7 @@ public class CommandsForKeyTest
         {
             TxnId min = MIN;
             TxnId max;
-            if (byId.isEmpty()) max = new TxnId(1, 100, Txn.Kind.Read, Domain.Key, nodeIds[0]);
+            if (byId.isEmpty()) max = new TxnId(1, 100, Txn.Kind.Read, Key, nodeIds[0]);
             else
             {
                 max = byId.lastEntry().getValue().txnId();
@@ -404,7 +404,7 @@ public class CommandsForKeyTest
                     case 2:
                         min = max;
                     case 1:
-                        max = new TxnId(max.epoch(), max.hlc() + 100, max.kind(), max.domain(), max.node);
+                        max = new TxnId(Math.min(100, max.epoch() * 2), max.hlc() + 100, max.kind(), max.domain(), max.node);
                     case 0:
 
                 }
@@ -437,8 +437,8 @@ public class CommandsForKeyTest
 
             Domain domain;
             if (hlc == min.hlc() && min.domain() == Domain.Range) domain = Domain.Range;
-            else if (hlc == max.hlc() && max.domain() == Domain.Key) domain = Domain.Key;
-            else domain = rnd.nextBoolean() ? Domain.Key : Domain.Range;
+            else if (hlc == max.hlc() && max.domain() == Key) domain = Key;
+            else domain = rnd.nextBoolean() ? Key : Domain.Range;
 
             return new TxnId(epoch, hlc, kind, domain, node);
         }
@@ -495,7 +495,7 @@ public class CommandsForKeyTest
         Command accepted(TxnId txnId, Timestamp executeAt, SaveStatus saveStatus)
         {
             Deps deps = generateDeps(txnId, txnId, Status.Accepted);
-            return Command.Accepted.accepted(common(txnId, saveStatus.known.definition.isKnown()).partialDeps(deps.intersecting(txnId.domain() == Domain.Key ? KEY_ROUTE : RANGE_ROUTE)),
+            return Command.Accepted.accepted(common(txnId, saveStatus.known.definition.isKnown()).partialDeps(deps.intersecting(txnId.domain() == Key ? KEY_ROUTE : RANGE_ROUTE)),
                                         saveStatus, executeAt, Ballot.ZERO, Ballot.ZERO);
         }
 
@@ -536,10 +536,10 @@ public class CommandsForKeyTest
         {
             CommonAttributes.Mutable result = new CommonAttributes.Mutable(txnId)
                    .durability(NotDurable)
-                   .route(txnId.domain() == Domain.Key ? KEY_ROUTE : RANGE_ROUTE);
+                   .updateParticipants(StoreParticipants.all(txnId, txnId.is(Key) ? KEY_ROUTE : RANGE_ROUTE));
 
             if (withDefinition)
-                result.partialTxn((txnId.domain() == Domain.Key ? KEY_TXN : RANGE_TXN).slice(RANGES, true));
+                result.partialTxn((txnId.domain() == Key ? KEY_TXN : RANGE_TXN).slice(RANGES, true));
 
             return result;
         }
@@ -566,14 +566,14 @@ public class CommandsForKeyTest
 
         private static PartialDeps slice(TxnId txnId, Deps deps)
         {
-            return deps.intersecting(txnId.domain() == Domain.Key ? KEY_ROUTE : RANGE_ROUTE);
+            return deps.intersecting(txnId.domain() == Key ? KEY_ROUTE : RANGE_ROUTE);
         }
     }
 
     @Test
     public void testOne()
     {
-        test(1363149044366621L, 1000);
+        test(232412256985395L, 1000);
 //        test(System.nanoTime(), 500);
     }
 
@@ -719,16 +719,10 @@ public class CommandsForKeyTest
         }
 
         @Override
-        protected SafeCommandsForKey getInternal(Key key)
+        protected SafeCommandsForKey getInternal(RoutingKey key)
         {
             Invariants.checkArgument(key.equals(cfk.key()));
             return cfk;
-        }
-
-        @Override
-        public SafeCommand get(TxnId txnId, RoutingKey unseekable)
-        {
-            return getInternal(txnId);
         }
 
         @Override
@@ -738,13 +732,13 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public SafeCommandsForKey get(Key key)
+        public SafeCommandsForKey get(RoutingKey key)
         {
             return getInternal(key);
         }
 
         @Override
-        public SafeCommand get(TxnId txnId, EpochSupplier toEpoch, Unseekables<?> unseekables)
+        public SafeCommand get(TxnId txnId, StoreParticipants participants)
         {
             return getInternal(txnId);
         }
@@ -771,7 +765,7 @@ public class CommandsForKeyTest
         }
 
         @Override
-        protected SafeCommandsForKey getInternalIfLoadedAndInitialised(Key key)
+        protected SafeCommandsForKey getInternalIfLoadedAndInitialised(RoutingKey key)
         {
             if (key.equals(cfk.key()))
                 return cfk;
@@ -785,13 +779,13 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public <P1, T> T mapReduceActive(Seekables<?, ?> keys, Ranges slice, @Nullable Timestamp withLowerTxnId, Txn.Kind.Kinds kinds, CommandFunction<P1, T, T> map, P1 p1, T initialValue)
+        public <P1, T> T mapReduceActive(Unseekables<?> keys, @Nullable Timestamp withLowerTxnId, Txn.Kind.Kinds kinds, CommandFunction<P1, T, T> map, P1 p1, T initialValue)
         {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public <P1, T> T mapReduceFull(Seekables<?, ?> keys, Ranges slice, TxnId testTxnId, Txn.Kind.Kinds testKind, TestStartedAt testStartedAt, TestDep testDep, TestStatus testStatus, CommandFunction<P1, T, T> map, P1 p1, T initialValue)
+        public <P1, T> T mapReduceFull(Unseekables<?> keys, TxnId testTxnId, Txn.Kind.Kinds testKind, TestStartedAt testStartedAt, TestDep testDep, TestStatus testStatus, CommandFunction<P1, T, T> map, P1 p1, T initialValue)
         {
             throw new UnsupportedOperationException();
         }
@@ -1022,7 +1016,7 @@ public class CommandsForKeyTest
         }
 
         @Override
-        public Txn emptySystemTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
+        public Txn emptySystemTxn(Txn.Kind kind, Domain domain)
         {
             throw new UnsupportedOperationException();
         }

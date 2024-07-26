@@ -18,11 +18,11 @@
 
 package accord.primitives;
 
-import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.utils.ArrayBuffers;
 import accord.utils.IndexedBiConsumer;
 import accord.utils.IndexedConsumer;
+import accord.utils.IndexedFunction;
 import accord.utils.IndexedTriConsumer;
 import accord.utils.RelationMultiMap;
 import accord.utils.SortedArrays.SortedArrayList;
@@ -36,6 +36,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
+import static accord.primitives.RoutingKeys.toRoutingKeys;
 import static accord.primitives.TxnId.NO_TXNIDS;
 import static accord.utils.ArrayBuffers.*;
 import static accord.utils.Invariants.illegalArgument;
@@ -49,9 +50,9 @@ import static accord.utils.SortedArrays.Search.FAST;
  * A collection of dependencies for a transaction, organised by the key the dependency is adopted via.
  * An inverse map from TxnId to Key may also be constructed and stored in this collection.
  */
-public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
+public class KeyDeps implements Iterable<Map.Entry<RoutingKey, TxnId>>
 {
-    public static final KeyDeps NONE = new KeyDeps(Keys.EMPTY, NO_TXNIDS, NO_INTS);
+    public static final KeyDeps NONE = new KeyDeps(RoutingKeys.EMPTY, NO_TXNIDS, NO_INTS);
 
     public static class SerializerSupport
     {
@@ -67,13 +68,13 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
             return deps.keysToTxnIds[idx];
         }
 
-        public static KeyDeps create(Keys keys, TxnId[] txnIds, int[] keyToTxnId)
+        public static KeyDeps create(RoutingKeys keys, TxnId[] txnIds, int[] keyToTxnId)
         {
             return new KeyDeps(keys, txnIds, keyToTxnId);
         }
     }
 
-    public static KeyDeps none(Keys keys)
+    public static KeyDeps none(RoutingKeys keys)
     {
         int[] keysToTxnId = new int[keys.size()];
         Arrays.fill(keysToTxnId, keys.size());
@@ -88,7 +89,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return new Builder();
     }
 
-    public static class Builder extends AbstractBuilder<Key, TxnId, KeyDeps>
+    public static class Builder extends AbstractBuilder<RoutingKey, TxnId, KeyDeps>
     {
         public Builder()
         {
@@ -102,29 +103,31 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         }
 
         @Override
-        protected KeyDeps build(Key[] keys, TxnId[] txnIds, int[] keysToTxnIds)
+        protected KeyDeps build(RoutingKey[] keys, TxnId[] txnIds, int[] keysToTxnIds)
         {
-            return new KeyDeps(Keys.ofSortedUnique(keys), txnIds, keysToTxnIds);
+            return new KeyDeps(RoutingKeys.ofSortedUnique(keys), txnIds, keysToTxnIds);
         }
     }
 
-    public static LinearMerger<Key, TxnId, KeyDeps> newMerger()
+    public static LinearMerger<RoutingKey, TxnId, KeyDeps> newMerger()
     {
         return new LinearMerger<>(ADAPTER);
     }
 
-    public static <T1, T2> KeyDeps merge(List<T1> merge, Function<T1, T2> getter1, Function<T2, KeyDeps> getter2)
+    public static <C, T1, T2> KeyDeps merge(C merge, int mergeSize, IndexedFunction<C, T1> getter1, Function<T1, T2> getter2, Function<T2, KeyDeps> getter3)
     {
-        try (LinearMerger<Key, TxnId, KeyDeps> linearMerger = newMerger())
+        try (LinearMerger<RoutingKey, TxnId, KeyDeps> linearMerger = newMerger())
         {
-            int mergeIndex = 0, mergeSize = merge.size();
+            int mergeIndex = 0;
             while (mergeIndex < mergeSize)
             {
-                T2 intermediate = getter1.apply(merge.get(mergeIndex++));
-                if (intermediate == null)
-                    continue;
+                T1 t1 = getter1.apply(merge, mergeIndex++);
+                if (t1 == null) continue;
 
-                KeyDeps deps = getter2.apply(intermediate);
+                T2 t2 = getter2.apply(t1);
+                if (t2 == null) continue;
+
+                KeyDeps deps = getter3.apply(t2);
                 if (deps == null || deps.isEmpty())
                     continue;
 
@@ -137,7 +140,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
 
     public static KeyDeps merge(Stream<KeyDeps> merge)
     {
-        try (LinearMerger<Key, TxnId, KeyDeps> linearMerger = newMerger())
+        try (LinearMerger<RoutingKey, TxnId, KeyDeps> linearMerger = newMerger())
         {
             merge.forEach(deps -> {
                 if (!deps.isEmpty())
@@ -148,7 +151,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         }
     }
 
-    final Keys keys; // unique Keys
+    final RoutingKeys keys; // unique Keys
     final TxnId[] txnIds; // unique TxnId
 
     /**
@@ -172,12 +175,12 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
     int[] keysToTxnIds; // Key -> [TxnId]
     int[] txnIdsToKeys; // TxnId -> [Key]
 
-    KeyDeps(Key[] keys, TxnId[] txnIds, int[] keysToTxnIds)
+    KeyDeps(RoutingKey[] keys, TxnId[] txnIds, int[] keysToTxnIds)
     {
-        this(Keys.ofSortedUnique(keys), txnIds, keysToTxnIds);
+        this(RoutingKeys.ofSortedUnique(keys), txnIds, keysToTxnIds);
     }
 
-    KeyDeps(Keys keys, TxnId[] txnIds, int[] keysToTxnIds)
+    KeyDeps(RoutingKeys keys, TxnId[] txnIds, int[] keysToTxnIds)
     {
         this.keys = keys;
         this.txnIds = txnIds;
@@ -201,14 +204,15 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         if (isEmpty())
             return new KeyDeps(keys, txnIds, keysToTxnIds);
 
-        return select(keys.intersecting(participants));
+        AbstractUnseekableKeys select = keys.intersecting(participants);
+        return select(toRoutingKeys(select));
     }
 
-    private KeyDeps select(Keys select)
+    private KeyDeps select(RoutingKeys select)
     {
         // TODO (low priority, efficiency): can slice in parallel with selecting keyToTxnId contents to avoid duplicate merging
         if (select.isEmpty())
-            return new KeyDeps(Keys.EMPTY, NO_TXNIDS, NO_INTS);
+            return new KeyDeps(RoutingKeys.EMPTY, NO_TXNIDS, NO_INTS);
 
         if (select.size() == keys.size())
             return this;
@@ -256,10 +260,10 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return linearUnion(
                 this.keys.keys, this.keys.keys.length, this.txnIds, this.txnIds.length, this.keysToTxnIds, this.keysToTxnIds.length,
                 that.keys.keys, that.keys.keys.length, that.txnIds, that.txnIds.length, that.keysToTxnIds, that.keysToTxnIds.length,
-                Key::compareTo, TxnId::compareTo,
-                cachedKeys(), cachedTxnIds(), cachedInts(),
+                RoutingKey::compareTo, TxnId::compareTo,
+                cachedRoutingKeys(), cachedTxnIds(), cachedInts(),
                 (keys, keysLength, txnIds, txnIdsLength, out, outLength) ->
-                        new KeyDeps(Keys.ofSortedUnchecked(cachedKeys().complete(keys, keysLength)),
+                        new KeyDeps(RoutingKeys.ofSortedUnique(cachedRoutingKeys().complete(keys, keysLength)),
                                 cachedTxnIds().complete(txnIds, txnIdsLength),
                                 cachedInts().complete(out, outLength))
                 );
@@ -307,28 +311,28 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return keysToTxnIds.length == keys.size();
     }
 
-    public Keys participatingKeys(TxnId txnId)
+    public RoutingKeys participatingKeys(TxnId txnId)
     {
         int txnIdx = Arrays.binarySearch(txnIds, txnId);
         if (txnIdx < 0)
-            return Keys.EMPTY;
+            return RoutingKeys.EMPTY;
 
         return participatingKeys(txnIdx);
     }
 
-    public Keys participatingKeys(int txnIdx)
+    public RoutingKeys participatingKeys(int txnIdx)
     {
         int[] txnIdsToKeys = txnIdsToKeys();
 
         int start = txnIdx == 0 ? txnIds.length : txnIdsToKeys[txnIdx - 1];
         int end = txnIdsToKeys[txnIdx];
         if (start == end)
-            return Keys.EMPTY;
+            return RoutingKeys.EMPTY;
 
-        Key[] result = new Key[end - start];
+        RoutingKey[] result = new RoutingKey[end - start];
         for (int i = start ; i < end ; ++i)
             result[i - start] = keys.get(txnIdsToKeys[i]);
-        return Keys.of(result);
+        return RoutingKeys.of(result);
     }
 
     // TODO (desired): consider optionally not inverting before answering, as a single txnId may be answered more efficiently without inversion
@@ -374,7 +378,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return keysToTxnIds;
     }
 
-    public void forEach(Ranges ranges, BiConsumer<Key, TxnId> forEach)
+    public void forEach(Ranges ranges, BiConsumer<RoutingKey, TxnId> forEach)
     {
         int[] keysToTxnIds = keysToTxnIds();
         Routables.foldl(keys, ranges, (key, value, index) -> {
@@ -400,7 +404,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         int[] keysToTxnIds = keysToTxnIds();
         if (txnIds.length <= 64)
         {
-            long bitset = Routables.foldl(keys, ranges, (key, ignore, value, keyIndex) -> {
+            long bitset = Routables.<RoutingKey>foldl(keys, ranges, (key, ignore, value, keyIndex) -> {
                 int index = startOffset(keyIndex);
                 int end = endOffset(keyIndex);
 
@@ -413,7 +417,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
                 }
 
                 return value;
-            }, 0, 0, -1L >>> (64 - txnIds.length));
+            }, 0L, 0L, -1L >>> (64 - txnIds.length));
 
             while (bitset != 0)
             {
@@ -439,7 +443,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         }
     }
 
-    public void forEach(Key key, IndexedConsumer<TxnId> forEach)
+    public void forEach(RoutingKey key, IndexedConsumer<TxnId> forEach)
     {
         int keyIndex = keys.indexOf(key);
         if (keyIndex < 0)
@@ -497,7 +501,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         }
     }
 
-    public <P1, V> V foldEachKey(int txnIdx, P1 p1, V accumulate, TriFunction<P1, Key, V, V> fold)
+    public <P1, V> V foldEachKey(int txnIdx, P1 p1, V accumulate, TriFunction<P1, RoutingKey, V, V> fold)
     {
         int[] txnIdsToKeys = txnIdsToKeys();
 
@@ -508,7 +512,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return accumulate;
     }
 
-    public Keys keys()
+    public RoutingKeys keys()
     {
         return keys;
     }
@@ -538,7 +542,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         return new SortedArrayList<>(txnIds);
     }
 
-    public SortedRelationList<TxnId> txnIds(Key key)
+    public SortedRelationList<TxnId> txnIds(RoutingKey key)
     {
         int keyIndex = keys.indexOf(key);
         if (keyIndex < 0)
@@ -638,7 +642,7 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
     }
 
     @Override
-    public Iterator<Map.Entry<Key, TxnId>> iterator()
+    public Iterator<Map.Entry<RoutingKey, TxnId>> iterator()
     {
         return newIterator(keys.keys, txnIds, keysToTxnIds);
     }
@@ -655,12 +659,12 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
     }
 
     private static final KeyDepsAdapter ADAPTER = new KeyDepsAdapter();
-    static class KeyDepsAdapter implements Adapter<Key, TxnId>
+    static class KeyDepsAdapter implements Adapter<RoutingKey, TxnId>
     {
         @Override
-        public final SymmetricComparator<? super Key> keyComparator()
+        public final SymmetricComparator<? super RoutingKey> keyComparator()
         {
-            return Key::compareTo;
+            return RoutingKey::compareTo;
         }
 
         @Override
@@ -670,9 +674,9 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         }
 
         @Override
-        public final ObjectBuffers<Key> cachedKeys()
+        public final ObjectBuffers<RoutingKey> cachedKeys()
         {
-            return ArrayBuffers.cachedKeys();
+            return ArrayBuffers.cachedRoutingKeys();
         }
 
         @Override

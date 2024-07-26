@@ -23,8 +23,8 @@ import javax.annotation.Nonnull;
 import accord.api.RoutingKey;
 import accord.primitives.AbstractRanges;
 import accord.primitives.Routables;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
+import accord.primitives.Unseekables;
 import accord.utils.ReducingIntervalMap;
 import accord.utils.ReducingRangeMap;
 
@@ -43,7 +43,7 @@ public class MaxConflicts extends ReducingRangeMap<Timestamp>
         super(inclusiveEnds, starts, values);
     }
 
-    public Timestamp get(Seekables<?, ?> keysOrRanges)
+    public Timestamp get(Unseekables<?> keysOrRanges)
     {
         return foldl(keysOrRanges, Timestamp::max, Timestamp.NONE);
     }
@@ -53,7 +53,7 @@ public class MaxConflicts extends ReducingRangeMap<Timestamp>
         return foldl(keysOrRanges, Timestamp::max, Timestamp.NONE);
     }
 
-    MaxConflicts update(Seekables<?, ?> keysOrRanges, Timestamp maxConflict)
+    MaxConflicts update(Unseekables<?> keysOrRanges, Timestamp maxConflict)
     {
         return merge(this, create(keysOrRanges, maxConflict));
     }
@@ -66,7 +66,7 @@ public class MaxConflicts extends ReducingRangeMap<Timestamp>
         return create(ranges, maxConflict, MaxConflicts.Builder::new);
     }
 
-    public static MaxConflicts create(Seekables<?, ?> keysOrRanges, @Nonnull Timestamp maxConflict)
+    public static MaxConflicts create(Unseekables<?> keysOrRanges, @Nonnull Timestamp maxConflict)
     {
         if (keysOrRanges.isEmpty())
             return MaxConflicts.EMPTY;

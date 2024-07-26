@@ -25,7 +25,6 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import javax.annotation.Nullable;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,7 +37,8 @@ import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
+import accord.primitives.SaveStatus;
+import accord.local.StoreParticipants;
 import accord.primitives.Participants;
 import accord.primitives.ProgressToken;
 import accord.primitives.Ranges;
@@ -62,7 +62,8 @@ import static accord.impl.progresslog.Progress.Queued;
 import static accord.impl.progresslog.TxnStateKind.Home;
 import static accord.impl.progresslog.TxnStateKind.Waiting;
 import static accord.local.PreLoadContext.contextFor;
-import static accord.local.Status.PreApplied;
+import static accord.primitives.Status.PreApplied;
+import static accord.primitives.Status.PreCommitted;
 import static accord.utils.ArrayBuffers.cachedAny;
 import static accord.utils.btree.UpdateFunction.noOpReplace;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
@@ -138,16 +139,15 @@ public class DefaultProgressLog implements ProgressLog, Runnable
         maybeReschedule(nowMicros, deadline);
     }
 
-    @VisibleForTesting
-    public @Nullable TxnState get(TxnId txnId)
+    @Nullable TxnState get(TxnId txnId)
     {
-        Invariants.checkState(txnId.kind().isGloballyVisible());
+        Invariants.checkState(txnId.isVisible());
         return BTree.<TxnId, TxnState>find(stateMap, (id, state) -> id.compareTo(state.txnId), txnId);
     }
 
     TxnState ensure(TxnId txnId)
     {
-        Invariants.checkState(txnId.kind().isGloballyVisible());
+        Invariants.checkState(txnId.isVisible());
         TxnState result = BTree.<TxnId, TxnState>find(stateMap, (id, state) -> id.compareTo(state.txnId), txnId);
         if (result == null)
         {
@@ -193,14 +193,14 @@ public class DefaultProgressLog implements ProgressLog, Runnable
     @Override
     public void update(SafeCommandStore safeStore, TxnId txnId, Command before, Command after)
     {
-        if (!txnId.kind().isGloballyVisible())
+        if (!txnId.isVisible())
             return;
 
         TxnState state = null;
         if (before.route() == null && after.route() != null)
         {
             RoutingKey homeKey = after.homeKey();
-            Ranges coordinateRanges = safeStore.ranges().allAt(txnId.epoch());
+            Ranges coordinateRanges = safeStore.coordinateRanges(txnId);
             boolean isHome = coordinateRanges.contains(homeKey);
             state = get(txnId);
             if (isHome)
@@ -211,8 +211,7 @@ public class DefaultProgressLog implements ProgressLog, Runnable
                 if (after.durability().isDurableOrInvalidated())
                 {
                     state.setHomeDoneAnyMaybeRemove(this);
-                    if (!after.hasBeen(PreApplied))
-                        state.waiting().setBlockedUntil(safeStore, this, CanApply);
+                    state = maybeFetch(safeStore, txnId, after, state);
                 }
                 else
                     state.set(safeStore, this, Undecided, Queued);
@@ -229,13 +228,7 @@ public class DefaultProgressLog implements ProgressLog, Runnable
             if (state != null)
                 state.setHomeDoneAnyMaybeRemove(this);
 
-            if (!after.hasBeen(PreApplied))
-            {
-                // this command should be ready to apply locally, so fetch it
-                if (state == null)
-                    state = insert(txnId);
-                state.waiting().setBlockedUntil(safeStore, this, CanApply);
-            }
+            state = maybeFetch(safeStore, txnId, after, state);
         }
 
         SaveStatus beforeSaveStatus = before.saveStatus();
@@ -267,10 +260,27 @@ public class DefaultProgressLog implements ProgressLog, Runnable
         }
     }
 
+    private TxnState maybeFetch(SafeCommandStore safeStore, TxnId txnId, Command after, TxnState state)
+    {
+        if (after.hasBeen(PreApplied))
+            return state;
+
+        Ranges executeRanges = after.hasBeen(PreCommitted) ? safeStore.ranges().allAt(after.executeAt())
+                                                           : safeStore.ranges().allSince(after.txnId().epoch());
+        if (executeRanges.intersects(after.participants().owns()))
+        {
+            // this command should be ready to apply locally, so fetch it
+            if (state == null)
+                state = insert(txnId);
+            state.waiting().setBlockedUntil(safeStore, this, CanApply);
+        }
+        return state;
+    }
+
     @Override
     public void clear(TxnId txnId)
     {
-        if (!txnId.kind().isGloballyVisible())
+        if (!txnId.isVisible())
             return;
 
         TxnState state = get(txnId);
@@ -324,30 +334,28 @@ public class DefaultProgressLog implements ProgressLog, Runnable
     @Override
     public void waiting(BlockedUntil blockedUntil, SafeCommandStore safeStore, SafeCommand blockedBy, Route<?> blockedOnRoute, Participants<?> blockedOnParticipants)
     {
-        if (!blockedBy.txnId().kind().isGloballyVisible())
+        if (!blockedBy.txnId().isVisible())
             return;
 
         // ensure we have a record to work with later; otherwise may think has been truncated
         // TODO (expected): we shouldn't rely on this anymore
         blockedBy.initialise();
         Invariants.checkState(blockedBy.current().saveStatus().compareTo(blockedUntil.minSaveStatus) < 0);
+        Invariants.checkState(blockedOnParticipants == null || safeStore.ranges().all().containsAll(blockedOnParticipants)); // more permissive than strictly necessary, but just to cheaply catch errors
 
         // first save the route/participant info into the Command if it isn't already there
+        Command command = blockedBy.current();
+
         CommonAttributes update = blockedBy.current();
-        Route<?> currentRoute = update.route();
-        if (currentRoute != null)
-        {
-            Route<?> updatedRoute = currentRoute;
-            if (blockedOnRoute != null) updatedRoute = currentRoute.with((Route) blockedOnRoute);
-            else if (blockedOnParticipants != null)
-                updatedRoute = currentRoute.with((Participants) blockedOnParticipants);
-            if (updatedRoute != currentRoute)
-                update = update.mutable().route(updatedRoute);
-        }
-        else if (blockedOnRoute != null) update = update.mutable().route(blockedOnRoute);
-        else if (blockedOnParticipants != null) update = update.mutable().participants(blockedOnParticipants);
-        if (update != blockedBy.current())
-            blockedBy.updateAttributes(safeStore, update);
+        StoreParticipants participants = update.participants();
+        StoreParticipants updatedParticipants = participants.supplement(blockedOnRoute, null, blockedOnParticipants);
+        if (participants != updatedParticipants)
+            update = update.mutable().updateParticipants(updatedParticipants);
+
+        if (update != command)
+            command = blockedBy.updateAttributes(safeStore, update);
+
+        Invariants.checkState(safeStore.ranges().allSince(command.txnId().epoch()).intersects(command.participants().hasTouched()));
 
         // TODO (consider): consider triggering a preemption of existing coordinator (if any) in some circumstances;
         //                  today, an LWT can pre-empt more efficiently (i.e. instantly) a failed operation whereas Accord will
@@ -417,7 +425,7 @@ public class DefaultProgressLog implements ProgressLog, Runnable
             TxnStateKind runKind = run.wasScheduledTimer();
             validatePreRunState(run, runKind);
 
-            long pendingTimerDeadline = run.pendingTimerDeadline(DefaultProgressLog.this);
+            long pendingTimerDeadline = run.pendingTimerDeadline();
             if (pendingTimerDeadline > 0)
             {
                 run.clearPendingTimerDelay();
@@ -549,5 +557,17 @@ public class DefaultProgressLog implements ProgressLog, Runnable
     void unschedule(TxnState state)
     {
         timers.remove(state);
+    }
+
+    public boolean isHomeStateActive(TxnId txnId)
+    {
+        TxnState state = get(txnId);
+        return state != null && !state.isHomeDone();
+    }
+
+    public boolean isWaitingStateActive(TxnId txnId)
+    {
+        TxnState state = get(txnId);
+        return state != null && !state.isWaitingDone();
     }
 }

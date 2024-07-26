@@ -18,21 +18,21 @@
 
 package accord.impl;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.primitives.Timestamp;
 
 public abstract class SafeTimestampsForKey implements SafeState<TimestampsForKey>
 {
-    private final Key key;
+    private final RoutingKey key;
 
-    public SafeTimestampsForKey(Key key)
+    public SafeTimestampsForKey(RoutingKey key)
     {
         this.key = key;
     }
 
     protected abstract void set(TimestampsForKey update);
 
-    public Key key()
+    public RoutingKey key()
     {
         return key;
     }

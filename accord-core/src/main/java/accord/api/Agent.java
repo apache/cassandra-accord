@@ -18,8 +18,6 @@
 
 package accord.api;
 
-import javax.annotation.Nonnull;
-
 import java.util.concurrent.TimeUnit;
 
 import accord.api.ProgressLog.BlockedUntil;
@@ -28,7 +26,7 @@ import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.messages.ReplyContext;
 import accord.primitives.Ranges;
-import accord.primitives.Seekables;
+import accord.primitives.Routable;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -62,15 +60,6 @@ public interface Agent extends UncaughtExceptionListener
 
     void onFailedBootstrap(String phase, Ranges ranges, Runnable retry, Throwable failure);
 
-    /**
-     * Invoked with the keys (but not ranges) that have all dependent transactions in the applied
-     * state at this node as of some TxnId. No guarantees are made about other nodes.
-     *
-     * Useful for migrations to/from Accord where you want to know there are no in flight
-     * transactions in Accord that might still execute, and that it is safe to read
-     * outside of Accord.
-     */
-    default void onLocalBarrier(@Nonnull Seekables<?, ?> keysOrRanges, @Nonnull TxnId txnId) {}
     void onStale(Timestamp staleSince, Ranges ranges);
 
     @Override
@@ -102,7 +91,7 @@ public interface Agent extends UncaughtExceptionListener
     /**
      * Create an empty transaction that Accord can use for its own internal transactions.
      */
-    Txn emptySystemTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges);
+    Txn emptySystemTxn(Txn.Kind kind, Routable.Domain domain);
 
     default EventsListener metricsEventsListener()
     {

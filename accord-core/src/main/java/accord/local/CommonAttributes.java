@@ -18,13 +18,10 @@
 
 package accord.local;
 
-import javax.annotation.Nullable;
-
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
-import accord.primitives.Participants;
 import accord.primitives.Route;
-import accord.primitives.Seekables;
+import accord.primitives.Status;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
 
@@ -32,11 +29,9 @@ public interface CommonAttributes
 {
     TxnId txnId();
     Status.Durability durability();
-    Route<?> route();
-    // if we don't know a route, we may know some participants; if we know a route, this must return the same object as route()
-    Participants<?> participants();
+    StoreParticipants participants();
+    default Route<?> route() { return participants().route(); }
     PartialTxn partialTxn();
-    @Nullable Seekables<?, ?> additionalKeysOrRanges();
     PartialDeps partialDeps();
 
     default Mutable mutable()
@@ -48,11 +43,9 @@ public interface CommonAttributes
     {
         private TxnId txnId;
         private Status.Durability durability;
-        private Route<?> route;
-        private Participants<?> participants; // if route != null, route == participants
+        private StoreParticipants participants;
         private PartialTxn partialTxn;
         private PartialDeps partialDeps;
-        private Seekables<?, ?> additionalKeysOrRanges;
 
         public Mutable(TxnId txnId)
         {
@@ -63,12 +56,9 @@ public interface CommonAttributes
         {
             this.txnId = attributes.txnId();
             this.durability = attributes.durability();
-            this.route = attributes.route();
-            this.participants = attributes.participants();
-            Invariants.checkState(participants == route || route == null);
+            this.participants = Invariants.nonNull(attributes.participants());
             this.partialTxn = attributes.partialTxn();
             this.partialDeps = attributes.partialDeps();
-            this.additionalKeysOrRanges = attributes.additionalKeysOrRanges();
         }
 
         @Override
@@ -102,27 +92,19 @@ public interface CommonAttributes
         }
 
         @Override
-        public Route<?> route()
-        {
-            return route;
-        }
-
-        public Mutable route(Route<?> route)
-        {
-            this.route = route;
-            this.participants = route;
-            return this;
-        }
-
-        @Override
-        public Participants<?> participants()
+        public StoreParticipants participants()
         {
             return participants;
         }
 
-        public Mutable participants(Participants<?> participants)
+        public Mutable updateParticipants(StoreParticipants participants)
         {
-            Invariants.checkState(route == null);
+            this.participants = this.participants == null ? participants : participants.supplement(this.participants);
+            return this;
+        }
+
+        public Mutable setParticipants(StoreParticipants participants)
+        {
             this.participants = participants;
             return this;
         }
@@ -135,27 +117,7 @@ public interface CommonAttributes
 
         public Mutable partialTxn(PartialTxn partialTxn)
         {
-            PartialTxn prev = this.partialTxn;
             this.partialTxn = partialTxn;
-            if (prev != null || additionalKeysOrRanges != null)
-            {
-                Seekables<?, ?> removed = prev == null ? null : ((Seekables) prev.keys()).without(partialTxn.keys());
-                if (prev != null && !removed.isEmpty())
-                {
-                    if (additionalKeysOrRanges == null) additionalKeysOrRanges = removed;
-                    else additionalKeysOrRanges = ((Seekables)additionalKeysOrRanges).without(partialTxn.keys()).with(removed);
-                }
-                else if (additionalKeysOrRanges != null)
-                {
-                    additionalKeysOrRanges = ((Seekables)additionalKeysOrRanges).without(partialTxn.keys());
-                }
-            }
-            return this;
-        }
-
-        public Mutable removePartialTxn()
-        {
-            this.partialTxn = null;
             return this;
         }
 
@@ -168,17 +130,6 @@ public interface CommonAttributes
         public Mutable partialDeps(PartialDeps partialDeps)
         {
             this.partialDeps = partialDeps;
-            return this;
-        }
-
-        public Seekables<?, ?> additionalKeysOrRanges()
-        {
-            return additionalKeysOrRanges;
-        }
-
-        public Mutable additionalKeysOrRanges(Seekables<?, ?> additionalKeysOrRanges)
-        {
-            this.additionalKeysOrRanges = additionalKeysOrRanges;
             return this;
         }
     }

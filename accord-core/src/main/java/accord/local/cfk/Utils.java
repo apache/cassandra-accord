@@ -44,7 +44,7 @@ class Utils
         for (TxnInfo txn : byId)
         {
             if (txn == newInfo) continue;
-            if (!txn.status.hasDeps()) continue;
+            if (!txn.hasDeps()) continue;
             int additionIndex = Arrays.binarySearch(additions, 0, additionCount, txn.depsKnownBefore());
             if (additionIndex < 0) additionIndex = -1 - additionIndex;
             TxnId[] missing = txn.missing();
@@ -56,7 +56,7 @@ class Utils
                 if (shouldNotHaveMissing != NO_TXNIDS && Arrays.binarySearch(shouldNotHaveMissing, txn) >= 0) Invariants.checkState(j < 0);
                 else Invariants.checkState(j >= 0);
             }
-            if (curInfo == null && newInfo.status.compareTo(COMMITTED) < 0 && txn.kind().witnesses(newInfo) && txn.depsKnownBefore().compareTo(newInfo) > 0 && (shouldNotHaveMissing == NO_TXNIDS || Arrays.binarySearch(shouldNotHaveMissing, txn) < 0))
+            if (curInfo == null && newInfo.status().compareTo(COMMITTED) < 0 && txn.kind().witnesses(newInfo) && txn.depsKnownBefore().compareTo(newInfo) > 0 && (shouldNotHaveMissing == NO_TXNIDS || Arrays.binarySearch(shouldNotHaveMissing, txn) < 0))
                 Invariants.checkState(Arrays.binarySearch(missing, newInfo) >= 0);
         }
     }
@@ -72,6 +72,7 @@ class Utils
         else ++startIndex;
 
         int minSearchIndex = Arrays.binarySearch(byId, removeTxnId) + 1;
+        removeFromMissingArraysById(byId, 0, minSearchIndex, removeTxnId);
         for (int i = startIndex ; i < committedByExecuteAt.length ; ++i)
         {
             int newMinSearchIndex;
@@ -84,7 +85,7 @@ class Utils
                 TxnId[] newMissing = removeOneMissing(missing, removeTxnId);
                 if (missing == newMissing) continue;
 
-                newMinSearchIndex = updateInfoArraysByExecuteAt(i, txn, txn.update(newMissing), minSearchIndex, byId, committedByExecuteAt);
+                newMinSearchIndex = updateInfoArraysByExecuteAt(i, txn, txn.withMissing(newMissing), minSearchIndex, byId, committedByExecuteAt);
             }
 
             minSearchIndex = removeFromMissingArraysById(byId, minSearchIndex, newMinSearchIndex, removeTxnId);
@@ -101,16 +102,17 @@ class Utils
     {
         for (int i = from ; i < to ; ++i)
         {
+            // TODO (expected): optimise with flag bits
             TxnInfo txn = byId[i];
             if (txn.getClass() == TxnInfo.class) continue;
-            if (!txn.status.hasExecuteAtOrDeps) continue;
+            if (!txn.hasDeps()) continue;
             if (!txn.kind().witnesses(removeTxnId)) continue;
-            if (txn.status != ACCEPTED) continue;
+            if (txn.status() != ACCEPTED && txn.mayExecute()) continue;
 
             TxnId[] missing = txn.missing();
             TxnId[] newMissing = removeOneMissing(missing, removeTxnId);
             if (missing == newMissing) continue;
-            byId[i] = txn.update(newMissing);
+            byId[i] = txn.withMissing(newMissing);
         }
         return to;
     }
@@ -129,6 +131,22 @@ class Utils
         else ++startIndex;
 
         int minByIdSearchIndex = Arrays.binarySearch(byId, insertTxnId) + 1;
+        for (int i = 0 ; i < minByIdSearchIndex ; ++i)
+        {
+            TxnInfo txn = byId[i];
+            if (txn == newInfo) continue;
+            if (txn.mayExecute()) continue;
+            if (!txn.hasDeps()) continue;
+            if (txn.executeAt == txn) continue;
+            if (!txn.kind().witnesses(insertTxnId)) continue;
+            if (txn.depsKnownBefore().compareTo(newInfo) < 0) continue;
+
+            TxnId[] missing = txn.missing();
+            if (missing == NO_TXNIDS) missing = oneMissing = ensureOneMissing(insertTxnId, oneMissing);
+            else missing = SortedArrays.insert(missing, insertTxnId, TxnId[]::new);
+            byId[i] = txn.withMissing(missing);
+        }
+
         int minDoNotInsertSearchIndex = 0;
         for (int i = startIndex ; i < committedByExecuteAt.length ; ++i)
         {
@@ -161,16 +179,16 @@ class Utils
                 if (missing == NO_TXNIDS) missing = oneMissing = ensureOneMissing(insertTxnId, oneMissing);
                 else missing = SortedArrays.insert(missing, insertTxnId, TxnId[]::new);
 
-                newMinSearchIndex = updateInfoArraysByExecuteAt(i, txn, txn.update(missing), minByIdSearchIndex, byId, committedByExecuteAt);
+                newMinSearchIndex = updateInfoArraysByExecuteAt(i, txn, txn.withMissing(missing), minByIdSearchIndex, byId, committedByExecuteAt);
             }
 
             for (; minByIdSearchIndex < newMinSearchIndex ; ++minByIdSearchIndex)
             {
                 TxnInfo txn = byId[minByIdSearchIndex];
                 if (txn == newInfo) continue;
-                if (!txn.status.hasExecuteAtOrDeps) continue;
+                if (!txn.hasDeps()) continue;
                 if (!txn.kind().witnesses(insertTxnId)) continue;
-                if (txn.status != ACCEPTED) continue;
+                if (txn.status() != ACCEPTED && txn.mayExecute()) continue;
                 if (minDoNotInsertSearchIndex < doNotInsert.length && doNotInsert[minDoNotInsertSearchIndex].equals(txn))
                 {
                     ++minDoNotInsertSearchIndex;
@@ -180,7 +198,7 @@ class Utils
                 TxnId[] missing = txn.missing();
                 if (missing == NO_TXNIDS) missing = oneMissing = ensureOneMissing(insertTxnId, oneMissing);
                 else missing = SortedArrays.insert(missing, insertTxnId, TxnId[]::new);
-                byId[minByIdSearchIndex] = txn.update(missing);
+                byId[minByIdSearchIndex] = txn.withMissing(missing);
             }
         }
 
@@ -188,9 +206,10 @@ class Utils
         {
             TxnInfo txn = byId[minByIdSearchIndex];
             if (txn == newInfo) continue;
-            if (!txn.status.hasExecuteAtOrDeps) continue;
+            // TODO (expected): optimise this with flag bits
+            if (!txn.hasDeps()) continue;
             if (!txn.kind().witnesses(insertTxnId)) continue;
-            if (txn.status != ACCEPTED) continue;
+            if (txn.status() != ACCEPTED && txn.mayExecute()) continue;
             if (minDoNotInsertSearchIndex < doNotInsert.length && doNotInsert[minDoNotInsertSearchIndex].equals(txn))
             {
                 ++minDoNotInsertSearchIndex;
@@ -200,7 +219,7 @@ class Utils
             TxnId[] missing = txn.missing();
             if (missing == NO_TXNIDS) missing = oneMissing = ensureOneMissing(insertTxnId, oneMissing);
             else missing = SortedArrays.insert(missing, insertTxnId, TxnId[]::new);
-            byId[minByIdSearchIndex] = txn.update(missing);
+            byId[minByIdSearchIndex] = txn.withMissing(missing);
         }
     }
 
@@ -302,11 +321,11 @@ class Utils
      */
     static TxnId[] mergeAndFilterMissing(TxnId owner, TxnId[] current, TxnId[] additions, int additionCount, @Nullable TxnId skipAddition)
     {
-        Txn.Kind.Kinds kinds = owner.kind().witnesses();
+        Txn.Kind.Kinds kinds = owner.witnesses();
         int additionLength = additionCount;
         for (int i = additionCount - 1 ; i >= 0 ; --i)
         {
-            if (!kinds.test(additions[i].kind()))
+            if (!kinds.test(additions[i]))
                 --additionCount;
         }
 
@@ -317,7 +336,7 @@ class Utils
         int i = 0, j = 0, count = 0;
         while (i < additionLength && j < current.length)
         {
-            if (kinds.test(additions[i].kind()))
+            if (kinds.test(additions[i]))
             {
                 int c = additions[i].compareTo(current[j]);
                 if (c < 0)
@@ -335,7 +354,7 @@ class Utils
         }
         while (i < additionLength)
         {
-            if (kinds.test(additions[i].kind()))
+            if (kinds.test(additions[i]))
             {
                 TxnId addition = additions[i];
                 if (addition != skipAddition)

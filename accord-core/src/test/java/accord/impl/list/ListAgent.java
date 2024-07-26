@@ -33,7 +33,7 @@ import accord.local.SafeCommandStore;
 import accord.messages.ReplyContext;
 import accord.primitives.Keys;
 import accord.primitives.Ranges;
-import accord.primitives.Seekables;
+import accord.primitives.Routable.Domain;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -132,9 +132,9 @@ public class ListAgent implements Agent
     }
 
     @Override
-    public Txn emptySystemTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
+    public Txn emptySystemTxn(Txn.Kind kind, Domain domain)
     {
-        return new Txn.InMemory(kind, keysOrRanges, new ListRead(identity(), false, Keys.EMPTY, Keys.EMPTY), new ListQuery(NONE, Integer.MIN_VALUE, false), null);
+        return new Txn.InMemory(kind, domain == Domain.Key ? Keys.EMPTY : Ranges.EMPTY, new ListRead(identity(), false, Keys.EMPTY, Keys.EMPTY), new ListQuery(NONE, Integer.MIN_VALUE, false), null);
     }
 
     @Override
@@ -159,7 +159,7 @@ public class ListAgent implements Agent
     @Override
     public long retryAwaitTimeout(Node node, SafeCommandStore safeStore, TxnId txnId, int retryCount, ProgressLog.BlockedUntil retrying, TimeUnit units)
     {
-        int retryDelay = Math.min(32, 1 << retryCount);
+        int retryDelay = Math.min(16, 1 << retryCount);
         return units.convert(retryDelay, SECONDS);
     }
 

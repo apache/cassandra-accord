@@ -29,7 +29,7 @@ import accord.local.SafeCommandStore;
 import accord.messages.ReplyContext;
 import accord.primitives.Keys;
 import accord.primitives.Ranges;
-import accord.primitives.Seekables;
+import accord.primitives.Routable.Domain;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -103,9 +103,9 @@ public class MaelstromAgent implements Agent
     }
 
     @Override
-    public Txn emptySystemTxn(Txn.Kind kind, Seekables<?, ?> keysOrRanges)
+    public Txn emptySystemTxn(Txn.Kind kind, Domain domain)
     {
-        return new Txn.InMemory(kind, keysOrRanges, new MaelstromRead(Keys.EMPTY, Keys.EMPTY), new MaelstromQuery(Node.Id.NONE, -1), null);
+        return new Txn.InMemory(kind, domain == Domain.Key ? Keys.EMPTY : Ranges.EMPTY, new MaelstromRead(Keys.EMPTY, Keys.EMPTY), new MaelstromQuery(Node.Id.NONE, -1), null);
     }
 
     @Override

@@ -22,6 +22,7 @@ import accord.local.SafeCommandStore;
 import accord.primitives.PartialTxn;
 import accord.primitives.Seekable;
 import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import accord.utils.async.AsyncChain;
 
 /**
@@ -31,5 +32,5 @@ import accord.utils.async.AsyncChain;
  */
 public interface Write
 {
-    AsyncChain<Void> apply(Seekable key, SafeCommandStore safeStore, Timestamp executeAt, DataStore store, PartialTxn txn);
+    AsyncChain<Void> apply(Seekable key, SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt, DataStore store, PartialTxn txn);
 }

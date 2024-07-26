@@ -65,6 +65,7 @@ public class Writes
         return Objects.hash(txnId, executeAt, keys, write);
     }
 
+    // TODO (expected): accept Participants here, computes from StoreParticipants.executes
     public AsyncChain<Void> apply(SafeCommandStore safeStore, Ranges ranges, PartialTxn txn)
     {
         if (write == null)
@@ -74,7 +75,7 @@ public class Writes
             return SUCCESS;
 
         List<AsyncChain<Void>> futures = Routables.foldl(keys, ranges, (key, accumulate, index) -> {
-            accumulate.add(write.apply(key, safeStore, executeAt, safeStore.dataStore(), txn));
+            accumulate.add(write.apply(key, safeStore, txnId, executeAt, safeStore.dataStore(), txn));
             return accumulate;
         }, new ArrayList<>());
 

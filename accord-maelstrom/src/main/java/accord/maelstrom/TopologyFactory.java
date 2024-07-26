@@ -19,7 +19,6 @@
 package accord.maelstrom;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +29,7 @@ import accord.local.Node.Id;
 import accord.maelstrom.Datum.Kind;
 import accord.topology.Shard;
 import accord.topology.Topology;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.WrapAroundList;
 import accord.utils.WrapAroundSet;
 
@@ -86,6 +86,6 @@ public class TopologyFactory
             for (int i = 0 ; i < this.shards ; ++i)
                 shards.add(new Shard(ranges[j][i], copyUnsorted(electorates.get(i % electorates.size()), Id[]::new), fastPathElectorates.get(i % fastPathElectorates.size())));
         }
-        return new Topology(1, Collections.emptySet(), toArray(shards, Shard[]::new));
+        return new Topology(1, SortedArrayList.ofSorted(), toArray(shards, Shard[]::new));
     }
 }

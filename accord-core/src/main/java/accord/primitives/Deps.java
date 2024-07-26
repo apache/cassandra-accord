@@ -18,8 +18,9 @@
 
 package accord.primitives;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.local.cfk.CommandsForKey;
+import accord.utils.IndexedFunction;
 import accord.utils.Invariants;
 import accord.utils.MergeFewDisjointSortedListsCursor;
 import accord.utils.SortedCursor;
@@ -77,7 +78,7 @@ public class Deps
             this.keyBuilder = KeyDeps.builder();
         }
 
-        public AbstractBuilder<T> add(Seekable keyOrRange, TxnId txnId)
+        public AbstractBuilder<T> add(Unseekable keyOrRange, TxnId txnId)
         {
             Invariants.checkArgument(keyOrRange.domain() == txnId.domain(), keyOrRange + " is not same domain as " + txnId);
             switch (txnId.domain())
@@ -86,13 +87,13 @@ public class Deps
                 case Key:
                     if (CommandsForKey.managesExecution(txnId))
                     {
-                        keyBuilder.add(keyOrRange.asKey(), txnId);
+                        keyBuilder.add(keyOrRange.asRoutingKey(), txnId);
                     }
                     else
                     {
                         if (directKeyBuilder == null)
                             directKeyBuilder = KeyDeps.builder();
-                        directKeyBuilder.add(keyOrRange.asKey(), txnId);
+                        directKeyBuilder.add(keyOrRange.asRoutingKey(), txnId);
                     }
                     break;
 
@@ -185,7 +186,7 @@ public class Deps
         return directKeyDeps.intersects(txnId, ranges);
     }
 
-    public SortedCursor<TxnId> txnIds(Key key)
+    public SortedCursor<TxnId> txnIds(RoutingKey key)
     {
         SortedList<TxnId> keyDeps = this.keyDeps.txnIds(key);
         SortedList<TxnId> rangeDeps = this.rangeDeps.computeTxnIds(key);
@@ -278,11 +279,11 @@ public class Deps
         rangeDeps.forEachUniqueTxnId(ranges, forEach);
     }
 
-    public static <T> Deps merge(List<T> list, Function<T, Deps> getter)
+    public static <C, T1> Deps merge(C collection, int size, IndexedFunction<C, T1> getter1, Function<T1, Deps> getter2)
     {
-        return new Deps(KeyDeps.merge(list, getter, deps -> deps.keyDeps),
-                        RangeDeps.merge(list, getter, deps -> deps.rangeDeps),
-                        KeyDeps.merge(list, getter, deps -> deps.directKeyDeps));
+        return new Deps(KeyDeps.merge(collection, size, getter1, getter2, deps -> deps.keyDeps),
+                        RangeDeps.merge(collection, size, getter1, getter2, deps -> deps.rangeDeps),
+                        KeyDeps.merge(collection, size, getter1, getter2, deps -> deps.directKeyDeps));
     }
 
     @Override

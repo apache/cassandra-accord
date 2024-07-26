@@ -27,13 +27,14 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
+import accord.local.StoreParticipants;
 import accord.messages.Apply.ApplyReply;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
+import accord.primitives.Ranges;
 import accord.primitives.Route;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -47,9 +48,9 @@ public class Apply extends TxnRequest<ApplyReply>
     public static final Factory FACTORY = Apply::new;
     public static class SerializationSupport
     {
-        public static Apply create(TxnId txnId, Route<?> scope, long waitForEpoch, Kind kind, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, PartialTxn txn, @Nullable FullRoute<?> fullRoute, Writes writes, Result result)
+        public static Apply create(TxnId txnId, Route<?> scope, long waitForEpoch, Kind kind, Timestamp executeAt, PartialDeps deps, PartialTxn txn, @Nullable FullRoute<?> fullRoute, Writes writes, Result result)
         {
-            return new Apply(kind, txnId, scope, waitForEpoch, keys, executeAt, deps, txn, fullRoute, writes, result);
+            return new Apply(kind, txnId, scope, waitForEpoch, executeAt, deps, txn, fullRoute, writes, result);
         }
     }
 
@@ -58,9 +59,33 @@ public class Apply extends TxnRequest<ApplyReply>
         Apply create(Kind kind, Id to, Topologies participates, TxnId txnId, FullRoute<?> route, Txn txn, Timestamp executeAt, Deps deps, Writes writes, Result result);
     }
 
+    public static Factory wrapForExclusiveSyncPoint(Factory factory)
+    {
+        return (kind, to, participates, txnId, route, txn, executeAt, deps, writes, result) -> {
+            while (true)
+            {
+                long minEpoch = participates.oldestEpoch();
+                Ranges ranges = participates.computeRangesForNode(to);
+                // TODO (desired): simply compute the min TxnId covered by the ranges
+                Deps slicedDeps = deps.intersecting(ranges);
+                long newMinEpoch = slicedDeps.minTxnId(txnId).epoch();
+                if (minEpoch >= newMinEpoch)
+                    break;
+
+                participates = participates.forEpochs(newMinEpoch, participates.currentEpoch());
+                if (!participates.nodes().contains(to))
+                    return null;
+
+                if (newMinEpoch == participates.currentEpoch())
+                    break;
+            }
+
+            return factory.create(kind, to, participates, txnId, route, txn, executeAt, deps, writes, result);
+        };
+    }
+
     public final Kind kind;
     public final Timestamp executeAt;
-    public final Seekables<?, ?> keys;
     public final PartialDeps deps; // TODO (expected): this should be nullable, and only included if we did not send Commit (or if sending Maximal apply)
     public final @Nullable PartialTxn txn;
     public final @Nullable FullRoute<?> fullRoute;
@@ -77,7 +102,6 @@ public class Apply extends TxnRequest<ApplyReply>
         //     often it will be cheaper to include the FullRoute for Deps scope (or come up with some other safety-preserving encoding scheme)
         this.kind = kind;
         this.deps = deps.intersecting(scope);
-        this.keys = txn.keys().intersecting(scope);
         this.txn = kind == Kind.Maximal ? txn.intersecting(scope, true) : null;
         this.fullRoute = kind == Kind.Maximal ? route : null;
         this.executeAt = executeAt;
@@ -107,13 +131,12 @@ public class Apply extends TxnRequest<ApplyReply>
         return factory.create(Kind.Maximal, to, participates, txnId, route, txn, executeAt, stableDeps, writes, result);
     }
 
-    protected Apply(Kind kind, TxnId txnId, Route<?> route, long waitForEpoch, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps deps, @Nullable PartialTxn txn, @Nullable FullRoute<?> fullRoute, Writes writes, Result result)
+    protected Apply(Kind kind, TxnId txnId, Route<?> route, long waitForEpoch, Timestamp executeAt, PartialDeps deps, @Nullable PartialTxn txn, @Nullable FullRoute<?> fullRoute, Writes writes, Result result)
     {
         super(txnId, route, waitForEpoch);
         this.kind = kind;
         this.executeAt = executeAt;
         this.deps = deps;
-        this.keys = keys;
         this.txn = txn;
         this.fullRoute = fullRoute;
         this.writes = writes;
@@ -123,25 +146,38 @@ public class Apply extends TxnRequest<ApplyReply>
     @Override
     public void process()
     {
-        // note, we do not also commit here if txnId.epoch != executeAt.epoch, as the scope() for a commit would be different
-        node.mapReduceConsumeLocal(this, txnId.epoch(), executeAt.epoch(), this);
+        node.mapReduceConsumeLocal(this, minEpoch(txnId), executeAt.epoch(), this);
+    }
+
+    private long minEpoch(TxnId txnId)
+    {
+        if (!txnId.awaitsOnlyDeps())
+            return txnId.epoch();
+        return deps.minTxnId(txnId).epoch();
     }
 
     @Override
     public ApplyReply apply(SafeCommandStore safeStore)
     {
-        return apply(safeStore, txn, txnId, executeAt, deps, fullRoute != null ? fullRoute : scope, writes, result);
+        Route<?> route = fullRoute != null ? fullRoute : scope;
+        StoreParticipants participants = StoreParticipants.update(safeStore, route, minEpoch(txnId), txnId, executeAt.epoch());
+        return apply(safeStore, participants);
     }
 
-    public static ApplyReply apply(SafeCommandStore safeStore, PartialTxn txn, TxnId txnId, Timestamp executeAt, PartialDeps deps, Route<?> route, Writes writes, Result result)
+    public ApplyReply apply(SafeCommandStore safeStore, StoreParticipants participants)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, executeAt, route);
-        return apply(safeStore, safeCommand, txn, txnId, executeAt, deps, route, writes, result);
+        return apply(safeStore, participants, txn, txnId, executeAt, deps, participants.route(), writes, result);
     }
 
-    public static ApplyReply apply(SafeCommandStore safeStore, SafeCommand safeCommand, PartialTxn txn, TxnId txnId, Timestamp executeAt, PartialDeps deps, Route<?> route, Writes writes, Result result)
+    public static ApplyReply apply(SafeCommandStore safeStore, StoreParticipants participants, PartialTxn txn, TxnId txnId, Timestamp executeAt, PartialDeps deps, Route<?> route, Writes writes, Result result)
     {
-        switch (Commands.apply(safeStore, safeCommand, txnId, route, executeAt, deps, txn, writes, result))
+        SafeCommand safeCommand = safeStore.get(txnId, participants);
+        return apply(safeStore, safeCommand, participants, txn, txnId, executeAt, deps, route, writes, result);
+    }
+
+    public static ApplyReply apply(SafeCommandStore safeStore, SafeCommand safeCommand, StoreParticipants participants, PartialTxn txn, TxnId txnId, Timestamp executeAt, PartialDeps deps, Route<?> route, Writes writes, Result result)
+    {
+        switch (Commands.apply(safeStore, safeCommand, participants, txnId, route, executeAt, deps, txn, writes, result))
         {
             default:
             case Insufficient:
@@ -172,9 +208,9 @@ public class Apply extends TxnRequest<ApplyReply>
     }
 
     @Override
-    public Seekables<?, ?> keys()
+    public Unseekables<?> keys()
     {
-        return keys;
+        return scope;
     }
 
     @Override

@@ -18,9 +18,6 @@
 
 package accord.primitives;
 
-import accord.api.RoutingKey;
-import accord.utils.Invariants;
-
 /**
  * Defines an inequality point in the processing of the distributed transaction log, which is to say that
  * this is able to say that the point has passed, or that it has not yet passed, but it is unable to
@@ -33,48 +30,36 @@ import accord.utils.Invariants;
  *   to execute at its TxnId time, even if a later txn exists. We must either make it visible to other transactions
  *   for coordination (but not necessarily for execution), or else require that it has an Accept round.
  */
-public class SyncPoint<S extends Seekables<?, ?>>
+public class SyncPoint<U extends Unseekable>
 {
     public static class SerializationSupport
     {
-        public static SyncPoint construct(TxnId syncId, Deps waitFor, Seekables<?,?> keysOrRanges, RoutingKey homeKey)
+        public static SyncPoint construct(TxnId syncId, Deps waitFor, FullRoute<?> route)
         {
-            return new SyncPoint(syncId, waitFor, keysOrRanges, homeKey);
+            return new SyncPoint(syncId, waitFor, route);
         }
     }
 
     public final TxnId syncId;
     public final Deps waitFor;
-    public final S keysOrRanges;
-    public final RoutingKey homeKey;
+    public final FullRoute<U> route;
 
-    public SyncPoint(TxnId syncId, Deps waitFor, S keysOrRanges, FullRoute<?> route)
-    {
-        Invariants.checkArgument(keysOrRanges.toRoute(route.homeKey()).equals(route), "Expected homeKey %s from route %s to be in ranges %s", route.homeKey(), route, keysOrRanges);
-        this.syncId = syncId;
-        this.waitFor = waitFor;
-        this.keysOrRanges = keysOrRanges;
-        this.homeKey = route.homeKey();
-    }
-
-    private SyncPoint(TxnId syncId, Deps waitFor, S keysOrRanges, RoutingKey homeKey)
+    public SyncPoint(TxnId syncId, Deps waitFor, FullRoute<U> route)
     {
         this.syncId = syncId;
         this.waitFor = waitFor;
-        this.keysOrRanges = keysOrRanges;
-        this.homeKey = homeKey;
+        this.route = route;
     }
 
-    public FullRoute route()
-    {
-        return keysOrRanges.toRoute(homeKey);
-    }
-
-    // TODO (required): document this and its usages; make sure call-sites make sense
+    // TODO (required): this is not safe to use as a "sourceEpoch", as a transaction in the dependencies may execute in a future epoch
     public long sourceEpoch()
     {
-        TxnId maxDep = waitFor.maxTxnId();
-        return TxnId.nonNullOrMax(maxDep, syncId).epoch();
+        return syncId.epoch();
+    }
+
+    public FullRoute<U> route()
+    {
+        return route;
     }
 
     @Override
@@ -83,7 +68,7 @@ public class SyncPoint<S extends Seekables<?, ?>>
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         SyncPoint<?> syncPoint = (SyncPoint<?>) o;
-        return syncId.equals(syncPoint.syncId) && waitFor.equals(syncPoint.waitFor) && keysOrRanges.equals(syncPoint.keysOrRanges) && homeKey.equals(syncPoint.homeKey);
+        return syncId.equals(syncPoint.syncId) && waitFor.equals(syncPoint.waitFor) && route.equals(syncPoint.route);
     }
 
     @Override
@@ -97,8 +82,7 @@ public class SyncPoint<S extends Seekables<?, ?>>
     {
         return "SyncPoint{" +
                "syncId=" + syncId +
-               ", keysOrRanges=" + keysOrRanges +
-               ", homeKey=" + homeKey +
+               ", scope=" + route +
                ", waitFor=" + waitFor +
                '}';
     }

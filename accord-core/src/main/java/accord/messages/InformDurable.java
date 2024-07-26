@@ -24,8 +24,9 @@ import accord.local.Node.Id;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.Status;
-import accord.local.Status.Durability;
+import accord.primitives.Status;
+import accord.primitives.Status.Durability;
+import accord.local.StoreParticipants;
 import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -72,11 +73,12 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
     @Override
     public Reply apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, txnId, scope);
+        StoreParticipants participants = StoreParticipants.update(safeStore, scope, txnId.epoch(), txnId, txnId.epoch());
+        SafeCommand safeCommand = safeStore.get(txnId, participants);
         if (safeCommand.current().is(Status.Truncated))
             return Ok;
 
-        Commands.setDurability(safeStore, safeCommand, durability, scope, executeAt);
+        Commands.setDurability(safeStore, safeCommand, participants, durability, executeAt);
         return Ok;
     }
 

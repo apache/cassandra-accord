@@ -19,7 +19,6 @@
 package accord.primitives;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -30,12 +29,11 @@ import javax.annotation.Nullable;
 import com.google.common.collect.ImmutableList;
 
 import accord.api.RoutingKey;
-import accord.local.Status;
 import accord.utils.ReducingIntervalMap;
 import accord.utils.ReducingRangeMap;
 import accord.utils.TriFunction;
 
-import static accord.local.Status.KnownDeps.DepsProposed;
+import static accord.primitives.Known.KnownDeps.DepsProposed;
 
 public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
 {
@@ -63,11 +61,11 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
 
     public static class AbstractEntry
     {
-        public final Status.KnownDeps known;
+        public final Known.KnownDeps known;
         public final Ballot ballot;
         public final @Nullable Deps coordinatedDeps;
 
-        private AbstractEntry(Status.KnownDeps known, Ballot ballot, Deps coordinatedDeps)
+        private AbstractEntry(Known.KnownDeps known, Ballot ballot, Deps coordinatedDeps)
         {
             this.known = known;
             this.ballot = ballot;
@@ -87,7 +85,6 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
                 b = tmp;
             }
 
-            // TODO (required): consider more whether we need to also maintain and merge localDeps for Committed
             if (a.known.compareTo(DepsProposed) <= 0)
                 return merge.apply(a, b);
             // note that it is *not* necessarily guaranteed that stable deps will be the same - only that they will imply the same relations once filtered
@@ -101,7 +98,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
         // set only if DepsUnknown or DepsProposed
         public final @Nullable Deps localDeps;
 
-        public LatestEntry(Status.KnownDeps known, Ballot ballot, Deps coordinatedDeps, Deps localDeps)
+        public LatestEntry(Known.KnownDeps known, Ballot ballot, Deps coordinatedDeps, Deps localDeps)
         {
             super(known, ballot, coordinatedDeps);
             this.localDeps = localDeps;
@@ -129,7 +126,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
             KeyDeps keyDeps = deps.keyDeps;
             RangeDeps rangeDeps = deps.rangeDeps;
             KeyDeps directKeyDeps = deps.directKeyDeps;
-            Keys keys = deps.keyDeps.keys;
+            RoutingKeys keys = deps.keyDeps.keys;
 
             boolean slice = keys.indexOf(start) != -1 || keys.indexOf(end) != -1 - keys.size();
             if (!slice) slice = directKeyDeps.keys.indexOf(start) != -1 || directKeyDeps.keys.indexOf(end) != -1 - keys.size();
@@ -150,7 +147,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
 
     private LatestDeps()
     {
-        super();
+        super(false, RoutingKeys.EMPTY_KEYS_ARRAY, new LatestEntry[0]);
     }
 
     private LatestDeps(boolean inclusiveEnds, RoutingKey[] starts, LatestEntry[] values)
@@ -160,7 +157,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
 
     public Deps merge()
     {
-        return Deps.merge(Arrays.asList(values), e -> e == null ? null : e.coordinatedDeps);
+        return Deps.merge(values, values.length, (array, i) -> array[i], d -> d.coordinatedDeps);
     }
 
     public static LatestDeps merge(LatestDeps a, LatestDeps b)
@@ -168,7 +165,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
         return ReducingIntervalMap.mergeIntervals(a, b, Builder::new);
     }
 
-    public static LatestDeps create(Ranges ranges, Status.KnownDeps knownDeps, Ballot ballot, Deps coordinatedDeps, Deps localDeps)
+    public static LatestDeps create(Ranges ranges, Known.KnownDeps knownDeps, Ballot ballot, Deps coordinatedDeps, Deps localDeps)
     {
         if (ranges.isEmpty())
             return new LatestDeps();
@@ -253,7 +250,7 @@ public class LatestDeps extends ReducingRangeMap<LatestDeps.LatestEntry>
         {
             final List<Deps> merge;
 
-            MergeEntry(Status.KnownDeps known, Ballot ballot, Deps coordinatedDeps, List<Deps> merge)
+            MergeEntry(Known.KnownDeps known, Ballot ballot, Deps coordinatedDeps, List<Deps> merge)
             {
                 super(known, ballot, coordinatedDeps);
                 this.merge = merge;

@@ -18,13 +18,11 @@
 
 package accord.primitives;
 
+import accord.api.RoutingKey;
+
 /**
- * A marker interface for cases where we do not include any non-participating home key in the collection.
- * Note that this interface is implemented by classes that may or may not contain only participants; it is expected
- * that these classes will only be used via interfaces such as Route that do not extend this interface,
- * so that the implementation may return itself when suitable, and a converted copy otherwise.
+ * A marker interface for a collection of Unseekables that make up some portion of a Route but without necessarily having a homeKey.
  */
-// TODO (desired): so we need this abstraction anymore, now that we have removed the concept of non-participating home keys?
 public interface Participants<K extends Unseekable> extends Unseekables<K>
 {
     @Override
@@ -55,5 +53,15 @@ public interface Participants<K extends Unseekable> extends Unseekables<K>
         if (left == null) return right;
         if (right == null) return left;
         return left.with(right);
+    }
+
+    static Participants<?> empty(Routable.Domain domain)
+    {
+        return domain == Routable.Domain.Range ? Ranges.EMPTY : RoutingKeys.EMPTY;
+    }
+
+    static Participants<?> singleton(Routable.Domain domain, RoutingKey key)
+    {
+        return domain == Routable.Domain.Range ? Ranges.of(key.asRange()) : RoutingKeys.of(key);
     }
 }

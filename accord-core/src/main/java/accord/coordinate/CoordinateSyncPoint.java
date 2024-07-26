@@ -24,24 +24,23 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.coordinate.CoordinationAdapter.Adapters;
+import accord.coordinate.CoordinationAdapter.Adapters.SyncPointAdapter;
 import accord.local.Node;
 import accord.messages.Apply;
 import accord.messages.PreAccept.PreAcceptOk;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
-import accord.primitives.Seekables;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.Txn.Kind;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekable;
+import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.async.AsyncResult;
-import accord.utils.async.AsyncResults;
 
-import static accord.coordinate.CoordinationAdapter.Invoke.execute;
-import static accord.coordinate.CoordinationAdapter.Invoke.propose;
 import static accord.coordinate.ExecutePath.FAST;
 import static accord.coordinate.Propose.Invalidate.proposeAndCommitInvalidate;
 import static accord.primitives.Timestamp.mergeMax;
@@ -55,54 +54,85 @@ import static accord.utils.Invariants.checkArgument;
  *
  * TODO (desired, testing): dedicated burn test to validate outcomes
  */
-public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePreAccept<SyncPoint<S>>
+public class CoordinateSyncPoint<U extends Unseekable> extends CoordinatePreAccept<SyncPoint<U>>
 {
     @SuppressWarnings("unused")
     private static final Logger logger = LoggerFactory.getLogger(CoordinateSyncPoint.class);
 
-    final CoordinationAdapter<SyncPoint<S>> adapter;
+    final CoordinationAdapter<SyncPoint<U>> adapter;
 
-    private CoordinateSyncPoint(Node node, TxnId txnId, Txn txn, FullRoute<?> route, CoordinationAdapter<SyncPoint<S>> adapter)
+    private CoordinateSyncPoint(Node node, TxnId txnId, Topologies topologies, Txn txn, FullRoute<?> route, CoordinationAdapter<SyncPoint<U>> adapter)
     {
-        super(node, txnId, txn, route, node.topology().withOpenEpochs(route, txnId, txnId));
+        super(node, txnId, txn, route, topologies);
         this.adapter = adapter;
     }
 
-    public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> exclusive(Node node, S keysOrRanges)
+    public static <U extends Unseekable> AsyncResult<SyncPoint<U>> exclusiveSyncPoint(Node node, Unseekables<U> keysOrRanges)
     {
         return coordinate(node, ExclusiveSyncPoint, keysOrRanges, Adapters.exclusiveSyncPoint());
     }
 
-    public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> exclusive(Node node, TxnId txnId, S keysOrRanges)
+    public static <U extends Unseekable> AsyncResult<SyncPoint<U>> exclusiveSyncPoint(Node node, TxnId txnId, Unseekables<U> keysOrRanges)
     {
+        Topologies topologies = node.topology().withOpenEpochs(keysOrRanges, null, null);
         return coordinate(node, txnId, keysOrRanges, Adapters.exclusiveSyncPoint());
     }
 
-    public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> inclusive(Node node, S keysOrRanges)
+    public static <U extends Unseekable> AsyncResult<SyncPoint<U>> inclusive(Node node, Unseekables<U> keysOrRanges)
     {
         return coordinate(node, Kind.SyncPoint, keysOrRanges, Adapters.inclusiveSyncPoint());
     }
 
-    public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> inclusiveAndAwaitQuorum(Node node, S keysOrRanges)
+    public static <U extends Unseekable> AsyncResult<SyncPoint<U>> inclusive(Node node, FullRoute<U> route)
+    {
+        return coordinate(node, Kind.SyncPoint, route, Adapters.inclusiveSyncPoint());
+    }
+
+    public static <U extends Unseekable> AsyncResult<SyncPoint<U>> inclusive(Node node, TxnId txnId, FullRoute<U> route)
+    {
+        return node.withEpoch(txnId.epoch(), () -> coordinate(node, txnId, route, Adapters.inclusiveSyncPoint())).beginAsResult();
+    }
+
+    public static <U extends Unseekable> AsyncResult<SyncPoint<U>> inclusiveAndAwaitQuorum(Node node, Unseekables<U> keysOrRanges)
     {
         return coordinate(node, Kind.SyncPoint, keysOrRanges, Adapters.inclusiveSyncPointBlocking());
     }
 
-    public static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> coordinate(Node node, Kind kind, S keysOrRanges, CoordinationAdapter<SyncPoint<S>> adapter)
+    public static <U extends Unseekable> AsyncResult<SyncPoint<U>> inclusiveAndAwaitQuorum(Node node, FullRoute<U> route)
     {
-        checkArgument(kind == Kind.SyncPoint || kind == ExclusiveSyncPoint);
+        return coordinate(node, Kind.SyncPoint, route, Adapters.inclusiveSyncPointBlocking());
+    }
+
+    public static <U extends Unseekable> AsyncResult<SyncPoint<U>> inclusiveAndAwaitQuorum(Node node, TxnId txnId, FullRoute<U> route)
+    {
+        return node.withEpoch(txnId.epoch(), () -> coordinate(node, txnId, route, Adapters.inclusiveSyncPointBlocking())).beginAsResult();
+    }
+
+    public static <U extends Unseekable> AsyncResult<SyncPoint<U>> coordinate(Node node, Kind kind, Unseekables<U> keysOrRanges, SyncPointAdapter<U> adapter)
+    {
+        checkArgument(kind.isSyncPoint());
         TxnId txnId = node.nextTxnId(kind, keysOrRanges.domain());
         return node.withEpoch(txnId.epoch(), () -> coordinate(node, txnId, keysOrRanges, adapter)).beginAsResult();
     }
 
-    private static <S extends Seekables<?, ?>> AsyncResult<SyncPoint<S>> coordinate(Node node, TxnId txnId, S keysOrRanges, CoordinationAdapter<SyncPoint<S>> adapter)
+    public static <U extends Unseekable> AsyncResult<SyncPoint<U>> coordinate(Node node, Kind kind, FullRoute<U> route, SyncPointAdapter<U> adapter)
     {
-        checkArgument(txnId.kind() == Kind.SyncPoint || txnId.kind() == ExclusiveSyncPoint);
-        FullRoute<?> route = node.computeRoute(txnId, keysOrRanges);
-        TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(txnId.epoch()), txnId, route.homeKey(), keysOrRanges);
-        if (mismatch != null)
-            return AsyncResults.failure(mismatch);
-        CoordinateSyncPoint<S> coordinate = new CoordinateSyncPoint<>(node, txnId, node.agent().emptySystemTxn(txnId.kind(), keysOrRanges), route, adapter);
+        checkArgument(kind.isSyncPoint());
+        TxnId txnId = node.nextTxnId(kind, route.domain());
+        return node.withEpoch(txnId.epoch(), () -> coordinate(node, txnId, route, adapter)).beginAsResult();
+    }
+
+    private static <U extends Unseekable> AsyncResult<SyncPoint<U>> coordinate(Node node, TxnId txnId, Unseekables<U> keysOrRanges, SyncPointAdapter<U> adapter)
+    {
+        checkArgument(txnId.isSyncPoint());
+        FullRoute<U> route = (FullRoute<U>) node.computeRoute(txnId, keysOrRanges);
+        return coordinate(node, txnId, route, adapter);
+    }
+
+    private static <U extends Unseekable> AsyncResult<SyncPoint<U>> coordinate(Node node, TxnId txnId, FullRoute<U> route, SyncPointAdapter<U> adapter)
+    {
+        checkArgument(txnId.isSyncPoint());
+        CoordinateSyncPoint<U> coordinate = new CoordinateSyncPoint<>(node, txnId, adapter.forDecision(node, route, txnId), node.agent().emptySystemTxn(txnId.kind(), txnId.domain()), route, adapter);
         coordinate.start();
         return coordinate;
     }
@@ -116,7 +146,7 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
     @Override
     void onPreAccepted(Topologies topologies, Timestamp executeAt, List<PreAcceptOk> oks)
     {
-        Deps deps = Deps.merge(oks, ok -> ok.deps);
+        Deps deps = Deps.merge(oks, oks.size(), List::get, ok -> ok.deps);
         Timestamp checkRejected = foldl(oks, (ok, prev) -> mergeMax(ok.witnessedAt, prev), Timestamp.NONE);
         if (checkRejected.isRejected())
         {
@@ -124,13 +154,10 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
         }
         else
         {
-            // we don't need to fetch deps from Accept replies, so we don't need to contact unsynced epochs
-            topologies = node.topology().forEpoch(route, txnId.epoch());
-            // TODO (required, consider): consider the required semantics of a SyncPoint
             if (tracker.hasFastPathAccepted() && txnId.kind() == Kind.SyncPoint)
-                execute(adapter, node, topologies, route, FAST, txnId, txn, txnId, deps, this);
+                adapter.execute(node, topologies, route, FAST, txnId, txn, txnId, deps, this);
             else
-                propose(adapter, node, topologies, route, Ballot.ZERO, txnId, txn, executeAt, deps, this);
+                adapter.propose(node, topologies, route, Ballot.ZERO, txnId, txn, executeAt, deps, this);
         }
     }
 
@@ -138,7 +165,7 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
     {
         TxnId txnId = syncPoint.syncId;
         Timestamp executeAt = txnId;
-        Txn txn = node.agent().emptySystemTxn(txnId.kind(), syncPoint.keysOrRanges);
+        Txn txn = node.agent().emptySystemTxn(txnId.kind(), txnId.domain());
         Deps deps = syncPoint.waitFor;
         Apply.sendMaximal(node, to, txnId, syncPoint.route(), txn, executeAt, deps, txn.execute(txnId, executeAt, null), txn.result(txnId, executeAt, null));
     }
