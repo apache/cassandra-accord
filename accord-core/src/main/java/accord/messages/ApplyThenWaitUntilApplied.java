@@ -25,10 +25,9 @@ import org.slf4j.LoggerFactory;
 
 import accord.api.Data;
 import accord.api.Result;
-import accord.local.CommandStore;
 import accord.local.Node;
-import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
+import accord.local.StoreParticipants;
 import accord.messages.Apply.ApplyReply;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
@@ -37,7 +36,6 @@ import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Route;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -60,9 +58,9 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     @SuppressWarnings("unused")
     public static class SerializerSupport
     {
-        public static ApplyThenWaitUntilApplied create(TxnId txnId, Participants<?> readScope, Timestamp executeAt, FullRoute<?> route, PartialTxn txn, PartialDeps deps, Writes writes, Result result, Seekables<?, ?> notify)
+        public static ApplyThenWaitUntilApplied create(TxnId txnId, Participants<?> readScope, Timestamp executeAt, FullRoute<?> route, PartialTxn txn, PartialDeps deps, Writes writes, Result result)
         {
-            return new ApplyThenWaitUntilApplied(txnId, readScope, executeAt, route, txn, deps, writes, result, notify);
+            return new ApplyThenWaitUntilApplied(txnId, readScope, executeAt, route, txn, deps, writes, result);
         }
     }
 
@@ -72,9 +70,8 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     public final PartialDeps deps;
     public final Writes writes;
     public final Result result;
-    public final Seekables<?, ?> notify;
 
-    public ApplyThenWaitUntilApplied(Node.Id to, Topologies topologies, Timestamp executeAt, FullRoute<?> route, TxnId txnId, Txn txn, Deps deps, Participants<?> readScope, Writes writes, Result result, Seekables<?, ?> notify)
+    public ApplyThenWaitUntilApplied(Node.Id to, Topologies topologies, Timestamp executeAt, FullRoute<?> route, TxnId txnId, Txn txn, Deps deps, Participants<?> readScope, Writes writes, Result result)
     {
         super(to, topologies, txnId, readScope, executeAt.epoch());
         this.executeAt = executeAt;
@@ -84,10 +81,9 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
         this.deps = deps.intersecting(scope);
         this.writes = writes;
         this.result = result;
-        this.notify = notify == null ? null : notify.intersecting(scope);
     }
 
-    protected ApplyThenWaitUntilApplied(TxnId txnId, Participants<?> readScope, Timestamp executeAt, FullRoute<?> route, PartialTxn txn, PartialDeps deps, Writes writes, Result result, Seekables<?, ?> notify)
+    protected ApplyThenWaitUntilApplied(TxnId txnId, Participants<?> readScope, Timestamp executeAt, FullRoute<?> route, PartialTxn txn, PartialDeps deps, Writes writes, Result result)
     {
         super(txnId, readScope, executeAt.epoch());
         this.executeAt = executeAt;
@@ -96,7 +92,6 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
         this.deps = deps;
         this.writes = writes;
         this.result = result;
-        this.notify = notify;
     }
 
     @Override
@@ -108,7 +103,8 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     @Override
     public CommitOrReadNack apply(SafeCommandStore safeStore)
     {
-        ApplyReply applyReply = Apply.apply(safeStore, txn, txnId, executeAt, deps, route, writes, result);
+        StoreParticipants participants = StoreParticipants.update(safeStore, route, txnId.epoch(), txnId, executeAtEpoch);
+        ApplyReply applyReply = Apply.apply(safeStore, participants, txn, txnId, executeAt, deps, route, writes, result);
         switch (applyReply)
         {
             default:
@@ -127,21 +123,8 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     }
 
     @Override
-    protected void readComplete(CommandStore commandStore, Data readResult, Ranges unavailable)
-    {
-        logger.trace("{}: readComplete ApplyThenWaitUntilApplied", txnId);
-        // TODO (required): why is this submitting to an executor?
-        commandStore.execute(PreLoadContext.contextFor(txnId), safeStore -> {
-            super.readComplete(commandStore, readResult, unavailable);
-        }).begin(node.agent());
-    }
-
-    @Override
     protected void onAllSuccess(@Nullable Ranges unavailable, @Nullable Data data, @Nullable Throwable fail)
     {
-        // TODO (expected): don't like the coupling going on here
-        if (notify != null)
-            node.agent().onLocalBarrier(notify, txnId);
         super.onAllSuccess(unavailable, data, fail);
     }
 

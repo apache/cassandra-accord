@@ -18,22 +18,19 @@
 
 package accord.coordinate;
 
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
-import java.util.stream.Stream;
+
+import javax.annotation.Nullable;
 
 import accord.api.ProgressLog.BlockedUntil;
 import accord.api.Result;
-import accord.coordinate.CoordinationAdapter.Invoke;
 import accord.coordinate.tracking.RecoveryTracker;
 import accord.local.Node;
 import accord.local.Node.Id;
-import accord.local.Status;
+import accord.primitives.Status;
 import accord.messages.BeginRecovery;
 import accord.messages.BeginRecovery.RecoverOk;
 import accord.messages.BeginRecovery.RecoverReply;
@@ -45,21 +42,20 @@ import accord.primitives.FullRoute;
 import accord.primitives.LatestDeps;
 import accord.primitives.Participants;
 import accord.primitives.ProgressToken;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.utils.Invariants;
+import accord.utils.SortedListMap;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
+import static accord.api.ProtocolModifiers.QuorumEpochIntersections;
 import static accord.coordinate.CoordinationAdapter.Factory.Step.InitiateRecovery;
-import static accord.coordinate.CoordinationAdapter.Invoke.execute;
-import static accord.coordinate.CoordinationAdapter.Invoke.persist;
-import static accord.coordinate.CoordinationAdapter.Invoke.stabilise;
 import static accord.coordinate.ExecutePath.RECOVER;
 import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAndCallback;
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
@@ -68,13 +64,10 @@ import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.messages.BeginRecovery.RecoverOk.maxAccepted;
 import static accord.messages.BeginRecovery.RecoverOk.maxAcceptedNotTruncated;
 import static accord.primitives.ProgressToken.TRUNCATED_DURABLE_OR_INVALIDATED;
-import static accord.utils.Invariants.debug;
 import static accord.utils.Invariants.illegalState;
 
 // TODO (low priority, cleanup): rename to Recover (verb); rename Recover message to not clash
-// TODO (expected): do not recover transactions that are known to be Stable and waiting to execute.
-// TODO (expected): separate out recovery of sync points from standard transactions
-// TODO (required): do not wait for a quorum if we find enough information to execute
+// TODO (expected): do not wait for a quorum if we find enough information to execute
 public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throwable>
 {
     AsyncResult<Object> awaitCommits(Node node, Deps waitOn)
@@ -104,21 +97,18 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
     private final TxnId txnId;
     private final Txn txn;
     private final FullRoute<?> route;
+    private final @Nullable Timestamp executeAt;
     private final BiConsumer<Outcome, Throwable> callback;
     private boolean isDone;
 
-    private final RecoverOk[] recoverOks;
+    private final SortedListMap<Id, RecoverOk> recoverOks;
     private final RecoveryTracker tracker;
-    private final Topology topology;
     private boolean isBallotPromised;
-    private final Map<Id, RecoverReply> debug = debug() ? new TreeMap<>() : null;
 
-    private Recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
+    private Recover(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, @Nullable Timestamp executeAt, BiConsumer<Outcome, Throwable> callback)
     {
-        Invariants.checkState(txnId.kind().isGloballyVisible());
-        // TODO (required, correctness): we may have to contact all epochs to ensure we spot any future transaction that might not have taken us as dependency?
-        //    or we need an exclusive sync point covering us and closing out the old epoch before recovering;
-        //    or we need to manage dependencies for ranges we don't own in future epochs; this might be simplest
+        this.executeAt = executeAt;
+        Invariants.checkState(txnId.isVisible());
         this.adapter = node.coordinationAdapter(txnId, InitiateRecovery);
         this.node = node;
         this.ballot = ballot;
@@ -126,10 +116,8 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         this.txn = txn;
         this.route = route;
         this.callback = callback;
-        assert topologies.oldestEpoch() == topologies.currentEpoch() && topologies.currentEpoch() == txnId.epoch();
         this.tracker = new RecoveryTracker(topologies);
-        this.topology = topologies.current();
-        this.recoverOks = new RecoverOk[topology.nodes().size()];
+        this.recoverOks = new SortedListMap<>(topologies.nodes(), RecoverOk[]::new);
     }
 
     @Override
@@ -140,6 +128,10 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         {
             callback.accept(ProgressToken.APPLIED, null);
             node.agent().metricsEventsListener().onRecover(txnId, ballot);
+        }
+        else if (failure instanceof Redundant)
+        {
+            retry(((Redundant) failure).committedExecuteAt);
         }
         else
         {
@@ -157,30 +149,31 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     public static Recover recover(Node node, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback)
     {
-        return recover(node, txnId, txn, route, callback, node.topology().forEpoch(route, txnId.epoch()));
-    }
-
-    private static Recover recover(Node node, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
-    {
         Ballot ballot = new Ballot(node.uniqueNow());
-        return recover(node, ballot, txnId, txn, route, callback, topologies);
+        return recover(node, ballot, txnId, txn, route, callback);
     }
 
     private static Recover recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback)
     {
-        return recover(node, ballot, txnId, txn, route, callback, node.topology().forEpoch(route, txnId.epoch()));
+        return recover(node, ballot, txnId, txn, route, null, callback);
     }
 
-    private static Recover recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
+    public static Recover recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, BiConsumer<Outcome, Throwable> callback)
     {
-        Recover recover = new Recover(node, ballot, txnId, txn, route, callback, topologies);
+        Topologies topologies = node.topology().select(route, txnId, executeAt == null ? txnId : executeAt, QuorumEpochIntersections.recover);
+        return recover(node, topologies, ballot, txnId, txn, route, executeAt, callback);
+    }
+
+    private static Recover recover(Node node, Topologies topologies, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, Timestamp executeAt, BiConsumer<Outcome, Throwable> callback)
+    {
+        Recover recover = new Recover(node, topologies, ballot, txnId, txn, route, executeAt, callback);
         recover.start(topologies.nodes());
         return recover;
     }
 
     void start(Collection<Id> nodes)
     {
-        node.send(nodes, to -> new BeginRecovery(to, tracker.topologies(), txnId, txn, route, ballot), this);
+        node.send(nodes, to -> new BeginRecovery(to, tracker.topologies(), txnId, executeAt, txn, route, ballot), this);
     }
 
     @Override
@@ -189,8 +182,6 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         if (isDone || isBallotPromised)
             return;
 
-        if (debug != null) debug.put(from, reply);
-
         if (!reply.isOk())
         {
             accept(null, new Preempted(txnId, route.homeKey()));
@@ -198,9 +189,8 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         }
 
         RecoverOk ok = (RecoverOk) reply;
-        recoverOks[topology.nodes().find(from)] = ok;
-        boolean fastPath = ok.executeAt.compareTo(txnId) == 0;
-        if (tracker.recordSuccess(from, fastPath) == Success)
+        recoverOks.put(from, ok);
+        if (tracker.recordSuccess(from, ok.acceptsFastPath) == Success)
             recover();
     }
 
@@ -209,7 +199,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         Invariants.checkState(!isBallotPromised);
         isBallotPromised = true;
 
-        List<RecoverOk> recoverOkList = Arrays.asList(recoverOks);
+        List<RecoverOk> recoverOkList = recoverOks.valuesAsNullableList();
         RecoverOk acceptOrCommit = maxAccepted(recoverOkList);
         RecoverOk acceptOrCommitNotTruncated = acceptOrCommit == null || acceptOrCommit.status != Status.Truncated
                                                ? acceptOrCommit : maxAcceptedNotTruncated(recoverOkList);
@@ -236,8 +226,10 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                             node.agent().onUncaughtException(CoordinationFailed.wrap(withEpochFailure));
                             return;
                         }
+                        // TODO (required): if we have to calculate deps for any shard, should we first ensure they are stable?
+                        //   it should only be possible for a fast path decision, but we might have Stable in only one shard.
                         // TODO (future development correctness): when writes/result are partially replicated, need to confirm we have quorum of these
-                        persist(adapter, node, tracker.topologies(), route, txnId, txn, executeAt, stableDeps, acceptOrCommitNotTruncated.writes, acceptOrCommitNotTruncated.result, (ignored, failure) -> {
+                        adapter.persist(node, tracker.topologies(), route, txnId, txn, executeAt, stableDeps, acceptOrCommitNotTruncated.writes, acceptOrCommitNotTruncated.result, (ignored, failure) -> {
                             if (failure != null)
                                 node.agent().onUncaughtException(CoordinationFailed.wrap(withEpochFailure));
                         });
@@ -248,13 +240,15 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
                 case Stable:
                 {
+                    // TODO (required): if we have to calculate deps for any shard, should we first ensure they are stable?
+                    //   it should only be possible for a fast path decision, but we might have Stable in only one shard.
                     withCommittedDeps(executeAt, (stableDeps, withEpochFailure) -> {
                         if (withEpochFailure != null)
                         {
                             node.agent().onUncaughtException(CoordinationFailed.wrap(withEpochFailure));
                             return;
                         }
-                        execute(adapter, node, tracker.topologies(), route, RECOVER, txnId, txn, executeAt, stableDeps, this);
+                        adapter.execute(node, tracker.topologies(), route, RECOVER, txnId, txn, executeAt, stableDeps, this);
                     });
                     return;
                 }
@@ -262,13 +256,14 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 case PreCommitted:
                 case Committed:
                 {
+                    // TODO (expected): should we only ask for txns with t0 < t0' < t?
                     withCommittedDeps(executeAt, (committedDeps, withEpochFailure) -> {
                         if (withEpochFailure != null)
                         {
                             node.agent().onUncaughtException(CoordinationFailed.wrap(withEpochFailure));
                             return;
                         }
-                        stabilise(adapter, node, tracker.topologies(), route, ballot, txnId, txn, executeAt, committedDeps, this);
+                        adapter.stabilise(node, tracker.topologies(), route, ballot, txnId, txn, executeAt, committedDeps, this);
                     });
                     return;
                 }
@@ -297,37 +292,44 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
         if (acceptOrCommit != null)
         {
+            // TODO (required): match logic in Invalidate; we need to know which keys have been invalidated
+            Topologies topologies = tracker.topologies();
             boolean allShardsTruncated = true;
-            for (Shard shard : topology.shards())
+            for (int topologyIndex = 0 ; topologyIndex < topologies.size() ; ++topologyIndex)
             {
-                RecoverOk maxReply = maxAccepted(topology.nodes().select(recoverOks, shard.nodes));
-                allShardsTruncated &= maxReply.status == Status.Truncated;
-            }
-            if (allShardsTruncated)
-            {
-                // TODO (required, correctness): this is not a safe inference in the case of an ErasedOrInvalidOrVestigial response.
-                //   We need to tighten up the inference and spread of truncation/invalid outcomes.
-                //   In this case, at minimum this can lead to liveness violations as the home shard stops coordinating
-                //   a command that it hasn't invalidated, but nor is it possible to recover. This happens because
-                //   when the home shard shares all of its replicas with another shard that has autonomously invalidated
-                //   the transaction, so that all received InvalidateReply show truncation (when in fact this is only partial).
-                //   We could paper over this, but better to revisit and provide stronger invariants we can rely on.
-                isDone = true;
-                callback.accept(TRUNCATED_DURABLE_OR_INVALIDATED, null);
-                return;
+                Topology topology = topologies.get(topologyIndex);
+                for (Shard shard : topology.shards())
+                {
+                    RecoverOk maxReply = maxAccepted(recoverOks.select(shard.nodes));
+                    allShardsTruncated &= maxReply.status == Status.Truncated;
+                }
+                if (allShardsTruncated)
+                {
+                    // TODO (required, correctness): this is not a safe inference in the case of an ErasedOrInvalidOrVestigial response.
+                    //   We need to tighten up the inference and spread of truncation/invalid outcomes.
+                    //   In this case, at minimum this can lead to liveness violations as the home shard stops coordinating
+                    //   a command that it hasn't invalidated, but nor is it possible to recover. This happens because
+                    //   when the home shard shares all of its replicas with another shard that has autonomously invalidated
+                    //   the transaction, so that all received InvalidateReply show truncation (when in fact this is only partial).
+                    //   We could paper over this, but better to revisit and provide stronger invariants we can rely on.
+                    isDone = true;
+                    callback.accept(TRUNCATED_DURABLE_OR_INVALIDATED, null);
+                    return;
+                }
             }
         }
 
-        if (tracker.rejectsFastPath() || Stream.of(recoverOks).anyMatch(ok -> ok != null && ok.rejectsFastPath))
+        if (tracker.rejectsFastPath() || recoverOks.valuesAsNullableStream().anyMatch(ok -> ok != null && ok.rejectsFastPath))
         {
             invalidate();
             return;
         }
 
+        Invariants.checkState(executeAt == null || executeAt.equals(txnId));
         // should all be PreAccept
         Deps proposeDeps = LatestDeps.mergeProposal(recoverOkList, ok -> ok == null ? null : ok.deps);
-        Deps earlierAcceptedNoWitness = Deps.merge(recoverOkList, ok -> ok == null ? null : ok.earlierAcceptedNoWitness);
-        Deps earlierCommittedWitness = Deps.merge(recoverOkList, ok -> ok == null ? null : ok.earlierCommittedWitness);
+        Deps earlierAcceptedNoWitness = Deps.merge(recoverOkList, recoverOkList.size(), List::get, ok -> ok.earlierAcceptedNoWitness);
+        Deps earlierCommittedWitness = Deps.merge(recoverOkList, recoverOkList.size(), List::get, ok -> ok.earlierCommittedWitness);
         earlierAcceptedNoWitness = earlierAcceptedNoWitness.without(earlierCommittedWitness::contains);
         if (!earlierAcceptedNoWitness.isEmpty())
         {
@@ -342,29 +344,27 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             });
             return;
         }
-        // TODO (required): if there are epochs before txnId.epoch that haven't propagated their dependencies we potentially have a problem
-        //                  as we may propose deps that don't witness a transaction they should witness.
-        //                  in this case we should run GetDeps before proposing
+
         propose(txnId, proposeDeps);
     }
 
     private void withCommittedDeps(Timestamp executeAt, BiConsumer<Deps, Throwable> withDeps)
     {
-        LatestDeps.MergedCommitResult merged = LatestDeps.mergeCommit(txnId, executeAt, Arrays.asList(recoverOks), ok -> ok == null ? null : ok.deps);
+        LatestDeps.MergedCommitResult merged = LatestDeps.mergeCommit(txnId, executeAt, recoverOks.valuesAsNullableList(), ok -> ok == null ? null : ok.deps);
         node.withEpoch(executeAt.epoch(), (ignored, withEpochFailure) -> {
             if (withEpochFailure != null)
             {
                 withDeps.accept(null, CoordinationFailed.wrap(withEpochFailure));
                 return;
             }
-            Seekables<?, ?> missing = txn.keys().without(merged.sufficientFor);
+            Unseekables<?> missing = route.without(merged.sufficientFor);
             if (missing.isEmpty())
             {
                 withDeps.accept(merged.deps, null);
             }
             else
             {
-                CollectCalculatedDeps.withCalculatedDeps(node, txnId, route, missing.toParticipants(), missing, executeAt, (extraDeps, fail) -> {
+                CollectCalculatedDeps.withCalculatedDeps(node, txnId, route, missing, executeAt, (extraDeps, fail) -> {
                     if (fail != null)
                     {
                         isDone = true;
@@ -391,7 +391,10 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
     {
         // If not accepted then the executeAt is not consistent cross the peers and likely different on every node.  There is also an edge case
         // when ranges are removed from the topology, during this case the executeAt won't know the ranges and the invalidate commit will fail.
-        Timestamp invalidateUntil = Stream.of(recoverOks).map(ok -> ok == null ? null : ok.status.hasBeen(Status.Accepted) ? ok.executeAt : ok.txnId).reduce(txnId, Timestamp::nonNullOrMax);
+        Timestamp invalidateUntil = recoverOks.valuesAsNullableStream()
+                                              .map(ok -> ok == null ? null : ok.status.hasBeen(Status.Accepted) ? ok.executeAt : ok.txnId)
+                                              .reduce(txnId, Timestamp::nonNullOrMax);
+
         node.withEpoch(invalidateUntil.epoch(), (ignored, withEpochFailure) -> {
             if (withEpochFailure != null)
             {
@@ -401,7 +404,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             Commit.Invalidate.commitInvalidate(node, txnId, route, invalidateUntil);
         });
         isDone = true;
-        locallyInvalidateAndCallback(node, txnId, invalidateUntil, route, ProgressToken.INVALIDATED, callback);
+        locallyInvalidateAndCallback(node, txnId, txnId, invalidateUntil, route, ProgressToken.INVALIDATED, callback);
     }
 
     private void propose(Timestamp executeAt, Deps deps)
@@ -412,13 +415,21 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 this.accept(null, CoordinationFailed.wrap(withEpochFailure));
                 return;
             }
-            Invoke.propose(adapter, node, route, ballot, txnId, txn, executeAt, deps, this);
+            adapter.propose(node, null, route, ballot, txnId, txn, executeAt, deps, this);
         });
     }
 
     private void retry()
     {
-        Recover.recover(node, ballot, txnId, txn, route, callback, tracker.topologies());
+        retry(executeAt);
+    }
+
+    private void retry(Timestamp executeAt)
+    {
+        Topologies topologies = tracker.topologies();
+        if (executeAt != null && executeAt.epoch() != (this.executeAt == null ? txnId : this.executeAt).epoch())
+            topologies = node.topology().select(route, txnId, executeAt, QuorumEpochIntersections.recover);
+        Recover.recover(node, topologies, ballot, txnId, txn, route, executeAt, callback);
     }
 
     @Override

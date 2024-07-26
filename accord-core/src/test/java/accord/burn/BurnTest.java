@@ -37,6 +37,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -59,8 +60,9 @@ import accord.impl.TopologyFactory;
 import accord.impl.basic.Cluster;
 import accord.impl.basic.Cluster.Stats;
 import accord.impl.basic.Packet;
+import accord.impl.basic.PendingQueue;
 import accord.impl.basic.PendingRunnable;
-import accord.impl.basic.PropagatingPendingQueue;
+import accord.impl.basic.MonitoredPendingQueue;
 import accord.impl.basic.RandomDelayQueue;
 import accord.impl.basic.RandomDelayQueue.Factory;
 import accord.impl.basic.SimulatedDelayedExecutorService;
@@ -287,35 +289,24 @@ public class BurnTest
     @SuppressWarnings("unused")
     static void reconcile(long seed, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency) throws ExecutionException, InterruptedException
     {
-        ReconcilingLogger logReconciler = new ReconcilingLogger(logger);
-
         RandomSource random1 = new DefaultRandom(), random2 = new DefaultRandom();
+
         random1.setSeed(seed);
         random2.setSeed(seed);
         ExecutorService exec = Executors.newFixedThreadPool(2);
-        Future<?> f1;
-        try (@SuppressWarnings("unused") ReconcilingLogger.Session session = logReconciler.nextSession())
-        {
-            f1 = exec.submit(() -> burn(random1, topologyFactory, clients, nodes, keyCount, operations, concurrency));
-        }
-
-        Future<?> f2;
-        try (@SuppressWarnings("unused") ReconcilingLogger.Session session = logReconciler.nextSession())
-        {
-            f2 = exec.submit(() -> burn(random2, topologyFactory, clients, nodes, keyCount, operations, concurrency));
-        }
+        RandomDelayQueue.ReconcilingQueueFactory factory = new RandomDelayQueue.ReconcilingQueueFactory(seed);
+        Future<?> f1 = exec.submit(() -> burn(random1, topologyFactory, clients, nodes, keyCount, operations, concurrency, factory.get(true)));
+        Future<?> f2 = exec.submit(() -> burn(random2, topologyFactory, clients, nodes, keyCount, operations, concurrency, factory.get(false)));
         exec.shutdown();
         f1.get();
         f2.get();
-
-        assert logReconciler.reconcile();
     }
 
-    static void burn(RandomSource random, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency)
+    static void burn(RandomSource random, TopologyFactory topologyFactory, List<Id> clients, List<Id> nodes, int keyCount, int operations, int concurrency, PendingQueue pendingQueue)
     {
         List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
-        RandomDelayQueue delayQueue = new Factory(random).get();
-        PropagatingPendingQueue queue = new PropagatingPendingQueue(failures, delayQueue);
+        AtomicLong progress = new AtomicLong();
+        MonitoredPendingQueue queue = new MonitoredPendingQueue(failures, progress, 5L, TimeUnit.MINUTES, pendingQueue);
         long startNanos = System.nanoTime();
         long startLogicalMillis = queue.nowInMillis();
         Consumer<Runnable> retryBootstrap;
@@ -422,6 +413,7 @@ public class BurnTest
                     return;
                 }
 
+                progress.incrementAndGet();
                 switch (reply.status())
                 {
                     default: throw new AssertionError("Unhandled status: " + reply.status());
@@ -539,6 +531,7 @@ public class BurnTest
         int count = 1;
         int operations = 1000;
         Long overrideSeed = null;
+        boolean reconcile = false;
         LongSupplier seedGenerator = ThreadLocalRandom.current()::nextLong;
         boolean hasOverriddenSeed = false;
         for (int i = 0 ; i < args.length ; i += 2)
@@ -560,13 +553,24 @@ public class BurnTest
                 case "-o":
                     operations = Integer.parseInt(args[i + 1]);
                     break;
+                case "-r":
+                    reconcile = true;
+                    --i;
+                    break;
                 case "--loop-seed":
                     seedGenerator = new DefaultRandom(Long.parseLong(args[i + 1]))::nextLong;
             }
         }
         while (count-- > 0)
         {
-            run(overrideSeed != null ? overrideSeed : seedGenerator.getAsLong(), operations);
+            if (!reconcile)
+            {
+                run(overrideSeed != null ? overrideSeed : seedGenerator.getAsLong(), operations);
+            }
+            else
+            {
+                reconcile(overrideSeed != null ? overrideSeed : seedGenerator.getAsLong(), operations);
+            }
         }
     }
 
@@ -618,6 +622,39 @@ public class BurnTest
             List<Id> nodes = generateIds(false, random.nextInt(rf, rf * 3));
 
             burn(random, new TopologyFactory(rf, ranges(0, HASH_RANGE_START, HASH_RANGE_END, random.nextInt(Math.max(nodes.size() + 1, rf), nodes.size() * 3))),
+                    clients,
+                    nodes,
+                    5 + random.nextInt(15),
+                    operations,
+                    10 + random.nextInt(30),
+                 new Factory(random).get());
+        }
+        catch (Throwable t)
+        {
+            logger.error("Exception running burn test for seed {}:", seed, t);
+            throw SimulationException.wrap(seed, t);
+        }
+    }
+
+    private static void reconcile(long seed, int operations)
+    {
+        logger.info("Seed: {}", seed);
+        Cluster.trace.trace("Seed: {}", seed);
+        RandomSource random = new DefaultRandom(seed);
+        try
+        {
+            List<Id> clients = generateIds(true, 1 + random.nextInt(4));
+            int rf;
+            float chance = random.nextFloat();
+            if (chance < 0.2f)      { rf = random.nextInt(2, 9); }
+            else if (chance < 0.4f) { rf = 3; }
+            else if (chance < 0.7f) { rf = 5; }
+            else if (chance < 0.8f) { rf = 7; }
+            else                    { rf = 9; }
+
+            List<Id> nodes = generateIds(false, random.nextInt(rf, rf * 3));
+
+            reconcile(seed, new TopologyFactory(rf, ranges(0, HASH_RANGE_START, HASH_RANGE_END, random.nextInt(Math.max(nodes.size() + 1, rf), nodes.size() * 3))),
                     clients,
                     nodes,
                     5 + random.nextInt(15),

@@ -27,7 +27,8 @@ import accord.local.Node.Id;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
+import accord.primitives.SaveStatus;
+import accord.local.StoreParticipants;
 import accord.messages.ReadData.CommitOrReadNack;
 import accord.messages.ReadData.ReadReply;
 import accord.primitives.Ballot;
@@ -38,7 +39,6 @@ import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Route;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -49,7 +49,7 @@ import accord.utils.Invariants;
 import accord.utils.TriFunction;
 import org.agrona.collections.IntHashSet;
 
-import static accord.local.SaveStatus.Committed;
+import static accord.primitives.SaveStatus.Committed;
 import static accord.messages.Commit.Kind.StableWithTxnAndDeps;
 import static accord.messages.Commit.WithDeps.HasDeps;
 import static accord.messages.Commit.WithDeps.NoDeps;
@@ -57,20 +57,19 @@ import static accord.messages.Commit.WithTxn.HasNewlyOwnedTxnRanges;
 import static accord.messages.Commit.WithTxn.HasTxn;
 import static accord.messages.Commit.WithTxn.NoTxn;
 
-public class Commit extends TxnRequest<CommitOrReadNack>
+public class Commit extends TxnRequest.WithUnsynced<CommitOrReadNack>
 {
     public static class SerializerSupport
     {
-        public static Commit create(TxnId txnId, Route<?> scope, long waitForEpoch, Kind kind, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
+        public static Commit create(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, Kind kind, Ballot ballot, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
         {
-            return new Commit(kind, txnId, scope, waitForEpoch, ballot, executeAt, keys, partialTxn, partialDeps, fullRoute, readData);
+            return new Commit(kind, txnId, scope, waitForEpoch, minEpoch, ballot, executeAt, partialTxn, partialDeps, fullRoute, readData);
         }
     }
 
     public final Kind kind;
     public final Ballot ballot;
     public final Timestamp executeAt;
-    public final Seekables<?, ?> keys;
     // TODO (expected): share keys with partialTxn and partialDeps - in memory and on wire
     public final @Nullable PartialTxn partialTxn;
     public final @Nullable PartialDeps partialDeps;
@@ -104,6 +103,7 @@ public class Commit extends TxnRequest<CommitOrReadNack>
     // TODO (low priority, clarity): cleanup passing of topologies here - maybe fetch them afresh from Node?
     //                               Or perhaps introduce well-named classes to represent different topology combinations
 
+    // TODO (required): must send to prior epochs for recovery decisions in those epochs
     public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Ballot ballot, Timestamp executeAt, Deps deps, ReadData read)
     {
         this(kind, to, coordinateTopology, topologies, txnId, txn, route, ballot, executeAt, deps, read == null ? null : (u1, u2, u3) -> read);
@@ -116,7 +116,7 @@ public class Commit extends TxnRequest<CommitOrReadNack>
 
     public Commit(Kind kind, Id to, Topology coordinateTopology, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route, Ballot ballot, Timestamp executeAt, Deps deps, TriFunction<Txn, Route<?>, PartialDeps, ReadData> toExecuteFactory)
     {
-        super(to, topologies, route, txnId);
+        super(to, topologies, txnId, route);
         this.ballot = ballot;
 
         FullRoute<?> sendRoute = null;
@@ -138,20 +138,18 @@ public class Commit extends TxnRequest<CommitOrReadNack>
 
         this.kind = kind;
         this.executeAt = executeAt;
-        this.keys = txn.keys().intersecting(scope);
         this.partialTxn = partialTxn;
         this.partialDeps = deps.intersecting(scope);
         this.route = sendRoute;
         this.readData = toExecuteFactory == null ? null : toExecuteFactory.apply(partialTxn != null ? partialTxn : txn, scope, partialDeps);
     }
 
-    protected Commit(Kind kind, TxnId txnId, Route<?> scope, long waitForEpoch, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
+    protected Commit(Kind kind, TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, Ballot ballot, Timestamp executeAt, @Nullable PartialTxn partialTxn, PartialDeps partialDeps, @Nullable FullRoute<?> fullRoute, @Nullable ReadData readData)
     {
-        super(txnId, scope, waitForEpoch);
+        super(txnId, scope, waitForEpoch, minEpoch);
         this.kind = kind;
         this.ballot = ballot;
         this.executeAt = executeAt;
-        this.keys = keys;
         this.partialTxn = partialTxn;
         this.partialDeps = partialDeps;
         this.route = fullRoute;
@@ -229,9 +227,9 @@ public class Commit extends TxnRequest<CommitOrReadNack>
     }
 
     @Override
-    public Seekables<?, ?> keys()
+    public Unseekables<?> keys()
     {
-        return keys;
+        return scope;
     }
 
     @Override
@@ -251,9 +249,10 @@ public class Commit extends TxnRequest<CommitOrReadNack>
     public synchronized CommitOrReadNack apply(SafeCommandStore safeStore)
     {
         Route<?> route = this.route != null ? this.route : scope;
-        SafeCommand safeCommand = safeStore.get(txnId, executeAt, route);
+        StoreParticipants participants = StoreParticipants.update(safeStore, route, txnId.epoch(), txnId, executeAt.epoch());
+        SafeCommand safeCommand = safeStore.get(txnId, participants);
 
-        switch (Commands.commit(safeStore, safeCommand, kind.saveStatus, ballot, txnId, route, partialTxn, executeAt, partialDeps))
+        switch (Commands.commit(safeStore, safeCommand, participants, kind.saveStatus, ballot, txnId, route, partialTxn, executeAt, partialDeps))
         {
             default:
             case Success:
@@ -312,18 +311,18 @@ public class Commit extends TxnRequest<CommitOrReadNack>
     {
         public static class SerializerSupport
         {
-            public static Invalidate create(TxnId txnId, Unseekables<?> scope, long waitForEpoch, long invalidateUntilEpoch)
+            public static Invalidate create(TxnId txnId, Participants<?> scope, long waitForEpoch, long invalidateUntilEpoch)
             {
                 return new Invalidate(txnId, scope, waitForEpoch, invalidateUntilEpoch);
             }
         }
 
-        public static void commitInvalidate(Node node, TxnId txnId, Unseekables<?> inform, Timestamp until)
+        public static void commitInvalidate(Node node, TxnId txnId, Participants<?> inform, Timestamp until)
         {
             commitInvalidate(node, txnId, inform, until.epoch());
         }
 
-        public static void commitInvalidate(Node node, TxnId txnId, Unseekables<?> inform, long untilEpoch)
+        public static void commitInvalidate(Node node, TxnId txnId, Participants<?> inform, long untilEpoch)
         {
             // TODO (expected, safety): this kind of check needs to be inserted in all equivalent methods
             Invariants.checkState(untilEpoch >= txnId.epoch());
@@ -332,31 +331,27 @@ public class Commit extends TxnRequest<CommitOrReadNack>
             commitInvalidate(node, commitTo, txnId, inform);
         }
 
-        public static void commitInvalidate(Node node, Topologies commitTo, TxnId txnId, Unseekables<?> inform)
+        public static void commitInvalidate(Node node, Topologies commitTo, TxnId txnId, Participants<?> inform)
         {
-            for (Node.Id to : commitTo.nodes())
-            {
-                Invalidate send = new Invalidate(to, commitTo, txnId, inform);
-                node.send(to, send);
-            }
+            node.send(commitTo.nodes(), to -> new Invalidate(to, commitTo, txnId, inform));
         }
 
         public final TxnId txnId;
-        public final Unseekables<?> scope;
+        public final Participants<?> scope;
         public final long waitForEpoch;
         public final long invalidateUntilEpoch;
 
-        Invalidate(Id to, Topologies topologies, TxnId txnId, Unseekables<?> scope)
+        Invalidate(Id to, Topologies topologies, TxnId txnId, Participants<?> scope)
         {
             this.txnId = txnId;
             int latestRelevantIndex = latestRelevantEpochIndex(to, topologies, scope);
-            this.scope = computeScope(to, topologies, (Unseekables)scope, latestRelevantIndex, Unseekables::slice, Unseekables::with);
+            this.scope = computeScope(to, topologies, (Participants)scope, latestRelevantIndex, Participants::slice, Participants::with);
             this.waitForEpoch = computeWaitForEpoch(to, topologies, latestRelevantIndex);
             // TODO (expected): make sure we're picking the right upper limit - it can mean future owners that have never witnessed the command are invalidated
             this.invalidateUntilEpoch = topologies.currentEpoch();
         }
 
-        Invalidate(TxnId txnId, Unseekables<?> scope, long waitForEpoch, long invalidateUntilEpoch)
+        Invalidate(TxnId txnId, Participants<?> scope, long waitForEpoch, long invalidateUntilEpoch)
         {
             this.txnId = txnId;
             this.scope = scope;
@@ -382,7 +377,8 @@ public class Commit extends TxnRequest<CommitOrReadNack>
             node.forEachLocal(this, scope, txnId.epoch(), invalidateUntilEpoch, safeStore -> {
                 // it's fine for this to operate on a non-participating home key, since invalidation is a terminal state,
                 // so it doesn't matter if we resurrect a redundant entry
-                Commands.commitInvalidate(safeStore, safeStore.get(txnId, txnId, scope), scope);
+                StoreParticipants participants = StoreParticipants.invalidate(safeStore, scope, txnId);
+                Commands.commitInvalidate(safeStore, safeStore.get(txnId, participants), scope);
             }).begin(node.agent());
         }
 

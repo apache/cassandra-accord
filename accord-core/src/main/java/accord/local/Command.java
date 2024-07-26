@@ -24,18 +24,17 @@ import java.util.List;
 import java.util.Objects;
 import javax.annotation.Nullable;
 
-import accord.api.Key;
 import accord.api.Result;
 import accord.api.RoutingKey;
 import accord.api.VisibleForImplementation;
-import accord.local.Status.Durability;
-import accord.local.Status.Known;
+import accord.primitives.SaveStatus;
+import accord.primitives.Status;
+import accord.primitives.Status.Durability;
+import accord.primitives.Known;
 import accord.local.cfk.CommandsForKey;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
-import accord.primitives.FullRoute;
 import accord.primitives.KeyDeps;
-import accord.primitives.Keys;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
@@ -43,7 +42,7 @@ import accord.primitives.RangeDeps;
 import accord.primitives.Ranges;
 import accord.primitives.Routable;
 import accord.primitives.Route;
-import accord.primitives.Seekables;
+import accord.primitives.RoutingKeys;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -55,17 +54,19 @@ import accord.utils.IndexedTriConsumer;
 import accord.utils.Invariants;
 import accord.utils.SimpleBitSet;
 
+import javax.annotation.Nonnull;
+
 import static accord.local.Command.AbstractCommand.validate;
-import static accord.local.SaveStatus.AcceptedInvalidate;
-import static accord.local.SaveStatus.ErasedOrInvalidOrVestigial;
-import static accord.local.SaveStatus.Uninitialised;
-import static accord.local.Status.Durability.Local;
-import static accord.local.Status.Durability.NotDurable;
-import static accord.local.Status.Durability.ShardUniversal;
-import static accord.local.Status.Durability.UniversalOrInvalidated;
-import static accord.local.Status.Invalidated;
-import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
-import static accord.local.Status.Stable;
+import static accord.primitives.SaveStatus.AcceptedInvalidate;
+import static accord.primitives.SaveStatus.ErasedOrVestigial;
+import static accord.primitives.SaveStatus.Uninitialised;
+import static accord.primitives.Status.Durability.Local;
+import static accord.primitives.Status.Durability.NotDurable;
+import static accord.primitives.Status.Durability.ShardUniversal;
+import static accord.primitives.Status.Durability.UniversalOrInvalidated;
+import static accord.primitives.Status.Invalidated;
+import static accord.primitives.Known.KnownExecuteAt.ExecuteAtKnown;
+import static accord.primitives.Status.Stable;
 import static accord.primitives.Routable.Domain.Range;
 import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.illegalArgument;
@@ -79,7 +80,7 @@ public abstract class Command implements CommonAttributes
 {
     private static Durability durability(Durability durability, SaveStatus status)
     {
-        if (durability == NotDurable && status.compareTo(SaveStatus.PreApplied) >= 0 && status.compareTo(ErasedOrInvalidOrVestigial) < 0)
+        if (durability == NotDurable && status.compareTo(SaveStatus.PreApplied) >= 0 && status.compareTo(ErasedOrVestigial) < 0)
             return Local; // not necessary anywhere, but helps for logical consistency
         return durability;
     }
@@ -173,10 +174,10 @@ public abstract class Command implements CommonAttributes
             case TruncatedApply:
             case TruncatedApplyWithDeps:
             case TruncatedApplyWithOutcome:
-                if (txnId.kind().awaitsOnlyDeps())
+                if (txnId.awaitsOnlyDeps())
                     return validateCommandClass(status, TruncatedAwaitsOnlyDeps.class, klass);
             case Erased:
-            case ErasedOrInvalidOrVestigial:
+            case ErasedOrVestigial:
             case Invalidated:
                 return validateCommandClass(status, Truncated.class, klass);
             default:
@@ -189,18 +190,15 @@ public abstract class Command implements CommonAttributes
         private final TxnId txnId;
         private final SaveStatus status;
         private final Durability durability;
-        private final @Nullable Route<?> route;
-        // TODO (expected): more consistent handling of keys for transactions that only *may* intersect a command store, as have both additionalKeysOrRanges AND forLocalEpoch to separately handle the problem
-        private final @Nullable Seekables<?, ?> additionalKeysOrRanges;
+        private final @Nonnull StoreParticipants participants;
         private final Ballot promised;
 
-        private AbstractCommand(TxnId txnId, SaveStatus status, Durability durability, @Nullable Route<?> route, @Nullable Seekables<?, ?> additionalKeysOrRanges, Ballot promised)
+        private AbstractCommand(TxnId txnId, SaveStatus status, Durability durability, @Nonnull StoreParticipants participants, Ballot promised)
         {
             this.txnId = txnId;
             this.status = validateCommandClass(txnId, status, getClass());
             this.durability = durability;
-            this.route = route;
-            this.additionalKeysOrRanges = additionalKeysOrRanges;
+            this.participants = participants;
             this.promised = promised;
         }
 
@@ -209,8 +207,7 @@ public abstract class Command implements CommonAttributes
             this.txnId = common.txnId();
             this.status = validateCommandClass(txnId, status, getClass());
             this.durability = common.durability();
-            this.route = common.route();
-            this.additionalKeysOrRanges = common.additionalKeysOrRanges();
+            this.participants = common.participants();
             this.promised = promised;
         }
 
@@ -223,8 +220,7 @@ public abstract class Command implements CommonAttributes
             return txnId().equals(command.txnId())
                     && saveStatus() == command.saveStatus()
                     && durability() == command.durability()
-                    && Objects.equals(route(), command.route())
-                    && Objects.equals(additionalKeysOrRanges, command.additionalKeysOrRanges())
+                    && Objects.equals(participants(), command.participants())
                     && Objects.equals(promised(), command.promised());
         }
 
@@ -241,9 +237,9 @@ public abstract class Command implements CommonAttributes
         }
 
         @Override
-        public final Route<?> route()
+        public final StoreParticipants participants()
         {
-            return route;
+            return participants;
         }
 
         @Override
@@ -262,12 +258,6 @@ public abstract class Command implements CommonAttributes
         public final SaveStatus saveStatus()
         {
             return status;
-        }
-
-        @Override
-        public @Nullable Seekables<?, ?> additionalKeysOrRanges()
-        {
-            return additionalKeysOrRanges;
         }
 
         public static <T extends AbstractCommand> T validate(T validate)
@@ -302,6 +292,7 @@ public abstract class Command implements CommonAttributes
                     default: throw new AssertionError("Unhandled KnownExecuteAt: " + known.executeAt);
                     case ExecuteAtErased:
                     case ExecuteAtUnknown:
+                        Invariants.checkState(executeAt == null || executeAt.compareTo(validate.txnId()) >= 0);
                         break;
                     case ExecuteAtProposed:
                     case ExecuteAtKnown:
@@ -389,7 +380,7 @@ public abstract class Command implements CommonAttributes
      */
     @Override
     @Nullable
-    public abstract Route<?> route();
+    public final Route<?> route() { return participants().route(); }
 
     /**
      * We require that this is a FullRoute for all states where isDefinitionKnown().
@@ -403,14 +394,13 @@ public abstract class Command implements CommonAttributes
      *    or any route will do
      */
     @Override
-    @Nullable
-    public abstract Participants<?> participants();
+    public abstract StoreParticipants participants();
 
     public Participants<?> maxContactable()
     {
         Route<?> route = route();
         if (route != null) return route.withHomeKey();
-        else return participants();
+        else return participants().hasTouched();
     }
 
     /**
@@ -470,7 +460,6 @@ public abstract class Command implements CommonAttributes
 
     @Override
     public abstract PartialTxn partialTxn();
-    public abstract Seekables<?, ?> keysOrRanges();
 
     @Override
     public abstract @Nullable PartialDeps partialDeps();
@@ -602,18 +591,14 @@ public abstract class Command implements CommonAttributes
 
     public static class NotDefined extends AbstractCommand
     {
-        final Participants<?> participants;
-        NotDefined(TxnId txnId, SaveStatus status, Durability durability, @Nullable Route<?> route, @Nullable Participants<?> participants, @Nullable Seekables<?, ?> additionalKeysOrRanges, Ballot promised)
+        NotDefined(TxnId txnId, SaveStatus status, Durability durability, @Nonnull StoreParticipants participants, Ballot promised)
         {
-            super(txnId, status, durability, route, additionalKeysOrRanges, promised);
-            this.participants = participants;
-            Invariants.checkState(route == participants || route == null);
+            super(txnId, status, durability, participants, promised);
         }
 
         NotDefined(CommonAttributes common, SaveStatus status, Ballot promised)
         {
             super(common, status, promised);
-            participants = common.participants();
         }
 
         @Override
@@ -629,14 +614,7 @@ public abstract class Command implements CommonAttributes
 
         public static NotDefined uninitialised(TxnId txnId)
         {
-            return validate(new NotDefined(txnId, Uninitialised, NotDurable, null, null, null, Ballot.ZERO));
-        }
-
-        @Nullable
-        @Override
-        public Participants<?> participants()
-        {
-            return participants;
+            return validate(new NotDefined(txnId, Uninitialised, NotDurable, StoreParticipants.empty(txnId), Ballot.ZERO));
         }
 
         @Override
@@ -655,12 +633,6 @@ public abstract class Command implements CommonAttributes
         public PartialTxn partialTxn()
         {
             return null;
-        }
-
-        @Override
-        public Seekables<?, ?> keysOrRanges()
-        {
-            return additionalKeysOrRanges();
         }
 
         @Override
@@ -689,9 +661,9 @@ public abstract class Command implements CommonAttributes
             this.result = result;
         }
 
-        public Truncated(TxnId txnId, SaveStatus saveStatus, Durability durability, @Nullable Route<?> route, @Nullable Timestamp executeAt, @Nullable Writes writes, @Nullable Result result)
+        public Truncated(TxnId txnId, SaveStatus saveStatus, Durability durability, @Nonnull StoreParticipants participants, @Nullable Timestamp executeAt, @Nullable Writes writes, @Nullable Result result)
         {
-            super(txnId, saveStatus, durability, route, null, Ballot.MAX);
+            super(txnId, saveStatus, durability, participants, Ballot.MAX);
             this.executeAt = executeAt;
             this.writes = writes;
             this.result = result;
@@ -712,22 +684,22 @@ public abstract class Command implements CommonAttributes
         public static Truncated erased(Command command)
         {
             Durability durability = Durability.mergeAtLeast(command.durability(), UniversalOrInvalidated);
-            return erased(command.txnId(), durability, command.route());
+            return erased(command.txnId(), durability, command.participants());
         }
 
-        public static Truncated erased(TxnId txnId, Status.Durability durability, Route<?> route)
+        public static Truncated erased(TxnId txnId, Status.Durability durability, StoreParticipants participants)
         {
-            return validate(new Truncated(txnId, SaveStatus.Erased, durability, route, null, null, null));
+            return validate(new Truncated(txnId, SaveStatus.Erased, durability, participants, null, null, null));
         }
 
         public static Truncated erasedOrInvalidOrVestigial(Command command)
         {
-            return erasedOrInvalidOrVestigial(command.txnId(), command.durability(), command.route());
+            return erasedOrInvalidOrVestigial(command.txnId(), command.durability(), command.participants());
         }
 
-        public static Truncated erasedOrInvalidOrVestigial(TxnId txnId, Status.Durability durability, Route<?> route)
+        public static Truncated erasedOrInvalidOrVestigial(TxnId txnId, Status.Durability durability, StoreParticipants participants)
         {
-            return validate(new Truncated(txnId, SaveStatus.ErasedOrInvalidOrVestigial, durability, route, null, null, null));
+            return validate(new Truncated(txnId, SaveStatus.ErasedOrVestigial, durability, participants, null, null, null));
         }
 
         public static Truncated truncatedApply(Command command)
@@ -735,43 +707,44 @@ public abstract class Command implements CommonAttributes
             return truncatedApply(command, null);
         }
 
-        public static Truncated truncatedApply(Command command, @Nullable FullRoute<?> route)
+        public static Truncated truncatedApply(Command command, @Nullable StoreParticipants participants)
         {
             Invariants.checkArgument(command.known().executeAt.isDecidedAndKnownToExecute());
-            if (route == null) route = Route.castToNonNullFullRoute(command.route());
+            if (participants == null) participants = command.participants();
+            else participants = command.participants().supplement(participants);
             Durability durability = Durability.mergeAtLeast(command.durability(), ShardUniversal);
-            if (command.txnId().kind().awaitsOnlyDeps())
+            if (command.txnId().awaitsOnlyDeps())
             {
                 Timestamp executesAtLeast = command.hasBeen(Stable) ? command.executesAtLeast() : null;
-                return validate(new TruncatedAwaitsOnlyDeps(command.txnId(), SaveStatus.TruncatedApply, durability, route, command.executeAt(), null, null, executesAtLeast));
+                return validate(new TruncatedAwaitsOnlyDeps(command.txnId(), SaveStatus.TruncatedApply, durability, participants, command.executeAt(), null, null, executesAtLeast));
             }
-            return validate(new Truncated(command.txnId(), SaveStatus.TruncatedApply, durability, route, command.executeAt(), null, null));
+            return validate(new Truncated(command.txnId(), SaveStatus.TruncatedApply, durability, participants, command.executeAt(), null, null));
         }
 
         public static Truncated truncatedApplyWithOutcome(Executed command)
         {
             Durability durability = Durability.mergeAtLeast(command.durability(), ShardUniversal);
-            if (command.txnId().kind().awaitsOnlyDeps())
-                return validate(new TruncatedAwaitsOnlyDeps(command.txnId(), SaveStatus.TruncatedApplyWithOutcome, durability, command.route(), command.executeAt(), command.writes, command.result, command.executesAtLeast()));
-            return validate(new Truncated(command.txnId(), SaveStatus.TruncatedApplyWithOutcome, durability, command.route(), command.executeAt(), command.writes, command.result));
+            if (command.txnId().awaitsOnlyDeps())
+                return validate(new TruncatedAwaitsOnlyDeps(command.txnId(), SaveStatus.TruncatedApplyWithOutcome, durability, command.participants(), command.executeAt(), command.writes, command.result, command.executesAtLeast()));
+            return validate(new Truncated(command.txnId(), SaveStatus.TruncatedApplyWithOutcome, durability, command.participants(), command.executeAt(), command.writes, command.result));
         }
 
         public static Truncated truncatedApply(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result)
         {
-            Invariants.checkArgument(!common.txnId().kind().awaitsOnlyDeps());
+            Invariants.checkArgument(!common.txnId().awaitsOnlyDeps());
             Durability durability = checkTruncatedApplyInvariants(common, saveStatus, executeAt);
-            return validate(new Truncated(common.txnId(), saveStatus, durability, common.route(), executeAt, writes, result));
+            return validate(new Truncated(common.txnId(), saveStatus, durability, common.participants(), executeAt, writes, result));
         }
 
         public static Truncated truncatedApply(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt, Writes writes, Result result, @Nullable Timestamp dependencyExecutesAt)
         {
-            if (!common.txnId().kind().awaitsOnlyDeps())
+            if (!common.txnId().awaitsOnlyDeps())
             {
                 Invariants.checkState(dependencyExecutesAt == null);
                 return truncatedApply(common, saveStatus, executeAt, writes, result);
             }
             Durability durability = checkTruncatedApplyInvariants(common, saveStatus, executeAt);
-            return validate(new TruncatedAwaitsOnlyDeps(common.txnId(), saveStatus, durability, common.route(), executeAt, writes, result, dependencyExecutesAt));
+            return validate(new TruncatedAwaitsOnlyDeps(common.txnId(), saveStatus, durability, common.participants(), executeAt, writes, result, dependencyExecutesAt));
         }
 
         private static Durability checkTruncatedApplyInvariants(CommonAttributes common, SaveStatus saveStatus, Timestamp executeAt)
@@ -791,14 +764,7 @@ public abstract class Command implements CommonAttributes
         {
             // TODO (expected): migrate to using null for executeAt when invalidated
             // TODO (expected): is UniversalOrInvalidated correct here? Should we have a lower implication pure Invalidated?
-            return validate(new Truncated(txnId, SaveStatus.Invalidated, UniversalOrInvalidated, null, Timestamp.NONE, null, null));
-        }
-
-        @Nullable
-        @Override
-        public final Participants<?> participants()
-        {
-            return route();
+            return validate(new Truncated(txnId, SaveStatus.Invalidated, UniversalOrInvalidated, StoreParticipants.empty(txnId), Timestamp.NONE, null, null));
         }
 
         @Override
@@ -832,12 +798,6 @@ public abstract class Command implements CommonAttributes
         }
 
         @Override
-        public Seekables<?, ?> keysOrRanges()
-        {
-            return null;
-        }
-
-        @Override
         public @Nullable PartialDeps partialDeps()
         {
             return null;
@@ -846,8 +806,7 @@ public abstract class Command implements CommonAttributes
         @Override
         public Command updateAttributes(CommonAttributes attrs, Ballot promised)
         {
-            // TODO (now): invoke listeners precisely once when we adopt this state, then we can simply return `this`
-            return validate(new Truncated(txnId(), saveStatus(), attrs.durability(), attrs.route(), executeAt, writes, result));
+            return validate(new Truncated(txnId(), saveStatus(), attrs.durability(), attrs.participants(), executeAt, writes, result));
         }
     }
 
@@ -865,9 +824,9 @@ public abstract class Command implements CommonAttributes
             this.executesAtLeast = executesAtLeast;
         }
 
-        public TruncatedAwaitsOnlyDeps(TxnId txnId, SaveStatus saveStatus, Durability durability, @Nullable Route<?> route, @Nullable Timestamp executeAt, @Nullable Writes writes, @Nullable Result result, @Nullable Timestamp executesAtLeast)
+        public TruncatedAwaitsOnlyDeps(TxnId txnId, SaveStatus saveStatus, Durability durability, StoreParticipants participants, @Nullable Timestamp executeAt, @Nullable Writes writes, @Nullable Result result, @Nullable Timestamp executesAtLeast)
         {
-            super(txnId, saveStatus, durability, route, executeAt, writes, result);
+            super(txnId, saveStatus, durability, participants, executeAt, writes, result);
             this.executesAtLeast = executesAtLeast;
         }
 
@@ -916,13 +875,6 @@ public abstract class Command implements CommonAttributes
             this.partialDeps = partialDeps;
         }
 
-        @Nullable
-        @Override
-        public final Participants<?> participants()
-        {
-            return route();
-        }
-
         @Override
         public Timestamp executeAt()
         {
@@ -939,14 +891,6 @@ public abstract class Command implements CommonAttributes
         public PartialTxn partialTxn()
         {
             return partialTxn;
-        }
-
-        @Override
-        public Seekables<?, ?> keysOrRanges()
-        {
-            return partialTxn == null ? additionalKeysOrRanges()
-                                      : additionalKeysOrRanges() == null
-                                        ? partialTxn.keys() : ((Seekables)partialTxn.keys()).with(additionalKeysOrRanges());
         }
 
         @Override
@@ -1082,7 +1026,7 @@ public abstract class Command implements CommonAttributes
         @Override
         public Timestamp executesAtLeast()
         {
-            if (!txnId().kind().awaitsOnlyDeps()) return executeAt();
+            if (!txnId().awaitsOnlyDeps()) return executeAt();
             if (status().hasBeen(Stable)) return waitingOn.executeAtLeast(executeAt());
             return null;
         }
@@ -1210,8 +1154,8 @@ public abstract class Command implements CommonAttributes
 
     public static class WaitingOn
     {
-        private static final WaitingOn EMPTY_FOR_KEY = new WaitingOn(Keys.EMPTY, RangeDeps.NONE, KeyDeps.NONE, ImmutableBitSet.EMPTY, null);
-        private static final WaitingOn EMPTY_FOR_RANGE = new WaitingOn(Keys.EMPTY, RangeDeps.NONE, KeyDeps.NONE, ImmutableBitSet.EMPTY, ImmutableBitSet.EMPTY);
+        private static final WaitingOn EMPTY_FOR_KEY = new WaitingOn(RoutingKeys.EMPTY, RangeDeps.NONE, KeyDeps.NONE, ImmutableBitSet.EMPTY, null);
+        private static final WaitingOn EMPTY_FOR_RANGE = new WaitingOn(RoutingKeys.EMPTY, RangeDeps.NONE, KeyDeps.NONE, ImmutableBitSet.EMPTY, ImmutableBitSet.EMPTY);
 
         public static WaitingOn empty(Routable.Domain domain)
         {
@@ -1220,7 +1164,7 @@ public abstract class Command implements CommonAttributes
             return EMPTY_FOR_KEY;
         }
 
-        public final Keys keys;
+        public final RoutingKeys keys;
         public final RangeDeps directRangeDeps;
         public final KeyDeps directKeyDeps;
         // waitingOn ONLY encodes both txnIds and keys
@@ -1232,7 +1176,7 @@ public abstract class Command implements CommonAttributes
             this(copy.keys, copy.directRangeDeps, copy.directKeyDeps, copy.waitingOn, copy.appliedOrInvalidated);
         }
 
-        public WaitingOn(Keys keys, RangeDeps directRangeDeps, KeyDeps directKeyDeps, ImmutableBitSet waitingOn, ImmutableBitSet appliedOrInvalidated)
+        public WaitingOn(RoutingKeys keys, RangeDeps directRangeDeps, KeyDeps directKeyDeps, ImmutableBitSet waitingOn, ImmutableBitSet appliedOrInvalidated)
         {
             this.keys = keys;
             this.directRangeDeps = directRangeDeps;
@@ -1300,7 +1244,7 @@ public abstract class Command implements CommonAttributes
             return waitingOn.lastSetBit() >= txnIdCount();
         }
 
-        public Key lastWaitingOnKey()
+        public RoutingKey lastWaitingOnKey()
         {
             int keyIndex = waitingOn.lastSetBit() - txnIdCount();
             if (keyIndex < 0) return null;
@@ -1352,7 +1296,7 @@ public abstract class Command implements CommonAttributes
         public String toString()
         {
             List<TxnId> waitingOnTxnIds = new ArrayList<>();
-            List<Key> waitingOnKeys = new ArrayList<>();
+            List<RoutingKey> waitingOnKeys = new ArrayList<>();
             waitingOn.reverseForEach(waitingOnTxnIds, waitingOnKeys, this, keys, (outIds, outKeys, self, ks, i) -> {
                 if (i < self.txnIdCount()) outIds.add(self.txnId(i));
                 else outKeys.add(ks.get(i - self.txnIdCount()));
@@ -1378,7 +1322,7 @@ public abstract class Command implements CommonAttributes
 
         public static class Update
         {
-            final Keys keys;
+            final RoutingKeys keys;
             final RangeDeps directRangeDeps;
             final KeyDeps directKeyDeps;
             private SimpleBitSet waitingOn;
@@ -1401,7 +1345,7 @@ public abstract class Command implements CommonAttributes
                 this(committed.waitingOn);
             }
 
-            private Update(TxnId txnId, Keys keys, RangeDeps directRangeDeps, KeyDeps directKeyDeps)
+            private Update(TxnId txnId, RoutingKeys keys, RangeDeps directRangeDeps, KeyDeps directKeyDeps)
             {
                 this.keys = keys;
                 this.directRangeDeps = directRangeDeps;
@@ -1410,13 +1354,59 @@ public abstract class Command implements CommonAttributes
                 this.appliedOrInvalidated = CommandsForKey.managesExecution(txnId) ? null : new SimpleBitSet(txnIdCount(), false);
             }
 
-            public static Update initialise(TxnId txnId, Route route, Ranges ranges, Deps deps)
+            public static Update initialise(SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt, StoreParticipants participants, Deps deps)
             {
-                Unseekables<?> executionParticipants = route.participants().slice(ranges, Minimal);
                 Update update = new Update(txnId, deps.keyDeps.keys(), deps.rangeDeps, deps.directKeyDeps);
+                if (txnId.is(Txn.Kind.ExclusiveSyncPoint))
+                {
+                    CommandStores.RangesForEpoch rangesForEpoch = safeStore.ranges();
+                    long prevEpoch = Long.MAX_VALUE;
+                    for (int i = rangesForEpoch.ranges.length - 1 ; i >= 0 ; --i)
+                    {
+                        long maxEpoch = prevEpoch;
+                        long epoch = rangesForEpoch.epochs[i];
+                        Ranges ranges = rangesForEpoch.ranges[i];
+                        ranges = safeStore.commandStore().redundantBefore().removePreBootstrap(txnId, ranges);
+                        if (!ranges.isEmpty())
+                        {
+                            Unseekables<?> executionParticipants = participants.route.slice(ranges, Minimal);
+                            deps.rangeDeps.forEach(executionParticipants, update, (upd, idx) -> {
+                                TxnId id = upd.txnId(idx);
+                                if (id.epoch() >= epoch && id.epoch() < maxEpoch)
+                                    update.initialise(idx);
+                            });
+                            int lbound = deps.rangeDeps.txnIdCount();
+                            deps.directKeyDeps.forEach(ranges, 0, deps.directKeyDeps.txnIdCount(), update, deps.rangeDeps, (upd, rdeps, idx) -> {
+                                TxnId id = upd.txnId(idx + lbound);
+                                if (id.epoch() >= epoch && id.epoch() < maxEpoch)
+                                    update.initialise(idx + lbound);
+                            });// TODO (expected): do same loop as above for keys, but mark the key if we find any matching id
+                            deps.keyDeps.keys().forEach(ranges, (upd, key, index) -> upd.initialise(index + upd.txnIdCount()), update);
+                        }
+                        prevEpoch = epoch;
+                    }
+                    return update;
+                }
+                else
+                {
+                    Ranges executeRanges = participants.executeRanges(safeStore, txnId, executeAt);
+                    Unseekables<?> executionParticipants = participants.executes(safeStore, txnId, executeAt);
+                    // TODO (expected): refactor this to operate only on participants, not ranges
+                    deps.rangeDeps.forEach(executionParticipants, update, Update::initialise);
+                    deps.directKeyDeps.forEach(executeRanges, 0, deps.directKeyDeps.txnIdCount(), update, deps.rangeDeps, (upd, rdeps, index) -> upd.initialise(index + rdeps.txnIdCount()));
+                    deps.keyDeps.keys().forEach(executeRanges, (upd, key, index) -> upd.initialise(index + upd.txnIdCount()), update);
+                    return update;
+                }
+            }
+
+            public static Update unsafeInitialise(TxnId txnId, Ranges executeRanges, Route<?> route, Deps deps)
+            {
+                Unseekables<?> executionParticipants = route.slice(executeRanges, Minimal);
+                Update update = new Update(txnId, deps.keyDeps.keys(), deps.rangeDeps, deps.directKeyDeps);
+                // TODO (expected): refactor this to operate only on participants, not ranges
                 deps.rangeDeps.forEach(executionParticipants, update, Update::initialise);
-                deps.directKeyDeps.forEach(ranges, 0, deps.directKeyDeps.txnIdCount(), update, deps.rangeDeps, (upd, rdeps, index) -> upd.initialise(index + rdeps.txnIdCount()));
-                deps.keyDeps.keys().forEach(ranges, (upd, key, index) -> upd.initialise(index + upd.txnIdCount()), update);
+                deps.directKeyDeps.forEach(executeRanges, 0, deps.directKeyDeps.txnIdCount(), update, deps.rangeDeps, (upd, rdeps, index) -> upd.initialise(index + rdeps.txnIdCount()));
+                deps.keyDeps.keys().forEach(executeRanges, (upd, key, index) -> upd.initialise(index + upd.txnIdCount()), update);
                 return update;
             }
 
@@ -1478,7 +1468,7 @@ public abstract class Command implements CommonAttributes
                 return i >= 0 && !waitingOn.get(i);
             }
 
-            public boolean removeWaitingOn(Key key)
+            public boolean removeWaitingOn(RoutingKey key)
             {
                 int index = keys.indexOf(key);
                 // we can be a member of a CFK we aren't waiting on, if we Accept in a later epoch using a key we don't own once Committed to an earlier eopch
@@ -1494,7 +1484,7 @@ public abstract class Command implements CommonAttributes
                 return true;
             }
 
-            public boolean isWaitingOn(Key key)
+            public boolean isWaitingOn(RoutingKey key)
             {
                 int index = keys.indexOf(key) + txnIdCount();
                 return index >= 0 && waitingOn.get(index);
@@ -1668,7 +1658,7 @@ public abstract class Command implements CommonAttributes
             public String toString()
             {
                 List<TxnId> waitingOnTxnIds = new ArrayList<>();
-                List<Key> waitingOnKeys = new ArrayList<>();
+                List<RoutingKey> waitingOnKeys = new ArrayList<>();
                 waitingOn.reverseForEach(waitingOnTxnIds, waitingOnKeys, this, keys, (outIds, outKeys, self, ks, i) -> {
                     if (i < self.txnIdCount()) outIds.add(self.txnId(i));
                     else outKeys.add(ks.get(i - self.txnIdCount()));

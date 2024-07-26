@@ -20,14 +20,15 @@ package accord.impl;
 
 import accord.local.Command;
 import accord.local.SafeCommand;
-import accord.local.SaveStatus;
+import accord.local.StoreParticipants;
+import accord.primitives.SaveStatus;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
 
-import static accord.local.SaveStatus.Erased;
-import static accord.local.SaveStatus.ErasedOrInvalidOrVestigial;
-import static accord.local.Status.Durability.NotDurable;
-import static accord.local.Status.Durability.UniversalOrInvalidated;
+import static accord.primitives.SaveStatus.Erased;
+import static accord.primitives.SaveStatus.ErasedOrVestigial;
+import static accord.primitives.Status.Durability.NotDurable;
+import static accord.primitives.Status.Durability.UniversalOrInvalidated;
 
 public class ErasedSafeCommand extends SafeCommand
 {
@@ -36,8 +37,8 @@ public class ErasedSafeCommand extends SafeCommand
     public ErasedSafeCommand(TxnId txnId, SaveStatus saveStatus)
     {
         super(txnId);
-        Invariants.checkArgument(saveStatus == Erased || saveStatus == ErasedOrInvalidOrVestigial);
-        this.erased = new Command.Truncated(txnId, saveStatus, saveStatus == ErasedOrInvalidOrVestigial ? NotDurable : UniversalOrInvalidated, null, null, null, null);
+        Invariants.checkArgument(saveStatus.compareTo(Erased) >= 0);
+        this.erased = new Command.Truncated(txnId, saveStatus, saveStatus == ErasedOrVestigial ? NotDurable : UniversalOrInvalidated, StoreParticipants.empty(txnId), null, null, null);
     }
 
     @Override

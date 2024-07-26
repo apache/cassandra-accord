@@ -34,7 +34,7 @@ import static accord.utils.Invariants.illegalState;
  * A result of null indicates the transaction is globally persistent
  * A result of CheckStatusOk indicates the maximum status found for the transaction, which may be used to assess progress
  */
-public abstract class CheckShards<U extends Unseekables<?>> extends ReadCoordinator<CheckStatusReply>
+public abstract class CheckShards<U extends Participants<?>> extends ReadCoordinator<CheckStatusReply>
 {
     final U route;
 
@@ -52,7 +52,7 @@ public abstract class CheckShards<U extends Unseekables<?>> extends ReadCoordina
     protected CheckShards(Node node, TxnId txnId, U route, IncludeInfo includeInfo)
     {
         this(node, txnId, route, txnId.epoch(), includeInfo);
-        Invariants.checkState(txnId.kind().isGloballyVisible());
+        Invariants.checkState(txnId.isVisible());
     }
 
     protected CheckShards(Node node, TxnId txnId, U route, long srcEpoch, IncludeInfo includeInfo)
@@ -72,7 +72,7 @@ public abstract class CheckShards<U extends Unseekables<?>> extends ReadCoordina
     @Override
     protected void contact(Id id)
     {
-        Unseekables<?> unseekables = route.slice(topologies().computeRangesForNode(id));
+        Participants<?> unseekables = route.slice(topologies().computeRangesForNode(id));
         node.send(id, new CheckStatus(txnId, unseekables, sourceEpoch, includeInfo), this);
     }
 

@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
 
 import accord.local.Command.WaitingOn;
 import accord.primitives.Deps;
-import accord.primitives.Keys;
+import accord.primitives.RoutingKeys;
 import accord.primitives.TxnId;
 import accord.utils.AccordGens;
 import accord.utils.Gen;
@@ -38,7 +38,7 @@ import static accord.utils.Property.qt;
 class WaitingOnTest
 {
     private static final Gen<Gen<Boolean>> BOOLEAN_DISTRO = Gens.bools().mixedDistribution();
-    private static final Gen<Deps> DEPS_GEN = AccordGens.depsFromKey(AccordGens.intKeys(), AccordGens.ranges(AccordGens.intRoutingKey()));
+    private static final Gen<Deps> DEPS_GEN = AccordGens.depsFromKey(AccordGens.intRoutingKey(), AccordGens.ranges(AccordGens.intRoutingKey()));
     private static final Gen<Gen<WaitingOn>> WAITING_ON_DISTRO = rs -> AccordGens.waitingOn(DEPS_GEN, BOOLEAN_DISTRO.next(rs),
                                                                                             BOOLEAN_DISTRO.next(rs),
                                                                                             BOOLEAN_DISTRO.next(rs),
@@ -91,7 +91,7 @@ class WaitingOnTest
     private static void validateWaitingOnKey(WaitingOn waitingOn)
     {
         // property: isWaitingOnKey(key_index) == is_set(key_offset + key_index)
-        Keys keys = waitingOn.keys;
+        RoutingKeys keys = waitingOn.keys;
         int offset = waitingOn.directRangeDeps.txnIdCount() + waitingOn.directKeyDeps.txnIdCount();
         boolean hasKeyWaiting = false;
         for (int i = 0; i < keys.size(); i++)

@@ -80,7 +80,7 @@ public class ExecuteEphemeralRead extends ReadCoordinator<ReadReply>
     @Override
     public void contact(Id to)
     {
-        node.send(to, new ReadEphemeralTxnData(to, allTopologies, txnId, txn.keys().toParticipants(), allTopologies.currentEpoch(), txn, deps, route), this);
+        node.send(to, new ReadEphemeralTxnData(to, allTopologies, txnId, route, allTopologies.currentEpoch(), txn, deps, route), this);
     }
 
     @Override

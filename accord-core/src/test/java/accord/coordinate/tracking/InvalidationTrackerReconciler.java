@@ -18,6 +18,7 @@
 
 package accord.coordinate.tracking;
 
+import accord.primitives.Participants;
 import accord.utils.RandomSource;
 import accord.coordinate.tracking.InvalidationTracker.InvalidationShardTracker;
 import accord.local.Node;
@@ -30,6 +31,7 @@ public class InvalidationTrackerReconciler extends TrackerReconciler<Invalidatio
 {
     enum Rsp { PROMISED_FAST, NOT_PROMISED_FAST, PROMISED_SLOW, NOT_PROMISED_SLOW, FAIL }
 
+    final Participants<?> participants;
     InvalidationTrackerReconciler(RandomSource random, Topologies topologies)
     {
         this(random, new InvalidationTracker(topologies));
@@ -38,6 +40,7 @@ public class InvalidationTrackerReconciler extends TrackerReconciler<Invalidatio
     private InvalidationTrackerReconciler(RandomSource random, InvalidationTracker tracker)
     {
         super(random, Rsp.class, tracker, new ArrayList<>(tracker.nodes()));
+        participants = tracker.topologies.current().ranges();
     }
 
     @Override
@@ -46,10 +49,10 @@ public class InvalidationTrackerReconciler extends TrackerReconciler<Invalidatio
         switch (event)
         {
             default: throw new AssertionError();
-            case PROMISED_FAST: inflight.remove(from); return tracker.recordSuccess(from, true, false, true);
-            case PROMISED_SLOW: inflight.remove(from); return tracker.recordSuccess(from, true, false, false);
-            case NOT_PROMISED_FAST: inflight.remove(from); return tracker.recordSuccess(from, false, false, true);
-            case NOT_PROMISED_SLOW: inflight.remove(from); return tracker.recordSuccess(from, false, false, false);
+            case PROMISED_FAST: inflight.remove(from); return tracker.recordSuccess(from, participants, participants, null, false, true);
+            case PROMISED_SLOW: inflight.remove(from); return tracker.recordSuccess(from, participants, participants, null, false, false);
+            case NOT_PROMISED_FAST: inflight.remove(from); return tracker.recordSuccess(from, null, participants, null, false, true);
+            case NOT_PROMISED_SLOW: inflight.remove(from); return tracker.recordSuccess(from, null, participants, null, false, false);
             case FAIL: inflight.remove(from); return tracker.recordFailure(from);
         }
     }

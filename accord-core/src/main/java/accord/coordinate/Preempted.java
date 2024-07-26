@@ -36,7 +36,7 @@ public class Preempted extends CoordinationFailed
         super(txnId, homeKey);
     }
 
-    private Preempted(TxnId txnId, @Nullable RoutingKey homeKey, Preempted cause)
+    Preempted(TxnId txnId, @Nullable RoutingKey homeKey, Preempted cause)
     {
         super(txnId, homeKey, cause);
     }

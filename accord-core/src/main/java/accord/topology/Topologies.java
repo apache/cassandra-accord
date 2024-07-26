@@ -18,15 +18,7 @@
 
 package accord.topology;
 
-import java.util.AbstractCollection;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Set;
-
-import com.google.common.collect.Iterators;
 
 import accord.api.TopologySorter;
 import accord.local.Node;
@@ -41,6 +33,7 @@ import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.SortedList;
 
 import static accord.utils.Invariants.illegalState;
+import static accord.utils.SortedArrays.isSortedUnique;
 
 // TODO (desired, efficiency/clarity): since Topologies are rarely needed, should optimise API for single topology case
 //  (e.g. at least implementing Topologies by Topology)
@@ -74,34 +67,18 @@ public interface Topologies extends TopologySorter
 
     boolean contains(Id to);
 
-    // note this can be expensive to evaluate
-    SortedList<Id> nodes();
+    /**
+     * This should be cheap to evaluate
+     */
+    SortedArrayList<Id> nodes();
 
-    default Collection<Node.Id> nonStaleNodes()
+    default SortedList<Node.Id> nonStaleNodes()
     {
-        Topology currentTopology = current();
-        Set<Id> staleIds = currentTopology.staleIds();
-        SortedList<Id> nodes = nodes();
+        SortedArrayList<Node.Id> staleIds = current().staleIds;
         if (staleIds.isEmpty())
-            return nodes;
-
-        return new AbstractCollection<>()
-        {
-            @Override
-            public Iterator<Id> iterator()
-            {
-                return Iterators.filter(nodes.iterator(), id -> !staleIds.contains(id));
-            }
-
-            @Override
-            public int size()
-            {
-                return Iterators.size(iterator());
-            }
-        };
+            return nodes();
+        return nodes().without(staleIds);
     }
-
-    int estimateUniqueNodes();
 
     Ranges computeRangesForNode(Id node);
 
@@ -236,15 +213,9 @@ public interface Topologies extends TopologySorter
         }
 
         @Override
-        public SortedList<Node.Id> nodes()
+        public SortedArrayList<Node.Id> nodes()
         {
             return topology.nodes();
-        }
-
-        @Override
-        public int estimateUniqueNodes()
-        {
-            return topology.nodes().size();
         }
 
         @Override
@@ -288,27 +259,19 @@ public interface Topologies extends TopologySorter
     {
         private final TopologySorter.Supplier supplier;
         private final TopologySorter sorter;
-        private final List<Topology> topologies;
+        private final Topology[] topologies;
         private final int maxShardsPerEpoch;
+        private final SortedArrayList<Id> nodes;
 
         public Multi(TopologySorter.Supplier sorter, Topology... topologies)
         {
-            this(sorter, Arrays.asList(topologies));
-        }
-
-        public Multi(TopologySorter.Supplier sorter, List<Topology> input)
-        {
-            this.topologies = new ArrayList<>(input.size());
-            for (Topology topology : input)
-            {
-                Invariants.checkArgument(topologies.isEmpty() || topology.epoch == topologies.get(topologies.size() - 1).epoch - 1);
-                topologies.add(topology);
-            }
+            this.topologies = Invariants.checkArgument(topologies, isSortedUnique(topologies, (a, b) -> Long.compare(b.epoch, a.epoch)));
             int maxShardsPerEpoch = 0;
-            for (int i = 0 ; i < topologies.size() ; ++i)
-                maxShardsPerEpoch = Math.max(maxShardsPerEpoch, topologies.get(i).size());
+            for (int i = 0 ; i < topologies.length ; ++i)
+                maxShardsPerEpoch = Math.max(maxShardsPerEpoch, topologies[i].size());
             this.maxShardsPerEpoch = maxShardsPerEpoch;
             this.supplier = sorter;
+            this.nodes = nodes(topologies);
             this.sorter = sorter.get(this);
         }
 
@@ -341,7 +304,7 @@ public interface Topologies extends TopologySorter
             if (minEpochInclusive == oldestEpoch() && maxEpochInclusive == currentEpoch())
                 return this;
             // TODO (desired): copy if underlying list is small, or delta is large (or just copy)
-            return new Multi(supplier, topologies.subList(indexForEpoch(maxEpochInclusive), 1 + indexForEpoch(minEpochInclusive)));
+            return new Multi(supplier, Arrays.copyOfRange(topologies, indexForEpoch(maxEpochInclusive), 1 + indexForEpoch(minEpochInclusive)));
         }
 
         @Override
@@ -353,21 +316,21 @@ public interface Topologies extends TopologySorter
         @Override
         public Topology get(int i)
         {
-            return topologies.get(i);
+            return topologies[i];
         }
 
         @Override
         public int size()
         {
-            return topologies.size();
+            return topologies.length;
         }
 
         @Override
         public int totalShards()
         {
             int count = 0;
-            for (int i=0, mi= topologies.size(); i<mi; i++)
-                count += topologies.get(i).size();
+            for (Topology topology : topologies)
+                count += topology.size();
             return count;
         }
 
@@ -383,40 +346,44 @@ public interface Topologies extends TopologySorter
         }
 
         @Override
-        public int estimateUniqueNodes()
+        public SortedArrayList<Id> nodes()
         {
-            // just guess at one additional node per epoch, and at most twice as many nodes
-            int estSize = get(0).nodes().size();
-            return Math.min(estSize * 2, estSize + size() - 1);
+            return nodes;
         }
 
-        @Override
-        public SortedList<Id> nodes()
+        private static SortedArrayList<Id> nodes(Topology[] topologies)
         {
-            if (topologies.size() == 1)
-                return topologies.get(0).nodes();
+            if (topologies.length == 1)
+                return topologies[0].nodes();
 
-            if (topologies.isEmpty())
-                return new SortedArrayList<>(new Id[0]);
+            if (topologies.length == 0)
+                return Topology.NO_IDS;
 
             RecursiveObjectBuffers<Object> merging = new RecursiveObjectBuffers<>(ArrayBuffers.cachedAny());
 
-            int bufferSize = topologies.get(0).nodes().size();
-            Object[] buffer = merging.get(bufferSize);
-            buffer = topologies.get(0).nodes().toArray(buffer);
+            SortedArrayList<Id> exactMatch = topologies[0].nodes();
+            int bufferSize = exactMatch.size();
+            Object[] buffer = exactMatch.backingArrayUnsafe();
 
-            for (int i = 1; i < topologies.size() ; ++i)
+            for (int i = 1; i < topologies.length ; ++i)
             {
-                Topology topology = topologies.get(i);
+                Topology topology = topologies[i];
                 Node.Id[] input = topology.nodes().backingArrayUnsafe();
 
-                buffer = SortedArrays.linearUnion(buffer, 0, bufferSize, input, 0, input.length, (a, b) -> ((Id)a).compareTo((Id)b), merging);
+                Object[] newBuffer = SortedArrays.linearUnion(buffer, 0, bufferSize, input, 0, input.length, (a, b) -> ((Id)a).compareTo((Id)b), merging);
                 bufferSize = merging.sizeOfLast(buffer);
+                if (buffer == input) exactMatch = topology.nodes();
+                else if (newBuffer != buffer) exactMatch = null;
+                buffer = newBuffer;
             }
 
-            Id[] array = new Id[bufferSize];
-            System.arraycopy(buffer, 0, array, 0, bufferSize);
-            SortedArrayList<Id> result = new SortedArrayList<>(array);
+            SortedArrayList<Id> result = exactMatch;
+            if (exactMatch == null)
+            {
+                Id[] array = new Id[bufferSize];
+                System.arraycopy(buffer, 0, array, 0, bufferSize);
+                result = new SortedArrayList<>(array);
+            }
             merging.discardBuffers();
             return result;
         }
@@ -463,33 +430,39 @@ public interface Topologies extends TopologySorter
 
     class Builder
     {
-        private final List<Topology> topologies;
+        private Object[] buffer;
+        private int size;
 
         public Builder(int initialCapacity)
         {
-            topologies = new ArrayList<>(initialCapacity);
+            buffer = ArrayBuffers.cachedAny().get(4);
         }
 
         public void add(Topology topology)
         {
-            Invariants.checkArgument(topologies.isEmpty() || topology.epoch == topologies.get(topologies.size() - 1).epoch - 1);
-            topologies.add(topology);
+            if (size == buffer.length)
+                buffer = ArrayBuffers.cachedAny().resize(buffer, size, size * 2);
+            buffer[size++] = topology;
         }
 
         public boolean isEmpty()
         {
-            return topologies.isEmpty();
+            return size == 0;
         }
 
         public Topologies build(TopologySorter.Supplier sorter)
         {
-            switch (topologies.size())
+            switch (size)
             {
                 case 0:
                     throw illegalState("Unable to build an empty Topologies");
+
                 case 1:
-                    return new Single(sorter, topologies.get(0));
+                    return new Single(sorter, (Topology) buffer[0]);
+
                 default:
+                    Topology[] topologies = new Topology[size];
+                    System.arraycopy(buffer, 0, topologies, 0, size);
                     return new Multi(sorter, topologies);
             }
         }

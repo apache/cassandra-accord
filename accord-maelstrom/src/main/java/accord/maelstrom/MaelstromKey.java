@@ -152,6 +152,12 @@ public class MaelstromKey implements RoutableKey
         }
 
         @Override
+        public RoutingKey asRoutingKey()
+        {
+            return this;
+        }
+
+        @Override
         public RangeFactory rangeFactory()
         {
             return Range::new;

@@ -52,8 +52,8 @@ import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import javax.annotation.Nullable;
 
-import static accord.local.SaveStatus.Applied;
-import static accord.local.SaveStatus.TruncatedApply;
+import static accord.primitives.SaveStatus.Applied;
+import static accord.primitives.SaveStatus.TruncatedApply;
 import static accord.messages.ReadData.CommitOrReadNack.Insufficient;
 import static accord.primitives.Routables.Slice.Minimal;
 

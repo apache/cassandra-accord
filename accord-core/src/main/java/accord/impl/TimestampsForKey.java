@@ -20,7 +20,7 @@ package accord.impl;
 
 import java.util.Objects;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
@@ -30,34 +30,38 @@ public class TimestampsForKey
 
     public static class SerializerSupport
     {
-        public static TimestampsForKey create(Key key,
+        public static TimestampsForKey create(RoutingKey key,
                                                   Timestamp lastExecutedTimestamp,
                                                   long lastExecutedHlc,
+                                                  TxnId lastWriteId,
                                                   Timestamp lastWriteTimestamp)
         {
-            return new TimestampsForKey(key, lastExecutedTimestamp, lastExecutedHlc, lastWriteTimestamp);
+            return new TimestampsForKey(key, lastExecutedTimestamp, lastExecutedHlc, lastWriteId, lastWriteTimestamp);
         }
     }
 
-    private final Key key;
+    private final RoutingKey key;
     private final Timestamp lastExecutedTimestamp;
     // TODO (desired): we have leaked C* implementation details here
     private final long rawLastExecutedHlc;
+    private final TxnId lastWriteId;
     private final Timestamp lastWriteTimestamp;
 
-    public TimestampsForKey(Key key, Timestamp lastExecutedTimestamp, long rawLastExecutedHlc, Timestamp lastWriteTimestamp)
+    public TimestampsForKey(RoutingKey key, Timestamp lastExecutedTimestamp, long rawLastExecutedHlc, TxnId lastWriteId, Timestamp lastWriteTimestamp)
     {
         this.key = key;
         this.lastExecutedTimestamp = lastExecutedTimestamp;
         this.rawLastExecutedHlc = rawLastExecutedHlc;
+        this.lastWriteId = lastWriteId;
         this.lastWriteTimestamp = lastWriteTimestamp;
     }
 
-    public TimestampsForKey(Key key)
+    public TimestampsForKey(RoutingKey key)
     {
         this.key = key;
         this.lastExecutedTimestamp = Timestamp.NONE;
         this.rawLastExecutedHlc = 0;
+        this.lastWriteId = TxnId.NONE;
         this.lastWriteTimestamp = Timestamp.NONE;
     }
 
@@ -74,7 +78,7 @@ public class TimestampsForKey
         throw new UnsupportedOperationException();
     }
 
-    public Key key()
+    public RoutingKey key()
     {
         return key;
     }
@@ -94,6 +98,11 @@ public class TimestampsForKey
         return rawLastExecutedHlc;
     }
 
+    public TxnId lastWriteId()
+    {
+        return lastWriteId;
+    }
+
     public Timestamp lastWriteTimestamp()
     {
         return lastWriteTimestamp;
@@ -101,10 +110,9 @@ public class TimestampsForKey
 
     public TimestampsForKey withoutRedundant(TxnId redundantBefore)
     {
-        return new TimestampsForKey(key,
-                                    lastExecutedTimestamp.compareTo(redundantBefore) < 0 ? Timestamp.NONE : lastExecutedTimestamp,
-                                    rawLastExecutedHlc < redundantBefore.hlc() ? NO_LAST_EXECUTED_HLC : rawLastExecutedHlc,
-                                    lastWriteTimestamp.compareTo(redundantBefore) < 0 ? Timestamp.NONE : lastWriteTimestamp);
+        if (lastWriteId.compareTo(redundantBefore) < 0)
+            return new TimestampsForKey(key);
+        return this;
     }
 
     public void validateExecuteAtTime(Timestamp executeAt, boolean isForWriteTxn)

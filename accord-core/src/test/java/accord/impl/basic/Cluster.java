@@ -49,9 +49,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.api.BarrierType;
-import accord.api.Key;
 import accord.api.LocalConfig;
 import accord.api.MessageSink;
+import accord.api.RoutingKey;
 import accord.api.Scheduler;
 import accord.burn.BurnTestConfigurationService;
 import accord.burn.TopologyUpdates;
@@ -82,19 +82,20 @@ import accord.local.CommandStore;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.NodeTimeService;
-import accord.local.SaveStatus;
+import accord.primitives.SaveStatus;
 import accord.local.ShardDistributor;
-import accord.local.Status;
+import accord.primitives.Seekables;
+import accord.primitives.Status;
 import accord.local.cfk.CommandsForKey;
 import accord.messages.Message;
 import accord.messages.MessageType;
 import accord.messages.Reply;
 import accord.messages.Request;
 import accord.messages.SafeCallback;
+import accord.primitives.FullRoute;
 import accord.primitives.Keys;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -348,7 +349,7 @@ public class Cluster implements Scheduler
                                                       Function<Map<Node.Id, Node>, Request> init)
     {
         List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
-        PropagatingPendingQueue queue = new PropagatingPendingQueue(failures, new RandomDelayQueue(randomSupplier.get()));
+        MonitoredPendingQueue queue = new MonitoredPendingQueue(failures, new RandomDelayQueue(randomSupplier.get()));
         Consumer<Runnable> retryBootstrap;
         {
             RandomSource rnd = randomSupplier.get();
@@ -532,27 +533,29 @@ public class Cluster implements Scheduler
             Scheduled restart = sinks.recurring(() -> {
                 Id id = random.pick(nodes);
                 CommandStore[] stores = nodeMap.get(id).commandStores().all();
-                Predicate<Pending> pred = getPendingPredicate(stores);
-                while (sinks.drain(pred));
+                ((DelayedCommandStore)stores[0]).unsafeRunIn(() -> {
+                    Predicate<Pending> pred = getPendingPredicate(stores);
+                    while (sinks.drain(pred));
 
-                // Journal cleanup is a rough equivalent of a node restart.
-                trace.debug("Triggering journal cleanup for node " + id);
-                CommandsForKey.disableLinearizabilityViolationsReporting();
-                ListStore listStore = (ListStore) nodeMap.get(id).commandStores().dataStore();
-                listStore.clear();
-                listStore.restoreFromSnapshot();
+                    // Journal cleanup is a rough equivalent of a node restart.
+                    trace.debug("Triggering journal cleanup for node " + id);
+                    CommandsForKey.disableLinearizabilityViolationsReporting();
+                    ListStore listStore = (ListStore) nodeMap.get(id).commandStores().dataStore();
+                    listStore.clear();
+                    listStore.restoreFromSnapshot();
 
-                Journal journal = journalMap.get(id);
-                for (CommandStore s : stores)
-                {
-                    DelayedCommandStores.DelayedCommandStore store = (DelayedCommandStores.DelayedCommandStore) s;
-                    store.clearForTesting();
-                    journal.reconstructAll(store.loader(), store.id());
-                    journal.loadHistoricalTransactions(store::load, store.id());
-                }
-                while (sinks.drain(pred));
-                CommandsForKey.enableLinearizabilityViolationsReporting();
-                trace.debug("Done with cleanup.");
+                    Journal journal = journalMap.get(id);
+                    for (CommandStore s : stores)
+                    {
+                        DelayedCommandStores.DelayedCommandStore store = (DelayedCommandStores.DelayedCommandStore) s;
+                        store.clearForTesting();
+                        journal.reconstructAll(store.loader(), store.id());
+                        journal.loadHistoricalTransactions(store::load, store.id());
+                    }
+                    while (sinks.drain(pred));
+                    CommandsForKey.enableLinearizabilityViolationsReporting();
+                    trace.debug("Done with cleanup.");
+                });
             }, () -> random.nextInt(1, 10), SECONDS);
 
             durabilityScheduling.forEach(CoordinateDurabilityScheduling::start);
@@ -693,7 +696,8 @@ public class Cluster implements Scheduler
             BarrierType type = typeSupplier.get();
             if (type == BarrierType.local)
             {
-                run(node, Keys.of(keysInsideRanges(ranges).next(rs)), current.epoch(), type);
+                Keys keys = Keys.of(keysInsideRanges(ranges).next(rs));
+                run(node, keys, node.computeRoute(current.epoch(), keys), current.epoch(), type);
             }
             else
             {
@@ -705,13 +709,14 @@ public class Cluster implements Scheduler
                 }
                 if (subset.isEmpty())
                     return;
-                run(node, Ranges.of(subset.toArray(Range[]::new)), current.epoch(), type);
+                Ranges rs = Ranges.of(subset.toArray(Range[]::new));
+                run(node, rs, node.computeRoute(current.epoch(), rs), current.epoch(), type);
             }
         }
 
-        private <S extends Seekables<?, ?>> void run(Node node, S keysOrRanges, long epoch, BarrierType type)
+        private void run(Node node, Seekables<?, ?> keysOrRanges, FullRoute<?> route, long epoch, BarrierType type)
         {
-            Barrier.barrier(node, keysOrRanges, epoch, type).begin((s, f) -> {
+            Barrier.barrier(node, keysOrRanges, route, epoch, type).begin((s, f) -> {
                 if (f != null)
                 {
                     // ignore specific errors
@@ -887,6 +892,7 @@ public class Cluster implements Scheduler
             this.commandStore = commandStore;
             this.blockedOn = blockedOn;
             this.blockedVia = blockedVia;
+            Invariants.checkArgument(blockedOn == null || !txnId.equals(blockedOn.txnId()));
         }
 
         @Override
@@ -950,8 +956,16 @@ public class Cluster implements Scheduler
         while (true)
         {
             result.add(txn);
-            if (txn.blockedOn == null || txn.command.saveStatus().compareTo(SaveStatus.Stable) < 0)
+            if (txn.command.saveStatus().compareTo(SaveStatus.Stable) < 0)
                 return result;
+
+            if (txn.blockedOn == null)
+            {
+                // look for another copy that is still blocked, and continue from there
+                txn = find(txn.txnId, null, null);
+                if (txn.blockedOn == null)
+                    return result;
+            }
 
             Command blockedOn = txn.blockedOn;
             GlobalCommand command = txn.commandStore.unsafeCommands().get(blockedOn.txnId());
@@ -1018,10 +1032,11 @@ public class Cluster implements Scheduler
         if (command.hasBeen(Status.Stable) && !command.hasBeen(Status.Truncated))
         {
             Command.WaitingOn waitingOn = command.asCommitted().waitingOn();
-            Key blockedOnKey = waitingOn.lastWaitingOnKey();
+            RoutingKey blockedOnKey = waitingOn.lastWaitingOnKey();
             if (blockedOnKey == null)
             {
                 blockedOnId = waitingOn.nextWaitingOn();
+                Invariants.checkState(!command.txnId().equals(blockedOnId));
                 if (blockedOnId != null)
                     blockedVia = command.partialDeps().participants(blockedOnId);
             }
@@ -1029,7 +1044,9 @@ public class Cluster implements Scheduler
             {
                 CommandsForKey cfk = store.unsafeCommandsForKey().get(blockedOnKey).value();
                 blockedOnId = cfk.blockedOnTxnId(command.txnId(), command.executeAt());
-                blockedVia = cfk;
+                if (blockedOnId != null)
+                    blockedVia = cfk;
+                Invariants.checkState(!command.txnId().equals(blockedOnId));
             }
         }
         Command blockedOn = null;

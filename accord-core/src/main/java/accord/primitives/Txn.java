@@ -36,8 +36,6 @@ import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
-import java.util.function.Predicate;
-
 import static accord.primitives.Txn.Kind.Kinds.AnyGloballyVisible;
 import static accord.primitives.Txn.Kind.Kinds.Nothing;
 import static accord.primitives.Txn.Kind.Kinds.RsOrWs;
@@ -52,15 +50,15 @@ public interface Txn
      */
     enum Kind
     {
-        Read,
-        Write,
+        Read('R', true, false, false, false),
+        Write('W', true, false, false, false),
 
         /**
          * A non-durable read that cannot be recovered and provides only per-key linearizability guarantees.
          * This may be used to implement single-partition-key reads with strict serializable isolation OR
          * weaker isolation multi-key/range reads for interoperability with weaker isolation systems.
          */
-        EphemeralRead,
+        EphemeralRead('E', false, false, false, true),
 
         /**
          * A pseudo-transaction whose deps represent the complete set of transactions that may execute before it,
@@ -86,7 +84,7 @@ public interface Txn
          *
          * Invisible to other transactions.
          */
-        SyncPoint,
+        SyncPoint('S', true, true, true, false),
 
         /**
          * A {@link #SyncPoint} that invalidates transactions with lower TxnId that it does not witness, i.e. it ensures
@@ -104,65 +102,91 @@ public interface Txn
          */
         // TODO (expected): introduce a special kind of visible ExclusiveSyncPoint that creates a precise moment,
         //    and is therefore visible to all transactions.
-        ExclusiveSyncPoint('X'),
+        ExclusiveSyncPoint('X', true, true, true, true),
 
         /**
          * Used for local book-keeping only, not visible to any other replica or directly to other transactions.
          * This is used to create pseudo transactions that take the place of dependencies that will be fulfilled by a bootstrap.
          */
-        LocalOnly;
+        LocalOnly('L', false, false, true, false);
 
-        Kind()
+        public enum Kinds
         {
-            this.shortName = name().charAt(0);
-        }
-
-        Kind(char shortName)
-        {
-            this.shortName = shortName;
-        }
-
-        public enum Kinds implements Predicate<Kind>
-        {
-            Nothing,
-            Ws,
-
+            Nothing(),
+            Ws(Write),
             /**
              * Any DURABLE read or write. This does not witness EphemeralReads.
              */
-            RsOrWs,
+            RsOrWs(Write, Read),
+            WsOrSyncPoints(Write, SyncPoint, ExclusiveSyncPoint),
+            ExclusiveSyncPoints(ExclusiveSyncPoint),
+            AnyGloballyVisible(Write, Read, SyncPoint, ExclusiveSyncPoint);
 
-            WsOrSyncPoints,
-            ExclusiveSyncPoints,
-            AnyGloballyVisible;
+            final int bitset;
+            Kinds(Kind ... kinds)
+            {
+                int bitset = 0;
+                for (Kind kind : kinds)
+                    bitset |= 1 << kind.ordinal();
+                this.bitset = bitset;
+            }
 
-            @Override
             public boolean test(Kind kind)
             {
-                switch (this)
-                {
-                    default: throw new AssertionError();
-                    case AnyGloballyVisible: return kind.isGloballyVisible();
-                    case WsOrSyncPoints: return kind == Write || kind == Kind.SyncPoint || kind == ExclusiveSyncPoint;
-                    case ExclusiveSyncPoints: return kind == ExclusiveSyncPoint;
-                    case RsOrWs: return kind == Read || kind == Write;
-                    case Ws: return kind == Write;
-                    case Nothing: return false; // TODO (expected, consider): throw exception? we shouldn't ever be presented the option to test even.
-                }
+                return testOrdinal(kind.ordinal());
+            }
+
+            public boolean test(TxnId txnId)
+            {
+                return txnId.is(this);
+            }
+
+            boolean testOrdinal(int ordinal)
+            {
+                return 0 != (bitset & (1 << ordinal));
             }
         }
 
         // in future: BlindWrite, Interactive?
 
         private static final Kind[] VALUES = Kind.values();
+        private static final long ENCODED_ORDINAL_INFO;
+        private static final long IS_VISIBLE_ORDINAL_INFO_OFFSET = 0;
+        private static final long IS_SYNCPOINT_ORDINAL_INFO_OFFSET = VALUES.length;
+        private static final long IS_SYSTEM_ORDINAL_INFO_OFFSET = 2 * VALUES.length;
+        private static final long AWAITS_ONLY_DEPS_ORDINAL_INFO_OFFSET = 3 * VALUES.length;
+
         static
         {
+            Invariants.checkState(AWAITS_ONLY_DEPS_ORDINAL_INFO_OFFSET + VALUES.length <= 64);
+            long encodedOrdinalInfo = 0;
             Map<Character, Kind> shortNames = new HashMap<>();
             for (Kind kind : VALUES)
+            {
                 Invariants.checkState(null == shortNames.putIfAbsent(kind.shortName, kind), "Short name conflict between: " + kind + " and " + shortNames.get(kind.shortName));
+                if (kind.isVisible()) encodedOrdinalInfo   |= 1L << (IS_VISIBLE_ORDINAL_INFO_OFFSET + kind.ordinal());
+                if (kind.isSyncPoint()) encodedOrdinalInfo |= 1L << (IS_SYNCPOINT_ORDINAL_INFO_OFFSET + kind.ordinal());
+                if (kind.isSystemTxn()) encodedOrdinalInfo |= 1L << (IS_SYSTEM_ORDINAL_INFO_OFFSET + kind.ordinal());
+                if (kind.awaitsOnlyDeps()) encodedOrdinalInfo |= 1L << (AWAITS_ONLY_DEPS_ORDINAL_INFO_OFFSET + kind.ordinal());
+            }
+            ENCODED_ORDINAL_INFO = encodedOrdinalInfo;
         }
 
         private final char shortName;
+        public final boolean isVisible;
+        public final boolean isSyncPoint;
+        public final boolean isSystem;
+        public final boolean awaitsOnlyDeps;
+
+        Kind(char shortName, boolean isVisible, boolean isSyncPoint, boolean isSystem, boolean awaitsOnlyDeps)
+        {
+            this.shortName = shortName;
+            this.isVisible = isVisible;
+            this.isSyncPoint = isSyncPoint;
+            this.isSystem = isSystem;
+            this.awaitsOnlyDeps = awaitsOnlyDeps;
+        }
+
 
         public boolean isWrite()
         {
@@ -184,25 +208,19 @@ public interface Txn
             return this != EphemeralRead;
         }
 
-        public boolean isGloballyVisible()
+        public boolean isVisible()
         {
-            switch (this)
-            {
-                default: throw new AssertionError("Unhandled Kind: " + this);
-                case EphemeralRead:
-                case LocalOnly:
-                    return false;
-                case Write:
-                case Read:
-                case ExclusiveSyncPoint:
-                case SyncPoint:
-                    return true;
-            }
+            return isVisible;
         }
 
         public boolean isSyncPoint()
         {
-            return this == ExclusiveSyncPoint || this == SyncPoint;
+            return isSyncPoint;
+        }
+
+        public boolean isSystemTxn()
+        {
+            return isSystem;
         }
 
         /**
@@ -210,12 +228,32 @@ public interface Txn
          */
         public boolean awaitsOnlyDeps()
         {
-            return this == ExclusiveSyncPoint || this == EphemeralRead;
+            return awaitsOnlyDeps;
         }
 
         public static Kind ofOrdinal(int ordinal)
         {
             return VALUES[ordinal];
+        }
+
+        public static boolean isVisible(int ordinal)
+        {
+            return 0 != (ENCODED_ORDINAL_INFO & (1L << (IS_VISIBLE_ORDINAL_INFO_OFFSET + ordinal)));
+        }
+
+        public static boolean isSyncPoint(int ordinal)
+        {
+            return 0 != (ENCODED_ORDINAL_INFO & (1L << (IS_SYNCPOINT_ORDINAL_INFO_OFFSET + ordinal)));
+        }
+
+        public static boolean isSystemTxn(int ordinal)
+        {
+            return 0 != (ENCODED_ORDINAL_INFO & (1L << (IS_SYSTEM_ORDINAL_INFO_OFFSET + ordinal)));
+        }
+
+        public static boolean awaitsOnlyDeps(int ordinal)
+        {
+            return 0 != (ENCODED_ORDINAL_INFO & (1L << (AWAITS_ONLY_DEPS_ORDINAL_INFO_OFFSET + ordinal)));
         }
 
         public Kinds witnesses()
@@ -236,7 +274,7 @@ public interface Txn
 
         public boolean witnesses(TxnId txnId)
         {
-            return witnesses(txnId.kind());
+            return witnesses().test(txnId);
         }
 
         public boolean witnesses(Kind kind)

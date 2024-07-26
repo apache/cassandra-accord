@@ -321,10 +321,10 @@ public class Json
             out.beginObject();
             out.name("keyDeps");
             out.beginArray();
-            for (Map.Entry<Key, TxnId> e : value.keyDeps)
+            for (Map.Entry<RoutingKey, TxnId> e : value.keyDeps)
             {
                 out.beginArray();
-                ((MaelstromKey)e.getKey()).datum.write(out);
+                ((MaelstromKey.Routing)e.getKey()).datum.write(out);
                 GSON.toJson(e.getValue(), TxnId.class, out);
                 out.endArray();
             }
@@ -334,18 +334,18 @@ public class Json
             for (Map.Entry<Range, TxnId> e : value.rangeDeps)
             {
                 out.beginArray();
-                ((MaelstromKey)e.getKey().start()).datum.write(out);
-                ((MaelstromKey)e.getKey().end()).datum.write(out);
+                ((MaelstromKey.Routing)e.getKey().start()).datum.write(out);
+                ((MaelstromKey.Routing)e.getKey().end()).datum.write(out);
                 GSON.toJson(e.getValue(), TxnId.class, out);
                 out.endArray();
             }
             out.endArray();
             out.name("directKeyDeps");
             out.beginArray();
-            for (Map.Entry<Key, TxnId> e : value.directKeyDeps)
+            for (Map.Entry<RoutingKey, TxnId> e : value.directKeyDeps)
             {
                 out.beginArray();
-                ((MaelstromKey)e.getKey()).datum.write(out);
+                ((MaelstromKey.Routing)e.getKey()).datum.write(out);
                 GSON.toJson(e.getValue(), TxnId.class, out);
                 out.endArray();
             }
@@ -373,7 +373,7 @@ public class Json
                             while (in.hasNext())
                             {
                                 in.beginArray();
-                                Key key = MaelstromKey.readKey(in);
+                                RoutingKey key = MaelstromKey.readRouting(in);
                                 TxnId txnId = GSON.fromJson(in, TxnId.class);
                                 builder.add(key, txnId);
                                 in.endArray();
@@ -391,7 +391,7 @@ public class Json
                             while (in.hasNext())
                             {
                                 in.beginArray();
-                                Key key = MaelstromKey.readKey(in);
+                                RoutingKey key = MaelstromKey.readRouting(in);
                                 TxnId txnId = GSON.fromJson(in, TxnId.class);
                                 builder.add(key, txnId);
                                 in.endArray();

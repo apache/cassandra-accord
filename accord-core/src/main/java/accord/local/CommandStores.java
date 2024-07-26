@@ -39,7 +39,6 @@ import org.slf4j.LoggerFactory;
 import accord.api.Agent;
 import accord.api.ConfigurationService.EpochReady;
 import accord.api.DataStore;
-import accord.api.Key;
 import accord.api.LocalListeners;
 import accord.api.ProgressLog;
 import accord.api.RoutingKey;
@@ -137,9 +136,8 @@ public abstract class CommandStores
         }
     }
 
-    // TODO (required): ensure all deterministic results across runs; updating RangesForEpoch should happen once per
-    //  execution batch and be logged
     // TODO (expected): merge with RedundantBefore, and standardise executeRanges() to treat removing stale ranges the same as adding new epoch ranges
+    // We ONLY remove ranges to keep logic manageable; likely to only merge CommandStores into a new CommandStore via some kind of Bootstrap
     public static class RangesForEpoch
     {
         public static class Snapshot
@@ -228,33 +226,22 @@ public abstract class CommandStores
 
         /**
          * Extend a previously computed set of Ranges that included {@code fromInclusive}
-         * to include {@code toInclusive}
-         */
-        public @Nonnull Ranges extend(Ranges extend, Timestamp fromInclusive, Timestamp toInclusive)
-        {
-            return extend(extend, fromInclusive.epoch(), toInclusive.epoch());
-        }
-
-        /**
-         * Extend a previously computed set of Ranges that included {@code fromInclusive}
          * to include ranges up to {@code toInclusive}
          */
-        public @Nonnull Ranges extend(Ranges extend, long fromInclusive, long toInclusive)
+        public @Nonnull Ranges extend(Ranges extend, long curFrom, long curTo, long extendFrom, long extendTo)
         {
-            if (fromInclusive == toInclusive)
+            if (extend.isEmpty()) // this captures the case where curTo < epochs[0]
+                return allBetween(extendFrom, extendTo);
+
+            if (extendFrom >= curFrom)
                 return extend;
 
-            int startIndex = 1 + floorIndex(fromInclusive);
-            int endIndex = 1 + floorIndex(toInclusive);
-            for (int i = startIndex ; i < endIndex; ++i)
-                extend = extend.with(ranges[i]); // want to always return extend for equal ranges, so same ranges are identity-equals
+            int startCurIndex = floorIndex(curFrom);
+            int startExtendIndex = Math.max(0, floorIndex(extendFrom));
+            if (startCurIndex <= startExtendIndex)
+                return extend;
 
-            return extend;
-        }
-
-        public @Nonnull Ranges allBetween(EpochSupplier fromInclusive, EpochSupplier toInclusive)
-        {
-            return allBetween(fromInclusive.epoch(), toInclusive.epoch());
+            return ranges[startExtendIndex];
         }
 
         public @Nonnull Ranges allBetween(long fromInclusive, EpochSupplier toInclusive)
@@ -267,35 +254,35 @@ public abstract class CommandStores
             if (fromInclusive > toInclusive)
                 throw new IndexOutOfBoundsException();
 
-            if (fromInclusive == toInclusive)
-                return allAt(fromInclusive);
+            int since = floorIndex(fromInclusive);
+            if (since >= 0) return ranges[since];
 
-            return allInternal(Math.max(0, floorIndex(fromInclusive)), 1 + floorIndex(toInclusive));
+            int to = floorIndex(toInclusive);
+            if (to >= 0) return ranges[0];
+            return Ranges.EMPTY;
         }
 
         public @Nonnull Ranges all()
         {
-            return allInternal(0, ranges.length);
+            return ranges[0];
         }
 
         public @Nonnull Ranges allBefore(long toExclusive)
         {
-            return allInternal(0, ceilIndex(toExclusive));
-        }
-
-        public @Nonnull Ranges allAfter(long fromInclusive)
-        {
-            return allInternal(Math.max(0, floorIndex(fromInclusive)), ranges.length);
+            int to = ceilIndex(toExclusive);
+            return to <= 0 ? Ranges.EMPTY : ranges[0];
         }
 
         public @Nonnull Ranges allUntil(long toInclusive)
         {
-            return allInternal(0, 1 + floorIndex(toInclusive));
+            int to = floorIndex(toInclusive);
+            return to < 0 ? Ranges.EMPTY : ranges[0];
         }
 
         public @Nonnull Ranges allSince(long fromInclusive)
         {
-            return allInternal(Math.max(0, floorIndex(fromInclusive)), epochs.length);
+            int since = floorIndex(fromInclusive);
+            return ranges[Math.max(since, 0)];
         }
 
         private int floorIndex(long epoch)
@@ -312,22 +299,6 @@ public abstract class CommandStores
             return i;
         }
 
-        private @Nonnull Ranges allInternal(int startIndex, int endIndex)
-        {
-            if (startIndex >= endIndex) return Ranges.EMPTY;
-            Ranges result = ranges[startIndex];
-            for (int i = startIndex + 1 ; i < endIndex; ++i)
-                result = ranges[i].with(result);
-
-            return result;
-        }
-
-        public @Nonnull Ranges applyRanges(Timestamp executeAt)
-        {
-            // Note: we COULD slice to only those ranges we haven't bootstrapped, but no harm redundantly writing
-            return allAt(executeAt.epoch());
-        }
-
         public @Nonnull Ranges currentRanges()
         {
             return ranges[ranges.length - 1];
@@ -339,12 +310,17 @@ public abstract class CommandStores
                             .collect(Collectors.joining(", "));
         }
 
-        public long latestEpochWithNewParticipants(long sinceEpoch, Routables<?> keysOrRanges)
+        public long earliestLaterEpochThatFullyCovers(long sinceEpoch, Routables<?> keysOrRanges)
         {
-            int i = floorIndex(sinceEpoch);
-            long latest = sinceEpoch;
-            Ranges existing = i < 0 ? Ranges.EMPTY : ranges[i];
-            while (++i < ranges.length)
+            return Math.max(sinceEpoch, epochs[0]);
+        }
+
+        public long latestEarlierEpochThatFullyCovers(long beforeEpoch, Routables<?> keysOrRanges)
+        {
+            int i = ceilIndex(beforeEpoch);
+            long latest = beforeEpoch;
+            Ranges existing = i >= ranges.length ? Ranges.EMPTY : ranges[i];
+            while (--i >= 0)
             {
                 if (ranges[i].without(existing).intersects(keysOrRanges))
                     latest = epochs[i];
@@ -612,7 +588,7 @@ public abstract class CommandStores
         ShardHolder[] shards = snapshot.shards;
         for (ShardHolder shard : shards)
         {
-            // TODO (urgent, efficiency): range map for intersecting ranges (e.g. that to be introduced for range dependencies)
+            // TODO (required, efficiency): range map for intersecting ranges (e.g. that to be introduced for range dependencies)
             Ranges shardRanges = shard.ranges().allBetween(minEpoch, maxEpoch);
             if (!shardRanges.intersects(keys))
                 continue;
@@ -759,7 +735,7 @@ public abstract class CommandStores
     }
 
     @VisibleForTesting
-    public CommandStore unsafeForKey(Key key)
+    public CommandStore unsafeForKey(RoutingKey key)
     {
         ShardHolder[] shards = current.shards;
         for (ShardHolder shard : shards)

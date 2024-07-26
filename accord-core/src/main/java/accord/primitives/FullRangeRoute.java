@@ -52,6 +52,12 @@ public class FullRangeRoute extends RangeRoute implements FullRoute<Range>
     }
 
     @Override
+    public FullRoute<?> toRoute(RoutingKey homeKey)
+    {
+        throw new UnsupportedOperationException("Already a route!");
+    }
+
+    @Override
     public FullRangeRoute withHomeKey()
     {
         return this;

@@ -19,9 +19,6 @@
 package accord.primitives;
 
 import accord.api.RoutingKey;
-import accord.utils.IndexedFoldToLong;
-import accord.utils.IndexedTriFold;
-import net.nicoulaj.compilecommand.annotations.Inline;
 
 import javax.annotation.Nonnull;
 import java.util.ArrayList;
@@ -110,6 +107,23 @@ public class Ranges extends AbstractRanges implements Iterable<Range>, Seekables
     private Ranges slice(AbstractRanges ranges, Slice slice)
     {
         return slice(ranges, slice, this, this, (i1, i2, rs) -> i2.ranges == rs ? i2 : Ranges.ofSortedAndDeoverlapped(rs));
+    }
+
+    @Override
+    public Participants<Range> intersecting(Seekables<?, ?> intersecting)
+    {
+        return intersecting(intersecting, Overlapping);
+    }
+
+    @Override
+    public Participants<Range> intersecting(Seekables<?, ?> intersecting, Slice slice)
+    {
+        switch (intersecting.domain())
+        {
+            default: throw new AssertionError("Unhandled domain: " + intersecting.domain());
+            case Range: return slice((AbstractRanges) intersecting, slice);
+            case Key: return intersecting((Keys) intersecting, this, null, (i1, i2, rs) -> i1.ranges == rs ? i1 : new Ranges(rs));
+        }
     }
 
     @Override
@@ -222,17 +236,5 @@ public class Ranges extends AbstractRanges implements Iterable<Range>, Seekables
         if (falses.isEmpty()) return ImmutableMap.of(Boolean.TRUE, this);
         return ImmutableMap.of(Boolean.TRUE, Ranges.ofSortedAndDeoverlapped(trues.toArray(new Range[0])),
                                Boolean.FALSE, Ranges.ofSortedAndDeoverlapped(falses.toArray(new Range[0])));
-    }
-
-    @Inline
-    public final long foldl(Ranges intersect, IndexedFoldToLong<Range> fold, long param, long accumulator, long terminalValue)
-    {
-        return Routables.foldl(this, intersect, fold, param, accumulator, terminalValue);
-    }
-
-    @Inline
-    public final <P1, P2, V> V foldl(Ranges intersect, IndexedTriFold<P1, P2, Range, V> fold, P1 p1, P2 p2, V accumulator)
-    {
-        return Routables.foldl(this, intersect, fold, p1, p2, accumulator, i -> false);
     }
 }

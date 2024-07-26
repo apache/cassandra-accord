@@ -21,20 +21,20 @@ package accord.coordinate;
 import java.util.function.BiConsumer;
 
 import accord.local.Node;
-import accord.local.Status.Known;
+import accord.primitives.Known;
 import accord.messages.CheckStatus.CheckStatusOk;
 import accord.messages.CheckStatus.IncludeInfo;
-import accord.messages.CheckStatus.WithQuorum;
+import accord.primitives.WithQuorum;
+import accord.primitives.Participants;
 import accord.primitives.Route;
-import accord.primitives.Unseekables;
 import accord.primitives.TxnId;
 
-import static accord.local.Status.Known.Nothing;
+import static accord.primitives.Known.Nothing;
 
 /**
  * Find the homeKey of a txnId with some known keys
  */
-public class FindSomeRoute extends CheckShards<Unseekables<?>>
+public class FindSomeRoute extends CheckShards<Participants<?>>
 {
     static class Result
     {
@@ -51,17 +51,22 @@ public class FindSomeRoute extends CheckShards<Unseekables<?>>
     }
 
     final BiConsumer<Result, Throwable> callback;
-    FindSomeRoute(Node node, TxnId txnId, Unseekables<?> unseekables, BiConsumer<Result, Throwable> callback)
+    FindSomeRoute(Node node, TxnId txnId, Participants<?> unseekables, BiConsumer<Result, Throwable> callback)
     {
         super(node, txnId, unseekables, IncludeInfo.Route);
         this.callback = callback;
     }
 
-    public static FindSomeRoute findSomeRoute(Node node, TxnId txnId, Unseekables<?> unseekables, BiConsumer<Result, Throwable> callback)
+    public static void findSomeRoute(Node node, TxnId txnId, Participants<?> unseekables, BiConsumer<Result, Throwable> callback)
     {
+        if (!node.topology().hasEpoch(txnId.epoch()))
+        {
+            node.withEpoch(txnId.epoch(), callback, () -> findSomeRoute(node, txnId, unseekables, callback));
+            return;
+        }
+
         FindSomeRoute findSomeRoute = new FindSomeRoute(node, txnId, unseekables, callback);
         findSomeRoute.start();
-        return findSomeRoute;
     }
 
     @Override
@@ -75,6 +80,6 @@ public class FindSomeRoute extends CheckShards<Unseekables<?>>
     {
         if (failure != null) callback.accept(null, failure);
         else if (merged == null) callback.accept(new Result(null, Nothing, success.withQuorum), null);
-        else callback.accept(new Result(merged.route, merged.finish(this.route, success.withQuorum).knownFor(this.route), success.withQuorum), null);
+        else callback.accept(new Result(merged.route, merged.finish(this.route, success.withQuorum).knownFor(txnId, this.route, this.route), success.withQuorum), null);
     }
 }

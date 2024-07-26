@@ -33,6 +33,7 @@ import java.util.Set;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import static accord.utils.ArrayBuffers.uncached;
 import static accord.utils.Property.qt;
 import static accord.utils.Utils.toArray;
 
@@ -245,13 +246,13 @@ class SortedArraysTest
                 Set<Integer> difference = Sets.difference(left, right);
                 Integer[] expected = toArray(difference, Integer[]::new);
                 Arrays.sort(expected);
-                assertArrayEquals(expected, SortedArrays.linearSubtract(a, b, Integer[]::new));
+                assertArrayEquals(expected, SortedArrays.linearSubtract(a, b, uncached(Integer[]::new)));
             }
             {
                 Set<Integer> difference = Sets.difference(right, left);
                 Integer[] expected = toArray(difference, Integer[]::new);
                 Arrays.sort(expected);
-                assertArrayEquals(expected, SortedArrays.linearSubtract(b, a, Integer[]::new));
+                assertArrayEquals(expected, SortedArrays.linearSubtract(b, a, uncached(Integer[]::new)));
             }
         });
     }

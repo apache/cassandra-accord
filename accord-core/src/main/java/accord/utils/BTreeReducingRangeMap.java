@@ -268,7 +268,7 @@ public class BTreeReducingRangeMap<V> extends BTreeReducingIntervalMap<RoutingKe
      *  Update the range map retaining as much of the underlying BTree as possible
      */
     public static <M extends BTreeReducingRangeMap<V>, V> M update(
-        M map, Seekables<?, ?> keysOrRanges, V value, BiFunction<V, V, V> valueResolver,
+        M map, Unseekables<?> keysOrRanges, V value, BiFunction<V, V, V> valueResolver,
         BiFunction<Boolean, Object[], M> factory, BoundariesBuilderFactory<RoutingKey, V, M> builderFactory)
     {
         if (keysOrRanges.isEmpty())
@@ -284,7 +284,7 @@ public class BTreeReducingRangeMap<V> extends BTreeReducingIntervalMap<RoutingKe
     }
 
     private static <M extends BTreeReducingRangeMap<V>, V> M update(
-            M map, Seekables<?,?> keysOrRanges, V value, BiFunction<V, V, V> valueResolver, BiFunction<Boolean, Object[], M> factory)
+            M map, Unseekables<?> keysOrRanges, V value, BiFunction<V, V, V> valueResolver, BiFunction<Boolean, Object[], M> factory)
     {
         Accumulator<V> acc = accumulator();
 

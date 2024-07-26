@@ -18,35 +18,36 @@
 
 package accord.local.cfk;
 
-import accord.api.Key;
 import accord.api.ProgressLog.BlockedUntil;
+import accord.api.RoutingKey;
 import accord.local.Command;
 import accord.local.Commands;
 import accord.local.CommonAttributes;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
+import accord.primitives.SaveStatus;
+import accord.local.StoreParticipants;
 import accord.local.cfk.CommandsForKey.TxnInfo;
-import accord.primitives.Keys;
+import accord.primitives.Routable;
 import accord.primitives.RoutingKeys;
-import accord.primitives.Seekables;
 import accord.primitives.TxnId;
+import accord.utils.Invariants;
 
 import static accord.local.KeyHistory.COMMANDS;
 
 interface NotifySink
 {
-    void notWaiting(SafeCommandStore safeStore, TxnId txnId, Key key);
+    void notWaiting(SafeCommandStore safeStore, TxnId txnId, RoutingKey key);
 
-    void waitingOn(SafeCommandStore safeStore, TxnInfo txn, Key key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk);
+    void waitingOn(SafeCommandStore safeStore, TxnInfo txn, RoutingKey key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk);
 
     class DefaultNotifySink implements NotifySink
     {
         static final DefaultNotifySink INSTANCE = new DefaultNotifySink();
 
         @Override
-        public void notWaiting(SafeCommandStore safeStore, TxnId txnId, Key key)
+        public void notWaiting(SafeCommandStore safeStore, TxnId txnId, RoutingKey key)
         {
             SafeCommand safeCommand = safeStore.ifLoadedAndInitialised(txnId);
             if (safeCommand != null) notWaiting(safeStore, safeCommand, key);
@@ -58,13 +59,13 @@ interface NotifySink
             }
         }
 
-        private void notWaiting(SafeCommandStore safeStore, SafeCommand safeCommand, Key key)
+        private void notWaiting(SafeCommandStore safeStore, SafeCommand safeCommand, RoutingKey key)
         {
             Commands.removeWaitingOnKeyAndMaybeExecute(safeStore, safeCommand, key);
         }
 
         @Override
-        public void waitingOn(SafeCommandStore safeStore, TxnInfo notify, Key key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk)
+        public void waitingOn(SafeCommandStore safeStore, TxnInfo notify, RoutingKey key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk)
         {
             TxnId txnId = notify.plainTxnId();
             PreLoadContext context = PreLoadContext.contextFor(txnId);
@@ -76,23 +77,28 @@ interface NotifySink
         }
 
         // TODO (desired): we could complicate our state machine to replicate PreCommitted here, so we can simply wait for waitingOnStatus.execution
-        private void doNotifyWaitingOn(SafeCommandStore safeStore, TxnId txnId, Key key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk)
+        private void doNotifyWaitingOn(SafeCommandStore safeStore, TxnId txnId, RoutingKey key, SaveStatus waitingOnStatus, BlockedUntil blockedUntil, boolean notifyCfk)
         {
             SafeCommand safeCommand = safeStore.unsafeGet(txnId);
             safeCommand.initialise();
             Command command = safeCommand.current();
-            Seekables<?, ?> keysOrRanges = command.keysOrRanges();
-            if (keysOrRanges == null || !keysOrRanges.contains(key))
+            StoreParticipants participants = command.participants();
+            if (!participants.touches(key))
             {
+                Invariants.checkState(txnId.is(Routable.Domain.Key));
                 // make sure we will notify the CommandsForKey that's waiting
-                CommonAttributes.Mutable attrs = command.mutable();
-                Keys keys = Keys.of(key);
-                if (command.additionalKeysOrRanges() == null) attrs.additionalKeysOrRanges(keys);
-                else attrs.additionalKeysOrRanges(keys.with((Keys) command.additionalKeysOrRanges()));
+                CommonAttributes.Mutable attrs = command.mutable().updateParticipants(participants.supplement(RoutingKeys.of(key)));
                 safeCommand.update(safeStore, command.updateAttributes(attrs));
             }
             if (command.saveStatus().compareTo(waitingOnStatus) >= 0)
             {
+                // TODO (required): we expect this invariant to fail periodically today due to how we handle losing ranges
+                //   (specifically at minimum in the case where a CommandsForKey is provided a later transaction as a dependency
+                //    for an earlier transaction in order to permit CFK to fill in that dependency history).
+                //    This should be revisited at the same time as we resolve epoch changes with Recovery, as we expect
+                //    to have earlier epochs continue to maintain recovery state until the new epoch is fully ready
+                //    as this simplifies recovery and makes it more deterministic (avoiding epoch chasing).
+                Invariants.checkState(command.saveStatus() == SaveStatus.Invalidated || command.participants().touches(key));
                 // if we're committed but not invalidated, that means EITHER we have raced with a commit+
                 // OR we adopted as a dependency a <...?>
                 if (notifyCfk)
@@ -104,7 +110,7 @@ interface NotifySink
             }
         }
 
-        private void doNotifyAlreadyReady(SafeCommandStore safeStore, TxnId txnId, Key key)
+        private void doNotifyAlreadyReady(SafeCommandStore safeStore, TxnId txnId, RoutingKey key)
         {
             SafeCommandsForKey update = safeStore.ifLoadedAndInitialised(key);
             if (update != null)
@@ -113,7 +119,7 @@ interface NotifySink
             }
             else
             {
-                Keys keys = Keys.of(key);
+                RoutingKeys keys = RoutingKeys.of(key);
                 //noinspection ConstantConditions,SillyAssignment
                 safeStore = safeStore; // prevent use in lambda
                 safeStore.commandStore().execute(PreLoadContext.contextFor(txnId, keys, COMMANDS), safeStore0 -> {

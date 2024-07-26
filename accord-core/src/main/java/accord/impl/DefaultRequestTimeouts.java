@@ -134,7 +134,7 @@ public class DefaultRequestTimeouts implements RequestTimeouts
     {
         long now = node.elapsed(MILLISECONDS);
         long deadline = now + Math.max(1, MILLISECONDS.convert(delay, units));
-        int i = timeout.hashCode() & (stripes.length - 1);
+        int i = timeout.stripe() & (stripes.length - 1);
         while (true)
         {
             RegisteredTimeout result = stripes[i].tryRegister(timeout, now, deadline);

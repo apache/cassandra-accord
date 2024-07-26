@@ -83,6 +83,12 @@ public class PartialRangeRoute extends RangeRoute implements PartialRoute<Range>
     }
 
     @Override
+    public FullRoute<?> toRoute(RoutingKey homeKey)
+    {
+        throw new UnsupportedOperationException("Already a route!");
+    }
+
+    @Override
     public PartialRangeRoute with(PartialRoute<Range> that)
     {
         if (!(that instanceof PartialRangeRoute))

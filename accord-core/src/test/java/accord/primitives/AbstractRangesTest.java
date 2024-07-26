@@ -21,6 +21,7 @@ package accord.primitives;
 import java.util.Arrays;
 
 import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.impl.IntKey;
 import accord.utils.AccordGens;
 import accord.utils.Gen;
@@ -97,31 +98,49 @@ class AbstractRangesTest
         }
 
         @Override
-        public Routables<?> slice(int from, int to)
+        public Ranges slice(int from, int to)
         {
             return new Ranges(Arrays.copyOfRange(ranges, from, to));
         }
 
         @Override
-        public Routables<?> slice(accord.primitives.Ranges ranges)
+        public Ranges slice(accord.primitives.Ranges ranges)
         {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public Routables<Range> slice(accord.primitives.Ranges ranges, Slice slice)
+        public Ranges slice(accord.primitives.Ranges ranges, Slice slice)
         {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public Routables<?> intersecting(Unseekables<?> intersecting)
+        public Ranges intersecting(Unseekables<?> intersecting)
         {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public Routables<Range> intersecting(Unseekables<?> intersecting, Slice slice)
+        public Ranges intersecting(Unseekables<?> intersecting, Slice slice)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Ranges intersecting(Seekables<?, ?> intersecting)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Ranges intersecting(Seekables<?, ?> intersecting, Slice slice)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public FullRoute<?> toRoute(RoutingKey homeKey)
         {
             throw new UnsupportedOperationException();
         }

@@ -36,6 +36,8 @@ import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
 
+import static accord.utils.Invariants.illegalArgument;
+
 public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduceConsume<SafeCommandStore, R>
 {
     public static abstract class WithUnsynced<R> extends TxnRequest<R>
@@ -238,7 +240,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
             last = ranges;
         }
         if (scope == null)
-            throw new IllegalArgumentException("No intersection");
+            throw illegalArgument("No intersection between " + topologies + " and " + keys + " on " + node);
         return scope;
     }
 

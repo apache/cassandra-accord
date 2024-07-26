@@ -137,6 +137,12 @@ public class IntKey implements RoutableKey
         }
 
         @Override
+        public RoutingKey asRoutingKey()
+        {
+            return this;
+        }
+
+        @Override
         public RangeFactory rangeFactory()
         {
             return (s, e) -> new Range((Routing)s, (Routing)e);

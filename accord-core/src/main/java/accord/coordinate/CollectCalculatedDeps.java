@@ -18,8 +18,6 @@
 
 package accord.coordinate;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.function.BiConsumer;
 
 import accord.api.RoutingKey;
@@ -32,6 +30,7 @@ import accord.messages.CalculateDeps;
 import accord.messages.CalculateDeps.CalculateDepsOk;
 import accord.primitives.*;
 import accord.topology.Topologies;
+import accord.utils.SortedListMap;
 
 import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
@@ -43,7 +42,7 @@ public class CollectCalculatedDeps implements Callback<CalculateDepsOk>
     final RoutingKey homeKey;
     final Timestamp executeAt;
 
-    private final List<CalculateDepsOk> oks;
+    private final SortedListMap<Id, CalculateDepsOk> oks;
     private final QuorumTracker tracker;
     private final BiConsumer<Deps, Throwable> callback;
     private boolean isDone;
@@ -55,18 +54,18 @@ public class CollectCalculatedDeps implements Callback<CalculateDepsOk>
         this.homeKey = homeKey;
         this.executeAt = executeAt;
         this.callback = callback;
-        this.oks = new ArrayList<>();
+        this.oks = new SortedListMap<>(topologies.nodes(), CalculateDepsOk[]::new);
         this.tracker = new QuorumTracker(topologies);
     }
 
-    public static void withCalculatedDeps(Node node, TxnId txnId, FullRoute<?> fullRoute, Unseekables<?> sendTo, Seekables<?, ?> keysOrRanges, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
+    public static void withCalculatedDeps(Node node, TxnId txnId, FullRoute<?> fullRoute, Unseekables<?> sendTo, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
     {
         Topologies topologies = node.topology().withUnsyncedEpochs(sendTo, txnId, executeAt);
         CollectCalculatedDeps collect = new CollectCalculatedDeps(node, topologies, txnId, fullRoute.homeKey(), executeAt, callback);
         CommandStore store = CommandStore.maybeCurrent();
         if (store == null)
             store = node.commandStores().select(fullRoute);
-        node.send(collect.tracker.nodes(), to -> new CalculateDeps(to, topologies, fullRoute, txnId, keysOrRanges, executeAt),
+        node.send(collect.tracker.nodes(), to -> new CalculateDeps(to, topologies, fullRoute, txnId, executeAt),
                   store, collect);
     }
 
@@ -76,7 +75,7 @@ public class CollectCalculatedDeps implements Callback<CalculateDepsOk>
         if (isDone)
             return;
 
-        oks.add(ok);
+        oks.put(from, ok);
         if (tracker.recordSuccess(from) == Success)
             onQuorum();
     }
@@ -110,7 +109,7 @@ public class CollectCalculatedDeps implements Callback<CalculateDepsOk>
             return;
 
         isDone = true;
-        Deps deps = Deps.merge(oks, ok -> ok.deps);
+        Deps deps = Deps.merge(oks, oks.domainSize(), SortedListMap::getValue, ok -> ok.deps);
         callback.accept(deps, null);
     }
 }

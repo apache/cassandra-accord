@@ -51,7 +51,15 @@ public class PackedKeyTracker
         if (routeSize < totalBits)
             return routeSize;
 
-        return Math.toIntExact((1L << (totalBits - 1)) / routeSize);
+        // TODO (expected): calculate directly and test
+        int counterBits = 1;
+        while (true)
+        {
+            int roundBits = totalBits - counterBits; // we must count past the round, so we must have one reserved index for "done"
+            if ((roundBits << counterBits) - roundBits >= routeSize)
+                return roundBits;
+            ++counterBits;
+        }
     }
 
     /**
@@ -129,10 +137,10 @@ public class PackedKeyTracker
     /**
      * Set the packed round index for a round of the provided size
      */
-    static long setRoundIndexAndClearBitSet(long encodedState, int newIndex, int roundSize, int shift, long mask)
+    static long setRoundIndexAndClearBitSet(long encodedState, int newIndex, int roundSize, int shift, int bits, long mask)
     {
-        Invariants.checkArgument(roundSize > 0);
-        int counterBits = shift - roundSize;
+        Invariants.checkArgument(roundSize > 0 && roundSize <= bits);
+        int counterBits = bits - roundSize;
         Invariants.checkState(newIndex < (1L << counterBits));
         int counterShift = shift + roundSize;
         encodedState &= ~(mask << shift);
@@ -143,10 +151,10 @@ public class PackedKeyTracker
     /**
      * Set the packed round index for a round of the provided size
      */
-    static long setMaxRoundIndexAndClearBitSet(long encodedState, int roundSize, int shift, long mask)
+    static long setMaxRoundIndexAndClearBitSet(long encodedState, int roundSize, int shift, int bits, long mask)
     {
-        Invariants.checkArgument(roundSize > 0);
-        int counterBits = shift - roundSize;
+        Invariants.checkArgument(roundSize > 0 && roundSize <= bits);
+        int counterBits = bits - roundSize;
         long maxIndex = (1L << counterBits) - 1;
         int counterShift = shift + roundSize;
         encodedState &= ~(mask << shift);

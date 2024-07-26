@@ -49,7 +49,7 @@ import static accord.utils.Invariants.illegalState;
 public class ReducingIntervalMap<K extends Comparable<? super K>, V>
 {
     @SuppressWarnings("rawtypes")
-    private static final Comparable[] NO_OBJECTS = new Comparable[0];
+    public static final Comparable[] NO_OBJECTS = new Comparable[0];
 
     // for simplicity at construction, we permit this to be overridden by the first insertion
     final boolean inclusiveEnds;
@@ -73,7 +73,7 @@ public class ReducingIntervalMap<K extends Comparable<? super K>, V>
     @VisibleForTesting
     ReducingIntervalMap(boolean inclusiveEnds, K[] starts, V[] values)
     {
-        Invariants.checkArgument(starts.length == values.length + 1);
+        Invariants.checkArgument(starts.length == values.length + 1 || (starts.length + values.length) == 0);
         this.inclusiveEnds = inclusiveEnds;
         this.starts = starts;
         this.values = values;

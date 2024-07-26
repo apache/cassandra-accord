@@ -274,32 +274,32 @@ public class AccordGens
         throw new IllegalArgumentException("Unsupported key type " + sample.getClass() + "; supported = PrefixedIntHashKey, IntKey");
     }
 
-    public static Gen<KeyDeps> keyDeps(Gen<? extends Key> keyGen)
+    public static Gen<KeyDeps> keyDeps(Gen<? extends RoutingKey> keyGen)
     {
         Gen<Txn.Kind> kinds = Gens.pick(Txn.Kind.Write, Txn.Kind.Read);
         return keyDeps(keyGen, txnIds(kinds, ignore -> Routable.Domain.Key));
     }
 
-    public static Gen<KeyDeps> directKeyDeps(Gen<? extends Key> keyGen)
+    public static Gen<KeyDeps> directKeyDeps(Gen<? extends RoutingKey> keyGen)
     {
         Gen<Txn.Kind> kinds = Gens.pick(Txn.Kind.SyncPoint, Txn.Kind.ExclusiveSyncPoint);
         return keyDeps(keyGen, txnIds(kinds, ignore -> Routable.Domain.Key));
     }
 
-    public static Gen<KeyDeps> keyDeps(Gen<? extends Key> keyGen, Gen<TxnId> idGen)
+    public static Gen<KeyDeps> keyDeps(Gen<? extends RoutingKey> keyGen, Gen<TxnId> idGen)
     {
         double emptyProb = .2D;
         return rs -> {
             if (rs.decide(emptyProb)) return KeyDeps.NONE;
-            Set<Key> seenKeys = new HashSet<>();
+            Set<RoutingKey> seenKeys = new HashSet<>();
             Set<TxnId> seenTxn = new HashSet<>();
-            Gen<? extends Key> uniqKeyGen = keyGen.filter(42, null, seenKeys::add);
+            Gen<? extends RoutingKey> uniqKeyGen = keyGen.filter(42, null, seenKeys::add);
             Gen<TxnId> uniqIdGen = idGen.filter(42, null, seenTxn::add);
             try (KeyDeps.Builder builder = KeyDeps.builder())
             {
                 for (int i = 0, numKeys = rs.nextInt(1, 10); i < numKeys; i++)
                 {
-                    Key next = uniqKeyGen.next(rs);
+                    RoutingKey next = uniqKeyGen.next(rs);
                     if (next == null)
                         break;
                     builder.nextKey(next);
@@ -552,12 +552,12 @@ public class AccordGens
         return rs -> new Deps(keyDepsGen.next(rs), rangeDepsGen.next(rs), directKeyDepsGen.next(rs));
     }
 
-    public static Gen<Deps> depsFromKey(Gen<? extends Key> keyGen, Gen<? extends Range> rangeGen, Gen<? extends Key> directKeyGen)
+    public static Gen<Deps> depsFromKey(Gen<? extends RoutingKey> keyGen, Gen<? extends Range> rangeGen, Gen<? extends RoutingKey> directKeyGen)
     {
         return deps(keyDeps(keyGen), rangeDeps(rangeGen), directKeyDeps(directKeyGen));
     }
 
-    public static Gen<Deps> depsFromKey(Gen<? extends Key> keyGen, Gen<? extends Range> rangeGen)
+    public static Gen<Deps> depsFromKey(Gen<? extends RoutingKey> keyGen, Gen<? extends Range> rangeGen)
     {
         return depsFromKey(keyGen, rangeGen, keyGen);
     }
@@ -573,7 +573,7 @@ public class AccordGens
             case Read:
             case EphemeralRead:
             {
-                Gen<? extends Key> keyGen = Gens.pick(Iterators.toArray(((Keys) txn.keys()).iterator(), Key.class));
+                Gen<? extends RoutingKey> keyGen = Gens.pick(Iterators.toArray((((Keys) txn.keys()).toParticipants()).iterator(), RoutingKey.class));
                 keyDepsGen = AccordGens.keyDeps(keyGen, AccordGens.txnIds(Gens.longs().between(0, txnId.epoch()),
                                                                           Gens.longs().between(0, txnId.hlc()),
                                                                           nodeIdValues(),

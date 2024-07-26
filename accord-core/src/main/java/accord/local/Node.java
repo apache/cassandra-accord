@@ -45,7 +45,6 @@ import accord.api.Agent;
 import accord.api.ConfigurationService;
 import accord.api.ConfigurationService.EpochReady;
 import accord.api.DataStore;
-import accord.api.Key;
 import accord.api.LocalConfig;
 import accord.api.LocalListeners;
 import accord.api.MessageSink;
@@ -77,7 +76,6 @@ import accord.primitives.Ranges;
 import accord.primitives.Routable.Domain;
 import accord.primitives.Routables;
 import accord.primitives.Route;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -89,6 +87,8 @@ import accord.utils.DeterministicSet;
 import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
 import accord.utils.RandomSource;
+import accord.utils.SortedList;
+import accord.utils.SortedListMap;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncExecutor;
 import accord.utils.async.AsyncResult;
@@ -531,6 +531,10 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         if (collection instanceof List) return;
         if (collection instanceof NavigableSet
             || collection instanceof LinkedHashSet
+            || collection instanceof SortedList
+            || collection instanceof SortedListMap
+            || collection instanceof SortedListMap.SetView
+            || collection instanceof SortedListMap.CollectionView
             || "java.util.LinkedHashMap.LinkedKeySet".equals(collection.getClass().getCanonicalName())
             || collection instanceof DeterministicSet) return;
         throw new IllegalArgumentException("Attempted to use a collection that is unsafe for iteration: " + collection.getClass());
@@ -620,19 +624,19 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         }
     }
 
-    public FullRoute<?> computeRoute(TxnId txnId, Seekables<?, ?> keysOrRanges)
+    public FullRoute<?> computeRoute(TxnId txnId, Routables<?> keysOrRanges)
     {
         return computeRoute(txnId.epoch(), keysOrRanges);
     }
 
-    public FullRoute<?> computeRoute(long epoch, Seekables<?, ?> keysOrRanges)
+    public FullRoute<?> computeRoute(long epoch, Routables<?> keysOrRanges)
     {
         Invariants.checkArgument(!keysOrRanges.isEmpty(), "Attempted to compute a route from empty keys or ranges");
         RoutingKey homeKey = selectHomeKey(epoch, keysOrRanges);
         return keysOrRanges.toRoute(homeKey);
     }
 
-    private RoutingKey selectHomeKey(long epoch, Seekables<?, ?> keysOrRanges)
+    private RoutingKey selectHomeKey(long epoch, Routables<?> keysOrRanges)
     {
         Ranges owned = topology().localForEpoch(epoch).ranges();
         int i = (int)keysOrRanges.findNextIntersection(0, owned, 0);
@@ -748,7 +752,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     }
 
     @VisibleForTesting
-    public CommandStore unsafeForKey(Key key)
+    public CommandStore unsafeForKey(RoutingKey key)
     {
         return commandStores.unsafeForKey(key);
     }

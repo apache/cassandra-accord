@@ -21,9 +21,10 @@ package accord.local;
 import accord.api.Result;
 import accord.local.Command.Truncated;
 import accord.primitives.Ballot;
-import accord.primitives.Seekables;
+import accord.primitives.Status;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
 
@@ -101,32 +102,11 @@ public abstract class SafeCommand
         return incidentalUpdate(current().updatePromised(promised));
     }
 
-    public Command.Accepted accept(SafeCommandStore safeStore, Seekables<?, ?> keysOrRanges, CommonAttributes attrs, Timestamp executeAt, Ballot ballot)
+    public Command.Accepted accept(SafeCommandStore safeStore, Unseekables<?> keysOrRanges, CommonAttributes attrs, Timestamp executeAt, Ballot ballot)
     {
         Command current = current();
-        attrs = updateKeysOrRanges(attrs, keysOrRanges);
         Command.Accepted updated = Command.accept(current, attrs, executeAt, ballot);
         return update(safeStore, updated);
-    }
-
-    private static CommonAttributes updateKeysOrRanges(CommonAttributes attrs, Seekables<?, ?> keysOrRanges)
-    {
-        if (attrs.partialTxn() != null && attrs.partialTxn().keys().containsAll(keysOrRanges))
-            return attrs;
-
-        if (attrs.additionalKeysOrRanges() != null && attrs.additionalKeysOrRanges().containsAll(keysOrRanges))
-            return attrs;
-
-        if (attrs.partialTxn() != null)
-            keysOrRanges = ((Seekables)keysOrRanges).without(attrs.partialTxn().keys());
-
-        if (attrs.additionalKeysOrRanges() != null)
-            keysOrRanges = ((Seekables)keysOrRanges).with(attrs.additionalKeysOrRanges());
-
-        if (!keysOrRanges.isEmpty())
-            attrs = attrs.mutable().additionalKeysOrRanges(keysOrRanges);
-
-        return attrs;
     }
 
     public Command acceptInvalidated(SafeCommandStore safeStore, Ballot ballot)

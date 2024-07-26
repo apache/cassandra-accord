@@ -20,6 +20,7 @@ package accord.local.cfk;
 
 import java.util.Arrays;
 
+import accord.local.RedundantBefore;
 import accord.local.cfk.CommandsForKey.TxnInfo;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
@@ -30,13 +31,18 @@ import accord.utils.btree.BTree;
 import accord.utils.btree.BTreeRemoval;
 import accord.utils.btree.BulkIterator;
 import accord.utils.btree.UpdateFunction;
+import org.agrona.collections.Long2ObjectHashMap;
 
 import static accord.local.cfk.CommandsForKey.InternalStatus.APPLIED;
 import static accord.local.cfk.CommandsForKey.InternalStatus.COMMITTED;
+import static accord.local.cfk.CommandsForKey.bootstrappedAt;
 import static accord.local.cfk.CommandsForKey.insertPos;
 import static accord.local.cfk.CommandsForKey.managesExecution;
+import static accord.local.cfk.CommandsForKey.mayExecute;
+import static accord.local.cfk.CommandsForKey.redundantBefore;
 import static accord.local.cfk.Pruning.LoadingPruned.LOADINGF;
 import static accord.local.cfk.Utils.removeRedundantMissing;
+import static accord.primitives.Txn.Kind.Write;
 import static accord.primitives.TxnId.NO_TXNIDS;
 import static accord.utils.ArrayBuffers.cachedAny;
 import static accord.utils.ArrayBuffers.cachedTxnIds;
@@ -44,6 +50,7 @@ import static accord.utils.Invariants.Paranoia.LINEAR;
 import static accord.utils.Invariants.Paranoia.NONE;
 import static accord.utils.Invariants.ParanoiaCostFactor.LOW;
 import static accord.utils.Invariants.testParanoia;
+import static accord.utils.SortedArrays.Search.FLOOR;
 import static accord.utils.btree.BTree.Dir.ASC;
 import static accord.utils.btree.UpdateFunction.noOp;
 
@@ -182,7 +189,7 @@ public class Pruning
             while (--i >= 0)
             {
                 TxnInfo txn = cfk.committedByExecuteAt[i];
-                if (txn.kind().isWrite() && txn.executeAt.hlc() <= maxPruneHlc && txn.status == APPLIED)
+                if (txn.is(Write) && txn.executeAt.hlc() <= maxPruneHlc && txn.status() == APPLIED)
                     break;
             }
 
@@ -210,13 +217,16 @@ public class Pruning
     static CommandsForKey pruneBefore(CommandsForKey cfk, TxnInfo newPrunedBefore, int pos)
     {
         Invariants.checkArgument(newPrunedBefore.compareTo(cfk.prunedBefore()) >= 0, "Expect new prunedBefore to be ahead of existing one");
+        Invariants.checkArgument(newPrunedBefore.mayExecute());
 
         TxnInfo[] byId = cfk.byId;
+        TxnInfo[] committedByExecuteAt = cfk.committedByExecuteAt;
         int minUndecidedById;
         int retainCount = 0, removedCommittedCount = 0;
         // a store of committed executeAts we have removed where we cannot otherwise cheaply infer it
         Object[] removedExecuteAts = NO_TXNIDS;
         int removedExecuteAtCount = 0;
+        Long2ObjectHashMap<TxnInfo> epochPrunedBefores = buildEpochPrunedBefores(byId, committedByExecuteAt, newPrunedBefore);
         TxnInfo[] newById;
         {
             minUndecidedById = cfk.minUndecidedById;
@@ -224,39 +234,72 @@ public class Pruning
             RecursiveObjectBuffers<TxnId> missingBuffers = new RecursiveObjectBuffers<>(cachedTxnIds());
             TxnId[] mergedMissing = newPrunedBefore.missing();
             int mergedMissingCount = mergedMissing.length;
+            TxnInfo activePruneEpochBefore = newPrunedBefore; // note that if activePrunedBefore != newPrunedBefore, we compare with executeAt
+            long activePruneEpoch = activePruneEpochBefore.epoch();
+            Object[] newByIdBuffer = cachedAny().get(pos);
+
             for (int i = pos - 1 ; i >= 0 ; --i)
             {
                 TxnInfo txn = byId[i];
-                switch (txn.status)
+                switch (txn.status())
                 {
-                    default: throw new AssertionError("Unhandled status: " + txn.status);
+                    default: throw new AssertionError("Unhandled status: " + txn.status());
                     case COMMITTED:
                     case STABLE:
-                        ++retainCount;
+                        if (txn.mayExecute())
+                        {
+                            newByIdBuffer[pos - ++retainCount] = txn;
+                        }
+                        else
+                        {
+                            long epoch = txn.executeAt.epoch();
+                            if (epoch != activePruneEpoch && epochPrunedBefores != null)
+                            {
+                                activePruneEpochBefore = epochPrunedBefores.get(epoch);
+                                activePruneEpoch = epoch;
+                            }
+
+                            if (activePruneEpochBefore == txn || (activePruneEpochBefore == newPrunedBefore && activePruneEpochBefore.executeAt.compareTo(txn.executeAt) <= 0))
+                                newByIdBuffer[pos - ++retainCount] = txn;
+                        }
                         break;
 
                     case HISTORICAL:
                     case TRANSITIVELY_KNOWN:
                     case PREACCEPTED_OR_ACCEPTED_INVALIDATE:
                     case ACCEPTED:
-                        ++retainCount;
+                        newByIdBuffer[pos - ++retainCount] = txn;
                         if (i == minUndecidedById)
                             minUndecidedByIdDelta = retainCount;
                         break;
 
                     case APPLIED:
-                        if (txn.executeAt.compareTo(newPrunedBefore.executeAt) < 0)
+                        long epoch = txn.executeAt.epoch();
+                        if (epoch != activePruneEpoch)
+                        {
+                            activePruneEpochBefore = epochPrunedBefores.get(epoch);
+                            activePruneEpoch = epoch;
+                        }
+
+                        boolean tryPrune = activePruneEpochBefore == newPrunedBefore
+                                           ? txn.executeAt.compareTo(newPrunedBefore.executeAt) < 0
+                                           : activePruneEpochBefore != txn && activePruneEpochBefore != null;
+
+                        if (tryPrune)
                         {
                             TxnId[] missing = txn.missing();
                             if (missing == NO_TXNIDS || SortedArrays.isSubset(missing, 0, missing.length, mergedMissing, 0, mergedMissingCount))
                             {
-                                if (missing != NO_TXNIDS)
-                                {
-                                    if (removedExecuteAtCount == removedExecuteAts.length)
-                                        removedExecuteAts = cachedAny().resize(removedExecuteAts, removedExecuteAtCount, Math.max(8, removedExecuteAtCount + (removedExecuteAtCount >> 1)));
-                                    removedExecuteAts[removedExecuteAtCount++] = txn.executeAt;
+                                if (txn.mayExecute())
+                                {   // if we don't execute, we don't track in committedByExecuteAt, so don't need to update bookkeeping for removing from there
+                                    if (missing != NO_TXNIDS)
+                                    {
+                                        if (removedExecuteAtCount == removedExecuteAts.length)
+                                            removedExecuteAts = cachedAny().resize(removedExecuteAts, removedExecuteAtCount, Math.max(8, removedExecuteAtCount + (removedExecuteAtCount >> 1)));
+                                        removedExecuteAts[removedExecuteAtCount++] = txn.executeAt;
+                                    }
+                                    ++removedCommittedCount;
                                 }
-                                ++removedCommittedCount;
                                 continue;
                             }
 
@@ -266,9 +309,9 @@ public class Pruning
                                 mergedMissingCount = missingBuffers.sizeOfLast(mergedMissing);
                             }
                         }
-                        ++retainCount;
+                        newByIdBuffer[pos - ++retainCount] = txn;
 
-                    case INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED:
+                    case INVALID_OR_TRUNCATED_OR_PRUNED:
                         break;
                 }
             }
@@ -277,7 +320,6 @@ public class Pruning
                 return cfk;
 
             int removedByIdCount = pos - retainCount;
-            newById = new TxnInfo[byId.length - removedByIdCount];
             if (minUndecidedById >= 0)
             {
                 if (minUndecidedById >= pos)
@@ -285,51 +327,12 @@ public class Pruning
                 else
                     minUndecidedById = retainCount - minUndecidedByIdDelta;
             }
+            newById = new TxnInfo[byId.length - removedByIdCount];
+            System.arraycopy(newByIdBuffer, pos - retainCount, newById, 0, retainCount);
+            System.arraycopy(byId, pos, newById, retainCount, byId.length - pos);
             missingBuffers.discardBuffers();
         }
 
-        {   // copy to new byTxnId array
-            int insertPos = retainCount;
-            int removedExecuteAtPos = 0;
-            for (int i = pos - 1; i >= 0 ; --i)
-            {
-                TxnInfo txn = byId[i];
-                switch (txn.status)
-                {
-                    default: throw new AssertionError("Unhandled status: " + txn.status);
-                    case INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED:
-                        continue;
-
-                    case COMMITTED:
-                    case STABLE:
-                    case HISTORICAL:
-                    case TRANSITIVELY_KNOWN:
-                    case PREACCEPTED_OR_ACCEPTED_INVALIDATE:
-                    case ACCEPTED:
-                        break;
-
-                    case APPLIED:
-                        if (txn.executeAt.compareTo(newPrunedBefore.executeAt) < 0)
-                        {
-                            TxnId[] missing = txn.missing();
-                            if (missing == NO_TXNIDS)
-                                continue;
-
-                            if (removedExecuteAtPos < removedExecuteAtCount && removedExecuteAts[removedExecuteAtPos] == txn.executeAt)
-                            {
-                                ++removedExecuteAtPos;
-                                continue;
-                            }
-                        }
-                }
-
-                newById[--insertPos] = txn;
-            }
-            Invariants.checkState(retainCount + byId.length - pos == newById.length);
-            System.arraycopy(byId, pos, newById, retainCount, byId.length - pos);
-        }
-
-        TxnInfo[] committedByExecuteAt = cfk.committedByExecuteAt;
         TxnInfo[] newCommittedByExecuteAt;
         {   // copy to new committedByExecuteAt array
             Arrays.sort(removedExecuteAts, 0, removedExecuteAtCount);
@@ -337,19 +340,35 @@ public class Pruning
             int sourcePos = Arrays.binarySearch(committedByExecuteAt, newPrunedBefore, TxnInfo::compareExecuteAt);
             int insertPos = sourcePos - removedCommittedCount;
             int removedExecuteAtPos = removedExecuteAtCount - 1;
+            TxnInfo activePruneEpochBefore = newPrunedBefore; // note that if activePrunedBefore != newPrunedBefore, we compare with executeAt
+            long activePruneEpoch = newPrunedBefore.epoch();
             for (int i = sourcePos - 1; i >= 0 ; --i)
             {
                 TxnInfo txn = committedByExecuteAt[i];
-                if (txn.status == APPLIED && txn.compareTo(newPrunedBefore) < 0)
+                if (txn.status() == APPLIED)
                 {
-                    TxnId[] missing = txn.missing();
-                    if (missing == NO_TXNIDS)
-                        continue;
-
-                    if (removedExecuteAtPos >= 0 && removedExecuteAts[removedExecuteAtPos] == txn.executeAt)
+                    long epoch = txn.executeAt.epoch();
+                    if (epoch != activePruneEpoch && epochPrunedBefores != null)
                     {
-                        --removedExecuteAtPos;
-                        continue;
+                        activePruneEpochBefore = epochPrunedBefores.get(epoch);
+                        activePruneEpoch = epoch;
+                    }
+
+                    boolean tryPrune = activePruneEpochBefore == newPrunedBefore
+                                       ? txn.compareTo(newPrunedBefore) < 0
+                                       : activePruneEpochBefore != txn && activePruneEpochBefore != null;
+
+                    if (tryPrune)
+                    {
+                        TxnId[] missing = txn.missing();
+                        if (missing == NO_TXNIDS)
+                            continue;
+
+                        if (removedExecuteAtPos >= 0 && removedExecuteAts[removedExecuteAtPos] == txn.executeAt)
+                        {
+                            --removedExecuteAtPos;
+                            continue;
+                        }
                     }
                 }
 
@@ -361,13 +380,52 @@ public class Pruning
         cachedAny().forceDiscard(removedExecuteAts, removedExecuteAtCount);
         int newMaxAppliedWriteByExecuteAt = cfk.maxAppliedWriteByExecuteAt - removedCommittedCount;
         Invariants.checkState(newById[retainCount] == newPrunedBefore);
-        return new CommandsForKey(cfk.key, cfk.redundantBefore, cfk.bootstrappedAt, newById, newCommittedByExecuteAt, minUndecidedById, newMaxAppliedWriteByExecuteAt, cfk.loadingPruned, retainCount, cfk.safelyPrunedBefore, cfk.unmanageds);
+        return new CommandsForKey(cfk.key, cfk.boundsInfo, newById, newCommittedByExecuteAt, minUndecidedById, newMaxAppliedWriteByExecuteAt, cfk.loadingPruned, retainCount, cfk.unmanageds);
     }
 
-    static TxnInfo[] pruneById(TxnInfo[] byId, TxnId redundantBefore, TxnId bootstrappedAt, TxnId newRedundantBefore, TxnId newBootstrappedAt)
+    /**
+     * Pruning operates on the assumption it is safe to return a future transaction as an execution dependency for sync points and exclusive sync points;
+     * due to the way we execute these transactions, by stabilising all of their dependencies (transitively) before taking our Apply point,
+     * this is true _so long_ as we participate in the epochs of the future transactions.
+     * So, to facilitate this we retain the highest committed transaction for each epoch, that would otherwise be pruned.
+     */
+    private static Long2ObjectHashMap<TxnInfo> buildEpochPrunedBefores(TxnInfo[] byId, TxnInfo[] committedByExecuteAt, TxnInfo newPrunedBefore)
     {
-        Invariants.checkArgument(newRedundantBefore.compareTo(redundantBefore) >= 0, "Expect new RedundantBefore.Entry locallyAppliedOrInvalidatedBefore to be ahead of existing one");
-        Invariants.checkArgument(bootstrappedAt == null || newRedundantBefore.compareTo(bootstrappedAt) >= 0 || (newBootstrappedAt != null && newBootstrappedAt.compareTo(bootstrappedAt) >= 0), "Expect new RedundantBefore.Entry bootstrappedAt to be ahead of existing one");
+        if (byId[0].epoch() == committedByExecuteAt[committedByExecuteAt.length - 1].executeAt.epoch())
+            return null;
+
+        Long2ObjectHashMap<TxnInfo> epochPrunedBefores = new Long2ObjectHashMap<>();
+        for (long epoch = newPrunedBefore.epoch() ; epoch <= newPrunedBefore.executeAt.epoch(); ++epoch)
+            epochPrunedBefores.put(epoch, newPrunedBefore);
+
+        int maxi = Arrays.binarySearch(committedByExecuteAt, newPrunedBefore, TxnInfo::compareExecuteAt);
+        int i = 0;
+        while (i < maxi)
+        {
+            TxnInfo test = committedByExecuteAt[i];
+            while (!test.is(Write) && ++i < maxi) test = committedByExecuteAt[i];
+            long epoch = test.executeAt.epoch(); // we only care about executeAt.epoch() here
+            if (epoch >= newPrunedBefore.epoch())
+                break;
+
+            Object prev = epochPrunedBefores.putIfAbsent(epoch, test);
+            Invariants.checkState(prev == null);
+
+            i = SortedArrays.exponentialSearch(committedByExecuteAt, i + 1, maxi, test, TxnInfo::compareExecuteAtEpoch, FLOOR);
+            if (i < 0) i = -1 - i;
+            else i = i + 1;
+        }
+        return epochPrunedBefores;
+    }
+
+    static TxnInfo[] pruneById(TxnInfo[] byId, RedundantBefore.Entry prevBoundsInfo, RedundantBefore.Entry newBoundsInfo)
+    {
+        TxnId newRedundantBefore = redundantBefore(newBoundsInfo);
+        TxnId newBootstrappedAt = bootstrappedAt(newBoundsInfo);
+        TxnId prevRedundantBefore = redundantBefore(prevBoundsInfo);
+        TxnId prevBootstrappedAt = bootstrappedAt(prevBoundsInfo);
+        Invariants.checkArgument(newRedundantBefore.compareTo(prevRedundantBefore) >= 0, "Expect new RedundantBefore.Entry locallyAppliedOrInvalidatedBefore to be ahead of existing one");
+        Invariants.checkArgument(prevBootstrappedAt == null || newRedundantBefore.compareTo(prevBootstrappedAt) >= 0 || (newBootstrappedAt != null && newBootstrappedAt.compareTo(prevBootstrappedAt) >= 0), "Expect new RedundantBefore.Entry bootstrappedAt to be ahead of existing one");
 
         TxnInfo[] newById = byId;
         int pos = insertPos(byId, newRedundantBefore);
@@ -375,9 +433,9 @@ public class Pruning
         {
             if (Invariants.isParanoid() && testParanoia(LINEAR, NONE, LOW))
             {
-                int startPos = bootstrappedAt == null ? 0 : insertPos(byId, bootstrappedAt);
+                int startPos = prevBootstrappedAt == null ? 0 : insertPos(byId, prevBootstrappedAt);
                 for (int i = startPos ; i < pos ; ++i)
-                    Invariants.checkState(byId[i].status != COMMITTED, "%s expected to be applied or undecided, as marked redundant", byId[i]);
+                    Invariants.checkState(byId[i].status() != COMMITTED, "%s expected to be applied or undecided, as marked redundant", byId[i]);
             }
 
             newById = Arrays.copyOfRange(byId, pos, byId.length);
@@ -387,7 +445,20 @@ public class Pruning
                 TxnId[] missing = txn.missing();
                 if (missing == NO_TXNIDS) continue;
                 missing = removeRedundantMissing(missing, newRedundantBefore);
-                newById[i] = txn.update(missing);
+                newById[i] = txn.withMissing(missing);
+            }
+        }
+
+        if (newBoundsInfo.startOwnershipEpoch != prevBoundsInfo.startOwnershipEpoch
+            || newBoundsInfo.endOwnershipEpoch != prevBoundsInfo.endOwnershipEpoch
+            || !newBoundsInfo.bootstrappedAt.equals(prevBoundsInfo.bootstrappedAt))
+        {
+            for (int i = 0 ; i < newById.length ; ++i)
+            {
+                TxnInfo txn = newById[i];
+                txn = txn.withMayExecute(mayExecute(newBoundsInfo, txn));
+                if (txn != newById[i])
+                    newById[i] = txn;
             }
         }
         return newById;

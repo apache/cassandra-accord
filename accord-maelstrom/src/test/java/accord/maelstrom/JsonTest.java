@@ -24,6 +24,7 @@ import accord.api.Key;
 import accord.primitives.Deps;
 import accord.primitives.Range;
 import accord.primitives.RangeDeps;
+import accord.primitives.RoutableKey;
 import accord.utils.AccordGens;
 import accord.utils.Gen;
 import accord.utils.Gens;
@@ -84,7 +85,9 @@ class JsonTest
 
     static Gen<Deps> depsGen()
     {
-        return AccordGens.deps(AccordGens.keyDeps(keyGen()), rangeDepsGen(), AccordGens.directKeyDeps(keyGen()));
+        return AccordGens.deps(AccordGens.keyDeps(keyGen().map(RoutableKey::toUnseekable)),
+                               rangeDepsGen(),
+                               AccordGens.directKeyDeps(keyGen().map(RoutableKey::toUnseekable)));
     }
 
 }

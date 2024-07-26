@@ -18,7 +18,7 @@
 
 package accord.impl;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.impl.InMemoryCommandStore.GlobalTimestampsForKey;
 
 public class InMemorySafeTimestampsForKey extends SafeTimestampsForKey
@@ -26,7 +26,7 @@ public class InMemorySafeTimestampsForKey extends SafeTimestampsForKey
     private boolean invalidated = false;
     private final GlobalTimestampsForKey global;
 
-    public InMemorySafeTimestampsForKey(Key key, GlobalTimestampsForKey global)
+    public InMemorySafeTimestampsForKey(RoutingKey key, GlobalTimestampsForKey global)
     {
         super(key);
         this.global = global;

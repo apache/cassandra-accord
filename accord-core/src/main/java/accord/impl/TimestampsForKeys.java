@@ -18,13 +18,18 @@
 
 package accord.impl;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.api.VisibleForImplementation;
 import accord.local.CommandStore;
+import accord.primitives.RoutingKeys;
 import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static accord.local.RedundantBefore.PreBootstrapOrStale.FULLY;
+import static accord.utils.Invariants.illegalState;
 
 
 public class TimestampsForKeys
@@ -33,7 +38,7 @@ public class TimestampsForKeys
 
     private TimestampsForKeys() {}
 
-    public static TimestampsForKey updateLastExecutionTimestamps(CommandStore commandStore, SafeTimestampsForKey tfk, Timestamp executeAt, boolean isForWriteTxn)
+    public static TimestampsForKey updateLastExecutionTimestamps(CommandStore commandStore, SafeTimestampsForKey tfk, TxnId txnId, Timestamp executeAt, boolean isForWriteTxn)
     {
         TimestampsForKey current = tfk.current();
 
@@ -41,9 +46,9 @@ public class TimestampsForKeys
 
         if (executeAt.compareTo(lastWrite) < 0)
         {
-            if (!commandStore.safeToReadAt(executeAt).contains(tfk.key().toUnseekable()))
+            if (commandStore.redundantBefore().preBootstrapOrStale(TxnId.min(txnId, current.lastWriteId()), RoutingKeys.of(tfk.key().toUnseekable())) == FULLY)
                 return current;
-            throw new IllegalArgumentException(String.format("%s is less than the most recent write timestamp %s for %s", executeAt, lastWrite, tfk.key()));
+            throw illegalState("%s is less than the most recent write timestamp %s", executeAt, lastWrite);
         }
 
         Timestamp lastExecuted = current.lastExecutedTimestamp();
@@ -56,7 +61,7 @@ public class TimestampsForKeys
         {
             if (!commandStore.safeToReadAt(executeAt).contains(tfk.key().toUnseekable()))
                 return current;
-            throw new IllegalArgumentException(String.format("%s is less than the most recent executed timestamp %s", executeAt, lastExecuted));
+            throw illegalState("%s is less than the most recent executed timestamp %s", executeAt, lastExecuted);
         }
 
         long micros = executeAt.hlc();
@@ -64,14 +69,20 @@ public class TimestampsForKeys
 
         Timestamp lastExecutedTimestamp = executeAt;
         long lastExecutedHlc = micros > lastMicros ? Long.MIN_VALUE : lastMicros + 1;
-        Timestamp lastWriteTimestamp = isForWriteTxn ? executeAt : current.lastWriteTimestamp();
+        TxnId lastWriteId = current.lastWriteId();
+        Timestamp lastWriteTimestamp = current.lastWriteTimestamp();
+        if (isForWriteTxn)
+        {
+            lastWriteId = txnId;
+            lastWriteTimestamp = executeAt;
+        }
 
-        return tfk.updateLastExecutionTimestamps(lastExecutedTimestamp, lastExecutedHlc, lastWriteTimestamp);
+        return tfk.updateLastExecutionTimestamps(lastExecutedTimestamp, lastExecutedHlc, lastWriteId, lastWriteTimestamp);
     }
 
     @VisibleForImplementation
-    public static <D> TimestampsForKey updateLastExecutionTimestamps(AbstractSafeCommandStore<?,?,?> safeStore, Key key, Timestamp executeAt, boolean isForWriteTxn)
+    public static <D> TimestampsForKey updateLastExecutionTimestamps(AbstractSafeCommandStore<?,?,?> safeStore, RoutingKey key, TxnId txnId, Timestamp executeAt, boolean isForWriteTxn)
     {
-        return updateLastExecutionTimestamps(safeStore.commandStore(), safeStore.timestampsForKey(key), executeAt, isForWriteTxn);
+        return updateLastExecutionTimestamps(safeStore.commandStore(), safeStore.timestampsForKey(key), txnId, executeAt, isForWriteTxn);
     }
 }

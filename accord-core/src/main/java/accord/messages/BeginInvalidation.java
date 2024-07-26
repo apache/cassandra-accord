@@ -28,7 +28,6 @@ import accord.utils.SortedList;
 
 import javax.annotation.Nullable;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Objects;
 
 import static accord.primitives.Route.castToFullRoute;
@@ -38,37 +37,51 @@ import static accord.utils.Functions.mapReduceNonNull;
 public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.InvalidateReply> implements Request, PreLoadContext
 {
     public final Ballot ballot;
-    public final Unseekables<?> someUnseekables;
+    public final Participants<?> participants;
 
-    public BeginInvalidation(Id to, Topologies topologies, TxnId txnId, Unseekables<?> someUnseekables, Ballot ballot)
+    public BeginInvalidation(Id to, Topologies topologies, TxnId txnId, Participants<?> participants, Ballot ballot)
     {
         super(txnId);
-        this.someUnseekables = someUnseekables.slice(topologies.computeRangesForNode(to));
+        this.participants = participants.slice(topologies.computeRangesForNode(to));
         this.ballot = ballot;
     }
 
-    public BeginInvalidation(TxnId txnId, Unseekables<?> someUnseekables, Ballot ballot)
+    public BeginInvalidation(TxnId txnId, Participants<?> participants, Ballot ballot)
     {
         super(txnId);
-        this.someUnseekables = someUnseekables;
+        this.participants = participants;
         this.ballot = ballot;
     }
 
     @Override
     public void process()
     {
-        node.mapReduceConsumeLocal(this, someUnseekables, txnId.epoch(), txnId.epoch(), this);
+        node.mapReduceConsumeLocal(this, participants, txnId.epoch(), txnId.epoch(), this);
     }
 
     @Override
     public InvalidateReply apply(SafeCommandStore safeStore)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, txnId, someUnseekables);
-        boolean preaccepted = Commands.preacceptInvalidate(safeCommand, ballot);
+        StoreParticipants participants = StoreParticipants.invalidate(safeStore, this.participants, txnId);
+        SafeCommand safeCommand = safeStore.get(txnId, participants);
         Command command = safeCommand.current();
-        boolean acceptedFastPath = command.executeAt() != null && command.executeAt().equals(command.txnId());
-        Ballot supersededBy = preaccepted ? null : safeCommand.current().promised();
-        return new InvalidateReply(supersededBy, command.acceptedOrCommitted(), command.saveStatus(), acceptedFastPath, command.route(), command.homeKey());
+        boolean acceptedFastPath;
+        Ballot supersededBy;
+        Participants<?> truncated;
+        if (command.is(Status.Truncated))
+        {
+            acceptedFastPath = false;
+            supersededBy = null;
+            truncated = participants.owns();
+        }
+        else
+        {
+            boolean promised = Commands.preacceptInvalidate(safeCommand, ballot);
+            acceptedFastPath = command.executeAt() != null && command.executeAt().equals(command.txnId());
+            supersededBy = promised ? null : safeCommand.current().promised();
+            truncated = null;
+        }
+        return new InvalidateReply(supersededBy, command.acceptedOrCommitted(), command.saveStatus(), acceptedFastPath, command.route(), command.homeKey(), truncated);
     }
 
     @Override
@@ -78,14 +91,14 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
         // we can safely take any reject from one key as a reject for the whole node
         // unfortunately we must also treat the promise rejection as pan-node, even though we only need
         // a single key to accept a promise globally for the invalidation to be able to succeed
-        boolean isOk = o1.isPromised() && o2.isPromised();
-        Ballot supersededBy = isOk ? null : Ballot.nonNullOrMax(o1.supersededBy, o2.supersededBy);
+        Ballot supersededBy = Ballot.nonNullOrMax(o1.supersededBy, o2.supersededBy);
         boolean acceptedFastPath = o1.acceptedFastPath && o2.acceptedFastPath;
         Route<?> route =  Route.merge((Route)o1.route, o2.route);
+        Participants<?> truncated =  Participants.merge((Participants) o1.truncated, o2.truncated);
         RoutingKey homeKey = o1.homeKey != null ? o1.homeKey : o2.homeKey != null ? o2.homeKey : null;
         InvalidateReply maxStatus = SaveStatus.max(o1, o1.maxStatus, o1.accepted, o2, o2.maxStatus, o2.accepted, false);
         InvalidateReply maxKnowledgeStatus = SaveStatus.max(o1, o1.maxKnowledgeStatus, o1.accepted, o2, o2.maxKnowledgeStatus, o2.accepted, true);
-        return new InvalidateReply(supersededBy, maxStatus.accepted, maxStatus.maxStatus, maxKnowledgeStatus.maxKnowledgeStatus, acceptedFastPath, route, homeKey);
+        return new InvalidateReply(supersededBy, maxStatus.accepted, maxStatus.maxStatus, maxKnowledgeStatus.maxKnowledgeStatus, acceptedFastPath, truncated, route, homeKey);
     }
 
     @Override
@@ -121,21 +134,23 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
         public final Ballot accepted;
         public final SaveStatus maxStatus, maxKnowledgeStatus;
         public final boolean acceptedFastPath;
+        public final @Nullable Participants<?> truncated;
         public final @Nullable Route<?> route;
         public final @Nullable RoutingKey homeKey;
 
-        public InvalidateReply(@Nullable Ballot supersededBy, Ballot accepted, SaveStatus status, boolean acceptedFastPath, @Nullable Route<?> route, @Nullable RoutingKey homeKey)
+        public InvalidateReply(@Nullable Ballot supersededBy, Ballot accepted, SaveStatus status, boolean acceptedFastPath, @Nullable Route<?> route, @Nullable RoutingKey homeKey, Participants<?> truncated)
         {
-            this(supersededBy, accepted, status, status, acceptedFastPath, route, homeKey);
+            this(supersededBy, accepted, status, status, acceptedFastPath, truncated, route, homeKey);
         }
 
-        public InvalidateReply(@Nullable Ballot supersededBy, Ballot accepted, SaveStatus maxStatus, SaveStatus maxKnowledgeStatus, boolean acceptedFastPath, @Nullable Route<?> route, @Nullable RoutingKey homeKey)
+        public InvalidateReply(@Nullable Ballot supersededBy, Ballot accepted, SaveStatus maxStatus, SaveStatus maxKnowledgeStatus, boolean acceptedFastPath, @Nullable Participants<?> truncated, @Nullable Route<?> route, @Nullable RoutingKey homeKey)
         {
             this.supersededBy = supersededBy;
             this.accepted = accepted;
             this.maxStatus = maxStatus;
             this.maxKnowledgeStatus = maxKnowledgeStatus;
             this.acceptedFastPath = acceptedFastPath;
+            this.truncated = truncated;
             this.route = route;
             this.homeKey = homeKey;
         }
@@ -145,9 +160,24 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
             return maxKnowledgeStatus.known.executeAt.hasDecision();
         }
 
-        public boolean isPromised()
+        public boolean isPromiseRejected()
+        {
+            return supersededBy != null;
+        }
+
+        public boolean isTruncated()
+        {
+            return truncated != null;
+        }
+
+        public boolean isPromisedOrPartPromised()
         {
             return supersededBy == null;
+        }
+
+        public boolean isPartPromised()
+        {
+            return isPromisedOrPartPromised() && isTruncated();
         }
 
         @Override
@@ -168,7 +198,11 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
         @Override
         public String toString()
         {
-            return "Invalidate" + (isPromised() ? "Promised{" : "NotPromised{" + supersededBy + ",") + maxStatus + ',' + maxKnowledgeStatus + ',' + (route != null ? route: homeKey) + '}';
+            String description = isPromiseRejected() ? "Rejected{" + supersededBy + ","
+                                                     : isPartPromised() ? "PartPromised"
+                                                                        : isTruncated() ? "Truncated"
+                                                                                        : "Promised";
+            return "Invalidate" + description + maxStatus + ',' + maxKnowledgeStatus + ',' + (route != null ? route: homeKey) + '}';
         }
 
         @Override
@@ -207,14 +241,15 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
             return SaveStatus.max(Arrays.asList(invalidateReplies),r -> r.maxKnowledgeStatus, r -> r.accepted, r -> r != null && !r.maxKnowledgeStatus.is(Status.Truncated), true);
         }
 
-        public static RoutingKey findHomeKey(List<InvalidateReply> invalidateOks)
+        public static int countTruncated(InvalidateReply[] invalidateReplies, Shard shard, SortedList<Id> nodeIds)
         {
-            for (InvalidateReply ok : invalidateOks)
+            int count = 0;
+            for (InvalidateReply reply : nodeIds.select(invalidateReplies, shard.nodes))
             {
-                if (ok.homeKey != null)
-                    return ok.homeKey;
+                if (reply != null && reply.maxStatus.is(Status.Truncated))
+                    ++count;
             }
-            return null;
+            return count;
         }
     }
 }

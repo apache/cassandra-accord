@@ -18,12 +18,35 @@
 
 package accord.local;
 
+import accord.api.LocalListeners;
+import accord.api.ProgressLog;
+import accord.api.DataStore;
+import accord.coordinate.CollectCalculatedDeps;
+import accord.local.Command.WaitingOn;
+
+import javax.annotation.Nullable;
+import accord.api.Agent;
+
+import accord.local.CommandStores.RangesForEpoch;
+import accord.primitives.KeyDeps;
+import accord.primitives.Participants;
+import accord.primitives.Range;
+import accord.primitives.Routables;
+import accord.primitives.RoutingKeys;
+import accord.primitives.Status;
+import accord.primitives.Unseekables;
+import accord.utils.async.AsyncChain;
+
+import accord.api.ConfigurationService.EpochReady;
+import accord.utils.DeterministicIdentitySet;
+import accord.utils.Invariants;
+import accord.utils.async.AsyncResult;
+
 import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.Callable;
@@ -31,39 +54,18 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSortedMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import accord.api.Agent;
-import accord.api.ConfigurationService.EpochReady;
-import accord.api.DataStore;
-import accord.api.LocalListeners;
-import accord.api.ProgressLog;
-import accord.coordinate.CollectCalculatedDeps;
-import accord.local.Command.WaitingOn;
-import accord.local.CommandStores.RangesForEpoch;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
-import accord.primitives.KeyDeps;
-import accord.primitives.Keys;
-import accord.primitives.Participants;
-import accord.primitives.Range;
 import accord.primitives.RangeDeps;
 import accord.primitives.Ranges;
-import accord.primitives.Routables;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-import accord.primitives.Unseekables;
-import accord.utils.DeterministicIdentitySet;
-import accord.utils.Invariants;
-import accord.utils.ReducingRangeMap;
-import accord.utils.async.AsyncChain;
-import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import org.agrona.collections.Int2ObjectHashMap;
 
@@ -154,7 +156,6 @@ public abstract class CommandStore implements AgentExecutor
 
     // Used in markShardStale to make sure the staleness includes in progresss bootstraps
     private transient NavigableMap<TxnId, Ranges> bootstrapBeganAt = ImmutableSortedMap.of(TxnId.NONE, Ranges.EMPTY); // additive (i.e. once inserted, rolled-over until invalidated, and the floor entry contains additions)
-
     private RedundantBefore redundantBefore = RedundantBefore.EMPTY;
     // TODO (expected): store this only once per node
     private DurableBefore durableBefore = DurableBefore.EMPTY;
@@ -180,7 +181,7 @@ public abstract class CommandStore implements AgentExecutor
      */
     private NavigableMap<Timestamp, Ranges> safeToRead = ImmutableSortedMap.of(Timestamp.NONE, Ranges.EMPTY);
     private final Set<Bootstrap> bootstraps = Collections.synchronizedSet(new DeterministicIdentitySet<>());
-    @Nullable private ReducingRangeMap<Timestamp> rejectBefore;
+    @Nullable private RejectBefore rejectBefore;
 
     protected CommandStore(int id,
                            NodeTimeService time,
@@ -255,7 +256,7 @@ public abstract class CommandStore implements AgentExecutor
         durableBefore = DurableBefore.merge(durableBefore, addDurableBefore);
     }
 
-    protected void unsafeSetRejectBefore(ReducingRangeMap<Timestamp> newRejectBefore)
+    protected void unsafeSetRejectBefore(RejectBefore newRejectBefore)
     {
         this.rejectBefore = newRejectBefore;
     }
@@ -303,12 +304,10 @@ public abstract class CommandStore implements AgentExecutor
     {
         Timestamp executeAt = updated.executeAt();
         if (executeAt == null) return;
-        Seekables<?, ?> keysOrRanges = updated.keysOrRanges();
-        if (keysOrRanges == null) return;
         if (prev != null && prev.executeAt() != null && prev.executeAt().compareTo(executeAt) >= 0) return;
 
 
-        MaxConflicts updatedMaxConflicts = maxConflicts.update(keysOrRanges, executeAt);
+        MaxConflicts updatedMaxConflicts = maxConflicts.update(updated.participants().hasTouched, executeAt);
         if (++maxConflictsUpdates >= agent.maxConflictsPruneInterval())
         {
             int initialSize = updatedMaxConflicts.size();
@@ -322,18 +321,18 @@ public abstract class CommandStore implements AgentExecutor
             int prunedSize = updatedMaxConflicts.size();
             if (initialSize > 100 && prunedSize == initialSize)
             {
-                logger.info("Ineffective prune for {}. Initial size: {}, pruned size: {}, executeAt: {}, pruneBefore: {}", ranges, initialSize, prunedSize, executeAt, pruneBefore);
+                logger.debug("Ineffective prune for {}. Initial size: {}, pruned size: {}, executeAt: {}, pruneBefore: {}", ranges, initialSize, prunedSize, executeAt, pruneBefore);
                 if (dumpCounter == 0)
                 {
-                    logger.info("initial MaxConflicts dump: {}", initialConflicts);
-                    logger.info("pruned MaxConflicts dump: {}", updatedMaxConflicts);
+                    logger.trace("initial MaxConflicts dump: {}", initialConflicts);
+                    logger.trace("pruned MaxConflicts dump: {}", updatedMaxConflicts);
                 }
                 dumpCounter++;
                 dumpCounter %= 100;
             }
             else if (prunedSize != initialSize)
             {
-                logger.info("Successfully pruned {} to {}", initialSize, prunedSize);
+                logger.trace("Successfully pruned {} to {}", initialSize, prunedSize);
             }
 
 
@@ -345,16 +344,16 @@ public abstract class CommandStore implements AgentExecutor
     public final void markExclusiveSyncPoint(SafeCommandStore safeStore, TxnId txnId, Ranges ranges)
     {
         // TODO (desired): narrow ranges to those that are owned
-        Invariants.checkArgument(txnId.kind() == ExclusiveSyncPoint);
-        ReducingRangeMap<Timestamp> newRejectBefore = rejectBefore != null ? rejectBefore : new ReducingRangeMap<>();
-        newRejectBefore = ReducingRangeMap.add(newRejectBefore, ranges, txnId, Timestamp::max);
+        Invariants.checkArgument(txnId.is(ExclusiveSyncPoint));
+        RejectBefore newRejectBefore = rejectBefore != null ? rejectBefore : new RejectBefore();
+        newRejectBefore = RejectBefore.add(newRejectBefore, ranges, txnId);
         unsafeSetRejectBefore(newRejectBefore);
     }
 
     public final void markExclusiveSyncPointLocallyApplied(SafeCommandStore safeStore, TxnId txnId, Ranges ranges)
     {
         // TODO (desired): narrow ranges to those that are owned
-        Invariants.checkArgument(txnId.kind() == ExclusiveSyncPoint);
+        Invariants.checkArgument(txnId.is(ExclusiveSyncPoint));
         RedundantBefore newRedundantBefore = RedundantBefore.merge(redundantBefore, RedundantBefore.create(ranges, txnId, TxnId.NONE, TxnId.NONE, TxnId.NONE));
         unsafeSetRedundantBefore(newRedundantBefore);
         updatedRedundantBefore(safeStore, txnId, ranges);
@@ -363,28 +362,28 @@ public abstract class CommandStore implements AgentExecutor
     /**
      * We expect keys to be sliced to those owned by the replica in the coordination epoch
      */
-    final Timestamp preaccept(TxnId txnId, Seekables<?, ?> keys, SafeCommandStore safeStore, boolean permitFastPath)
+    final Timestamp preaccept(TxnId txnId, Routables<?> keys, SafeCommandStore safeStore, boolean permitFastPath)
     {
         NodeTimeService time = safeStore.time();
 
-        boolean isExpired = time.now() - txnId.hlc() >= safeStore.preAcceptTimeout() && !txnId.kind().isSyncPoint();
+        boolean isExpired = time.now() - txnId.hlc() >= safeStore.preAcceptTimeout() && !txnId.isSyncPoint();
         if (rejectBefore != null && !isExpired)
-            isExpired = null == rejectBefore.foldl(keys, (rejectIfBefore, test) -> rejectIfBefore.compareTo(test) > 0 ? null : test, txnId, Objects::isNull);
+            isExpired = rejectBefore.rejects(txnId, keys);
 
         if (isExpired)
             return time.uniqueNow(txnId).asRejected();
 
-        if (txnId.kind() == ExclusiveSyncPoint)
+        if (txnId.is(ExclusiveSyncPoint))
             return txnId;
 
         // TODO (expected): reject if any transaction exists with a higher timestamp OR a higher epoch
         //   this permits us to agree fast path decisions across epoch changes
         // TODO (expected): we should (perhaps) separate conflicts for reads and writes
-        Timestamp minNonConflicting = maxConflicts.get(keys);
-        if (permitFastPath && txnId.compareTo(minNonConflicting) >= 0 && txnId.epoch() >= time.epoch())
+        Timestamp min = TxnId.max(txnId, maxConflicts.get(keys));
+        if (permitFastPath && txnId == min && txnId.epoch() >= time.epoch())
             return txnId;
 
-        return time.uniqueNow(minNonConflicting);
+        return time.uniqueNow(min);
     }
 
     public Timestamp maxConflict(Routables<?> keysOrRanges)
@@ -506,7 +505,7 @@ public abstract class CommandStore implements AgentExecutor
         Timestamp before = Timestamp.minForEpoch(epoch);
         FullRoute<?> route = node.computeRoute(id, ranges);
         // TODO (required): we need to ensure anyone we receive a reply from proposes newer timestamps for anything we don't see
-        CollectCalculatedDeps.withCalculatedDeps(node, id, route, route, ranges, before, (deps, fail) -> {
+        CollectCalculatedDeps.withCalculatedDeps(node, id, route, route, before, (deps, fail) -> {
             if (fail != null)
             {
                 fetchMajorityDeps(coordination, node, epoch, ranges);
@@ -531,7 +530,7 @@ public abstract class CommandStore implements AgentExecutor
             AsyncResult<Void> done = this.<Void>submit(empty(), safeStore -> {
                 for (Bootstrap prev : bootstraps)
                 {
-                    Ranges abort = prev.allValid.without(removedRanges);
+                    Ranges abort = prev.allValid.slice(removedRanges);
                     if (!abort.isEmpty())
                         prev.invalidate(abort);
                 }
@@ -570,7 +569,7 @@ public abstract class CommandStore implements AgentExecutor
         safeStore.dataStore().snapshot(slicedRanges, globalSyncId).begin((success, fail) -> {
             if (fail != null)
             {
-                logger.error("Unsuccessful dataStore snapshot; unable to update GC markers", fail);
+                agent.onHandledException(fail, "Unsuccessful dataStore snapshot; unable to update GC markers");
                 return;
             }
 
@@ -634,13 +633,13 @@ public abstract class CommandStore implements AgentExecutor
                 safeStore.setSafeToRead(purgeAndInsert(safeToRead, TxnId.NONE, ranges));
             }).beginAsResult();
 
-            return new EpochReady(epoch, DONE, DONE, DONE, DONE);
+            return new EpochReady(epoch, done, done, done, done);
         };
     }
 
     public final Ranges safeToReadAt(Timestamp at)
     {
-        return safeToRead.floorEntry(at).getValue();
+        return safeToRead.lowerEntry(at).getValue();
     }
 
     // TODO (desired): Commands.durability() can use this to upgrade to Majority without further info
@@ -670,7 +669,7 @@ public abstract class CommandStore implements AgentExecutor
         if (rejectBefore == null)
             return false;
 
-        return null != rejectBefore.foldl(participants, (rejectIfBefore, test) -> rejectIfBefore.compareTo(test) > 0 ? null : test, txnId, Objects::isNull);
+        return rejectBefore.rejects(txnId, participants);
     }
 
     public final void removeRedundantDependencies(Unseekables<?> participants, WaitingOn.Update builder)
@@ -680,7 +679,7 @@ public abstract class CommandStore implements AgentExecutor
         // TODO (required): make sure we have no races on HLC around SyncPoint else this resolution may not work (we need to know the micros equivalent timestamp of the snapshot)
         class KeyState
         {
-            Int2ObjectHashMap<Keys> partiallyBootstrapping;
+            Int2ObjectHashMap<RoutingKeys> partiallyBootstrapping;
 
             /**
              * Are the participating ranges for the txn fully covered by bootstrapping ranges for this command store
@@ -692,8 +691,8 @@ public abstract class CommandStore implements AgentExecutor
 
                 if (partiallyBootstrapping == null)
                     partiallyBootstrapping = new Int2ObjectHashMap<>();
-                Keys prev = partiallyBootstrapping.get(txnIdx);
-                Keys remaining = prev;
+                RoutingKeys prev = partiallyBootstrapping.get(txnIdx);
+                RoutingKeys remaining = prev;
                 if (remaining == null) remaining = builder.directKeyDeps.participatingKeys(txnIdx);
                 else Invariants.checkState(!remaining.isEmpty());
                 remaining = remaining.without(range);
@@ -810,7 +809,7 @@ public abstract class CommandStore implements AgentExecutor
         // TODO (required): consider race conditions when bootstrapping into an active command store, that may have seen a higher txnId than this?
         //   might benefit from maintaining a per-CommandStore largest TxnId register to ensure we allocate a higher TxnId for our ExclSync,
         //   or from using whatever summary records we have for the range, once we maintain them
-        return redundantBefore.status(minimumDependencyId, executeAt, participantsOfWaitingTxn).compareTo(RedundantStatus.PARTIALLY_PRE_BOOTSTRAP_OR_STALE) >= 0;
+        return redundantBefore.status(minimumDependencyId, participantsOfWaitingTxn).compareTo(RedundantStatus.PARTIALLY_PRE_BOOTSTRAP_OR_STALE) >= 0;
     }
 
     final void markUnsafeToRead(Ranges ranges)

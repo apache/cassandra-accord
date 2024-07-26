@@ -20,13 +20,12 @@ package accord.primitives;
 
 import accord.coordinate.Outcome;
 import accord.local.Command;
-import accord.local.Status;
-import accord.local.Status.Durability;
-import accord.local.Status.Phase;
+import accord.primitives.Status.Durability;
+import accord.primitives.Status.Phase;
 
 import javax.annotation.Nonnull;
 
-import static accord.local.Status.AcceptedInvalidate;
+import static accord.primitives.Status.AcceptedInvalidate;
 
 /**
  * A representation of activity on a command, so that peers may monitor a command to ensure it is making progress

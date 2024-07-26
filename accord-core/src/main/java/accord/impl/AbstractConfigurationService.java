@@ -234,12 +234,14 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
 
     protected abstract void fetchTopologyInternal(long epoch);
 
+    private long maxRequestedEpoch;
     @Override
     public synchronized void fetchTopologyForEpoch(long epoch)
     {
-        if (epoch <= epochs.lastReceived)
+        if (epoch <= maxRequestedEpoch)
             return;
 
+        maxRequestedEpoch = epoch;
         fetchTopologyInternal(epoch);
     }
 

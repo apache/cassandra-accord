@@ -37,6 +37,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
+import accord.api.RoutingKey;
 import accord.impl.IntHashKey.Hash;
 import accord.primitives.KeyDeps.Builder;
 import accord.utils.AccordGens;
@@ -70,24 +71,24 @@ public class KeyDepsTest
     @Test
     public void testFoldEachKey()
     {
-        Gen<Gen<Key>> uniqueKeys = Gens.lists(AccordGens.intKeys()).uniqueBestEffort().ofSizeBetween(1, 10).map(l -> Gens.pick(l));
-        Gen<Gen<Key>> keyDistro = rs -> rs.nextBoolean() ? uniqueKeys.next(rs) : AccordGens.intKeys();
+        Gen<Gen<? extends RoutingKey>> uniqueKeys = Gens.lists(AccordGens.intRoutingKey()).uniqueBestEffort().ofSizeBetween(1, 10).map(l -> Gens.pick(l));
+        Gen<Gen<? extends RoutingKey>> keyDistro = rs -> rs.nextBoolean() ? uniqueKeys.next(rs) : AccordGens.intRoutingKey();
         Gen<Gen<TxnId>> uniqueTxnIds = Gens.lists(AccordGens.txnIds()).uniqueBestEffort().ofSizeBetween(1, 10).map(l -> Gens.pick(l));
         Gen<Gen<TxnId>> txnIdDistro = rs -> rs.nextBoolean() ? uniqueTxnIds.next(rs) : AccordGens.txnIds();
         qt().check(rs -> {
             Gen<KeyDeps> gen = AccordGens.keyDeps(keyDistro.next(rs), txnIdDistro.next(rs));
             KeyDeps keyDeps = gen.next(rs);
-            Map<TxnId, List<Key>> reverseLookup = new HashMap<>();
-            for (Key key : keyDeps.keys)
+            Map<TxnId, List<RoutingKey>> reverseLookup = new HashMap<>();
+            for (RoutingKey key : keyDeps.keys)
             {
                 for (TxnId id : keyDeps.txnIds(key))
                     reverseLookup.computeIfAbsent(id, ignore -> new ArrayList<>()).add(key);
             }
-            for (Key key : keyDeps.keys)
+            for (RoutingKey key : keyDeps.keys)
             {
                 keyDeps.forEach(key.asRange(), null, null, null, (i1, i2, i3, index) -> {
-                    List<Key> expected = reverseLookup.get(keyDeps.txnId(index));
-                    List<Key> matches = keyDeps.foldEachKey(index, null, new ArrayList<>(), (ignore, k, accum) -> {
+                    List<RoutingKey> expected = reverseLookup.get(keyDeps.txnId(index));
+                    List<RoutingKey> matches = keyDeps.foldEachKey(index, null, new ArrayList<>(), (ignore, k, accum) -> {
                         accum.add(k);
                         return accum;
                     });
@@ -174,7 +175,7 @@ public class KeyDepsTest
                 }
 
                 // check each key
-                for (Key key : deps.test.keys())
+                for (RoutingKey key : deps.test.keys())
                 {
                     List<TxnId> expected = get(deps.test, key);
                     expected.remove(txnId);
@@ -185,7 +186,7 @@ public class KeyDepsTest
         });
     }
 
-    private static List<TxnId> get(accord.primitives.KeyDeps deps, Key key)
+    private static List<TxnId> get(accord.primitives.KeyDeps deps, RoutingKey key)
     {
         List<TxnId> ids = new ArrayList<>();
         deps.forEach(key, (id, i) -> ids.add(id));
@@ -198,7 +199,7 @@ public class KeyDepsTest
         qt().forAll(Deps::generate).check(deps -> {
             try (Builder builder = accord.primitives.KeyDeps.builder())
             {
-                for (Map.Entry<Key, TxnId> e : deps.test)
+                for (Map.Entry<RoutingKey, TxnId> e : deps.test)
                     builder.add(e.getKey(), e.getValue());
                 Assertions.assertEquals(deps.test, builder.build());
             }
@@ -209,9 +210,9 @@ public class KeyDepsTest
     public void testForEachOnUniqueEndInclusive()
     {
         qt().forAll(Gen.of(Deps::generate).filter(d -> d.test.keys().size() >= 2)).check(deps -> {
-            Keys keys = deps.test.keys();
-            Key start = keys.get(0);
-            Key end = keys.get(keys.size() - 1);
+            RoutingKeys keys = deps.test.keys();
+            RoutingKey start = keys.get(0);
+            RoutingKey end = keys.get(keys.size() - 1);
             if (start.equals(end))
                 throw new AssertionError(start + " == " + end);
 
@@ -235,9 +236,9 @@ public class KeyDepsTest
     public void testForEachOnUniqueStartInclusive()
     {
         qt().forAll(Gen.of(Deps::generate).filter(d -> d.test.keys().size() >= 2)).check(deps -> {
-            Keys keys = deps.test.keys();
-            Key start = keys.get(0);
-            Key end = keys.get(keys.size() - 1);
+            RoutingKeys keys = deps.test.keys();
+            RoutingKey start = keys.get(0);
+            RoutingKey end = keys.get(keys.size() - 1);
 
             TreeSet<TxnId> seen = new TreeSet<>();
             deps.test.forEachUniqueTxnId(Ranges.of(Range.range(start.toUnseekable(), end.toUnseekable(), true, false)), txnId -> {
@@ -259,9 +260,9 @@ public class KeyDepsTest
     public void testForEachOnUniqueNoMatch()
     {
         qt().forAll(Gen.of(Deps::generate).filter(d -> d.test.keys().size() >= 2)).check(deps -> {
-            Keys keys = deps.test.keys();
+            RoutingKeys keys = deps.test.keys();
             Hash start = IntHashKey.forHash(Integer.MIN_VALUE);
-            Key end = keys.get(0);
+            RoutingKey end = keys.get(0);
 
             TreeSet<TxnId> seen = new TreeSet<>();
             deps.test.forEachUniqueTxnId(Ranges.of(Range.range(start.toUnseekable(), end.toUnseekable(), true, false)), txnId -> {
@@ -311,7 +312,7 @@ public class KeyDepsTest
         expected.testSimpleEquality();
 
         // slightly redundant due to Deps.merge using this method... it is here for completeness
-        Assertions.assertEquals(expected.test, accord.primitives.KeyDeps.merge(list, a -> a.test, Function.identity()));
+        Assertions.assertEquals(expected.test, accord.primitives.KeyDeps.merge(list, list.size(), List::get, d -> d.test, Function.identity()));
         Assertions.assertEquals(expected.test, list.stream().map(a -> a.test).reduce(accord.primitives.KeyDeps.NONE, accord.primitives.KeyDeps::with));
     }
 
@@ -321,7 +322,7 @@ public class KeyDepsTest
         qt().forAll(Deps::generate, Gens.random()).check((deps, random) -> {
             try (Builder builder = accord.primitives.KeyDeps.builder())
             {
-                for (Key key : deps.canonical.keySet())
+                for (RoutingKey key : deps.canonical.keySet())
                 {
                     builder.nextKey(key);
                     List<TxnId> ids = new ArrayList<>(deps.canonical.get(key));
@@ -336,10 +337,10 @@ public class KeyDepsTest
 
     static class Deps
     {
-        final Map<Key, NavigableSet<TxnId>> canonical;
+        final Map<RoutingKey, NavigableSet<TxnId>> canonical;
         final accord.primitives.KeyDeps test;
 
-        Deps(Map<Key, NavigableSet<TxnId>> canonical, accord.primitives.KeyDeps test)
+        Deps(Map<RoutingKey, NavigableSet<TxnId>> canonical, accord.primitives.KeyDeps test)
         {
             this.canonical = canonical;
             this.test = test;
@@ -366,15 +367,15 @@ public class KeyDepsTest
                              int uniqueKeys, int emptyKeys, int keyRange, int totalCount)
         {
             // populateKeys is a subset of keys
-            Keys populateKeys, keys;
+            RoutingKeys populateKeys, keys;
             {
-                TreeSet<Key> tmp = new TreeSet<>();
+                TreeSet<RoutingKey> tmp = new TreeSet<>();
                 while (tmp.size() < uniqueKeys)
-                    tmp.add(IntHashKey.key(random.nextInt(keyRange)));
-                populateKeys = new Keys(tmp);
+                    tmp.add(IntHashKey.key(random.nextInt(keyRange)).toUnseekable());
+                populateKeys = new RoutingKeys(tmp.toArray(RoutingKey[]::new));
                 while (tmp.size() < uniqueKeys + emptyKeys)
-                    tmp.add(IntHashKey.key(random.nextInt(keyRange)));
-                keys = new Keys(tmp);
+                    tmp.add(IntHashKey.key(random.nextInt(keyRange)).toUnseekable());
+                keys = new RoutingKeys(tmp.toArray(RoutingKey[]::new));
             }
 
             List<TxnId> txnIds; {
@@ -384,10 +385,10 @@ public class KeyDepsTest
                 txnIds = new ArrayList<>(tmp);
             }
 
-            TreeMap<Key, NavigableSet<TxnId>> canonical = new TreeMap<>();
+            TreeMap<RoutingKey, NavigableSet<TxnId>> canonical = new TreeMap<>();
             for (int i = 0 ; i < totalCount ; ++i)
             {
-                Key key = populateKeys.get(random.nextInt(uniqueKeys));
+                RoutingKey key = populateKeys.get(random.nextInt(uniqueKeys));
                 TxnId txnId = txnIds.get(random.nextInt(uniqueTxnIds));
                 canonical.computeIfAbsent(key, ignore -> new TreeSet<>()).add(txnId);
             }
@@ -408,8 +409,8 @@ public class KeyDepsTest
 
         Deps select(Ranges ranges)
         {
-            Map<Key, NavigableSet<TxnId>> canonical = new TreeMap<>();
-            for (Map.Entry<Key, NavigableSet<TxnId>> e : this.canonical.entrySet())
+            Map<RoutingKey, NavigableSet<TxnId>> canonical = new TreeMap<>();
+            for (Map.Entry<RoutingKey, NavigableSet<TxnId>> e : this.canonical.entrySet())
             {
                 if (ranges.contains(e.getKey()))
                     canonical.put(e.getKey(), e.getValue());
@@ -420,10 +421,10 @@ public class KeyDepsTest
 
         Deps with(Deps that)
         {
-            Map<Key, NavigableSet<TxnId>> canonical = new TreeMap<>();
-            for (Map.Entry<Key, NavigableSet<TxnId>> e : this.canonical.entrySet())
+            Map<RoutingKey, NavigableSet<TxnId>> canonical = new TreeMap<>();
+            for (Map.Entry<RoutingKey, NavigableSet<TxnId>> e : this.canonical.entrySet())
                 canonical.computeIfAbsent(e.getKey(), ignore -> new TreeSet<>()).addAll(e.getValue());
-            for (Map.Entry<Key, NavigableSet<TxnId>> e : that.canonical.entrySet())
+            for (Map.Entry<RoutingKey, NavigableSet<TxnId>> e : that.canonical.entrySet())
                 canonical.computeIfAbsent(e.getKey(), ignore -> new TreeSet<>()).addAll(e.getValue());
 
             return new Deps(canonical, test.with(that.test));
@@ -432,7 +433,7 @@ public class KeyDepsTest
         void testSimpleEquality()
         {
             Assertions.assertArrayEquals(canonical.keySet().toArray(new Key[0]), test.keys().stream().toArray(Key[]::new));
-            for (Map.Entry<Key, NavigableSet<TxnId>> e : canonical.entrySet())
+            for (Map.Entry<RoutingKey, NavigableSet<TxnId>> e : canonical.entrySet())
             {
                 List<TxnId> canonical = new ArrayList<>(e.getValue());
                 List<TxnId> test = new ArrayList<>();
@@ -440,18 +441,18 @@ public class KeyDepsTest
                 Assertions.assertEquals(canonical, test);
             }
 
-            TreeMap<TxnId, List<Key>> canonicalInverted = invertCanonical();
+            TreeMap<TxnId, List<RoutingKey>> canonicalInverted = invertCanonical();
             Assertions.assertArrayEquals(toArray(canonicalInverted.keySet(), TxnId[]::new),
                                          IntStream.range(0, test.txnIdCount()).mapToObj(test::txnId).toArray(TxnId[]::new));
-            for (Map.Entry<TxnId, List<Key>> e : canonicalInverted.entrySet())
+            for (Map.Entry<TxnId, List<RoutingKey>> e : canonicalInverted.entrySet())
             {
-                Assertions.assertArrayEquals(toArray(e.getValue(), Key[]::new),
+                Assertions.assertArrayEquals(toArray(e.getValue(), RoutingKey[]::new),
                                              test.participatingKeys(e.getKey()).stream().toArray(Key[]::new));
             }
 
             StringBuilder builder = new StringBuilder();
             builder.append("{");
-            for (Map.Entry<Key, NavigableSet<TxnId>> e : canonical.entrySet())
+            for (Map.Entry<RoutingKey, NavigableSet<TxnId>> e : canonical.entrySet())
             {
                 if (builder.length() > 1)
                     builder.append(", ");
@@ -463,10 +464,10 @@ public class KeyDepsTest
             Assertions.assertEquals(builder.toString(), test.toString());
         }
 
-        TreeMap<TxnId, List<Key>> invertCanonical()
+        TreeMap<TxnId, List<RoutingKey>> invertCanonical()
         {
-            TreeMap<TxnId, List<Key>> result = new TreeMap<>();
-            for (Map.Entry<Key, NavigableSet<TxnId>> e : canonical.entrySet())
+            TreeMap<TxnId, List<RoutingKey>> result = new TreeMap<>();
+            for (Map.Entry<RoutingKey, NavigableSet<TxnId>> e : canonical.entrySet())
             {
                 e.getValue().forEach(txnId -> result.computeIfAbsent(txnId, ignore -> new ArrayList<>())
                                                     .add(e.getKey()));
@@ -477,14 +478,14 @@ public class KeyDepsTest
 
         static Deps merge(List<Deps> deps)
         {
-            Map<Key, NavigableSet<TxnId>> canonical = new TreeMap<>();
+            Map<RoutingKey, NavigableSet<TxnId>> canonical = new TreeMap<>();
             for (Deps that : deps)
             {
-                for (Map.Entry<Key, NavigableSet<TxnId>> e : that.canonical.entrySet())
+                for (Map.Entry<RoutingKey, NavigableSet<TxnId>> e : that.canonical.entrySet())
                     canonical.computeIfAbsent(e.getKey(), ignore -> new TreeSet<>()).addAll(e.getValue());
             }
 
-            return new Deps(canonical, accord.primitives.KeyDeps.merge(deps, d -> d.test, Function.identity()));
+            return new Deps(canonical, accord.primitives.KeyDeps.merge(deps, deps.size(), List::get, d -> d.test, Function.identity()));
         }
     }
 
@@ -545,19 +546,19 @@ public class KeyDepsTest
                 Ranges ranges = randomKeyRanges(random, 1 + random.nextInt(5), keyRange);
 
                 {   // test forEach(key, txnId)
-                    List<Entry<Key, TxnId>> canonical = new ArrayList<>();
-                    for (Key key : deps.canonical.keySet())
+                    List<Entry<RoutingKey, TxnId>> canonical = new ArrayList<>();
+                    for (RoutingKey key : deps.canonical.keySet())
                     {
                         if (ranges.contains(key))
                             deps.canonical.get(key).forEach(txnId -> canonical.add(new Entry<>(key, txnId)));
                     }
-                    deps.test.forEach(ranges, new BiConsumer<Key, TxnId>()
+                    deps.test.forEach(ranges, new BiConsumer<RoutingKey, TxnId>()
                     {
                         int i = 0;
                         @Override
-                        public void accept(Key key, TxnId txnId)
+                        public void accept(RoutingKey key, TxnId txnId)
                         {
-                            Entry<Key, TxnId> entry = canonical.get(i);
+                            Entry<RoutingKey, TxnId> entry = canonical.get(i);
                             Assertions.assertEquals(entry.getKey(), key);
                             Assertions.assertEquals(entry.getValue(), txnId);
                             ++i;
@@ -568,7 +569,7 @@ public class KeyDepsTest
                 {   // test forEach(txnId)
                     Set<TxnId> canonical = new TreeSet<>();
                     List<TxnId> test = new ArrayList<>();
-                    for (Key key : deps.canonical.keySet())
+                    for (RoutingKey key : deps.canonical.keySet())
                     {
                         if (ranges.contains(key))
                             canonical.addAll(deps.canonical.get(key));

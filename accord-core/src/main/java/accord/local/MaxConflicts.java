@@ -19,8 +19,8 @@ package accord.local;
 
 import accord.api.RoutingKey;
 import accord.primitives.Routables;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
+import accord.primitives.Unseekables;
 import accord.utils.BTreeReducingRangeMap;
 
 
@@ -44,7 +44,7 @@ class MaxConflicts extends BTreeReducingRangeMap<Timestamp>
         return foldl(keysOrRanges, Timestamp::max, Timestamp.NONE);
     }
 
-    public MaxConflicts update(Seekables<?, ?> keysOrRanges, Timestamp maxConflict)
+    public MaxConflicts update(Unseekables<?> keysOrRanges, Timestamp maxConflict)
     {
         return update(this, keysOrRanges, maxConflict, Timestamp::max, MaxConflicts::new, Builder::new);
     }

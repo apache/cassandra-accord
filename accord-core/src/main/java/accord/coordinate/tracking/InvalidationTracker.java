@@ -18,8 +18,11 @@
 
 package accord.coordinate.tracking;
 
-import accord.api.RoutingKey;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+
 import accord.local.Node;
+import accord.primitives.Participants;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 
@@ -31,10 +34,11 @@ public class InvalidationTracker extends AbstractTracker<InvalidationTracker.Inv
     {
         private int fastPathRejects;
         private int fastPathInflight;
-        private int promises;
+        private int promisesOrPartPromises;
         private boolean hasDecision;
         private int inflight;
         private boolean isFinal;
+        private @Nullable Participants<?> neverTruncated;
 
         private InvalidationShardTracker(Shard shard)
         {
@@ -43,14 +47,19 @@ public class InvalidationTracker extends AbstractTracker<InvalidationTracker.Inv
             fastPathInflight = shard.fastPathElectorate.size();
         }
 
-        public InvalidationShardTracker onSuccess(Node.Id from, boolean isPromised, boolean isDecided, boolean withFastPath)
+        public InvalidationShardTracker onSuccess(Node.Id from, @Nullable Participants<?> promised, @Nonnull Participants<?> notTruncated, @Nullable Participants<?> truncated, boolean isDecided, boolean withFastPath)
         {
             if (shard.fastPathElectorate.contains(from))
             {
                 --fastPathInflight;
                 if (!withFastPath) ++fastPathRejects;
             }
-            if (isPromised) ++promises;
+            if (promised != null && promised.intersects(shard.range))
+                ++promisesOrPartPromises;
+            if (neverTruncated == null) neverTruncated = notTruncated;
+            if (truncated != null && truncated.intersects(shard.range))
+                neverTruncated = neverTruncated.without(truncated);
+
             if (isDecided) hasDecision = true;
             --inflight;
             return this;
@@ -91,12 +100,17 @@ public class InvalidationTracker extends AbstractTracker<InvalidationTracker.Inv
 
         public boolean isPromiseRejected()
         {
-            return promises + inflight < shard.slowPathQuorumSize;
+            return promisesOrPartPromises + inflight < shard.slowPathQuorumSize;
         }
 
         public boolean isPromised()
         {
-            return promises >= shard.slowPathQuorumSize;
+            return promisesOrPartPromises >= shard.slowPathQuorumSize;
+        }
+
+        public boolean isAnyNotTruncated()
+        {
+            return neverTruncated != null && !neverTruncated.isEmpty();
         }
 
         public boolean isPromisedOrHasDecision()
@@ -149,21 +163,19 @@ public class InvalidationTracker extends AbstractTracker<InvalidationTracker.Inv
         return promisedShard >= 0;
     }
 
+    public boolean isAnyNotTruncated()
+    {
+        return any(InvalidationShardTracker::isAnyNotTruncated);
+    }
+
     public boolean isSafeToInvalidate()
     {
         return rejectsFastPath;
     }
 
-    public boolean isPromisedForKey(RoutingKey key, long epoch)
+    public RequestStatus recordSuccess(Node.Id from, @Nullable Participants<?> promised, @Nonnull Participants<?> notTruncated, @Nullable Participants<?> truncated, boolean hasDecision, boolean acceptedFastPath)
     {
-        int shardIndex = (int) (topologies.get(0).epoch() - epoch);
-        int withinShardIndex = topologies.get(shardIndex).indexForKey(key);
-        return get(shardIndex, withinShardIndex).isPromised();
-    }
-
-    public RequestStatus recordSuccess(Node.Id from, boolean isPromised, boolean hasDecision, boolean acceptedFastPath)
-    {
-        return recordResponse(this, from, (shard, node) -> shard.onSuccess(node, isPromised, hasDecision, acceptedFastPath), from);
+        return recordResponse(this, from, (shard, node) -> shard.onSuccess(node, promised, notTruncated, truncated, hasDecision, acceptedFastPath), from);
     }
 
     // return true iff hasFailed()

@@ -18,8 +18,9 @@
 
 package accord.coordinate;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.local.*;
+import accord.primitives.Status;
 import accord.primitives.TxnId;
 
 import org.junit.jupiter.api.Assertions;
@@ -31,19 +32,19 @@ import static accord.impl.InMemoryCommandStore.inMemory;
 
 public class RecoverTest
 {
-    private static CommandStore getCommandShard(Node node, Key key)
+    private static CommandStore getCommandShard(Node node, RoutingKey key)
     {
         return node.unsafeForKey(key);
     }
 
-    private static Command getCommand(Node node, Key key, TxnId txnId)
+    private static Command getCommand(Node node, RoutingKey key, TxnId txnId)
     {
         CommandStore commandStore = getCommandShard(node, key);
         Assertions.assertTrue(inMemory(commandStore).hasCommand(txnId));
         return inMemory(commandStore).command(txnId).value();
     }
 
-    private static void assertStatus(Node node, Key key, TxnId txnId, Status status)
+    private static void assertStatus(Node node, RoutingKey key, TxnId txnId, Status status)
     {
         Command command = getCommand(node, key, txnId);
 
@@ -51,7 +52,7 @@ public class RecoverTest
         Assertions.assertEquals(status, command.status());
     }
 
-    private static void assertMissing(Node node, Key key, TxnId txnId)
+    private static void assertMissing(Node node, RoutingKey key, TxnId txnId)
     {
         CommandStore commandStore = getCommandShard(node, key);
         Assertions.assertFalse(inMemory(commandStore).hasCommand(txnId));

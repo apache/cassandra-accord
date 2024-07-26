@@ -32,12 +32,12 @@ import accord.messages.PreAccept.PreAcceptOk;
 import accord.messages.PreAccept.PreAcceptReply;
 import accord.primitives.Ballot;
 import accord.primitives.FullRoute;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 
+import static accord.api.ProtocolModifiers.QuorumEpochIntersections;
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.primitives.Timestamp.mergeMax;
 import static accord.utils.Functions.foldl;
@@ -51,19 +51,21 @@ import static accord.utils.Functions.foldl;
 abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, PreAcceptReply>
 {
     final FastPathTracker tracker;
-    private final List<PreAcceptOk> oks; // TODO (expected): this can be cleared after preaccept
+    // TODO (expected): this can be cleared after preaccept
+    // TODO (expected): back by SortedListMap; must handle additional preaccepts (but this is no longer ordinarily enabled)
+    private final List<PreAcceptOk> oks;
     final Txn txn;
 
     CoordinatePreAccept(Node node, TxnId txnId, Txn txn, FullRoute<?> route)
     {
-        this(node, txnId, txn, route, node.topology().withUnsyncedEpochs(route, txnId, txnId));
+        this(node, txnId, txn, route, node.topology().select(route, txnId, txnId, QuorumEpochIntersections.preaccept.include));
     }
 
     CoordinatePreAccept(Node node, TxnId txnId, Txn txn, FullRoute<?> route, Topologies topologies)
     {
-        super(node, route, txnId);
+        super(node, route, txnId, topologies);
         this.tracker = new FastPathTracker(topologies);
-        this.oks = new ArrayList<>(topologies.estimateUniqueNodes());
+        this.oks = new ArrayList<>(topologies.nodes().size());
         this.txn = txn;
     }
 
@@ -80,12 +82,6 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
     long executeAtEpoch()
     {
         return foldl(oks, (ok, prev) -> ok.witnessedAt.epoch() > prev.epoch() ? ok.witnessedAt : prev, Timestamp.NONE).epoch();
-    }
-
-    @Override
-    Seekables<?, ?> keysOrRanges()
-    {
-        return txn.keys();
     }
 
     @Override

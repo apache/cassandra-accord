@@ -21,7 +21,6 @@ package accord.coordinate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 
 import com.google.common.collect.Lists;
 
@@ -30,14 +29,15 @@ import accord.coordinate.tracking.RequestStatus;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Callback;
-import accord.messages.CheckStatus.WithQuorum;
+import accord.primitives.WithQuorum;
 import accord.primitives.Ranges;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
+import accord.utils.SortedListMap;
 
-import static accord.messages.CheckStatus.WithQuorum.HasQuorum;
-import static accord.messages.CheckStatus.WithQuorum.NoQuorum;
+import static accord.primitives.WithQuorum.HasQuorum;
+import static accord.primitives.WithQuorum.NoQuorum;
 import static accord.utils.Invariants.debug;
 
 // TODO (expected): configure the number of initial requests we send
@@ -99,13 +99,14 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
     protected final TxnId txnId;
     private boolean isDone;
     private Throwable failure;
-    final Map<Id, Object> debug = debug() ? new TreeMap<>() : null;
+    final Map<Id, Object> debug;
 
     protected ReadCoordinator(Node node, Topologies topologies, TxnId txnId)
     {
         super(topologies);
         this.node = node;
         this.txnId = txnId;
+        this.debug = debug() ? new SortedListMap<>(topologies.nodes(), Object[]::new) : null;
     }
 
     protected abstract Action process(Id from, Reply reply);

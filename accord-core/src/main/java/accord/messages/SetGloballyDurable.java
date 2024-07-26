@@ -21,7 +21,6 @@ package accord.messages;
 import accord.local.DurableBefore;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
-import accord.primitives.TxnId;
 
 import static accord.messages.SimpleReply.Ok;
 
@@ -34,9 +33,9 @@ public class SetGloballyDurable extends AbstractEpochRequest<SimpleReply>
 {
     public final DurableBefore durableBefore;
 
-    public SetGloballyDurable(TxnId txnId, DurableBefore durableBefore)
+    public SetGloballyDurable(DurableBefore durableBefore)
     {
-        super(txnId);
+        super(null);
         this.durableBefore = durableBefore;
     }
 

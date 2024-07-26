@@ -19,7 +19,6 @@
 package accord.coordinate;
 
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.function.BiConsumer;
 
 import accord.coordinate.tracking.QuorumTracker;
@@ -37,8 +36,8 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
+import accord.utils.SortedListMap;
 
-import static accord.coordinate.CoordinationAdapter.Invoke.execute;
 import static accord.coordinate.ExecutePath.SLOW;
 import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.messages.Commit.Kind.CommitWithTxn;
@@ -54,9 +53,9 @@ public abstract class Stabilise<R> implements Callback<ReadReply>
     final Timestamp executeAt;
     final Deps stabiliseDeps;
 
-    private final Map<Node.Id, Object> debug = debug() ? new TreeMap<>() : null;
     final QuorumTracker stableTracker;
     final Topologies allTopologies;
+    private final Map<Node.Id, Object> debug;
     final BiConsumer<? super R, Throwable> callback;
     private boolean isDone;
 
@@ -72,6 +71,7 @@ public abstract class Stabilise<R> implements Callback<ReadReply>
         // we only care about coordination epoch for stability, as it is a recovery condition
         this.stableTracker = new QuorumTracker(coordinates);
         this.allTopologies = allTopologies;
+        this.debug = debug() ? new SortedListMap<>(allTopologies.nodes(), Object[]::new) : null;
         this.callback = callback;
     }
 
@@ -101,8 +101,11 @@ public abstract class Stabilise<R> implements Callback<ReadReply>
             switch ((CommitOrReadNack)reply)
             {
                 default: throw new AssertionError("Unhandled CommitOrReadNack: " + reply);
-                case Rejected:
                 case Redundant:
+                    isDone = true;
+                    callback.accept(null, new Redundant(txnId, route.homeKey(), executeAt));
+                    break;
+                case Rejected:
                 case Invalid:
                     isDone = true;
                     callback.accept(null, new Preempted(txnId, route.homeKey()));
@@ -142,7 +145,7 @@ public abstract class Stabilise<R> implements Callback<ReadReply>
 
     protected void onStabilised()
     {
-        execute(adapter(), node, allTopologies, route, SLOW, txnId, txn, executeAt, stabiliseDeps, callback);
+        adapter().execute(node, allTopologies, route, SLOW, txnId, txn, executeAt, stabiliseDeps, callback);
     }
 
     protected abstract CoordinationAdapter<R> adapter();

@@ -41,16 +41,16 @@ public interface Unseekables<K extends Unseekable> extends Iterable<K>, Routable
     }
 
     @Override
-    Unseekables<K> intersecting(Unseekables<?> intersecting);
-    @Override
-    Unseekables<K> intersecting(Unseekables<?> intersecting, Slice slice);
-
-    @Override
     Unseekables<K> slice(int from, int to);
     @Override
     Unseekables<K> slice(Ranges ranges);
     @Override
     Unseekables<K> slice(Ranges ranges, Slice slice);
+
+    @Override Unseekables<K> intersecting(Seekables<?, ?> intersecting);
+    @Override Unseekables<K> intersecting(Seekables<?, ?> intersecting, Slice slice);
+    @Override Unseekables<K> intersecting(Unseekables<?> intersecting);
+    @Override Unseekables<K> intersecting(Unseekables<?> intersecting, Slice slice);
 
     Unseekables<K> without(Ranges ranges);
     Unseekables<K> without(Unseekables<?> subtract);

@@ -22,7 +22,7 @@ import accord.local.Command;
 import accord.local.CommandStore;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
+import accord.primitives.SaveStatus;
 import accord.primitives.TxnId;
 
 public interface LocalListeners

@@ -27,23 +27,23 @@ import accord.local.Node;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
-import accord.primitives.Seekables;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekable;
 import accord.topology.Topologies;
-import accord.utils.Faults;
+import accord.utils.SortedListMap;
 
-import static accord.coordinate.CoordinationAdapter.Invoke.stabilise;
+import static accord.api.ProtocolModifiers.Faults;
 
-public class ProposeSyncPoint<S extends Seekables<?, ?>> extends Propose<SyncPoint<S>>
+public class ProposeSyncPoint<U extends Unseekable> extends Propose<SyncPoint<U>>
 {
     @SuppressWarnings("unused")
     private static final Logger logger = LoggerFactory.getLogger(ProposeSyncPoint.class);
-    private final CoordinationAdapter<SyncPoint<S>> adapter;
+    private final CoordinationAdapter<SyncPoint<U>> adapter;
 
-    ProposeSyncPoint(CoordinationAdapter<SyncPoint<S>> adapter, Node node, Topologies topologies, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super SyncPoint<S>, Throwable> callback)
+    ProposeSyncPoint(CoordinationAdapter<SyncPoint<U>> adapter, Node node, Topologies topologies, FullRoute<?> route, Ballot ballot, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super SyncPoint<U>, Throwable> callback)
     {
         super(node, topologies, ballot, txnId, txn, route, executeAt, deps, callback);
         this.adapter = adapter;
@@ -52,7 +52,7 @@ public class ProposeSyncPoint<S extends Seekables<?, ?>> extends Propose<SyncPoi
     @Override
     void onAccepted()
     {
-        Deps deps = Faults.SYNCPOINT_UNMERGED_DEPS ? this.deps : this.deps.with(Deps.merge(acceptOks, ok -> ok.deps));
-        stabilise(adapter, node, acceptTracker.topologies(), route, ballot, txnId, txn, executeAt, deps, callback);
+        Deps deps = Faults.syncPointDiscardPreAcceptDeps ? this.deps : this.deps.with(Deps.merge(acceptOks, acceptOks.domainSize(), SortedListMap::getValue, ok -> ok.deps));
+        adapter.stabilise(node, acceptTracker.topologies(), route, ballot, txnId, txn, executeAt, deps, callback);
     }
 }
