@@ -16,38 +16,36 @@
  * limitations under the License.
  */
 
-package accord.local;
+package accord.primitives;
 
 import java.util.List;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
-import accord.local.Status.Definition;
-import accord.local.Status.Known;
-import accord.local.Status.KnownDeps;
-import accord.local.Status.KnownExecuteAt;
-import accord.local.Status.KnownRoute;
-import accord.local.Status.Outcome;
-import accord.local.Status.Phase;
-import accord.primitives.Ballot;
+import accord.primitives.Known.Definition;
+import accord.primitives.Known.KnownDeps;
+import accord.primitives.Known.KnownExecuteAt;
+import accord.primitives.Known.KnownRoute;
+import accord.primitives.Known.Outcome;
+import accord.primitives.Status.Phase;
 
-import static accord.local.SaveStatus.LocalExecution.CleaningUp;
-import static accord.local.SaveStatus.LocalExecution.NotReady;
-import static accord.local.Status.Definition.DefinitionErased;
-import static accord.local.Status.Definition.DefinitionKnown;
-import static accord.local.Status.Definition.DefinitionUnknown;
-import static accord.local.Status.KnownDeps.DepsErased;
-import static accord.local.Status.KnownDeps.DepsKnown;
-import static accord.local.Status.KnownDeps.DepsProposed;
-import static accord.local.Status.KnownDeps.DepsUnknown;
-import static accord.local.Status.KnownExecuteAt.ExecuteAtErased;
-import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
-import static accord.local.Status.KnownExecuteAt.ExecuteAtProposed;
-import static accord.local.Status.KnownExecuteAt.ExecuteAtUnknown;
-import static accord.local.Status.KnownRoute.Full;
-import static accord.local.Status.KnownRoute.Maybe;
-import static accord.local.Status.Outcome.Unknown;
-import static accord.local.Status.Truncated;
+import static accord.primitives.SaveStatus.LocalExecution.CleaningUp;
+import static accord.primitives.SaveStatus.LocalExecution.NotReady;
+import static accord.primitives.Known.Definition.DefinitionErased;
+import static accord.primitives.Known.Definition.DefinitionKnown;
+import static accord.primitives.Known.Definition.DefinitionUnknown;
+import static accord.primitives.Known.KnownDeps.DepsErased;
+import static accord.primitives.Known.KnownDeps.DepsKnown;
+import static accord.primitives.Known.KnownDeps.DepsProposed;
+import static accord.primitives.Known.KnownDeps.DepsUnknown;
+import static accord.primitives.Known.KnownExecuteAt.ExecuteAtErased;
+import static accord.primitives.Known.KnownExecuteAt.ExecuteAtKnown;
+import static accord.primitives.Known.KnownExecuteAt.ExecuteAtProposed;
+import static accord.primitives.Known.KnownExecuteAt.ExecuteAtUnknown;
+import static accord.primitives.Known.KnownRoute.Full;
+import static accord.primitives.Known.KnownRoute.Maybe;
+import static accord.primitives.Known.Outcome.Unknown;
+import static accord.primitives.Status.Truncated;
 
 /**
  * A version of Status that preserves additional local state, including whether we have previously been PreAccepted
@@ -85,13 +83,13 @@ public enum SaveStatus
     Applied                         (Status.Applied,                                                                                               LocalExecution.Applied),
     // TruncatedApplyWithDeps is a state never adopted within a single replica; it is however a useful state we may enter by combining state from multiple replicas
     // TODO (expected): TruncatedApplyWithDeps should be redundant now we have migrated away from SaveStatus in CheckStatusOk to Known; remove in isolated commit once stable
-    TruncatedApplyWithDeps          (Status.Truncated,             Full,    DefinitionErased,   ExecuteAtKnown,    DepsKnown,    Outcome.Apply,    CleaningUp),
-    TruncatedApplyWithOutcome       (Status.Truncated,             Full,    DefinitionErased,   ExecuteAtKnown,    DepsErased,   Outcome.Apply,    CleaningUp),
-    TruncatedApply                  (Status.Truncated,             Full,    DefinitionErased,   ExecuteAtKnown,    DepsErased,   Outcome.WasApply, CleaningUp),
+    TruncatedApplyWithDeps          (Status.Truncated, Full, DefinitionErased, ExecuteAtKnown, DepsKnown, Known.Outcome.Apply, CleaningUp),
+    TruncatedApplyWithOutcome       (Status.Truncated, Full, DefinitionErased, ExecuteAtKnown, DepsErased, Known.Outcome.Apply, CleaningUp),
+    TruncatedApply                  (Status.Truncated, Full, DefinitionErased, ExecuteAtKnown, DepsErased, Known.Outcome.WasApply, CleaningUp),
     // NOTE: Erased should ONLY be adopted on a replica that knows EVERY shard has successfully applied the transaction at all healthy replicas (or else it is durably invalidated)
-    Erased                          (Status.Truncated,             Maybe,   DefinitionErased,   ExecuteAtErased,   DepsErased,   Outcome.Erased,   CleaningUp),
-    // ErasedOrInvalidOrVestigial means the command cannot be completed and is either pre-bootstrap, did not commit, or did not participate in this shard's epoch
-    ErasedOrInvalidOrVestigial      (Status.Truncated,             Maybe,   DefinitionUnknown,  ExecuteAtUnknown,  DepsUnknown,  Unknown,          CleaningUp),
+    Erased                          (Status.Truncated, Maybe, DefinitionErased, ExecuteAtErased, DepsErased, Known.Outcome.Erased, CleaningUp),
+    // ErasedOrVestigial means the command cannot be completed and is either pre-bootstrap, did not commit, or did not participate in this shard's epoch
+    ErasedOrVestigial               (Status.Truncated,             Maybe,   DefinitionUnknown,  ExecuteAtUnknown,  DepsUnknown,  Unknown,          CleaningUp),
     Invalidated                     (Status.Invalidated,                                                                                           CleaningUp),
     ;
 
@@ -282,19 +280,19 @@ public enum SaveStatus
                 switch (status)
                 {
                     default: throw new AssertionError("Unexpected status: " + status);
-                    case ErasedOrInvalidOrVestigial:
+                    case ErasedOrVestigial:
                         if (known.outcome.isInvalidated())
                             return Invalidated;
 
                         if (!known.outcome.isOrWasApply() || known.executeAt == ExecuteAtKnown)
-                            return ErasedOrInvalidOrVestigial;
+                            return ErasedOrVestigial;
 
                     case Erased:
                         if (!known.outcome.isOrWasApply() || known.executeAt != ExecuteAtKnown)
                             return Erased;
 
                     case TruncatedApply:
-                        if (known.outcome != Outcome.Apply)
+                        if (known.outcome != Known.Outcome.Apply)
                             return TruncatedApply;
 
                     case TruncatedApplyWithOutcome:

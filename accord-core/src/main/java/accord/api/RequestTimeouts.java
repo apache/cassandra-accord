@@ -30,6 +30,7 @@ public interface RequestTimeouts
     interface Timeout
     {
         void timeout();
+        int stripe();
     }
 
     RegisteredTimeout register(Timeout timeout, long delay, TimeUnit units);

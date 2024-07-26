@@ -21,27 +21,27 @@ package accord.local.cfk;
 import javax.annotation.Nullable;
 
 import accord.api.Agent;
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.impl.SafeState;
 import accord.local.Command;
 import accord.local.RedundantBefore;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.Status;
+import accord.primitives.Status;
 import accord.primitives.TxnId;
 
 public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
 {
-    private final Key key;
+    private final RoutingKey key;
 
-    public SafeCommandsForKey(Key key)
+    public SafeCommandsForKey(RoutingKey key)
     {
         this.key = key;
     }
 
     protected abstract void set(CommandsForKey update);
 
-    public Key key()
+    public RoutingKey key()
     {
         return key;
     }
@@ -50,6 +50,12 @@ public abstract class SafeCommandsForKey implements SafeState<CommandsForKey>
     {
         CommandsForKey prevCfk = current();
         update(safeStore, nextCommand, prevCfk, prevCfk.updatePruned(nextCommand), notifySink);
+    }
+
+    public void update(SafeCommandStore safeStore, Command nextCommand, boolean isOutOfRange)
+    {
+        CommandsForKey prevCfk = current();
+        update(safeStore, nextCommand, prevCfk, prevCfk.update(nextCommand, isOutOfRange));
     }
 
     public void update(SafeCommandStore safeStore, Command nextCommand)

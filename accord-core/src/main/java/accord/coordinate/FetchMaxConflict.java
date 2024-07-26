@@ -26,7 +26,7 @@ import accord.messages.Callback;
 import accord.messages.GetMaxConflict;
 import accord.messages.GetMaxConflict.GetMaxConflictOk;
 import accord.primitives.FullRoute;
-import accord.primitives.Seekables;
+import accord.primitives.Routables;
 import accord.primitives.Timestamp;
 import accord.topology.Topologies;
 import accord.utils.async.AsyncResult;
@@ -44,25 +44,23 @@ import static accord.coordinate.tracking.RequestStatus.Success;
 public class FetchMaxConflict extends AbstractCoordinatePreAccept<Timestamp, GetMaxConflictOk>
 {
     final QuorumTracker tracker;
-    final Seekables<?, ?> keysOrRanges;
     Timestamp maxConflict;
     long executionEpoch;
 
-    private FetchMaxConflict(Node node, FullRoute<?> route, Seekables<?, ?> keysOrRanges, long executionEpoch)
+    private FetchMaxConflict(Node node, FullRoute<?> route, long executionEpoch)
     {
-        this(node, route, keysOrRanges, executionEpoch, node.topology().withUnsyncedEpochs(route, executionEpoch, executionEpoch));
+        this(node, route, executionEpoch, node.topology().withUnsyncedEpochs(route, executionEpoch, executionEpoch));
     }
 
-    private FetchMaxConflict(Node node, FullRoute<?> route, Seekables<?, ?> keysOrRanges, long executionEpoch, Topologies topologies)
+    private FetchMaxConflict(Node node, FullRoute<?> route, long executionEpoch, Topologies topologies)
     {
         super(node, route, null, topologies);
-        this.keysOrRanges = keysOrRanges;
         this.maxConflict = Timestamp.NONE;
         this.executionEpoch = executionEpoch;
         this.tracker = new QuorumTracker(topologies);
     }
 
-    public static AsyncResult<Timestamp> fetchMaxConflict(Node node, Seekables<?, ?> keysOrRanges)
+    public static AsyncResult<Timestamp> fetchMaxConflict(Node node, Routables<?> keysOrRanges)
     {
         long epoch = node.epoch();
         FullRoute<?> route = node.computeRoute(epoch, keysOrRanges);
@@ -70,22 +68,15 @@ public class FetchMaxConflict extends AbstractCoordinatePreAccept<Timestamp, Get
         TopologyMismatch mismatch = TopologyMismatch.checkForMismatchOrPendingRemoval(node.topology().globalForEpoch(epoch), null, route.homeKey(), keysOrRanges);
         if (mismatch != null)
             return AsyncResults.failure(mismatch);
-        FetchMaxConflict coordinate = new FetchMaxConflict(node, route, keysOrRanges, epoch);
+        FetchMaxConflict coordinate = new FetchMaxConflict(node, route, epoch);
         coordinate.start();
         return coordinate;
-    }
-
-
-    @Override
-    Seekables<?, ?> keysOrRanges()
-    {
-        return keysOrRanges;
     }
 
     @Override
     void contact(Collection<Node.Id> nodes, Topologies topologies, Callback<GetMaxConflictOk> callback)
     {
-        node.send(nodes, to -> new GetMaxConflict(to, topologies, route, keysOrRanges, executionEpoch), callback);
+        node.send(nodes, to -> new GetMaxConflict(to, topologies, route, executionEpoch), callback);
     }
 
     @Override

@@ -25,7 +25,8 @@ import accord.local.Commands;
 import accord.local.Node.Id;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
+import accord.local.StoreParticipants;
+import accord.primitives.SaveStatus;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
 import accord.primitives.PartialDeps;
@@ -84,10 +85,10 @@ public class ReadEphemeralTxnData extends ReadData
     }
 
     @Override
-    protected synchronized CommitOrReadNack apply(SafeCommandStore safeStore, SafeCommand safeCommand)
+    protected synchronized CommitOrReadNack apply(SafeCommandStore safeStore, SafeCommand safeCommand, StoreParticipants participants)
     {
         Commands.ephemeralRead(safeStore, safeCommand, route, txnId, partialTxn, partialDeps, executeAtEpoch);
-        return super.apply(safeStore, safeCommand);
+        return super.apply(safeStore, safeCommand, participants);
     }
 
     @Override
@@ -118,7 +119,7 @@ public class ReadEphemeralTxnData extends ReadData
     static long retryInLaterEpoch(long executeAtEpoch, SafeCommandStore safeStore, Command command)
     {
         TxnId txnId = command.txnId();
-        if (!txnId.kind().awaitsOnlyDeps())
+        if (!txnId.awaitsOnlyDeps())
             return 0;
 
         // TODO (required): should we disambiguate between cases where a truncated command has been executed locally

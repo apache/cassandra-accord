@@ -18,7 +18,11 @@
 
 package accord.primitives;
 
+import accord.api.RoutingKey;
 import accord.utils.Invariants;
+import accord.utils.SortedCursor;
+
+import static accord.utils.Invariants.illegalArgument;
 
 public class PartialDeps extends Deps
 {
@@ -63,6 +67,18 @@ public class PartialDeps extends Deps
         return covering.intersectsAll(participants);
     }
 
+    public boolean covers(RoutingKey key)
+    {
+        return covering.contains(key);
+    }
+
+    @Override
+    public SortedCursor<TxnId> txnIds(RoutingKey key)
+    {
+        Invariants.checkArgument(covers(key), "%s is not covered by %s", key, this);
+        return super.txnIds(key);
+    }
+
     public Deps with(Deps that)
     {
         if (that instanceof PartialDeps)
@@ -80,6 +96,14 @@ public class PartialDeps extends Deps
         );
     }
 
+    @Override
+    public PartialDeps intersecting(Participants<?> participants)
+    {
+        if (!covers(participants))
+            throw illegalArgument("This PartialDeps does not cover the requested participants");
+        return new PartialDeps(this.covering.intersecting(participants), keyDeps.intersecting(participants), rangeDeps.intersecting(participants), directKeyDeps.intersecting(participants));
+    }
+
     public Deps reconstitute(FullRoute<?> route)
     {
         if (!covers(route.participants()))
@@ -94,6 +118,6 @@ public class PartialDeps extends Deps
             throw new IllegalArgumentException();
 
         if (covers(covering)) return this;
-        else throw Invariants.illegalArgument(this + " does not cover " + covering);
+        else throw illegalArgument(this + " does not cover " + covering);
     }
 }

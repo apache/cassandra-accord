@@ -21,11 +21,10 @@ package accord.primitives;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import accord.local.Node.Id;
 import accord.primitives.Routable.Domain;
 import accord.primitives.Txn.Kind;
+import accord.primitives.Txn.Kind.Kinds;
 
 import static accord.primitives.Txn.Kind.Read;
 import static accord.primitives.Txn.Kind.Write;
@@ -85,17 +84,62 @@ public class TxnId extends Timestamp
 
     public boolean isWrite()
     {
-        return rwOrdinal(flags()) == Write.ordinal();
+        return is(Write);
     }
 
     public boolean isRead()
     {
-        return rwOrdinal(flags()) == Read.ordinal();
+        return is(Read);
     }
 
     public Kind kind()
     {
         return kind(flags());
+    }
+
+    public boolean is(Kinds kinds)
+    {
+        return kinds.testOrdinal(kindOrdinal(flags()));
+    }
+
+    public boolean is(Kind kind)
+    {
+        return kindOrdinal(flags()) == kind.ordinal();
+    }
+
+    public boolean isVisible()
+    {
+        return Kind.isVisible(kindOrdinal(flags()));
+    }
+
+    public boolean isSyncPoint()
+    {
+        return Kind.isSyncPoint(kindOrdinal(flags()));
+    }
+
+    public boolean isSystemTxn()
+    {
+        return Kind.isSystemTxn(kindOrdinal(flags()));
+    }
+
+    public boolean awaitsOnlyDeps()
+    {
+        return Kind.awaitsOnlyDeps(kindOrdinal(flags()));
+    }
+
+    public boolean is(Domain domain)
+    {
+        return domainOrdinal(flags()) == domain.ordinal();
+    }
+
+    public Kinds witnesses()
+    {
+        return kind().witnesses();
+    }
+
+    public Kinds witnessedBy()
+    {
+        return kind().witnessedBy();
     }
 
     public Domain domain()
@@ -113,7 +157,6 @@ public class TxnId extends Timestamp
         return as(kind(), domain);
     }
 
-    @VisibleForTesting
     public TxnId as(Kind kind, Domain domain)
     {
         return new TxnId(epoch(), hlc(), kind, domain, node);
@@ -153,7 +196,7 @@ public class TxnId extends Timestamp
 
     private static Kind kind(int flags)
     {
-        return Kind.ofOrdinal(rwOrdinal(flags));
+        return Kind.ofOrdinal(kindOrdinal(flags));
     }
 
     private static Domain domain(int flags)
@@ -161,7 +204,7 @@ public class TxnId extends Timestamp
         return Domain.ofOrdinal(domainOrdinal(flags));
     }
 
-    private static int rwOrdinal(int flags)
+    private static int kindOrdinal(int flags)
     {
         return (flags >> 1) & 7;
     }

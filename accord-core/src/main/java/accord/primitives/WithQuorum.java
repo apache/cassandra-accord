@@ -16,12 +16,9 @@
  * limitations under the License.
  */
 
-package accord.utils;
+package accord.primitives;
 
-public class Faults
+public enum WithQuorum
 {
-    public static final boolean TRANSACTION_INSTABILITY = false;
-    public static final boolean SYNCPOINT_INSTABILITY = false;
-    public static final boolean TRANSACTION_UNMERGED_DEPS = false;
-    public static final boolean SYNCPOINT_UNMERGED_DEPS = false;
+    HasQuorum, NoQuorum
 }

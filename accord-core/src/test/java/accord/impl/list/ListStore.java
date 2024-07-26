@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -34,20 +35,18 @@ import accord.api.DataStore;
 import accord.api.Key;
 import accord.api.Scheduler;
 import accord.coordinate.CoordinateSyncPoint;
+import accord.coordinate.ExecuteSyncPoint;
 import accord.coordinate.ExecuteSyncPoint.SyncPointErased;
+import accord.coordinate.Exhausted;
 import accord.coordinate.Invalidated;
 import accord.coordinate.Preempted;
 import accord.coordinate.Timeout;
 import accord.coordinate.TopologyMismatch;
+import accord.coordinate.Truncated;
 import accord.coordinate.tracking.AllTracker;
-import accord.coordinate.tracking.RequestStatus;
 import accord.impl.basic.SimulatedFault;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
-import accord.messages.Callback;
-import accord.messages.ReadData;
-import accord.messages.ReadData.ReadReply;
-import accord.messages.WaitUntilApplied;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.RoutableKey;
@@ -55,7 +54,6 @@ import accord.primitives.Seekable;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
-import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.utils.Invariants;
 import accord.utils.RandomSource;
@@ -110,7 +108,7 @@ public class ListStore implements DataStore
         {
             return "FetchComplete{" +
                    "storeId=" + storeId +
-                   ", syncPoint=(" + syncPoint.syncId + ", " + syncPoint.keysOrRanges + ")" +
+                   ", syncPoint=(" + syncPoint.syncId + ", " + syncPoint.route + ")" +
                    ", ranges=" + ranges +
                    '}';
         }
@@ -133,13 +131,14 @@ public class ListStore implements DataStore
         public String toString()
         {
             return "PurgeAt{" +
-                   "syncPoint=(" + syncPoint.syncId + ", " + syncPoint.keysOrRanges + ")" +
+                   "syncPoint=(" + syncPoint.syncId + ", " + syncPoint.route + ")" +
                    ", epoch=" + epoch +
                    ", ranges=" + ranges +
                    '}';
         }
     }
 
+    static final boolean VERIFY_ACCESS = Boolean.getBoolean(System.getProperty("accord.test.verify_liststore_access", "true"));
     static final Timestamped<int[]> EMPTY = new Timestamped<>(Timestamp.NONE, new int[0], Arrays::toString);
     final NavigableMap<RoutableKey, Timestamped<int[]>> data = new TreeMap<>();
     final Scheduler scheduler;
@@ -181,12 +180,12 @@ public class ListStore implements DataStore
     private static final class PendingSnapshot
     {
         final long delay;
-        final Runnable runnable;
+        final Consumer<Boolean> onCompletion;
 
-        private PendingSnapshot(long delay, Runnable runnable)
+        private PendingSnapshot(long delay, Consumer<Boolean> onCompletion)
         {
             this.delay = delay;
-            this.runnable = runnable;
+            this.onCompletion = onCompletion;
         }
     }
 
@@ -200,9 +199,16 @@ public class ListStore implements DataStore
         AsyncResult.Settable<Void> result = new AsyncResults.SettableResult<>();
         long delay = Math.max(1, random.nextBiasedLong(100, 1000, 5000) - pendingDelay);
         pendingDelay += delay;
-        pendingSnapshots.add(new PendingSnapshot(delay, () -> {
-            this.snapshot = snapshot;
-            result.setSuccess(null);
+        pendingSnapshots.add(new PendingSnapshot(delay, success -> {
+            if (success)
+            {
+                this.snapshot = snapshot;
+                result.setSuccess(null);
+            }
+            else
+            {
+                result.setFailure(new RuntimeException("Snapshot aborted due to earlier snapshot being restored"));
+            }
         }));
 
         if (pendingSnapshots.size() == 1)
@@ -218,7 +224,7 @@ public class ListStore implements DataStore
                 return;
 
             PendingSnapshot pendingSnapshot = pendingSnapshots.pollFirst();
-            pendingSnapshot.runnable.run();
+            pendingSnapshot.onCompletion.accept(true);
             pendingDelay -= pendingSnapshot.delay;
             if (!pendingSnapshots.isEmpty())
                 scheduleRunSnapshot();
@@ -227,15 +233,18 @@ public class ListStore implements DataStore
 
     public void restoreFromSnapshot()
     {
-        if (snapshot == null)
-            return;
+        if (snapshot != null)
+        {
+            data.putAll(snapshot.data);
+            addedAts.addAll(snapshot.addedAts);
+            removedAts.addAll(snapshot.removedAts);
+            purgedAts.addAll(snapshot.purgedAts);
+            fetchCompletes.addAll(snapshot.fetchCompletes);
+            pendingRemoves.addAll(snapshot.pendingRemoves);
+        }
 
-        data.putAll(snapshot.data);
-        addedAts.addAll(snapshot.addedAts);
-        removedAts.addAll(snapshot.removedAts);
-        purgedAts.addAll(snapshot.purgedAts);
-        fetchCompletes.addAll(snapshot.fetchCompletes);
-        pendingRemoves.addAll(snapshot.pendingRemoves);
+        while (!pendingSnapshots.isEmpty())
+            pendingSnapshots.pollFirst().onCompletion.accept(false);
     }
 
     public void clear()
@@ -358,7 +367,7 @@ public class ListStore implements DataStore
 
     private static String format(SyncPoint sp)
     {
-        return String.format("(%s -> %s)", sp.syncId, sp.keysOrRanges);
+        return String.format("(%s -> %s)", sp.syncId, sp.route);
     }
 
     public String historySeekable(Seekable o)
@@ -534,7 +543,7 @@ public class ListStore implements DataStore
         // * api is range -> TxnId, so we still need a TxnId to be referenced off... so we need to create a TxnId to know when we are in-sync!
         // * if we have a sync point, we really only care if the sync point is applied globally...
         // * even though CoordinateDurabilityScheduling is part of BurnTest, it was seen that shard/global syncs were only happening in around 1/5 of the tests (mostly due to timeouts/invalidates), which would mean purge was called infrequently.
-        currentSyncPoint(node, removed).flatMap(sp -> Await.coordinate(node, epoch - 1, sp)).begin((s, f) -> {
+        currentSyncPoint(node, removed).flatMap(sp -> awaitSyncPoint(node, sp)).begin((s, f) -> {
             if (f != null)
             {
                 node.agent().onUncaughtException(f);
@@ -549,6 +558,7 @@ public class ListStore implements DataStore
         // TODO (effeciency, correctness): remove the delayed removal logic.
         // This logic was added to make sure the sequence of events made sense but doesn't handle everything perfectly; I (David C) believe that this code
         // will suffer from the ABA problem; if a range is removed, then added back it is not likley to be handled correctly (the add will no-op as it wasn't removed, then the remove will remove it!)
+        if (pendingRemoves.isEmpty()) return;
         if (pendingRemoves.get(0) != epoch)
         {
             onRemovalDone.add(() -> performRemoval(epoch, removed, s));
@@ -573,13 +583,13 @@ public class ListStore implements DataStore
         callbacks.forEach(Runnable::run);
     }
 
-    private static AsyncChain<SyncPoint<Ranges>> currentSyncPoint(Node node, Ranges removed)
+    private static AsyncChain<SyncPoint<Range>> currentSyncPoint(Node node, Ranges removed)
     {
-        return CoordinateSyncPoint.exclusive(node, removed)
+        return CoordinateSyncPoint.exclusiveSyncPoint(node, removed)
                                   .recover(t -> {
                                       // TODO (api, effeciency): retry with backoff.
                                       // TODO (effeciency): if Preempted, can we keep block waiting?
-                                      if (t instanceof Invalidated || t instanceof Timeout || t instanceof Preempted)
+                                      if (t instanceof Invalidated || t instanceof Timeout || t instanceof Preempted || t instanceof Truncated)
                                           return currentSyncPoint(node, removed);
                                       if (t instanceof TopologyMismatch)
                                       {
@@ -594,110 +604,38 @@ public class ListStore implements DataStore
                                   });
     }
 
-    // TODO (duplication): this is 95% of accord.coordinate.CoordinateShardDurable
-    //   we already report all this information to EpochState; would be better to use that
-    private static class Await extends AsyncResults.SettableResult<SyncPoint<Ranges>> implements Callback<ReadReply>
+    private static AsyncChain<SyncPoint<Range>> awaitSyncPoint(Node node, SyncPoint<Range> exclusiveSyncPoint)
     {
-        private final Node node;
-        private final AllTracker tracker;
-        private final SyncPoint<Ranges> exclusiveSyncPoint;
+        Await e = new Await(node, exclusiveSyncPoint);
+        e.addCallback(() -> node.configService().reportEpochRedundant(exclusiveSyncPoint.route.toRanges(), exclusiveSyncPoint.syncId.epoch()));
+        e.start();
+        return e.recover(t -> {
+            if (t.getClass() == SyncPointErased.class)
+                return AsyncChains.success(null);
+            if (t instanceof Timeout ||
+                // TODO (expected): why are we not simply handling Insufficient properly?
+                t instanceof RuntimeException && "Insufficient".equals(t.getMessage()) ||
+                t instanceof SimulatedFault ||
+                t instanceof Exhausted)
+                return awaitSyncPoint(node, exclusiveSyncPoint);
+            // cannot loop indefinitely
+            if (t instanceof RuntimeException && "Redundant".equals(t.getMessage()))
+                return AsyncChains.success(null);
+            return null;
+        });
+    }
 
-        private Await(Node node, long minEpoch, SyncPoint<Ranges> exclusiveSyncPoint)
+    private static class Await extends ExecuteSyncPoint.ExecuteExclusiveSyncPoint
+    {
+        public Await(Node node, SyncPoint<Range> syncPoint)
         {
-            Topologies topologies = node.topology().forEpoch(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.sourceEpoch());
-            this.node = node;
-            this.tracker = new AllTracker(topologies);
-            this.exclusiveSyncPoint = exclusiveSyncPoint;
-        }
-
-        public static AsyncChain<SyncPoint<Ranges>> coordinate(Node node, long minEpoch, SyncPoint sp)
-        {
-            return node.withEpoch(sp.sourceEpoch(), () -> {
-                Await coordinate = new Await(node, minEpoch, sp);
-                coordinate.start();
-                return coordinate.recover(t -> {
-                    if (t.getClass() == SyncPointErased.class)
-                        return AsyncChains.success(null);
-                    if (t instanceof Timeout ||
-                        // TODO (expected): why are we not simply handling Insufficient properly?
-                        t instanceof RuntimeException && "Insufficient".equals(t.getMessage()) ||
-                        t instanceof SimulatedFault)
-                        return coordinate(node, minEpoch, sp);
-                    // cannot loop indefinitely
-                    if (t instanceof RuntimeException && "Redundant".equals(t.getMessage()))
-                        return AsyncChains.success(null);
-                    return null;
-                });
-            });
-        }
-
-        private void start()
-        {
-            node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), exclusiveSyncPoint.syncId, exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.syncId.epoch()), this);
-        }
-        @Override
-        public void onSuccess(Node.Id from, ReadReply reply)
-        {
-            if (!reply.isOk())
-            {
-                ReadData.CommitOrReadNack nack = (ReadData.CommitOrReadNack) reply;
-                switch (nack)
-                {
-                    default: throw new AssertionError("Unhandled: " + reply);
-
-                    case Insufficient:
-                        CoordinateSyncPoint.sendApply(node, from, exclusiveSyncPoint);
-                        return;
-                    case Rejected:
-                        tryFailure(new RuntimeException(nack.name()));
-                    case Redundant:
-                        tryFailure(new SyncPointErased());
-                        return;
-                    case Invalid:
-                        tryFailure(new Invalidated(exclusiveSyncPoint.syncId, exclusiveSyncPoint.homeKey));
-                        return;
-                }
-            }
-            else
-            {
-                if (tracker.recordSuccess(from) == RequestStatus.Success)
-                {
-                    node.configService().reportEpochRedundant(exclusiveSyncPoint.keysOrRanges, exclusiveSyncPoint.syncId.epoch());
-                    trySuccess(exclusiveSyncPoint);
-                }
-            }
-        }
-
-        private Throwable cause;
-
-        @Override
-        public void onFailure(Node.Id from, Throwable failure)
-        {
-            synchronized (this)
-            {
-                if (cause == null) cause = failure;
-                else
-                {
-                    try
-                    {
-                        cause.addSuppressed(failure);
-                    }
-                    catch (Throwable t)
-                    {
-                        // can not always add suppress
-                        node.agent().onUncaughtException(failure);
-                    }
-                }
-                failure = cause;
-            }
-            if (tracker.recordFailure(from) == RequestStatus.Failed)
-                tryFailure(failure);
+            super(node, syncPoint, AllTracker::new);
         }
 
         @Override
-        public void onCallbackFailure(Node.Id from, Throwable failure)
+        public void start()
         {
-            tryFailure(failure);
+            super.start();
         }
     }
 }

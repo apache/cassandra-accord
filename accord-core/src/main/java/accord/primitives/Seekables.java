@@ -43,7 +43,6 @@ public interface Seekables<K extends Seekable, U extends Seekables<K, ?>> extend
     Seekables<K, U> with(U with);
 
     Participants<?> toParticipants();
-
     FullRoute<?> toRoute(RoutingKey homeKey);
     
     static Seekables<?, ?> of(Seekable seekable)

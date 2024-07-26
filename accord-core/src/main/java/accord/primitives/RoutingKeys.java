@@ -40,8 +40,7 @@ public class RoutingKeys extends AbstractUnseekableKeys implements Unseekables<R
     }
 
     public static final RoutingKeys EMPTY = new RoutingKeys(new RoutingKey[0]);
-
-    private static final RoutingKey[] EMPTY_KEYS_ARRAY = new RoutingKey[0];
+    public static final RoutingKey[] EMPTY_KEYS_ARRAY = new RoutingKey[0];
 
     RoutingKeys(RoutingKey[] keys)
     {
@@ -120,6 +119,11 @@ public class RoutingKeys extends AbstractUnseekableKeys implements Unseekables<R
         return slice(ranges);
     }
 
+    public RoutingKeys without(Range range)
+    {
+        return wrap(subtract(range, keys));
+    }
+
     private RoutingKeys wrap(RoutingKey[] wrap, AbstractKeys<RoutingKey> that)
     {
         return wrap == keys ? this : wrap == that.keys && that instanceof RoutingKeys ? (RoutingKeys)that : new RoutingKeys(wrap);
@@ -128,5 +132,12 @@ public class RoutingKeys extends AbstractUnseekableKeys implements Unseekables<R
     private RoutingKeys wrap(RoutingKey[] wrap)
     {
         return wrap == keys ? this : new RoutingKeys(wrap);
+    }
+
+    public static RoutingKeys toRoutingKeys(AbstractUnseekableKeys keys)
+    {
+        if (keys.getClass() == RoutingKeys.class)
+            return (RoutingKeys) keys;
+        return new RoutingKeys(keys.keys);
     }
 }

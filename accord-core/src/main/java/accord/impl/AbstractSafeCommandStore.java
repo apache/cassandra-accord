@@ -23,7 +23,7 @@ import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.api.VisibleForImplementation;
 import accord.local.*;
 import accord.local.cfk.SafeCommandsForKey;
@@ -61,13 +61,13 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
     protected abstract void addCommandInternal(CommandType command);
     protected abstract CommandType getIfLoaded(TxnId txnId);
 
-    protected abstract TimestampsForKeyType getTimestampsForKeyInternal(Key key);
+    protected abstract TimestampsForKeyType getTimestampsForKeyInternal(RoutingKey key);
     protected abstract void addTimestampsForKeyInternal(TimestampsForKeyType cfk);
-    protected abstract TimestampsForKeyType getTimestampsForKeyIfLoaded(Key key);
+    protected abstract TimestampsForKeyType getTimestampsForKeyIfLoaded(RoutingKey key);
 
-    protected abstract CommandsForKeyType getCommandsForKeyInternal(Key key);
+    protected abstract CommandsForKeyType getCommandsForKeyInternal(RoutingKey key);
     protected abstract void addCommandsForKeyInternal(CommandsForKeyType cfk);
-    protected abstract CommandsForKeyType getCommandsForKeyIfLoaded(Key key);
+    protected abstract CommandsForKeyType getCommandsForKeyIfLoaded(RoutingKey key);
 
     @Override
     protected CommandType getInternalIfLoadedAndInitialised(TxnId txnId)
@@ -89,12 +89,12 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
         return command;
     }
 
-    private CommandsForKeyType getCommandsIfLoaded(Key key)
+    private CommandsForKeyType getCommandsIfLoaded(RoutingKey key)
     {
         return getIfLoaded(key, this::getCommandsForKeyInternal, this::addCommandsForKeyInternal, this::getCommandsForKeyIfLoaded);
     }
 
-    protected CommandsForKeyType getInternalIfLoadedAndInitialised(Key key)
+    protected CommandsForKeyType getInternalIfLoadedAndInitialised(RoutingKey key)
     {
         CommandsForKeyType cfk = getCommandsIfLoaded(key);
         if (cfk == null)
@@ -105,7 +105,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
     }
 
     @VisibleForTesting
-    protected CommandsForKeyType getInternal(Key key)
+    protected CommandsForKeyType getInternal(RoutingKey key)
     {
         CommandsForKeyType cfk = getCommandsIfLoaded(key);
         Invariants.checkState(cfk != null, "%s was not specified in PreLoadContext", key);
@@ -115,7 +115,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
     }
 
     @VisibleForImplementation
-    public CommandsForKeyType maybeCommandsForKey(Key key)
+    public CommandsForKeyType maybeCommandsForKey(RoutingKey key)
     {
         CommandsForKeyType cfk = getCommandsIfLoaded(key);
         if (cfk == null || cfk.isUnset())
@@ -123,7 +123,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
         return cfk;
     }
 
-    public TimestampsForKeyType timestampsIfLoadedAndInitialised(Key key)
+    public TimestampsForKeyType timestampsIfLoadedAndInitialised(RoutingKey key)
     {
         TimestampsForKeyType cfk = getIfLoaded(key, this::getTimestampsForKeyInternal, this::addTimestampsForKeyInternal, this::getTimestampsForKeyIfLoaded);
         if (cfk == null)
@@ -135,7 +135,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
         return cfk;
     }
 
-    public TimestampsForKeyType timestampsForKey(Key key)
+    public TimestampsForKeyType timestampsForKey(RoutingKey key)
     {
         TimestampsForKeyType tfk = getIfLoaded(key, this::getTimestampsForKeyInternal, this::addTimestampsForKeyInternal, this::getTimestampsForKeyIfLoaded);
         Invariants.checkState(tfk != null, "%s was not specified in PreLoadContext", key);
@@ -146,7 +146,7 @@ public abstract class AbstractSafeCommandStore<CommandType extends SafeCommand,
 
 
     @VisibleForImplementation
-    public TimestampsForKeyType maybeTimestampsForKey(Key key)
+    public TimestampsForKeyType maybeTimestampsForKey(RoutingKey key)
     {
         TimestampsForKeyType tfk = getIfLoaded(key, this::getTimestampsForKeyInternal, this::addTimestampsForKeyInternal, this::getTimestampsForKeyIfLoaded);
         if (tfk == null || tfk.isUnset())

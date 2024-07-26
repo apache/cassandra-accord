@@ -20,8 +20,12 @@ package accord.primitives;
 
 import accord.api.RoutingKey;
 import accord.utils.ArrayBuffers.ObjectBuffers;
+import accord.utils.IndexedFoldToLong;
+import accord.utils.IndexedTriFold;
 import accord.utils.Invariants;
 import accord.utils.SortedArrays;
+import net.nicoulaj.compilecommand.annotations.Inline;
+
 import com.google.common.collect.Iterators;
 
 import javax.annotation.Nonnull;
@@ -228,6 +232,11 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
         return SortedArrays.exponentialSearch(ranges, thisIndex, size(), find, (k, r) -> -r.compareTo(k), search);
     }
 
+    public Ranges toRanges()
+    {
+        return Ranges.ofSortedAndDeoverlappedUnchecked(ranges);
+    }
+
     /**
      * Subtracts the given set of ranges from this
      */
@@ -310,7 +319,7 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
      * Returns the inputs that intersect with any of the members of the keysOrRanges.
      * DOES NOT MODIFY THE INPUT.
      */
-    static <I extends AbstractRanges, P> I intersecting(AbstractUnseekableKeys intersecting, I input, P param, SliceConstructor<I, P, I> constructor)
+    static <I extends AbstractRanges, P> I intersecting(AbstractKeys<?> intersecting, I input, P param, SliceConstructor<I, P, I> constructor)
     {
         Range[] result = SortedArrays.intersectWithMultipleMatches(input.ranges, input.ranges.length, intersecting.keys, intersecting.keys.length, Range::compareTo, cachedRanges());
         return result == input.ranges ? input : constructor.construct(input, param, result);
@@ -797,5 +806,17 @@ public abstract class AbstractRanges implements Iterable<Range>, Routables<Range
         }
 
         return constructor.apply(ranges);
+    }
+
+    @Inline
+    public final long foldl(AbstractRanges intersect, IndexedFoldToLong<Range> fold, long param, long accumulator, long terminalValue)
+    {
+        return Routables.foldl(this, intersect, fold, param, accumulator, terminalValue);
+    }
+
+    @Inline
+    public final <P1, P2, V> V foldl(AbstractRanges intersect, IndexedTriFold<P1, P2, Range, V> fold, P1 p1, P2 p2, V accumulator)
+    {
+        return Routables.foldl(this, intersect, fold, p1, p2, accumulator, i -> false);
     }
 }

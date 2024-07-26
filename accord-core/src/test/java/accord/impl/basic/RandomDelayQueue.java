@@ -28,9 +28,12 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import accord.burn.random.FrequentLargeRange;
+import accord.impl.basic.DelayedCommandStores.DelayedCommandStore.DelayedTask;
+import accord.utils.DefaultRandom;
 import accord.utils.RandomSource;
 
 import static accord.utils.Invariants.illegalArgument;
+import static accord.utils.Invariants.illegalState;
 
 public class RandomDelayQueue implements PendingQueue
 {
@@ -199,5 +202,103 @@ public class RandomDelayQueue implements PendingQueue
     public Iterator<Pending> iterator()
     {
         return queue.stream().map(i -> i.item).iterator();
+    }
+
+    public abstract static class MonitoringQueue extends RandomDelayQueue
+    {
+        public MonitoringQueue(RandomSource random)
+        {
+            super(random);
+        }
+
+        protected abstract void added(Pending pending, long delay);
+
+        @Override
+        public void add(Pending item, long delay, TimeUnit units)
+        {
+            added(item, units.toNanos(delay));
+            super.add(item, delay, units);
+        }
+    }
+
+    public static class ReconcilingQueueFactory
+    {
+        final Pending[] pendings = new Pending[2];
+        final long[] delays = new long[2];
+        final long seed;
+        int waiting = 0;
+
+        class ReconcilingQueue extends MonitoringQueue
+        {
+            final int id;
+
+            public ReconcilingQueue(long seed, int id)
+            {
+                super(new DefaultRandom(seed));
+                this.id = id;
+            }
+
+            @Override
+            protected void added(Pending pending, long delay)
+            {
+                reconcile(pending, delay, id);
+            }
+        }
+
+        synchronized void reconcile(Pending item, long delay, int id)
+        {
+            pendings[id] = item;
+            delays[id] = delay;
+            switch (++waiting)
+            {
+                default: throw new IllegalStateException();
+                case 1:
+                {
+                    try
+                    {
+                        wait();
+                    }
+                    catch (InterruptedException e)
+                    {
+                        throw new RuntimeException(e);
+                    }
+                    return;
+                }
+                case 2:
+                {
+                    if (delays[0] != delays[1])
+                        throw illegalState("%d != %d", delays[0], delays[1]);
+                    if (pendings[0].getClass() != pendings[1].getClass())
+                        throw illegalState("%s != %s", pendings[0], pendings[1]);
+                    if (pendings[0] instanceof DelayedTask)
+                    {
+                        DelayedTask a = (DelayedTask) pendings[0];
+                        DelayedTask b = (DelayedTask) pendings[1];
+                        if (a.callable().getClass() != b.callable().getClass())
+                            throw illegalState("%s != %s", a.callable(), b.callable());
+
+                    }
+                    else if (pendings[0] instanceof Packet)
+                    {
+                        Packet a = (Packet) pendings[0];
+                        Packet b = (Packet) pendings[1];
+                        if (a.requestId != b.requestId || a.replyId != b.replyId || a.src.id != b.src.id || a.dst.id != b.dst.id || a.message.type() != b.message.type())
+                            throw illegalState("%s != %s", a, b);
+                    }
+                    waiting = 0;
+                    notifyAll();
+                }
+            }
+        }
+
+        public ReconcilingQueue get(boolean first)
+        {
+            return new ReconcilingQueue(seed, first ? 0 : 1);
+        }
+
+        public ReconcilingQueueFactory(long seed)
+        {
+            this.seed = seed;
+        }
     }
 }

@@ -29,10 +29,10 @@ import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
-import accord.utils.Faults;
+import accord.utils.SortedListMap;
 
+import static accord.api.ProtocolModifiers.Faults;
 import static accord.coordinate.CoordinationAdapter.Factory.Step.Continue;
-import static accord.coordinate.CoordinationAdapter.Invoke.stabilise;
 
 class ProposeTxn extends Propose<Result>
 {
@@ -44,11 +44,11 @@ class ProposeTxn extends Propose<Result>
     @Override
     void onAccepted()
     {
-        Deps deps = this.deps;
-        if (!Faults.TRANSACTION_UNMERGED_DEPS)
-            deps = deps.with(Deps.merge(acceptOks, ok -> ok.deps));
+        Deps deps = Deps.merge(acceptOks, acceptOks.domainSize(), SortedListMap::getValue, ok -> ok.deps);
+        if (!Faults.txnDiscardPreAcceptDeps)
+            deps = deps.with(this.deps);
 
-        stabilise(adapter(), node, acceptTracker.topologies(), route, ballot, txnId, txn, executeAt, deps, callback);
+        adapter().stabilise(node, acceptTracker.topologies(), route, ballot, txnId, txn, executeAt, deps, callback);
     }
 
     protected CoordinationAdapter<Result> adapter()

@@ -25,6 +25,7 @@ import accord.local.SafeCommandStore;
 import accord.primitives.PartialTxn;
 import accord.primitives.Seekable;
 import accord.primitives.Timestamp;
+import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.utils.Timestamped;
 import accord.utils.async.AsyncChain;
@@ -34,7 +35,7 @@ import java.util.TreeMap;
 public class MaelstromWrite extends TreeMap<Key, Value> implements Write
 {
     @Override
-    public AsyncChain<Void> apply(Seekable key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store, PartialTxn txn)
+    public AsyncChain<Void> apply(Seekable key, SafeCommandStore commandStore, TxnId txnId, Timestamp executeAt, DataStore store, PartialTxn txn)
     {
         MaelstromStore s = (MaelstromStore) store;
         if (containsKey(key))

@@ -36,9 +36,10 @@ import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
+import accord.topology.Topology;
 
 import static accord.coordinate.tracking.RequestStatus.Success;
-import static accord.local.Status.Durability.Majority;
+import static accord.primitives.Status.Durability.Majority;
 
 public abstract class Persist implements Callback<ApplyReply>
 {
@@ -85,7 +86,11 @@ public abstract class Persist implements Callback<ApplyReply>
                     {
                         isDone = true;
                         Topologies topologies = tracker.topologies();
-                        node.send(topologies.nodes(), to -> new InformDurable(to, topologies, route, txnId, executeAt, Majority));
+                        Topology topology = topologies.forEpoch(txnId.epoch());
+                        int homeShardIndex = topology.indexForKey(route.homeKey());
+                        // we can persist only partially if some shards are already completed; in this case the home shard may not participate
+                        if (homeShardIndex >= 0)
+                            node.send(topology.get(homeShardIndex).nodes, to -> new InformDurable(to, topologies, route, txnId, executeAt, Majority));
                     }
                 }
                 break;

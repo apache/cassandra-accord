@@ -34,6 +34,7 @@ import accord.utils.Invariants;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
+import org.apache.cassandra.utils.concurrent.Threads;
 
 public abstract class AbstractConfigurationService<EpochState extends AbstractConfigurationService.AbstractEpochState,
                                                    EpochHistory extends AbstractConfigurationService.AbstractEpochHistory<EpochState>>
@@ -234,12 +235,14 @@ public abstract class AbstractConfigurationService<EpochState extends AbstractCo
 
     protected abstract void fetchTopologyInternal(long epoch);
 
+    private long maxRequestedEpoch;
     @Override
     public synchronized void fetchTopologyForEpoch(long epoch)
     {
-        if (epoch <= epochs.lastReceived)
+        if (epoch <= maxRequestedEpoch)
             return;
 
+        maxRequestedEpoch = epoch;
         fetchTopologyInternal(epoch);
     }
 

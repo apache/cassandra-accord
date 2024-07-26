@@ -24,11 +24,10 @@ import accord.local.KeyHistory;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
 import accord.primitives.FullRoute;
-import accord.primitives.Ranges;
 import accord.primitives.Route;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 
@@ -36,26 +35,23 @@ public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMa
 {
     public static final class SerializationSupport
     {
-        public static GetMaxConflict create(Route<?> scope, long waitForEpoch, long minEpoch, Seekables<?, ?> keys, long executionEpoch)
+        public static GetMaxConflict create(Route<?> scope, long waitForEpoch, long minEpoch, long executionEpoch)
         {
-            return new GetMaxConflict(scope, waitForEpoch, minEpoch, keys, executionEpoch);
+            return new GetMaxConflict(scope, waitForEpoch, minEpoch, executionEpoch);
         }
     }
 
-    public final Seekables<?, ?> keys;
     public final long executionEpoch;
 
-    public GetMaxConflict(Node.Id to, Topologies topologies, FullRoute<?> route, Seekables<?, ?> keys, long executionEpoch)
+    public GetMaxConflict(Node.Id to, Topologies topologies, FullRoute<?> route, long executionEpoch)
     {
         super(to, topologies, route);
-        this.keys = keys.intersecting(scope);
         this.executionEpoch = executionEpoch;
     }
 
-    protected GetMaxConflict(Route<?> scope, long waitForEpoch, long minEpoch,  Seekables<?, ?> keys, long executionEpoch)
+    protected GetMaxConflict(Route<?> scope, long waitForEpoch, long minEpoch, long executionEpoch)
     {
         super(TxnId.NONE, scope, waitForEpoch, minEpoch);
-        this.keys = keys;
         this.executionEpoch = executionEpoch;
     }
 
@@ -68,8 +64,7 @@ public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMa
     @Override
     public GetMaxConflictOk apply(SafeCommandStore safeStore)
     {
-        Ranges ranges = safeStore.ranges().allBetween(minEpoch, executionEpoch);
-        Timestamp maxConflict = safeStore.commandStore().maxConflict(keys.slice(ranges));
+        Timestamp maxConflict = safeStore.commandStore().maxConflict(scope);
         return new GetMaxConflictOk(maxConflict, Math.max(safeStore.time().epoch(), node.epoch()));
     }
 
@@ -95,7 +90,7 @@ public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMa
     public String toString()
     {
         return "GetMaxConflict{" +
-               ", keys:" + keys +
+               ", scope:" + scope +
                '}';
     }
 
@@ -106,9 +101,9 @@ public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMa
     }
 
     @Override
-    public Seekables<?, ?> keys()
+    public Unseekables<?> keys()
     {
-        return keys;
+        return scope;
     }
 
     @Override

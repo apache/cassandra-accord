@@ -30,10 +30,12 @@ import accord.local.Node.Id;
 import accord.messages.Await;
 import accord.messages.Await.AwaitOk;
 import accord.messages.Callback;
+import accord.primitives.Participants;
 import accord.primitives.Route;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.topology.Topologies;
+import accord.utils.Invariants;
 
 import static accord.coordinate.tracking.RequestStatus.Success;
 
@@ -67,14 +69,14 @@ public class AsynchronousAwait implements Callback<AwaitOk>
     }
 
     final TxnId txnId;
-    final Unseekables<?> contact;
+    final Participants<?> contact;
     final AwaitTracker tracker;
     final int asynchronousCallbackId;
     final BiConsumer<SynchronousResult, Throwable> synchronousCallback;
     private boolean isDone;
     private Throwable failure;
 
-    public AsynchronousAwait(TxnId txnId, Unseekables<?> contact, AwaitTracker tracker, int asynchronousCallbackId, BiConsumer<SynchronousResult, Throwable> synchronousCallback)
+    public AsynchronousAwait(TxnId txnId, Participants<?> contact, AwaitTracker tracker, int asynchronousCallbackId, BiConsumer<SynchronousResult, Throwable> synchronousCallback)
     {
         this.txnId = txnId;
         this.contact = contact;
@@ -84,11 +86,12 @@ public class AsynchronousAwait implements Callback<AwaitOk>
     }
 
     /**
-     * we require a Route to contact so we can be sure a home shard recipient invokes {@link Commands#updateRouteOrParticipants},
+     * we require a Route to contact so we can be sure a home shard recipient invokes {@link Commands#updateParticipants},
      * notifying the progress log of a Route to determine it is the home shard.
      */
     public static AsynchronousAwait awaitAny(Node node, Topologies topologies, TxnId txnId, Route<?> contact, BlockedUntil awaiting, int asynchronousCallbackId, BiConsumer<SynchronousResult, Throwable> synchronousCallback)
     {
+        Invariants.checkArgument(topologies.size() == 1);
         AwaitTracker tracker = new AwaitTracker(topologies);
         AsynchronousAwait result = new AsynchronousAwait(txnId, contact, tracker, asynchronousCallbackId, synchronousCallback);
         result.start(node, topologies, contact, awaiting);

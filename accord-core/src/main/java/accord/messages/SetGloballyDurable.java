@@ -34,9 +34,9 @@ public class SetGloballyDurable extends AbstractEpochRequest<SimpleReply>
 {
     public final DurableBefore durableBefore;
 
-    public SetGloballyDurable(TxnId txnId, DurableBefore durableBefore)
+    public SetGloballyDurable(DurableBefore durableBefore)
     {
-        super(txnId);
+        super(null);
         this.durableBefore = durableBefore;
     }
 

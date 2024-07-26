@@ -22,8 +22,8 @@ import accord.local.Command;
 import accord.local.Node;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
-import accord.local.Status.Durability;
+import accord.primitives.SaveStatus;
+import accord.primitives.Status.Durability;
 import accord.primitives.TxnId;
 
 /**

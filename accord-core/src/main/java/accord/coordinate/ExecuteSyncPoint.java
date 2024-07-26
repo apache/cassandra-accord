@@ -18,7 +18,10 @@
 
 package accord.coordinate;
 
+import java.util.function.Function;
+
 import accord.api.Result;
+import accord.coordinate.CoordinationAdapter.Adapters;
 import accord.coordinate.tracking.AbstractSimpleTracker;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.coordinate.tracking.RequestStatus;
@@ -27,58 +30,127 @@ import accord.messages.ApplyThenWaitUntilApplied;
 import accord.messages.Callback;
 import accord.messages.ReadData;
 import accord.messages.ReadData.ReadReply;
+import accord.messages.WaitUntilApplied;
 import accord.primitives.Participants;
-import accord.primitives.Seekables;
+import accord.primitives.Range;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
+import accord.primitives.Unseekable;
 import accord.primitives.Writes;
 import accord.topology.Topologies;
+import accord.utils.Invariants;
 import accord.utils.async.AsyncResults.SettableResult;
 
-public abstract class ExecuteSyncPoint<S extends Seekables<?, ?>> extends SettableResult<SyncPoint<S>> implements Callback<ReadReply>
+import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
+
+public abstract class ExecuteSyncPoint<U extends Unseekable> extends SettableResult<SyncPoint<U>> implements Callback<ReadReply>
 {
     public static class SyncPointErased extends Throwable {}
 
-    public static class ExecuteBlocking<S extends Seekables<?, ?>> extends ExecuteSyncPoint<S>
+    public static class ExecuteBlocking<U extends Unseekable> extends ExecuteSyncPoint<U>
     {
         private final Timestamp executeAt;
-        public ExecuteBlocking(Node node, AbstractSimpleTracker<?> tracker, SyncPoint<S> syncPoint, Timestamp executeAt)
+        public ExecuteBlocking(Node node, SyncPoint<U> syncPoint, AbstractSimpleTracker<?> tracker, Timestamp executeAt)
         {
-            super(node, tracker, syncPoint);
+            super(node, syncPoint, tracker);
+            Invariants.checkArgument(!syncPoint.syncId.awaitsOnlyDeps());
             this.executeAt = executeAt;
         }
 
-        public static <S extends Seekables<?, ?>> ExecuteBlocking<S> atQuorum(Node node, Topologies topologies, SyncPoint<S> syncPoint, Timestamp executeAt)
+        public static <U extends Unseekable> ExecuteBlocking<U> atQuorum(Node node, Topologies topologies, SyncPoint<U> syncPoint, Timestamp executeAt)
         {
-            return  new ExecuteBlocking<>(node, new QuorumTracker(topologies), syncPoint, executeAt);
+            return new ExecuteBlocking<>(node, syncPoint, new QuorumTracker(topologies), executeAt);
         }
 
         @Override
         public void start()
         {
-            Txn txn = node.agent().emptySystemTxn(syncPoint.syncId.kind(), syncPoint.keysOrRanges);
+            Txn txn = node.agent().emptySystemTxn(syncPoint.syncId.kind(), syncPoint.syncId.domain());
             Writes writes = txn.execute(syncPoint.syncId, syncPoint.syncId, null);
             Result result = txn.result(syncPoint.syncId, syncPoint.syncId, null);
             node.send(tracker.topologies().nodes(), to -> {
-                Seekables<?, ?> notify = to.equals(node.id()) ? null : syncPoint.keysOrRanges;
-                Participants<?> participants = syncPoint.keysOrRanges.toParticipants();
-                return new ApplyThenWaitUntilApplied(to, tracker.topologies(), executeAt, syncPoint.route(), syncPoint.syncId, txn, syncPoint.waitFor, participants, writes, result, notify);
+                Participants<?> participants = syncPoint.route.participants();
+                return new ApplyThenWaitUntilApplied(to, tracker.topologies(), executeAt, syncPoint.route(), syncPoint.syncId, txn, syncPoint.waitFor, participants, writes, result);
             }, this);
         }
     }
 
+    public static class ExecuteExclusiveSyncPoint extends ExecuteSyncPoint<Range>
+    {
+        private long retryInFutureEpoch;
+        public ExecuteExclusiveSyncPoint(Node node, SyncPoint<Range> syncPoint, Function<Topologies, AbstractSimpleTracker<?>> trackerSupplier)
+        {
+            super(node, syncPoint, Adapters.exclusiveSyncPoint().forExecution(node, syncPoint.route(), syncPoint.syncId, syncPoint.syncId, syncPoint.waitFor), trackerSupplier);
+            Invariants.checkArgument(syncPoint.syncId.kind() == ExclusiveSyncPoint);
+        }
+
+        public ExecuteExclusiveSyncPoint(Node node, SyncPoint<Range> syncPoint, Function<Topologies, AbstractSimpleTracker<?>> trackerSupplier, AbstractSimpleTracker<?> tracker)
+        {
+            super(node, syncPoint, trackerSupplier, tracker);
+            Invariants.checkArgument(syncPoint.syncId.kind() == ExclusiveSyncPoint);
+        }
+
+        @Override
+        protected void start()
+        {
+            node.send(tracker.nodes(), to -> new WaitUntilApplied(to, tracker.topologies(), syncPoint.syncId, syncPoint.route, syncPoint.syncId.epoch()), this);
+        }
+
+        @Override
+        public synchronized void onSuccess(Node.Id from, ReadReply reply)
+        {
+            if (reply instanceof ReadData.ReadOkWithFutureEpoch)
+                retryInFutureEpoch = Math.max(retryInFutureEpoch, ((ReadData.ReadOkWithFutureEpoch) reply).futureEpoch);
+
+            super.onSuccess(from, reply);
+        }
+
+        @Override
+        protected void onSuccess()
+        {
+            if (retryInFutureEpoch > tracker.topologies().currentEpoch())
+            {
+                ExecuteExclusiveSyncPoint continuation = new ExecuteExclusiveSyncPoint(node, syncPoint, trackerSupplier, trackerSupplier.apply(node.topology().preciseEpochs(syncPoint.route(), tracker.topologies().currentEpoch(), retryInFutureEpoch)));
+                continuation.addCallback((success, failure) -> {
+                    if (failure == null) trySuccess(success);
+                    else tryFailure(failure);
+                });
+                continuation.start();
+            }
+            else
+            {
+                super.onSuccess();
+            }
+        }
+    }
+
     final Node node;
+    final SyncPoint<U> syncPoint;
+
+    final Function<Topologies, AbstractSimpleTracker<?>> trackerSupplier;
     final AbstractSimpleTracker<?> tracker;
-    final SyncPoint<S> syncPoint;
     private Throwable failures = null;
 
-    ExecuteSyncPoint(Node node, AbstractSimpleTracker<?> tracker, SyncPoint<S> syncPoint)
+    ExecuteSyncPoint(Node node, SyncPoint<U> syncPoint, AbstractSimpleTracker<?> tracker)
     {
-        // TODO (required): this isn't correct, we need to potentially perform a second round if a dependency executes in a future epoch and we have lost ownership of that epoch
         this.node = node;
-        this.tracker = tracker;
         this.syncPoint = syncPoint;
+        this.trackerSupplier = null;
+        this.tracker = tracker;
+    }
+
+    ExecuteSyncPoint(Node node, SyncPoint<U> syncPoint, Topologies topologies, Function<Topologies, AbstractSimpleTracker<?>> trackerSupplier)
+    {
+        this(node, syncPoint, trackerSupplier, trackerSupplier.apply(topologies));
+    }
+
+    ExecuteSyncPoint(Node node, SyncPoint<U> syncPoint, Function<Topologies, AbstractSimpleTracker<?>> trackerSupplier, AbstractSimpleTracker<?> tracker)
+    {
+        this.node = node;
+        this.syncPoint = syncPoint;
+        this.trackerSupplier = trackerSupplier;
+        this.tracker = tracker;
     }
 
     protected abstract void start();
@@ -103,7 +175,7 @@ public abstract class ExecuteSyncPoint<S extends Seekables<?, ?>> extends Settab
                     return;
 
                 case Invalid:
-                    tryFailure(new Invalidated(syncPoint.syncId, syncPoint.homeKey));
+                    tryFailure(new Invalidated(syncPoint.syncId, syncPoint.route.homeKey()));
                     return;
             }
         }
@@ -126,7 +198,7 @@ public abstract class ExecuteSyncPoint<S extends Seekables<?, ?>> extends Settab
         if (isDone()) return;
         failures = FailureAccumulator.append(failures, failure);
         if (tracker.recordFailure(from) == RequestStatus.Failed)
-            tryFailure(FailureAccumulator.createFailure(failures, syncPoint.syncId, syncPoint.homeKey));
+            tryFailure(FailureAccumulator.createFailure(failures, syncPoint.syncId, syncPoint.route.homeKey()));
     }
 
     @Override

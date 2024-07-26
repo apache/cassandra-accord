@@ -24,7 +24,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.impl.IntKey;
 import accord.utils.AccordGens;
 
@@ -36,7 +36,7 @@ class DepsTest
     @Test
     void test()
     {
-        qt().forAll(AccordGens.depsFromKey(AccordGens.intKeys(), AccordGens.ranges(AccordGens.intRoutingKey(), (ignore, a, b) -> IntKey.range(a, b)))).check(deps -> {
+        qt().forAll(AccordGens.depsFromKey(AccordGens.intRoutingKey(), AccordGens.ranges(AccordGens.intRoutingKey(), (ignore, a, b) -> IntKey.range(a, b)))).check(deps -> {
             validateEquals(deps);
             validateContains(deps);
             validateSelfWith(deps);
@@ -108,9 +108,9 @@ class DepsTest
     private static Ranges ranges(Deps deps)
     {
         List<Range> ranges = new ArrayList<>();
-        for (Key key : deps.keyDeps.keys)
+        for (RoutingKey key : deps.keyDeps.keys)
             ranges.add(key.asRange());
-        for (Key key : deps.directKeyDeps.keys)
+        for (RoutingKey key : deps.directKeyDeps.keys)
             ranges.add(key.asRange());
         for (Range range : deps.rangeDeps.ranges)
             ranges.add(range);

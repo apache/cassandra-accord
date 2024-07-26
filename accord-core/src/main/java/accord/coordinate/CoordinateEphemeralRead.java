@@ -18,9 +18,7 @@
 
 package accord.coordinate;
 
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.List;
 
 import accord.api.Result;
 import accord.coordinate.tracking.QuorumTracker;
@@ -31,13 +29,15 @@ import accord.messages.GetEphemeralReadDeps;
 import accord.messages.GetEphemeralReadDeps.GetEphemeralReadDepsOk;
 import accord.primitives.Deps;
 import accord.primitives.FullRoute;
-import accord.primitives.Seekables;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
+import accord.utils.SortedListMap;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 
+import static accord.api.ProtocolModifiers.QuorumEpochIntersections;
+import static accord.api.ProtocolModifiers.QuorumEpochIntersections.Include.Owned;
 import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
 
@@ -58,7 +58,7 @@ public class CoordinateEphemeralRead extends AbstractCoordinatePreAccept<Result,
 {
     public static AsyncResult<Result> coordinate(Node node, FullRoute<?> route, TxnId txnId, Txn txn)
     {
-        TopologyMismatch mismatch = TopologyMismatch.checkForMismatchOrPendingRemoval(node.topology().globalForEpoch(txnId.epoch()), txnId, route.homeKey(), txn.keys());
+        TopologyMismatch mismatch = TopologyMismatch.checkForMismatchOrPendingRemoval(node.topology().globalForEpoch(txnId.epoch()), txnId, route.homeKey(), route);
         if (mismatch != null)
             return AsyncResults.failure(mismatch);
 
@@ -71,7 +71,7 @@ public class CoordinateEphemeralRead extends AbstractCoordinatePreAccept<Result,
     private final Txn txn;
 
     private final QuorumTracker tracker;
-    private final List<GetEphemeralReadDepsOk> oks;
+    private final SortedListMap<Node.Id, GetEphemeralReadDepsOk> oks;
     private long executeAtEpoch;
 
     CoordinateEphemeralRead(Node node, Topologies topologies, FullRoute<?> route, TxnId txnId, Txn txn)
@@ -80,13 +80,7 @@ public class CoordinateEphemeralRead extends AbstractCoordinatePreAccept<Result,
         this.txn = txn;
         this.tracker = new QuorumTracker(topologies);
         this.executeAtEpoch = txnId.epoch();
-        this.oks = new ArrayList<>(topologies.estimateUniqueNodes());
-    }
-
-    @Override
-    Seekables<?, ?> keysOrRanges()
-    {
-        return txn.keys();
+        this.oks = new SortedListMap<>(topologies.nodes(), GetEphemeralReadDepsOk[]::new);
     }
 
     @Override
@@ -94,7 +88,7 @@ public class CoordinateEphemeralRead extends AbstractCoordinatePreAccept<Result,
     {
         CommandStore commandStore = CommandStore.maybeCurrent();
         if (commandStore == null) commandStore = node.commandStores().select(route.homeKey());
-        node.send(nodes, to -> new GetEphemeralReadDeps(to, topologies, route, txnId, txn.keys(), executeAtEpoch), commandStore, callback);
+        node.send(nodes, to -> new GetEphemeralReadDeps(to, topologies, route, txnId, executeAtEpoch), commandStore, callback);
     }
 
     @Override
@@ -106,7 +100,7 @@ public class CoordinateEphemeralRead extends AbstractCoordinatePreAccept<Result,
     @Override
     public void onSuccessInternal(Node.Id from, GetEphemeralReadDepsOk ok)
     {
-        oks.add(ok);
+        oks.put(from, ok);
         if (ok.latestEpoch > executeAtEpoch)
             executeAtEpoch = ok.latestEpoch;
 
@@ -120,7 +114,7 @@ public class CoordinateEphemeralRead extends AbstractCoordinatePreAccept<Result,
         if (ok.latestEpoch > executeAtEpoch)
             executeAtEpoch = ok.latestEpoch;
 
-        oks.add(ok);
+        oks.put(from, ok);
         return true;
     }
 
@@ -140,8 +134,8 @@ public class CoordinateEphemeralRead extends AbstractCoordinatePreAccept<Result,
     @Override
     void onPreAccepted(Topologies topologies)
     {
-        Deps deps = Deps.merge(oks, ok -> ok.deps);
-        topologies = topologies.forEpochs(executeAtEpoch, executeAtEpoch);
+        Deps deps = Deps.merge(oks, oks.domainSize(), SortedListMap::getValue, ok -> ok.deps);
+        topologies = node.topology().reselect(topologies, QuorumEpochIntersections.preaccept.include, route, executeAtEpoch, executeAtEpoch, Owned);
         new ExecuteEphemeralRead(node, topologies, route, txnId, txn, executeAtEpoch, deps, this).start();
     }
 }

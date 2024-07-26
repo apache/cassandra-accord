@@ -22,23 +22,26 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import accord.api.RoutingKey;
+import accord.local.Command;
 import accord.local.Commands;
 import accord.local.Commands.AcceptOutcome;
 import accord.local.KeyHistory;
 import accord.local.Node.Id;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
+import accord.local.StoreParticipants;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
 import accord.primitives.FullRoute;
 import accord.primitives.PartialDeps;
-import accord.primitives.Ranges;
+import accord.primitives.Participants;
 import accord.primitives.Route;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.topology.Topologies;
+import accord.utils.Invariants;
 
 import static accord.local.Commands.AcceptOutcome.Redundant;
 import static accord.local.Commands.AcceptOutcome.RejectedBallot;
@@ -51,69 +54,58 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
 {
     public static class SerializerSupport
     {
-        public static Accept create(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, PartialDeps partialDeps)
+        public static Accept create(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, Ballot ballot, Timestamp executeAt, PartialDeps partialDeps)
         {
-            return new Accept(txnId, scope, waitForEpoch, minEpoch, ballot, executeAt, keys, partialDeps);
+            return new Accept(txnId, scope, waitForEpoch, minEpoch, ballot, executeAt, partialDeps);
         }
     }
 
     public final Ballot ballot;
     public final Timestamp executeAt;
-    public final Seekables<?, ?> keys;
     public final PartialDeps partialDeps;
 
-    public Accept(Id to, Topologies topologies, Ballot ballot, TxnId txnId, FullRoute<?> route, Timestamp executeAt, Seekables<?, ?> keys, Deps deps)
+    public Accept(Id to, Topologies topologies, Ballot ballot, TxnId txnId, FullRoute<?> route, Timestamp executeAt, Deps deps)
     {
         super(to, topologies, txnId, route);
         this.ballot = ballot;
         this.executeAt = executeAt;
-        this.keys = keys.intersecting(scope);
         this.partialDeps = deps.intersecting(scope);
     }
 
-    private Accept(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, PartialDeps partialDeps)
+    private Accept(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, Ballot ballot, Timestamp executeAt, PartialDeps partialDeps)
     {
         super(txnId, scope, waitForEpoch, minEpoch);
         this.ballot = ballot;
         this.executeAt = executeAt;
-        this.keys = keys;
         this.partialDeps = partialDeps;
     }
 
     @Override
     public AcceptReply apply(SafeCommandStore safeStore)
     {
-        // TODO (now): we previously checked isAffectedByBootstrap(txnId) here and took this branch also, try to remember why
-        if (minEpoch < txnId.epoch())
-        {
-            // if we include unsync'd epochs, check if we intersect the ranges for coordination or execution;
-            // if not, we're just providing dependencies, and we can do that without updating our state
-            Ranges acceptRanges = safeStore.ranges().allBetween(txnId, executeAt);
-            if (!acceptRanges.intersects(scope))
-                return new AcceptReply(calculatePartialDeps(safeStore));
-        }
-
-        // only accept if we actually participate in the ranges - otherwise we're just looking
-        switch (Commands.accept(safeStore, txnId, ballot, scope, keys, executeAt, partialDeps))
+        StoreParticipants participants = StoreParticipants.update(safeStore, scope, minEpoch, txnId, txnId.epoch(), executeAt.epoch());
+        SafeCommand safeCommand = safeStore.get(txnId, participants);
+        switch (Commands.accept(safeStore, safeCommand, participants, txnId, ballot, scope, executeAt, partialDeps))
         {
             default: throw new IllegalStateException();
             case Truncated:
                 return AcceptReply.TRUNCATED;
             case Redundant:
-                return AcceptReply.REDUNDANT;
+                return AcceptReply.redundant(ballot, safeCommand.current());
             case RejectedBallot:
-                return new AcceptReply(safeStore.get(txnId, executeAt, scope).current().promised());
+                return new AcceptReply(safeCommand.current().promised());
             case Success:
                 // TODO (desirable, efficiency): we don't need to calculate deps if executeAt == txnId
                 // TODO (desirable, efficiency): only return delta of sent and calculated deps
-                return new AcceptReply(calculatePartialDeps(safeStore));
+                Deps deps = calculateDeps(safeStore, participants);
+                Invariants.checkState(deps.maxTxnId(txnId).epoch() <= executeAt.epoch());
+                return new AcceptReply(calculateDeps(safeStore, participants));
         }
     }
 
-    private PartialDeps calculatePartialDeps(SafeCommandStore safeStore)
+    private Deps calculateDeps(SafeCommandStore safeStore, StoreParticipants participants)
     {
-        Ranges ranges = safeStore.ranges().allBetween(minEpoch, executeAt);
-        return PreAccept.calculatePartialDeps(safeStore, txnId, keys, scope, EpochSupplier.constant(minEpoch), executeAt, ranges);
+        return PreAccept.calculateDeps(safeStore, txnId, participants, EpochSupplier.constant(minEpoch), executeAt);
     }
 
     @Override
@@ -122,7 +114,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         if (!ok1.isOk() || !ok2.isOk())
             return ok1.outcome().compareTo(ok2.outcome()) >= 0 ? ok1 : ok2;
 
-        PartialDeps deps = ok1.deps.with(ok2.deps);
+        Deps deps = ok1.deps.with(ok2.deps);
         if (deps == ok1.deps) return ok1;
         if (deps == ok2.deps) return ok2;
         return new AcceptReply(deps);
@@ -147,9 +139,9 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     }
 
     @Override
-    public Seekables<?, ?> keys()
+    public Unseekables<?> keys()
     {
-        return keys;
+        return scope;
     }
 
     @Override
@@ -176,19 +168,20 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     public static final class AcceptReply implements Reply
     {
         public static final AcceptReply ACCEPT_INVALIDATE = new AcceptReply(Success);
-        public static final AcceptReply REDUNDANT = new AcceptReply(Redundant);
         public static final AcceptReply TRUNCATED = new AcceptReply(Truncated);
 
         public final AcceptOutcome outcome;
         public final Ballot supersededBy;
         // TODO (expected): only send back deps that weren't in those we received
-        public final @Nullable PartialDeps deps;
+        public final @Nullable Deps deps;
+        public final @Nullable Timestamp committedExecuteAt;
 
         private AcceptReply(AcceptOutcome outcome)
         {
             this.outcome = outcome;
             this.supersededBy = null;
             this.deps = null;
+            this.committedExecuteAt = null;
         }
 
         public AcceptReply(Ballot supersededBy)
@@ -196,13 +189,31 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
             this.outcome = RejectedBallot;
             this.supersededBy = supersededBy;
             this.deps = null;
+            this.committedExecuteAt = null;
         }
 
-        public AcceptReply(@Nonnull PartialDeps deps)
+        public AcceptReply(@Nonnull Deps deps)
         {
             this.outcome = Success;
             this.supersededBy = null;
             this.deps = deps;
+            this.committedExecuteAt = null;
+        }
+
+        public AcceptReply(Ballot supersededBy, @Nullable Timestamp committedExecuteAt)
+        {
+            this.outcome = Redundant;
+            this.supersededBy = supersededBy;
+            this.deps = null;
+            this.committedExecuteAt = committedExecuteAt;
+        }
+
+        static AcceptReply redundant(Ballot ballot, Command command)
+        {
+            Ballot superseding = command.promised();
+            if (superseding.compareTo(ballot) <= 0)
+                superseding = null;
+            return new AcceptReply(superseding, command.executeAtIfKnown());
         }
 
         @Override
@@ -230,7 +241,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
                 case Success:
                     return "AcceptOk{deps=" + deps + '}';
                 case Redundant:
-                    return "AcceptNack()";
+                    return "AcceptRedundant(" + supersededBy + ',' + committedExecuteAt + ")";
                 case RejectedBallot:
                     return "AcceptNack(" + supersededBy + ")";
             }
@@ -259,7 +270,8 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         @Override
         public AcceptReply apply(SafeCommandStore safeStore)
         {
-            SafeCommand safeCommand = safeStore.get(txnId, someKey);
+            StoreParticipants participants = StoreParticipants.invalidate(safeStore, Participants.singleton(txnId.domain(), someKey), txnId);
+            SafeCommand safeCommand = safeStore.get(txnId, participants);
             AcceptOutcome outcome = Commands.acceptInvalidate(safeStore, safeCommand, ballot);
             switch (outcome)
             {
@@ -267,7 +279,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
                 case Truncated:
                     return AcceptReply.TRUNCATED;
                 case Redundant:
-                    return AcceptReply.REDUNDANT;
+                    return AcceptReply.redundant(ballot, safeCommand.current());
                 case Success:
                     return AcceptReply.ACCEPT_INVALIDATE;
                 case RejectedBallot:

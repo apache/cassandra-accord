@@ -20,7 +20,7 @@ package accord.messages;
 
 import accord.local.PreLoadContext;
 import accord.local.SafeCommandStore;
-import accord.primitives.Ranges;
+import accord.primitives.AbstractRanges;
 import accord.primitives.SyncPoint;
 import accord.utils.MapReduceConsume;
 
@@ -40,13 +40,13 @@ public class SetShardDurable extends AbstractEpochRequest<SimpleReply>
     @Override
     public void process()
     {
-        node.mapReduceConsumeLocal(this, exclusiveSyncPoint.keysOrRanges, waitForEpoch(), waitForEpoch(), this);
+        node.mapReduceConsumeLocal(this, exclusiveSyncPoint.route, waitForEpoch(), waitForEpoch(), this);
     }
 
     @Override
     public SimpleReply apply(SafeCommandStore safeStore)
     {
-        safeStore.commandStore().markShardDurable(safeStore, exclusiveSyncPoint.syncId, (Ranges)exclusiveSyncPoint.keysOrRanges);
+        safeStore.commandStore().markShardDurable(safeStore, exclusiveSyncPoint.syncId, ((AbstractRanges) exclusiveSyncPoint.route).toRanges());
         return Ok;
     }
 

@@ -32,7 +32,7 @@ import accord.local.Node;
 import accord.local.PreLoadContext;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
+import accord.primitives.SaveStatus;
 import accord.primitives.TxnId;
 import accord.utils.AsymmetricComparator;
 import accord.utils.Invariants;
@@ -256,6 +256,7 @@ public class DefaultLocalListeners implements LocalListeners
             remove.index = -1;
             // we don't decrement length even if count==length so as to simplify reentry
             --count;
+            if (Invariants.isParanoid() && !notifying) checkIntegrity();
             return count > 0 || notifying ? this : null;
         }
 
@@ -299,6 +300,7 @@ public class DefaultLocalListeners implements LocalListeners
             add.index = length;
             length++;
             count++;
+            if (Invariants.isParanoid() && !notifying) checkIntegrity();
         }
 
         /**
@@ -326,6 +328,7 @@ public class DefaultLocalListeners implements LocalListeners
                 }
                 else if (next.index >= 0) // can be cancelled by notify, without notify return false
                 {
+                    Invariants.checkArgument(next.index == i);
                     if (i != count)
                     {
                         listeners[count] = next;
@@ -333,6 +336,7 @@ public class DefaultLocalListeners implements LocalListeners
                     }
                     ++count;
                 }
+                else Invariants.checkState(listeners[i] == null);
             }
             notifying = false;
 
@@ -358,7 +362,18 @@ public class DefaultLocalListeners implements LocalListeners
             Arrays.fill(listeners, count, length, null);
             this.length = count;
 
+            if (Invariants.isParanoid()) checkIntegrity();
             return count == 0 ? null : this;
+        }
+
+        private void checkIntegrity()
+        {
+            int c = 0;
+            for (int i = 0 ; i < length ; ++i)
+                c += listeners[i] != null ? 1 : 0;
+            Invariants.checkState(c == count);
+            for (int i = length ; i < listeners.length ; ++i)
+                Invariants.checkState(listeners[i] == null);
         }
     }
 

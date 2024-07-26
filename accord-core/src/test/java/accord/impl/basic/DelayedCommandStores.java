@@ -160,6 +160,11 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
             {
                 unsafeRunIn(super::run);
             }
+
+            public Callable<T> callable()
+            {
+                return callable;
+            }
         }
 
         private final SimulatedDelayedExecutorService executor;
@@ -285,6 +290,12 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         {
             journal.registerHistoricalTransactions(id(), deps);
             super.registerHistoricalTransactions(deps, safeStore);
+        }
+
+        @Override
+        public void unsafeRunIn(Runnable fn)
+        {
+            super.unsafeRunIn(fn);
         }
     }
 

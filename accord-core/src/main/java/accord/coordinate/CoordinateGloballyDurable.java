@@ -39,7 +39,6 @@ import static accord.primitives.Txn.Kind.LocalOnly;
 public class CoordinateGloballyDurable extends SettableResult<Void> implements Callback<DurableBeforeReply>
 {
     final Node node;
-    final TxnId txnId; // only used for key into journal
     // TODO (expected): this can be a ReadTracker, we only need one response from each shard
     final QuorumTracker tracker;
     private DurableBefore durableBefore = DurableBefore.EMPTY;
@@ -48,7 +47,6 @@ public class CoordinateGloballyDurable extends SettableResult<Void> implements C
     {
         Topologies topologies = node.topology().preciseEpochs(epoch);
         this.node = node;
-        this.txnId = node.nextTxnId(LocalOnly, Range);
         this.tracker = new QuorumTracker(topologies);
     }
 
@@ -71,7 +69,7 @@ public class CoordinateGloballyDurable extends SettableResult<Void> implements C
         if (tracker.recordSuccess(from) == RequestStatus.Success)
         {
             if (durableBefore != null && durableBefore.size() != 0)
-                node.send(tracker.nodes(), new SetGloballyDurable(txnId, durableBefore));
+                node.send(tracker.nodes(), new SetGloballyDurable(durableBefore));
             trySuccess(null);
         }
     }

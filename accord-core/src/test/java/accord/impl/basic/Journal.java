@@ -41,22 +41,23 @@ import accord.local.CommandStore;
 import accord.local.Commands;
 import accord.local.CommonAttributes;
 import accord.local.Node;
-import accord.local.SaveStatus;
-import accord.local.Status;
+import accord.primitives.Known;
+import accord.primitives.SaveStatus;
+import accord.primitives.Status;
+import accord.local.StoreParticipants;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
-import accord.primitives.Route;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
 import accord.utils.Invariants;
 import org.agrona.collections.Long2ObjectHashMap;
 
-import static accord.local.Status.Invalidated;
-import static accord.local.Status.Truncated;
+import static accord.primitives.SaveStatus.Stable;
+import static accord.primitives.Status.Invalidated;
+import static accord.primitives.Status.Truncated;
 import static accord.utils.Invariants.illegalState;
 
 public class Journal
@@ -88,7 +89,8 @@ public class Journal
                 Command command = reconstruct(diffs, Reconstruct.Last).get(0);
                 if (command.status() == Truncated || command.status() == Invalidated)
                     continue; // Already truncated
-                Cleanup cleanup = Cleanup.shouldCleanup(store, command, null, command.route(), false);
+                StoreParticipants participants = Invariants.nonNull(command.participants());
+                Cleanup cleanup = Cleanup.shouldCleanup(store, command, participants);
                 switch (cleanup)
                 {
                     case NO:
@@ -96,7 +98,7 @@ public class Journal
                     case INVALIDATE:
                     case TRUNCATE_WITH_OUTCOME:
                     case TRUNCATE:
-                        command = Commands.purge(command, command.route(), cleanup);
+                        command = Commands.purge(command, command.participants(), cleanup);
                         Invariants.checkState(command.saveStatus() != SaveStatus.Uninitialised);
                         List<Diff> arr = new ArrayList<>();
                         arr.add(diff(null, command));
@@ -133,7 +135,7 @@ public class Journal
             for (TxnId txnId : diffs.keySet())
             {
                 Command command = reconstruct(commandStoreId, txnId);
-                if (command.saveStatus().compareTo(SaveStatus.Applying) >= 0 && !command.is(Invalidated) && !command.is(Truncated))
+                if (command.saveStatus().compareTo(Stable) >= 0 && !command.hasBeen(Truncated))
                     toApply.add(command);
                 loader.load(command);
             }
@@ -184,10 +186,9 @@ public class Journal
         Ballot acceptedOrCommitted = Ballot.ZERO;
         Ballot promised = Ballot.ZERO;
 
-        Route<?> route = null;
+        StoreParticipants participants = null;
         PartialTxn partialTxn = null;
         PartialDeps partialDeps = null;
-        Seekables<?, ?> additionalKeysOrRanges = null;
 
         Command.WaitingOn waitingOn = null;
         Writes writes = null;
@@ -218,20 +219,17 @@ public class Journal
             if (diff.promised != null)
                 promised = diff.promised.get();
 
-            if (diff.route != null)
-                route = diff.route.get();
+            if (diff.participants != null)
+                participants = diff.participants.get();
             if (diff.partialTxn != null)
                 partialTxn = diff.partialTxn.get();
             if (diff.partialDeps != null)
                 partialDeps = diff.partialDeps.get();
-            if (diff.additionalKeysOrRanges != null)
-                additionalKeysOrRanges = diff.additionalKeysOrRanges.get();
 
             if (diff.waitingOn != null)
                 waitingOn = diff.waitingOn.get();
             if (diff.writes != null)
                 writes = diff.writes.get();
-
             if (diff.result != null)
                 result = diff.result.get();
 
@@ -258,17 +256,15 @@ public class Journal
                 attrs.partialTxn(partialTxn);
             if (durability != null)
                 attrs.durability(durability);
-            if (route != null)
-                attrs.route(route);
+            if (participants != null) attrs.setParticipants(participants);
+            else attrs.setParticipants(StoreParticipants.empty(txnId));
 
             // TODO (desired): we can simplify this logic if, instead of diffing, we will infer the diff from the status
             if (partialDeps != null &&
-                (saveStatus.known.deps != Status.KnownDeps.NoDeps &&
-                 saveStatus.known.deps != Status.KnownDeps.DepsErased &&
-                 saveStatus.known.deps != Status.KnownDeps.DepsUnknown))
+                (saveStatus.known.deps != Known.KnownDeps.NoDeps &&
+                 saveStatus.known.deps != Known.KnownDeps.DepsErased &&
+                 saveStatus.known.deps != Known.KnownDeps.DepsUnknown))
                 attrs.partialDeps(partialDeps);
-            if (additionalKeysOrRanges != null)
-                attrs.additionalKeysOrRanges(additionalKeysOrRanges);
             Invariants.checkState(saveStatus != null,
                                   "Save status is null after applying %s", diffs);
 
@@ -335,10 +331,10 @@ public class Journal
             case TruncatedApplyWithDeps:
             case TruncatedApply:
                 return Command.Truncated.truncatedApply(attrs, status, executeAt, writes, result, executesAtLeast);
-            case ErasedOrInvalidOrVestigial:
-                return Command.Truncated.erasedOrInvalidOrVestigial(attrs.txnId(), attrs.durability(), attrs.route());
+            case ErasedOrVestigial:
+                return Command.Truncated.erasedOrInvalidOrVestigial(attrs.txnId(), attrs.durability(), attrs.participants());
             case Erased:
-                return Command.Truncated.erased(attrs.txnId(), attrs.durability(), attrs.route());
+                return Command.Truncated.erased(attrs.txnId(), attrs.durability(), attrs.participants());
             case Invalidated:
                 return Command.Truncated.invalidated(attrs.txnId());
         }
@@ -384,13 +380,12 @@ public class Journal
         public final NewValue<Ballot> acceptedOrCommitted;
         public final NewValue<Ballot> promised;
 
-        public final NewValue<Route<?>> route;
+        public final NewValue<StoreParticipants> participants;
         public final NewValue<PartialTxn> partialTxn;
         public final NewValue<PartialDeps> partialDeps;
 
         public final NewValue<Writes> writes;
         public final NewValue<Command.WaitingOn> waitingOn;
-        public final NewValue<Seekables<?, ?>> additionalKeysOrRanges;
 
         public final NewValue<Result> result; // temporarily here for sakes for reloads
 
@@ -403,14 +398,12 @@ public class Journal
                     NewValue<Ballot> acceptedOrCommitted,
                     NewValue<Ballot> promised,
 
-                    NewValue<Route<?>> route,
+                    NewValue<StoreParticipants> participants,
                     NewValue<PartialTxn> partialTxn,
                     NewValue<PartialDeps> partialDeps,
                     NewValue<Command.WaitingOn> waitingOn,
 
                     NewValue<Writes> writes,
-                    NewValue<Seekables<?, ?>> additionalKeysOrRanges,
-
                     NewValue<Result> result)
         {
             this.txnId = txnId;
@@ -422,20 +415,19 @@ public class Journal
             this.acceptedOrCommitted = acceptedOrCommitted;
             this.promised = promised;
 
-            this.route = route;
+            this.participants = participants;
             this.partialTxn = partialTxn;
             this.partialDeps = partialDeps;
 
             this.writes = writes;
             this.waitingOn = waitingOn;
-            this.additionalKeysOrRanges = additionalKeysOrRanges;
             this.result = result;
         }
 
         // We allow only save status, and waitingOn to be updated by non-primary transactions
         public Diff asNonPrimary()
         {
-            return new Diff(txnId, null, null, saveStatus, null, null, null, null, null, null, waitingOn, null, additionalKeysOrRanges, null);
+            return new Diff(txnId, null, null, saveStatus, null, null, null, null, null, null, waitingOn, null, null);
         }
 
         public boolean allNulls()
@@ -447,12 +439,11 @@ public class Journal
             if (durability != null) return false;
             if (acceptedOrCommitted != null) return false;
             if (promised != null) return false;
-            if (route != null) return false;
+            if (participants != null) return false;
             if (partialTxn != null) return false;
             if (partialDeps != null) return false;
             if (writes != null) return false;
             if (waitingOn != null) return false;
-            if (additionalKeysOrRanges != null) return false;
             if (result != null) return false;
             return true;
         }
@@ -475,8 +466,8 @@ public class Journal
                 builder.append("acceptedOrCommitted = ").append(acceptedOrCommitted).append(" ");
             if (promised != null)
                 builder.append("promised = ").append(promised).append(" ");
-            if (route != null)
-                builder.append("route = ").append(route).append(" ");
+            if (participants != null)
+                builder.append("participants = ").append(participants).append(" ");
             if (partialTxn != null)
                 builder.append("partialTxn = ").append(partialTxn).append(" ");
             if (partialDeps != null)
@@ -485,8 +476,6 @@ public class Journal
                 builder.append("writes = ").append(writes).append(" ");
             if (waitingOn != null)
                 builder.append("waitingOn = ").append(waitingOn).append(" ");
-            if (additionalKeysOrRanges != null)
-                builder.append("additionalKeysOrRanges = ").append(additionalKeysOrRanges).append(" ");
             if (result != null)
                 builder.append("result = ").append(result).append(" ");
             builder.append("}");
@@ -508,14 +497,12 @@ public class Journal
                              ifNotEqual(before, after, Command::acceptedOrCommitted, false),
                              ifNotEqual(before, after, Command::promised, false),
 
-                             ifNotEqual(before, after, Command::route, true),
+                             ifNotEqual(before, after, Command::participants, true),
                              ifNotEqual(before, after, Command::partialTxn, false),
                              ifNotEqual(before, after, Command::partialDeps, false),
                              ifNotEqual(before, after, Journal::getWaitingOn, true),
                              ifNotEqual(before, after, Command::writes, false),
-                             ifNotEqual(before, after, Command::additionalKeysOrRanges, false),
                              ifNotEqual(before, after, Command::result, false));
-
         if (diff.allNulls())
             return null;
 

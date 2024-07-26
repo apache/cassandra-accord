@@ -18,7 +18,7 @@
 
 package accord.impl;
 
-import accord.api.Key;
+import accord.api.RoutingKey;
 import accord.impl.InMemoryCommandStore.GlobalCommandsForKey;
 import accord.local.cfk.CommandsForKey;
 import accord.local.cfk.SafeCommandsForKey;
@@ -28,7 +28,7 @@ public class InMemorySafeCommandsForKey extends SafeCommandsForKey
     private boolean invalidated = false;
     private final GlobalCommandsForKey global;
 
-    public InMemorySafeCommandsForKey(Key key, GlobalCommandsForKey global)
+    public InMemorySafeCommandsForKey(RoutingKey key, GlobalCommandsForKey global)
     {
         super(key);
         this.global = global;

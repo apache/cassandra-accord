@@ -44,14 +44,12 @@ import accord.local.Command;
 import accord.local.CommonAttributes;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
-import accord.local.Status.Durability;
+import accord.primitives.SaveStatus;
+import accord.primitives.Status.Durability;
+import accord.local.StoreParticipants;
 import accord.primitives.Ballot;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
-import accord.primitives.Participants;
-import accord.primitives.Route;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.utils.AccordGens;
@@ -59,7 +57,7 @@ import accord.utils.Invariants;
 import accord.utils.RandomSource;
 import accord.utils.RandomTestRunner;
 
-import static accord.local.Status.Durability.NotDurable;
+import static accord.primitives.Status.Durability.NotDurable;
 
 public class LocalListenersTest
 {
@@ -440,16 +438,8 @@ public class LocalListenersTest
             this.durability = durability;
         }
 
-        @Nullable
         @Override
-        public Route<?> route()
-        {
-            return null;
-        }
-
-        @Nullable
-        @Override
-        public Participants<?> participants()
+        public StoreParticipants participants()
         {
             return null;
         }
@@ -492,19 +482,6 @@ public class LocalListenersTest
 
         @Override
         public PartialTxn partialTxn()
-        {
-            return null;
-        }
-
-        @Nullable
-        @Override
-        public Seekables<?, ?> additionalKeysOrRanges()
-        {
-            return null;
-        }
-
-        @Override
-        public Seekables<?, ?> keysOrRanges()
         {
             return null;
         }

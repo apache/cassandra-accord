@@ -31,11 +31,11 @@ import java.util.stream.Stream;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.utils.ArrayBuffers;
 import accord.utils.IndexedBiConsumer;
 import accord.utils.IndexedConsumer;
+import accord.utils.IndexedFunction;
 import accord.utils.IndexedQuadConsumer;
 import accord.utils.IndexedRangeQuadConsumer;
 import accord.utils.Invariants;
@@ -76,9 +76,10 @@ import static accord.utils.SortedArrays.Search.FAST;
  * <p>The relationship between Range and TxnId is maintained via {@code int[]} utilising {@link RelationMultiMap}
  * functionality.
  *
- * TODO (required): de-overlap ranges per txnId if possible cheaply, or else reduce use of partial ranges where possible
- * TODO (required): permit building out-of-order
- * TODO (required): currently permitting duplicates
+ * TODO (expected): de-overlap ranges per txnId if possible cheaply, or else reduce use of partial ranges where possible
+ * TODO (expected): keep only the latest exclusive sync point for a given range
+ * TODO (expected): permit building out-of-order
+ * TODO (expected): currently permitting duplicates
  * TODO (required): randomised testing of all iteration methods (just found a double increment bug)
  */
 public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
@@ -129,18 +130,20 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     }
 
     // TODO (expected): merge by TxnId key, not by range, so that we can merge overlapping ranges for same TxnId
-    public static <T1, T2> RangeDeps merge(List<T1> merge, Function<T1, T2> getter1, Function<T2, RangeDeps> getter2)
+    public static <C, T1, T2> RangeDeps merge(C merge, int mergeSize, IndexedFunction<C, T1> getter1, Function<T1, T2> getter2, Function<T2, RangeDeps> getter3)
     {
         try (LinearMerger<Range, TxnId, RangeDeps> linearMerger = newMerger())
         {
-            int mergeIndex = 0, mergeSize = merge.size();
+            int mergeIndex = 0;
             while (mergeIndex < mergeSize)
             {
-                T2 intermediate = getter1.apply(merge.get(mergeIndex++));
-                if (intermediate == null)
-                    continue;
+                T1 t1 = getter1.apply(merge, mergeIndex++);
+                if (t1 == null) continue;
 
-                RangeDeps deps = getter2.apply(intermediate);
+                T2 t2 = getter2.apply(t1);
+                if (t2 == null) continue;
+
+                RangeDeps deps = getter3.apply(t2);
                 if (deps == null || deps.isEmpty())
                     continue;
 
@@ -696,7 +699,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
         }
     }
 
-    public SortedList<TxnId> computeTxnIds(Key key)
+    public SortedList<TxnId> computeTxnIds(RoutingKey key)
     {
         ListBuilder builder = new ListBuilder();
         forEachUniqueTxnId(key, builder::add);

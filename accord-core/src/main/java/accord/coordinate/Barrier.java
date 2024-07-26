@@ -25,7 +25,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.api.BarrierType;
-import accord.api.Key;
 import accord.api.LocalListeners;
 import accord.api.RoutingKey;
 import accord.local.Command;
@@ -35,14 +34,18 @@ import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.SafeCommandStore.TestDep;
 import accord.local.SafeCommandStore.TestStartedAt;
-import accord.local.Status;
+import accord.primitives.Seekables;
+import accord.primitives.Status;
+import accord.primitives.FullRoute;
 import accord.primitives.Routable.Domain;
 import accord.primitives.RoutableKey;
-import accord.primitives.Seekables;
 import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
+import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.utils.Invariants;
 import accord.utils.MapReduceConsume;
+import accord.utils.TriFunction;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
 import javax.annotation.Nonnull;
@@ -62,33 +65,47 @@ import static accord.utils.Invariants.illegalState;
  *
  * Note that reads might still order after, but side effect bearing transactions should not.
  */
-public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractResult<TxnId>
+public class Barrier extends AsyncResults.AbstractResult<TxnId>
 {
     @SuppressWarnings("unused")
     private static final Logger logger = LoggerFactory.getLogger(Barrier.class);
 
     private final Node node;
 
-    private final S seekables;
+    private final FullRoute<?> route;
+    private final Seekables<?, ?> keysOrRanges;
 
     private final long minEpoch;
     private final BarrierType barrierType;
 
     @VisibleForTesting
-    AsyncResult<SyncPoint<S>> coordinateSyncPoint;
+    AsyncResult<? extends SyncPoint<?>> coordinateSyncPoint;
     @VisibleForTesting
     ExistingTransactionCheck existingTransactionCheck;
 
-    private final BiFunction<Node, S, AsyncResult<SyncPoint<S>>> syncPoint;
+    public static class AsyncSyncPoint
+    {
+        final TxnId txnId;
+        final AsyncResult<? extends SyncPoint<?>> async;
 
-    Barrier(Node node, S keysOrRanges, long minEpoch, BarrierType barrierType, BiFunction<Node, S, AsyncResult<SyncPoint<S>>> syncPoint)
+        public AsyncSyncPoint(TxnId txnId, AsyncResult<? extends SyncPoint<?>> async)
+        {
+            this.txnId = txnId;
+            this.async = async;
+        }
+    }
+
+    private final BiFunction<Node, FullRoute<?>, AsyncSyncPoint> syncPoint;
+
+    Barrier(Node node, Seekables<?, ?> keysOrRanges, FullRoute<?> route, long minEpoch, BarrierType barrierType, BiFunction<Node, FullRoute<?>, AsyncSyncPoint> syncPoint)
     {
         this.syncPoint = syncPoint;
-        checkArgument(keysOrRanges.domain() == Domain.Key || barrierType.global, "Ranges are only supported with global barriers");
-        checkArgument(keysOrRanges.size() == 1 || barrierType.global, "Only a single key is supported with local barriers");
+        this.keysOrRanges = keysOrRanges;
+        checkArgument(route.domain() == Domain.Key || barrierType.global, "Ranges are only supported with global barriers");
+        checkArgument(route.size() == 1 || barrierType.global, "Only a single key is supported with local barriers");
         this.node = node;
         this.minEpoch = minEpoch;
-        this.seekables = keysOrRanges;
+        this.route = route;
         this.barrierType = barrierType;
     }
 
@@ -108,9 +125,9 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
      *
      * Returns the Timestamp the barrier actually ended up occurring at. Keep in mind for local barriers it doesn't mean a new transaction was created.
      */
-    public static <S extends Seekables<?, ?>> Barrier<S> barrier(Node node, S keysOrRanges, long minEpoch, BarrierType barrierType, BiFunction<Node, S, AsyncResult<SyncPoint<S>>> syncPoint)
+    public static Barrier barrier(Node node, Seekables<?, ?> keysOrRanges, FullRoute<?> route, long minEpoch, BarrierType barrierType, BiFunction<Node, FullRoute<?>, AsyncSyncPoint> syncPoint)
     {
-        Barrier<S> barrier = new Barrier(node, keysOrRanges, minEpoch, barrierType, syncPoint);
+        Barrier barrier = new Barrier(node, keysOrRanges, route, minEpoch, barrierType, syncPoint);
         node.topology().awaitEpoch(minEpoch).begin((ignored, failure) -> {
             if (failure != null)
             {
@@ -122,9 +139,17 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
         return barrier;
     }
 
-    public static <S extends Seekables<?, ?>> Barrier<S> barrier(Node node, S keysOrRanges, long minEpoch, BarrierType barrierType)
+    public static Barrier barrier(Node node, Seekables<?, ?> keysOrRanges, FullRoute route, long minEpoch, BarrierType barrierType)
     {
-        return barrier(node, keysOrRanges, minEpoch, barrierType, barrierType.async ? CoordinateSyncPoint::inclusive : CoordinateSyncPoint::inclusiveAndAwaitQuorum);
+        return barrier(node, keysOrRanges, route, minEpoch, barrierType, wrap(barrierType.async ? CoordinateSyncPoint::inclusive : CoordinateSyncPoint::inclusiveAndAwaitQuorum));
+    }
+
+    private static BiFunction<Node, FullRoute<?>, AsyncSyncPoint> wrap(TriFunction<Node, TxnId, FullRoute<?>, AsyncResult<? extends SyncPoint<?>>> syncPointFactory)
+    {
+        return (node, route) -> {
+            TxnId txnId = node.nextTxnId(Txn.Kind.SyncPoint, route.domain());
+            return new AsyncSyncPoint(txnId, syncPointFactory.apply(node, txnId, route));
+        };
     }
 
     private void start()
@@ -153,20 +178,20 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
         }
     }
 
-    private void doBarrierSuccess(TxnId syncId)
-    {
-        // The transaction we wait on might have more keys, but it's not
-        // guaranteed they were wanted and we don't want to force the agent to filter them
-        // so provide the seekables we were given.
-        // We also don't notify the agent for range barriers since that makes sense as a local concept
-        // since ranges can easily span multiple nodes
-        node.agent().onLocalBarrier(seekables, syncId);
-        Barrier.this.trySuccess(syncId);
-    }
-
     private void createSyncPoint()
     {
-        coordinateSyncPoint = syncPoint.apply(node, seekables);
+        AsyncSyncPoint async = syncPoint.apply(node, route);
+        coordinateSyncPoint = async.async;
+        if (!barrierType.global)
+        {
+            Invariants.checkState(barrierType.async);
+            TxnId txnId = async.txnId;
+            long epoch = txnId.epoch();
+            RoutingKey homeKey = route.homeKey();
+            node.commandStores().ifLocal(contextFor(txnId), homeKey, epoch, epoch, safeStore -> register(safeStore, txnId, homeKey))
+                .begin(node.agent());
+        }
+
         coordinateSyncPoint.addCallback((syncPoint, syncPointFailure) -> {
             if (syncPointFailure != null)
             {
@@ -174,20 +199,8 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
                 return;
             }
 
-            // Need to wait for the local transaction to finish since coordinate sync point won't wait on anything
-            // if async was requested or there were no deps found
-            if (barrierType.async)
-            {
-                TxnId txnId = syncPoint.syncId;
-                long epoch = txnId.epoch();
-                RoutingKey homeKey = syncPoint.homeKey;
-                node.commandStores().ifLocal(contextFor(txnId), homeKey, epoch, epoch, safeStore -> register(safeStore, txnId, homeKey))
-                    .begin(node.agent());
-            }
-            else
-            {
-                doBarrierSuccess(syncPoint.syncId);
-            }
+            if (!barrierType.async)
+                Barrier.this.trySuccess(syncPoint.syncId);
         });
     }
 
@@ -201,7 +214,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
             {
                 // In all the cases where we add a listener (listening to existing command, async completion of CoordinateSyncPoint)
                 // we want to notify the agent
-                doBarrierSuccess(command.txnId());
+                Barrier.this.trySuccess(command.txnId());
                 return false;
             }
             else if (command.hasBeen(Status.Truncated))
@@ -216,9 +229,9 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
 
     private ExistingTransactionCheck checkForExistingTransaction()
     {
-        checkState(seekables.size() == 1 && seekables.domain() == Domain.Key);
+        checkState(route.size() == 1 && route.domain() == Domain.Key);
         ExistingTransactionCheck check = new ExistingTransactionCheck();
-        Key k = seekables.get(0).asKey();
+        RoutingKey k = route.get(0).asRoutingKey();
         node.commandStores().mapReduceConsume(
                 contextFor(k, KeyHistory.COMMANDS),
                 k.toUnseekable(),
@@ -242,8 +255,8 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
         @Nonnull
         public final Timestamp executeAt;
         @Nonnull
-        public final Key key;
-        public BarrierTxn(@Nonnull TxnId txnId, @Nonnull Timestamp executeAt, Key key)
+        public final RoutingKey key;
+        public BarrierTxn(@Nonnull TxnId txnId, @Nonnull Timestamp executeAt, RoutingKey key)
         {
             this.txnId = txnId;
             this.executeAt = executeAt;
@@ -265,8 +278,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
         {
             // TODO (required, consider): consider these semantics
             BarrierTxn found = safeStore.mapReduceFull(
-            seekables,
-            safeStore.ranges().allAfter(minEpoch),
+            route,
             // Barriers are trying to establish that committed transactions are applied before the barrier (or in this case just minEpoch)
             // so all existing transaction types should ensure that at this point. An earlier txnid may have an executeAt that is after
             // this barrier or the transaction we listen on and that is fine
@@ -279,7 +291,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
                 if (barrierTxn != null)
                     return barrierTxn;
                 if (keyOrRange.domain() == Domain.Key)
-                    return new BarrierTxn(txnId, executeAt, keyOrRange.asKey());
+                    return new BarrierTxn(txnId, executeAt, keyOrRange.asRoutingKey());
                 return null;
             },
             null,

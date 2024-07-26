@@ -31,26 +31,23 @@ import accord.local.KeyHistory;
 import accord.local.Node.Id;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
-import accord.local.SaveStatus;
+import accord.primitives.SaveStatus;
+import accord.local.StoreParticipants;
 import accord.messages.TxnRequest.WithUnsynced;
 import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
 import accord.primitives.FullRoute;
-import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
-import accord.primitives.Ranges;
 import accord.primitives.Route;
-import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.primitives.Unseekables;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 
-import static accord.primitives.Txn.Kind.ExclusiveSyncPoint;
-
-public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements EpochSupplier
+public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply>
 {
     @SuppressWarnings("unused")
     private static final Logger logger = LoggerFactory.getLogger(PreAccept.class);
@@ -63,24 +60,26 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
         }
     }
 
+    // TODO (desired): we send partialTxn pieces to epochs that no longer own the range and that won't save it; stop
+    //  (depends in part on moving to RoutingKey for CommandsForKey and Deps)
     public final PartialTxn partialTxn;
     public final FullRoute<?> route;
-    public final long maxEpoch;
+    public final long acceptEpoch;
 
     public PreAccept(Id to, Topologies topologies, TxnId txnId, Txn txn, FullRoute<?> route)
     {
         super(to, topologies, txnId, route);
-        // TODO (expected): only includeQuery if route.contains(route.homeKey()); this affects state eviction and is low priority given size in C*
+        // TODO (desired): only includeQuery if route.contains(route.homeKey()); this affects state eviction and is low priority given size in C*
         this.partialTxn = txn.intersecting(scope, true);
-        this.maxEpoch = topologies.currentEpoch();
+        this.acceptEpoch = topologies.currentEpoch();
         this.route = route;
     }
 
-    PreAccept(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, long maxEpoch, PartialTxn partialTxn, @Nullable FullRoute<?> fullRoute)
+    PreAccept(TxnId txnId, Route<?> scope, long waitForEpoch, long minEpoch, long acceptEpoch, PartialTxn partialTxn, @Nullable FullRoute<?> fullRoute)
     {
         super(txnId, scope, waitForEpoch, minEpoch);
         this.partialTxn = partialTxn;
-        this.maxEpoch = maxEpoch;
+        this.acceptEpoch = acceptEpoch;
         this.route = fullRoute;
     }
 
@@ -91,9 +90,9 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
     }
 
     @Override
-    public Seekables<?, ?> keys()
+    public Unseekables<?> keys()
     {
-        return partialTxn.keys();
+        return scope;
     }
 
     @Override
@@ -105,33 +104,15 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
     @Override
     protected void process()
     {
-        node.mapReduceConsumeLocal(this, minEpoch, maxEpoch, this);
-    }
-
-    protected PreAcceptReply applyIfDoesNotCoordinate(SafeCommandStore safeStore)
-    {
-        // we only preaccept in the coordination epoch, but we might contact other epochs for dependencies
-        // TODO (required): for recovery we need to update CommandsForKeys et al, even if we don't participate in coordination.
-        //      must consider cleanup though. (alternative is to make recovery more complicated)
-        Ranges ranges = safeStore.ranges().allBetween(minEpoch, txnId);
-        if (txnId.kind() == ExclusiveSyncPoint)
-            // TODO (required): this must be removed for correctly restoring rejectBefore (so journal can update it). This is expected to happen in a follow-up patch soon after.
-            safeStore.commandStore().markExclusiveSyncPoint(safeStore, txnId, ranges);
-        return new PreAcceptOk(txnId, txnId, calculatePartialDeps(safeStore, txnId, partialTxn.keys(), scope, EpochSupplier.constant(minEpoch), txnId, ranges));
+        node.mapReduceConsumeLocal(this, minEpoch, acceptEpoch, this);
     }
 
     @Override
     public PreAcceptReply apply(SafeCommandStore safeStore)
     {
-        // TODO (desired): restore consistency with paper, either by changing code or paper
-        // note: this diverges from the paper, in that instead of waiting for JoinShard,
-        //       we PreAccept to both old and new topologies and require quorums in both.
-        //       This necessitates sending to ALL replicas of old topology, not only electorate (as fast path may be unreachable).
-        if (minEpoch < txnId.epoch() && !safeStore.ranges().coordinates(txnId).intersects(scope))
-            return applyIfDoesNotCoordinate(safeStore);
-
-        SafeCommand safeCommand = safeStore.get(txnId, this, route);
-        Commands.AcceptOutcome outcome = Commands.preaccept(safeStore, safeCommand, txnId, maxEpoch, partialTxn, route);
+        StoreParticipants participants = StoreParticipants.update(safeStore, route, minEpoch, txnId, acceptEpoch);
+        SafeCommand safeCommand = safeStore.get(txnId, participants);
+        Commands.AcceptOutcome outcome = Commands.preaccept(safeStore, safeCommand, participants, txnId, acceptEpoch, partialTxn, route);
         Command command = safeCommand.current();
         switch (outcome)
         {
@@ -145,15 +126,12 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
                 if (command.saveStatus().compareTo(SaveStatus.PreAccepted) > 0)
                     return PreAcceptNack.INSTANCE;
 
-                Ranges ranges = safeStore.ranges().allBetween(minEpoch, txnId);
-                Timestamp executeAt = command.executeAt();
-                PartialDeps deps = calculatePartialDeps(safeStore, txnId, command.partialTxn().keys(), scope, EpochSupplier.constant(minEpoch), txnId, ranges);
-                // we can have future transaction dependencies if we are responding with an earlier witnessed executeAt, and in this case
-                // we may still execute on the fast path, so we need to include the future dependency (which is included by CFK only if it has pruned earlier transactions)
-                // for execution on any replica these dependencies may be committed to.
-                // TODO (desired): if we proceed to propose phase we could choose to filter these future dependencies, as any necessary will be re-included by the Accept responses
-                Invariants.checkState(txnId.kind().isSyncPoint() || deps.maxTxnId(txnId).compareTo(executeAt) <= 0,
-                                      "Calculated dependencies for %s containing a txnId %s greater than the decided executeAt %s: %s", txnId, deps.maxTxnId(), executeAt, deps);
+                Deps deps = calculateDeps(safeStore, txnId, participants, EpochSupplier.constant(minEpoch), txnId);
+                // NOTE: we CANNOT test whether we adopt a future dependency here because it might be that this command
+                // is guaranteed to not reach agreement, but that this replica is unaware of that fact and has pruned
+                // all preceding transactions.
+                //  in which case we may be able to adopt a future dependency but won't propose it
+                Invariants.checkState(deps.maxTxnId(txnId).epoch() <= txnId.epoch());
                 return new PreAcceptOk(txnId, command.executeAt(), deps);
 
             case Truncated:
@@ -173,7 +151,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
         PreAcceptOk okMin = okMax == ok1 ? ok2 : ok1;
 
         Timestamp witnessedAt = Timestamp.mergeMax(okMax.witnessedAt, okMin.witnessedAt);
-        PartialDeps deps = ok1.deps.with(ok2.deps);
+        Deps deps = ok1.deps.with(ok2.deps);
 
         if (deps == okMax.deps && witnessedAt == okMax.witnessedAt)
             return okMax;
@@ -207,9 +185,9 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
     {
         public final TxnId txnId;
         public final Timestamp witnessedAt;
-        public final PartialDeps deps;
+        public final Deps deps;
 
-        public PreAcceptOk(TxnId txnId, Timestamp witnessedAt, PartialDeps deps)
+        public PreAcceptOk(TxnId txnId, Timestamp witnessedAt, Deps deps)
         {
             this.txnId = txnId;
             this.witnessedAt = witnessedAt;
@@ -267,18 +245,17 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
         }
     }
 
-    static PartialDeps calculatePartialDeps(SafeCommandStore safeStore, TxnId txnId, Seekables<?, ?> keys, Route<?> route, EpochSupplier minEpoch, Timestamp executeAt, Ranges ranges)
+    static Deps calculateDeps(SafeCommandStore safeStore, TxnId txnId, StoreParticipants participants, EpochSupplier minEpoch, Timestamp executeAt)
     {
         // TODO (expected): do not build covering ranges; no longer especially valuable given use of FullRoute
         // NOTE: ExclusiveSyncPoint *relies* on STARTED_BEFORE to ensure it reports a dependency on *every* earlier TxnId that may execute after it.
         //       This is necessary for reporting to a bootstrapping replica which TxnId it must not prune from dependencies
         //       i.e. the source replica reports to the target replica those TxnId that STARTED_BEFORE and EXECUTES_AFTER.
 
-        Route<?> scope = route.slice(ranges);
-        try (Deps.AbstractBuilder<PartialDeps> builder = new PartialDeps.Builder(scope);
-             Deps.AbstractBuilder<PartialDeps> redundantBuilder = new PartialDeps.Builder(scope))
+        try (Deps.AbstractBuilder<Deps> builder = new Deps.Builder();
+             Deps.AbstractBuilder<Deps> redundantBuilder = new Deps.Builder())
         {
-            safeStore.mapReduceActive(keys, ranges, executeAt, txnId.kind().witnesses(),
+            safeStore.mapReduceActive(participants.touches(), executeAt, txnId.witnesses(),
                                       (p1, keyOrRange, testTxnId, testExecuteAt, in) -> {
                                           if (p1 == null || !testTxnId.equals(p1))
                                               in.add(keyOrRange, testTxnId);
@@ -286,8 +263,10 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
                                       }, executeAt.equals(txnId) ? null : txnId, builder);
 
             // TODO (required): make sure any sync point is in the past
-            PartialDeps redundant = safeStore.commandStore().redundantBefore().collectDeps(keys, redundantBuilder, minEpoch, executeAt).build();
-            return builder.build().with(redundant);
+            Deps redundant = safeStore.commandStore().redundantBefore().collectDeps(participants.touches(), redundantBuilder, minEpoch, executeAt).build();
+            Deps result = builder.build().with(redundant);
+            Invariants.checkState(!result.contains(txnId));
+            return result;
         }
     }
 
@@ -369,11 +348,5 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
                ", txn:" + partialTxn +
                ", scope:" + scope +
                '}';
-    }
-
-    @Override
-    public long epoch()
-    {
-        return maxEpoch;
     }
 }

@@ -34,12 +34,12 @@ import accord.impl.mock.Network;
 import accord.impl.mock.RecordingMessageSink;
 import accord.local.Command;
 import accord.local.CommandStore;
-import accord.local.SaveStatus;
+import accord.primitives.SaveStatus;
 import accord.local.cfk.CommandsForKey;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.local.PreLoadContext;
-import accord.local.Status;
+import accord.primitives.Status;
 import accord.primitives.Ballot;
 import accord.primitives.FullRoute;
 import accord.primitives.KeyDeps;
@@ -94,8 +94,8 @@ public class PreAcceptTest
         try
         {
             Raw key = IntKey.key(10);
-            CommandStore commandStore = node.unsafeForKey(key);
-            Assertions.assertFalse(inMemory(commandStore).hasCommandsForKey(key));
+            CommandStore commandStore = node.unsafeForKey(key.toUnseekable());
+            Assertions.assertFalse(inMemory(commandStore).hasCommandsForKey(key.toUnseekable()));
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
@@ -103,8 +103,8 @@ public class PreAcceptTest
             clock.increment(10);
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
-            commandStore.execute(PreLoadContext.contextFor(txnId, txn.keys()), safeStore -> {
-                CommandsForKey cfk = safeStore.get(key).current();
+            commandStore.execute(PreLoadContext.contextFor(txnId, txn.keys().toParticipants()), safeStore -> {
+                CommandsForKey cfk = safeStore.get(key.toUnseekable()).current();
                 TxnId commandId = cfk.findFirst();
                 Command command = safeStore.ifInitialised(commandId).current();
                 Assertions.assertEquals(Status.PreAccepted, command.status());
@@ -131,8 +131,8 @@ public class PreAcceptTest
         try
         {
             Raw key = IntKey.key(10);
-            CommandStore commandStore = node.unsafeForKey(key);
-            Assertions.assertFalse(inMemory(commandStore).hasCommandsForKey(key));
+            CommandStore commandStore = node.unsafeForKey(key.toUnseekable());
+            Assertions.assertFalse(inMemory(commandStore).hasCommandsForKey(key.toUnseekable()));
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
@@ -154,8 +154,8 @@ public class PreAcceptTest
         try
         {
             Raw key = IntKey.key(10);
-            CommandStore commandStore = node.unsafeForKey(key);
-            Assertions.assertFalse(inMemory(commandStore).hasCommandsForKey(key));
+            CommandStore commandStore = node.unsafeForKey(key.toUnseekable());
+            Assertions.assertFalse(inMemory(commandStore).hasCommandsForKey(key.toUnseekable()));
 
             TxnId txnId = clock.idForNode(1, ID2);
             Txn txn = writeTxn(Keys.of(key));
@@ -165,7 +165,7 @@ public class PreAcceptTest
             invalidate.process(node, ID2, REPLY_CONTEXT);
 
             messageSink.assertHistorySizes(0, 1);
-            assertThat(messageSink.responses.get(0).payload).isEqualTo(new BeginInvalidation.InvalidateReply(null, Ballot.ZERO, SaveStatus.NotDefined, false, null, null));
+            assertThat(messageSink.responses.get(0).payload).isEqualTo(new BeginInvalidation.InvalidateReply(null, Ballot.ZERO, SaveStatus.NotDefined, false, null, null, null));
             messageSink.clearHistory();
 
             PreAccept preAccept = preAccept(txnId, txn, key.toUnseekable());
@@ -260,7 +260,7 @@ public class PreAcceptTest
         {
             Raw key = IntKey.key(10);
             Keys keys = Keys.of(key);
-            CommandStore commandStore = node.unsafeForKey(key);
+            CommandStore commandStore = node.unsafeForKey(key.toUnseekable());
 
             configService(node).reportTopology(TopologyUtils.withEpoch(node.topology().current(), 2));
             messageSink.clearHistory();
@@ -272,8 +272,8 @@ public class PreAcceptTest
             clock.increment(10);
             preAccept.process(node, ID2, REPLY_CONTEXT);
 
-            commandStore.execute(PreLoadContext.contextFor(txnId, txn.keys()), safeStore -> {
-                CommandsForKey cfk = safeStore.get(key).current();
+            commandStore.execute(PreLoadContext.contextFor(txnId, txn.keys().toParticipants()), safeStore -> {
+                CommandsForKey cfk = safeStore.get(key.toUnseekable()).current();
                 TxnId commandId = cfk.findFirst();
                 Command command = safeStore.ifInitialised(commandId).current();
                 Assertions.assertEquals(Status.PreAccepted, command.status());

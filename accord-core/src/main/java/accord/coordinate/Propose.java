@@ -18,10 +18,7 @@
 
 package accord.coordinate;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.function.BiConsumer;
 
 import accord.api.RoutingKey;
@@ -44,6 +41,7 @@ import accord.primitives.TxnId;
 import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
+import accord.utils.SortedListMap;
 
 import static accord.coordinate.tracking.AbstractTracker.ShardOutcomes.Fail;
 import static accord.coordinate.tracking.RequestStatus.Failed;
@@ -59,8 +57,7 @@ abstract class Propose<R> implements Callback<AcceptReply>
     final FullRoute<?> route;
     final Deps deps;
 
-    final List<AcceptReply> acceptOks;
-    private final Map<Id, AcceptReply> debug = debug() ? new TreeMap<>() : null;
+    final SortedListMap<Id, AcceptReply> acceptOks;
     final Timestamp executeAt;
     final QuorumTracker acceptTracker;
     final BiConsumer<? super R, Throwable> callback;
@@ -76,15 +73,15 @@ abstract class Propose<R> implements Callback<AcceptReply>
         this.deps = deps;
         this.executeAt = executeAt;
         this.callback = callback;
-        this.acceptOks = new ArrayList<>();
+        this.acceptOks = new SortedListMap<>(topologies.nodes(), AcceptReply[]::new);
         this.acceptTracker = new QuorumTracker(topologies);
-        Invariants.checkState(txnId.kind().isSyncPoint() || deps.maxTxnId(txnId).compareTo(executeAt) <= 0,
+        Invariants.checkState(txnId.isSyncPoint() || deps.maxTxnId(txnId).compareTo(executeAt) <= 0,
                               "Attempted to propose %s with an earlier executeAt than a conflicting transaction it witnessed: %s vs executeAt: %s", txnId, deps, executeAt);
     }
 
     void start()
     {
-        node.send(acceptTracker.nodes(), to -> new Accept(to, acceptTracker.topologies(), ballot, txnId, route, executeAt, txn.keys(), deps), this);
+        node.send(acceptTracker.nodes(), to -> new Accept(to, acceptTracker.topologies(), ballot, txnId, route, executeAt, deps), this);
     }
 
     @Override
@@ -93,8 +90,6 @@ abstract class Propose<R> implements Callback<AcceptReply>
         if (isDone)
             return;
 
-        if (debug != null) debug.put(from, reply);
-
         switch (reply.outcome())
         {
             default: throw new IllegalStateException();
@@ -102,13 +97,20 @@ abstract class Propose<R> implements Callback<AcceptReply>
                 isDone = true;
                 callback.accept(null, new Truncated(txnId, route.homeKey()));
                 break;
-            case Redundant:
+
             case RejectedBallot:
                 isDone = true;
                 callback.accept(null, new Preempted(txnId, route.homeKey()));
                 break;
+
+            case Redundant:
+                isDone = true;
+                if (reply.supersededBy != null || ballot.equals(Ballot.ZERO)) callback.accept(null, new Preempted(txnId, route.homeKey()));
+                else callback.accept(null, new Redundant(txnId, route.homeKey(), reply.committedExecuteAt));
+                break;
+
             case Success:
-                acceptOks.add(reply);
+                acceptOks.put(from, reply);
                 if (acceptTracker.recordSuccess(from) == RequestStatus.Success)
                 {
                     isDone = true;
@@ -120,6 +122,7 @@ abstract class Propose<R> implements Callback<AcceptReply>
     @Override
     public void onFailure(Id from, Throwable failure)
     {
+        // TODO (expected): we aren't tracking the specific failure here to report
         if (acceptTracker.recordFailure(from) == Failed)
         {
             isDone = true;
@@ -144,7 +147,7 @@ abstract class Propose<R> implements Callback<AcceptReply>
         final TxnId txnId;
         final RoutingKey someParticipant;
         final BiConsumer<Void, Throwable> callback;
-        final Map<Id, AcceptReply> debug = debug() ? new TreeMap<>() : null;
+        final Map<Id, AcceptReply> debug;
 
         private final QuorumShardTracker acceptTracker;
         private boolean isDone;
@@ -157,6 +160,7 @@ abstract class Propose<R> implements Callback<AcceptReply>
             this.txnId = txnId;
             this.someParticipant = someParticipant;
             this.callback = callback;
+            this.debug = debug() ? new SortedListMap<>(shard.nodes, AcceptReply[]::new) : null;
         }
 
         public static Invalidate proposeInvalidate(Node node, Ballot ballot, TxnId txnId, RoutingKey invalidateWithParticipant, BiConsumer<Void, Throwable> callback)

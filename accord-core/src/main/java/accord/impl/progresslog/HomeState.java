@@ -26,6 +26,7 @@ import accord.coordinate.Outcome;
 import accord.local.Command;
 import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
+import accord.primitives.Status;
 import accord.primitives.ProgressToken;
 import accord.primitives.TxnId;
 import accord.utils.Invariants;
@@ -131,7 +132,7 @@ abstract class HomeState extends WaitingState
     {
         Invariants.checkState(!isHomeDoneOrUninitialised());
         Command command = safeCommand.current();
-        Invariants.checkState(!safeStore.isTruncated(command), "Command %s is truncated", command);
+        Invariants.checkState(!command.hasBeen(Status.Truncated), "Command %s is truncated", command);
 
         // TODO (expected): when invalidated, safer to maintain HomeState until known to be globally invalidated
         // TODO (now): validate that we clear HomeState when we receive a Durable reply, to replace the token check logic

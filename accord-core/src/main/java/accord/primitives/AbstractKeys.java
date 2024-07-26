@@ -29,6 +29,7 @@ import java.util.stream.Stream;
 
 import accord.api.RoutingKey;
 import accord.utils.ArrayBuffers.ObjectBuffers;
+import accord.utils.AsymmetricComparator;
 import accord.utils.IndexedBiConsumer;
 import accord.utils.IndexedFold;
 import accord.utils.IndexedFoldToLong;
@@ -221,6 +222,11 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
         return SortedArrays.linearIntersection(this.keys, that.keys, buffers);
     }
 
+    protected <K2 extends RoutableKey> K[] intersecting(AsymmetricComparator<K, K2> comparator, AbstractKeys<K2> that, ObjectBuffers<K> buffers)
+    {
+        return SortedArrays.asymmetricLinearIntersection(this.keys, this.keys.length, that.keys, that.keys.length, comparator, buffers);
+    }
+
     protected K[] intersecting(AbstractRanges ranges, ObjectBuffers<K> buffers)
     {
         return SortedArrays.intersectWithMultipleMatches(keys, keys.length, ranges.ranges, ranges.ranges.length, (k, r) -> -r.compareTo(k), buffers);
@@ -353,6 +359,8 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
 
     public final RoutingKeys toParticipants()
     {
+        if (getClass() == RoutingKeys.class)
+            return (RoutingKeys) this;
         return toUnseekables(array -> array.length == 0 ? RoutingKeys.EMPTY : new RoutingKeys(array));
     }
 

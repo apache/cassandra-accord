@@ -147,7 +147,7 @@ public class ExecuteTxn extends ReadCoordinator<ReadReply>
         if (failure == null)
         {
             Result result = txn.result(txnId, executeAt, data);
-            CoordinationAdapter.Invoke.persist(adapter(), node, allTopologies, route, txnId, txn, executeAt, stableDeps, txn.execute(txnId, executeAt, data), result, callback);
+            adapter().persist(node, allTopologies, route, txnId, txn, executeAt, stableDeps, txn.execute(txnId, executeAt, data), result, callback);
         }
         else
         {

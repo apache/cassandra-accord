@@ -26,7 +26,7 @@ import accord.primitives.FullRoute;
 import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Route;
-import accord.primitives.Seekables;
+import accord.primitives.SaveStatus;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.primitives.Writes;
@@ -44,24 +44,26 @@ public class CheckedCommands
 
     public static void preaccept(SafeCommandStore safeStore, TxnId txnId, PartialTxn partialTxn, FullRoute<?> route, BiConsumer<Command, Command> consumer)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, txnId, route);
+        StoreParticipants participants = StoreParticipants.update(safeStore, route, txnId.epoch(), txnId, txnId.epoch());
+        SafeCommand safeCommand = safeStore.get(txnId, participants);
         Command before = safeCommand.current();
-        Commands.AcceptOutcome result = Commands.preaccept(safeStore, safeCommand, txnId, txnId.epoch(), partialTxn, route);
+        Commands.AcceptOutcome result = Commands.preaccept(safeStore, safeCommand, participants, txnId, txnId.epoch(), partialTxn, route);
         Command after = safeCommand.current();
         if (result != Commands.AcceptOutcome.Success) throw illegalState("Command mutation rejected: " + result);
         consumer.accept(before, after);
     }
 
-    public static void accept(SafeCommandStore safeStore, TxnId txnId, Ballot ballot, Route<?> route, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps partialDeps)
+    public static void accept(SafeCommandStore safeStore, TxnId txnId, Ballot ballot, Route<?> route, Timestamp executeAt, PartialDeps partialDeps)
     {
-        accept(safeStore, txnId, ballot, route, keys, executeAt, partialDeps, (l, r) -> {});
+        accept(safeStore, txnId, ballot, route, executeAt, partialDeps, (l, r) -> {});
     }
 
-    public static void accept(SafeCommandStore safeStore, TxnId txnId, Ballot ballot, Route<?> route, Seekables<?, ?> keys, Timestamp executeAt, PartialDeps partialDeps, BiConsumer<Command, Command> consumer)
+    public static void accept(SafeCommandStore safeStore, TxnId txnId, Ballot ballot, Route<?> route, Timestamp executeAt, PartialDeps partialDeps, BiConsumer<Command, Command> consumer)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, txnId, route);
+        StoreParticipants participants = StoreParticipants.update(safeStore, route, txnId.epoch(), txnId, executeAt.epoch());
+        SafeCommand safeCommand = safeStore.get(txnId, participants);
         Command before = safeCommand.current();
-        Commands.AcceptOutcome result = Commands.accept(safeStore, txnId, ballot, route, keys, executeAt, partialDeps);
+        Commands.AcceptOutcome result = Commands.accept(safeStore, safeCommand, participants, txnId, ballot, route, executeAt, partialDeps);
         Command after = safeCommand.current();
         if (result != Commands.AcceptOutcome.Success) throw illegalState("Command mutation rejected: " + result);
         consumer.accept(before, after);
@@ -74,9 +76,10 @@ public class CheckedCommands
 
     public static void commit(SafeCommandStore safeStore, SaveStatus saveStatus, Ballot ballot, TxnId txnId, Route<?> route, @Nullable PartialTxn partialTxn, Timestamp executeAt, PartialDeps partialDeps, BiConsumer<Command, Command> consumer)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, txnId, route);
+        StoreParticipants participants = StoreParticipants.update(safeStore, route, txnId.epoch(), txnId, executeAt.epoch());
+        SafeCommand safeCommand = safeStore.get(txnId, participants);
         Command before = safeCommand.current();
-        Commands.CommitOutcome result = Commands.commit(safeStore, safeCommand, saveStatus, ballot, txnId, route, partialTxn, executeAt, partialDeps);
+        Commands.CommitOutcome result = Commands.commit(safeStore, safeCommand, participants, saveStatus, ballot, txnId, route, partialTxn, executeAt, partialDeps);
         Command after = safeCommand.current();
         if (result != Commands.CommitOutcome.Success) throw illegalState("Command mutation rejected: " + result);
         consumer.accept(before, after);
@@ -89,9 +92,10 @@ public class CheckedCommands
 
     public static void apply(SafeCommandStore safeStore, TxnId txnId, Route<?> route, Timestamp executeAt, @Nullable PartialDeps partialDeps, @Nullable PartialTxn partialTxn, Writes writes, Result result, BiConsumer<Command, Command> consumer)
     {
-        SafeCommand safeCommand = safeStore.get(txnId, txnId, route);
+        StoreParticipants participants = StoreParticipants.update(safeStore, route, txnId.epoch(), txnId, executeAt.epoch());
+        SafeCommand safeCommand = safeStore.get(txnId, participants);
         Command before = safeCommand.current();
-        Commands.ApplyOutcome outcome = Commands.apply(safeStore, safeCommand, txnId, route, executeAt, partialDeps, partialTxn, writes, result);
+        Commands.ApplyOutcome outcome = Commands.apply(safeStore, safeCommand, participants, txnId, route, executeAt, partialDeps, partialTxn, writes, result);
         Command after = safeCommand.current();
         if (outcome != Commands.ApplyOutcome.Success) throw illegalState("Command mutation rejected: " + outcome);
         consumer.accept(before, after);

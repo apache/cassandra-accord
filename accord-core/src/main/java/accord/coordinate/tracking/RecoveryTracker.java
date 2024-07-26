@@ -22,6 +22,7 @@ import accord.coordinate.tracking.QuorumTracker.QuorumShardTracker;
 import accord.local.Node;
 import accord.topology.Shard;
 import accord.topology.Topologies;
+import accord.topology.Topology;
 
 public class RecoveryTracker extends AbstractTracker<RecoveryTracker.RecoveryShardTracker>
 {
@@ -68,6 +69,16 @@ public class RecoveryTracker extends AbstractTracker<RecoveryTracker.RecoverySha
 
     public boolean rejectsFastPath()
     {
-        return any(RecoveryShardTracker::rejectsFastPath);
+        // a fast path decision must have recorded itself to a fast quorum in an earlier epoch
+        // but the fast path votes may be taken from the proposal epoch only.
+        // Importantly, on recovery, since we do the full slow path we do not need to reach a fast quorum in the earlier epochs
+        // So, we can effectively ignore earlier epochs wrt fast path decisions.
+        Topology current = topologies.current();
+        for (int i = 0 ; i < current.size() ; ++i)
+        {
+            if (trackers[i].rejectsFastPath())
+                return true;
+        }
+        return false;
     }
 }

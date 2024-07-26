@@ -29,13 +29,14 @@ import accord.local.Node;
 import accord.local.Node.Id;
 import accord.messages.Callback;
 import accord.primitives.FullRoute;
-import accord.primitives.Seekables;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
 import accord.utils.Invariants;
 import accord.utils.async.AsyncResults.SettableResult;
 
+import static accord.api.ProtocolModifiers.QuorumEpochIntersections.ChaseFixedPoint.DoNotChase;
+import static accord.api.ProtocolModifiers.QuorumEpochIntersections;
 import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
 
@@ -103,11 +104,11 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
     private Topologies topologies;
     private boolean initialRoundIsDone;
     private ExtraEpochs extraEpochs;
-    private Map<Id, Object> debug = Invariants.debug() ? new TreeMap<>() : null;
+    private final Map<Id, Object> debug = Invariants.debug() ? new TreeMap<>() : null;
 
     AbstractCoordinatePreAccept(Node node, FullRoute<?> route, TxnId txnId)
     {
-        this(node, route, txnId, node.topology().withUnsyncedEpochs(route, txnId, txnId));
+        this(node, route, txnId, node.topology().select(route, txnId, txnId, QuorumEpochIntersections.preaccept.include));
     }
 
     AbstractCoordinatePreAccept(Node node, FullRoute<?> route, @Nullable TxnId txnId, Topologies topologies)
@@ -123,7 +124,6 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
         contact(topologies.nodes(), topologies, this);
     }
 
-    abstract Seekables<?, ?> keysOrRanges();
     abstract void contact(Collection<Id> nodes, Topologies topologies, Callback<R> callback);
     abstract void onSuccessInternal(Id from, R reply);
     /**
@@ -195,6 +195,14 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
     {
         Invariants.checkState(!initialRoundIsDone || (extraEpochs != null && !extraEpochs.extraRoundIsDone));
         initialRoundIsDone = true;
+        if (QuorumEpochIntersections.preaccept.chase == DoNotChase)
+        {
+            long latestEpoch = executeAtEpoch();
+            if (latestEpoch > topologies.currentEpoch()) node.withEpoch(latestEpoch, node.agent(), () -> onPreAcceptedInNewEpoch(topologies, latestEpoch));
+            else onPreAcceptedInNewEpoch(topologies, latestEpoch);
+            return;
+        }
+
         if (extraEpochs != null)
             extraEpochs.extraRoundIsDone = true;
 
@@ -208,6 +216,13 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
             onNewEpoch(topologies, latestEpoch);
     }
 
+    final void onPreAcceptedInNewEpoch(Topologies topologies, long latestEpoch)
+    {
+        TopologyMismatch mismatch = TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(latestEpoch), txnId, route.homeKey(), route);
+        if (mismatch == null) onPreAccepted(topologies);
+        else onNewEpochTopologyMismatch(mismatch);
+    }
+
     final void onNewEpoch(Topologies prevTopologies, long latestEpoch)
     {
         // TODO (desired, efficiency): check if we have already have a valid quorum for the future epoch
@@ -219,8 +234,8 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
                 return;
             }
             TopologyMismatch mismatch = txnId.kind() == Txn.Kind.ExclusiveSyncPoint
-                                        ? TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(latestEpoch), txnId, route.homeKey(), keysOrRanges())
-                                        : TopologyMismatch.checkForMismatchOrPendingRemoval(node.topology().globalForEpoch(latestEpoch), txnId, route.homeKey(), keysOrRanges());
+                                        ? TopologyMismatch.checkForMismatch(node.topology().globalForEpoch(latestEpoch), txnId, route.homeKey(), route)
+                                        : TopologyMismatch.checkForMismatchOrPendingRemoval(node.topology().globalForEpoch(latestEpoch), txnId, route.homeKey(), route);
             if (mismatch != null)
             {
                 initialRoundIsDone = true;

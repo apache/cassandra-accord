@@ -123,7 +123,7 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
 
             scheduledAt = runAt;
             lastNow = now;
-            long delay = runAt - now;
+            long delay = Math.max(0, runAt - now);
             scheduled = scheduler.once(taskFactory.apply(next), delay, TimeUnit.MICROSECONDS);
         }
 
@@ -140,6 +140,11 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
             scheduled = Scheduler.CANCELLED;
             lastNow = 0;
             scheduledAt = Long.MAX_VALUE;
+        }
+
+        public long scheduledAt()
+        {
+            return scheduledAt;
         }
     }
 
@@ -508,7 +513,7 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
         }
         Bucket<T> bucket = new Bucket<>(this, bucketEpoch, bucketSpan);
         buckets[bucketsEnd++] = bucket;
-        checkContiguous();
+        if (Invariants.isParanoid()) checkContiguous();
         return bucket;
     }
 
@@ -525,7 +530,7 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
         }
         Bucket<T> bucket = new Bucket<>(this, bucketEpoch, bucketSpan);
         buckets[--bucketsStart] = bucket;
-        checkContiguous();
+        if (Invariants.isParanoid()) checkContiguous();
         return bucket;
     }
 
@@ -538,7 +543,7 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
         if (idealSpan > bucket.span / 2)
             return;
 
-        checkContiguous();
+        if (Invariants.isParanoid()) checkContiguous();
         split(bucket, idealSpan);
     }
 
@@ -584,7 +589,7 @@ public class LogGroupTimers<T extends LogGroupTimers.Timer>
             epoch += nextSpan;
             nextSpan *= 2;
         }
-        checkContiguous();
+        if (Invariants.isParanoid()) checkContiguous();
         bucket.redistribute();
     }
 

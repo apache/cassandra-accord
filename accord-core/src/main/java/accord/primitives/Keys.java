@@ -94,11 +94,26 @@ public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
     }
 
     @Override
-    public Routables<?> slice(int from, int to)
+    public Routables<Key> slice(int from, int to)
     {
         if (from == 0 && to == size())
             return this;
         return Keys.ofSortedUnique(Arrays.copyOfRange(keys, from, to));
+    }
+
+    public final Keys intersecting(Seekables<?, ?> intersecting)
+    {
+        switch (intersecting.domain())
+        {
+            default: throw new AssertionError("Unhandled domain: " + intersecting.domain());
+            case Key: return intersecting((Keys) intersecting);
+            case Range: return wrap(intersecting((AbstractRanges) intersecting, cachedKeys()));
+        }
+    }
+
+    public final Keys intersecting(Seekables<?, ?> intersecting, Slice slice)
+    {
+        return intersecting(intersecting);
     }
 
     public final Keys intersecting(Unseekables<?> intersecting)
@@ -155,7 +170,7 @@ public class Keys extends AbstractKeys<Key> implements Seekables<Key, Keys>
     @Override
     public Keys without(Keys subtract)
     {
-        return wrap(SortedArrays.linearSubtract(keys, subtract.keys, Key[]::new));
+        return wrap(SortedArrays.linearSubtract(keys, subtract.keys, cachedKeys()));
     }
 
     public static Keys of(Key key)
