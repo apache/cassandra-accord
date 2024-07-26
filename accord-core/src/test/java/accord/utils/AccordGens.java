@@ -36,6 +36,7 @@ import accord.impl.IntHashKey;
 import accord.impl.IntKey;
 import accord.impl.PrefixedIntHashKey;
 import accord.local.Node;
+import accord.local.RedundantBefore;
 import accord.primitives.Ballot;
 import accord.primitives.Deps;
 import accord.primitives.KeyDeps;
@@ -75,9 +76,14 @@ public class AccordGens
         return rs -> rs.nextInt(0, 1 << 16);
     }
 
+    public static Gen.LongGen hlcs()
+    {
+        return rs -> rs.nextLong(0, Long.MAX_VALUE);
+    }
+
     public static Gen<Timestamp> timestamps()
     {
-        return timestamps(epochs()::nextLong, rs -> rs.nextLong(0, Long.MAX_VALUE), flags(), RandomSource::nextInt);
+        return timestamps(epochs()::nextLong, hlcs(), flags(), RandomSource::nextInt);
     }
 
     public static Gen<Timestamp> timestamps(Gen.LongGen epochs, Gen.LongGen hlcs, Gen.IntGen flags, Gen.IntGen nodes)
@@ -92,7 +98,12 @@ public class AccordGens
 
     public static Gen<TxnId> txnIds(Gen<Txn.Kind> kinds)
     {
-        return txnIds(epochs()::nextLong, rs -> rs.nextLong(0, Long.MAX_VALUE), RandomSource::nextInt, kinds);
+        return txnIds(epochs(), hlcs(), RandomSource::nextInt, kinds);
+    }
+
+    public static Gen<TxnId> txnIds(Gen<Txn.Kind> kinds, Gen<Routable.Domain> domains)
+    {
+        return txnIds(epochs(), hlcs(), RandomSource::nextInt, kinds, domains);
     }
 
     public static Gen<TxnId> txnIds(Gen.LongGen epochs, Gen.LongGen hlcs, Gen.IntGen nodes)
@@ -102,13 +113,17 @@ public class AccordGens
 
     public static Gen<TxnId> txnIds(Gen.LongGen epochs, Gen.LongGen hlcs, Gen.IntGen nodes, Gen<Txn.Kind> kinds)
     {
-        Gen<Routable.Domain> domains = Gens.enums().all(Routable.Domain.class);
+        return txnIds(epochs, hlcs, nodes, kinds, Gens.enums().all(Routable.Domain.class));
+    }
+
+    public static Gen<TxnId> txnIds(Gen.LongGen epochs, Gen.LongGen hlcs, Gen.IntGen nodes, Gen<Txn.Kind> kinds, Gen<Routable.Domain> domains)
+    {
         return rs -> new TxnId(epochs.nextLong(rs), hlcs.nextLong(rs), kinds.next(rs), domains.next(rs), new Node.Id(nodes.nextInt(rs)));
     }
 
     public static Gen<Ballot> ballot()
     {
-        return ballot(epochs()::nextLong, rs -> rs.nextLong(0, Long.MAX_VALUE), flags(), RandomSource::nextInt);
+        return ballot(epochs()::nextLong, hlcs(), flags(), RandomSource::nextInt);
     }
 
     public static Gen<Ballot> ballot(Gen.LongGen epochs, Gen.LongGen hlcs, Gen.IntGen flags, Gen.IntGen nodes)
@@ -501,5 +516,17 @@ public class AccordGens
     public static Gen<Deps> deps(Gen<KeyDeps> keyDepsGen, Gen<RangeDeps> rangeDepsGen, Gen<KeyDeps> directKeyDepsGen)
     {
         return rs -> new Deps(keyDepsGen.next(rs), rangeDepsGen.next(rs), directKeyDepsGen.next(rs));
+    }
+
+    public static Gen<RedundantBefore> redundantBefore(Gen<Ranges> rangesGen,
+                                                       BiFunction<RandomSource, Range, RedundantBefore.Entry> entryGen)
+    {
+        return rs -> {
+            Ranges ranges = rangesGen.next(rs);
+            if (ranges.isEmpty()) return RedundantBefore.EMPTY;
+            RedundantBefore.Builder builder = new RedundantBefore.Builder(ranges.get(0).endInclusive(), ranges.size());
+            ranges.forEach(r -> builder.append(r.start(), r.end(), entryGen.apply(rs, r)));
+            return builder.build();
+        };
     }
 }

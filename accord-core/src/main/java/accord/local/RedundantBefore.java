@@ -462,9 +462,9 @@ public class RedundantBefore extends ReducingRangeMap<RedundantBefore.Entry>
         return staleRanges;
     }
 
-    static class Builder extends AbstractIntervalBuilder<RoutingKey, Entry, RedundantBefore>
+    public static class Builder extends AbstractIntervalBuilder<RoutingKey, Entry, RedundantBefore>
     {
-        protected Builder(boolean inclusiveEnds, int capacity)
+        public Builder(boolean inclusiveEnds, int capacity)
         {
             super(inclusiveEnds, capacity);
         }
