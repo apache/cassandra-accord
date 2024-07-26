@@ -23,6 +23,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
@@ -478,7 +479,7 @@ public class BurnTest
 
         int observedOperations = acks.get() + recovered.get() + nacks.get() + lost.get() + truncated.get();
         logger.info("Received {} acks, {} recovered, {} nacks, {} lost, {} truncated ({} total) to {} operations", acks.get(), recovered.get(), nacks.get(), lost.get(), truncated.get(), observedOperations, operations);
-        logger.info("Message counts: {}", messageStatsMap.entrySet());
+        logger.info("Message counts: {}", statsInDescOrder(messageStatsMap));
         logger.info("Took {} and in logical time of {}", Duration.ofNanos(System.nanoTime() - startNanos), Duration.ofMillis(queue.nowInMillis() - startLogicalMillis));
         if (clock.get() != operations * 2 || observedOperations != operations)
         {
@@ -496,6 +497,13 @@ public class BurnTest
             if (clock.get() != operations * 2) throw new AssertionError("Incomplete set of responses; clock=" + clock.get() + ", expected operations=" + (operations * 2));
             else throw new AssertionError("Incomplete set of responses; ack+recovered+other+nacks+lost+truncated=" + observedOperations + ", expected operations=" + (operations * 2));
         }
+    }
+
+    private static String statsInDescOrder(Map<MessageType, Stats> statsMap)
+    {
+        List<Stats> stats = new ArrayList<>(statsMap.values());
+        stats.sort(Comparator.comparingInt(s -> -s.count()));
+        return stats.toString();
     }
 
     private static Verifier createVerifier(String prefix, int keyCount)

@@ -65,16 +65,27 @@ public class SyncPoint<S extends Seekables<?, ?>>
         this.homeKey = homeKey;
     }
 
+    // TODO (required): this is not safe to use as a "sourceEpoch", as a transaction in the dependencies may execute in a future epoch
+    public long sourceEpoch()
+    {
+        return syncId.epoch();
+    }
+
+    public long earliestEpoch()
+    {
+        long epoch = syncId.epoch();
+        if (waitFor.keyDeps.txnIdCount() > 0)
+            epoch = Math.min(waitFor.keyDeps.txnId(0).epoch(), epoch);
+        if (waitFor.rangeDeps.txnIdCount() > 0)
+            epoch = Math.min(waitFor.rangeDeps.txnId(0).epoch(), epoch);
+        if (waitFor.directKeyDeps.txnIdCount() > 0)
+            epoch = Math.min(waitFor.directKeyDeps.txnId(0).epoch(), epoch);
+        return epoch;
+    }
+
     public FullRoute route()
     {
         return keysOrRanges.toRoute(homeKey);
-    }
-
-    // TODO (required): document this and its usages; make sure call-sites make sense
-    public long sourceEpoch()
-    {
-        TxnId maxDep = waitFor.maxTxnId();
-        return TxnId.nonNullOrMax(maxDep, syncId).epoch();
     }
 
     @Override

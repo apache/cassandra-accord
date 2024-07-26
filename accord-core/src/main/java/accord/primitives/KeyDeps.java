@@ -25,6 +25,7 @@ import accord.utils.IndexedBiConsumer;
 import accord.utils.IndexedConsumer;
 import accord.utils.IndexedTriConsumer;
 import accord.utils.RelationMultiMap;
+import accord.utils.SortedArrays;
 import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.SymmetricComparator;
 import accord.utils.TriFunction;

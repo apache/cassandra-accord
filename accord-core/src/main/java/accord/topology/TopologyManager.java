@@ -51,6 +51,8 @@ import javax.annotation.Nullable;
 import static accord.coordinate.tracking.RequestStatus.Success;
 import static accord.primitives.AbstractRanges.UnionMode.MERGE_ADJACENT;
 import static accord.primitives.Routables.Slice.Minimal;
+import static accord.topology.TopologyManager.EpochSufficiencyMode.AT_LEAST;
+import static accord.topology.TopologyManager.EpochSufficiencyMode.AT_MOST;
 import static accord.utils.Invariants.checkArgument;
 import static accord.utils.Invariants.illegalState;
 import static accord.utils.Invariants.nonNull;
@@ -530,6 +532,7 @@ public class TopologyManager
         return new Single(sorter, epochs.get(epoch).global);
     }
 
+    // TODO (required): test all of these methods when asking for epochs that have been cleaned up (and other code paths)
     public Topologies withUnsyncedEpochs(Unseekables<?> select, Timestamp min, Timestamp max)
     {
         return withUnsyncedEpochs(select, min.epoch(), max.epoch());
@@ -538,28 +541,38 @@ public class TopologyManager
     public Topologies withUnsyncedEpochs(Unseekables<?> select, long minEpoch, long maxEpoch)
     {
         Invariants.checkArgument(minEpoch <= maxEpoch, "min epoch %d > max %d", minEpoch, maxEpoch);
-        return withSufficientEpochs(select, minEpoch, maxEpoch, epochState -> epochState.syncComplete);
+        return withSufficientEpochs(select, minEpoch, maxEpoch, epochState -> epochState.syncComplete, AT_LEAST);
     }
 
-    public Topologies withOpenEpochs(Unseekables<?> select, EpochSupplier min, EpochSupplier max)
+    public Topologies withOpenEpochs(Unseekables<?> select, EpochSupplier min, EpochSupplier max, EpochSufficiencyMode mode)
     {
-        return withSufficientEpochs(select, min.epoch(), max.epoch(), epochState -> epochState.closed);
+        return withSufficientEpochs(select, min.epoch(), max.epoch(), epochState -> epochState.closed, mode);
     }
 
-    private Topologies withSufficientEpochs(Unseekables<?> select, long minEpoch, long maxEpoch, Function<EpochState, Ranges> isSufficientFor)
+    public Topologies withUncompletedEpochs(Unseekables<?> select, EpochSupplier min, EpochSupplier max, EpochSufficiencyMode mode)
+    {
+        return withSufficientEpochs(select, min.epoch(), max.epoch(), epochState -> epochState.complete, mode);
+    }
+
+    public enum EpochSufficiencyMode { AT_LEAST, AT_MOST }
+
+    private Topologies withSufficientEpochs(Unseekables<?> select, long minEpoch, long maxEpoch, Function<EpochState, Ranges> isSufficientFor, EpochSufficiencyMode mode)
     {
         Invariants.checkArgument(minEpoch <= maxEpoch);
         Epochs snapshot = epochs;
 
-        TopologyMismatch tm = TopologyMismatch.checkForMismatch(snapshot.get(maxEpoch).global(), select);
-        if (tm != null)
-            throw tm;
+        if (mode == AT_LEAST)
+        {
+            TopologyMismatch tm = TopologyMismatch.checkForMismatch(snapshot.get(maxEpoch).global(), select);
+            if (tm != null)
+                throw tm;
+        }
 
         if (maxEpoch == Long.MAX_VALUE) maxEpoch = snapshot.currentEpoch;
         else Invariants.checkState(snapshot.currentEpoch >= maxEpoch, "current epoch %d < max %d", snapshot.currentEpoch, maxEpoch);
 
         EpochState maxEpochState = nonNull(snapshot.get(maxEpoch));
-        if (minEpoch == maxEpoch && isSufficientFor.apply(maxEpochState).containsAll(select))
+        if (minEpoch == maxEpoch && (mode != AT_LEAST || isSufficientFor.apply(maxEpochState).containsAll(select)))
             return new Single(sorter, maxEpochState.global.forSelection(select));
 
         int i = (int)(snapshot.currentEpoch - maxEpoch);
@@ -570,14 +583,16 @@ public class TopologyManager
         // An issue was found where a range was removed from a replica and min selection picked the epoch before that,
         // which caused a node to get included in the txn that actually lost the range
         // See CASSANDRA-18804
-        while (i < maxi)
+        while (i < maxi && !select.isEmpty())
         {
             EpochState epochState = snapshot.epochs[i++];
             topologies.add(epochState.global.forSelection(select));
             select = select.subtract(epochState.addedRanges);
+            if (mode == AT_MOST)
+                select = select.subtract(isSufficientFor.apply(epochState));
         }
 
-        if (select.isEmpty())
+        if (select.isEmpty() || mode == AT_MOST)
             return topologies.build(sorter);
 
         if (i == snapshot.epochs.length)
@@ -636,7 +651,6 @@ public class TopologyManager
             topologies.add(epochState.global.forSelection(select));
             select = select.subtract(epochState.addedRanges);
         }
-        Invariants.checkState(!topologies.isEmpty(), "Unable to find an epoch that contained %s", select);
 
         return topologies.build(sorter);
     }

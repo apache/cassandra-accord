@@ -151,6 +151,7 @@ public abstract class FetchCoordinator
         this.fetchRanges = fetchRanges;
         // TODO (expected): prioritise nodes that were members in the "prior" epoch also
         //  (by prior, we mean the prior epoch affecting ownership of this shard, not the prior numerical epoch)
+        // TODO (required): the sourceEpoch may be wrong, as a transaction may execute in a future epoch
         Topology topology = node.topology().forEpoch(ranges, syncPoint.sourceEpoch()).get(0);
         for (Node.Id id : topology.nodes())
         {
