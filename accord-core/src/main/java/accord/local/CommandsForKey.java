@@ -72,10 +72,14 @@ import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
 import static accord.primitives.Txn.Kind.Kinds.AnyGloballyVisible;
 import static accord.primitives.Txn.Kind.Write;
 import static accord.utils.ArrayBuffers.cachedTxnIds;
+import static accord.utils.Invariants.Paranoia.LINEAR;
+import static accord.utils.Invariants.Paranoia.NONE;
+import static accord.utils.Invariants.Paranoia.SUPERLINEAR;
+import static accord.utils.Invariants.ParanoiaCostFactor.LOW;
 import static accord.utils.Invariants.checkNonNegative;
 import static accord.utils.Invariants.illegalState;
 import static accord.utils.Invariants.isParanoid;
-import static accord.utils.Invariants.paranoia;
+import static accord.utils.Invariants.testParanoia;
 import static accord.utils.SortedArrays.Search.FAST;
 
 /**
@@ -659,16 +663,17 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
     private void checkIntegrity()
     {
-        Invariants.checkState(prunedBefore == NO_INFO || (prunedBefore.status == APPLIED && prunedBefore.kind().isWrite()));
-        Invariants.checkState(minUndecidedById < 0 || byId[minUndecidedById].status.compareTo(COMMITTED) < 0);
-        Invariants.checkState(maxAppliedWriteByExecuteAt < 0 || committedByExecuteAt[maxAppliedWriteByExecuteAt].status == APPLIED);
         if (isParanoid())
         {
-            Invariants.checkArgument(SortedArrays.isSortedUnique(byId));
-            Invariants.checkArgument(SortedArrays.isSortedUnique(committedByExecuteAt, TxnInfo::compareExecuteAt));
+            Invariants.checkState(prunedBefore == NO_INFO || (prunedBefore.status == APPLIED && prunedBefore.kind().isWrite()));
+            Invariants.checkState(minUndecidedById < 0 || byId[minUndecidedById].status.compareTo(COMMITTED) < 0);
+            Invariants.checkState(maxAppliedWriteByExecuteAt < 0 || committedByExecuteAt[maxAppliedWriteByExecuteAt].status == APPLIED);
 
-            if (paranoia() >= 2)
+            if (testParanoia(LINEAR, NONE, LOW))
             {
+                Invariants.checkArgument(SortedArrays.isSortedUnique(byId));
+                Invariants.checkArgument(SortedArrays.isSortedUnique(committedByExecuteAt, TxnInfo::compareExecuteAt));
+
                 if (minUndecidedById >= 0) for (int i = 0 ; i < minUndecidedById ; ++i) Invariants.checkState(byId[i].status.compareTo(COMMITTED) >= 0);
                 else for (TxnInfo txn : byId) Invariants.checkState(txn.status.compareTo(COMMITTED) >= 0);
 
@@ -680,9 +685,12 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 }
                 else
                 {
-                    for (TxnInfo txn : committedByExecuteAt) Invariants.checkState(txn.kind() != Kind.Write || txn.status.compareTo(APPLIED) < 0);
+                    for (TxnInfo txn : committedByExecuteAt)
+                        Invariants.checkState(txn.kind() != Kind.Write || txn.status.compareTo(APPLIED) < 0);
                 }
-
+            }
+            if (testParanoia(SUPERLINEAR, NONE, LOW))
+            {
                 for (TxnInfo txn : committedByExecuteAt)
                 {
                     Invariants.checkState(txn == get(txn, byId));
@@ -1131,7 +1139,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         else loadingAsPrunedFor = NO_TXNIDS;
 
         insertOrUpdateWithAdditions(insertPos, updatePos, plainTxnId, newInfo, additions, additionCount, newById, loadingAsPrunedFor);
-        if (paranoia() >= 2)
+        if (testParanoia(SUPERLINEAR, NONE, LOW))
             validateMissing(newById, additions, additionCount, curInfo, newInfo, loadingAsPrunedFor);
 
         int newMinUndecidedById = minUndecidedById;
@@ -1859,7 +1867,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             addToMissingArrays(newById, newCommittedByExecuteAt, newInfo, plainTxnId, loadingAsPrunedFor);
         }
 
-        if (paranoia() >= 2 && curInfo == null && newInfo.status.compareTo(COMMITTED) < 0)
+        if (testParanoia(SUPERLINEAR, NONE, LOW) && curInfo == null && newInfo.status.compareTo(COMMITTED) < 0)
             validateMissing(newById, NO_TXNIDS, 0, curInfo, newInfo, loadingAsPrunedFor);
 
         return new CommandsForKey(key, redundantBefore, prunedBefore, newLoadingPruned, newById, newCommittedByExecuteAt, newMinUndecidedById, newMaxAppliedWriteByExecuteAt, unmanageds)

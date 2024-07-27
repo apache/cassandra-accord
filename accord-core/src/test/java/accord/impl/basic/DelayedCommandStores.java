@@ -64,6 +64,9 @@ import accord.utils.ReflectionUtils.Difference;
 import accord.utils.async.AsyncChain;
 import accord.utils.async.AsyncChains;
 
+import static accord.utils.Invariants.Paranoia.LINEAR;
+import static accord.utils.Invariants.ParanoiaCostFactor.HIGH;
+
 public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
 {
     //TODO (correctness): remove once we have a Journal integration that does not change the values of a command...
@@ -163,7 +166,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         @Override
         public void validateRead(Command current)
         {
-            if (Invariants.paranoia() < 3)
+            if (!Invariants.testParanoia(LINEAR, LINEAR, HIGH))
                 return;
 
             // "loading" the command doesn't make sense as we don't "store" the command...
@@ -213,7 +216,7 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
         public <T> AsyncChain<T> submit(Callable<T> fn)
         {
             Task<T> task = new DelayedTask<>(fn);
-            if (Invariants.paranoia() >= 3)
+            if (Invariants.testParanoia(LINEAR, LINEAR, HIGH))
             {
                 return AsyncChains.detectLeak(agent::onUncaughtException, () -> {
                     boolean wasEmpty = pending.isEmpty();

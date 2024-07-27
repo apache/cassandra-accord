@@ -28,17 +28,32 @@ import static java.lang.String.format;
 
 public class Invariants
 {
-    private static final int PARANOIA = Integer.parseInt(System.getProperty("accord.paranoia", "0"));
+    public enum Paranoia
+    {
+        NONE, CONSTANT, LINEAR, SUPERLINEAR, QUADRATIC
+    }
+
+    public enum ParanoiaCostFactor
+    {
+        LOW, HIGH
+    }
+
+    private static final int PARANOIA_COMPUTE = Paranoia.valueOf(System.getProperty("accord.paranoia.cpu", "NONE")).ordinal();
+    private static final int PARANOIA_MEMORY = Paranoia.valueOf(System.getProperty("accord.paranoia.memory", "NONE")).ordinal();
+    private static final int PARANOIA_FACTOR = Paranoia.valueOf(System.getProperty("accord.paranoia.costfactor", "LOW")).ordinal();
+    private static boolean IS_PARANOID = PARANOIA_COMPUTE > 0 || PARANOIA_MEMORY > 0;
     private static final boolean DEBUG = System.getProperty("accord.debug", "false").equals("true");
 
     public static boolean isParanoid()
     {
-        return PARANOIA > 0;
+        return PARANOIA_COMPUTE > 0;
     }
-    public static int paranoia()
+
+    public static boolean testParanoia(Paranoia compute, Paranoia memory, ParanoiaCostFactor factor)
     {
-        return PARANOIA;
+        return PARANOIA_COMPUTE >= compute.ordinal() && PARANOIA_MEMORY >= memory.ordinal() && PARANOIA_FACTOR >= factor.ordinal();
     }
+
     public static boolean debug()
     {
         return DEBUG;
