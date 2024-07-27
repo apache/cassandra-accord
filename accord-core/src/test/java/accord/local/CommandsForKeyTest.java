@@ -561,7 +561,7 @@ public class CommandsForKeyTest
         logger.info("Seed {}", seed);
         try
         {
-            final RandomSource rnd = RandomSource.wrap(new Random(seed));
+            final RandomSource rnd = new DefaultRandom(seed);
 
             final float runTaskChance = Math.max(0.01f, rnd.nextFloat());
             final float pruneChance = rnd.nextFloat() * (rnd.nextBoolean() ? 0.1f : 0.01f);
