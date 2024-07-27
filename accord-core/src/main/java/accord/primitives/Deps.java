@@ -117,6 +117,10 @@ public class Deps
      */
     public final KeyDeps keyDeps;
 
+    /**
+     * Range transaction dependencies. The execution of these is equivalent to {@code directKeyDeps}, in that they are
+     * managed via direct relationships in {@link accord.local.Command.WaitingOn}.
+     */
     public final RangeDeps rangeDeps;
 
     /**

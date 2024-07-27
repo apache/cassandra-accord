@@ -310,7 +310,7 @@ public class PrefixedIntHashKey implements RoutableKey
                     int rightInt = that instanceof Sentinel ? (((Sentinel) that).isMin ? -1 : 1) : 0;
                     rc = Integer.compare(leftInt, rightInt);
                 }
-                else if (!(this instanceof PrefixedIntRoutingKey) && (!(that instanceof PrefixedIntRoutingKey)))
+                else if (this instanceof Key && that instanceof Key)
                 {
                     rc = Integer.compare(this.key, other.key);
                 }

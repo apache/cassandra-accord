@@ -194,11 +194,6 @@ public abstract class SafeCommandStore
     protected abstract SafeCommandsForKey getInternalIfLoadedAndInitialised(Key key);
     public abstract boolean canExecuteWith(PreLoadContext context);
 
-    public void load(Command loaded)
-    {
-        update(null, loaded);
-    }
-
     protected void update(Command prev, Command updated)
     {
         updateMaxConflicts(prev, updated);
@@ -251,7 +246,7 @@ public abstract class SafeCommandStore
         }
         else
         {
-            safeStore = safeStore;
+            safeStore = safeStore; // prevent accidental usage inside lambda
             safeStore.commandStore().execute(context, safeStore0 -> updateManagedCommandsForKey(safeStore0, prev, next))
                           .begin(safeStore.commandStore().agent);
         }

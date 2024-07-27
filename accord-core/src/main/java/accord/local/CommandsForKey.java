@@ -143,13 +143,12 @@ import static accord.utils.SortedArrays.Search.FAST;
  *
  * TODO (expected): maintain separate redundantBefore and closedBefore timestamps, latter implied by any exclusivesyncpoint;
  *                  advance former based on Applied status of all TxnId before the latter
- * TODO (expected): track whether a TxnId is a write on this key only for execution (rather than globally)
+ * TODO (desired):  track whether a TxnId is a write on this key only for execution (rather than globally)
  * TODO (expected): merge with TimestampsForKey
- * TODO (desired):  save bytes by encoding InternalStatus in TxnId.flags()
+ * TODO (desired):  save space by encoding InternalStatus in TxnId.flags(), so that when executeAt==txnId we can save 8 bytes per entry
  * TODO (expected): remove a command that is committed to not intersect with the key for this store (i.e. if accepted in a later epoch than committed on, so ownership changes)
- * TODO (expected):  avoid updating transactions we don't manage the execution of - perhaps have a dedicated InternalStatus
- * TODO (expected): mark a command as notified once ready-to-execute or applying
- * TODO (required): more randomised testing
+ * TODO (expected): avoid updating transactions we don't manage the execution of - perhaps have a dedicated InternalStatus
+ * TODO (expected): minimise repeated notification, either by logic or marking a command as notified once ready-to-execute
  * TODO (required): linearizability violation detection
  */
 public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSummary
@@ -346,20 +345,29 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         }
     }
 
+    /**
+     * A TxnId that we have witnessed as a dependency that predates {@link #prunedBefore}, so we must load its
+     * Command state to determine if this is a new transaction to track, or if it is an already-applied transaction
+     * we have pruned.
+     */
     static class LoadingPruned extends TxnId
     {
         static final UpdateFunction.Simple<LoadingPruned> LOADINGF = UpdateFunction.Simple.of(LoadingPruned::merge);
-        final TxnId[] withAsDep;
 
-        public LoadingPruned(TxnId copy, TxnId[] withAsDep)
+        /**
+         * Transactions that had witnessed this pre-pruned TxnId and are therefore waiting for the load to complete
+         */
+        final TxnId[] witnessedBy;
+
+        public LoadingPruned(TxnId copy, TxnId[] witnessedBy)
         {
             super(copy);
-            this.withAsDep = withAsDep;
+            this.witnessedBy = witnessedBy;
         }
 
         LoadingPruned merge(LoadingPruned that)
         {
-            return new LoadingPruned(this, SortedArrays.linearUnion(withAsDep, that.withAsDep, cachedTxnIds()));
+            return new LoadingPruned(this, SortedArrays.linearUnion(witnessedBy, that.witnessedBy, cachedTxnIds()));
         }
 
         static Object[] empty()
@@ -367,47 +375,60 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             return BTree.empty();
         }
 
-        static Object[] load(Object[] loadingPruned, TxnId[] toLoad, TxnId withAsDep)
+        /**
+         * Updating {@code loadingPruned} to register that each element of {@code toLoad} is being loaded for {@code loadingFor}
+         */
+        static Object[] load(Object[] loadingPruned, TxnId[] toLoad, TxnId loadingFor)
         {
-            return load(loadingPruned, toLoad, new TxnId[] { withAsDep });
+            return load(loadingPruned, toLoad, new TxnId[] { loadingFor });
         }
 
-        static Object[] load(Object[] loadingPruned, TxnId[] toLoad, TxnId[] withAsDepAsList)
+        static Object[] load(Object[] loadingPruned, TxnId[] toLoad, TxnId[] loadingForAsList)
         {
             Object[] toLoadAsTree;
             try (BTree.FastBuilder<LoadingPruned> fastBuilder = BTree.fastBuilder())
             {
                 for (TxnId txnId : toLoad)
-                    fastBuilder.add(new LoadingPruned(txnId, withAsDepAsList));
+                    fastBuilder.add(new LoadingPruned(txnId, loadingForAsList));
                 toLoadAsTree = fastBuilder.build();
             }
             return BTree.update(loadingPruned, toLoadAsTree, LoadingPruned::compareTo, LOADINGF);
         }
 
-        static TxnId[] get(Object[] loadingPruned, TxnId find)
+        /**
+         * Find the list of TxnId that are waiting for {@code find} to load
+         */
+        static TxnId[] get(Object[] loadingPruned, TxnId find, TxnId[] ifNoMatch)
         {
             LoadingPruned obj = (LoadingPruned) BTree.find(loadingPruned, TxnId::compareTo, find);
             if (obj == null)
-                return NO_TXNIDS;
+                return ifNoMatch;
 
-            return obj.withAsDep;
+            return obj.witnessedBy;
         }
 
+        /**
+         * Updating {@code loadingPruned} to remove {@code find}, as it has been loaded
+         */
         static Object[] remove(Object[] loadingPruned, TxnId find)
         {
             return BTreeRemoval.remove(loadingPruned, TxnId::compareTo, find);
         }
 
+        /**
+         * Return true if {@code waitingId} is waiting for any transaction with a lower TxnId than waitingExecuteAt
+         */
         static boolean isWaiting(Object[] loadingPruned, TxnId waitingId, Timestamp waitingExecuteAt)
         {
             if (BTree.isEmpty(loadingPruned))
                 return false;
 
             int ceilIndex = BTree.ceilIndex(loadingPruned, Timestamp::compareTo, waitingExecuteAt);
+            // TODO (desired): this is O(n.lg n), whereas we could import the accumulate function and perform in O(max(m, lg n))
             for (int i = 0 ; i < ceilIndex ; ++i)
             {
-                TxnId[] withAsDep = ((LoadingPruned)BTree.findByIndex(loadingPruned, i)).withAsDep;
-                if (Arrays.binarySearch(withAsDep, waitingId) >= 0)
+                TxnId[] loadingFor = ((LoadingPruned)BTree.findByIndex(loadingPruned, i)).witnessedBy;
+                if (Arrays.binarySearch(loadingFor, waitingId) >= 0)
                     return true;
             }
 
@@ -415,6 +436,9 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         }
     }
 
+    /**
+     * An object representing the basic CommandsForKey state, extending TxnId to save memory and improve locality.
+     */
     public static class TxnInfo extends TxnId
     {
         public final InternalStatus status;
@@ -504,7 +528,12 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             return executeAt == this ? plainTxnId() : executeAt;
         }
 
-        // any uncommitted transactions we weren't aware of
+        /**
+         * Any uncommitted transactions the owning CommandsForKey is aware of, that could have been included in our
+         * dependencies but weren't.
+         *
+         * That is to say, any TxnId < depsKnownBefore() we have otherwise witnessed that were not witnessed by this transaction.
+         */
         public TxnId[] missing()
         {
             return NO_TXNIDS;
@@ -549,6 +578,9 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
     public static class TxnInfoExtra extends TxnInfo
     {
+        /**
+         * {@link TxnInfo#missing()}
+         */
         public final TxnId[] missing;
         public final Ballot ballot;
 
@@ -559,6 +591,9 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             this.ballot = ballot;
         }
 
+        /**
+         * {@link TxnInfo#missing()}
+         */
         @Override
         public TxnId[] missing()
         {
@@ -660,6 +695,10 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                         Invariants.checkState(txn.kind().witnesses(missingId));
                         Invariants.checkState(get(missingId, byId).status.compareTo(COMMITTED) < 0);
                     }
+                }
+                for (LoadingPruned txn : BTree.<LoadingPruned>iterable(loadingPruned))
+                {
+                    Invariants.checkState(indexOf(txn) < 0);
                 }
             }
         }
@@ -832,7 +871,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                                    CommandFunction<P1, T, T> map, P1 p1, T initialValue)
     {
         int start, end, loadingIndex = 0;
-        TxnId[] loadingWithAsDep = null;
+        TxnId[] loadingFor = null;
         {
             int insertPos = Arrays.binarySearch(byId, testTxnId);
             if (insertPos < 0)
@@ -848,12 +887,12 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                         if (testTxnId.compareTo(prunedBefore) >= 0)
                             return initialValue;
 
-                        loadingWithAsDep = LoadingPruned.get(loadingPruned, testTxnId);
+                        loadingFor = LoadingPruned.get(loadingPruned, testTxnId, NO_TXNIDS);
                         break;
 
                     case WITHOUT:
                         if (testTxnId.compareTo(prunedBefore) < 0)
-                            loadingWithAsDep = LoadingPruned.get(loadingPruned, testTxnId);
+                            loadingFor = LoadingPruned.get(loadingPruned, testTxnId, NO_TXNIDS);
                 }
             }
 
@@ -895,12 +934,12 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                     continue;
 
                 boolean hasAsDep;
-                if (loadingWithAsDep == null)
+                if (loadingFor == null)
                 {
                     TxnId[] missing = txn.missing();
                     hasAsDep = missing == NO_TXNIDS || Arrays.binarySearch(txn.missing(), testTxnId) < 0;
                 }
-                else if (loadingWithAsDep == NO_TXNIDS)
+                else if (loadingFor == NO_TXNIDS)
                 {
                     hasAsDep = false;
                 }
@@ -908,7 +947,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 {
                     // we could use expontentialSearch and moving index for improved algorithmic complexity,
                     // but since should be rarely taken path probably not worth code complexity
-                    loadingIndex = SortedArrays.exponentialSearch(loadingWithAsDep, loadingIndex, loadingWithAsDep.length, txn);
+                    loadingIndex = SortedArrays.exponentialSearch(loadingFor, loadingIndex, loadingFor.length, txn);
                     if (hasAsDep = (loadingIndex >= 0)) ++loadingIndex;
                     else loadingIndex = -1 - loadingIndex;
                 }
@@ -1033,9 +1072,6 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
     public static boolean needsUpdate(Command prev, Command updated)
     {
-        if (!updated.txnId().kind().isGloballyVisible())
-            return false;
-
         SaveStatus prevStatus;
         Ballot prevAcceptedOrCommitted;
         if (prev == null)
@@ -1090,9 +1126,9 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         }
 
         TxnInfo[] newById = new TxnInfo[byId.length + additionCount + (updatePos < 0 ? 1 : 0)];
-        TxnId[] loadingAsPrunedFor = LoadingPruned.get(newLoadingPruned, plainTxnId);
-        if (loadingAsPrunedFor != NO_TXNIDS)
-            newLoadingPruned = LoadingPruned.remove(newLoadingPruned, plainTxnId);
+        TxnId[] loadingAsPrunedFor = LoadingPruned.get(newLoadingPruned, plainTxnId, null); // we default to null to distinguish between no match, and a match with NO_TXNIDS
+        if (loadingAsPrunedFor != null) newLoadingPruned = LoadingPruned.remove(newLoadingPruned, plainTxnId);
+        else loadingAsPrunedFor = NO_TXNIDS;
 
         insertOrUpdateWithAdditions(insertPos, updatePos, plainTxnId, newInfo, additions, additionCount, newById, loadingAsPrunedFor);
         if (paranoia() >= 2)
@@ -1336,6 +1372,11 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
     }
 
     // TODO (required): additional linearizability violation detection, based on expectation of presence in missing set
+
+    /**
+     * {@code removeTxnId} no longer needs to be tracked in missing arrays;
+     * remove it from byId and committedByExecuteAt, ensuring both arrays still reference the same TxnInfo where updated
+     */
     private static void removeFromMissingArrays(TxnInfo[] byId, TxnInfo[] committedByExecuteAt, TxnId removeTxnId)
     {
         int startIndex = SortedArrays.binarySearch(committedByExecuteAt, 0, committedByExecuteAt.length, removeTxnId, (id, info) -> id.compareTo(info.executeAt), FAST);
@@ -1364,6 +1405,10 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         removeFromMissingArraysById(byId, minSearchIndex, byId.length, removeTxnId);
     }
 
+    /**
+     * {@code removeTxnId} no longer needs to be tracked in missing arrays;
+     * remove it from a range of byId ACCEPTED status entries only, that could not be tracked via committedByExecuteAt
+     */
     private static int removeFromMissingArraysById(TxnInfo[] byId, int from, int to, TxnId removeTxnId)
     {
         for (int i = from ; i < to ; ++i)
@@ -1382,6 +1427,11 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         return to;
     }
 
+    /**
+     * {@code insertTxnId} needs to be tracked in missing arrays;
+     * add it to byId and committedByExecuteAt, ensuring both arrays still reference the same TxnInfo where updated
+     * Do not insert it into any members of {@code doNotInsert} as these are known to have witnessed {@code insertTxnId}
+     */
     private static void addToMissingArrays(TxnInfo[] byId, TxnInfo[] committedByExecuteAt, TxnInfo newInfo, TxnId insertTxnId, @Nonnull TxnId[] doNotInsert)
     {
         TxnId[] oneMissing = null;
@@ -1466,6 +1516,10 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         }
     }
 
+    /**
+     * Take an index in {@code committedByExecuteAt}, find the companion entry in {@code byId}, and update both of them.
+     * Return the updated minSearchIndex used for querying {@code byId} - this will be updated only if txnId==executeAt
+     */
     @Inline
     private static int updateInfoArrays(int i, TxnInfo prevTxn, TxnInfo newTxn, int minSearchIndex, TxnInfo[] byId, TxnInfo[] committedByExecuteAt)
     {
@@ -1484,6 +1538,9 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         return minSearchIndex;
     }
 
+    /**
+     * If a {@code missing} contains {@code removeTxnId}, return a new array without it (or NO_TXNIDS if the only entry)
+     */
     private static TxnId[] removeOneMissing(TxnId[] missing, TxnId removeTxnId)
     {
         if (missing == NO_TXNIDS) return NO_TXNIDS;
@@ -1515,6 +1572,10 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         return result;
     }
 
+    /**
+     * Insert the contents of {@code additions} up to {@code additionCount} into {@code current}, ignoring {@code skipAddition} if not null.
+     * Only insert entries that would be witnessed by {@code owner}.
+     */
     private static TxnId[] mergeAndFilterMissing(TxnId owner, TxnId[] current, TxnId[] additions, int additionCount, @Nullable TxnId skipAddition)
     {
         Kinds kinds = owner.kind().witnesses();
@@ -1574,9 +1635,13 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         return to;
     }
 
+    /**
+     * A TxnInfo to insert alongside any dependencies we did not already know about
+     */
     static class InfoWithAdditions
     {
         final TxnInfo info;
+        // a cachedTxnIds() array that should be returned once done
         final TxnId[] additions;
         final int additionCount;
 
@@ -1601,6 +1666,10 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         return computeInfoAndAdditions(insertPos, updatePos, txnId, newStatus, ballot, executeAt, depsKnownBefore, command.partialDeps().keyDeps.txnIds(key));
     }
 
+    /**
+     * We return an Object here to avoid wasting allocations; most of the time we expect a new TxnInfo to be returned,
+     * but if we have transitive dependencies to insert we return an InfoWithAdditions
+     */
     private Object computeInfoAndAdditions(int insertPos, int updatePos, TxnId plainTxnId, InternalStatus newStatus, Ballot ballot, Timestamp executeAt, Timestamp depsKnownBefore, SortedList<TxnId> deps)
     {
         int depsKnownBeforePos;
@@ -1687,9 +1756,9 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         TxnInfo updatedCommitted = newInfo.status.isCommitted() ? newInfo : null;
         TxnInfo[] newCommittedByExecuteAt = committedByExecuteAt;
 
-        TxnId[] loadingAsPrunedFor = LoadingPruned.get(newLoadingPruned, plainTxnId);
-        if (loadingAsPrunedFor != NO_TXNIDS)
-            newLoadingPruned = LoadingPruned.remove(newLoadingPruned, plainTxnId);
+        TxnId[] loadingAsPrunedFor = LoadingPruned.get(newLoadingPruned, plainTxnId, null); // we default to null to distinguish between no match, and a match with NO_TXNIDS
+        if (loadingAsPrunedFor != null) newLoadingPruned = LoadingPruned.remove(newLoadingPruned, plainTxnId);
+        else loadingAsPrunedFor = NO_TXNIDS;
 
         if (!maybeInsertMissing)
         {
@@ -1874,8 +1943,8 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
 
                 if (predecessor >= 0)
                 {
-                    int maxContiguousAppliedAny = maxContiguousManagedAppliedIndex();
-                    if (maxContiguousAppliedAny >= predecessor)
+                    int maxContiguousApplied = maxContiguousManagedAppliedIndex();
+                    if (maxContiguousApplied >= predecessor)
                         predecessor = -1;
                 }
 
@@ -2082,7 +2151,6 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
                 }
             }
 
-            // TODO (now): must handle pruned status here as well
             if (!readyToExecute)
             {
                 TxnInfo[] newInfos = byId;
@@ -2572,22 +2640,23 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
         if (txnId.compareTo(shardRedundantBefore()) < 0)
             return this;
 
-        if (txnId.compareTo(prunedBefore) < 0)
-        {
-            TxnId[] txnIdArray = new TxnId[] { txnId };
-            Object[] newLoadingPruned = LoadingPruned.load(loadingPruned, txnIdArray, NO_TXNIDS);
-            return LoadPruned.load(new TxnId[] { txnId }, update(newLoadingPruned));
-        }
-
         int i = Arrays.binarySearch(byId, txnId);
         if (i >= 0)
         {
             if (byId[i].status.compareTo(HISTORICAL) >= 0)
                 return this;
-             return update(i, txnId, byId[i], TxnInfo.create(txnId, HISTORICAL, txnId, Ballot.ZERO));
+            return update(i, txnId, byId[i], TxnInfo.create(txnId, HISTORICAL, txnId, Ballot.ZERO));
         }
-
-        return insert(-1 - i, txnId, TxnInfo.create(txnId, HISTORICAL, txnId, Ballot.ZERO));
+        else if (txnId.compareTo(prunedBefore) >= 0)
+        {
+            return insert(-1 - i, txnId, TxnInfo.create(txnId, HISTORICAL, txnId, Ballot.ZERO));
+        }
+        else
+        {
+            TxnId[] txnIdArray = new TxnId[] { txnId };
+            Object[] newLoadingPruned = LoadingPruned.load(loadingPruned, txnIdArray, NO_TXNIDS);
+            return LoadPruned.load(new TxnId[] { txnId }, update(newLoadingPruned));
+        }
     }
 
     private int insertPos(int min, Timestamp timestamp)

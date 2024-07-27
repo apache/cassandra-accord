@@ -95,10 +95,8 @@ public class PartialDeps extends Deps
         if (!covers(covering))
             throw new IllegalArgumentException();
 
-        if (covers(covering))
-            return this;
-
-        return new PartialDeps(covering, keyDeps, rangeDeps, directKeyDeps);
+        if (covers(covering)) return this;
+        else throw Invariants.illegalArgument(this.covering + " does not cover " + covering);
     }
 
     @Override

@@ -32,17 +32,18 @@ import static accord.local.CommandsForKey.InternalStatus.PREACCEPTED_OR_ACCEPTED
 import static accord.local.KeyHistory.COMMANDS;
 import static accord.local.SaveStatus.LocalExecution.WaitingToExecute;
 
+/**
+ * Encapsulates an updated {@code CommandsForKey} and any follow-up notification work that cannot be performed as part
+ * of the {@code CommandsForKey} update because it can trigger updates that may lead to additional updates to the
+ * {@code CommandsForKey}, which would still be being constructed. We therefore first update the {@code CommandsForKey},
+ * then notify any work that might itself need to update the {@code CommandsForKey}.
+ */
 public abstract class CommandsForKeyUpdate
 {
     @VisibleForTesting
     public abstract CommandsForKey cfk();
     abstract ExtraNotify notifier();
     abstract void notify(SafeCommandStore safeStore, @Nullable CommandsForKey prevCfk, @Nullable Command command, NotifySink notifySink);
-
-    void notify(SafeCommandStore safeStore, @Nullable CommandsForKey prevCfk, @Nullable Command command)
-    {
-        notify(safeStore, prevCfk, command, DefaultNotifySink.INSTANCE);
-    }
 }
 
 interface NotifySink
@@ -168,3 +169,4 @@ class CommandsForKeyUpdateWithNotifier extends CommandsForKeyUpdate
         extraNotify.notify(safeStore, cfk.key(), notifySink);
     }
 }
+
