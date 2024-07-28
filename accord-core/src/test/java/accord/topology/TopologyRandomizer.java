@@ -42,12 +42,14 @@ import accord.impl.PrefixedIntHashKey;
 import accord.impl.PrefixedIntHashKey.Hash;
 import accord.impl.PrefixedIntHashKey.PrefixedIntRoutingKey;
 import accord.local.Node;
+import accord.local.Node.Id;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Routables;
 import accord.primitives.Timestamp;
 import accord.utils.Invariants;
 import accord.utils.RandomSource;
+import accord.utils.SortedArrays.SortedArrayList;
 import org.agrona.collections.IntHashSet;
 
 import static accord.burn.BurnTest.HASH_RANGE_END;
@@ -81,25 +83,25 @@ public class TopologyRandomizer
     }
 
     private static final Logger logger = LoggerFactory.getLogger(TopologyRandomizer.class);
-    private static final Node.Id[] EMPTY_NODES = new Node.Id[0];
+    private static final Id[] EMPTY_NODES = new Id[0];
     private static final Shard[] EMPTY_SHARDS = new Shard[0];
 
     private final RandomSource random;
     private final AtomicInteger currentPrefix;
     private final List<Topology> epochs = new ArrayList<>();
-    private final Function<Node.Id, Node> nodeLookup;
-    private final Map<Node.Id, Ranges> previouslyReplicated = new HashMap<>();
+    private final Function<Id, Node> nodeLookup;
+    private final Map<Id, Ranges> previouslyReplicated = new HashMap<>();
     private final TopologyUpdates topologyUpdates;
     private final Listener listener;
 
-    public TopologyRandomizer(Supplier<RandomSource> randomSupplier, Topology initialTopology, TopologyUpdates topologyUpdates, @Nullable Function<Node.Id, Node> nodeLookup, Listener listener)
+    public TopologyRandomizer(Supplier<RandomSource> randomSupplier, Topology initialTopology, TopologyUpdates topologyUpdates, @Nullable Function<Id, Node> nodeLookup, Listener listener)
     {
         this.random = randomSupplier.get();
         this.currentPrefix = new AtomicInteger(random.nextInt(0, 1024));
         this.topologyUpdates = topologyUpdates;
         this.epochs.add(Topology.EMPTY);
         this.epochs.add(initialTopology);
-        for (Node.Id node : initialTopology.nodes())
+        for (Id node : initialTopology.nodes())
             previouslyReplicated.put(node, initialTopology.rangesForNode(node));
         this.nodeLookup = nodeLookup;
         this.listener = listener;
@@ -209,13 +211,14 @@ public class TopologyRandomizer
         System.arraycopy(shards, 0, result, 0, idx);
         System.arraycopy(shards, idx + 2, result, idx + 1, shards.length - (idx + 2));
         Range range = PrefixedIntHashKey.range((Hash)left.range.start(), (Hash)right.range.end());
-        List<Node.Id> nodes; {
-            TreeSet<Node.Id> tmp = new TreeSet<>();
+        SortedArrayList<Id> nodes; {
+            TreeSet<Id> tmp = new TreeSet<>();
             tmp.addAll(left.nodes);
             tmp.addAll(right.nodes);
-            nodes = new ArrayList<>(tmp);
+            nodes = new SortedArrayList<>(tmp.toArray(new Id[0]));
         }
-        Set<Node.Id> joining = new TreeSet<>();
+
+        Set<Id> joining = new TreeSet<>();
         joining.addAll(left.joining);
         joining.addAll(right.joining);
         result[idx] = new Shard(range, nodes, newFastPath(nodes, random), joining);
@@ -237,7 +240,7 @@ public class TopologyRandomizer
         if (Arrays.stream(shards).allMatch(shard -> shard.sortedNodes.containsAll(shardLeft.sortedNodes) || shardLeft.containsAll(shard.sortedNodes)))
             return shards;
 
-        Set<Node.Id> joining = new HashSet<>(shardLeft.joining);
+        Set<Id> joining = new HashSet<>(shardLeft.joining);
 
         int idxRight;
         Shard shardRight;
@@ -247,8 +250,8 @@ public class TopologyRandomizer
             joining.addAll(shardRight.joining);
         } while (idxRight == idxLeft || shardLeft.sortedNodes.containsAll(shardRight.sortedNodes) || shardRight.sortedNodes.containsAll(shardLeft.sortedNodes));
 
-        List<Node.Id> nodesLeft;
-        Node.Id toRight;
+        List<Id> nodesLeft;
+        Id toRight;
         for (;;)
         {
             nodesLeft = new ArrayList<>(shardLeft.nodes);
@@ -257,8 +260,8 @@ public class TopologyRandomizer
                 break;
         }
 
-        List<Node.Id> nodesRight;
-        Node.Id toLeft;
+        List<Id> nodesRight;
+        Id toLeft;
         for (;;)
         {
             nodesRight = new ArrayList<>(shardRight.nodes);
@@ -271,8 +274,8 @@ public class TopologyRandomizer
         nodesRight.add(toRight);
 
         Shard[] newShards = shards.clone();
-        newShards[idxLeft] = new Shard(shardLeft.range, nodesLeft, newFastPath(nodesLeft, random), Sets.intersection(joining, new HashSet<>(nodesLeft)));
-        newShards[idxRight] = new Shard(shardRight.range, nodesRight, newFastPath(nodesRight, random), Sets.intersection(joining, new HashSet<>(nodesRight)));
+        newShards[idxLeft] = new Shard(shardLeft.range, SortedArrayList.copyUnsorted(nodesLeft, Id[]::new), newFastPath(nodesLeft, random), Sets.intersection(joining, new HashSet<>(nodesLeft)));
+        newShards[idxRight] = new Shard(shardRight.range, SortedArrayList.copyUnsorted(nodesRight, Id[]::new), newFastPath(nodesRight, random), Sets.intersection(joining, new HashSet<>(nodesRight)));
         logger.debug("updated membership on {} & {} {} {} to {} {}",
                     idxLeft, idxRight,
                     shardLeft.toString(true), shardRight.toString(true),
@@ -281,15 +284,15 @@ public class TopologyRandomizer
         return newShards;
     }
 
-    private static Set<Node.Id> newFastPath(List<Node.Id> nodes, RandomSource random)
+    private static Set<Id> newFastPath(List<Id> nodes, RandomSource random)
     {
-        List<Node.Id> available = new ArrayList<>(nodes);
+        List<Id> available = new ArrayList<>(nodes);
         int rf = available.size();
         int f = Shard.maxToleratedFailures(rf);
         int minSize = rf - f;
         int newSize = minSize + random.nextInt(f + 1);
 
-        Set<Node.Id> fastPath = new HashSet<>();
+        Set<Id> fastPath = new HashSet<>();
         for (int i=0; i<newSize; i++)
         {
             int idx = random.nextInt(available.size());
@@ -322,16 +325,16 @@ public class TopologyRandomizer
         // In implementations (such as Apache Cassandra) its possible that a range exists, gets removed, then added back (CREATE KEYSPACE, DROP KEYSPACE, CREATE KEYSPACE),
         // in this case the old prefix should be "cleared".
         int prefix = state.currentPrefix.incrementAndGet();
-        Set<Node.Id> joining = new HashSet<>();
-        Node.Id[] nodes;
+        Set<Id> joining = new HashSet<>();
+        Id[] nodes;
         {
-            Set<Node.Id> uniq = new HashSet<>();
+            Set<Id> uniq = new HashSet<>();
             for (Shard shard : shards)
             {
                 uniq.addAll(shard.nodes);
                 joining.addAll(shard.joining);
             }
-            Node.Id[] result = uniq.toArray(EMPTY_NODES);
+            Id[] result = uniq.toArray(EMPTY_NODES);
             Arrays.sort(result);
             nodes = result;
         }
@@ -355,8 +358,8 @@ public class TopologyRandomizer
         for (int i = 0; i < ranges.length; i++)
         {
             Range range = ranges[i];
-            List<Node.Id> replicas = select(nodes, rf, random);
-            Set<Node.Id> fastPath = newFastPath(replicas, random);
+            SortedArrayList<Id> replicas = select(nodes, rf, random);
+            Set<Id> fastPath = newFastPath(replicas, random);
             result.add(new Shard(range, replicas, fastPath, Sets.intersection(joining, new HashSet<>(replicas))));
         }
         return result.toArray(EMPTY_SHARDS);
@@ -375,18 +378,18 @@ public class TopologyRandomizer
         return prefixes;
     }
 
-    private static List<Node.Id> select(Node.Id[] nodes, int rf, RandomSource random)
+    private static SortedArrayList<Id> select(Id[] nodes, int rf, RandomSource random)
     {
         Invariants.checkArgument(nodes.length >= rf, "Given %d nodes, which is < rf of %d", nodes.length, rf);
-        List<Node.Id> result = new ArrayList<>(rf);
+        List<Id> result = new ArrayList<>(rf);
         while (result.size() < rf)
         {
-            Node.Id id = random.pick(nodes);
+            Id id = random.pick(nodes);
             // TODO (efficiency) : rf is normally "small", so is it worth it to have a set, bitset, or another structure?
             if (!result.contains(id))
                 result.add(id);
         }
-        return result;
+        return SortedArrayList.copyUnsorted(result, Id[]::new);
     }
 
     private static int prefix(Shard shard)
@@ -394,10 +397,10 @@ public class TopologyRandomizer
         return ((PrefixedIntHashKey) shard.range.start()).prefix;
     }
 
-    private static Map<Node.Id, Ranges> getAdditions(Topology current, Topology next)
+    private static Map<Id, Ranges> getAdditions(Topology current, Topology next)
     {
-        Map<Node.Id, Ranges> additions = new HashMap<>();
-        for (Node.Id node : next.nodes())
+        Map<Id, Ranges> additions = new HashMap<>();
+        for (Id node : next.nodes())
         {
             Ranges prev = current.rangesForNode(node);
             if (prev == null) prev = Ranges.EMPTY;
@@ -411,12 +414,12 @@ public class TopologyRandomizer
         return additions;
     }
 
-    private static boolean reassignsRanges(Topology current, Shard[] nextShards, Map<Node.Id, Ranges> previouslyReplicated)
+    private static boolean reassignsRanges(Topology current, Shard[] nextShards, Map<Id, Ranges> previouslyReplicated)
     {
         Topology next = new Topology(current.epoch + 1, nextShards);
-        Map<Node.Id, Ranges> additions = getAdditions(current, next);
+        Map<Id, Ranges> additions = getAdditions(current, next);
 
-        for (Map.Entry<Node.Id, Ranges> entry : additions.entrySet())
+        for (Map.Entry<Id, Ranges> entry : additions.entrySet())
         {
             if (previouslyReplicated.getOrDefault(entry.getKey(), Ranges.EMPTY).intersects(entry.getValue()))
                 return true;
@@ -468,8 +471,8 @@ public class TopologyRandomizer
 
         Topology nextTopology = new Topology(current.epoch + 1, newShards);
 
-        Map<Node.Id, Ranges> nextAdditions = getAdditions(current, nextTopology);
-        for (Map.Entry<Node.Id, Ranges> entry : nextAdditions.entrySet())
+        Map<Id, Ranges> nextAdditions = getAdditions(current, nextTopology);
+        for (Map.Entry<Id, Ranges> entry : nextAdditions.entrySet())
         {
             Ranges previous = previouslyReplicated.getOrDefault(entry.getKey(), Ranges.EMPTY);
             Ranges added = entry.getValue();
@@ -483,7 +486,7 @@ public class TopologyRandomizer
 
         if (nodeLookup != null)
         {
-            List<Node.Id> nodes = new ArrayList<>(nextTopology.nodes());
+            List<Id> nodes = new ArrayList<>(nextTopology.nodes());
             int originatorIdx = random.nextInt(nodes.size());
             topologyUpdates.notify(nodeLookup.apply(nodes.get(originatorIdx)), current, nextTopology);
         }
@@ -506,13 +509,13 @@ public class TopologyRandomizer
         return true;
     }
 
-    public void onStale(Node.Id id, Timestamp sinceAtLeast, Ranges ranges)
+    public void onStale(Id id, Timestamp sinceAtLeast, Ranges ranges)
     {
         int epoch = (int) sinceAtLeast.epoch();
-        Invariants.checkState(epochs.get(epoch).nodeLookup.get(id).ranges.containsAll(ranges));
+        Invariants.checkState(epochs.get(epoch).nodeLookup.get(id.id).ranges.containsAll(ranges));
         while (++epoch < epochs.size())
         {
-            ranges = ranges.slice(epochs.get(epoch).nodeLookup.get(id).ranges, Routables.Slice.Minimal);
+            ranges = ranges.slice(epochs.get(epoch).nodeLookup.get(id.id).ranges, Routables.Slice.Minimal);
             if (ranges.isEmpty())
                 return;
         }

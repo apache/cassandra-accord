@@ -23,6 +23,7 @@ import java.util.Objects;
 import java.util.function.Function;
 
 import accord.local.SafeCommandStore;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Timestamp;
 import accord.utils.async.AsyncChain;
@@ -96,6 +97,12 @@ public class ListRead implements Read
     public Read slice(Ranges ranges)
     {
         return new ListRead(executor, isEphemeralRead, userReadKeys.slice(ranges), keys.slice(ranges));
+    }
+
+    @Override
+    public Read intersecting(Participants<?> participants)
+    {
+        return new ListRead(executor, isEphemeralRead, userReadKeys.intersecting(participants), keys.intersecting(participants));
     }
 
     @Override

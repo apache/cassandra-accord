@@ -21,6 +21,7 @@ package accord.coordinate;
 import java.util.function.BiConsumer;
 
 import accord.local.Status.Known;
+import accord.messages.InformDurable;
 import accord.primitives.*;
 import accord.utils.Invariants;
 
@@ -104,6 +105,8 @@ public class MaybeRecover extends CheckShards<Route<?>>
                     // we have included the home key, and one that witnessed the definition has responded, so it should also know the full route
                     if (hasMadeProgress(full))
                     {
+                        if (full.durability.isDurable())
+                            node.send(topologies.forEpoch(txnId.epoch()).forKey(route.homeKey()).nodes, to -> new InformDurable(to, topologies, route, txnId, full.executeAtIfKnown(), full.durability));
                         callback.accept(full.toProgressToken(), null);
                     }
                     else

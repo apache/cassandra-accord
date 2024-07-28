@@ -126,7 +126,7 @@ public class CoordinateSyncPoint<S extends Seekables<?, ?>> extends CoordinatePr
         {
             // we don't need to fetch deps from Accept replies, so we don't need to contact unsynced epochs
             topologies = node.topology().forEpoch(route, txnId.epoch());
-            // TODO (required): consider the required semantics of a SyncPoint
+            // TODO (required, consider): consider the required semantics of a SyncPoint
             if (tracker.hasFastPathAccepted() && txnId.kind() == Kind.SyncPoint)
                 execute(adapter, node, topologies, route, FAST, txnId, txn, txnId, deps, this);
             else

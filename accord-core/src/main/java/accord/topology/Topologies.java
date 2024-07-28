@@ -22,9 +22,13 @@ import accord.api.TopologySorter;
 import accord.local.Node;
 import accord.local.Node.Id;
 import accord.primitives.Ranges;
+import accord.utils.ArrayBuffers;
+import accord.utils.ArrayBuffers.RecursiveObjectBuffers;
 import accord.utils.IndexedConsumer;
-import com.google.common.collect.Sets;
 import accord.utils.Invariants;
+import accord.utils.SortedArrays;
+import accord.utils.SortedArrays.SortedArrayList;
+import accord.utils.SortedList;
 
 import java.util.*;
 
@@ -62,9 +66,8 @@ public interface Topologies extends TopologySorter
 
     boolean contains(Id to);
 
-    Set<Node.Id> nodes();
-
-    Set<Node.Id> copyOfNodes();
+    // note this can be expensive to evaluate
+    SortedList<Id> nodes();
 
     int estimateUniqueNodes();
 
@@ -201,15 +204,9 @@ public interface Topologies extends TopologySorter
         }
 
         @Override
-        public Set<Node.Id> nodes()
+        public SortedList<Node.Id> nodes()
         {
             return topology.nodes();
-        }
-
-        @Override
-        public Set<Id> copyOfNodes()
-        {
-            return new HashSet<>(nodes());
         }
 
         @Override
@@ -362,18 +359,34 @@ public interface Topologies extends TopologySorter
         }
 
         @Override
-        public Set<Node.Id> nodes()
+        public SortedList<Id> nodes()
         {
-            Set<Node.Id> result = Sets.newLinkedHashSetWithExpectedSize(estimateUniqueNodes());
-            for (int i=0,mi=size(); i<mi; i++)
-                result.addAll(get(i).nodes());
-            return result;
-        }
+            if (topologies.size() == 1)
+                return topologies.get(0).nodes();
 
-        @Override
-        public Set<Id> copyOfNodes()
-        {
-            return nodes();
+            if (topologies.isEmpty())
+                return new SortedArrayList<>(new Id[0]);
+
+            RecursiveObjectBuffers<Object> merging = new RecursiveObjectBuffers<>(ArrayBuffers.cachedAny());
+
+            int bufferSize = topologies.get(0).nodes().size();
+            Object[] buffer = merging.get(bufferSize);
+            buffer = topologies.get(0).nodes().toArray(buffer);
+
+            for (int i = 1; i < topologies.size() ; ++i)
+            {
+                Topology topology = topologies.get(i);
+                Node.Id[] input = topology.nodes().backingArrayUnsafe();
+
+                buffer = SortedArrays.linearUnion(buffer, 0, bufferSize, input, 0, input.length, (a, b) -> ((Id)a).compareTo((Id)b), merging);
+                bufferSize = merging.sizeOfLast(buffer);
+            }
+
+            Id[] array = new Id[bufferSize];
+            System.arraycopy(buffer, 0, array, 0, bufferSize);
+            SortedArrayList<Id> result = new SortedArrayList<>(array);
+            merging.discardBuffers();
+            return result;
         }
 
         @Override

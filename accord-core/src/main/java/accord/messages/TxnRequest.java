@@ -107,6 +107,7 @@ public abstract class TxnRequest<R> implements Request, PreLoadContext, MapReduc
     public final TxnId txnId;
     public final PartialRoute<?> scope;
     public final long waitForEpoch;
+    // set on receive only
     protected transient RoutingKey progressKey;
     protected transient Node node;
     protected transient Id replyTo;

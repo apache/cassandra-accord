@@ -69,6 +69,7 @@ import static accord.local.PreLoadContext.contextFor;
 import static accord.local.PreLoadContext.empty;
 import static accord.local.SaveStatus.LocalExecution.NotReady;
 import static accord.local.SaveStatus.LocalExecution.WaitingToApply;
+import static accord.local.Status.KnownRoute.Full;
 import static accord.local.Status.PreApplied;
 import static accord.utils.Invariants.illegalState;
 
@@ -292,7 +293,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
                 {
                     Invariants.checkState(route != null || participants != null, "Route and participants are both undefined");
                     Invariants.checkState(participants == null || !participants.isEmpty(), "participants is empty");
-                    Invariants.checkState(route == null || route.hasParticipants(), "Route %s does not have participants", route);
+                    Invariants.checkState(route == null || !route.isEmpty(), "Route %s is empty", route);
 
                     this.route = Route.merge(this.route, (Route)route);
                     this.participants = Participants.merge(this.participants, (Participants) participants);
@@ -340,7 +341,7 @@ public class SimpleProgressLog implements ProgressLog.Factory
 
                             setProgress(Expected);
                             // TODO (required): we might not be in the coordinating OR execution epochs if an accept round contacted us but recovery did not (quite hard to achieve)
-                            Invariants.checkState(fail != null || !blockedUntil.isSatisfiedBy(success.propagates()));
+                            Invariants.checkState(fail != null || !blockedUntil.isSatisfiedBy(success.propagates()) || success.route != Full);
                         }).begin(commandStore.agent());
                     };
 

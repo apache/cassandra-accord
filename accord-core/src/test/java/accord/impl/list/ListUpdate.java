@@ -29,6 +29,7 @@ import accord.api.Key;
 import accord.api.Update;
 import accord.local.CommandStore;
 import accord.primitives.Keys;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
@@ -72,6 +73,18 @@ public class ListUpdate extends TreeMap<Key, Integer> implements Update
         for (Map.Entry<Key, Integer> e : entrySet())
         {
             if (ranges.contains(e.getKey()))
+                result.put(e.getKey(), e.getValue());
+        }
+        return result;
+    }
+
+    @Override
+    public Update intersecting(Participants<?> participants)
+    {
+        ListUpdate result = new ListUpdate(executor);
+        for (Map.Entry<Key, Integer> e : entrySet())
+        {
+            if (participants.contains(e.getKey()))
                 result.put(e.getKey(), e.getValue());
         }
         return result;

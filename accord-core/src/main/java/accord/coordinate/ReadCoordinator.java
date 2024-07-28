@@ -95,7 +95,7 @@ public abstract class ReadCoordinator<Reply extends accord.messages.Reply> exten
     protected final TxnId txnId;
     private boolean isDone;
     private Throwable failure;
-    final Map<Id, Object> debug = debug() ? new HashMap<>() : null;
+    final Map<Id, Object> debug = debug() ? new TreeMap<>() : null;
 
     protected ReadCoordinator(Node node, Topologies topologies, TxnId txnId)
     {

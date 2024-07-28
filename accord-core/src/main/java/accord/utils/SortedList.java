@@ -18,10 +18,49 @@
 
 package accord.utils;
 
+import java.util.AbstractList;
 import java.util.List;
+import java.util.RandomAccess;
+import java.util.Set;
+import java.util.Spliterator;
 
-public interface SortedList<T extends Comparable<? super T>> extends List<T>
+public interface SortedList<T extends Comparable<? super T>> extends List<T>, Set<T>, RandomAccess
 {
     int findNext(int i, Comparable<? super T> find);
     int find(Comparable<? super T> find);
+
+    @Override
+    default boolean contains(Object o)
+    {
+        return o != null && find((Comparable<? super T>) o) >= 0;
+    }
+
+    @Override
+    default int indexOf(Object o)
+    {
+        return o == null ? -1 : Math.max(-1, find((Comparable<? super T>) o));
+    }
+
+    @Override
+    default Spliterator<T> spliterator()
+    {
+        return List.super.spliterator();
+    }
+
+    @Override
+    default int lastIndexOf(Object o)
+    {
+        return indexOf(o);
+    }
+
+    default <V> List<V> select(V[] selectFrom, List<T> select)
+    {
+        return new AbstractList<>()
+        {
+            @Override
+            public V get(int index) { return selectFrom[find(select.get(index))]; }
+            @Override
+            public int size() { return select.size(); }
+        };
+    }
 }

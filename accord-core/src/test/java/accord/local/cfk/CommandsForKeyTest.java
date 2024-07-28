@@ -67,6 +67,7 @@ import accord.primitives.Deps;
 import accord.primitives.EpochSupplier;
 import accord.primitives.FullRoute;
 import accord.primitives.Keys;
+import accord.primitives.PartialDeps;
 import accord.primitives.Participants;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
@@ -496,20 +497,20 @@ public class CommandsForKeyTest
         Command accepted(TxnId txnId, Timestamp executeAt, SaveStatus saveStatus)
         {
             Deps deps = generateDeps(txnId, txnId, Status.Accepted);
-            return Command.Accepted.accepted(common(txnId, saveStatus.known.definition.isKnown()).partialDeps(deps.slice(RANGES)),
+            return Command.Accepted.accepted(common(txnId, saveStatus.known.definition.isKnown()).partialDeps(deps.intersecting(txnId.domain() == Domain.Key ? KEY_ROUTE : RANGE_ROUTE)),
                                         saveStatus, executeAt, Ballot.ZERO, Ballot.ZERO);
         }
 
         Command committed(TxnId txnId, Timestamp executeAt)
         {
             Deps deps = generateDeps(txnId, executeAt, Status.Committed);
-            return Command.Committed.committed(common(txnId).partialDeps(deps.slice(RANGES)), SaveStatus.Committed, executeAt, Ballot.ZERO, Ballot.ZERO, null);
+            return Command.Committed.committed(common(txnId).partialDeps(slice(txnId, deps)), SaveStatus.Committed, executeAt, Ballot.ZERO, Ballot.ZERO, null);
         }
 
         Command stable(TxnId txnId, Timestamp executeAt, @Nullable Command.Committed committed)
         {
             Deps deps = committed == null ? generateDeps(txnId, executeAt, Status.Stable) : committed.partialDeps();
-            CommonAttributes common = common(txnId).partialDeps(deps.slice(RANGES));
+            CommonAttributes common = common(txnId).partialDeps(slice(txnId, deps));
             Command.WaitingOn waitingOn = initialiseWaitingOn(txnId, executeAt, common.route(), deps);
             return Command.Committed.committed(common, SaveStatus.Stable, executeAt, Ballot.ZERO, Ballot.ZERO, waitingOn);
         }
@@ -517,7 +518,7 @@ public class CommandsForKeyTest
         Command applied(TxnId txnId, Timestamp executeAt, @Nullable Command.Committed committed)
         {
             Deps deps = committed == null ? generateDeps(txnId, executeAt, Status.Applied) : committed.partialDeps();
-            CommonAttributes common = common(txnId).partialDeps(deps.slice(RANGES));
+            CommonAttributes common = common(txnId).partialDeps(slice(txnId, deps));
             Command.WaitingOn waitingOn = committed == null || committed.waitingOn == null ? initialiseWaitingOn(txnId, executeAt, common.route(), deps) : committed.waitingOn;
             return new Command.Executed(common, SaveStatus.Applied, executeAt, Ballot.ZERO, Ballot.ZERO, waitingOn,
                                         new Writes(txnId, executeAt, KEYS, null), new Result(){});
@@ -563,6 +564,11 @@ public class CommandsForKeyTest
             TxnId bound = generateId(from.first(), from.last());
             TxnId txnId = from.floor(bound);
             return byId.get(txnId);
+        }
+
+        private static PartialDeps slice(TxnId txnId, Deps deps)
+        {
+            return deps.intersecting(txnId.domain() == Domain.Key ? KEY_ROUTE : RANGE_ROUTE);
         }
     }
 
@@ -866,6 +872,12 @@ public class CommandsForKeyTest
 
         @Override
         public Read slice(Ranges ranges)
+        {
+            return this;
+        }
+
+        @Override
+        public Read intersecting(Participants<?> participants)
         {
             return this;
         }

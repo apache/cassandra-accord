@@ -22,19 +22,11 @@ import accord.api.RoutingKey;
 
 import javax.annotation.Nullable;
 
-public interface Route<K extends Unseekable> extends Unseekables<K>
+public interface Route<K extends Unseekable> extends Participants<K>
 {
     RoutingKey homeKey();
 
-    /**
-     * @return true iff homeKey() is involved in the transaction, not only in its coordination (i.e. txn.keys().contains(homeKey())
-     */
-    boolean isParticipatingHomeKey();
-    RoutingKey someParticipatingKey();
-
     default boolean isRoute() { return true; }
-
-    boolean covers(Ranges ranges);
 
     /**
      * Return an object containing any {@code K} present in either of the original collections,
@@ -47,9 +39,13 @@ public interface Route<K extends Unseekable> extends Unseekables<K>
 
     @Override
     PartialRoute<K> slice(Ranges ranges);
+    @Override
     PartialRoute<K> slice(Ranges ranges, Slice slice);
-    PartialRoute<K> sliceStrict(Ranges ranges);
-    Ranges sliceCovering(Ranges ranges, Slice slice);
+
+    @Override
+    Route<K> intersecting(Unseekables<?> intersecting);
+    @Override
+    Route<K> intersecting(Unseekables<?> intersecting, Slice slice);
 
     Route<K> withHomeKey();
 
@@ -72,11 +68,6 @@ public interface Route<K extends Unseekable> extends Unseekables<K>
      * Return the unseekables excluding any coordination-only home key, that intersect the provided ranges
      */
     Participants<K> participants(Ranges ranges, Slice slice);
-
-    default boolean hasParticipants()
-    {
-        return size() > (isParticipatingHomeKey() || !contains(homeKey()) ? 0 : 1);
-    }
 
     // this method exists solely to circumvent JDK bug with testing and casting interfaces
     static boolean isFullRoute(@Nullable Unseekables<?> unseekables) { return unseekables != null && unseekables.kind().isFullRoute(); }
@@ -116,8 +107,8 @@ public interface Route<K extends Unseekable> extends Unseekables<K>
         switch (unseekables.domain())
         {
             default: return null;
-            case Key: return (FullKeyRoute) unseekables;
-            case Range: return (FullRangeRoute) unseekables;
+            case Key: return unseekables instanceof FullKeyRoute ? (FullKeyRoute) unseekables : null;
+            case Range: return unseekables instanceof FullRangeRoute ? (FullRangeRoute) unseekables : null;
         }
     }
 

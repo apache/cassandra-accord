@@ -32,6 +32,7 @@ import javax.annotation.Nullable;
 
 import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAndCallback;
 import static accord.primitives.Route.castToRoute;
+import static accord.primitives.Route.isFullRoute;
 import static accord.primitives.Route.isRoute;
 
 /**
@@ -61,13 +62,13 @@ public class FetchData extends CheckShards<Route<?>>
         Invariants.checkArgument(node.topology().hasEpoch(srcEpoch), "Unknown epoch %d, latest known is %d", srcEpoch, node.epoch());
         long toEpoch = Math.max(srcEpoch, forLocalEpoch == null ? 0 : forLocalEpoch.epoch());
         Ranges ranges = node.topology().localRangesForEpochs(txnId.epoch(), toEpoch);
-        if (!route.covers(ranges))
+        if (!Route.isFullRoute(route))
         {
             return fetchWithIncompleteRoute(fetch, node, txnId, route, forLocalEpoch, executeAt, callback);
         }
         else
         {
-            return fetchInternal(ranges, fetch, node, txnId, route.sliceStrict(ranges), executeAt, toEpoch, callback);
+            return fetchInternal(ranges, fetch, node, txnId, route.slice(ranges), executeAt, toEpoch, callback);
         }
     }
 
@@ -79,6 +80,10 @@ public class FetchData extends CheckShards<Route<?>>
             else if (foundRoute.route == null)
             {
                 reportRouteNotFound(node, txnId, executeAt, forLocalEpoch, someUnseekables, foundRoute.known, callback);
+            }
+            else if (isFullRoute(foundRoute.route))
+            {
+                fetch(fetch, node, txnId, Route.castToFullRoute(foundRoute.route), forLocalEpoch, executeAt, callback);
             }
             else if (isRoute(someUnseekables) && someUnseekables.containsAll(foundRoute.route))
             {
@@ -119,7 +124,7 @@ public class FetchData extends CheckShards<Route<?>>
             case Erased:
             case WasApply:
             case Apply:
-                // TODO (required): we may now be stale
+                // TODO (expected): we may be stale
                 callback.accept(found, null);
         }
     }
@@ -140,7 +145,7 @@ public class FetchData extends CheckShards<Route<?>>
         return node.awaitEpoch(executeAt).map(ignore -> {
             long toEpoch = Math.max(fetch.fetchEpoch(txnId, executeAt), forLocalEpoch == null ? 0 : forLocalEpoch.epoch());
             Ranges ranges = node.topology().localRangesForEpochs(txnId.epoch(), toEpoch);
-            return fetchInternal(ranges, fetch, node, txnId, route.sliceStrict(ranges), executeAt, toEpoch, callback);
+            return fetchInternal(ranges, fetch, node, txnId, route.slice(ranges), executeAt, toEpoch, callback);
         }).beginAsResult();
     }
 
@@ -148,7 +153,7 @@ public class FetchData extends CheckShards<Route<?>>
     {
         long srcEpoch = target.fetchEpoch(txnId, executeAt);
         Invariants.checkArgument(node.topology().hasEpoch(srcEpoch), "Unknown epoch %d, latest known is %d", srcEpoch, node.epoch());
-        PartialRoute<?> fetch = route.sliceStrict(ranges);
+        PartialRoute<?> fetch = route.slice(ranges);
         return fetchData(target, node, txnId, fetch, srcEpoch, forLocalEpoch, (sufficientFor, fail) -> {
             if (fail != null) callback.accept(null, fail);
             else callback.accept(sufficientFor, null);

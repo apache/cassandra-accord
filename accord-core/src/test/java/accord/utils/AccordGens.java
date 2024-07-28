@@ -51,6 +51,7 @@ import accord.primitives.Txn;
 import accord.primitives.TxnId;
 import accord.topology.Shard;
 import accord.topology.Topology;
+import accord.utils.SortedArrays.SortedArrayList;
 import org.agrona.collections.IntHashSet;
 
 import static accord.utils.Utils.toArray;
@@ -298,11 +299,11 @@ public class AccordGens
         };
     }
 
-    public static Gen<Shard> shards(Gen<Range> rangeGen, Gen<List<Node.Id>> nodesGen)
+    public static Gen<Shard> shards(Gen<Range> rangeGen, Gen<SortedArrayList<Node.Id>> nodesGen)
     {
         return rs -> {
             Range range = rangeGen.next(rs);
-            List<Node.Id> nodes = nodesGen.next(rs);
+            SortedArrayList<Node.Id> nodes = nodesGen.next(rs);
             int maxFailures = (nodes.size() - 1) / 2;
             Set<Node.Id> fastPath = new HashSet<>();
             if (maxFailures == 0)
@@ -367,8 +368,9 @@ public class AccordGens
             for (int i = 0; i < ranges.size() ; ++i)
             {
                 WrapAroundList<Node.Id> replicas = electorates.get(i % electorates.size());
+                SortedArrayList<Node.Id> sortedIds = SortedArrayList.copyUnsorted(replicas, Node.Id[]::new);
                 Range range = ranges.get(i);
-                shards.add(shards(ignore -> range, ignore -> replicas).next(rs));
+                shards.add(shards(ignore -> range, ignore -> sortedIds).next(rs));
                 replicas.forEach(noShard::remove);
             }
             if (!noShard.isEmpty())

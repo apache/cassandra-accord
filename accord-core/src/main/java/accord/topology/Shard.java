@@ -26,9 +26,9 @@ import accord.local.Node.Id;
 import accord.primitives.Range;
 import accord.primitives.RoutableKey;
 import accord.utils.SortedArrays.ExtendedSortedArrayList;
+import accord.utils.SortedArrays.SortedArrayList;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 
@@ -38,7 +38,7 @@ import static accord.utils.Invariants.checkArgument;
 public class Shard
 {
     public final Range range;
-    public final List<Id> nodes;
+    public final SortedArrayList<Id> nodes;
     public final ExtendedSortedArrayList<Id> sortedNodes;
     public final Set<Id> fastPathElectorate;
     public final Set<Id> joining;
@@ -47,10 +47,10 @@ public class Shard
     public final int fastPathQuorumSize;
     public final int slowPathQuorumSize;
 
-    public Shard(Range range, List<Id> nodes, Set<Id> fastPathElectorate, Set<Id> joining)
+    public Shard(Range range, SortedArrayList<Id> nodes, Set<Id> fastPathElectorate, Set<Id> joining)
     {
         this.range = range;
-        this.nodes = ImmutableList.copyOf(nodes);
+        this.nodes = nodes;
         this.sortedNodes = ExtendedSortedArrayList.sortedCopyOf(nodes, Id[]::new);
         this.maxFailures = maxToleratedFailures(nodes.size());
         this.fastPathElectorate = ImmutableSet.copyOf(fastPathElectorate);
@@ -62,7 +62,7 @@ public class Shard
         this.fastPathQuorumSize = fastPathQuorumSize(nodes.size(), e, maxFailures);
     }
 
-    public Shard(Range range, List<Id> nodes, Set<Id> fastPathElectorate)
+    public Shard(Range range, SortedArrayList<Id> nodes, Set<Id> fastPathElectorate)
     {
         this(range, nodes, fastPathElectorate, Collections.emptySet());
     }

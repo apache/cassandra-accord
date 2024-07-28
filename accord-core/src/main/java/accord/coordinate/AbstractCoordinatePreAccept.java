@@ -18,9 +18,9 @@
 
 package accord.coordinate;
 
-import java.util.LinkedHashMap;
+import java.util.Collection;
 import java.util.Map;
-import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.BiConsumer;
 
 import javax.annotation.Nullable;
@@ -103,7 +103,7 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
     private Topologies topologies;
     private boolean initialRoundIsDone;
     private ExtraEpochs extraEpochs;
-    private Map<Id, Object> debug = Invariants.debug() ? new LinkedHashMap<>() : null;
+    private Map<Id, Object> debug = Invariants.debug() ? new TreeMap<>() : null;
 
     AbstractCoordinatePreAccept(Node node, FullRoute<?> route, TxnId txnId)
     {
@@ -124,7 +124,7 @@ abstract class AbstractCoordinatePreAccept<T, R> extends SettableResult<T> imple
     }
 
     abstract Seekables<?, ?> keysOrRanges();
-    abstract void contact(Set<Id> nodes, Topologies topologies, Callback<R> callback);
+    abstract void contact(Collection<Id> nodes, Topologies topologies, Callback<R> callback);
     abstract void onSuccessInternal(Id from, R reply);
     /**
      * The tracker for the extra rounds only is provided by the AbstractCoordinatePreAccept, so we expect a boolean back

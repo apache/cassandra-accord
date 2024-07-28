@@ -18,10 +18,6 @@
 
 package accord.coordinate;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.function.BiConsumer;
 
 import accord.coordinate.tracking.InvalidationTracker;
@@ -31,12 +27,14 @@ import accord.local.Node.Id;
 import accord.messages.Commit;
 import accord.local.*;
 import accord.primitives.*;
+import accord.topology.Shard;
 import accord.topology.Topologies;
 
 import accord.api.RoutingKey;
 import accord.messages.BeginInvalidation;
 import accord.messages.BeginInvalidation.InvalidateReply;
 import accord.messages.Callback;
+import accord.topology.Topology;
 import accord.utils.Invariants;
 
 import javax.annotation.Nullable;
@@ -60,10 +58,10 @@ public class Invalidate implements Callback<InvalidateReply>
     private boolean isDone;
     private boolean isPrepareDone;
     private final boolean transitivelyInvokedByPriorInvalidation;
-    private final List<InvalidateReply> replies = new ArrayList<>();
+    private final InvalidateReply[] replies;
+    private final Topology topology;
     private final InvalidationTracker tracker;
     private Throwable failure;
-    private final Map<Id, InvalidateReply> debug = Invariants.debug() ? new HashMap<>() : null;
 
     private Invalidate(Node node, Ballot ballot, TxnId txnId, Unseekables<?> invalidateWith, boolean transitivelyInvokedByPriorInvalidation, BiConsumer<Outcome, Throwable> callback)
     {
@@ -74,7 +72,10 @@ public class Invalidate implements Callback<InvalidateReply>
         this.transitivelyInvokedByPriorInvalidation = transitivelyInvokedByPriorInvalidation;
         this.invalidateWith = invalidateWith;
         Topologies topologies = node.topology().forEpoch(invalidateWith, txnId.epoch());
+        Invariants.checkState(topologies.size() == 1);
         this.tracker = new InvalidationTracker(topologies);
+        this.topology = topologies.current();
+        this.replies = new InvalidateReply[topology.nodes().size()];
     }
 
     public static Invalidate invalidate(Node node, TxnId txnId, Unseekables<?> invalidateWith, BiConsumer<Outcome, Throwable> callback)
@@ -101,8 +102,7 @@ public class Invalidate implements Callback<InvalidateReply>
         if (isDone || isPrepareDone)
             return;
 
-        if (debug != null) debug.put(from, reply);
-        replies.add(reply);
+        replies[topology.nodes().find(from)] = reply;
         handle(tracker.recordSuccess(from, reply.isPromised(), reply.hasDecision(), reply.acceptedFastPath));
     }
 
@@ -148,19 +148,20 @@ public class Invalidate implements Callback<InvalidateReply>
         Invariants.checkState(!isPrepareDone);
         isPrepareDone = true;
 
-        // first look to see if it has already been
-        {
-            FullRoute<?> fullRoute = InvalidateReply.findRoute(replies);
-            Route<?> someRoute = InvalidateReply.mergeRoutes(replies);
-            InvalidateReply maxReply = InvalidateReply.max(replies);
+        FullRoute<?> fullRoute = InvalidateReply.findRoute(replies);
+        Route<?> someRoute = InvalidateReply.mergeRoutes(replies);
 
-            switch (maxReply.status)
+        // first look to see if it has already been decided/invalidated
+        // check each shard independently - if we find any that can be invalidated, do so
+        InvalidateReply max = InvalidateReply.max(replies);
+        InvalidateReply maxNotTruncated = max.status != Status.Truncated ? max : InvalidateReply.maxNotTruncated(replies);
+
+        if (maxNotTruncated != null)
+        {
+            switch (maxNotTruncated.status)
             {
-                default: throw illegalState();
-                case Truncated:
-                    isDone = true;
-                    callback.accept(TRUNCATED, null);
-                    return;
+                default: throw new AssertionError("Unhandled status: " + maxNotTruncated.status);
+                case Truncated: throw illegalState();
 
                 case AcceptedInvalidate:
                     // latest accept also invalidating, so we're on the same page and should finish our invalidation
@@ -176,7 +177,7 @@ public class Invalidate implements Callback<InvalidateReply>
                 case Stable:
                 case Committed:
                 case PreCommitted:
-                    Invariants.checkState(maxReply.status == PreAccepted || !invalidateWith.contains(someRoute.homeKey()) || fullRoute != null);
+                    Invariants.checkState(maxNotTruncated.status == PreAccepted || !invalidateWith.contains(someRoute.homeKey()) || fullRoute != null);
 
                 case Accepted:
                     // TODO (desired, efficiency): if we see Committed or above, go straight to Execute if we have assembled enough information
@@ -193,7 +194,7 @@ public class Invalidate implements Callback<InvalidateReply>
 
                     // Note that there's lots of scope for variations in behaviour here, but lots of care is needed.
 
-                    Status witnessedByInvalidation = maxReply.status;
+                    Status witnessedByInvalidation = maxNotTruncated.status;
                     if (!witnessedByInvalidation.hasBeen(Accepted))
                     {
                         Invariants.checkState(tracker.all(InvalidationShardTracker::isPromised));
@@ -208,6 +209,22 @@ public class Invalidate implements Callback<InvalidateReply>
                     isDone = true;
                     commitInvalidate();
                     return;
+            }
+        }
+
+        if (max != maxNotTruncated)
+        {
+            boolean allShardsTruncated = true;
+            for (Shard shard : topology.shards())
+            {
+                InvalidateReply maxReply = InvalidateReply.max(replies, shard, topology.nodes());
+                allShardsTruncated &= maxReply.status == Status.Truncated;
+            }
+            if (allShardsTruncated)
+            {
+                isDone = true;
+                callback.accept(TRUNCATED, null);
+                return;
             }
         }
 

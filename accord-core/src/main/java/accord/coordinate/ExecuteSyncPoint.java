@@ -109,7 +109,7 @@ public abstract class ExecuteSyncPoint<S extends Seekables<?, ?>> extends Settab
         }
         else
         {
-            // TODO (required): we also need to handle ranges not being safe to read
+            // TODO (required, consider): do we need to handle ranges not being safe to read
             if (tracker.recordSuccess(from) == RequestStatus.Success)
                 onSuccess();
         }

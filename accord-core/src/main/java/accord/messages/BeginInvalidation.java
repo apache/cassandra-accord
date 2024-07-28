@@ -22,9 +22,12 @@ import accord.api.RoutingKey;
 import accord.local.*;
 import accord.local.Node.Id;
 import accord.primitives.*;
+import accord.topology.Shard;
 import accord.topology.Topologies;
+import accord.utils.SortedList;
 
 import javax.annotation.Nullable;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
@@ -167,24 +170,34 @@ public class BeginInvalidation extends AbstractEpochRequest<BeginInvalidation.In
             return MessageType.BEGIN_INVALIDATE_RSP;
         }
 
-        public static FullRoute<?> findRoute(List<InvalidateReply> invalidateOks)
+        public static FullRoute<?> findRoute(InvalidateReply[] invalidateOks)
         {
             for (InvalidateReply ok : invalidateOks)
             {
-                if (isFullRoute(ok.route))
+                if (ok != null && isFullRoute(ok.route))
                     return castToFullRoute(ok.route);
             }
             return null;
         }
 
-        public static Route<?> mergeRoutes(List<InvalidateReply> invalidateOks)
+        public static Route<?> mergeRoutes(InvalidateReply[] invalidateOks)
         {
             return mapReduceNonNull(ok -> (Route)ok.route, Route::union, invalidateOks);
         }
 
-        public static InvalidateReply max(List<InvalidateReply> invalidateReplies)
+        public static InvalidateReply max(InvalidateReply[] invalidateReplies, Shard shard, SortedList<Id> nodeIds)
         {
-            return Status.max(invalidateReplies, r -> r.status, r -> r.accepted, invalidateReply -> true);
+            return Status.max(nodeIds.select(invalidateReplies, shard.nodes), r -> r.status, r -> r.accepted, Objects::nonNull);
+        }
+
+        public static InvalidateReply max(InvalidateReply[] invalidateReplies)
+        {
+            return Status.max(Arrays.asList(invalidateReplies),r -> r.status, r -> r.accepted, Objects::nonNull);
+        }
+
+        public static InvalidateReply maxNotTruncated(InvalidateReply[] invalidateReplies)
+        {
+            return Status.max(Arrays.asList(invalidateReplies),r -> r.status, r -> r.accepted, r -> r != null && r.status != Status.Truncated);
         }
 
         public static RoutingKey findHomeKey(List<InvalidateReply> invalidateOks)

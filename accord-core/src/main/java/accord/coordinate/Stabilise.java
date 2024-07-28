@@ -18,8 +18,8 @@
 
 package accord.coordinate;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.function.BiConsumer;
 
 import accord.coordinate.tracking.QuorumTracker;
@@ -54,7 +54,7 @@ public abstract class Stabilise<R> implements Callback<ReadReply>
     final Timestamp executeAt;
     final Deps stabiliseDeps;
 
-    private final Map<Node.Id, Object> debug = debug() ? new HashMap<>() : null;
+    private final Map<Node.Id, Object> debug = debug() ? new TreeMap<>() : null;
     final QuorumTracker stableTracker;
     final Topologies allTopologies;
     final BiConsumer<? super R, Throwable> callback;

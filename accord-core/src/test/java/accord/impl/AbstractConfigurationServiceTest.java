@@ -21,7 +21,6 @@ package accord.impl;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -29,9 +28,10 @@ import java.util.stream.Collectors;
 
 import accord.api.ConfigurationService.EpochReady;
 import accord.primitives.Ranges;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.async.AsyncResult;
 import accord.utils.async.AsyncResults;
-import com.google.common.collect.ImmutableList;
+
 import com.google.common.collect.ImmutableSet;
 
 import accord.api.ConfigurationService;
@@ -175,15 +175,15 @@ public class AbstractConfigurationServiceTest
     private static final Id ID1 = new Id(1);
     private static final Id ID2 = new Id(2);
     private static final Id ID3 = new Id(3);
-    private static final List<Id> NODES = ImmutableList.of(ID1, ID2, ID3);
+    private static final SortedArrayList<Id> NODES = new SortedArrayList<>(new Id[] { ID1, ID2, ID3 });
     private static final Range RANGE = IntKey.range(0, 100);
 
-    private static Shard shard(Range range, List<Id> nodes, Set<Id> fastPath)
+    private static Shard shard(Range range, SortedArrayList<Id> nodes, Set<Id> fastPath)
     {
         return new Shard(range, nodes, fastPath);
     }
 
-    private static Topology topology(long epoch, Range range, List<Id> nodes, Set<Id> fastPath)
+    private static Topology topology(long epoch, Range range, SortedArrayList<Id> nodes, Set<Id> fastPath)
     {
         return new Topology(epoch, shard(range, nodes, fastPath));
     }

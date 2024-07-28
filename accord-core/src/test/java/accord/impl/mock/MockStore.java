@@ -27,6 +27,7 @@ import accord.api.Update;
 import accord.api.Write;
 import accord.local.Node;
 import accord.local.SafeCommandStore;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
@@ -74,6 +75,12 @@ public class MockStore implements DataStore
             }
 
             @Override
+            public Read intersecting(Participants<?> participants)
+            {
+                return MockStore.read(keys.intersecting(participants));
+            }
+
+            @Override
             public Read merge(Read other)
             {
                 return MockStore.read(((Seekables)keys).with(other.keys()));
@@ -107,6 +114,12 @@ public class MockStore implements DataStore
             public Update slice(Ranges ranges)
             {
                 return MockStore.update(keys.slice(ranges));
+            }
+
+            @Override
+            public Update intersecting(Participants<?> participants)
+            {
+                return MockStore.update(keys.intersecting(participants));
             }
 
             @Override

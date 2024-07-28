@@ -465,7 +465,7 @@ public abstract class CommandStore implements AgentExecutor
         Timestamp before = Timestamp.minForEpoch(epoch);
         FullRoute<?> route = node.computeRoute(id, ranges);
         // TODO (required): we need to ensure anyone we receive a reply from proposes newer timestamps for anything we don't see
-        CollectDeps.withDeps(node, id, route, ranges, before, (deps, fail) -> {
+        CollectDeps.withDeps(node, id, route, route, ranges, before, (deps, fail) -> {
             if (fail != null)
             {
                 fetchMajorityDeps(coordination, node, epoch, ranges);

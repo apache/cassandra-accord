@@ -40,20 +40,32 @@ implements Iterable<RoutingKey>, Unseekables<RoutingKey>, Participants<RoutingKe
     }
 
     @Override
-    public final AbstractUnseekableKeys intersect(Unseekables<?> keysOrRanges)
+    public final boolean intersectsAll(Unseekables<?> keysOrRanges)
     {
-        switch (keysOrRanges.domain())
+        return containsAll(keysOrRanges);
+    }
+
+    @Override
+    public AbstractUnseekableKeys intersecting(Unseekables<?> intersecting, Slice slice)
+    {
+        return intersecting(intersecting);
+    }
+
+    @Override
+    public AbstractUnseekableKeys intersecting(Unseekables<?> intersecting)
+    {
+        switch (intersecting.domain())
         {
-            default: throw new AssertionError("Unhandled domain: " + keysOrRanges.domain());
+            default: throw new AssertionError("Unhandled domain: " + intersecting.domain());
             case Key:
             {
-                AbstractUnseekableKeys that = (AbstractUnseekableKeys) keysOrRanges;
-                return weakWrap(intersect(that, ArrayBuffers.cachedRoutingKeys()), that);
+                AbstractUnseekableKeys that = (AbstractUnseekableKeys) intersecting;
+                return weakWrap(intersecting(that, ArrayBuffers.cachedRoutingKeys()), that);
             }
             case Range:
             {
-                AbstractRanges that = (AbstractRanges) keysOrRanges;
-                return wrap(intersect(that, ArrayBuffers.cachedRoutingKeys()));
+                AbstractRanges that = (AbstractRanges) intersecting;
+                return wrap(intersecting(that, ArrayBuffers.cachedRoutingKeys()));
             }
         }
     }

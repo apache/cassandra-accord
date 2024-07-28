@@ -40,6 +40,7 @@ import accord.api.ProgressLog;
 import accord.api.RoutingKey;
 import accord.local.CommandStore.EpochUpdateHolder;
 import accord.primitives.EpochSupplier;
+import accord.primitives.Participants;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Routables;
@@ -115,9 +116,9 @@ public abstract class CommandStores
         }
     }
 
-    static class ShardHolder
+    protected static class ShardHolder
     {
-        final CommandStore store;
+        public final CommandStore store;
         RangesForEpoch ranges;
 
         ShardHolder(CommandStore store)
@@ -335,9 +336,9 @@ public abstract class CommandStores
         }
     }
 
-    static class Snapshot
+    protected static class Snapshot
     {
-        final ShardHolder[] shards;
+        public final ShardHolder[] shards;
         final Int2ObjectHashMap<CommandStore> byId;
         final Topology local;
         final Topology global;
@@ -665,6 +666,11 @@ public abstract class CommandStores
         return  select(ranges -> ranges.intersects(route));
     }
 
+    public CommandStore select(Participants<?> participants)
+    {
+        return  select(ranges -> ranges.intersects(participants));
+    }
+
     private CommandStore select(Predicate<Ranges> fn)
     {
         ShardHolder[] shards = current.shards;
@@ -722,5 +728,10 @@ public abstract class CommandStores
                 return shard.store;
         }
         throw new IllegalArgumentException();
+    }
+
+    protected Snapshot current()
+    {
+        return current;
     }
 }

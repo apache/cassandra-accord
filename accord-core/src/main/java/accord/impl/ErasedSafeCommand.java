@@ -28,7 +28,8 @@ import accord.utils.Invariants;
 
 import static accord.local.Listeners.Immutable.EMPTY;
 import static accord.local.SaveStatus.Erased;
-import static accord.local.SaveStatus.ErasedOrInvalidated;
+import static accord.local.SaveStatus.ErasedOrInvalidOrVestigial;
+import static accord.local.Status.Durability.NotDurable;
 import static accord.local.Status.Durability.UniversalOrInvalidated;
 
 public class ErasedSafeCommand extends SafeCommand
@@ -38,8 +39,8 @@ public class ErasedSafeCommand extends SafeCommand
     public ErasedSafeCommand(TxnId txnId, SaveStatus saveStatus)
     {
         super(txnId);
-        Invariants.checkArgument(saveStatus == Erased || saveStatus == ErasedOrInvalidated);
-        this.erased = new Command.Truncated(txnId, saveStatus, UniversalOrInvalidated, null, null, EMPTY, null, null);
+        Invariants.checkArgument(saveStatus == Erased || saveStatus == ErasedOrInvalidOrVestigial);
+        this.erased = new Command.Truncated(txnId, saveStatus, saveStatus == ErasedOrInvalidOrVestigial ? NotDurable : UniversalOrInvalidated, null, null, EMPTY, null, null);
     }
 
     @Override

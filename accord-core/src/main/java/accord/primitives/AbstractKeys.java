@@ -155,7 +155,7 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
     @Override
     public Iterator<K> iterator()
     {
-        return new Iterator<K>()
+        return new Iterator<>()
         {
             int i = 0;
             @Override
@@ -180,7 +180,7 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
 
 
     // TODO (expected, efficiency): accept cached buffers
-    protected K[] slice(Ranges ranges, IntFunction<K[]> factory)
+    protected K[] slice(AbstractRanges ranges, IntFunction<K[]> factory)
     {
         return SortedArrays.sliceWithMultipleMatches(keys, ranges.ranges, factory, (k, r) -> -r.compareTo(k), Range::compareTo);
     }
@@ -204,12 +204,12 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
         return Arrays.copyOfRange(keys, start, end);
     }
 
-    protected K[] intersect(AbstractKeys<K> that, ObjectBuffers<K> buffers)
+    protected K[] intersecting(AbstractKeys<K> that, ObjectBuffers<K> buffers)
     {
         return SortedArrays.linearIntersection(this.keys, that.keys, buffers);
     }
 
-    protected K[] intersect(AbstractRanges ranges, ObjectBuffers<K> buffers)
+    protected K[] intersecting(AbstractRanges ranges, ObjectBuffers<K> buffers)
     {
         return SortedArrays.intersectWithMultipleMatches(keys, keys.length, ranges.ranges, ranges.ranges.length, (k, r) -> -r.compareTo(k), buffers);
     }
@@ -294,15 +294,12 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
 
     public final FullKeyRoute toRoute(RoutingKey homeKey)
     {
-        if (isEmpty())
-            return new FullKeyRoute(homeKey, false, new RoutingKey[] { homeKey });
-
-        return toRoutingKeysArray(homeKey, (routingKeys, homeKeyIndex, isParticipatingHomeKey) -> new FullKeyRoute(routingKeys[homeKeyIndex], isParticipatingHomeKey, routingKeys));
+        return toRoutingKeysArray(homeKey, false, (routingKeys, homeKeyIndex, isParticipatingHomeKey) -> new FullKeyRoute(routingKeys[homeKeyIndex], routingKeys));
     }
 
-    protected RoutingKey[] toRoutingKeysArray(RoutingKey withKey)
+    protected RoutingKey[] toRoutingKeysArray(RoutingKey withKey, boolean permitInsert)
     {
-        return toRoutingKeysArray(withKey, (routingKeys, homeKeyIndex, isParticipatingHomeKey) -> routingKeys);
+        return toRoutingKeysArray(withKey, permitInsert, (routingKeys, homeKeyIndex, isParticipatingHomeKey) -> routingKeys);
     }
 
     interface ToRoutingKeysFactory<T>
@@ -310,42 +307,36 @@ public abstract class AbstractKeys<K extends RoutableKey> implements Iterable<K>
         T apply(RoutingKey[] keys, int insertPos, boolean includesKey);
     }
 
-    @SuppressWarnings("SuspiciousSystemArraycopy")
-    protected <T> T toRoutingKeysArray(RoutingKey withKey, ToRoutingKeysFactory<T> toRoutingKeysFactory)
+    protected <T> T toRoutingKeysArray(RoutingKey withKey, boolean permitInsert, ToRoutingKeysFactory<T> toRoutingKeysFactory)
     {
+        RoutingKey[] copy;
         if (keys.getClass() == RoutingKey[].class)
         {
-            int insertPos = Arrays.binarySearch(keys, withKey);
-            if (insertPos >= 0)
-            {
-                Invariants.checkState(keys[insertPos].equals(withKey));
-                return toRoutingKeysFactory.apply((RoutingKey[])keys, insertPos, true);
-            }
-
-            insertPos = -1 - insertPos;
-            RoutingKey[] result = new RoutingKey[1 + keys.length];
-            System.arraycopy(keys, 0, result, 0, insertPos);
-            result[insertPos] = withKey;
-            System.arraycopy(keys, insertPos, result, insertPos + 1, keys.length - insertPos);
-            return toRoutingKeysFactory.apply(result, insertPos, false);
+            copy = (RoutingKey[])keys;
         }
         else
         {
-            RoutingKey[] result = new RoutingKey[keys.length];
+            copy = new RoutingKey[keys.length];
             for (int i = 0; i < keys.length; i++)
-                result[i] = keys[i].toUnseekable();
-            int insertPos = Arrays.binarySearch(result, withKey);
-            if (insertPos >= 0)
-                return toRoutingKeysFactory.apply(result, insertPos, true);
-            else
-                insertPos = -1 - insertPos;
-
-            RoutingKey[] newResult = new RoutingKey[1 + keys.length];
-            System.arraycopy(result, 0, newResult, 0, insertPos);
-            newResult[insertPos] = withKey;
-            System.arraycopy(result, insertPos, newResult, insertPos + 1, result.length - insertPos);
-            return toRoutingKeysFactory.apply(newResult, insertPos, false);
+                copy[i] = keys[i].toUnseekable();
         }
+
+        int insertPos = Arrays.binarySearch(copy, withKey);
+        if (insertPos >= 0)
+        {
+            Invariants.checkState(copy[insertPos].equals(withKey));
+            return toRoutingKeysFactory.apply(copy, insertPos, true);
+        }
+
+        if (!permitInsert)
+            throw new IllegalArgumentException(withKey + " is expected to be a member of " + Arrays.toString(copy));
+
+        insertPos = -1 - insertPos;
+        RoutingKey[] newResult = new RoutingKey[1 + copy.length];
+        System.arraycopy(copy, 0, newResult, 0, insertPos);
+        newResult[insertPos] = withKey;
+        System.arraycopy(copy, insertPos, newResult, insertPos + 1, copy.length - insertPos);
+        return toRoutingKeysFactory.apply(newResult, insertPos, false);
     }
 
     public final RoutingKeys toParticipants()

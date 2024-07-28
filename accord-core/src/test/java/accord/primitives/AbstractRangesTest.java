@@ -105,6 +105,18 @@ class AbstractRangesTest
         {
             throw new UnsupportedOperationException();
         }
+
+        @Override
+        public Routables<?> intersecting(Unseekables<?> intersecting)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Routables<Range> intersecting(Unseekables<?> intersecting, Slice slice)
+        {
+            throw new UnsupportedOperationException();
+        }
     }
 
     private static class PrefixKey extends IntKey.Routing
