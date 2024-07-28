@@ -24,14 +24,14 @@ public class PartialDeps extends Deps
 {
     public static final PartialDeps NONE = new PartialDeps(Ranges.EMPTY, KeyDeps.NONE, RangeDeps.NONE, KeyDeps.NONE);
 
-    public static Builder builder(Ranges covering)
+    public static Builder builder(Participants<?> covering)
     {
         return new Builder(covering);
     }
     public static class Builder extends AbstractBuilder<PartialDeps>
     {
-        final Ranges covering;
-        public Builder(Ranges covering)
+        final Participants<?> covering;
+        public Builder(Participants<?> covering)
         {
             this.covering = covering;
         }
@@ -50,20 +50,17 @@ public class PartialDeps extends Deps
     //      could also retain a simple bitset over the original FullRoute
     // TODO (required) remove this and related concepts, as can cause problems with topology changes for a single store
     //    where the store has some ranges that we participate in, and some we do not; we will not correctly construct covering in some cases
-    public final Ranges covering;
 
-    public PartialDeps(Ranges covering, KeyDeps keyDeps, RangeDeps rangeDeps, KeyDeps directKeyDeps)
+    public final Participants<?> covering; // set only if this is a range transaction, containing the minimal ranges of the original transaction that we cover
+    public PartialDeps(Participants<?> covering, KeyDeps keyDeps, RangeDeps rangeDeps, KeyDeps directKeyDeps)
     {
         super(keyDeps, rangeDeps, directKeyDeps);
         this.covering = covering;
-        Invariants.checkState(covering.containsAll(keyDeps.keys));
-        Invariants.checkState(covering.containsAll(directKeyDeps.keys));
-        Invariants.checkState(rangeDeps.isCoveredBy(covering));
     }
 
-    public boolean covers(Participants<?> participants)
+    public boolean covers(Unseekables<?> participants)
     {
-        return covering.containsAll(participants);
+        return covering.intersectsAll(participants);
     }
 
     public Deps with(Deps that)
@@ -75,10 +72,11 @@ public class PartialDeps extends Deps
 
     public PartialDeps with(PartialDeps that)
     {
-        return new PartialDeps(that.covering.with(this.covering),
-                this.keyDeps.with(that.keyDeps),
-                this.rangeDeps.with(that.rangeDeps),
-                this.directKeyDeps.with(that.directKeyDeps)
+        return new PartialDeps(
+            this.covering.with((Participants)that.covering),
+            this.keyDeps.with(that.keyDeps),
+            this.rangeDeps.with(that.rangeDeps),
+            this.directKeyDeps.with(that.directKeyDeps)
         );
     }
 
@@ -90,35 +88,12 @@ public class PartialDeps extends Deps
     }
 
     // covering might cover a wider set of ranges, some of which may have no involved keys
-    public PartialDeps reconstitutePartial(Ranges covering)
+    public PartialDeps reconstitutePartial(Participants<?> covering)
     {
         if (!covers(covering))
             throw new IllegalArgumentException();
 
         if (covers(covering)) return this;
-        else throw Invariants.illegalArgument(this.covering + " does not cover " + covering);
-    }
-
-    @Override
-    public boolean equals(Object that)
-    {
-        return this == that || (that instanceof PartialDeps && equals((PartialDeps) that));
-    }
-
-    @Override
-    public boolean equals(Deps that)
-    {
-        return that instanceof PartialDeps && equals((PartialDeps) that);
-    }
-
-    public boolean equals(PartialDeps that)
-    {
-        return that != null && this.covering.equals(that.covering) && super.equals(that);
-    }
-
-    @Override
-    public String toString()
-    {
-        return covering + ":" + super.toString();
+        else throw Invariants.illegalArgument(this + " does not cover " + covering);
     }
 }

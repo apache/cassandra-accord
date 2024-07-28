@@ -126,7 +126,7 @@ public class ExtendedAssertions
         public TopologyAssert isHostsEqualTo(List<Node.Id> nodes)
         {
             isNotNull();
-            objects.assertEqual(info, actual.nodes(), new HashSet<>(nodes));
+            objects.assertEqual(info, actual.nodes(), nodes);
             return myself;
         }
 

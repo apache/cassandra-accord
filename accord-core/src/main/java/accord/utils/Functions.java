@@ -57,6 +57,22 @@ public class Functions
         return result;
     }
 
+    public static <I, O> O mapReduceNonNull(Function<I, O> map, BiFunction<O, O, O> reduce, I[] input)
+    {
+        O result = null;
+        for (I i : input)
+        {
+            if (i == null) continue;
+
+            O o = map.apply(i);
+            if (o == null) continue;
+
+            if (result == null) result = o;
+            else result = reduce.apply(result, o);
+        }
+        return result;
+    }
+
     public static <I, O> O foldl(List<I> list, BiFunction<I, O, O> foldl, O zero)
     {
         O result = zero;

@@ -19,6 +19,7 @@
 package accord.api;
 
 import accord.local.SafeCommandStore;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Seekable;
 import accord.primitives.Seekables;
@@ -33,5 +34,7 @@ public interface Read
     Seekables<?, ?> keys();
     AsyncChain<Data> read(Seekable key, SafeCommandStore commandStore, Timestamp executeAt, DataStore store);
     Read slice(Ranges ranges);
+    Read intersecting(Participants<?> participants);
     Read merge(Read other);
+
 }

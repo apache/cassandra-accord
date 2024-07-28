@@ -78,7 +78,7 @@ public enum Status
      */
     PreCommitted      (Accept,  Maybe, DefinitionUnknown, ExecuteAtKnown,   DepsUnknown,  Unknown),
 
-    Committed         (Commit, Full,   DefinitionKnown,   ExecuteAtKnown,   DepsCommitted, Unknown),
+    Committed         (Commit,  Full,  DefinitionKnown,   ExecuteAtKnown,   DepsCommitted,Unknown),
     Stable            (Execute, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,    Unknown),
     PreApplied        (Persist, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,    Outcome.Apply),
     Applied           (Persist, Full,  DefinitionKnown,   ExecuteAtKnown,   DepsKnown,    Outcome.Apply),
@@ -886,6 +886,7 @@ public enum Status
             if (c < 0) { Durability tmp = a; a = b; b = tmp; }
             // if we know we are applied, we can remove the OrInvalidated qualifier
             if (a == UniversalOrInvalidated && (b == Majority || b == ShardUniversal || b == Local)) a = Universal;
+            // TODO (required, minor cleanup): should ShardUniversal+NotDurable=Local? It might be that we are stale.
             if ((a == ShardUniversal) && (b == Local || b == NotDurable)) a = Local;
             if (b == NotDurable && a.compareTo(MajorityOrInvalidated) < 0) a = NotDurable;
             return a;

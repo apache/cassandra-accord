@@ -306,9 +306,20 @@ public interface Txn
         public PartialTxn slice(Ranges ranges, boolean includeQuery)
         {
             return new PartialTxn.InMemory(
-                    ranges, kind(), keys().slice(ranges),
-                    read().slice(ranges), includeQuery ? query() : null,
-                    update() == null ? null : update().slice(ranges)
+                kind(), keys().slice(ranges),
+                read().slice(ranges), includeQuery ? query() : null,
+                update() == null ? null : update().slice(ranges)
+            );
+        }
+
+        @Nonnull
+        @Override
+        public PartialTxn intersecting(Participants<?> participants, boolean includeQuery)
+        {
+            return new PartialTxn.InMemory(
+                kind(), keys().intersecting(participants),
+                read().intersecting(participants), includeQuery ? query() : null,
+                update() == null ? null : update().intersecting(participants)
             );
         }
 
@@ -374,6 +385,7 @@ public interface Txn
     @Nullable Update update();
 
     @Nonnull PartialTxn slice(Ranges ranges, boolean includeQuery);
+    @Nonnull PartialTxn intersecting(Participants<?> participants, boolean includeQuery);
 
     default boolean isWrite()
     {

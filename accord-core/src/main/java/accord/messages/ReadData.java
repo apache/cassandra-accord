@@ -46,6 +46,7 @@ import static accord.messages.MessageType.READ_RSP;
 import static accord.messages.ReadData.CommitOrReadNack.Insufficient;
 import static accord.messages.ReadData.CommitOrReadNack.Redundant;
 import static accord.messages.TxnRequest.latestRelevantEpochIndex;
+import static accord.primitives.Routables.Slice.Minimal;
 import static accord.utils.Invariants.illegalState;
 import static accord.utils.MapReduceConsume.forEach;
 
@@ -191,6 +192,8 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
                 waitingOn.set(safeStore.commandStore().id());
                 ++waitingOnCount;
                 safeCommand.addListener(this);
+                // TODO (expected): should we invoke waiting directly? We depend on NotifyWaitingOn to make progress, and it will call this.
+                //  Though we might get PreApplied info earlier.
                 safeStore.progressLog().waiting(safeCommand, executeOn().min.execution, null, readScope);
                 beginWaiting(safeStore, false);
                 return status.compareTo(SaveStatus.Stable) >= 0 ? null : Insufficient;
@@ -318,7 +321,7 @@ public abstract class ReadData extends AbstractEpochRequest<ReadData.CommitOrRea
 
         if (newUnavailable != null && !newUnavailable.isEmpty())
         {
-            newUnavailable = newUnavailable.intersecting(readScope);
+            newUnavailable = newUnavailable.intersecting(readScope, Minimal);
             if (this.unavailable == null) this.unavailable = newUnavailable;
             else this.unavailable = newUnavailable.with(this.unavailable);
         }

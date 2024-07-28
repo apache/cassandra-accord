@@ -24,6 +24,7 @@ import accord.utils.CheckpointIntervalArrayBuilder.Accessor;
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 import static accord.utils.SortedArrays.Search.CEIL;
+import static accord.utils.SortedArrays.Search.FLOOR;
 
 public class CheckpointIntervalArray<Ranges, Range, Key>
 {
@@ -92,12 +93,12 @@ public class CheckpointIntervalArray<Ranges, Range, Key>
     }
 
     @Inline
-    public <P1, P2, P3, P4> int forEach(Range range, IndexedQuadConsumer<P1, P2, P3, P4> forEachScanOrCheckpoint, IndexedRangeQuadConsumer<P1, P2, P3, P4> forEachRange, P1 p1, P2 p2, P3 p3, P4 p4, int minIndex)
+    public <P1, P2, P3, P4> int forEachRange(Range range, IndexedQuadConsumer<P1, P2, P3, P4> forEachScanOrCheckpoint, IndexedRangeQuadConsumer<P1, P2, P3, P4> forEachRange, P1 p1, P2 p2, P3 p3, P4 p4, int minIndex)
     {
-        return forEach(accessor.start(range), accessor.end(range), forEachScanOrCheckpoint, forEachRange, p1, p2, p3, p4, minIndex);
+        return forEachRange(accessor.start(range), accessor.end(range), forEachScanOrCheckpoint, forEachRange, p1, p2, p3, p4, minIndex);
     }
 
-    public <P1, P2, P3, P4> int forEach(Key startKey, Key endKey, IndexedQuadConsumer<P1, P2, P3, P4> forEachScanOrCheckpoint, IndexedRangeQuadConsumer<P1, P2, P3, P4> forEachRange, P1 p1, P2 p2, P3 p3, P4 p4, int minIndex)
+    public <P1, P2, P3, P4> int forEachRange(Key startKey, Key endKey, IndexedQuadConsumer<P1, P2, P3, P4> forEachScanOrCheckpoint, IndexedRangeQuadConsumer<P1, P2, P3, P4> forEachRange, P1 p1, P2 p2, P3 p3, P4 p4, int minIndex)
     {
         if (accessor.size(ranges) == 0 || minIndex == accessor.size(ranges))
             return minIndex;
@@ -125,6 +126,36 @@ public class CheckpointIntervalArray<Ranges, Range, Key>
 
         // Since endInclusive() != startInclusive(), so no need to adjust start/end comparisons
         return forEach(start, end, floor, startKey, 0, forEachScanOrCheckpoint, forEachRange, p1, p2, p3, p4, minIndex);
+    }
+
+    public <P1, P2, P3, P4> int forEachKey(Key key, IndexedQuadConsumer<P1, P2, P3, P4> forEachScanOrCheckpoint, IndexedRangeQuadConsumer<P1, P2, P3, P4> forEachRange, P1 p1, P2 p2, P3 p3, P4 p4, int minIndex)
+    {
+        if (accessor.size(ranges) == 0 || minIndex == accessor.size(ranges))
+            return minIndex;
+
+        var c = accessor.keyComparator();
+        int end = accessor.binarySearch(ranges, minIndex, accessor.size(ranges), key, (a, b) -> c.compare(a, accessor.start(b)), FLOOR);
+        if (end < 0) end = -1 - end;
+        else ++end;
+        if (end <= minIndex) return minIndex;
+
+        int floor = accessor.binarySearch(ranges, minIndex, accessor.size(ranges), key, (a, b) -> c.compare(a, accessor.start(b)), CEIL);
+        int start = floor;
+        if (floor < 0)
+        {
+            // if there's no precise match on start, step backwards;
+            // if this range does not overlap us, step forwards again for start
+            // but retain the floor index for performing scan and checkpoint searches from
+            // as this contains all ranges that might overlap us (whereas those that end
+            // after us but before the next range's start would be missed by the next range index)
+            start = floor = -2 - floor;
+            if (start < 0)
+                start = floor = 0;
+            else if (c.compare(accessor.end(ranges, start), key) <= 0)
+                ++start;
+        }
+
+        return forEach(start, end, floor, key, 0, forEachScanOrCheckpoint, forEachRange, p1, p2, p3, p4, minIndex);
     }
 
     @Inline

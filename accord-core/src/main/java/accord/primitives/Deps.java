@@ -212,14 +212,9 @@ public class Deps
         return new Deps(keyDeps.without(remove), rangeDeps.without(remove), directKeyDeps.without(remove));
     }
 
-    public PartialDeps slice(Ranges covering)
+    public PartialDeps intersecting(Participants<?> participants)
     {
-        return slice(covering, covering);
-    }
-
-    public PartialDeps slice(Ranges covering, Ranges slice)
-    {
-        return new PartialDeps(covering, keyDeps.slice(slice), rangeDeps.slice(slice), directKeyDeps.slice(slice));
+        return new PartialDeps(participants, keyDeps.intersecting(participants), rangeDeps.intersecting(participants), directKeyDeps.intersecting(participants));
     }
 
     public boolean isEmpty()

@@ -48,7 +48,7 @@ public class GetMaxConflict extends TxnRequest.WithUnsynced<GetMaxConflict.GetMa
     public GetMaxConflict(Node.Id to, Topologies topologies, FullRoute<?> route, Seekables<?, ?> keys, long executionEpoch)
     {
         super(to, topologies, executionEpoch, route);
-        this.keys = keys.slice(scope.covering());
+        this.keys = keys.intersecting(scope);
         this.executionEpoch = executionEpoch;
     }
 

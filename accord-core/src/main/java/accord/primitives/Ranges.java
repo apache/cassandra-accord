@@ -98,9 +98,26 @@ public class Ranges extends AbstractRanges implements Iterable<Range>, Seekables
         return slice(ranges, slice, this, null, (i1, i2, rs) -> i1.ranges == rs ? i1 : Ranges.ofSortedAndDeoverlapped(rs));
     }
 
-    public Ranges intersecting(Routables<?> keysOrRanges)
+    private Ranges slice(AbstractRanges ranges, Slice slice)
     {
-        return intersecting(this, keysOrRanges, this, (i1, i2, rs) -> i2.ranges == rs ? i2 : new Ranges(rs));
+        return slice(ranges, slice, this, this, (i1, i2, rs) -> i2.ranges == rs ? i2 : Ranges.ofSortedAndDeoverlapped(rs));
+    }
+
+    @Override
+    public Ranges intersecting(Unseekables<?> intersecting)
+    {
+        return intersecting(intersecting, Overlapping);
+    }
+
+    @Override
+    public final Ranges intersecting(Unseekables<?> intersecting, Slice slice)
+    {
+        switch (intersecting.domain())
+        {
+            default: throw new AssertionError("Unhandled domain: " + intersecting.domain());
+            case Range: return slice((AbstractRanges) intersecting, slice);
+            case Key: return intersecting((AbstractUnseekableKeys) intersecting, this, null, (i1, i2, rs) -> i1.ranges == rs ? i1 : new Ranges(rs));
+        }
     }
 
     @Override
@@ -157,11 +174,9 @@ public class Ranges extends AbstractRanges implements Iterable<Range>, Seekables
     public FullRangeRoute toRoute(RoutingKey homeKey)
     {
         if (!contains(homeKey))
-        {
-            Range[] ranges = with(Ranges.of(homeKey.asRange())).ranges;
-            return new FullRangeRoute(homeKey, false, ranges);
-        }
-        return new FullRangeRoute(homeKey, true, ranges);
+            throw new IllegalArgumentException("Home key must be contained in the route: " + homeKey + " not in " + this);
+
+        return new FullRangeRoute(homeKey, ranges);
     }
 
     public Ranges union(UnionMode mode, Ranges that)

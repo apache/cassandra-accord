@@ -78,9 +78,9 @@ public class Apply extends TxnRequest<ApplyReply>
         // TODO (desired): it's wasteful to encode the full set of ranges owned by the recipient node;
         //     often it will be cheaper to include the FullRoute for Deps scope (or come up with some other safety-preserving encoding scheme)
         this.kind = kind;
-        this.deps = deps.slice(scope.covering());
-        this.keys = txn.keys().slice(scope.covering());
-        this.txn = kind == Kind.Maximal ? txn.slice(scope.covering(), true) : null;
+        this.deps = deps.intersecting(scope);
+        this.keys = txn.keys().intersecting(scope);
+        this.txn = kind == Kind.Maximal ? txn.intersecting(scope, true) : null;
         this.fullRoute = kind == Kind.Maximal ? route : null;
         this.executeAt = executeAt;
         this.writes = writes;

@@ -18,7 +18,7 @@
 
 package accord.coordinate;
 
-import java.util.Set;
+import java.util.Collection;
 
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.Node;
@@ -83,7 +83,7 @@ public class FetchMaxConflict extends AbstractCoordinatePreAccept<Timestamp, Get
     }
 
     @Override
-    void contact(Set<Node.Id> nodes, Topologies topologies, Callback<GetMaxConflictOk> callback)
+    void contact(Collection<Node.Id> nodes, Topologies topologies, Callback<GetMaxConflictOk> callback)
     {
         node.send(nodes, to -> new GetMaxConflict(to, topologies, route, keysOrRanges, executionEpoch), callback);
     }

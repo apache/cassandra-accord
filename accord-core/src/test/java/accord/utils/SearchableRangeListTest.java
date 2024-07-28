@@ -45,7 +45,7 @@ class SearchableRangeListTest
         class Counter { int value;}
         BiConsumer<Integer, Integer> test = (rangeStart, rangeEnd) -> {
             Counter counter = new Counter();
-            list.forEach(IntKey.range(rangeStart, rangeEnd), (a, b, c, d, e) -> {
+            list.forEachRange(IntKey.range(rangeStart, rangeEnd), (a, b, c, d, e) -> {
                 counter.value++;
             }, (a, b, c, d, start, end) -> {
                 counter.value += (end - start + 1);
@@ -102,7 +102,7 @@ class SearchableRangeListTest
                         expected.add(r);
                 }
                 List<Range> actual = new ArrayList<>(expected.size());
-                list.forEach(range, (a, b, c, d, idx) -> {
+                list.forEachRange(range, (a, b, c, d, idx) -> {
                     actual.add(list.ranges[idx]);
                 }, (a, b, c, d, start, end) -> {
                     for (int j = start; j < end; j++)

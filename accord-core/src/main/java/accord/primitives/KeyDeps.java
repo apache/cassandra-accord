@@ -191,9 +191,21 @@ public class KeyDeps implements Iterable<Map.Entry<Key, TxnId>>
         if (isEmpty())
             return new KeyDeps(keys, txnIds, keysToTxnIds);
 
-        // TODO (low priority, efficiency): can slice in parallel with selecting keyToTxnId contents to avoid duplicate merging
-        Keys select = keys.slice(ranges);
+        return select(keys.slice(ranges));
 
+    }
+
+    public KeyDeps intersecting(Unseekables<?> participants)
+    {
+        if (isEmpty())
+            return new KeyDeps(keys, txnIds, keysToTxnIds);
+
+        return select(keys.intersecting(participants));
+    }
+
+    private KeyDeps select(Keys select)
+    {
+        // TODO (low priority, efficiency): can slice in parallel with selecting keyToTxnId contents to avoid duplicate merging
         if (select.isEmpty())
             return new KeyDeps(Keys.EMPTY, NO_TXNIDS, NO_INTS);
 

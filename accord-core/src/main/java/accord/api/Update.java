@@ -18,6 +18,7 @@
 
 package accord.api;
 
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
@@ -35,5 +36,7 @@ public interface Update
     // null is provided only if nothing was read
     Write apply(Timestamp executeAt, @Nullable Data data);
     Update slice(Ranges ranges);
+    Update intersecting(Participants<?> participants);
     Update merge(Update other);
+
 }

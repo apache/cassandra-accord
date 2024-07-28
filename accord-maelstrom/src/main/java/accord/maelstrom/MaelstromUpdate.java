@@ -24,8 +24,10 @@ import java.util.TreeMap;
 import accord.api.Key;
 import accord.api.Data;
 import accord.api.Update;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Keys;
+import accord.primitives.Routables;
 import accord.primitives.Timestamp;
 
 public class MaelstromUpdate extends TreeMap<Key, Value> implements Update
@@ -49,10 +51,21 @@ public class MaelstromUpdate extends TreeMap<Key, Value> implements Update
     @Override
     public Update slice(Ranges ranges)
     {
+        return intersecting((Routables<?>) ranges);
+    }
+
+    @Override
+    public Update intersecting(Participants<?> participants)
+    {
+        return intersecting((Routables<?>) participants);
+    }
+
+    public Update intersecting(Routables<?> routables)
+    {
         MaelstromUpdate result = new MaelstromUpdate();
         for (Map.Entry<Key, Value> e : entrySet())
         {
-            if (ranges.contains(e.getKey()))
+            if (routables.contains(e.getKey()))
                 result.put(e.getKey(), e.getValue());
         }
         return result;

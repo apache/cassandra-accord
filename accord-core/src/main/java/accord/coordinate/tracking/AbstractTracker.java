@@ -175,7 +175,7 @@ public abstract class AbstractTracker<ST extends ShardTracker>
         return true;
     }
 
-    public Set<Id> nodes()
+    public Collection<Id> nodes()
     {
         return topologies.nodes();
     }

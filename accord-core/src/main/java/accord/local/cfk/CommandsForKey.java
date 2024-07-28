@@ -100,7 +100,7 @@ import static accord.utils.SortedArrays.Search.FAST;
  *
  * <h2>Dependency Encoding</h2>
  * The byId list implies the contents of the deps of all commands in the collection - that is, it is assumed that in
- * the normal course of events every transaction will include the full set of {@code TxnId} we know that would be
+ * the normal course of events every transaction will include the full set of {@code TxnId} we know that could be
  * witnessed by the command. We only encode divergences from this, stored in each command's {@code missing} collection.
  *
  * We then go one step further, exploiting the fact that the missing collection exists solely to implement recovery,
@@ -125,7 +125,7 @@ import static accord.utils.SortedArrays.Search.FAST;
  * applied or invalidated.
  *
  * [We only do this if there also exists some later transactions we are not pruning that collectively have a superset of
- * its witnessed collection, so that recovery decisions will be unaffected by the removal of the transaction.]
+ * its {@code missing} collection, so that recovery decisions will be unaffected by the removal of the transaction.]
  *
  * The complexity here is that, by virtue of being a local decision point, we cannot guarantee that no coordinator will
  * contact us in future with either a new TxnId that is lower than this, or a dependency collection containing a TxnId
@@ -166,6 +166,7 @@ import static accord.utils.SortedArrays.Search.FAST;
  * TODO (expected): minimise repeated notification, either by logic or marking a command as notified once ready-to-execute
  * TODO (required): linearizability violation detection
  * TODO (desired): introduce a new status or other fast and simple mechanism for filtering treatment of range or unmanaged transactions
+ * TODO (expected): use locallyAppliedOrInvalidatedBefore to advance minUndecided and as a lower bound for triggering execution
  */
 public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSummary
 {
@@ -521,7 +522,7 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
             convert.put(SaveStatus.TruncatedApplyWithDeps, INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED);
             convert.put(SaveStatus.TruncatedApplyWithOutcome, INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED);
             convert.put(SaveStatus.TruncatedApply, INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED);
-            convert.put(SaveStatus.ErasedOrInvalidated, INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED);
+            convert.put(SaveStatus.ErasedOrInvalidOrVestigial, INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED);
             convert.put(SaveStatus.Erased, INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED);
             convert.put(SaveStatus.Invalidated, INVALID_OR_TRUNCATED_OR_UNMANAGED_COMMITTED);
         }
@@ -784,6 +785,14 @@ public class CommandsForKey extends CommandsForKeyUpdate implements CommandsSumm
     public TxnId shardRedundantBefore()
     {
         return redundantBefore.shardRedundantBefore();
+    }
+
+    public TxnId nextWaitingToApply(Kinds kinds)
+    {
+        int i = maxAppliedWriteByExecuteAt + 1;
+        while (i < committedByExecuteAt.length && (committedByExecuteAt[i].status != APPLIED || !kinds.test(committedByExecuteAt[i].kind())))
+            ++i;
+        return i >= committedByExecuteAt.length ? null : committedByExecuteAt[i];
     }
 
     /**

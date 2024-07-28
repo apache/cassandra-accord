@@ -18,6 +18,8 @@
 
 package accord.primitives;
 
+import java.util.Arrays;
+
 import accord.utils.Invariants;
 
 import accord.api.RoutingKey;
@@ -30,34 +32,25 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
 {
     public static class SerializationSupport
     {
-        public static PartialKeyRoute create(Ranges covering, RoutingKey homeKey, boolean isParticipatingHomeKey, RoutingKey[] keys)
+        public static PartialKeyRoute create(RoutingKey homeKey, RoutingKey[] keys)
         {
-            return new PartialKeyRoute(covering, homeKey, isParticipatingHomeKey, keys);
+            return new PartialKeyRoute(homeKey, keys);
         }
     }
 
-    public final Ranges covering;
 
-    public PartialKeyRoute(Ranges covering, RoutingKey homeKey, boolean isParticipatingHomeKey, RoutingKey[] keys)
+    public PartialKeyRoute(RoutingKey homeKey, RoutingKey[] keys)
     {
-        super(homeKey, isParticipatingHomeKey, keys);
-        this.covering = covering;
+        super(homeKey, keys);
     }
 
     @Override
-    public PartialKeyRoute sliceStrict(Ranges newRanges)
+    public PartialKeyRoute slice(Ranges select)
     {
-        if (!covering.containsAll(newRanges))
-            throw new IllegalArgumentException("Not covered");
-
-        return slice(newRanges);
-    }
-
-    @Override
-    public PartialKeyRoute slice(Ranges newRanges)
-    {
-        RoutingKey[] keys = slice(newRanges, RoutingKey[]::new);
-        return new PartialKeyRoute(newRanges, homeKey, isParticipatingHomeKey, keys);
+        RoutingKey[] keys = slice(select, RoutingKey[]::new);
+        if (keys == this.keys)
+            return this;
+        return new PartialKeyRoute(homeKey, keys);
     }
 
     @Override
@@ -74,12 +67,6 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
     }
 
     @Override
-    public boolean covers(Ranges ranges)
-    {
-        return covering.containsAll(ranges);
-    }
-
-    @Override
     public AbstractUnseekableKeys with(RoutingKey withKey)
     {
         if (withKey.equals(homeKey))
@@ -88,31 +75,33 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
         if (contains(withKey))
             return this;
 
-        return new RoutingKeys(toRoutingKeysArray(withKey));
+        return new RoutingKeys(toRoutingKeysArray(withKey, true));
     }
 
     @Override
     public PartialKeyRoute withHomeKey()
     {
-        if (contains(homeKey))
+        int insertPos = Arrays.binarySearch(keys, homeKey);
+        if (insertPos >= 0)
             return this;
-        return new PartialKeyRoute(covering.with(Ranges.of(homeKey.asRange())), homeKey, isParticipatingHomeKey, toRoutingKeysArray(homeKey));
+
+        insertPos = -1 - insertPos;
+        RoutingKey[] keys = new RoutingKey[1 + this.keys.length];
+        System.arraycopy(this.keys, 0, keys, 0, insertPos);
+        keys[insertPos] = homeKey;
+        System.arraycopy(this.keys, insertPos, keys, insertPos + 1, this.keys.length - insertPos);
+
+        return new PartialKeyRoute(homeKey, keys);
     }
 
     @Override
-    public PartialKeyRoute slice(Ranges newRanges, Slice slice)
+    public PartialKeyRoute slice(Ranges select, Slice slice)
     {
-        if (newRanges.containsAll(covering))
+        RoutingKey[] keys = slice(select, RoutingKey[]::new);
+        if (keys == this.keys)
             return this;
 
-        RoutingKey[] keys = slice(newRanges, RoutingKey[]::new);
-        return new PartialKeyRoute(newRanges, homeKey, isParticipatingHomeKey, keys);
-    }
-
-    @Override
-    public Ranges covering()
-    {
-        return covering;
+        return new PartialKeyRoute(homeKey, keys);
     }
 
     @Override
@@ -123,13 +112,13 @@ public class PartialKeyRoute extends KeyRoute implements PartialRoute<RoutingKey
 
         PartialKeyRoute that = (PartialKeyRoute) with;
         Invariants.checkState(homeKey.equals(that.homeKey));
-        Invariants.checkState(isParticipatingHomeKey == that.isParticipatingHomeKey);
         RoutingKey[] keys = SortedArrays.linearUnion(this.keys, that.keys, RoutingKey[]::new);
-        Ranges covering = this.covering.with(that.covering);
-        if (covering == this.covering && keys == this.keys)
+        if (keys == this.keys || keys == that.keys)
+        {
+            if (keys != that.keys) return this;
+            if (keys != this.keys) return that;
             return this;
-        if (covering == that.covering && keys == that.keys)
-            return that;
-        return new PartialKeyRoute(covering, homeKey, isParticipatingHomeKey, keys);
+        }
+        return new PartialKeyRoute(homeKey, keys);
     }
 }

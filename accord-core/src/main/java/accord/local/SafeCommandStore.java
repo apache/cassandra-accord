@@ -46,7 +46,7 @@ import static accord.local.Cleanup.NO;
 import static accord.local.KeyHistory.COMMANDS;
 import static accord.local.RedundantBefore.PreBootstrapOrStale.FULLY;
 import static accord.local.SaveStatus.Erased;
-import static accord.local.SaveStatus.ErasedOrInvalidated;
+import static accord.local.SaveStatus.ErasedOrInvalidOrVestigial;
 import static accord.primitives.Route.isFullRoute;
 
 /**
@@ -94,7 +94,7 @@ public abstract class SafeCommandStore
         if (command.saveStatus().isUninitialised())
         {
             if (commandStore().durableBefore().isUniversal(txnId, unseekable))
-                return new ErasedSafeCommand(txnId, ErasedOrInvalidated);
+                return new ErasedSafeCommand(txnId, ErasedOrInvalidOrVestigial);
         }
         return maybeTruncate(safeCommand, command, txnId, null);
     }
@@ -126,7 +126,7 @@ public abstract class SafeCommandStore
         if (command.saveStatus().isUninitialised())
         {
             if (Cleanup.isSafeToCleanup(commandStore().durableBefore(), txnId, unseekables))
-                return new ErasedSafeCommand(txnId, isFullRoute(unseekables) ? Erased : ErasedOrInvalidated);
+                return new ErasedSafeCommand(txnId, isFullRoute(unseekables) ? Erased : ErasedOrInvalidOrVestigial);
         }
         return maybeTruncate(safeCommand, command, toEpoch, unseekables);
     }

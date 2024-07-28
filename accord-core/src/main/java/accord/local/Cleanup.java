@@ -58,14 +58,6 @@ public enum Cleanup
     }
 
     /**
-     * Durability has been achieved globally across all keys/ranges that make this txnId's metadata safe to purge
-     */
-    public static boolean isSafeToCleanup(DurableBefore durableBefore, TxnId txnId)
-    {
-        return durableBefore.min(txnId) == UniversalOrInvalidated;
-    }
-
-    /**
      * Durability has been achieved for the specific keys associated with this txnId that makes its metadata safe to purge
      */
     public static boolean isSafeToCleanup(DurableBefore durableBefore, TxnId txnId, Unseekables<?> participants)
@@ -128,14 +120,12 @@ public enum Cleanup
                 //      - we can impose additional validations here IF we receive an epoch upper bound
                 //      - we should be more robust to the presence/absence of executeAt
                 //      - be cognisant of future epochs that participated only for PreAccept/Accept, but where txn was not committed to execute in the epoch (this is why we provide null toEpoch here)
-                if (route.isParticipatingHomeKey() || redundantBefore.get(txnId, NO_UPPER_BOUND, route.homeKey()) == NOT_OWNED)
-                    illegalState("Command " + txnId + " that is being loaded is not owned by this shard on route " + route);
+                illegalState("Command " + txnId + " that is being loaded is not owned by this shard on route " + route);
             }
         }
         switch (redundant)
         {
             default: throw new AssertionError();
-            case NOT_OWNED:
             case LIVE:
             case PARTIALLY_PRE_BOOTSTRAP_OR_STALE:
             case PRE_BOOTSTRAP_OR_STALE:

@@ -52,7 +52,7 @@ public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralRe
     public GetEphemeralReadDeps(Id to, Topologies topologies, FullRoute<?> route, TxnId txnId, Seekables<?, ?> keys, long executionEpoch)
     {
         super(to, topologies, txnId, route);
-        this.keys = keys.slice(scope.covering());
+        this.keys = keys.intersecting(scope);
         this.executionEpoch = executionEpoch;
     }
 
@@ -73,7 +73,7 @@ public class GetEphemeralReadDeps extends TxnRequest.WithUnsynced<GetEphemeralRe
     public GetEphemeralReadDepsOk apply(SafeCommandStore safeStore)
     {
         Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, executionEpoch);
-        PartialDeps deps = calculatePartialDeps(safeStore, txnId, keys, constant(minUnsyncedEpoch), Timestamp.MAX, ranges);
+        PartialDeps deps = calculatePartialDeps(safeStore, txnId, keys, scope, constant(minUnsyncedEpoch), Timestamp.MAX, ranges);
 
         return new GetEphemeralReadDepsOk(deps, Math.max(safeStore.time().epoch(), node.epoch()));
     }

@@ -118,6 +118,12 @@ class Bootstrap
 
         void start(SafeCommandStore safeStore0)
         {
+            if (valid.isEmpty())
+            {
+                maybeComplete();
+                return;
+            }
+
             globalSyncId = node.nextTxnId(ExclusiveSyncPoint, Routable.Domain.Range);
             localSyncId = globalSyncId.as(LocalOnly).withEpoch(epoch);
             Invariants.checkArgument(epoch <= globalSyncId.epoch(), "Attempting to use local epoch %d which is larger than global epoch %d", epoch, globalSyncId.epoch());
@@ -134,14 +140,12 @@ class Bootstrap
             Ranges commitRanges = valid;
             store.markBootstrapping(safeStore0, globalSyncId, valid);
             CoordinateSyncPoint.exclusive(node, globalSyncId, commitRanges)
-               // TODO (required, correcness) : PreLoadContext only works with Seekables, which doesn't allow mixing Keys and Ranges... But Deps has both Keys AND Ranges!
-               // TODO (required): is localSyncId even being used anymore
                // ATM all known implementations store ranges in-memory, but this will not be true soon, so this will need to be addressed
                .flatMap(syncPoint -> node.withEpoch(epoch, () -> store.submit(contextFor(localSyncId, syncPoint.waitFor.keyDeps.keys(), KeyHistory.COMMANDS), safeStore1 -> {
                    if (valid.isEmpty()) // we've lost ownership of the range
                        return AsyncResults.success(Ranges.EMPTY);
 
-                   Commands.createBootstrapCompleteMarkerTransaction(safeStore1, localSyncId, syncPoint, valid);
+                   Commands.createBootstrapCompleteMarkerTransaction(safeStore1, localSyncId, valid);
                    safeStore1.registerHistoricalTransactions(syncPoint.waitFor);
                    return fetch = safeStore1.dataStore().fetch(node, safeStore1, valid, syncPoint, this);
                })))

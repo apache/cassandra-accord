@@ -19,8 +19,8 @@
 package accord.coordinate;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
-import java.util.Set;
 
 import accord.coordinate.tracking.FastPathTracker;
 import accord.local.CommandStore;
@@ -67,7 +67,7 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
         this.txn = txn;
     }
 
-    void contact(Set<Id> nodes, Topologies topologies, Callback<PreAcceptReply> callback)
+    void contact(Collection<Id> nodes, Topologies topologies, Callback<PreAcceptReply> callback)
     {
         // TODO (desired, efficiency): consider sending only to electorate of most recent topology (as only these PreAccept votes matter)
         // note that we must send to all replicas of old topology, as electorate may not be reachable
@@ -141,7 +141,7 @@ abstract class CoordinatePreAccept<T> extends AbstractCoordinatePreAccept<T, Pre
          * We cannot execute the transaction because the execution epoch's topology no longer contains all of the
          * participating keys/ranges, so we propose that the transaction is invalidated in its coordination epoch
          */
-        Propose.Invalidate.proposeInvalidate(node, new Ballot(node.uniqueNow()), txnId, route.someParticipatingKey(), (outcome, failure) -> {
+        Propose.Invalidate.proposeInvalidate(node, new Ballot(node.uniqueNow()), txnId, route.homeKey(), (outcome, failure) -> {
             if (failure != null)
                 mismatch.addSuppressed(failure);
             accept(null, mismatch);

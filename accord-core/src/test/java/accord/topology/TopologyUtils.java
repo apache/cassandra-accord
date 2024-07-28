@@ -29,6 +29,7 @@ import accord.primitives.Unseekables;
 import accord.primitives.Unseekables.UnseekablesKind;
 import accord.utils.Gens;
 import accord.utils.RandomSource;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.Utils;
 import accord.utils.WrapAroundList;
 import accord.utils.WrapAroundSet;
@@ -56,7 +57,7 @@ public class TopologyUtils
 
     public static Topology withEpoch(Topology topology, long epoch)
     {
-        return new Topology(topology.global == null ? null : withEpoch(topology.global, epoch), epoch, topology.shards, topology.ranges, topology.nodeLookup, topology.subsetOfRanges, topology.supersetIndexes);
+        return new Topology(topology.global == null ? null : withEpoch(topology.global, epoch), epoch, topology.shards, topology.ranges, topology.nodeIds, topology.nodeLookup, topology.subsetOfRanges, topology.supersetIndexes);
     }
 
     public static Topology topology(long epoch, List<Node.Id> cluster, Ranges ranges, int rf)
@@ -85,7 +86,8 @@ public class TopologyUtils
         Set<Node.Id> noShard = new HashSet<>(Arrays.asList(cluster));
         for (int i = 0; i < ranges.size() ; ++i)
         {
-            shards.add(new Shard(ranges.get(i), electorates.get(i % electorates.size()), fastPathElectorates.get(i % fastPathElectorates.size())));
+            SortedArrayList<Node.Id> sortedNodes = SortedArrayList.copyUnsorted(electorates.get(i % electorates.size()), Node.Id[]::new);
+            shards.add(new Shard(ranges.get(i), sortedNodes, fastPathElectorates.get(i % fastPathElectorates.size())));
             noShard.removeAll(electorates.get(i % electorates.size()));
         }
         if (!noShard.isEmpty())

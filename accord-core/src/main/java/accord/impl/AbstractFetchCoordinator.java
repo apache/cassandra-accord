@@ -53,6 +53,7 @@ import accord.utils.async.AsyncResults;
 import javax.annotation.Nullable;
 
 import static accord.local.SaveStatus.Applied;
+import static accord.local.SaveStatus.TruncatedApply;
 import static accord.messages.ReadData.CommitOrReadNack.Insufficient;
 import static accord.primitives.Routables.Slice.Minimal;
 
@@ -137,7 +138,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         inflight.put(key, starting(to, ranges));
         Ranges ownedRanges = ownedRangesForNode(to);
         Invariants.checkArgument(ownedRanges.containsAll(ranges), "Got a reply from %s for ranges %s, but owned ranges %s does not contain all the ranges", to, ranges, ownedRanges);
-        PartialDeps partialDeps = syncPoint.waitFor.slice(ownedRanges, ranges);
+        PartialDeps partialDeps = syncPoint.waitFor.intersecting(ranges);
         node.send(to, newFetchRequest(syncPoint.sourceEpoch(), syncPoint.syncId, ranges, partialDeps, rangeReadTxn(ranges)), new Callback<ReadReply>()
         {
             @Override
@@ -236,7 +237,7 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
 
     public static class FetchRequest extends ReadData
     {
-        private static final ExecuteOn EXECUTE_ON = new ExecuteOn(Applied, Applied);
+        private static final ExecuteOn EXECUTE_ON = new ExecuteOn(Applied, TruncatedApply);
         public final PartialTxn read;
 
         public final PartialDeps partialDeps;
@@ -261,7 +262,8 @@ public abstract class AbstractFetchCoordinator extends FetchCoordinator
         }
 
         @Override
-        protected AsyncChain<Data> beginRead(SafeCommandStore safeStore, Timestamp executeAt, PartialTxn txn, Ranges unavailable) {
+        protected AsyncChain<Data> beginRead(SafeCommandStore safeStore, Timestamp executeAt, PartialTxn txn, Ranges unavailable)
+        {
             return read.read(safeStore, executeAt, unavailable);
         }
 

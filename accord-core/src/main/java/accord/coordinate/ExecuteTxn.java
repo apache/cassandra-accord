@@ -69,7 +69,7 @@ public class ExecuteTxn extends ReadCoordinator<ReadReply>
     {
         // we need to send Stable to the origin epoch as well as the execution epoch
         // TODO (desired): permit slicing Topologies by key (though unnecessary if we eliminate the concept of non-participating home keys)
-        super(node, route.isParticipatingHomeKey() ? topologies : node.topology().preciseEpochs(readScope, txnId.epoch(), executeAt.epoch()), txnId);
+        super(node, topologies, txnId);
         this.path = path;
         this.txn = txn;
         this.route = route;

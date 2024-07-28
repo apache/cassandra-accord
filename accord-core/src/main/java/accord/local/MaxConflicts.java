@@ -21,7 +21,7 @@ package accord.local;
 import javax.annotation.Nonnull;
 
 import accord.api.RoutingKey;
-import accord.primitives.Ranges;
+import accord.primitives.AbstractRanges;
 import accord.primitives.Routables;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
@@ -58,7 +58,7 @@ public class MaxConflicts extends ReducingRangeMap<Timestamp>
         return merge(this, create(keysOrRanges, maxConflict));
     }
 
-    public static MaxConflicts create(Ranges ranges, @Nonnull Timestamp maxConflict)
+    public static MaxConflicts create(AbstractRanges ranges, @Nonnull Timestamp maxConflict)
     {
         if (ranges.isEmpty())
             return MaxConflicts.EMPTY;

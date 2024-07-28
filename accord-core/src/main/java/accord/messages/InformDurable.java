@@ -17,6 +17,8 @@
  */
 package accord.messages;
 
+import javax.annotation.Nullable;
+
 import accord.local.Commands;
 import accord.local.Node.Id;
 import accord.local.PreLoadContext;
@@ -24,8 +26,8 @@ import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.Status;
 import accord.local.Status.Durability;
-import accord.primitives.FullRoute;
 import accord.primitives.PartialRoute;
+import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 import accord.topology.Topologies;
@@ -44,17 +46,17 @@ public class InformDurable extends TxnRequest<Reply> implements PreLoadContext
         }
     }
 
-    public final Timestamp executeAt;
+    public final @Nullable Timestamp executeAt;
     public final Durability durability;
 
-    public InformDurable(Id to, Topologies topologies, FullRoute<?> route, TxnId txnId, Timestamp executeAt, Durability durability)
+    public InformDurable(Id to, Topologies topologies, Route<?> route, TxnId txnId, @Nullable Timestamp executeAt, Durability durability)
     {
         super(to, topologies, route, txnId);
         this.executeAt = executeAt;
         this.durability = durability;
     }
 
-    private InformDurable(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, Timestamp executeAt, Durability durability)
+    private InformDurable(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, @Nullable Timestamp executeAt, Durability durability)
     {
         super(txnId, scope, waitForEpoch);
         this.executeAt = executeAt;

@@ -30,6 +30,8 @@ import accord.utils.Gens;
 import accord.utils.RandomSource;
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Iterators;
+
+import accord.utils.SortedArrays.SortedArrayList;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -366,9 +368,9 @@ public class TopologyManagerTest
     void aba()
     {
         TopologyManager service = new TopologyManager(SUPPLIER, ID);
-        List<Node.Id> dc1Nodes = idList(1, 2, 3);
+        SortedArrayList<Node.Id> dc1Nodes = idList(1, 2, 3);
         Set<Node.Id> dc1Fp = idSet(1, 2);
-        List<Node.Id> dc2Nodes = idList(4, 5, 6);
+        SortedArrayList<Node.Id> dc2Nodes = idList(4, 5, 6);
         Set<Node.Id> dc2Fp = idSet(4, 5);
         addAndMarkSynced(service, topology(1,
                 shard(PrefixedIntHashKey.range(0, 0, 100), dc2Nodes, dc2Fp),

@@ -22,13 +22,10 @@ import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
@@ -47,7 +44,10 @@ import accord.utils.IndexedBiFunction;
 import accord.utils.IndexedConsumer;
 import accord.utils.IndexedIntFunction;
 import accord.utils.IndexedTriFunction;
+import accord.utils.SimpleBitSet;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.Utils;
+import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.IntArrayList;
 
 import javax.annotation.Nullable;
@@ -60,14 +60,14 @@ public class Topology
 {
     public static final long EMPTY_EPOCH = 0;
     private static final int[] EMPTY_SUBSET = new int[0];
-    public static final Topology EMPTY = new Topology(null, EMPTY_EPOCH, new Shard[0], Ranges.EMPTY, Collections.emptyMap(), Ranges.EMPTY, EMPTY_SUBSET);
+    public static final Topology EMPTY = new Topology(null, EMPTY_EPOCH, new Shard[0], Ranges.EMPTY, new SortedArrayList<>(new Id[0]), new Int2ObjectHashMap<>(0, 0.9f), Ranges.EMPTY, EMPTY_SUBSET);
     final long epoch;
     final Shard[] shards;
     final Ranges ranges;
-    /**
-     * TODO (desired, efficiency): do not recompute nodeLookup for sub-topologies
-     */
-    final Map<Id, NodeInfo> nodeLookup;
+
+    final SortedArrayList<Id> nodeIds;
+    final Int2ObjectHashMap<NodeInfo> nodeLookup;
+
     /**
      * This array is used to permit cheaper sharing of Topology objects between requests, as we must only specify
      * the indexes within the parent Topology that we contain. This also permits us to perform efficient merges with
@@ -124,29 +124,35 @@ public class Topology
         this.shards = shards;
         this.subsetOfRanges = ranges;
         this.supersetIndexes = IntStream.range(0, shards.length).toArray();
-        this.nodeLookup = new LinkedHashMap<>();
+        this.nodeLookup = new Int2ObjectHashMap<>();
         Map<Id, IntArrayList> build = new HashMap<>();
         for (int i = 0 ; i < shards.length ; ++i)
         {
             for (Id node : shards[i].nodes)
                 build.computeIfAbsent(node, ignore -> new IntArrayList()).add(i);
         }
+        Id[] nodeIds = new Id[build.size()];
+        int count = 0;
         for (Map.Entry<Id, IntArrayList> e : build.entrySet())
         {
             int[] supersetIndexes = e.getValue().toIntArray();
             Ranges ranges = this.ranges.select(supersetIndexes);
-            nodeLookup.put(e.getKey(), new NodeInfo(ranges, supersetIndexes));
+            nodeLookup.put(e.getKey().id, new NodeInfo(ranges, supersetIndexes));
+            nodeIds[count++] = e.getKey();
         }
+        Arrays.sort(nodeIds);
+        this.nodeIds = new SortedArrayList<>(nodeIds);
     }
 
     @VisibleForTesting
-    Topology(@Nullable Topology global, long epoch, Shard[] shards, Ranges ranges, Map<Id, NodeInfo> nodeLookup, Ranges subsetOfRanges, int[] supersetIndexes)
+    Topology(@Nullable Topology global, long epoch, Shard[] shards, Ranges ranges, SortedArrayList<Id> nodeIds, Int2ObjectHashMap<NodeInfo> nodeById, Ranges subsetOfRanges, int[] supersetIndexes)
     {
         this.global = global;
         this.epoch = epoch;
         this.shards = shards;
         this.ranges = ranges;
-        this.nodeLookup = nodeLookup;
+        this.nodeIds = nodeIds;
+        this.nodeLookup = nodeById;
         this.subsetOfRanges = subsetOfRanges;
         this.supersetIndexes = supersetIndexes;
     }
@@ -207,13 +213,12 @@ public class Topology
 
     public Topology forNode(Id node)
     {
-        NodeInfo info = nodeLookup.get(node);
+        NodeInfo info = nodeLookup.get(node.id);
         if (info == null)
             return Topology.EMPTY;
 
-        Map<Id, NodeInfo> lookup = new LinkedHashMap<>();
-        lookup.put(node, info);
-        return new Topology(global(), epoch, shards, ranges, lookup, info.ranges, info.supersetIndexes);
+        SortedArrayList<Id> nodeIds = new SortedArrayList<>(new Id[] { node });
+        return new Topology(global(), epoch, shards, ranges, nodeIds, nodeLookup, info.ranges, info.supersetIndexes);
     }
 
     public Topology trim()
@@ -223,7 +228,7 @@ public class Topology
 
     public Ranges rangesForNode(Id node)
     {
-        NodeInfo info = nodeLookup.get(node);
+        NodeInfo info = nodeLookup.get(node.id);
         return info != null ? info.ranges : Ranges.EMPTY;
     }
 
@@ -261,29 +266,38 @@ public class Topology
     Topology forSubset(int[] newSubset)
     {
         Ranges rangeSubset = ranges.select(newSubset);
-
-        Map<Id, NodeInfo> nodeLookup = new LinkedHashMap<>();
+        SimpleBitSet nodes = new SimpleBitSet(nodeIds.size());
         for (int shardIndex : newSubset)
         {
             Shard shard = shards[shardIndex];
             for (Id id : shard.nodes)
-                nodeLookup.putIfAbsent(id, this.nodeLookup.get(id).forSubset(newSubset));
+            {
+                nodes.set(nodeIds.find(id));
+                // TODO (expected): do we need to shrink to the subset? I don't think we do anymore, and if not we can avoid copying the nodeLookup entirely
+                nodeLookup.putIfAbsent(id.id, this.nodeLookup.get(id.id).forSubset(newSubset));
+            }
         }
-        return new Topology(global(), epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
+        Id[] nodeIds = new Id[nodes.getSetBitCount()];
+        int count = 0;
+        for (int i = nodes.firstSetBit() ; i >= 0 ; i = nodes.nextSetBit(i + 1, -1))
+            nodeIds[count++] = this.nodeIds.get(i);
+        return new Topology(global(), epoch, shards, ranges, new SortedArrayList<>(nodeIds), nodeLookup, rangeSubset, newSubset);
     }
 
     @VisibleForTesting
     Topology forSubset(int[] newSubset, Collection<Id> nodes)
     {
         Ranges rangeSubset = ranges.select(newSubset);
-        Map<Id, NodeInfo> nodeLookup = new HashMap<>();
+        Id[] nodeIds = nodes.toArray(new Id[nodes.size()]);
+        Arrays.sort(nodeIds);
+        Int2ObjectHashMap<NodeInfo> nodeLookup = new Int2ObjectHashMap<>(nodes.size(), 0.8f);
         for (Id id : nodes)
         {
-            NodeInfo info = this.nodeLookup.get(id).forSubset(newSubset);
+            NodeInfo info = this.nodeLookup.get(id.id).forSubset(newSubset);
             if (info.ranges.isEmpty()) continue;
-            nodeLookup.put(id, info);
+            nodeLookup.put(id.id, info);
         }
-        return new Topology(global(), epoch, shards, ranges, nodeLookup, rangeSubset, newSubset);
+        return new Topology(global(), epoch, shards, ranges, new SortedArrayList<>(nodeIds), nodeLookup, rangeSubset, newSubset);
     }
 
     private int[] subsetFor(Unseekables<?> select)
@@ -385,7 +399,7 @@ public class Topology
 
     public void forEachOn(Id on, IndexedConsumer<Shard> consumer)
     {
-        NodeInfo info = nodeLookup.get(on);
+        NodeInfo info = nodeLookup.get(on.id);
         if (info == null)
             return;
         int[] a = supersetIndexes, b = info.supersetIndexes;
@@ -412,7 +426,7 @@ public class Topology
 
     public <P1, P2, P3, O> O mapReduceOn(Id on, int offset, IndexedTriFunction<? super P1, ? super P2, ? super P3, ? extends O> function, P1 p1, P2 p2, P3 p3, BiFunction<? super O, ? super O, ? extends O> reduce, O initialValue)
     {
-        NodeInfo info = nodeLookup.get(on);
+        NodeInfo info = nodeLookup.get(on.id);
         if (info == null)
             return initialValue;
         int[] a = supersetIndexes, b = info.supersetIndexes;
@@ -442,7 +456,7 @@ public class Topology
     public <P> int foldlIntOn(Id on, IndexedIntFunction<P> consumer, P param, int offset, int initialValue, int terminalValue)
     {
         // TODO (low priority, efficiency/clarity): use findNextIntersection?
-        NodeInfo info = nodeLookup.get(on);
+        NodeInfo info = nodeLookup.get(on.id);
         if (info == null)
             return initialValue;
         int[] a = supersetIndexes, b = info.supersetIndexes;
@@ -496,7 +510,7 @@ public class Topology
 
     public boolean contains(Id id)
     {
-        return nodeLookup.containsKey(id);
+        return nodeLookup.containsKey(id.id);
     }
 
     public List<Shard> shards()
@@ -523,9 +537,9 @@ public class Topology
             forEach.accept(shards[i]);
     }
 
-    public Set<Id> nodes()
+    public SortedArrayList<Id> nodes()
     {
-        return nodeLookup.keySet();
+        return nodeIds;
     }
 
     public Ranges ranges()

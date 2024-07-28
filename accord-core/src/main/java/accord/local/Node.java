@@ -71,7 +71,6 @@ import accord.primitives.Ballot;
 import accord.primitives.EpochSupplier;
 import accord.primitives.FullRoute;
 import accord.primitives.ProgressToken;
-import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Routable.Domain;
 import accord.primitives.Routables;
@@ -145,6 +144,7 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
 
     public boolean isCoordinating(TxnId txnId, Ballot promised)
     {
+        // TODO (required): on a prod system expire coordination ownership by time for safety
         return promised.node.equals(id) && coordinating.containsKey(txnId);
     }
 
@@ -622,18 +622,18 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
     public FullRoute<?> computeRoute(long epoch, Seekables<?, ?> keysOrRanges)
     {
         Invariants.checkArgument(!keysOrRanges.isEmpty(), "Attempted to compute a route from empty keys or ranges");
-        RoutingKey homeKey = trySelectHomeKey(epoch, keysOrRanges);
-        if (homeKey == null)
-            homeKey = selectRandomHomeKey(epoch);
-
+        RoutingKey homeKey = selectHomeKey(epoch, keysOrRanges);
         return keysOrRanges.toRoute(homeKey);
     }
 
-    private @Nullable RoutingKey trySelectHomeKey(long epoch, Seekables<?, ?> keysOrRanges)
+    private RoutingKey selectHomeKey(long epoch, Seekables<?, ?> keysOrRanges)
     {
         Ranges owned = topology().localForEpoch(epoch).ranges();
         int i = (int)keysOrRanges.findNextIntersection(0, owned, 0);
-        return i >= 0 ? keysOrRanges.get(i).someIntersectingRoutingKey(owned) : null;
+        if (i >= 0)
+            return keysOrRanges.get(i).someIntersectingRoutingKey(owned);
+
+        return keysOrRanges.get(random.nextInt(keysOrRanges.size())).someIntersectingRoutingKey(null);
     }
 
     public RoutingKey selectProgressKey(TxnId txnId, Route<?> route, RoutingKey homeKey)
@@ -673,23 +673,6 @@ public class Node implements ConfigurationService.Listener, NodeTimeService
         if (i < 0)
             return null;
         return route.get(i).someIntersectingRoutingKey(topology.ranges());
-    }
-
-    public RoutingKey selectRandomHomeKey(TxnId txnId)
-    {
-        return selectRandomHomeKey(txnId.epoch());
-    }
-
-    public RoutingKey selectRandomHomeKey(long epoch)
-    {
-        Ranges ranges = topology().localForEpoch(epoch).ranges();
-        // TODO (expected): should we try to pick keys in the same Keyspace in C*? Might want to adapt this to an Agent behaviour
-        if (ranges.isEmpty()) // should not really happen, but pick some other replica to serve as home key
-            ranges = topology().globalForEpoch(epoch).ranges();
-        if (ranges.isEmpty())
-            throw illegalState("Unable to select a HomeKey as the topology does not have any ranges for epoch " + epoch);
-        Range range = ranges.get(random.nextInt(ranges.size()));
-        return range.someIntersectingRoutingKey(null);
     }
 
     static class RecoverFuture<T> extends AsyncResults.SettableResult<T> implements BiConsumer<T, Throwable>

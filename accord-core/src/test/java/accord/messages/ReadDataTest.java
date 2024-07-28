@@ -102,7 +102,7 @@ class ReadDataTest
         AsyncResults.SettableResult<Data> readResult = new AsyncResults.SettableResult<>();
 
         Read read = Mockito.mock(Read.class);
-        Mockito.when(read.slice(any())).thenReturn(read);
+        Mockito.when(read.intersecting(any())).thenReturn(read);
         Mockito.when(read.merge(any())).thenReturn(read);
         Mockito.when(read.keys()).thenReturn((Seekables)keys);
         Mockito.when(read.read(any(), any(), any(), any())).thenAnswer(new Answer<AsyncChain<Data>>()
@@ -117,10 +117,10 @@ class ReadDataTest
         });
         Query query = Mockito.mock(Query.class);
         Update update = Mockito.mock(Update.class);
-        Mockito.when(update.slice(any())).thenReturn(update);
+        Mockito.when(update.intersecting(any())).thenReturn(update);
 
         Txn txn = new Txn.InMemory(keys, read, query, update);
-        PartialTxn partialTxn = txn.slice(RANGES, true);
+        PartialTxn partialTxn = txn.intersecting(RANGES, true);
 
         fn.accept(new State(node, sink, txnId, partialTxn, readResult));
     }
@@ -263,7 +263,7 @@ class ReadDataTest
             this.partialRoute = route.slice(RANGES);
             this.progressKey = key.toUnseekable();
             this.executeAt = txnId;
-            this.deps = PartialDeps.builder(RANGES).build();
+            this.deps = PartialDeps.builder(partialRoute).build();
             this.readResult = readResult;
         }
 
