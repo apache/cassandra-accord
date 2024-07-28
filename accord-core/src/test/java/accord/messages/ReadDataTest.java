@@ -263,7 +263,7 @@ class ReadDataTest
             this.partialRoute = route.slice(RANGES);
             this.progressKey = key.toUnseekable();
             this.executeAt = txnId;
-            this.deps = PartialDeps.builder(RANGES).build();
+            this.deps = PartialDeps.builder(partialRoute).build();
             this.readResult = readResult;
         }
 

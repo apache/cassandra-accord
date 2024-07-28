@@ -55,7 +55,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
     {
         super(to, topologies, txnId, route);
         // TODO (expected): only includeQuery if route.contains(route.homeKey()); this affects state eviction and is low priority given size in C*
-        this.partialTxn = txn.slice(scope.covering(), true);
+        this.partialTxn = txn.intersecting(scope, true);
         this.maxEpoch = topologies.currentEpoch();
         this.route = route;
     }
@@ -100,7 +100,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
         Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, txnId);
         if (txnId.kind() == ExclusiveSyncPoint)
             safeStore.commandStore().markExclusiveSyncPoint(safeStore, txnId, ranges);
-        return new PreAcceptOk(txnId, txnId, calculatePartialDeps(safeStore, txnId, partialTxn.keys(), EpochSupplier.constant(minUnsyncedEpoch), txnId, ranges));
+        return new PreAcceptOk(txnId, txnId, calculatePartialDeps(safeStore, txnId, partialTxn.keys(), scope, EpochSupplier.constant(minUnsyncedEpoch), txnId, ranges));
     }
 
     @Override
@@ -129,7 +129,7 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
                 // all transactions with lower txnId as expired.
                 Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, txnId);
                 return new PreAcceptOk(txnId, command.executeAt(),
-                                       calculatePartialDeps(safeStore, txnId, command.partialTxn().keys(), EpochSupplier.constant(minUnsyncedEpoch), txnId, ranges));
+                                       calculatePartialDeps(safeStore, txnId, command.partialTxn().keys(), scope, EpochSupplier.constant(minUnsyncedEpoch), txnId, ranges));
 
             case Truncated:
             case RejectedBallot:
@@ -242,14 +242,16 @@ public class PreAccept extends WithUnsynced<PreAccept.PreAcceptReply> implements
         }
     }
 
-    static PartialDeps calculatePartialDeps(SafeCommandStore safeStore, TxnId txnId, Seekables<?, ?> keys, EpochSupplier minEpoch, Timestamp executeAt, Ranges ranges)
+    static PartialDeps calculatePartialDeps(SafeCommandStore safeStore, TxnId txnId, Seekables<?, ?> keys, Route<?> route, EpochSupplier minEpoch, Timestamp executeAt, Ranges ranges)
     {
         // TODO (expected): do not build covering ranges; no longer especially valuable given use of FullRoute
         // NOTE: ExclusiveSyncPoint *relies* on STARTED_BEFORE to ensure it reports a dependency on *every* earlier TxnId that may execute after it.
         //       This is necessary for reporting to a bootstrapping replica which TxnId it must not prune from dependencies
         //       i.e. the source replica reports to the target replica those TxnId that STARTED_BEFORE and EXECUTES_AFTER.
-        try (Deps.AbstractBuilder<PartialDeps> builder = new PartialDeps.Builder(ranges);
-             Deps.AbstractBuilder<PartialDeps> redundantBuilder = new PartialDeps.Builder(ranges))
+
+        Route<?> scope = route.slice(ranges);
+        try (Deps.AbstractBuilder<PartialDeps> builder = new PartialDeps.Builder(scope);
+             Deps.AbstractBuilder<PartialDeps> redundantBuilder = new PartialDeps.Builder(scope))
         {
             safeStore.mapReduceActive(keys, ranges, executeAt, txnId.kind().witnesses(),
                                       (p1, keyOrRange, testTxnId, testExecuteAt, in) -> {

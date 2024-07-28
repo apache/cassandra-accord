@@ -24,8 +24,8 @@ import javax.annotation.Nullable;
 
 import accord.api.RoutingKey;
 import accord.local.Status.Durability;
+import accord.primitives.AbstractRanges;
 import accord.primitives.Participants;
-import accord.primitives.Ranges;
 import accord.primitives.TxnId;
 import accord.primitives.Unseekables;
 import accord.utils.Invariants;
@@ -147,7 +147,7 @@ public class DurableBefore extends ReducingRangeMap<DurableBefore.Entry>
         }
     }
 
-    public static DurableBefore create(Ranges ranges, @Nonnull TxnId majority, @Nonnull TxnId universal)
+    public static DurableBefore create(AbstractRanges ranges, @Nonnull TxnId majority, @Nonnull TxnId universal)
     {
         if (ranges.isEmpty())
             return DurableBefore.EMPTY;

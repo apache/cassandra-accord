@@ -19,8 +19,8 @@
 package accord.coordinate;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
-import java.util.Set;
 
 import accord.api.Result;
 import accord.coordinate.tracking.QuorumTracker;
@@ -90,7 +90,7 @@ public class CoordinateEphemeralRead extends AbstractCoordinatePreAccept<Result,
     }
 
     @Override
-    void contact(Set<Node.Id> nodes, Topologies topologies, Callback<GetEphemeralReadDepsOk> callback)
+    void contact(Collection<Node.Id> nodes, Topologies topologies, Callback<GetEphemeralReadDepsOk> callback)
     {
         CommandStore commandStore = CommandStore.maybeCurrent();
         if (commandStore == null) commandStore = node.commandStores().select(route.homeKey());

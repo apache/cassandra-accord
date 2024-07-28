@@ -24,12 +24,15 @@ package accord.primitives;
  * that these classes will only be used via interfaces such as Route that do not extend this interface,
  * so that the implementation may return itself when suitable, and a converted copy otherwise.
  */
+// TODO (desired): so we need this abstraction anymore, now that we have removed the concept of non-participating home keys?
 public interface Participants<K extends Unseekable> extends Unseekables<K>
 {
     Participants<K> with(Participants<K> with);
 
     @Override
-    Participants<K> intersect(Unseekables<?> with);
+    Participants<K> intersecting(Unseekables<?> intersecting);
+    @Override
+    Participants<K> intersecting(Unseekables<?> intersecting, Slice slice);
     @Override
     Participants<K> slice(Ranges ranges);
     @Override
@@ -39,39 +42,6 @@ public interface Participants<K extends Unseekable> extends Unseekables<K>
     Participants<K> subtract(Unseekables<?> without);
 
     Ranges toRanges();
-
-    static boolean isParticipants(Unseekables<?> unseekables)
-    {
-        switch (unseekables.kind())
-        {
-            default: throw new AssertionError("Unhandled Unseekables.Kind: " + unseekables.kind());
-            case FullKeyRoute:
-            case FullRangeRoute:
-            case PartialKeyRoute:
-            case PartialRangeRoute:
-                return Route.castToRoute(unseekables).isParticipatingHomeKey();
-            case RoutingRanges:
-            case RoutingKeys:
-                return true;
-        }
-    }
-
-    static Participants<?> participants(Unseekables<?> unseekables)
-    {
-        switch (unseekables.kind())
-        {
-            default: throw new AssertionError("Unhandled Unseekables.Kind: " + unseekables.kind());
-            case FullKeyRoute:
-            case FullRangeRoute:
-            case PartialKeyRoute:
-            case PartialRangeRoute:
-                return Route.castToRoute(unseekables).participants();
-            case RoutingRanges:
-                return (Ranges) unseekables;
-            case RoutingKeys:
-                return (RoutingKeys) unseekables;
-        }
-    }
 
     /**
      * If both left and right are a Route, invoke {@link Route#union} on them. Otherwise invoke {@link #with}.

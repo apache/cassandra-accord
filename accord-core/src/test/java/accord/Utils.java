@@ -20,6 +20,7 @@ package accord;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -45,6 +46,7 @@ import accord.impl.mock.MockCluster;
 import accord.impl.mock.MockConfigurationService;
 import accord.impl.mock.MockStore;
 import accord.local.Node;
+import accord.local.Node.Id;
 import accord.local.NodeTimeService;
 import accord.local.ShardDistributor;
 import accord.messages.LocalRequest;
@@ -58,6 +60,7 @@ import accord.topology.Topology;
 import accord.utils.DefaultRandom;
 import accord.utils.EpochFunction;
 import accord.utils.Invariants;
+import accord.utils.SortedArrays.SortedArrayList;
 import accord.utils.ThreadPoolScheduler;
 import org.awaitility.Awaitility;
 import org.awaitility.core.ThrowingRunnable;
@@ -66,14 +69,14 @@ import static accord.utils.async.AsyncChains.awaitUninterruptibly;
 
 public class Utils
 {
-    public static Node.Id id(int i)
+    public static Id id(int i)
     {
-        return new Node.Id(i);
+        return new Id(i);
     }
 
-    public static List<Node.Id> ids(int num)
+    public static List<Id> ids(int num)
     {
-        List<Node.Id> rlist = new ArrayList<>(num);
+        List<Id> rlist = new ArrayList<>(num);
         for (int i=0; i<num; i++)
         {
             rlist.add(id(i+1));
@@ -81,29 +84,30 @@ public class Utils
         return rlist;
     }
 
-    public static List<Node.Id> ids(int first, int last)
+    public static SortedArrayList<Id> ids(int first, int last)
     {
         Invariants.checkArgument(last >= first);
-        List<Node.Id> rlist = new ArrayList<>(last - first + 1);
+        Id[] rlist = new Id[last - first + 1];
         for (int i=first; i<=last; i++)
-            rlist.add(id(i));
+            rlist[first - i] = id(i);
 
-        return rlist;
+        return new SortedArrayList<>(rlist);
     }
 
-    public static List<Node.Id> idList(int... ids)
+    public static SortedArrayList<Id> idList(int... ids)
     {
-        List<Node.Id> list = new ArrayList<>(ids.length);
-        for (int i : ids)
-            list.add(new Node.Id(i));
-        return list;
+        Id[] list = new Id[ids.length];
+        for (int i = 0 ; i < ids.length ; ++i)
+            list[i] = new Id(ids[i]);
+        Arrays.sort(list);
+        return new SortedArrayList<>(list);
     }
 
-    public static Set<Node.Id> idSet(int... ids)
+    public static Set<Id> idSet(int... ids)
     {
-        Set<Node.Id> set = Sets.newHashSetWithExpectedSize(ids.length);
+        Set<Id> set = Sets.newHashSetWithExpectedSize(ids.length);
         for (int i : ids)
-            set.add(new Node.Id(i));
+            set.add(new Id(i));
         return set;
     }
 
@@ -121,7 +125,7 @@ public class Utils
         return new Txn.InMemory(ranges, MockStore.read(ranges), MockStore.QUERY, MockStore.update(ranges));
     }
 
-    public static Txn listWriteTxn(Node.Id client, Keys keys)
+    public static Txn listWriteTxn(Id client, Keys keys)
     {
         ListUpdate update = new ListUpdate(Function.identity());
         for (Key k : keys)
@@ -136,7 +140,7 @@ public class Utils
         return new Txn.InMemory(keys, MockStore.read(keys), MockStore.QUERY);
     }
 
-    public static Shard shard(Range range, List<Node.Id> nodes, Set<Node.Id> fastPath)
+    public static Shard shard(Range range, SortedArrayList<Id> nodes, Set<Id> fastPath)
     {
         return new Shard(range, nodes, fastPath);
     }
@@ -156,7 +160,7 @@ public class Utils
         return new Topologies.Multi(SizeOfIntersectionSorter.SUPPLIER, topologies);
     }
 
-    public static Node createNode(Node.Id nodeId, Topology topology, MessageSink messageSink, MockCluster.Clock clock)
+    public static Node createNode(Id nodeId, Topology topology, MessageSink messageSink, MockCluster.Clock clock)
     {
         MockStore store = new MockStore();
         Scheduler scheduler = new ThreadPoolScheduler();

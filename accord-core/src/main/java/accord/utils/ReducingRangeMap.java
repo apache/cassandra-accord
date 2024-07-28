@@ -77,6 +77,11 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         return foldl(routables, (a, b, f, p) -> f.apply(a, b, p), accumulator, fold, p1, terminate);
     }
 
+    public <V2, P1> V2 foldlWithKey(Routables<?> routables, IndexedTriFunction<V, V2, P1, V2> fold, V2 accumulator, P1 p1, Predicate<V2> terminate)
+    {
+        return foldl(routables, (v, v2, f, p, i, j, k) -> f.apply(v, v2, p, i), accumulator, fold, p1, terminate);
+    }
+
     public <V2, P1, P2> V2 foldl(Routables<?> routables, QuadFunction<V, V2, P1, P2, V2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
         return foldl(routables, (v, v2, param1, param2, i, j, k) -> fold.apply(v, v2, param1, param2), accumulator, p1, p2, terminate);
@@ -107,7 +112,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         return foldlWithDefault(routables, (v, v2, param1, param2, i, j) -> fold.apply(v, v2, param1, param2), defaultValue, accumulator, p1, p2, terminate);
     }
 
-    private <V2, P1, P2> V2 foldl(Routables<?> routables, ReduceFunction<V, V2, P1, P2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    public <V2, P1, P2> V2 foldl(Routables<?> routables, ReduceFunction<V, V2, P1, P2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
         switch (routables.domain())
         {
@@ -117,7 +122,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         }
     }
 
-    private <V2, P1, P2> V2 foldl(AbstractKeys<?> keys, ReduceFunction<V, V2, P1, P2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    public <V2, P1, P2> V2 foldl(AbstractKeys<?> keys, ReduceFunction<V, V2, P1, P2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
         if (values.length == 0)
             return accumulator;
@@ -151,7 +156,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         return accumulator;
     }
 
-    private <V2, P1, P2> V2 foldl(AbstractRanges ranges, ReduceFunction<V, V2, P1, P2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
+    public <V2, P1, P2> V2 foldl(AbstractRanges ranges, ReduceFunction<V, V2, P1, P2> fold, V2 accumulator, P1 p1, P2 p2, Predicate<V2> terminate)
     {
         if (values.length == 0)
             return accumulator;
@@ -314,7 +319,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         return values[idx];
     }
 
-    public static <V> ReducingRangeMap<V> create(Ranges ranges, V value)
+    public static <V> ReducingRangeMap<V> create(AbstractRanges ranges, V value)
     {
         if (value == null)
             throw new IllegalArgumentException("value is null");
@@ -330,7 +335,7 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         switch (keysOrRanges.domain())
         {
             default: throw new AssertionError("Unhandled domain: " + keysOrRanges.domain());
-            case Range: return create((Ranges) keysOrRanges, value, builder);
+            case Range: return create((AbstractRanges) keysOrRanges, value, builder);
             case Key: return create((AbstractUnseekableKeys) keysOrRanges, value, builder);
         }
     }
@@ -340,12 +345,12 @@ public class ReducingRangeMap<V> extends ReducingIntervalMap<RoutingKey, V>
         switch (keysOrRanges.domain())
         {
             default: throw new AssertionError("Unhandled domain: " + keysOrRanges.domain());
-            case Range: return create((Ranges) keysOrRanges, value, builder);
+            case Range: return create((AbstractRanges) keysOrRanges, value, builder);
             case Key: return create((Keys) keysOrRanges, value, builder);
         }
     }
 
-    public static <V, M extends ReducingRangeMap<V>> M create(Ranges ranges, V value, BuilderFactory<RoutingKey, V, M> factory)
+    public static <V, M extends ReducingRangeMap<V>> M create(AbstractRanges ranges, V value, BuilderFactory<RoutingKey, V, M> factory)
     {
         if (value == null)
             throw new IllegalArgumentException("value is null");

@@ -21,6 +21,7 @@ package accord.impl.basic;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -38,13 +39,17 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
+
+import javax.annotation.Nullable;
 
 import org.junit.jupiter.api.Assertions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import accord.api.BarrierType;
+import accord.api.Key;
 import accord.api.MessageSink;
 import accord.api.Scheduler;
 import accord.burn.BurnTestConfigurationService;
@@ -58,19 +63,26 @@ import accord.coordinate.Exhausted;
 import accord.coordinate.Invalidated;
 import accord.coordinate.Preempted;
 import accord.coordinate.Timeout;
+import accord.coordinate.Truncated;
 import accord.impl.CoordinateDurabilityScheduling;
+import accord.impl.InMemoryCommandStore;
 import accord.impl.MessageListener;
 import accord.impl.PrefixedIntHashKey;
 import accord.impl.SimpleProgressLog;
 import accord.impl.SizeOfIntersectionSorter;
 import accord.impl.TopologyFactory;
+import accord.impl.basic.DelayedCommandStores.DelayedCommandStore;
 import accord.impl.list.ListAgent;
 import accord.impl.list.ListStore;
 import accord.local.AgentExecutor;
+import accord.local.Command;
 import accord.local.Node.Id;
 import accord.local.Node;
 import accord.local.NodeTimeService;
+import accord.local.SaveStatus;
 import accord.local.ShardDistributor;
+import accord.local.Status;
+import accord.local.cfk.CommandsForKey;
 import accord.messages.Message;
 import accord.messages.MessageType;
 import accord.messages.Reply;
@@ -79,8 +91,11 @@ import accord.messages.SafeCallback;
 import accord.primitives.Keys;
 import accord.primitives.Range;
 import accord.primitives.Ranges;
+import accord.primitives.Routables;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
+import accord.primitives.Txn;
+import accord.primitives.TxnId;
 import accord.topology.Topology;
 import accord.topology.TopologyRandomizer;
 import accord.utils.Gens;
@@ -589,7 +604,7 @@ public class Cluster implements Scheduler
                 if (f != null)
                 {
                     // ignore specific errors
-                    if (f instanceof Invalidated || f instanceof Timeout || f instanceof Preempted || f instanceof Exhausted)
+                    if (f instanceof Invalidated || f instanceof Timeout || f instanceof Preempted || f instanceof Exhausted || f instanceof Truncated)
                         return;
                     node.agent().onUncaughtException(f);
                 }
@@ -744,6 +759,145 @@ public class Cluster implements Scheduler
         BiFunction<Id, Id, Link> defaultLinks = defaultLinks(random);
         Function<List<Id>, BiFunction<Id, Id, Link>> overrideLinks = overrideLinks(random, rf, defaultLinks);
         return new LinkConfig(overrideLinks, defaultLinks);
+    }
+
+    public static class BlockingTransaction
+    {
+        final TxnId txnId;
+        final Command command;
+        final DelayedCommandStore commandStore;
+        final TxnId blockedOn;
+        final Routables<?> blockedVia;
+
+        public BlockingTransaction(TxnId txnId, Command command, DelayedCommandStore commandStore, @Nullable TxnId blockedOn, @Nullable Routables<?> blockedVia)
+        {
+            this.txnId = txnId;
+            this.command = command;
+            this.commandStore = commandStore;
+            this.blockedOn = blockedOn;
+            this.blockedVia = blockedVia;
+        }
+
+        @Override
+        public String toString()
+        {
+            return txnId + ":" + command.saveStatus() + "@"
+                   + commandStore.toString().replaceAll("DelayedCommandStore", "")
+                   + (command.homeKey() != null && commandStore.unsafeRangesForEpoch().allAt(txnId.epoch()).contains(command.homeKey()) ? "(Home)" : "");
+        }
+    }
+
+    public List<BlockingTransaction> findBlockedCommitted(@Nullable Txn.Kind first, Txn.Kind ... rest)
+    {
+        return findBlocked(SaveStatus.Committed, first, rest);
+    }
+
+    public List<BlockingTransaction> findBlocked(@Nullable SaveStatus minSaveStatus, @Nullable Txn.Kind first, Txn.Kind ... rest)
+    {
+        List<BlockingTransaction> result = new ArrayList<>();
+        BlockingTransaction cur = findMin(SaveStatus.Committed, SaveStatus.ReadyToExecute, first, rest);
+        while (cur != null)
+        {
+            result.add(cur);
+            Command command = cur.commandStore.unsafeCommands().get(cur.txnId).value();
+            if (!command.hasBeen(Status.Stable) || cur.blockedOn == null)
+                break;
+
+            cur = find(cur.blockedOn, null, SaveStatus.Stable);
+        }
+        return result;
+    }
+
+    public BlockingTransaction findMinUnstable()
+    {
+        return findMin(null, SaveStatus.Committed, null);
+    }
+
+    public BlockingTransaction findMinUnstable(@Nullable Txn.Kind first, Txn.Kind ... rest)
+    {
+        return findMin(null, SaveStatus.Committed, first, rest);
+    }
+
+    public BlockingTransaction findMin(@Nullable SaveStatus minSaveStatus, @Nullable SaveStatus maxSaveStatus, @Nullable Txn.Kind first, Txn.Kind ... rest)
+    {
+        Predicate<Txn.Kind> testKind = first == null ? ignore -> true : EnumSet.of(first, rest)::contains;
+        return findMin(minSaveStatus, maxSaveStatus, id -> testKind.test(id.kind()));
+    }
+
+    public BlockingTransaction find(TxnId txnId, @Nullable SaveStatus minSaveStatus, @Nullable SaveStatus maxSaveStatus)
+    {
+        return findMin(minSaveStatus, maxSaveStatus, txnId::equals);
+    }
+
+    public BlockingTransaction findMin(@Nullable SaveStatus minSaveStatus, @Nullable SaveStatus maxSaveStatus, Predicate<TxnId> testTxnId)
+    {
+        return find(minSaveStatus, maxSaveStatus, testTxnId, (min, test) -> {
+            int c = -1;
+            if (min == null || (c = test.txnId.compareTo(min.txnId)) <= 0 && (c < 0 || test.command.saveStatus().compareTo(min.command.saveStatus()) < 0))
+                min = test;
+            return min;
+        }, null);
+    }
+
+    public List<BlockingTransaction> findAll(TxnId txnId)
+    {
+        return findAll(null, null, txnId::equals);
+    }
+
+    public List<BlockingTransaction> findAll(@Nullable SaveStatus minSaveStatus, @Nullable SaveStatus maxSaveStatus, Predicate<TxnId> testTxnId)
+    {
+        List<BlockingTransaction> result = new ArrayList<>();
+        find(minSaveStatus, maxSaveStatus, testTxnId, (r, c) -> { r.add(c); return r; }, result);
+        return result;
+    }
+
+    public <T> T find(@Nullable SaveStatus minSaveStatus, @Nullable SaveStatus maxSaveStatus, Predicate<TxnId> testTxnId, BiFunction<T, BlockingTransaction, T> fold, T accumulate)
+    {
+        for (Node.Id id : sinks.keySet())
+        {
+            Node node = lookup.apply(id);
+
+            DelayedCommandStores stores = (DelayedCommandStores) node.commandStores();
+            for (DelayedCommandStore store : stores.unsafeStores())
+            {
+                for (Map.Entry<TxnId, InMemoryCommandStore.GlobalCommand> e : store.unsafeCommands().entrySet())
+                {
+                    Command command = e.getValue().value();
+                    if ((minSaveStatus == null || command.saveStatus().compareTo(minSaveStatus) >= 0) &&
+                        (maxSaveStatus == null || command.saveStatus().compareTo(maxSaveStatus) <= 0) &&
+                        testTxnId.test(command.txnId()))
+                    {
+                        accumulate = fold.apply(accumulate, toBlocking(command, store));
+                        break;
+                    }
+                }
+            }
+        }
+        return accumulate;
+    }
+
+    private BlockingTransaction toBlocking(Command command, DelayedCommandStore store)
+    {
+        Routables<?> blockedVia = null;
+        TxnId blockedOn = null;
+        if (command.hasBeen(Status.Stable) && !command.hasBeen(Status.Truncated))
+        {
+            Command.WaitingOn waitingOn = command.asCommitted().waitingOn();
+            Key blockedOnKey = waitingOn.lastWaitingOnKey();
+            if (blockedOnKey == null)
+            {
+                blockedOn = waitingOn.nextWaitingOn();
+                if (blockedOn != null)
+                    blockedVia = command.partialDeps().participants(blockedOn);
+            }
+            else
+            {
+                CommandsForKey cfk = store.unsafeCommandsForKey().get(blockedOnKey).value();
+                blockedOn = cfk.nextWaitingToApply(command.txnId().kind().witnesses());
+                blockedVia = Keys.of(blockedOnKey);
+            }
+        }
+        return new BlockingTransaction(command.txnId(), command, store, blockedOn, blockedVia);
     }
 
 }

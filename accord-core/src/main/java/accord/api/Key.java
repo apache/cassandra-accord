@@ -18,6 +18,8 @@
 
 package accord.api;
 
+import javax.annotation.Nonnull;
+
 import accord.primitives.Range;
 import accord.primitives.RoutableKey;
 import accord.primitives.Seekable;
@@ -35,4 +37,6 @@ public interface Key extends Seekable, RoutableKey
 
     @Override
     default Range asRange() { throw new UnsupportedOperationException(); }
+
+    default int compareAsRoutingKey(@Nonnull RoutingKey that) { return toUnseekable().compareTo(that); }
 }

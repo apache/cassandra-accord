@@ -34,6 +34,10 @@ import static accord.utils.SortedArrays.Search.FLOOR;
  */
 public interface Routables<K extends Routable> extends Iterable<K>
 {
+    /**
+     * How to slice an input range that partially overlaps a slice range.
+     * This modifier applies only when both input collections (to either {@link #slice} or {@link #intersecting} contain Ranges)
+     */
     enum Slice
     {
         /** (Default) Overlapping ranges are returned unmodified */
@@ -66,9 +70,12 @@ public interface Routables<K extends Routable> extends Iterable<K>
 
     boolean contains(RoutableKey key);
     boolean containsAll(Routables<?> keysOrRanges);
+    boolean intersectsAll(Unseekables<?> keysOrRanges);
 
     Routables<?> slice(Ranges ranges);
     Routables<K> slice(Ranges ranges, Slice slice);
+    Routables<?> intersecting(Unseekables<?> intersecting);
+    Routables<K> intersecting(Unseekables<?> intersecting, Slice slice);
 
     /**
      * Search forwards from {code thisIndex} and {@code withIndex} to find the first entries in each collection

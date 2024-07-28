@@ -125,7 +125,7 @@ public class Commit extends TxnRequest<CommitOrReadNack>
         if (kind.withTxn == HasTxn)
         {
             // TODO (desired): only includeQuery if isHome; this affects state eviction and is low priority given size in C*
-            partialTxn = txn.slice(scope.covering(), true);
+            partialTxn = txn.intersecting(scope, true);
             sendRoute = route;
         }
         else if (kind.withTxn == HasNewlyOwnedTxnRanges && executeAt.epoch() != txnId.epoch())
@@ -134,14 +134,14 @@ public class Commit extends TxnRequest<CommitOrReadNack>
             Ranges executeRanges = topologies.computeRangesForNode(to);
             Ranges extraRanges = executeRanges.subtract(coordinateRanges);
             if (!extraRanges.isEmpty())
-                partialTxn = txn.slice(scope.covering().subtract(coordinateRanges), coordinateRanges.contains(route.homeKey()));
+                partialTxn = txn.intersecting(scope.subtract(coordinateRanges), coordinateRanges.contains(route.homeKey()));
         }
 
         this.kind = kind;
         this.executeAt = executeAt;
-        this.keys = txn.keys().slice(scope.covering());
+        this.keys = txn.keys().intersecting(scope);
         this.partialTxn = partialTxn;
-        this.partialDeps = deps.slice(scope.covering());
+        this.partialDeps = deps.intersecting(scope);
         this.route = sendRoute;
         this.readData = toExecuteFactory == null ? null : toExecuteFactory.apply(partialTxn != null ? partialTxn : txn, scope, partialDeps);
     }

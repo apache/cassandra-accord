@@ -152,7 +152,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
             return;
         }
 
-        Invariants.checkState(sourceEpoch == txnId.epoch() || (full.executeAt != null && sourceEpoch == full.executeAt.epoch()) || full.maxKnowledgeSaveStatus == SaveStatus.Erased || full.maxKnowledgeSaveStatus == SaveStatus.ErasedOrInvalidated);
+        Invariants.checkState(sourceEpoch == txnId.epoch() || (full.executeAt != null && sourceEpoch == full.executeAt.epoch()) || full.maxKnowledgeSaveStatus == SaveStatus.Erased || full.maxKnowledgeSaveStatus == SaveStatus.ErasedOrInvalidOrVestigial);
 
         full = full.finish(route, withQuorum);
         route = Invariants.nonNull(full.route);
@@ -161,14 +161,14 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
 
         RoutingKey progressKey = node.trySelectProgressKey(txnId, route);
 
-        Ranges covering = route.sliceCovering(sliceRanges, Minimal);
-        Participants<?> participatingKeys = route.participants().slice(covering, Minimal);
-        Status.Known achieved = full.knownFor(participatingKeys);
+        Route<?> covering = route.slice(sliceRanges, Minimal);
+        Status.Known achieved = full.knownFor(covering);
         if (achieved.executeAt.isDecidedAndKnownToExecute() && full.executeAt.epoch() > toEpoch)
         {
+            Invariants.checkState(Route.isFullRoute(route));
             Ranges acceptRanges;
             if (!node.topology().hasEpoch(full.executeAt.epoch()) ||
-                (!route.covers(acceptRanges = node.topology().localRangesForEpochs(txnId.epoch(), full.executeAt.epoch()))))
+                (!covering.containsAll(route.slice(acceptRanges = node.topology().localRangesForEpochs(txnId.epoch(), full.executeAt.epoch())))))
             {
                 // we don't know what the execution epoch requires, so we cannot be sure we can replicate it locally
                 // we *could* wait until we have the local epoch before running this
@@ -179,9 +179,8 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
             {
                 // TODO (expected): this should only be the two precise epochs, not the full range of epochs
                 sliceRanges = acceptRanges;
-                covering = route.sliceCovering(sliceRanges, Minimal);
-                participatingKeys = route.participants().slice(covering, Minimal);
-                Status.Known knownForExecution = full.knownFor(participatingKeys);
+                covering = route.slice(sliceRanges, Minimal);
+                Status.Known knownForExecution = full.knownFor(covering);
                 if ((target != null && target.isSatisfiedBy(knownForExecution)) || achieved.isSatisfiedBy(knownForExecution))
                 {
                     achieved = knownForExecution;
@@ -199,11 +198,11 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
 
         PartialTxn partialTxn = full.partialTxn;
         if (achieved.definition.isKnown())
-            partialTxn = full.partialTxn.slice(sliceRanges, true).reconstitutePartial(covering);
+            partialTxn = full.partialTxn.intersecting(route, true).reconstitutePartial(covering);
 
         PartialDeps stableDeps = full.stableDeps;
         if (achieved.deps.hasDecidedDeps())
-            stableDeps = full.stableDeps.slice(sliceRanges).reconstitutePartial(covering);
+            stableDeps = full.stableDeps.intersecting(route).reconstitutePartial(covering);
 
         Propagate propagate =
             new Propagate(txnId, route, full.maxKnowledgeSaveStatus, full.maxSaveStatus, full.acceptedOrCommitted, full.durability, full.homeKey, progressKey, achieved, full.map, isShardTruncated, partialTxn, stableDeps, toEpoch, full.executeAtIfKnown(), full.writes, full.result);
@@ -261,19 +260,20 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
             if (achieved == null)
                 return null;
 
-            Ranges needed = safeStore.ranges().allBetween(txnId.epoch(), (executeAtIfKnown == null ? txnId : executeAtIfKnown).epoch());
-            if (achieved.isDefinitionKnown() && partialTxn == null)
+            Participants<?> needed = route.slice(safeStore.ranges().allBetween(txnId.epoch(), (executeAtIfKnown == null ? txnId : executeAtIfKnown).epoch()));
+            if (achieved.isDefinitionKnown() && partialTxn == null && this.partialTxn != null)
             {
                 PartialTxn existing = command.partialTxn();
-                Ranges neededForDefinition = existing == null ? needed : needed.subtract(existing.covering());
-                partialTxn = this.partialTxn.slice(needed, true).reconstitutePartial(neededForDefinition);
+                Participants<?> neededExtra = needed;
+                if (existing != null) neededExtra = neededExtra.subtract(existing.keys().toParticipants());
+                partialTxn = this.partialTxn.intersecting(neededExtra, true).reconstitutePartial(neededExtra);
             }
 
-            if (achieved.hasDecidedDeps() && stableDeps == null)
+            if (achieved.hasDecidedDeps() && stableDeps == null && this.stableDeps != null)
             {
                 Invariants.checkState(executeAtIfKnown != null);
                 // we don't subtract existing partialDeps, as they cannot be committed deps; we only permit committing deps covering all participating ranges
-                stableDeps = this.stableDeps.slice(needed).reconstitutePartial(needed);
+                stableDeps = this.stableDeps.intersecting(needed).reconstitutePartial(needed);
             }
         }
 
@@ -281,7 +281,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
         if (command.hasBeen(propagate))
         {
             if (maxSaveStatus.phase == Cleanup && durability.isDurableOrInvalidated() && Infer.safeToCleanup(safeStore, command, route, executeAtIfKnown))
-                Commands.setTruncatedApply(safeStore, safeCommand);
+                Commands.setTruncatedApplyOrErasedVestigial(safeStore, safeCommand);
 
             // TODO (expected): maybe stale?
             return updateDurability(safeStore, safeCommand);
@@ -410,7 +410,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
         if (ranges.isEmpty())
         {
             // TODO (expected): we might prefer to adopt Redundant status, and permit ourselves to later accept the result of the execution and/or definition
-            Commands.setTruncatedApply(safeStore, safeCommand, executeAtIfKnown, route);
+            Commands.setTruncatedApplyOrErasedVestigial(safeStore, safeCommand, executeAtIfKnown, route);
             return null;
         }
 
@@ -419,7 +419,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
         {
             // we only coordinate this transaction, so being unable to retrieve its state does not imply any staleness
             // TODO (now): double check this doesn't stop us coordinating the transaction (it shouldn't, as doesn't imply durability)
-            Commands.setTruncatedApply(safeStore, safeCommand, executeAtIfKnown, route);
+            Commands.setTruncatedApplyOrErasedVestigial(safeStore, safeCommand, executeAtIfKnown, route);
             return null;
         }
 
@@ -445,7 +445,7 @@ public class Propagate implements EpochSupplier, LocalRequest<Status.Known>, Pre
             return required;
 
         // TODO (expected): we might prefer to adopt Redundant status, and permit ourselves to later accept the result of the execution and/or definition
-        Commands.setTruncatedApply(safeStore, safeCommand, executeAtIfKnown, route);
+        Commands.setTruncatedApplyOrErasedVestigial(safeStore, safeCommand, executeAtIfKnown, route);
         return null;
     }
 

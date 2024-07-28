@@ -115,7 +115,6 @@ public interface CoordinationAdapter<R>
         {
             if (any.oldestEpoch() <= txnId.epoch() && any.currentEpoch() >= executeAt.epoch()) any = any.forEpochs(txnId.epoch(), executeAt.epoch());
             else any = node.topology().preciseEpochs(route, txnId.epoch(), executeAt.epoch());
-            Topologies executes = any.forEpochs(executeAt.epoch(), executeAt.epoch());
 
             adapter.persist(node, any, route, txnId, txn, executeAt, deps, writes, result, callback);
         }
@@ -248,7 +247,7 @@ public interface CoordinationAdapter<R>
             @Override
             public void execute(Node node, Topologies all, FullRoute<?> route, ExecutePath path, TxnId txnId, Txn txn, Timestamp executeAt, Deps deps, BiConsumer<? super SyncPoint<S>, Throwable> callback)
             {
-                // TODO (required): remember and document why we don't use fast path for exclusive sync points
+                // TODO (required, consider): remember and document why we don't use fast path for exclusive sync points
                 if (path == FAST)
                 {
                     Invoke.stabilise(this, node, all, route, Ballot.ZERO, txnId, txn, executeAt, deps, callback);

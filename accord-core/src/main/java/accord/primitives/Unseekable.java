@@ -23,4 +23,5 @@ package accord.primitives;
  */
 public interface Unseekable extends Routable
 {
+    Range asRange();
 }

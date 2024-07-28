@@ -24,6 +24,7 @@ import accord.api.Key;
 import accord.api.Read;
 import accord.local.SafeCommandStore;
 import accord.primitives.Keys;
+import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Seekable;
 import accord.primitives.Timestamp;
@@ -60,6 +61,12 @@ public class MaelstromRead implements Read
     public Read slice(Ranges ranges)
     {
         return new MaelstromRead(readKeys.slice(ranges), keys.slice(ranges));
+    }
+
+    @Override
+    public Read intersecting(Participants<?> participants)
+    {
+        return new MaelstromRead(readKeys.intersecting(participants), keys.intersecting(participants));
     }
 
     @Override

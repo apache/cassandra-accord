@@ -35,7 +35,7 @@ import static accord.local.cfk.CommandsForKey.InternalStatus.INVALID_OR_TRUNCATE
 import static accord.local.cfk.CommandsForKey.NO_TXNIDS;
 import static accord.local.cfk.CommandsForKey.managesExecution;
 import static accord.local.cfk.Pruning.LoadingPruned.LOADINGF;
-import static accord.utils.ArrayBuffers.cachedTimestamps;
+import static accord.utils.ArrayBuffers.cachedAny;
 import static accord.utils.ArrayBuffers.cachedTxnIds;
 
 public class Pruning
@@ -203,7 +203,7 @@ public class Pruning
         TxnInfo[] byId = cfk.byId;
         int minUndecidedById = -1;
         int retainCount = 0, removedCommittedCount = 0;
-        Timestamp[] removedExecuteAts = NO_TXNIDS;
+        Object[] removedExecuteAts = NO_TXNIDS;
         int removedExecuteAtCount = 0;
         TxnInfo[] newInfos;
         {
@@ -239,7 +239,7 @@ public class Pruning
                                 if (missing != NO_TXNIDS)
                                 {
                                     if (removedExecuteAtCount == removedExecuteAts.length)
-                                        removedExecuteAts = cachedTimestamps().resize(removedExecuteAts, removedExecuteAtCount, Math.max(8, removedExecuteAtCount + (removedExecuteAtCount >> 1)));
+                                        removedExecuteAts = cachedAny().resize(removedExecuteAts, removedExecuteAtCount, Math.max(8, removedExecuteAtCount + (removedExecuteAtCount >> 1)));
                                     removedExecuteAts[removedExecuteAtCount++] = txn.executeAt;
                                 }
                                 ++removedCommittedCount;
@@ -325,7 +325,7 @@ public class Pruning
             System.arraycopy(committedByExecuteAt, sourcePos, newCommittedByExecuteAt, sourcePos - removedCommittedCount, committedByExecuteAt.length - sourcePos);
         }
 
-        cachedTimestamps().forceDiscard(removedExecuteAts, removedExecuteAtCount);
+        cachedAny().forceDiscard(removedExecuteAts, removedExecuteAtCount);
         int newMaxAppliedWriteByExecuteAt = cfk.maxAppliedWriteByExecuteAt - removedCommittedCount;
         return new CommandsForKey(cfk.key, cfk.redundantBefore, newPrunedBefore, cfk.loadingPruned, newInfos, newCommittedByExecuteAt, minUndecidedById, newMaxAppliedWriteByExecuteAt, cfk.unmanageds);
     }

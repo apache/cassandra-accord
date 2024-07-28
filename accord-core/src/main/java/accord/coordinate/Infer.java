@@ -31,8 +31,10 @@ import accord.local.SafeCommand;
 import accord.local.SafeCommandStore;
 import accord.local.Status;
 import accord.local.Status.Known;
+import accord.messages.CheckStatus.FoundKnown;
+import accord.messages.CheckStatus.FoundKnownMap;
 import accord.primitives.EpochSupplier;
-import accord.primitives.Participants;
+import accord.primitives.Range;
 import accord.primitives.Ranges;
 import accord.primitives.Route;
 import accord.primitives.Timestamp;
@@ -43,6 +45,7 @@ import accord.utils.MapReduceConsume;
 
 import static accord.coordinate.Infer.InvalidIf.IfPreempted;
 import static accord.coordinate.Infer.InvalidIf.IfQuorum;
+import static accord.coordinate.Infer.InvalidIf.NotInvalid;
 import static accord.coordinate.Infer.InvalidIf.NotKnown;
 import static accord.coordinate.Infer.InvalidIfNot.IfUndecided;
 import static accord.coordinate.Infer.InvalidIfNot.IfUnknown;
@@ -52,7 +55,9 @@ import static accord.local.Status.PreApplied;
 import static accord.local.Status.PreCommitted;
 import static accord.primitives.Route.castToRoute;
 import static accord.primitives.Route.isRoute;
+import static accord.utils.Invariants.illegalState;
 
+// TODO (required): dedicated randomised testing of all inferences
 public class Infer
 {
     public enum InvalidIfNot
@@ -91,18 +96,26 @@ public class Infer
         /**
          * If the command has not had its execution timestamp agreed on any shard
          */
-        IfUndecided(IfQuorum, IfQuorum);
+        IfUndecided(IfQuorum, IfQuorum),
+
+        /**
+         * This command is known to be decided, so it is a logic bug if it is inferred elsewhere to be invalid.
+         */
+        IsNotInvalid(NotInvalid, NotInvalid);
 
         final InvalidIf unknown, undecided;
         private static final InvalidIfNot[] LOOKUP;
-        private static final int invalidIfs = InvalidIf.values().length;
+        private static final int invalidIfs = InvalidIf.values().length - 1;
 
         static
         {
             LOOKUP = new InvalidIfNot[invalidIfs * invalidIfs];
             InvalidIfNot[] invalidIfNot = InvalidIfNot.values();
             for (InvalidIfNot ifNot : invalidIfNot)
-                LOOKUP[ifNot.unknown.ordinal() * invalidIfs + ifNot.undecided.ordinal()] = ifNot;
+            {
+                if (ifNot != IsNotInvalid)
+                    LOOKUP[ifNot.unknown.ordinal() * invalidIfs + ifNot.undecided.ordinal()] = ifNot;
+            }
         }
 
         InvalidIfNot(InvalidIf unknown, InvalidIf undecided)
@@ -113,7 +126,7 @@ public class Infer
 
         public static boolean isMax(InvalidIfNot that)
         {
-            return that == IfUndecided;
+            return that == IsNotInvalid;
         }
 
         public InvalidIfNot atLeast(InvalidIfNot that)
@@ -128,11 +141,14 @@ public class Infer
 
         private InvalidIfNot lookup(InvalidIf unknown, InvalidIf undecided)
         {
+            if (unknown == NotInvalid)
+                return IsNotInvalid;
             return LOOKUP[unknown.ordinal() * invalidIfs + undecided.ordinal()];
         }
 
         private static InvalidIf atLeast(InvalidIf a, InvalidIf b)
         {
+            if (a == NotInvalid || b == NotInvalid) return NotInvalid;
             if (a == b) return a;
             return IfPreempted;
         }
@@ -156,8 +172,11 @@ public class Infer
             switch (invalidIf)
             {
                 default: throw new AssertionError("Unhandled InvalidIf: " + invalidIf);
-                case NotKnown: break;
-                case IfQuorum: return true;
+                case NotInvalid:
+                case NotKnown:
+                    break;
+                case IfQuorum:
+                    return true;
                 case IfPreempted:
                     if (isPreempted == IsPreempted.Preempted)
                         return true;
@@ -179,7 +198,12 @@ public class Infer
         /**
          * If we obtain a quorum of responses with the associated lower bound, we can infer the command is invalidated if it has not been witnessed at the lower bound
          */
-        IfQuorum
+        IfQuorum,
+
+        /**
+         * Definitely not invalid
+         */
+        NotInvalid
     }
 
     // only valid with a quorum of responses
@@ -266,7 +290,7 @@ public class Infer
         {
             // we're applying an invalidation, so the record will not be cleaned up until the whole range is truncated
             Command command = safeCommand.current();
-            // TODO (required): consider the !command.hasBeen(PreCommitted) condition
+            // TODO (required, consider): consider the !command.hasBeen(PreCommitted) condition
             Invariants.checkState(!command.hasBeen(PreCommitted) || command.hasBeen(Status.Truncated), "Unexpected status for %s", command);
             Commands.commitInvalidate(safeStore, safeCommand, someUnseekables);
             return null;
@@ -293,45 +317,74 @@ public class Infer
         Void apply(SafeCommandStore safeStore, SafeCommand safeCommand)
         {
             Command command = safeCommand.current();
-            // TODO (required): introduce a special form of Erased where we do not imply the phase is "Cleanup"
+            // TODO (required, consider): introduce a special form of Erased where we do not imply the phase is "Cleanup"
             if (!command.hasBeen(PreApplied) && safeToCleanup(safeStore, command, Route.castToRoute(someUnseekables), null))
                 Commands.setErased(safeStore, safeCommand);
             return null;
         }
     }
 
-    public static InvalidIfNot invalidIfNot(SafeCommandStore safeStore, TxnId txnId, Unseekables<?> query)
+    public static FoundKnownMap withInvalidIfNot(SafeCommandStore safeStore, TxnId txnId, Unseekables<?> localKeys, Unseekables<?> maxKeys, FoundKnown known)
     {
+        if (isRoute(maxKeys))
+            maxKeys = castToRoute(maxKeys).withHomeKey();
+
         if (safeStore.commandStore().globalDurability(txnId).compareTo(Majority) >= 0)
         {
-            Unseekables<?> preacceptsWith = isRoute(query) ? castToRoute(query).withHomeKey() : query;
-            return safeStore.commandStore().isRejectedIfNotPreAccepted(txnId, preacceptsWith) ? IfUnknown : IfUndecided;
+            InvalidIfNot invalidIfNot = safeStore.commandStore().isRejectedIfNotPreAccepted(txnId, maxKeys) ? IfUnknown : IfUndecided;
+            return FoundKnownMap.create(maxKeys, known.withAtLeast(invalidIfNot));
         }
 
-        // TODO (expected, consider): should we force this to be a Route or a Participants?
-        if (isRoute(query))
+        // TODO (required): document the cleanup semantics that make this safe and tie the locations together preferably by compiler
+        //   (in essence iirc we permit
+
+        Ranges coordinateRanges = safeStore.ranges().allAt(txnId.epoch());
+        FoundKnownMap map = FoundKnownMap.create(localKeys, known);
+        if (Cleanup.isSafeToCleanup(safeStore.commandStore().durableBefore(), txnId, coordinateRanges))
         {
-            Participants<?> participants = castToRoute(query).participants();
-            // TODO (desired): limit to local participants to avoid O(n2) work across cluster
-            if (safeStore.commandStore().durableBefore().isSomeShardDurable(txnId, participants, Majority))
-                return IfUndecided;
+            // it is safe to cleanup for all keys we own, as they are all known to have UniversalOrInvalidated durability past the TxnId in question
+            map = FoundKnownMap.merge(map, FoundKnownMap.create(localKeys, known.withAtLeast(IfUndecided)));
         }
 
-        if (Cleanup.isSafeToCleanup(safeStore.commandStore().durableBefore(), txnId, safeStore.ranges().allAt(txnId.epoch())))
-            return IfUndecided;
+        // TODO (desired): limit to local participants to avoid O(n2) work across cluster
+        class Builder extends FoundKnownMap.Builder
+        {
+            int minIndex;
+            public Builder(boolean inclusiveEnds, int capacity)
+            {
+                super(inclusiveEnds, capacity);
+            }
+        }
+        Builder builder = new Builder(maxKeys.get(0).asRange().endInclusive(), 2 * maxKeys.size());
+        safeStore.commandStore().durableBefore().foldl(maxKeys, (e, b, q, id, i, j, k) -> {
+            if (e.majorityBefore.compareTo(id) > 0)
+            {
+                i = Math.max(i, b.minIndex);
+                while (i < j)
+                {
+                    Range range = q.get(i++).asRange();
+                    b.append(range.start(), FoundKnown.Nothing.withAtLeast(IfUndecided), (i1, i2) -> { throw illegalState(); });
+                    b.append(range.end(), null, (i1, i2) -> { throw illegalState(); });
+                }
+                b.minIndex = i;
+            }
+            return b;
+        }, builder, maxKeys, txnId, i -> false);
 
-        return InvalidIfNot.NotKnownToBeInvalid;
+        if (!builder.isEmpty())
+            map = FoundKnownMap.merge(map, builder.build());
+
+        return map;
     }
 
     public static boolean safeToCleanup(SafeCommandStore safeStore, Command command, Route<?> fetchedWith, @Nullable Timestamp executeAt)
     {
         Invariants.checkArgument(fetchedWith != null || command.route() != null);
         TxnId txnId = command.txnId();
-        if (command.route() == null || !fetchedWith.covers(safeStore.ranges().allAt(txnId.epoch())))
-            return false;
+        Route<?> route = Route.merge(command.route(), (Route)fetchedWith);
 
-        Route<?> route = command.route();
-        if (route == null) route = fetchedWith;
+        if (!Route.isFullRoute(route))
+            return false;
 
         // TODO (required): is it safe to cleanup without an executeAt? We don't know for sure which ranges it might participate in.
         //    We can infer the upper bound of execution by the "execution" of any ExclusiveSyncPoint used to infer the invalidation.

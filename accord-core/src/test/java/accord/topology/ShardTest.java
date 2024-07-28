@@ -19,11 +19,12 @@
 package accord.topology;
 
 import accord.local.Node;
+import accord.utils.SortedArrays.SortedArrayList;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 import static accord.Utils.ids;
@@ -151,7 +152,7 @@ public class ShardTest
     @Test
     void pendingNodeValidation()
     {
-        List<Node.Id> nodes = ids(0, 3);
+        SortedArrayList<Node.Id> nodes = ids(0, 3);
         Set<Node.Id> fpNodes = new HashSet<>(ids(0, 2));
         // pending nodes are part of electorate
         new Shard(range(0, 100), nodes, fpNodes, new HashSet<>(ids(3, 3)));

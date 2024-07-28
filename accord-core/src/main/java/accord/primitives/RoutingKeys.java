@@ -90,7 +90,7 @@ public class RoutingKeys extends AbstractUnseekableKeys implements Unseekables<R
         if (contains(with))
             return this;
 
-        return wrap(toRoutingKeysArray(with));
+        return wrap(toRoutingKeysArray(with, true));
     }
 
     @Override

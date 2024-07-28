@@ -32,6 +32,7 @@ import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
+import accord.primitives.Route;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -63,15 +64,15 @@ public class ReadEphemeralTxnData extends ReadData
 
     private ReadEphemeralTxnData(Id to, Topologies topologies, TxnId txnId, Participants<?> readScope, long executeAtEpoch, @Nonnull Txn txn, @Nonnull Deps deps, @Nonnull FullRoute<?> route, int latestRelevantIndex)
     {
-        this(txnId, readScope, computeScope(to, topologies, null, latestRelevantIndex, (i, r) -> r, Ranges::with), executeAtEpoch, txn, deps, route);
+        this(txnId, readScope, computeScope(to, topologies, route, latestRelevantIndex), executeAtEpoch, txn, deps, route);
     }
 
-    private ReadEphemeralTxnData(TxnId txnId, Participants<?> readScope, Ranges slice, long executeAtEpoch, @Nonnull Txn txn, @Nonnull Deps deps, @Nonnull FullRoute<?> route)
+    private ReadEphemeralTxnData(TxnId txnId, Participants<?> readScope, Route<?> scope, long executeAtEpoch, @Nonnull Txn txn, @Nonnull Deps deps, @Nonnull FullRoute<?> route)
     {
-        super(txnId, readScope.slice(slice), executeAtEpoch);
+        super(txnId, readScope.intersecting(scope), executeAtEpoch);
         this.route = route;
-        this.partialTxn = txn.slice(slice, false);
-        this.partialDeps = deps.slice(slice);
+        this.partialTxn = txn.intersecting(scope, false);
+        this.partialDeps = deps.intersecting(scope);
     }
 
     public ReadEphemeralTxnData(TxnId txnId, Participants<?> readScope, long executeAtEpoch, @Nonnull PartialTxn partialTxn, @Nonnull PartialDeps partialDeps, @Nonnull FullRoute<?> route)

@@ -53,7 +53,7 @@ public class ListFetchCoordinator extends AbstractFetchCoordinator
     @Override
     protected PartialTxn rangeReadTxn(Ranges ranges)
     {
-        return new PartialTxn.InMemory(ranges, Txn.Kind.Read, ranges, new ListRead(Function.identity(), false, ranges, ranges), new ListQuery(Node.Id.NONE, Long.MIN_VALUE, false), null);
+        return new PartialTxn.InMemory(Txn.Kind.Read, ranges, new ListRead(Function.identity(), false, ranges, ranges), new ListQuery(Node.Id.NONE, Long.MIN_VALUE, false), null);
     }
 
     @Override

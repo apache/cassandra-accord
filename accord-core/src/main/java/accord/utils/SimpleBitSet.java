@@ -61,6 +61,11 @@ public class SimpleBitSet
 
     public SimpleBitSet(SimpleBitSet copy)
     {
+        this(copy, false);
+    }
+
+    public SimpleBitSet(SimpleBitSet copy, boolean share)
+    {
         bits = copy.bits.clone();
         count = copy.count;
     }

@@ -67,8 +67,8 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
         super(to, topologies, txnId, route);
         this.ballot = ballot;
         this.executeAt = executeAt;
-        this.keys = keys.slice(scope.covering());
-        this.partialDeps = deps.slice(scope.covering());
+        this.keys = keys.intersecting(scope);
+        this.partialDeps = deps.intersecting(scope);
     }
 
     private Accept(TxnId txnId, PartialRoute<?> scope, long waitForEpoch, long minEpoch, boolean doNotComputeProgressKey, Ballot ballot, Timestamp executeAt, Seekables<?, ?> keys, PartialDeps partialDeps)
@@ -113,7 +113,7 @@ public class Accept extends TxnRequest.WithUnsynced<Accept.AcceptReply>
     private PartialDeps calculatePartialDeps(SafeCommandStore safeStore)
     {
         Ranges ranges = safeStore.ranges().allBetween(minUnsyncedEpoch, executeAt);
-        return PreAccept.calculatePartialDeps(safeStore, txnId, keys, EpochSupplier.constant(minUnsyncedEpoch), executeAt, ranges);
+        return PreAccept.calculatePartialDeps(safeStore, txnId, keys, scope, EpochSupplier.constant(minUnsyncedEpoch), executeAt, ranges);
     }
 
     @Override

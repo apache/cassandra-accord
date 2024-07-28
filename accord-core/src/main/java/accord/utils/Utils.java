@@ -118,7 +118,7 @@ public class Utils
     public static ImmutableBitSet ensureImmutable(SimpleBitSet set)
     {
         if (set == null) return null;
-        return set instanceof ImmutableBitSet ? (ImmutableBitSet) set : new ImmutableBitSet(set);
+        return set instanceof ImmutableBitSet ? (ImmutableBitSet) set : new ImmutableBitSet(set, true);
     }
 
     public static <T> T[] addAll(T[] first, T[] second)

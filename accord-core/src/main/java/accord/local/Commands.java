@@ -20,6 +20,7 @@ package accord.local;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import javax.annotation.Nullable;
 
@@ -44,7 +45,6 @@ import accord.primitives.Participants;
 import accord.primitives.Ranges;
 import accord.primitives.Route;
 import accord.primitives.Seekables;
-import accord.primitives.SyncPoint;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
@@ -57,18 +57,11 @@ import accord.utils.async.AsyncChains;
 import static accord.api.ProgressLog.ProgressShard.Home;
 import static accord.api.ProgressLog.ProgressShard.Local;
 import static accord.api.ProgressLog.ProgressShard.No;
-import static accord.api.ProgressLog.ProgressShard.UnmanagedHome;
-import static accord.api.ProgressLog.ProgressShard.Unsure;
 import static accord.local.Cleanup.ERASE;
 import static accord.local.Cleanup.shouldCleanup;
 import static accord.local.Command.Truncated.erased;
 import static accord.local.Command.Truncated.truncatedApply;
 import static accord.local.Command.Truncated.truncatedApplyWithOutcome;
-import static accord.local.Commands.EnsureAction.Add;
-import static accord.local.Commands.EnsureAction.Ignore;
-import static accord.local.Commands.EnsureAction.Set;
-import static accord.local.Commands.EnsureAction.TryAdd;
-import static accord.local.Commands.EnsureAction.TrySet;
 import static accord.local.KeyHistory.TIMESTAMPS;
 import static accord.local.PreLoadContext.contextFor;
 import static accord.local.RedundantStatus.PRE_BOOTSTRAP_OR_STALE;
@@ -77,13 +70,12 @@ import static accord.local.SaveStatus.Erased;
 import static accord.local.SaveStatus.LocalExecution.ReadyToExclude;
 import static accord.local.SaveStatus.LocalExecution.WaitingToApply;
 import static accord.local.SaveStatus.TruncatedApply;
-import static accord.local.Status.Accepted;
-import static accord.local.Status.AcceptedInvalidate;
 import static accord.local.Status.Applied;
 import static accord.local.Status.Committed;
 import static accord.local.Status.Durability;
 import static accord.local.Status.Invalidated;
 import static accord.local.Status.KnownExecuteAt.ExecuteAtKnown;
+import static accord.local.Status.KnownRoute.Full;
 import static accord.local.Status.NotDefined;
 import static accord.local.Status.PreAccepted;
 import static accord.local.Status.PreApplied;
@@ -101,16 +93,6 @@ public class Commands
 
     private Commands()
     {
-    }
-
-    private static Ranges covers(@Nullable PartialTxn txn)
-    {
-        return txn == null ? null : txn.covering();
-    }
-
-    private static Ranges covers(@Nullable PartialDeps deps)
-    {
-        return deps == null ? null : deps.covering;
     }
 
     private static boolean hasQuery(PartialTxn txn)
@@ -166,13 +148,14 @@ public class Commands
             return ballot.equals(Ballot.ZERO) ? AcceptOutcome.Redundant : AcceptOutcome.Success;
         }
 
-        Ranges preacceptRanges = preacceptRanges(safeStore, txnId, acceptEpoch);
-        Invariants.checkState(!preacceptRanges.isEmpty());
-        ProgressShard shard = progressShard(route, progressKey, preacceptRanges);
-        Invariants.checkState(validate(command.status(), command, Ranges.EMPTY, preacceptRanges, shard, route, Set, partialTxn, Set, null, Ignore));
+        Ranges coordinateRanges = coordinateRanges(safeStore, txnId);
+        Ranges acceptRanges = acceptRanges(safeStore, txnId, acceptEpoch, coordinateRanges);
+        Invariants.checkState(!acceptRanges.isEmpty());
+        ProgressShard shard = progressShard(route, progressKey, coordinateRanges);
+        Invariants.checkState(validate(SaveStatus.PreAccepted, command, acceptRanges, route, partialTxn, null, null));
 
         // FIXME: this should go into a consumer method
-        CommonAttributes attrs = set(command, Ranges.EMPTY, preacceptRanges, shard, route, partialTxn, Set, null, Ignore);
+        CommonAttributes attrs = set(SaveStatus.PreAccepted, command, command, acceptRanges, ballot, route, partialTxn, null);
         if (command.executeAt() == null)
         {
             // unlike in the Accord paper, we partition shards within a node, so that to ensure a total order we must either:
@@ -249,12 +232,12 @@ public class Commands
         Invariants.checkState(!acceptRanges.isEmpty());
 
         ProgressShard shard = progressShard(route, progressKey, coordinateRanges);
-        Invariants.checkState(validate(command.status(), command, coordinateRanges, acceptRanges, shard, route, Ignore, null, Ignore, partialDeps, Set));
+        Invariants.checkState(validate(SaveStatus.Accepted, command, acceptRanges, route, null, partialDeps, null));
 
         // TODO (desired, clarity/efficiency): we don't need to set the route here, and perhaps we don't even need to
         //  distributed partialDeps at all, since all we gain is not waiting for these transactions to commit during
         //  recovery. We probably don't want to directly persist a Route in any other circumstances, either, to ease persistence.
-        CommonAttributes attrs = set(command, coordinateRanges, acceptRanges, shard, route, null, Ignore, partialDeps, Set);
+        CommonAttributes attrs = set(SaveStatus.Accepted, command, command, acceptRanges, ballot, route, null, partialDeps);
 
         keysOrRanges = keysOrRanges.slice(acceptRanges);
         command = safeCommand.accept(safeStore, keysOrRanges, attrs, executeAt, ballot);
@@ -339,10 +322,10 @@ public class Commands
         Ranges acceptRanges = acceptRanges(safeStore, txnId, executeAt, coordinateRanges);
         ProgressShard shard = progressShard(route, progressKey, coordinateRanges);
 
-        if (!validate(command.status(), command, coordinateRanges, acceptRanges, shard, route, Add, partialTxn, Add, partialDeps, Set))
+        if (!validate(newStatus, command, acceptRanges, route, partialTxn, partialDeps, null))
             return CommitOutcome.Insufficient;
 
-        CommonAttributes attrs = set(command, coordinateRanges, acceptRanges, shard, route, partialTxn, Add, partialDeps, Set);
+        CommonAttributes attrs = set(newStatus, command, command, acceptRanges, ballot, route, partialTxn, partialDeps);
 
         logger.trace("{}: committed with executeAt: {}, deps: {}", txnId, executeAt, partialDeps);
         if (newStatus == SaveStatus.Stable)
@@ -398,29 +381,20 @@ public class Commands
         return CommitOutcome.Success;
     }
 
-    public static void createBootstrapCompleteMarkerTransaction(SafeCommandStore safeStore, TxnId localSyncId, SyncPoint syncPoint, Seekables<?, ?> keys)
+    public static void createBootstrapCompleteMarkerTransaction(SafeCommandStore safeStore, TxnId localSyncId, Seekables<?, ?> keys)
     {
         SafeCommand safeCommand = safeStore.get(localSyncId);
         Command command = safeCommand.current();
         Invariants.checkState(!command.hasBeen(Committed));
-        createBootstrapCompleteMarkerTransaction(safeStore, localSyncId, keys, syncPoint.route());
-    }
-
-    private static void createBootstrapCompleteMarkerTransaction(SafeCommandStore safeStore, TxnId localSyncId, Seekables<?, ?> keys, Route<?> route)
-    {
-        SafeCommand safeCommand = safeStore.get(localSyncId);
-        Command command = safeCommand.current();
-        if (command.hasBeen(Stable))
-            return;
+        FullRoute<?> route = keys.toRoute(keys.get(0).someIntersectingRoutingKey(null));
 
         Ranges coordinateRanges = coordinateRanges(safeStore, localSyncId);
         // TODO (desired, consider): in the case of sync points, the coordinator is unlikely to be a home shard, do we mind this? should document at least
         Txn emptyTxn = safeStore.agent().emptyTxn(localSyncId.kind(), keys);
-        ProgressShard progressShard = coordinateRanges.contains(route.homeKey()) ? UnmanagedHome : No;
-        PartialDeps none = Deps.NONE.slice(coordinateRanges);
+        PartialDeps none = Deps.NONE.intersecting(route);
         PartialTxn partialTxn = emptyTxn.slice(coordinateRanges, true);
-        Invariants.checkState(validate(command.status(), command, Ranges.EMPTY, coordinateRanges, progressShard, route, Set, partialTxn, Set, none, Set));
-        CommonAttributes newAttributes = set(command, Ranges.EMPTY, coordinateRanges, progressShard, route, partialTxn, Set, none, Set);
+        Invariants.checkState(validate(SaveStatus.Stable, command, coordinateRanges, route, partialTxn, none, null));
+        CommonAttributes newAttributes = set(SaveStatus.Stable, command, command, coordinateRanges, Ballot.ZERO, route, partialTxn, none);
         safeCommand.stable(safeStore, newAttributes, Ballot.ZERO, localSyncId, WaitingOn.EMPTY);
         safeStore.notifyListeners(safeCommand);
     }
@@ -437,10 +411,8 @@ public class Commands
         txnId = txnId.withEpoch(executeAtEpoch);
 
         Ranges coordinateRanges = coordinateRanges(safeStore, txnId);
-        // TODO (desired, consider): in the case of sync points, the coordinator is unlikely to be a home shard, do we mind this? should document at least
-        ProgressShard progressShard = No;
-        Invariants.checkState(validate(command.status(), command, Ranges.EMPTY, coordinateRanges, progressShard, route, Set, partialTxn, Set, partialDeps, Set));
-        CommonAttributes attrs = set(command, Ranges.EMPTY, coordinateRanges, progressShard, route, partialTxn, Set, partialDeps, Set);
+        Invariants.checkState(validate(SaveStatus.Stable, command, coordinateRanges, route, partialTxn, partialDeps, null));
+        CommonAttributes attrs = set(SaveStatus.Stable, command, command, coordinateRanges, Ballot.ZERO, route, partialTxn, partialDeps);
         safeCommand.stable(safeStore, attrs, Ballot.ZERO, txnId, initialiseWaitingOn(safeStore, txnId, attrs, txnId, route));
         maybeExecute(safeStore, safeCommand, false, true);
     }
@@ -504,13 +476,12 @@ public class Commands
 
         Ranges coordinateRanges = coordinateRanges(safeStore, txnId);
         Ranges acceptRanges = acceptRanges(safeStore, txnId, executeAt, coordinateRanges);
-
         ProgressShard shard = progressShard(route, progressKey, coordinateRanges);
 
-        if (!validate(command.status(), command, coordinateRanges, acceptRanges, shard, route, TryAdd, partialTxn, Add, partialDeps, command.hasBeen(Committed) ? TryAdd : TrySet, safeStore))
+        if (!validate(SaveStatus.PreApplied, command, acceptRanges, route, partialTxn, partialDeps, safeStore))
             return ApplyOutcome.Insufficient; // TODO (expected, consider): this should probably be an assertion failure if !TrySet
 
-        CommonAttributes attrs = set(command, coordinateRanges, acceptRanges, shard, route, partialTxn, Add, partialDeps, command.hasBeen(Committed) ? TryAdd : TrySet);
+        CommonAttributes attrs = set(SaveStatus.PreApplied, command, command, acceptRanges, null, route, partialTxn, partialDeps);
 
         WaitingOn waitingOn = !command.hasBeen(Stable) ? initialiseWaitingOn(safeStore, txnId, attrs, executeAt, attrs.route()) : command.asCommitted().waitingOn();
         safeCommand.preapplied(safeStore, attrs, executeAt, waitingOn, writes, result);
@@ -532,7 +503,7 @@ public class Commands
             // This listener must be a stale vestige
             // TODO (desired): would be nice to ensure these are deregistered explicitly, but would be costly
             Invariants.checkState(listener.saveStatus().isUninitialised() || listener.is(Truncated), "Listener status expected to be Uninitialised or Truncated, but was %s", listener.saveStatus());
-            Invariants.checkState(updated.is(NotDefined) || updated.is(Truncated) || !updated.asCommitted().waitingOn().isWaitingOn(listener.txnId()), "Updated status expected to be Applied or NotDefined, but was %s", updated);
+            Invariants.checkState(updated.is(NotDefined) || updated.hasBeen(Truncated) || !updated.asCommitted().waitingOn().isWaitingOn(listener.txnId()), "Updated status expected to be Applied or NotDefined, but was %s", updated);
             safeUpdated.removeListener(listener.asListener());
             return;
         }
@@ -577,12 +548,9 @@ public class Commands
         return safeStore.ranges().coordinates(txnId);
     }
 
-    /**
-     * The ranges for which we participate in the consensus decision of when a transaction executes
-     */
-    private static Ranges preacceptRanges(SafeCommandStore safeStore, TxnId txnId, long untilEpoch)
+    private static Ranges acceptRanges(SafeCommandStore safeStore, TxnId txnId, long untilEpoch, Ranges coordinateRanges)
     {
-        return safeStore.ranges().allBetween(txnId.epoch(), untilEpoch);
+        return safeStore.ranges().extend(coordinateRanges, txnId.epoch(), untilEpoch);
     }
 
     private static Ranges acceptRanges(SafeCommandStore safeStore, TxnId txnId, Timestamp executeAt, Ranges coordinateRanges)
@@ -767,8 +735,8 @@ public class Commands
                 case TruncatedApply:
                 case TruncatedApplyWithOutcome:
                 case TruncatedApplyWithDeps:
-                    Invariants.checkState(dependency.executeAt().compareTo(waitingExecuteAt) < 0 || waitingId.kind().awaitsOnlyDeps());
-                case ErasedOrInvalidated:
+                    Invariants.checkState(dependency.executeAt().compareTo(waitingExecuteAt) < 0 || waitingId.kind().awaitsOnlyDeps() || !dependency.txnId().kind().witnesses(waitingId));
+                case ErasedOrInvalidOrVestigial:
                 case Erased:
                     logger.trace("{}: {} is truncated. Stop listening and removing from waiting on commit set.", waitingId, dependencyId);
                     break;
@@ -853,12 +821,12 @@ public class Commands
     }
 
     // TODO (now): document and justify all calls
-    public static void setTruncatedApply(SafeCommandStore safeStore, SafeCommand safeCommand)
+    public static void setTruncatedApplyOrErasedVestigial(SafeCommandStore safeStore, SafeCommand safeCommand)
     {
-        setTruncatedApply(safeStore, safeCommand, null, null);
+        setTruncatedApplyOrErasedVestigial(safeStore, safeCommand, null, null);
     }
 
-    public static void setTruncatedApply(SafeCommandStore safeStore, SafeCommand safeCommand, @Nullable Timestamp executeAt, Route<?> maybeFullRoute)
+    public static void setTruncatedApplyOrErasedVestigial(SafeCommandStore safeStore, SafeCommand safeCommand, @Nullable Timestamp executeAt, Route<?> maybeFullRoute)
     {
         Command command = safeCommand.current();
         if (command.saveStatus().compareTo(TruncatedApply) >= 0) return;
@@ -867,7 +835,9 @@ public class Commands
         if (executeAt == null) executeAt = command.executeAtIfKnown();
         if (route == null || executeAt == null)
         {
-            safeCommand.update(safeStore, erased(command));
+            safeCommand.update(safeStore, Command.Truncated.erasedOrInvalidOrVestigial(command));
+            if (route != null && !safeStore.ranges().allAt(command.txnId()).contains(route.homeKey()))
+                safeStore.progressLog().clear(command.txnId());
         }
         else
         {
@@ -882,6 +852,7 @@ public class Commands
                 if (executesAtLeast == null) safeCommand.update(safeStore, erased(command));
                 else safeCommand.update(safeStore, truncatedApply(attributes, TruncatedApply, executeAt, null, null, executesAtLeast));
             }
+            safeStore.progressLog().clear(command.txnId());
         }
     }
 
@@ -924,8 +895,9 @@ public class Commands
             case TRUNCATE:
                 // TODO (expected): consider passing through any information we have about the reason for loading, so we can infer APPLIED if !PreCommitted
                 Invariants.checkState(command.saveStatus().compareTo(TruncatedApply) < 0);
-                if (!command.hasBeen(PreCommitted)) result = erased(command);
+                if (!command.hasBeen(PreCommitted)) result = Command.Truncated.erasedOrInvalidOrVestigial(command);
                 else result = truncatedApply(command, Route.tryCastToFullRoute(maybeFullRoute));
+                safeStore.progressLog().clear(command.txnId());
                 break;
 
             case ERASE:
@@ -1227,193 +1199,93 @@ public class Commands
         return progressKey.equals(route.homeKey()) ? Home : Local;
     }
 
-    enum EnsureAction
-    {
-        /** Don't check */
-        Ignore,
-        /** Add, but return false if insufficient for any reason */
-        TryAdd,
-        /** Supplement existing information, asserting that the existing and additional information are independently sufficient,
-         * returning false only if the existing information is absent AND the new information is insufficient. */
-        Add,
-        /** Set, but only return false if insufficient */
-        TrySet,
-        /** Overwrite existing information if sufficient; fail otherwise */
-        Set
-    }
-
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static CommonAttributes set(CommonAttributes attrs,
-                                        Ranges existingRanges, Ranges additionalRanges,
-                                        ProgressShard shard, Route<?> route,
-                                        @Nullable PartialTxn partialTxn, EnsureAction ensurePartialTxn,
-                                        @Nullable PartialDeps partialDeps, EnsureAction ensurePartialDeps)
+    private static CommonAttributes set(SaveStatus newStatus, Command cur, CommonAttributes upd,
+                                        Ranges acceptRanges, @Nullable Ballot newAcceptedOrCommittedBallot,
+                                        Route<?> route, @Nullable PartialTxn partialTxn, @Nullable PartialDeps partialDeps)
     {
-        Invariants.checkState(shard != Unsure);
-        Ranges allRanges = existingRanges.with(additionalRanges);
-        attrs = attrs.mutable().route(Route.merge(attrs.route(), (Route)route));
+        Status.Known haveKnown = cur.saveStatus().known;
+        Status.Known expectKnown = newStatus.known;
 
-        // TODO (soon): stop round-robin hashing; partition only on ranges
-        switch (ensurePartialTxn)
+        if (Route.isFullRoute(upd.route())) route = upd.route();
+        else upd = upd.mutable().route(route = Route.merge(upd.route(), (Route)route));
+
+        Route<?> scope;
+        if (partialTxn != null && expectKnown.definition.isKnown())
         {
-            case Add:
-                if (partialTxn == null)
-                    break;
-
-                if (attrs.partialTxn() != null)
-                {
-                    partialTxn = partialTxn.slice(allRanges, shard.isHome());
-                    attrs = attrs.mutable().partialTxn(attrs.partialTxn().with(partialTxn));
-                    break;
-                }
-
-            case Set:
-            case TrySet:
-                // TODO (desired): only includeQuery if shard.isHome(); this affects state eviction and is low priority given size in C*
-                attrs = attrs.mutable().partialTxn(partialTxn.slice(allRanges, true));
-                break;
+            scope = route.slice(acceptRanges);
+            partialTxn = partialTxn.intersecting(scope, true);
+            if (haveKnown.definition.isKnown())
+                upd = upd.mutable().partialTxn(upd.partialTxn().with(partialTxn));
+            else
+                upd = upd.mutable().partialTxn(partialTxn);
         }
 
-        switch (ensurePartialDeps)
+        if (partialDeps != null && expectKnown.deps.hasProposedOrDecidedDeps() && (haveKnown.deps != expectKnown.deps || (newAcceptedOrCommittedBallot != null && !newAcceptedOrCommittedBallot.equals(cur.acceptedOrCommitted()))))
         {
-            case Add:
-                if (partialDeps == null)
-                    break;
-
-                if (attrs.partialDeps() != null)
-                {
-                    attrs = attrs.mutable().partialDeps(attrs.partialDeps().with(partialDeps.slice(allRanges)));
-                    break;
-                }
-
-            case Set:
-            case TrySet:
-                attrs = attrs.mutable().partialDeps(partialDeps.slice(allRanges));
-                break;
+            scope = route.slice(acceptRanges);
+            upd = upd.mutable().partialDeps(partialDeps.intersecting(scope));
         }
-        return attrs;
+
+        return upd;
     }
 
-    /**
-     * Validate we have sufficient information for the route, partialTxn and partialDeps fields, and if so update them;
-     * otherwise return false (or throw an exception if an illegal state is encountered)
-     */
-    private static boolean validate(Status status, CommonAttributes attrs,
-                                    Ranges existingRanges, Ranges additionalRanges, ProgressShard shard,
-                                    Route<?> route, EnsureAction ensureRoute,
-                                    @Nullable PartialTxn partialTxn, EnsureAction ensurePartialTxn,
-                                    @Nullable PartialDeps partialDeps, EnsureAction ensurePartialDeps)
-    {
-        return validate(status, attrs, existingRanges, additionalRanges, shard, route, ensureRoute, partialTxn, ensurePartialTxn, partialDeps, ensurePartialDeps, null);
-    }
-
-    private static boolean validate(Status status, CommonAttributes attrs,
-                                    Ranges existingRanges, Ranges additionalRanges, ProgressShard shard,
-                                    Route<?> route, EnsureAction ensureRoute,
-                                    @Nullable PartialTxn partialTxn, EnsureAction ensurePartialTxn,
-                                    @Nullable PartialDeps partialDeps, EnsureAction ensurePartialDeps,
+    private static boolean validate(SaveStatus newStatus, Command cur,
+                                    Ranges acceptRanges,
+                                    Route<?> addRoute,
+                                    @Nullable PartialTxn addPartialTxn,
+                                    @Nullable PartialDeps newPartialDeps,
                                     @Nullable SafeCommandStore permitStaleMissing)
     {
-        if (shard == Unsure)
-            return false;
+        Status.Known haveKnown = cur.saveStatus().known;
+        Status.Known expectKnown = newStatus.known;
 
-        // first validate route
-        switch (ensureRoute)
+        FullRoute<?> fullRoute;
+        if (isFullRoute(cur.route())) fullRoute = Route.castToFullRoute(cur.route());
+        else if (isFullRoute(addRoute)) fullRoute = Route.castToFullRoute(addRoute);
+        else return expectKnown.route != Full; // we cannot validate further without a full route, so in cases we don't expect a full route we just assume we have received the right information
+
+        Participants<?> acceptScope = null;
+        if (expectKnown.definition.isKnown())
         {
-            default: throw new AssertionError("Unexpected action: " + ensureRoute);
-            case TryAdd:
-            case Add:
-                if (!isFullRoute(attrs.route()) && !isFullRoute(route))
+            acceptScope = fullRoute.slice(acceptRanges);
+            if (haveKnown.definition.isKnown())
+            {
+                // TODO (desired): avoid converting to participants before subtracting
+                Participants<?> extraScope = acceptScope.subtract(cur.partialTxn().keys().toParticipants());
+                if (!containsAll(addPartialTxn, PartialTxn::covers, extraScope, permitStaleMissing))
                     return false;
-            case Ignore:
-                break;
-            case Set:
-                if (!isFullRoute(route))
-                    throw new IllegalArgumentException("Incomplete route (" + route + ") sent to home shard");
-                break;
-            case TrySet:
-                if (!isFullRoute(route))
+            }
+            else
+            {
+                if (!containsAll(addPartialTxn, PartialTxn::covers, acceptScope, permitStaleMissing))
                     return false;
+            }
         }
 
-        // invalid to Add deps to Accepted or AcceptedInvalidate statuses, as Committed deps are not equivalent
-        // and we may erroneously believe we have covered a wider range than we have infact covered
-        if (ensurePartialDeps == Add)
-            Invariants.checkState(status != Accepted && status != AcceptedInvalidate);
-
-        // validate new partial txn
-        if (!validate(ensurePartialTxn, existingRanges, additionalRanges, covers(attrs.partialTxn()), covers(partialTxn), permitStaleMissing, "txn", partialTxn))
-            return false;
-
-        Invariants.checkState(partialTxn == null || attrs.txnId().kind().equals(partialTxn.kind()), "Transaction has different kind to its TxnId");
-        Invariants.checkState(partialTxn == null || !shard.isHome() || ensurePartialTxn == Ignore || hasQuery(attrs.partialTxn()) || hasQuery(partialTxn), "Home transaction should include query");
-
-        return validate(ensurePartialDeps, existingRanges, additionalRanges, covers(attrs.partialDeps()), covers(partialDeps), permitStaleMissing, "deps", partialDeps);
-    }
-
-    // FIXME (immutable-state): has this been removed?
-    private static boolean validate(EnsureAction action, Ranges existingRanges, Ranges requiredRanges,
-                                    Ranges existing, Ranges adding, @Nullable SafeCommandStore permitStaleMissing,
-                                    String kind, Object obj)
-    {
-        switch (action)
+        if (haveKnown.deps != expectKnown.deps && expectKnown.deps.hasProposedOrDecidedDeps())
         {
-            default: throw illegalState("Unexpected action: " + action);
-            case Ignore:
-                return true;
+            if (acceptScope == null)
+                acceptScope = fullRoute.slice(acceptRanges);
 
-            case TrySet:
-            case Set:
-                if (containsAll(adding, requiredRanges, permitStaleMissing))
-                    return true;
-
-                if (action == Set)
-                    illegalState("Incomplete " + kind + " (" + obj + ") provided; does not cover " + requiredRanges.subtract(adding));
-
-                return false;
-
-            case TryAdd:
-            case Add:
-                if (existing == null)
-                {
-                    if (adding == null)
-                        return false; // we don't want to permit a null value for txn/deps, even if we are stale for all participating ranges, as it breaks assumptions elsewhere
-
-                    if (!adding.containsAll(existingRanges))
-                        return false;
-
-                    return validate(action == TryAdd ? TrySet : Set, existingRanges, requiredRanges, existing, adding, permitStaleMissing, kind, obj);
-                }
-
-                Invariants.checkState(existing.containsAll(existingRanges), "Existing ranges insufficient");
-                if (requiredRanges == existingRanges)
-                    return true;
-
-                if (adding == null)
-                    return permitStaleMissing != null && containsAll(Ranges.EMPTY, requiredRanges.subtract(existing), permitStaleMissing);
-
-                requiredRanges = requiredRanges.subtract(existing);
-                if (containsAll(adding, requiredRanges, permitStaleMissing))
-                    return true;
-
-                if (action == Add)
-                    illegalState("Incomplete " + kind + " (" + obj + ") provided; does not cover " + requiredRanges.subtract(adding));
-
-                return false;
+            return containsAll(newPartialDeps, PartialDeps::covers, acceptScope, permitStaleMissing);
         }
+
+        return true;
     }
 
-    private static boolean containsAll(Ranges adding, Ranges requiredRanges, @Nullable SafeCommandStore permitStaleMissing)
+    private static <V> boolean containsAll(V adding, BiPredicate<V, Participants<?>> covers, Participants<?> required, @Nullable SafeCommandStore permitStaleMissing)
     {
-        if (adding.containsAll(requiredRanges))
+        if (adding == null ? required.isEmpty() : covers.test(adding, required))
             return true;
 
         if (permitStaleMissing != null)
         {
+            // TODO (required, later): in the event we are depending on a stale key for an insert into a non-stale key, we cannot proceed and must mark the new key stale
+            //  I think today this is unsupported in practice, but must be addressed before we improve efficiency of result handling
             Ranges staleRanges = permitStaleMissing.commandStore().redundantBefore().staleRanges();
-            requiredRanges = requiredRanges.subtract(staleRanges);
-            if (adding.containsAll(requiredRanges))
-                return true;
+            required = required.subtract(staleRanges);
+            return adding == null ? required.isEmpty() : covers.test(adding, required);
         }
 
         return false;

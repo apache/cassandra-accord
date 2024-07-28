@@ -50,6 +50,11 @@ public class ImmutableBitSet extends SimpleBitSet
         super(copy);
     }
 
+    public ImmutableBitSet(SimpleBitSet copy, boolean share)
+    {
+        super(copy, share);
+    }
+
     ImmutableBitSet(long[] bits)
     {
         super(bits);

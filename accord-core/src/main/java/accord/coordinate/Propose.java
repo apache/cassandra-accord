@@ -19,9 +19,9 @@
 package accord.coordinate;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.function.BiConsumer;
 
 import accord.api.RoutingKey;
@@ -60,7 +60,7 @@ abstract class Propose<R> implements Callback<AcceptReply>
     final Deps deps;
 
     final List<AcceptReply> acceptOks;
-    private final Map<Id, AcceptReply> debug = debug() ? new HashMap<>() : null;
+    private final Map<Id, AcceptReply> debug = debug() ? new TreeMap<>() : null;
     final Timestamp executeAt;
     final QuorumTracker acceptTracker;
     final BiConsumer<? super R, Throwable> callback;
@@ -144,7 +144,7 @@ abstract class Propose<R> implements Callback<AcceptReply>
         final TxnId txnId;
         final RoutingKey someParticipant;
         final BiConsumer<Void, Throwable> callback;
-        final Map<Id, AcceptReply> debug = debug() ? new HashMap<>() : null;
+        final Map<Id, AcceptReply> debug = debug() ? new TreeMap<>() : null;
 
         private final QuorumShardTracker acceptTracker;
         private boolean isDone;

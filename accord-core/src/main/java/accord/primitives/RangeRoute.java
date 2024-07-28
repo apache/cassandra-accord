@@ -29,14 +29,11 @@ import static accord.primitives.Routables.Slice.Overlapping;
 public abstract class RangeRoute extends AbstractRanges implements Route<Range>, Unseekables<Range>, Participants<Range>
 {
     public final RoutingKey homeKey;
-    public final boolean isParticipatingHomeKey;
 
-    RangeRoute(@Nonnull RoutingKey homeKey, boolean isParticipatingHomeKey, Range[] ranges)
+    RangeRoute(@Nonnull RoutingKey homeKey, Range[] ranges)
     {
         super(ranges);
         this.homeKey = Invariants.nonNull(homeKey);
-        this.isParticipatingHomeKey = isParticipatingHomeKey;
-        Invariants.checkArgument(isParticipatingHomeKey || !contains(homeKey) || get(indexOf(homeKey)).equals(homeKey.asRange()));
     }
 
     @Override
@@ -78,47 +75,42 @@ public abstract class RangeRoute extends AbstractRanges implements Route<Range>,
     @Override
     public boolean participatesIn(Ranges ranges)
     {
-        if (isParticipatingHomeKey())
-            return intersects(ranges);
-
-        long ij = findNextIntersection(0, ranges, 0);
-        if (ij < 0)
-            return false;
-
-        int i = (int)ij;
-        if (!get(i).contains(homeKey))
-            return true;
-
-        Invariants.checkState(get(i).equals(homeKey.asRange()));
-        int j = (int)(ij >>> 32);
-        return findNextIntersection(i + 1, ranges, j) >= 0;
+        return intersects(ranges);
     }
 
     @Override
     public PartialRangeRoute slice(Ranges ranges)
     {
-        return slice(ranges, Overlapping, this, homeKey,
-                     isParticipatingHomeKey ? PartialRangeRoute::withParticipatingHomeKey
-                                            : PartialRangeRoute::withNonParticipatingHomeKey);
+        return slice(ranges, Overlapping);
     }
 
     @Override
     public PartialRangeRoute slice(Ranges ranges, Slice slice)
     {
-        return slice(ranges, slice, this, homeKey,
-                     isParticipatingHomeKey ? PartialRangeRoute::withParticipatingHomeKey
-                                            : PartialRangeRoute::withNonParticipatingHomeKey);
+        return slice(ranges, slice, this, homeKey, (ignore, hk, rs) -> new PartialRangeRoute(hk, rs));
+    }
+
+    @Override
+    public RangeRoute intersecting(Unseekables<?> intersecting)
+    {
+        return intersecting(intersecting, Overlapping);
+    }
+
+    @Override
+    public RangeRoute intersecting(Unseekables<?> intersecting, Slice slice)
+    {
+        switch (intersecting.domain())
+        {
+            default: throw new AssertionError("Unhandled domain: " + intersecting.domain());
+            case Key: return intersecting((AbstractUnseekableKeys)intersecting, this, homeKey, (ignore, hk, ranges) -> new PartialRangeRoute(hk, ranges));
+            case Range: return slice((Ranges)intersecting, slice, this, homeKey, (ignore, homeKey, ranges) -> new PartialRangeRoute(homeKey, ranges));
+        }
     }
 
     @Override
     public Participants<Range> participants()
     {
-        if (isParticipatingHomeKey || !contains(homeKey))
-            return this;
-
-        // TODO (desired): efficiency (lots of unnecessary allocations)
-        // TODO (expected): this should return a PartialRangeRoute, but we need to remove Route.covering()
-        return toRanges().subtract(Ranges.of(homeKey().asRange()));
+        return this;
     }
 
     @Override
@@ -129,17 +121,7 @@ public abstract class RangeRoute extends AbstractRanges implements Route<Range>,
 
     public Participants<Range> participants(Ranges slice, Slice kind)
     {
-        Range[] ranges = slice(slice, kind, this, null, (i1, i2, rs) -> rs);
-        if (ranges == this.ranges && isParticipatingHomeKey)
-            return this;
-
-        Ranges result = Ranges.ofSortedAndDeoverlapped(ranges);
-        if (isParticipatingHomeKey || !result.contains(homeKey))
-            return result;
-
-        // TODO (desired): efficiency (lots of unnecessary allocations)
-        // TODO (expected): this should return a PartialRangeRoute, but we need to remove Route.covering()
-        return result.subtract(Ranges.of(homeKey().asRange()));
+        return slice(slice, kind, this, null, (i1, i2, rs) -> i1.ranges == rs ? i1 : Ranges.ofSortedAndDeoverlapped(rs));
     }
 
     public Ranges toRanges()
@@ -151,18 +133,6 @@ public abstract class RangeRoute extends AbstractRanges implements Route<Range>,
     public RoutingKey homeKey()
     {
         return homeKey;
-    }
-
-    @Override
-    public boolean isParticipatingHomeKey()
-    {
-        return isParticipatingHomeKey;
-    }
-
-    @Override
-    public RoutingKey someParticipatingKey()
-    {
-        return isParticipatingHomeKey ? homeKey : ranges[0].someIntersectingRoutingKey(null);
     }
 
     @Override

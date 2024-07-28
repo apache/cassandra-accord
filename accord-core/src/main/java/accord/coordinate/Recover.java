@@ -18,14 +18,15 @@
 
 package accord.coordinate;
 
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 import accord.api.Result;
 import accord.coordinate.CoordinationAdapter.Invoke;
@@ -51,6 +52,7 @@ import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
 import accord.primitives.TxnId;
+import accord.topology.Shard;
 import accord.topology.Topologies;
 import accord.topology.Topology;
 import accord.utils.Invariants;
@@ -66,7 +68,9 @@ import static accord.coordinate.Infer.InvalidateAndCallback.locallyInvalidateAnd
 import static accord.coordinate.Propose.Invalidate.proposeInvalidate;
 import static accord.coordinate.tracking.RequestStatus.Failed;
 import static accord.coordinate.tracking.RequestStatus.Success;
-import static accord.messages.BeginRecovery.RecoverOk.maxAcceptedOrLater;
+import static accord.messages.BeginRecovery.RecoverOk.maxAccepted;
+import static accord.messages.BeginRecovery.RecoverOk.maxAcceptedNotTruncated;
+import static accord.primitives.ProgressToken.TRUNCATED;
 import static accord.utils.Invariants.debug;
 import static accord.utils.Invariants.illegalState;
 
@@ -142,10 +146,11 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
     private final BiConsumer<Outcome, Throwable> callback;
     private boolean isDone;
 
-    private final List<RecoverOk> recoverOks = new ArrayList<>();
+    private final RecoverOk[] recoverOks;
     private final RecoveryTracker tracker;
+    private final Topology topology;
     private boolean isBallotPromised;
-    private final Map<Id, RecoverReply> debug = debug() ? new HashMap<>() : null;
+    private final Map<Id, RecoverReply> debug = debug() ? new TreeMap<>() : null;
 
     private Recover(Node node, Ballot ballot, TxnId txnId, Txn txn, FullRoute<?> route, BiConsumer<Outcome, Throwable> callback, Topologies topologies)
     {
@@ -162,6 +167,8 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         this.callback = callback;
         assert topologies.oldestEpoch() == topologies.currentEpoch() && topologies.currentEpoch() == txnId.epoch();
         this.tracker = new RecoveryTracker(topologies);
+        this.topology = topologies.current();
+        this.recoverOks = new RecoverOk[topology.nodes().size()];
     }
 
     @Override
@@ -210,7 +217,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         return recover;
     }
 
-    void start(Set<Id> nodes)
+    void start(Collection<Id> nodes)
     {
         node.send(nodes, to -> new BeginRecovery(to, tracker.topologies(), txnId, txn, route, ballot), this);
     }
@@ -230,7 +237,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         }
 
         RecoverOk ok = (RecoverOk) reply;
-        recoverOks.add(ok);
+        recoverOks[topology.nodes().find(from)] = ok;
         boolean fastPath = ok.executeAt.compareTo(txnId) == 0;
         if (tracker.recordSuccess(from, fastPath) == Success)
             recover();
@@ -241,18 +248,18 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
         Invariants.checkState(!isBallotPromised);
         isBallotPromised = true;
 
-        // first look for the most recent Accept (or later); if present, go straight to proposing it again
-        RecoverOk acceptOrCommit = maxAcceptedOrLater(recoverOks);
-        if (acceptOrCommit != null)
+        List<RecoverOk> recoverOkList = Arrays.asList(recoverOks);
+        RecoverOk acceptOrCommit = maxAccepted(recoverOkList);
+        RecoverOk acceptOrCommitNotTruncated = acceptOrCommit == null || acceptOrCommit.status != Status.Truncated
+                                               ? acceptOrCommit : maxAcceptedNotTruncated(recoverOkList);
+        
+        if (acceptOrCommitNotTruncated != null)
         {
-            Timestamp executeAt = acceptOrCommit.executeAt;
-            switch (acceptOrCommit.status)
+            Timestamp executeAt = acceptOrCommitNotTruncated.executeAt;
+            switch (acceptOrCommitNotTruncated.status)
             {
-                default: throw illegalState("Unknown status: " + acceptOrCommit.status);
-                case Truncated:
-                    callback.accept(ProgressToken.TRUNCATED, null);
-                    return;
-
+                default: throw new AssertionError("Unhandled Status: " + acceptOrCommitNotTruncated.status);
+                case Truncated: throw illegalState("Truncate should be filtered");
                 case Invalidated:
                 {
                     commitInvalidate();
@@ -264,9 +271,9 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                 {
                     withCommittedDeps(executeAt, stableDeps -> {
                         // TODO (future development correctness): when writes/result are partially replicated, need to confirm we have quorum of these
-                        persist(adapter, node, tracker.topologies(), route, txnId, txn, executeAt, stableDeps, acceptOrCommit.writes, acceptOrCommit.result, null);
+                        persist(adapter, node, tracker.topologies(), route, txnId, txn, executeAt, stableDeps, acceptOrCommitNotTruncated.writes, acceptOrCommitNotTruncated.result, null);
                     });
-                    accept(acceptOrCommit.result, null);
+                    accept(acceptOrCommitNotTruncated.result, null);
                     return;
                 }
 
@@ -292,8 +299,8 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
                     // TODO (desired, behaviour): if we didn't find Accepted in *every* shard, consider invalidating for consistency of behaviour
                     //     however, note that we may have taken the fast path and recovered, so we can only do this if acceptedOrCommitted=Ballot.ZERO
                     //     (otherwise recovery was attempted and did not invalidate, so it must have determined it needed to complete)
-                    Deps proposeDeps = LatestDeps.mergeProposal(recoverOks, ok -> ok.deps);
-                    propose(acceptOrCommit.executeAt, proposeDeps);
+                    Deps proposeDeps = LatestDeps.mergeProposal(recoverOkList, ok -> ok == null ? null : ok.deps);
+                    propose(acceptOrCommitNotTruncated.executeAt, proposeDeps);
                     return;
                 }
 
@@ -309,16 +316,32 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             }
         }
 
-        if (tracker.rejectsFastPath() || recoverOks.stream().anyMatch(ok -> ok.rejectsFastPath))
+        if (acceptOrCommit != acceptOrCommitNotTruncated)
+        {
+            boolean allShardsTruncated = true;
+            for (Shard shard : topology.shards())
+            {
+                RecoverOk maxReply = maxAccepted(topology.nodes().select(recoverOks, shard.nodes));
+                allShardsTruncated &= maxReply.status == Status.Truncated;
+            }
+            if (allShardsTruncated)
+            {
+                isDone = true;
+                callback.accept(TRUNCATED, null);
+                return;
+            }
+        }
+
+        if (tracker.rejectsFastPath() || Stream.of(recoverOks).anyMatch(ok -> ok != null && ok.rejectsFastPath))
         {
             invalidate();
             return;
         }
 
         // should all be PreAccept
-        Deps proposeDeps = LatestDeps.mergeProposal(recoverOks, ok -> ok.deps);
-        Deps earlierAcceptedNoWitness = Deps.merge(recoverOks, ok -> ok.earlierAcceptedNoWitness);
-        Deps earlierCommittedWitness = Deps.merge(recoverOks, ok -> ok.earlierCommittedWitness);
+        Deps proposeDeps = LatestDeps.mergeProposal(recoverOkList, ok -> ok == null ? null : ok.deps);
+        Deps earlierAcceptedNoWitness = Deps.merge(recoverOkList, ok -> ok == null ? null : ok.earlierAcceptedNoWitness);
+        Deps earlierCommittedWitness = Deps.merge(recoverOkList, ok -> ok == null ? null : ok.earlierCommittedWitness);
         earlierAcceptedNoWitness = earlierAcceptedNoWitness.without(earlierCommittedWitness::contains);
         if (!earlierAcceptedNoWitness.isEmpty())
         {
@@ -341,7 +364,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     private void withCommittedDeps(Timestamp executeAt, Consumer<Deps> withDeps)
     {
-        LatestDeps.MergedCommitResult merged = LatestDeps.mergeCommit(txnId, executeAt, recoverOks, ok -> ok.deps);
+        LatestDeps.MergedCommitResult merged = LatestDeps.mergeCommit(txnId, executeAt, Arrays.asList(recoverOks), ok -> ok == null ? null : ok.deps);
         node.withEpoch(executeAt.epoch(), () -> {
             Seekables<?, ?> missing = txn.keys().subtract(merged.sufficientFor);
             if (missing.isEmpty())
@@ -350,9 +373,16 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
             }
             else
             {
-                CollectDeps.withDeps(node, txnId, missing.toRoute(route.homeKey()), missing, executeAt, (extraDeps, fail) -> {
-                    if (fail != null) node.agent().onHandledException(fail);
-                    else withDeps.accept(merged.deps.with(extraDeps));
+                CollectDeps.withDeps(node, txnId, route, missing.toParticipants(), missing, executeAt, (extraDeps, fail) -> {
+                    if (fail != null)
+                    {
+                        isDone = true;
+                        callback.accept(null, fail);
+                    }
+                    else
+                    {
+                        withDeps.accept(merged.deps.with(extraDeps));
+                    }
                 });
             }
         });
@@ -360,7 +390,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
 
     private void invalidate()
     {
-        proposeInvalidate(node, ballot, txnId, route.someParticipatingKey(), (success, fail) -> {
+        proposeInvalidate(node, ballot, txnId, route.homeKey(), (success, fail) -> {
             if (fail != null) accept(null, fail);
             else commitInvalidate();
         });
@@ -370,7 +400,7 @@ public class Recover implements Callback<RecoverReply>, BiConsumer<Result, Throw
     {
         // If not accepted then the executeAt is not consistent cross the peers and likely different on every node.  There is also an edge case
         // when ranges are removed from the topology, during this case the executeAt won't know the ranges and the invalidate commit will fail.
-        Timestamp invalidateUntil = recoverOks.stream().map(ok -> ok.status.hasBeen(Status.Accepted) ? ok.executeAt : ok.txnId).reduce(txnId, Timestamp::max);
+        Timestamp invalidateUntil = Stream.of(recoverOks).map(ok -> ok == null ? null : ok.status.hasBeen(Status.Accepted) ? ok.executeAt : ok.txnId).reduce(txnId, Timestamp::nonNullOrMax);
         node.withEpoch(invalidateUntil.epoch(), () -> Commit.Invalidate.commitInvalidate(node, txnId, route, invalidateUntil));
         isDone = true;
         locallyInvalidateAndCallback(node, txnId, invalidateUntil, route, ProgressToken.INVALIDATED, callback);

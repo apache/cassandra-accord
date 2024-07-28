@@ -186,8 +186,8 @@ public class RecoverWithRoute extends CheckShards<FullRoute<?>>
                             // so that we know to WasApply, but not
                             if (known.executeAt == ExecuteAtKnown && known.deps == DepsKnown && known.outcome == Apply)
                             {
-                                Invariants.checkState(full.stableDeps.covering.containsAll(sendTo));
-                                Invariants.checkState(full.partialTxn.covering().containsAll(sendTo));
+                                Invariants.checkState(full.stableDeps.covers(sendTo));
+                                Invariants.checkState(full.partialTxn.covers(sendTo));
                                 persist(node.coordinationAdapter(txnId, InitiateRecovery), node, route, sendTo, txnId, full.partialTxn, full.executeAt, full.stableDeps, full.writes, full.result, null);
                             }
                             propagate = full;

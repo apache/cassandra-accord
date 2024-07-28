@@ -32,7 +32,12 @@ public interface Seekables<K extends Seekable, U extends Seekables<K, ?>> extend
     default U slice(Ranges ranges) { return slice(ranges, Overlapping); }
 
     @Override
+    default U intersecting(Unseekables<?> intersecting) { return intersecting(intersecting, Overlapping); }
+
+    @Override
     U slice(Ranges ranges, Slice slice);
+    U intersecting(Unseekables<?> intersecting, Slice slice);
+
     Seekables<K, U> subtract(Ranges ranges);
     Seekables<K, U> subtract(U without);
     Seekables<K, U> with(U with);

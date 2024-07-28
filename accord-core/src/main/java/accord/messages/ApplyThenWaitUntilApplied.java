@@ -37,6 +37,7 @@ import accord.primitives.PartialDeps;
 import accord.primitives.PartialTxn;
 import accord.primitives.Participants;
 import accord.primitives.Ranges;
+import accord.primitives.Route;
 import accord.primitives.Seekables;
 import accord.primitives.Timestamp;
 import accord.primitives.Txn;
@@ -78,13 +79,13 @@ public class ApplyThenWaitUntilApplied extends WaitUntilApplied
     {
         super(to, topologies, txnId, readScope, executeAt.epoch());
         this.executeAt = executeAt;
-        Ranges slice = computeScope(to, topologies, null, 0, (i,r)->r, Ranges::with);
+        Route<?> scope = computeScope(to, topologies, route);
         this.route = route;
-        this.txn = txn.slice(slice, true);
-        this.deps = deps.slice(slice);
+        this.txn = txn.intersecting(scope, true);
+        this.deps = deps.intersecting(scope);
         this.writes = writes;
         this.result = result;
-        this.notify = notify == null ? null : notify.slice(slice);
+        this.notify = notify == null ? null : notify.intersecting(scope);
     }
 
     protected ApplyThenWaitUntilApplied(TxnId txnId, Participants<?> readScope, Timestamp executeAt, FullRoute<?> route, PartialTxn txn, PartialDeps deps, Writes writes, Result result, Seekables<?, ?> notify)

@@ -188,7 +188,7 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     @Inline
     public <P1, P2, P3, P4> int forEach(RoutableKey key, IndexedQuadConsumer<P1, P2, P3, P4> forEachScanOrCheckpoint, IndexedRangeQuadConsumer<P1, P2, P3, P4> forEachRange, P1 p1, P2 p2, P3 p3, P4 p4, int minIndex)
     {
-        return ensureSearchable().forEach(key, forEachScanOrCheckpoint, forEachRange, p1, p2, p3, p4, minIndex);
+        return ensureSearchable().forEachKey(key, forEachScanOrCheckpoint, forEachRange, p1, p2, p3, p4, minIndex);
     }
 
     private <P1> int forEach(RoutableKey key, BiConsumer<P1, TxnId> forEach, P1 p1, int minIndex, @Nullable BitSet visited)
@@ -211,20 +211,27 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     @Inline
     public <P1, P2, P3, P4> int forEach(Range range, IndexedQuadConsumer<P1, P2, P3, P4> forEachScanOrCheckpoint, IndexedRangeQuadConsumer<P1, P2, P3, P4> forEachRange, P1 p1, P2 p2, P3 p3, P4 p4, int minIndex)
     {
-        return ensureSearchable().forEach(range, forEachScanOrCheckpoint, forEachRange, p1, p2, p3, p4, minIndex);
+        return ensureSearchable().forEachRange(range, forEachScanOrCheckpoint, forEachRange, p1, p2, p3, p4, minIndex);
     }
 
     @Inline
     public <P1, P2, P3, P4> int forEach(RoutingKey start, RoutingKey end, IndexedQuadConsumer<P1, P2, P3, P4> forEachScanOrCheckpoint, IndexedRangeQuadConsumer<P1, P2, P3, P4> forEachRange, P1 p1, P2 p2, P3 p3, P4 p4, int minIndex)
     {
-        return ensureSearchable().forEach(start, end, forEachScanOrCheckpoint, forEachRange, p1, p2, p3, p4, minIndex);
+        return ensureSearchable().forEachRange(start, end, forEachScanOrCheckpoint, forEachRange, p1, p2, p3, p4, minIndex);
     }
 
-    private <P1, P2, P3, P4> void forEach(Ranges ranges, IndexedQuadConsumer<P1, P2, P3, P4> forEachScanOrCheckpoint, IndexedRangeQuadConsumer<P1, P2, P3, P4> forEachRange, P1 p1, P2 p2, P3 p3, P4 p4)
+    private <P1, P2, P3, P4> void forEach(AbstractRanges ranges, IndexedQuadConsumer<P1, P2, P3, P4> forEachScanOrCheckpoint, IndexedRangeQuadConsumer<P1, P2, P3, P4> forEachRange, P1 p1, P2 p2, P3 p3, P4 p4)
     {
         int minIndex = 0;
         for (int i = 0; i < ranges.size() ; ++i)
             minIndex = forEach(ranges.get(i), forEachScanOrCheckpoint, forEachRange, p1, p2, p3, p4, minIndex);
+    }
+
+    private <P1, P2, P3, P4> void forEach(AbstractUnseekableKeys keys, IndexedQuadConsumer<P1, P2, P3, P4> forEachScanOrCheckpoint, IndexedRangeQuadConsumer<P1, P2, P3, P4> forEachRange, P1 p1, P2 p2, P3 p3, P4 p4)
+    {
+        int minIndex = 0;
+        for (int i = 0; i < keys.size() ; ++i)
+            minIndex = forEach(keys.get(i), forEachScanOrCheckpoint, forEachRange, p1, p2, p3, p4, minIndex);
     }
 
     private <P1> int forEach(Range range, BiConsumer<P1, TxnId> forEach, P1 p1, int minIndex, @Nullable BitSet visited)
@@ -574,7 +581,22 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
         txnIdsToRanges = invert(rangesToTxnIds, rangesToTxnIds.length, ranges.length, txnIds.length);
     }
 
+    public RangeDeps intersecting(Unseekables<?> select)
+    {
+        switch (select.domain())
+        {
+            default: throw new AssertionError("Unhandled domain: " + select.domain());
+            case Key: return intersecting((AbstractUnseekableKeys) select);
+            case Range: return slice((AbstractRanges) select);
+        }
+    }
+
     public RangeDeps slice(Ranges select)
+    {
+        return slice((AbstractRanges) select);
+    }
+
+    private RangeDeps slice(AbstractRanges select)
     {
         if (isEmpty())
             return new RangeDeps(NO_RANGES, txnIds, NO_INTS);
@@ -582,18 +604,34 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
         try (RangeAndMapCollector collector = new RangeAndMapCollector(ensureSearchable().maxScanAndCheckpointMatches))
         {
             forEach(select, collector, collector, ranges, rangesToTxnIds, null, null);
-
-            if (collector.rangesCount == 0)
-                return new RangeDeps(NO_RANGES, NO_TXNIDS, NO_INTS);
-
-            if (collector.rangesCount == this.ranges.length)
-                return this;
-
-            Range[] ranges = collector.getRanges();
-            int[] rangesToTxnIds = collector.getRangesToTxnIds();
-            TxnId[] txnIds = trimUnusedValues(ranges, this.txnIds, rangesToTxnIds, TxnId[]::new);
-            return new RangeDeps(ranges, txnIds, rangesToTxnIds);
+            return build(collector);
         }
+    }
+
+    private RangeDeps intersecting(AbstractUnseekableKeys select)
+    {
+        if (isEmpty())
+            return new RangeDeps(NO_RANGES, txnIds, NO_INTS);
+
+        try (RangeAndMapCollector collector = new RangeAndMapCollector(ensureSearchable().maxScanAndCheckpointMatches))
+        {
+            forEach(select, collector, collector, ranges, rangesToTxnIds, null, null);
+            return build(collector);
+        }
+    }
+
+    private RangeDeps build(RangeAndMapCollector collector)
+    {
+        if (collector.rangesCount == 0)
+            return new RangeDeps(NO_RANGES, NO_TXNIDS, NO_INTS);
+
+        if (collector.rangesCount == this.ranges.length)
+            return this;
+
+        Range[] ranges = collector.getRanges();
+        int[] rangesToTxnIds = collector.getRangesToTxnIds();
+        TxnId[] txnIds = trimUnusedValues(ranges, this.txnIds, rangesToTxnIds, TxnId[]::new);
+        return new RangeDeps(ranges, txnIds, rangesToTxnIds);
     }
 
     public RangeDeps with(RangeDeps that)
@@ -622,26 +660,6 @@ public class RangeDeps implements Iterable<Map.Entry<Range, TxnId>>
     public boolean contains(TxnId txnId)
     {
         return Arrays.binarySearch(txnIds, txnId) >= 0;
-    }
-
-    public boolean isCoveredBy(Ranges covering)
-    {
-        // check that every entry intersects with some entry in covering
-        int prev = 0;
-        for (Range range : covering)
-        {
-            int start = SortedArrays.binarySearch(ranges, 0, ranges.length, range.start(), (a, b) -> a.compareTo(b.start()), CEIL);
-            if (start < 0) start = -1 - start;
-            int end = SortedArrays.binarySearch(ranges, 0, ranges.length, range.end(), (a, b) -> a.compareTo(b.start()), CEIL);
-            if (end < 0) end = -1 - end;
-            for (int i = prev; i < start ; ++i)
-            {
-                if (range.compareIntersecting(ranges[i]) != 0)
-                    return false;
-            }
-            prev = end;
-        }
-        return prev == ranges.length;
     }
 
     public SortedArrayList<TxnId> txnIds()

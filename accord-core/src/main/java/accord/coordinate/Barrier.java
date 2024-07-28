@@ -259,7 +259,7 @@ public class Barrier<S extends Seekables<?, ?>> extends AsyncResults.AbstractRes
         @Override
         public BarrierTxn apply(SafeCommandStore safeStore)
         {
-            // TODO (required): consider these semantics
+            // TODO (required, consider): consider these semantics
             BarrierTxn found = safeStore.mapReduceFull(
             seekables,
             safeStore.ranges().allAfter(minEpoch),

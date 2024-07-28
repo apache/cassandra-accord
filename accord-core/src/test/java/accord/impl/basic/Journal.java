@@ -298,8 +298,8 @@ public class Journal implements LocalRequest.Handler, Runnable
             case TruncatedApplyWithDeps:
             case TruncatedApply:
                 return Command.Truncated.truncatedApply(attrs, status, executeAt, writes, result, executesAtLeast);
-            case ErasedOrInvalidated:
-                return Command.Truncated.erasedOrInvalidated(attrs.txnId(), attrs.durability(), attrs.route());
+            case ErasedOrInvalidOrVestigial:
+                return Command.Truncated.erasedOrInvalidOrVestigial(attrs.txnId(), attrs.durability(), attrs.route());
             case Erased:
                 return Command.Truncated.erased(attrs.txnId(), attrs.durability(), attrs.route());
             case Invalidated:

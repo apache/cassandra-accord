@@ -21,7 +21,6 @@ package accord.utils;
 import accord.api.Key;
 import accord.api.RoutingKey;
 import accord.primitives.Range;
-import accord.primitives.Timestamp;
 import accord.primitives.TxnId;
 
 import java.lang.reflect.Array;
@@ -58,7 +57,7 @@ public class ArrayBuffers
     private static final ThreadLocal<ObjectBufferCache<RoutingKey>> ROUTINGKEYS = ThreadLocal.withInitial(() -> new ObjectBufferCache<>(3, 1 << 9, RoutingKey[]::new));
     private static final ThreadLocal<ObjectBufferCache<Range>> KEYRANGES = ThreadLocal.withInitial(() -> new ObjectBufferCache<>(3, 1 << 7, Range[]::new));
     private static final ThreadLocal<ObjectBufferCache<TxnId>> TXN_IDS = ThreadLocal.withInitial(() -> new ObjectBufferCache<>(3, 1 << 12, TxnId[]::new));
-    private static final ThreadLocal<ObjectBufferCache<Timestamp>> TIMESTAMPS = ThreadLocal.withInitial(() -> new ObjectBufferCache<>(3, 1 << 12, Timestamp[]::new));
+    private static final ThreadLocal<ObjectBufferCache<Object>> OBJECTS = ThreadLocal.withInitial(() -> new ObjectBufferCache<>(3, 1 << 12, Object[]::new));
 
     public static IntBuffers cachedInts()
     {
@@ -85,9 +84,9 @@ public class ArrayBuffers
         return TXN_IDS.get();
     }
 
-    public static ObjectBuffers<Timestamp> cachedTimestamps()
+    public static ObjectBuffers<Object> cachedAny()
     {
-        return TIMESTAMPS.get();
+        return OBJECTS.get();
     }
 
     public static <T> ObjectBuffers<T> uncached(IntFunction<T[]> allocator) { return new UncachedObjectBuffers<>(allocator); }
@@ -611,7 +610,8 @@ public class ArrayBuffers
     }
 
     /**
-     * Returns the buffer to the caller, saving the length if necessary
+     * Used to perform a sequence of merges over the same data, i.e. a collection of arrays
+     * where we merge the first with the second, then the result of that with the third and so on
      */
     public static class RecursiveObjectBuffers<T> implements ObjectBuffers<T>
     {
@@ -630,30 +630,32 @@ public class ArrayBuffers
             if (alt != null)
             {
                 if (alt.length >= minSize)
-                    return alt;
+                {
+                    T[] result = alt;
+                    alt = cur;
+                    return cur = result;
+                }
 
                 wrapped.forceDiscard(alt, Math.min(maxBufferSize, alt.length));
             }
-            return alt = wrapped.get(minSize);
+
+            T[] result = wrapped.get(minSize);
+            alt = cur;
+            return cur = result;
         }
 
         @Override
         public T[] getAndCompleteExact(int size)
         {
             updateSize(size);
-            T[] buf = get(size);
-            this.alt = cur;
-            this.cur = buf;
-            return buf;
+            return get(size);
         }
 
         @Override
         public T[] complete(T[] buffer, int usedSize)
         {
             updateSize(usedSize);
-            Invariants.checkArgument(buffer == alt);
-            alt = cur;
-            cur = buffer;
+            Invariants.checkArgument(buffer == cur);
             return buffer;
         }
 

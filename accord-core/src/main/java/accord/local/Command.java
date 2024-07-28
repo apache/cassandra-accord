@@ -56,6 +56,7 @@ import javax.annotation.Nullable;
 
 import static accord.local.Command.AbstractCommand.validate;
 import static accord.local.Listeners.Immutable.EMPTY;
+import static accord.local.SaveStatus.ErasedOrInvalidOrVestigial;
 import static accord.local.SaveStatus.Uninitialised;
 import static accord.local.Status.Durability.Local;
 import static accord.local.Status.Durability.NotDurable;
@@ -143,7 +144,7 @@ public abstract class Command implements CommonAttributes
 
     private static Durability durability(Durability durability, SaveStatus status)
     {
-        if (status.compareTo(SaveStatus.PreApplied) >= 0 && !status.hasBeen(Invalidated) && durability == NotDurable)
+        if (durability == NotDurable && status.compareTo(SaveStatus.PreApplied) >= 0 && status.compareTo(ErasedOrInvalidOrVestigial) < 0)
             return Local; // not necessary anywhere, but helps for logical consistency
         return durability;
     }
@@ -234,7 +235,7 @@ public abstract class Command implements CommonAttributes
                 if (txnId.kind().awaitsOnlyDeps())
                     return validateCommandClass(status, TruncatedAwaitsOnlyDeps.class, klass);
             case Erased:
-            case ErasedOrInvalidated:
+            case ErasedOrInvalidOrVestigial:
             case Invalidated:
                 return validateCommandClass(status, Truncated.class, klass);
             default:
@@ -778,14 +779,19 @@ public abstract class Command implements CommonAttributes
             return erased(command.txnId(), durability, command.route());
         }
 
-        public static Truncated erasedOrInvalidated(TxnId txnId, Status.Durability durability, Route<?> route)
-        {
-            return validate(new Truncated(txnId, SaveStatus.ErasedOrInvalidated, durability, route, null, EMPTY, null, null));
-        }
-
         public static Truncated erased(TxnId txnId, Status.Durability durability, Route<?> route)
         {
             return validate(new Truncated(txnId, SaveStatus.Erased, durability, route, null, EMPTY, null, null));
+        }
+
+        public static Truncated erasedOrInvalidOrVestigial(Command command)
+        {
+            return erasedOrInvalidOrVestigial(command.txnId(), command.durability(), command.route());
+        }
+
+        public static Truncated erasedOrInvalidOrVestigial(TxnId txnId, Status.Durability durability, Route<?> route)
+        {
+            return validate(new Truncated(txnId, SaveStatus.ErasedOrInvalidOrVestigial, durability, route, null, EMPTY, null, null));
         }
 
         public static Truncated truncatedApply(Command command)
@@ -1296,6 +1302,13 @@ public abstract class Command implements CommonAttributes
         public boolean isWaitingOnKey()
         {
             return waitingOn.lastSetBit() >= txnIdCount();
+        }
+
+        public Key lastWaitingOnKey()
+        {
+            int keyIndex = waitingOn.lastSetBit() - txnIdCount();
+            if (keyIndex < 0) return null;
+            return keys.get(keyIndex);
         }
 
         public boolean isWaitingOnKey(int keyIndex)

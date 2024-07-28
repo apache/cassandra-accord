@@ -18,6 +18,7 @@
 
 package accord.impl.basic;
 
+import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -295,5 +296,13 @@ public class DelayedCommandStores extends InMemoryCommandStores.SingleThread
                 commandStore.validateRead(safe.current());
             });
         }
+    }
+
+    public List<DelayedCommandStore> unsafeStores()
+    {
+        List<DelayedCommandStore> stores = new ArrayList<>();
+        for (ShardHolder holder : current().shards)
+            stores.add((DelayedCommandStore) holder.store);
+        return stores;
     }
 }

@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
 
+import accord.api.RoutingKey;
 import accord.coordinate.tracking.QuorumTracker;
 import accord.local.CommandStore;
 import accord.local.Node;
@@ -39,7 +40,7 @@ public class CollectDeps implements Callback<GetDepsOk>
 {
     final Node node;
     final TxnId txnId;
-    final Route<?> route;
+    final RoutingKey homeKey;
 
     final Timestamp executeAt;
 
@@ -48,25 +49,25 @@ public class CollectDeps implements Callback<GetDepsOk>
     private final BiConsumer<Deps, Throwable> callback;
     private boolean isDone;
 
-    CollectDeps(Node node, Topologies topologies, TxnId txnId, FullRoute<?> route, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
+    CollectDeps(Node node, Topologies topologies, TxnId txnId, RoutingKey homeKey, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
     {
         this.node = node;
         this.txnId = txnId;
-        this.route = route;
+        this.homeKey = homeKey;
         this.executeAt = executeAt;
         this.callback = callback;
         this.oks = new ArrayList<>();
         this.tracker = new QuorumTracker(topologies);
     }
 
-    public static void withDeps(Node node, TxnId txnId, FullRoute<?> route, Seekables<?, ?> keysOrRanges, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
+    public static void withDeps(Node node, TxnId txnId, FullRoute<?> fullRoute, Unseekables<?> sendTo, Seekables<?, ?> keysOrRanges, Timestamp executeAt, BiConsumer<Deps, Throwable> callback)
     {
-        Topologies topologies = node.topology().withUnsyncedEpochs(route, txnId, executeAt);
-        CollectDeps collect = new CollectDeps(node, topologies, txnId, route, executeAt, callback);
+        Topologies topologies = node.topology().withUnsyncedEpochs(sendTo, txnId, executeAt);
+        CollectDeps collect = new CollectDeps(node, topologies, txnId, fullRoute.homeKey(), executeAt, callback);
         CommandStore store = CommandStore.maybeCurrent();
         if (store == null)
-            store = node.commandStores().select(route);
-        node.send(collect.tracker.nodes(), to -> new GetDeps(to, topologies, route, txnId, keysOrRanges, executeAt),
+            store = node.commandStores().select(fullRoute);
+        node.send(collect.tracker.nodes(), to -> new GetDeps(to, topologies, fullRoute, txnId, keysOrRanges, executeAt),
                   store, collect);
     }
 
@@ -90,7 +91,7 @@ public class CollectDeps implements Callback<GetDepsOk>
         if (tracker.recordFailure(from) == Failed)
         {
             isDone = true;
-            callback.accept(null, new Timeout(txnId, route.homeKey()));
+            callback.accept(null, new Timeout(txnId, homeKey));
         }
     }
 
